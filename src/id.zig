@@ -38,6 +38,12 @@ pub const Id = struct {
         return .{ .hash = nonZero(mix(parent.hash, comptime fnv1a(name))), .debug_name = debugName(name) };
     }
 
+    /// `parent.child(name)` for each item of a list, e.g. the options of
+    /// one dropdown, which must not collide with another dropdown's.
+    pub fn indexedChild(parent: Id, comptime name: []const u8, index: usize) Id {
+        return .{ .hash = nonZero(mix(mix(parent.hash, comptime fnv1a(name)), index)), .debug_name = debugName(name) };
+    }
+
     pub fn isNone(self: Id) bool {
         return self.hash == 0;
     }
@@ -134,6 +140,9 @@ test "indexed and child ids are distinct and stable" {
     const list_a: Id = .of("list_a");
     const list_b: Id = .of("list_b");
     try std.testing.expect(!list_a.child("item").eql(list_b.child("item")));
+    try std.testing.expect(!list_a.indexedChild("item", 0).eql(list_b.indexedChild("item", 0)));
+    try std.testing.expect(!list_a.indexedChild("item", 0).eql(list_a.indexedChild("item", 1)));
+    try std.testing.expect(!list_a.indexedChild("item", 0).eql(list_a.child("item")));
 }
 
 test "ids handles a realistic number of names" {

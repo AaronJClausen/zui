@@ -4,6 +4,9 @@
 
 const std = @import("std");
 const zui = @import("zui");
+const zui_testing = @import("zui_testing");
+const zui_widgets = @import("zui_widgets");
+const zui_reflect = @import("zui_reflect");
 
 const CheckPlatform = struct {
     pub fn measureText(_: *CheckPlatform, text: []const u8, _: u16, size: f32) [2]f32 {
@@ -60,8 +63,65 @@ export fn zuiCheckFrame(width: f32, height: f32, pointer_x: f32, pointer_y: f32)
         .pending, .failed => ui.requestFrame(),
         .ready => |value| _ = value,
     }
+    declareWidgets(&ui);
     const frame = ui.endFrame() catch ui.lastFrame();
     defer ui.release(frame);
     defer pool.deinit(&ui);
-    return frame.commands().len + @intFromBool(ui.needsFrame());
+    var snapshot_buffer: [256]u8 = undefined;
+    var snapshot_writer: std.Io.Writer = .fixed(&snapshot_buffer);
+    zui_testing.snapshot(&snapshot_writer, frame.commands(), zui.ids(.{"save"})) catch {};
+    const violation_count = @intFromBool(zui_testing.findViolation(frame.commands()) != null);
+    return frame.commands().len + @intFromBool(ui.needsFrame()) + violation_count;
+}
+
+const Settings = struct {
+    enabled: bool = true,
+    volume: f32 = 0.5,
+    retries: i8 = 3,
+    quality: enum { low, high } = .low,
+    name: zui_widgets.EditableText = .{ .buffer = &name_bytes },
+    version: []const u8 = "0.4.0",
+    nested: struct { depth: u64 = 1 } = .{},
+
+    pub const zui_inspector: zui_reflect.Options(@This()) = .{ .fields = .{ .volume = .{ .min = 0, .max = 1 } } };
+};
+
+var name_bytes: [16]u8 = undefined;
+var settings: Settings = .{};
+
+fn declareWidgets(ui: *Ui) void {
+    const widgets: zui_widgets.Widgets(Ui) = .{};
+    var expanded = true;
+    var choice: usize = 0;
+    widgets.labeledRow(ui, "row");
+    _ = widgets.button(ui, .of("button"), "button", .{});
+    ui.close();
+    _ = widgets.disclosure(ui, .of("disclosure"), "disclosure", &expanded);
+    _ = widgets.dropdown(ui, .of("dropdown"), &choice, &.{ "a", "b" }, .{});
+    _ = widgets.slider(ui, .of("slider"), &settings.retries, .{ .max = 10 });
+    _ = zui_reflect.inspector(widgets, ui, .of("settings"), &settings);
+}
+
+const TestingUi = zui.Context(.{ .max_elements = 32 }, zui_testing.FixedMetricsPlatform(u16));
+
+var testing_platform: zui_testing.FixedMetricsPlatform(u16) = .{};
+var testing_memory: [TestingUi.required_bytes]u8 align(16) = undefined;
+
+fn declareButton(clicks: *u32, ui: *TestingUi) void {
+    if (ui.clicked(.of("button"))) clicks.* += 1;
+    ui.box(.{ .id = .of("button"), .interactive = true, .layout = .{ .sizing = .{ .width = .fixed(10), .height = .fixed(10) } } });
+}
+
+export fn zuiCheckDriver() u32 {
+    var ui = TestingUi.initBuffer(&testing_memory, undefined, &testing_platform) catch return 0;
+    var driver: zui_testing.Driver(TestingUi) = .{ .ui = &ui };
+    var clicks: u32 = 0;
+    _ = driver.frame(&clicks, declareButton, .{}) catch return 0;
+    _ = driver.click(&clicks, declareButton, .of("button")) catch return 0;
+    _ = driver.drag(&clicks, declareButton, .of("button"), .{ 0, 0 }, .{ 1, 1 }) catch return 0;
+    _ = driver.hover(&clicks, declareButton, .of("button")) catch return 0;
+    _ = driver.focus(&clicks, declareButton, .of("button")) catch return 0;
+    _ = driver.pressKeys(&clicks, declareButton, &.{.enter}) catch return 0;
+    _ = driver.typeText(&clicks, declareButton, "typed") catch return 0;
+    return clicks;
 }

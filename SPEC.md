@@ -83,10 +83,17 @@ zui/                     the core module "zui"
   src/tasks.zig          TaskPool and the completion queue
   src/commands.zig       the RenderCommand union and emission
   src/debug.zig          the debug overlay (compiled out unless enabled)
-zui_widgets/             optional module: button, checkbox, slider, text field
+zui_widgets/             optional module: button, checkbox, slider, text field, dropdown, disclosure
 zui_reflect/             optional module: struct inspectors generated with @typeInfo
-zui_testing/             optional module: command snapshots, layout invariant checks
+zui_testing/             optional module: test platform, input driver, snapshots, command checks
 ```
+
+Each optional module's root file is named after it
+(`zui_widgets/zui_widgets.zig`), because Zig names types after their file
+and users read those names in compile errors. A module can only import
+files inside its own directory, so the optional modules can reach zui
+only through `@import("zui")`: **the compiler, not a review, keeps them
+on the public API.** `zui_reflect` also imports `zui_widgets`.
 
 Backends (`zui-raylib`, `zui-sokol`, `zui-terminal`) are separate packages
 that depend on `zui`. They are never dependencies of it.
@@ -469,6 +476,7 @@ pub const Id = struct {
     pub fn indexed(comptime name: []const u8, index: usize) Id
     pub fn dynamic(name: []const u8) Id                 // hashed at run time
     pub fn child(parent: Id, comptime name: []const u8) Id
+    pub fn indexedChild(parent: Id, comptime name: []const u8, index: usize) Id
     pub const none: Id;
 };
 ```
@@ -487,6 +495,9 @@ pub const Id = struct {
   collide. Element ids are never mixed with their parent implicitly. That
   would make an id depend on where the element sits in the tree, so that
   moving an element would silently reset its state.
+- **`indexedChild(parent, name, index)`** is `child` for the items of a
+  list, such as a dropdown's options, which must not collide with the
+  options of another dropdown.
 - **Elements without an id** get an internal one from their parent's id
   and their sibling index. They cannot be queried and cannot hold state,
   which is what you want for purely decorative boxes.
@@ -523,14 +534,23 @@ pub fn hovered(self: *const Self, id: Id) bool
 pub fn pressed(self: *const Self, id: Id) bool           // button held, press began on id
 pub fn clicked(self: *const Self, id: Id) bool           // released on the same id it was pressed on
 pub fn focused(self: *const Self, id: Id) bool
-pub fn requestFocus(self: *Self, id: Id) void            // takes effect at the next beginFrame
+pub fn requestFocus(self: *Self, id: Id) void            // at the next beginFrame, if id is then focusable and enabled
 pub fn widgetState(self: *const Self, id: Id) WidgetState
 pub fn pointerLocal(self: *const Self, id: Id) ?[2]f32   // pointer relative to the element's last rect
 pub fn rectOf(self: *const Self, id: Id) ?Rect           // last frame's layout result
 pub fn pointer(self: *const Self) ?[2]f32
 pub fn keyPressed(self: *const Self, key: Key) bool
+pub fn keysPressed(self: *const Self) []const Key        // in the order they happened
 pub fn modifiers(self: *const Self) Modifiers
 pub fn typedText(self: *const Self) []const u8
+```
+
+Two more queries exist for widgets. They answer for the current frame,
+not the previous one:
+
+```zig
+pub fn measureText(self: *Self, content: []const u8, font: FontId, size: f32) [2]f32 // through the cache
+pub fn viewport(self: *const Self) [2]f32
 ```
 
 The exact meanings:
@@ -985,7 +1005,9 @@ frame, or (in development) treat it as fatal.
 
 ### 14.1 zui's own tests
 
-- **Layout invariants**, checked by `zui_testing.checkInvariants(frame)`:
+- **Layout invariants**, checked on every test frame by
+  `src/tests/invariants.zig` (it reads the frame's internal arrays, so it
+  is not part of `zui_testing`):
   - each child lies within its parent's clip box, unless it is floating;
   - the sizes of `grow` siblings are proportional to their weights,
     except where a min/max clamp applies;
@@ -1002,19 +1024,53 @@ frame, or (in development) treat it as fatal.
 - **Compile-time guarantees** through `expect_errors` in `build.zig`, as
   in the comptime lesson: an invalid `Config`, a platform missing
   `measureText`, an `Id` collision in `zui.ids`, calling `custom` with
-  `CustomData = void`, and an oversized state type. Each is pinned to its
-  exact message (remember that `contains` matches line *endings*).
+  `CustomData = void`, an oversized state type, a slider over a `bool`,
+  and five misuses of `zui_reflect` (§15.2). Each is pinned to its exact
+  message. Remember that `contains` matches line *endings*, so a message
+  must end with stable text, not a generated type name.
 
 ### 14.2 Tools for applications
 
-- `zui_testing.snapshot(frame, writer)` writes the commands as stable text
-  (`rect id=toolbar x=0 y=0 w=800 h=40 color=#202020`), for golden-file
-  tests of application UIs.
-- A **recording platform** with deterministic text metrics (each byte is
-  8×16 units), so application tests don't depend on fonts.
-- `ui.simulate(.{ .click = id })` creates the input that clicks an
-  element's center in its last frame, for interaction tests that don't
-  hard-code coordinates.
+`zui_testing` holds what an application needs to test its own UI:
+
+- **`FixedMetricsPlatform(FontId)`** has deterministic text metrics:
+  each byte is `size / 2` wide and `size` tall (8×16 at the default size),
+  so tests don't depend on fonts.
+- **`Driver(Ui)`** runs frames with simulated input, by element id:
+
+  ```zig
+  var driver: zui_testing.Driver(Ui) = .{ .ui = &ui };
+  _ = try driver.frame(&app, App.declare, .{});           // declares the ids
+  _ = try driver.click(&app, App.declare, .of("save"));   // press frame, release frame
+  _ = try driver.drag(&app, App.declare, .of("volume"), .{ 0.5, 0.5 }, .{ 0.9, 0.5 });
+  _ = try driver.typeText(&app, App.declare, "Ada");
+  _ = try driver.pressKeys(&app, App.declare, &.{ .home, .delete });
+  ```
+
+  Points are fractions of the element's rectangle in the previous frame,
+  so tests never hard-code coordinates. Each helper runs complete frames
+  and releases them, and calls `declare(app, ui)` once per frame. (The
+  draft's `ui.simulate(.{ .click = id })` returned an `Input` instead. A
+  click takes two frames, so a helper that runs them is simpler to use
+  than one that returns their inputs.)
+- **`snapshot(writer, commands, names)`** writes one line per command,
+  for golden-file tests:
+
+  ```text
+  rectangle id=panel x=0 y=0 w=84 h=36 color=#202020
+  rectangle id=increment x=8 y=8 w=40 h=20 color=#3366ff80 radius=4
+  text x=52 y=8 w=24 h=16 size=16 color=#ffffff "Add"
+  ```
+
+  Only ids that are fields of `names` (a `zui.ids(...)` set) are written,
+  so snapshots don't change when an unrelated internal id does, and they
+  read the same in debug and release builds. Values at their defaults
+  (z 0, no corner radius, opaque alpha, font 0) are left out.
+  `expectSnapshot` compares against an expected string.
+- **`checkCommands(commands)`** checks what any frame must satisfy:
+  finite, non-negative bounds; z that never decreases; and balanced clip
+  commands. `findViolation` returns the first violation instead of
+  printing it.
 
 ### 14.3 Benchmarks
 
@@ -1036,19 +1092,107 @@ be 0). A regression of more than 10% against the stored baseline fails CI.
 |---|---|
 | draw something zui does not know | `custom(data, config)`, with your `CustomData` |
 | size a custom leaf from its content | `.layout.sizing = .fixed(...)` from your own measurement, or a `Platform.measureCustom(data) [2]f32` hook (optional declaration) |
-| add widgets | functions over the public API; see `zui_widgets` for the reference set |
+| add widgets | functions over the public API; `zui_widgets` (§15.1) is the reference set |
 | bridge accessibility | `Frame.semantics()` (§7.6) |
 | animate | `state(id, T)` for per-element animation state, plus `Input.dt_seconds` |
 | render | iterate `Frame.commands()`; backends are ordinary packages |
 | debug visually | `-Dzui-debug` adds `ui.debugOverlay()`, which declares an inspector panel showing the hovered element's id, rect and config |
 
-`zui_reflect.inspector(ui, id, &value)` declares an editor for any
-struct: checkboxes for bools, sliders for bounded integers, dropdowns for
-enums, and nested panels for structs. It walks `@typeInfo`, as the
-lesson's flag parser did. Labels, ranges and hidden fields come from a
-**typed** `pub const zui_inspector: zui_reflect.Options = .{...}`
-declaration, and misspelled options are compile errors. It lives outside
-the core because most applications will not need it.
+### 15.1 Widgets
+
+`zui_widgets.Widgets(Ui)` is a value that holds a `Theme`. Its methods
+declare widgets into a `*Ui`:
+
+```zig
+const widgets: zui_widgets.Widgets(Ui) = .{ .theme = .{ .accent = .rgb(0x2fbf71) } };
+
+if (widgets.button(ui, .of("save"), "Save", .{})) save();
+_ = widgets.checkbox(ui, .of("autosave"), "Autosave", &settings.autosave, .{});
+_ = widgets.slider(ui, .of("volume"), &settings.volume, .{ .min = 0, .max = 100, .step = 5 });
+if (widgets.textField(ui, .of("name"), &settings.name, .{ .placeholder = "Name" }).submitted) rename();
+_ = widgets.dropdownEnum(ui, .of("quality"), &settings.quality, .{});
+```
+
+| Widget | Edits | Returns | Keyboard |
+|---|---|---|---|
+| `button` | nothing | clicked | Enter, Space |
+| `checkbox` | `*bool` | toggled | Enter, Space |
+| `slider` | `*` any integer or float | changed | arrows, Page Up/Down, Home, End |
+| `textField` | `*EditableText` | `.{ changed, submitted }` | characters, Left, Right, Home, End, Backspace, Delete, Enter |
+| `dropdown` / `dropdownEnum` | `*usize` / `*` any enum | changed | Up/Down while closed; Tab within the open list; Escape |
+| `disclosure` | `*bool` (expanded) | toggled | Enter, Space |
+| `label`, `mutedLabel`, `labeledRow` | nothing | nothing | none |
+
+How they are built, all from §7:
+- **Every control is focusable** and draws the theme's focus ring when
+  focused. Colors come from `widgetState`, indexed by an `EnumArray`.
+- **The slider places its thumb with `grow` weights,** not with the
+  previous frame's width. The filled track has weight `fraction`, the
+  rest `1 - fraction`, and the fixed-width thumb sits between them, so the
+  thumb is right from the very first frame. Dragging maps `pointerLocal`
+  through the previous frame's width, which is what the pointer was over.
+- **The text field** keeps its caret position in `state(id, ...)`. It
+  splits the text at the caret into two text elements around a caret box,
+  and scrolls an inner horizontal scroll container to keep the caret in
+  view. A click places the caret at the nearest character boundary,
+  measured with `ui.measureText`. Keys are handled in order
+  (`keysPressed`), and the caret always moves by whole UTF-8 characters.
+  `EditableText` wraps a caller-owned buffer; input that does not fit is
+  cut at a character boundary. Not in 0.4: selection, the clipboard, word
+  movement, IME composition and multiple lines.
+- **The dropdown's list** is a floating element attached to the button,
+  in layer `theme.popup_z + 1`. Below it, in layer `theme.popup_z`, an
+  invisible interactive element covers the viewport and closes the list
+  when clicked. The list is a focus scope, so Tab stays inside it while it
+  is open, and choosing an option returns focus to the button.
+
+### 15.2 Reflection
+
+`zui_reflect.inspector(widgets, ui, id, &value)` declares an editor for
+each field of a struct with the widgets above, and returns whether any
+field changed. (The draft's signature had no `widgets` argument. The
+inspector needs a theme, and taking the application's own `widgets` value
+keeps the two consistent.)
+
+| Field type | Editor |
+|---|---|
+| `bool` | checkbox |
+| integer or float, with `min` and `max` | slider and the value |
+| integer or float, otherwise | − and + buttons that move by `step` (default 1, or 0.1 for floats), saturating at the type's limits and at `min` or `max` if either is given |
+| exhaustive enum | dropdown |
+| `zui_widgets.EditableText` | text field |
+| `[]const u8` | read-only text |
+| struct | collapsible section, which reads that struct's own options |
+
+Labels default to the field name with underscores as spaces and the first
+letter capitalized: `max_fps` becomes "Max fps". Options come from a
+**typed** declaration:
+
+```zig
+const Settings = struct {
+    max_fps: u16 = 144,
+    frames_rendered: u64 = 0,
+
+    pub const zui_inspector: zui_reflect.Options(@This()) = .{ .fields = .{
+        .max_fps = .{ .label = "Frame cap", .min = 30, .max = 240, .step = 10 },
+        .frames_rendered = .{ .hidden = true },
+    } };
+};
+```
+
+`Options(T)` holds a struct built with `@Struct`, with one `FieldOptions`
+field per field of `T`, so the compiler itself rejects a misspelled field
+name: `no field named 'volum' in struct
+'zui_reflect.FieldOptionsOf(Settings)'`. zui_reflect adds its own errors
+for:
+- a `zui_inspector` declared without the type, which would otherwise
+  accept any misspelling;
+- `min`, `max` or `step` on a field that is not a number;
+- `min` above `max`, or a `step` that is not above 0;
+- a visible field of a type it cannot edit, quoting the
+  `.hidden = true` line that fixes it.
+
+It lives outside the core because most applications will not need it.
 
 ---
 
@@ -1059,7 +1203,7 @@ the core because most applications will not need it.
 | 0.1 | Context, memory, element declaration, sizing passes, text wrapping with the cache, render commands, golden and invariant tests | all §14.1 tests pass; zero allocations per frame |
 | 0.2 | input, hover/press/click/focus, clipping, scrolling, floating elements, the state table | the interaction tests pass; a reference raylib backend renders the example application |
 | 0.3 | TaskPool, the completion queue, `needsFrame`, frames in flight with a render thread | a thumbnail-grid example cancels off-screen loads, and an idle application uses 0% CPU |
-| 0.4 | `zui_widgets` (button, checkbox, slider, text field), `zui_reflect`, `zui_testing` snapshots | the widget set is built on the public API only |
+| 0.4 | `zui_widgets` (button, checkbox, slider, text field), `zui_reflect`, `zui_testing` snapshots | the widget set is built on the public API only (enforced by the module boundary, §3) |
 | 0.5 | parallel measurement; benchmarks that meet the §6.5 targets | targets met in CI |
 | later | layout islands, flex wrap, static subtrees | each one ships only if the benchmarks show a win |
 

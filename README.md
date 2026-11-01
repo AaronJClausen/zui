@@ -18,11 +18,17 @@ Implemented so far:
   element stops being declared; `needsFrame`, so an idle application can
   sleep at 0% CPU; and `beginFrame` waiting for a render thread to
   release a frame.
+- **0.4:** three optional modules built only on the public API:
+  - `zui_widgets`: button, checkbox, slider, text field, dropdown and
+    disclosure;
+  - `zui_reflect`: an editor generated from any struct, with typed
+    options;
+  - `zui_testing`: font-independent metrics, a driver that clicks, drags
+    and types by element id, golden snapshots, and command checks.
 
 The reference backend and demo application live in
-[zui-raylib](https://github.com/AaronJClausen/zui-raylib). Widgets,
-reflection and testing helpers (0.4) come next; see the roadmap in
-SPEC.md §16.
+[zui-raylib](https://github.com/AaronJClausen/zui-raylib). Parallel
+measurement and benchmarks (0.5) come next; see the roadmap in SPEC.md §16.
 
 ```zig
 const Ui = zui.Context(.{}, MyPlatform);
@@ -46,8 +52,8 @@ ui.release(frame);
 
 | Command | What it does |
 |---|---|
-| `zig build test` | run the unit, golden, randomized-invariant and compile-error tests (add `-Doptimize=ReleaseSafe` or `ReleaseFast` to test other modes) |
-| `zig build check` | compile one full frame without producing output; add `-Dtarget=wasm32-freestanding` to check another target |
+| `zig build test` | run the unit, golden, randomized-invariant, widget and compile-error tests (add `-Doptimize=ReleaseSafe` or `ReleaseFast` to test other modes) |
+| `zig build check` | compile one full frame, every widget and the test driver without producing output; add `-Dtarget=wasm32-freestanding` to check another target |
 | `zig build test -Dzui-debug=true` | keep id names, so duplicate-id and unbalanced-tree panics name the element |
 | `zig build docs` | generate API documentation into `zig-out/docs` |
 | `zig build fmt` | format every Zig source file |
@@ -77,7 +83,22 @@ zig fetch --save git+https://github.com/AaronJClausen/zui
 // build.zig
 const zui = b.dependency("zui", .{ .target = target, .optimize = optimize });
 exe.root_module.addImport("zui", zui.module("zui"));
+// Optional:
+exe.root_module.addImport("zui_widgets", zui.module("zui_widgets"));
+exe.root_module.addImport("zui_reflect", zui.module("zui_reflect"));
+tests.root_module.addImport("zui_testing", zui.module("zui_testing"));
 ```
+
+```zig
+const widgets: zui_widgets.Widgets(Ui) = .{};
+
+if (widgets.button(ui, .of("save"), "Save", .{})) save();
+_ = widgets.slider(ui, .of("volume"), &settings.volume, .{ .max = 100 });
+_ = zui_reflect.inspector(widgets, ui, .of("settings"), &settings);
+```
+
+SPEC.md §15.1 lists the widgets, and §15.2 covers what the inspector
+generates for each field type.
 
 ## License
 

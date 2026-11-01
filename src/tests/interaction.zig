@@ -119,6 +119,21 @@ test "disabled elements report their state and are never pressed or clicked" {
     try finish(&harness);
 }
 
+test "focus requested for a disabled element is refused, even with Enter in the same frame" {
+    var harness: Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    const options: ButtonOptions = .{ .disabled_a = true };
+    var ui = try step(&harness, .{}, options);
+    ui.requestFocus(a);
+    try finish(&harness);
+    ui = try step(&harness, .{ .keys_pressed = &.{.enter} }, options);
+    try testing.expect(!ui.focused(a));
+    try testing.expect(!ui.clicked(a));
+    try finish(&harness);
+}
+
 test "hover covers interactive ancestors; the click goes to the innermost" {
     var harness: Harness = .{};
     try harness.init();

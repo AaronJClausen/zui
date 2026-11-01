@@ -143,6 +143,7 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
     return struct {
         const Self = @This();
 
+        pub const FontId = config.FontId;
         pub const TextStyle = style.TextStyle(config.FontId);
         pub const RenderCommand = command_types.RenderCommand(TextStyle, config.ImageHandle, config.CustomData);
         pub const Index = std.math.IntFittingRange(0, config.max_elements);
@@ -273,7 +274,7 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
                 return self.floatings[self.floating_index[index]];
             }
 
-            fn reset(self: *Frame, viewport: [2]f32) void {
+            fn reset(self: *Frame, frame_viewport: [2]f32) void {
                 self.element_count = 0;
                 self.layout_count = 0;
                 self.decoration_count = 0;
@@ -285,7 +286,7 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
                 self.line_count = 0;
                 self.command_count = 0;
                 self.diagnostics = .{};
-                self.viewport = viewport;
+                self.viewport = frame_viewport;
                 @memset(&self.id_table, none_index);
             }
         };
@@ -517,6 +518,19 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
 
         pub fn diagnostics(self: *const Self) Diagnostics {
             return self.lastFrame().diagnostics;
+        }
+
+        /// The size the platform measures for `content`, through the
+        /// measurement cache. For widgets that place a caret or map a
+        /// pointer position to a character.
+        pub fn measureText(self: *Self, content: []const u8, font: FontId, size: f32) [2]f32 {
+            return self.memory.cache.measure(self.platform, content, font, size);
+        }
+
+        /// The current frame's viewport, as given to `beginFrame`.
+        pub fn viewport(self: *const Self) [2]f32 {
+            const frame = self.current orelse @panic("zui: viewport() is only known between beginFrame() and endFrame()");
+            return frame.viewport;
         }
 
         /// How many times the text cache has called the platform. Useful
@@ -788,7 +802,9 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
             @memcpy(it.text[0..it.text_len], input.text_input[0..it.text_len]);
             it.clicked = 0;
             if (it.pending_focus) |requested| {
-                it.focus = requested;
+                // Checked here as well as at endFrame, so a disabled element
+                // is never focused for long enough to be activated by Enter.
+                if (results.isFocusable(requested)) it.focus = requested;
                 it.pending_focus = null;
             }
 
@@ -917,6 +933,12 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
 
         pub fn keyPressed(self: *const Self, key: interaction.Key) bool {
             return self.input_state.keyPressed(key);
+        }
+
+        /// This frame's key presses in the order they happened, for
+        /// widgets where order matters (Home then Right is not Right then Home).
+        pub fn keysPressed(self: *const Self) []const interaction.Key {
+            return self.input_state.keys[0..self.input_state.key_count];
         }
 
         pub fn modifiers(self: *const Self) interaction.Modifiers {

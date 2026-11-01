@@ -1,6 +1,6 @@
 .{
     .name = .zui,
-    .version = "0.3.0",
+    .version = "0.4.0",
     .fingerprint = 0xc00160dbaadffbc5, // Changing this has security and trust implications.
     .minimum_zig_version = "0.16.0",
     .dependencies = .{},
@@ -9,6 +9,9 @@
         "build.zig.zon",
         "src",
         "tests",
+        "zui_testing",
+        "zui_widgets",
+        "zui_reflect",
         "LICENSE",
         "README.md",
         "SPEC.md",
