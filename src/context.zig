@@ -222,7 +222,8 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
             position: [max_elements][2]f32,
             flags: [max_elements]ElementFlags,
             /// One past the last element of this element's subtree, which is
-            /// also its next sibling, if it has one.
+            /// also its next sibling, if it has one. A container's is only
+            /// written when it closes, so it is not valid while it is open.
             subtree_end: [max_elements]Index,
             /// Index into `floatings`. Only written for floating elements;
             /// for any other element it holds whatever an earlier frame left.
@@ -664,6 +665,7 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
             }
             const record_index = frame.text_count;
             const element_index = self.appendElement(.none, .{}, .text, record_index) orelse return;
+            frame.subtree_end[element_index] = element_index + 1;
             const start = frame.text_bytes_used;
             @memcpy(frame.text_bytes[start..][0..content.len], content);
             frame.text_bytes_used += @intCast(content.len);
@@ -704,7 +706,9 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
                 self.countDropped(frame, .elements);
                 return false;
             }
-            return self.appendElement(element.id, element, kind, record_index) != null;
+            const index = self.appendElement(element.id, element, kind, record_index) orelse return false;
+            frame.subtree_end[index] = index + 1;
+            return true;
         }
 
         fn declaring(self: *Self) *Frame {
@@ -741,7 +745,6 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
             frame.flow_child_count[index] = 0;
             frame.content_kind[index] = kind;
             frame.content_index[index] = @intCast(record_index);
-            frame.subtree_end[index] = index + 1;
             frame.flags[index] = self.flagsFor(element_id, element);
 
             if (element.floating) |floating| {
