@@ -1,4 +1,4 @@
-# zui
+<h1><img src="assets/zui-social.svg" alt="zui"></h1>
 
 An immediate-mode UI layout library for Zig, in the spirit of
 [Clay](https://github.com/nicbarker/clay). Each frame, the application
