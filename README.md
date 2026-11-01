@@ -60,3 +60,19 @@ index.
 
 The repository uses LF line endings everywhere (see `.gitattributes`),
 whatever your `core.autocrlf` setting.
+
+## Using zui in your project
+
+```sh
+zig fetch --save git+https://github.com/AaronJClausen/zui
+```
+
+```zig
+// build.zig
+const zui = b.dependency("zui", .{ .target = target, .optimize = optimize });
+exe.root_module.addImport("zui", zui.module("zui"));
+```
+
+## License
+
+MIT; see [LICENSE](LICENSE).
