@@ -73,9 +73,9 @@ CI runs:
   a 32-bit x86 Linux program;
 - `check` for six targets: 32- and 64-bit, big-endian, freestanding and
   WebAssembly;
-- the benchmarks, failing on a missed SPEC.md §6.5 target, or on a
-  slowdown of more than 10% against the commit before, timed on the same
-  runner.
+- the benchmarks, failing on a slowdown of more than 10% against the
+  commit before, timed on the same runner. The SPEC.md §6.5 targets are
+  reported in the job summary; runners vary too much to enforce them.
 
 Those targets exist to catch assumptions about the host machine early:
 the first 32-bit build found two places that used a 64-bit hash as an

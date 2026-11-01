@@ -429,8 +429,8 @@ Measured in 0.5 on an Intel i9-10900K (a 2020 desktop CPU), with
 
 | Scenario | 0.4 | 0.5 | Target |
 |---|---|---|---|
-| 4,096 boxes, depth 8 | 216 µs | 97 µs (CI: 63 µs) | 100 µs |
-| 1,000 texts, warm cache | 346 µs | 166–176 µs (CI: 97 µs) | 250 µs |
+| 4,096 boxes, depth 8 | 216 µs | 97 µs (CI runners: 63–103 µs) | 100 µs |
+| 1,000 texts, warm cache | 346 µs | 166–176 µs (CI runners: 97–128 µs) | 250 µs |
 | 4,000 children of one parent | 163 µs | 65 µs | |
 | allocations after `init` | 0 | 0 | 0 |
 
@@ -1161,14 +1161,16 @@ platform calls per frame.
 | `--json <path>` | save each single-threaded scenario's fastest frame |
 | `--compare <path>` | fail if any of them is more than 10% slower than in that file |
 
-**How CI uses it.** The benchmark job runs with `--check-targets`, and
-also times the previous commit and the new one on the same runner,
-alternately, failing if a scenario is more than 10% slower in each of
-three attempts. (The draft compared against a stored baseline. A file of
-times from one machine says nothing about another, so the comparison is
-always against a fresh measurement.) GitHub's Linux runner turned out
-faster than the reference machine: in the first run, 62.6 µs for the box
-tree and 96.7 µs for the warm text, against targets of 100 and 250.
+**How CI uses it.** The benchmark job times the previous commit and the
+new one on the same runner, alternately, and fails if a scenario is more
+than 10% slower in each of three attempts. (The draft compared against a
+stored baseline. A file of times from one machine says nothing about
+another, so the comparison is always against a fresh measurement.) The
+targets are reported in the job summary but not enforced. GitHub's
+runners differ too much for a fixed limit: two runs of the box tree took
+62.6 µs and 102.8 µs, so a target check would pass or fail depending on
+the machine. Enforcing the targets is a step for a reference machine:
+`zig build bench -- --check-targets`.
 
 ---
 
@@ -1290,7 +1292,7 @@ It lives outside the core because most applications will not need it.
 | 0.2 | input, hover/press/click/focus, clipping, scrolling, floating elements, the state table | the interaction tests pass; a reference raylib backend renders the example application |
 | 0.3 | TaskPool, the completion queue, `needsFrame`, frames in flight with a render thread | a thumbnail-grid example cancels off-screen loads, and an idle application uses 0% CPU |
 | 0.4 | `zui_widgets` (button, checkbox, slider, text field), `zui_reflect`, `zui_testing` snapshots | the widget set is built on the public API only (enforced by the module boundary, §3) |
-| 0.5 | parallel measurement; benchmarks that meet the §6.5 targets | targets met in CI, and on a 2020 desktop core |
+| 0.5 | parallel measurement; benchmarks that meet the §6.5 targets | targets met on a 2020 desktop core; CI reports them and fails on regressions (§14.3) |
 | later | layout islands, flex wrap, static subtrees | each one ships only if the benchmarks show a win |
 
 **Static subtrees** (later, opt-in) are a tree described as a comptime
