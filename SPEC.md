@@ -129,6 +129,12 @@ pub const Config = struct {
     measure_cache_entries: u32 = 4096,
     /// Number of frames that can be alive at once (§10.2). 2 = double buffering.
     frames_in_flight: u8 = 2,
+    /// With a thread-safe platform (§10.5): after this many inline
+    /// measurements in one frame, the frame's remaining misses are measured
+    /// in parallel.
+    parallel_measure_threshold: u32 = 256,
+    /// The most distinct misses one frame measures in parallel.
+    parallel_measure_capacity: u32 = 4096,
     /// Payload type of `.custom` elements and render commands.
     CustomData: type = void,
     /// Payload type of `.image` elements, e.g. a texture handle.
@@ -150,10 +156,12 @@ pub fn Context(comptime config: Config, comptime Platform: type) type
   `"MyPlatform does not implement zui.Platform: missing \`measureText\`"`
   instead of failing somewhere deep inside the layout code.
 
-The index types are computed from the limits with `@Int`. For example,
-`ElementIndex = SmallestUnsignedFor(max_elements)`, so the default
-configuration uses 13-bit indices padded into `u16` fields. Smaller
-indices mean denser arrays.
+The index type is the smallest whole-byte unsigned integer that holds
+`max_elements`: `u16` for the default 4,096. (The draft used the smallest
+integer, a `u13`. It is stored in 16 bits anyway, and every load of one is
+masked; rounding up made the 4,096-box benchmark 10% faster.) The enums
+stored per element (`Sizing.Rule`, `Direction`, `Alignment`, `TextWrap`,
+the content kind) are `u8`-backed for the same reason.
 
 ### 4.2 Memory
 
@@ -331,20 +339,22 @@ in reverse. None of them recurses.
 
 | # | Pass | Direction | Work |
 |---|---|---|---|
-| 1 | fit widths | reverse order (children before parents) | each `fit` width becomes the sum of its children along its axis (or their maximum across it), plus padding and gaps, clamped to min/max. Text contributes the width of its longest word as its minimum and its unwrapped width as its preferred width. |
-| 2 | distribute widths | forward (parents before children) | inside each parent along the width axis: `percent` and `fixed` children first, then free space goes to `grow` children by weight. If the children overflow, they shrink: the largest shrinkable child shrinks first until it matches the next largest (Clay's approach), never below its minimum. |
-| 3 | wrap text | each text element | with its width now known, the text is wrapped into lines (§8.2), which fixes its height. |
+| 0 | measure text | each text element | every word (or paragraph, or the whole text, by wrap mode) is measured through the cache, and its width recorded for pass 3. |
+| 1 | fit widths | reverse order (children before parents) | each `fit` width becomes the sum of its children along its axis (or their maximum across it), plus padding and gaps, clamped to min/max. Text contributes the width of its longest word as its minimum and its unwrapped width as its preferred width. Each element adds its size into its parent's as it is reached, so no child list is walked. |
+| 2 | distribute widths | forward (parents before children) | inside each parent along the width axis: `percent` and `fixed` children first, then free space goes to `grow` children by weight. If the children overflow, they shrink: the largest shrinkable child shrinks first until it matches the next largest (Clay's approach), never below its minimum. The parent's content size is recorded for scrolling and alignment. |
+| 3 | wrap text | each text element | with its width now known, the text is wrapped into lines (§8.2) from the widths pass 0 recorded, which fixes its height. |
 | 4 | fit heights | reverse | as pass 1, for heights. |
 | 5 | distribute heights | forward | as pass 2, for heights. |
-| 6 | position | forward | each child's position follows from its parent's content box, its alignment, the gap and the scroll offset. Floating elements are positioned relative to their attach target (§6.4). |
-| 7 | emit | forward, then per z-layer | render commands, clip regions, hit regions (§7.5). |
+| 6 | position | forward | each parent, once placed, prepares a cursor from its content box, alignment and scroll offset, and each child takes its place from its parent's cursor. Floating elements are positioned relative to their attach target (§6.4). |
+| 7 | emit | forward, then per z-layer | render commands, clip regions, hit regions (§7.5). Elements that draw nothing are skipped; a border waits until the element's subtree ends. |
 
 Widths are settled before heights because text wrapping needs the width,
 and the height depends on the wrap. This is the one ordering constraint,
 and it is why the passes come in pairs.
 
-Each pass is a tight loop over two or three arrays. Text wrapping is the
-only per-character work, and it runs once per text element.
+Each pass is a tight loop over a few arrays. Measuring is the only
+per-character work, and it runs once per text element. §6.5 has the
+measured cost, and what fusing passes did to it.
 
 ### 6.3 Clipping and scrolling
 
@@ -408,14 +418,52 @@ through `.bottom_right`. Floating elements follow these rules:
 
 ### 6.5 Performance targets
 
-These are **targets**, to be verified by the benchmark suite in §14.3
-before v1:
-- **4,096 boxes, depth 8, no text:** layout and emission under 100 µs on
-  a 2020-era desktop core.
+The targets, for one 2020-era desktop core:
+- **4,096 boxes, depth 8, no text:** layout and emission under 100 µs.
 - **1,000 text elements averaging 40 characters, all measurements cached:**
   under 250 µs.
-- **Allocation:** zero after `init`, verified by running the benchmarks
-  under a failing allocator.
+- **Allocation:** zero after `init`.
+
+Measured in 0.5 on an Intel i9-10900K (a 2020 desktop CPU), with
+`zig build bench`, as the fastest of 400 frames:
+
+| Scenario | 0.4 | 0.5 | Target |
+|---|---|---|---|
+| 4,096 boxes, depth 8 | 216 µs | 97 µs | 100 µs |
+| 1,000 texts, warm cache | 346 µs | 166–176 µs | 250 µs |
+| 4,000 children of one parent | 163 µs | 65 µs | |
+| allocations after `init` | 0 | 0 | 0 |
+
+The box tree is 512 chains of 8 nested boxes with mixed sizing rules, so
+nearly every element is a parent: the most layout work a tree of that
+size can ask for. Shallower, wider trees cost less per element. Its time
+is within a few percent of the target, so it has no headroom.
+
+What made the difference, in order of effect:
+- **Text is looked up once per frame.** Measuring records the width of
+  every word in a scratch buffer (`text.maxRuns` entries, sized by
+  `max_text_bytes + max_elements`), and wrapping reads the widths back
+  instead of hashing each word again.
+- **The cache key is one hash.** Wyhash of the bytes, seeded with the font
+  and size, instead of a hash and two mixes, and the word splitter scans
+  16 bytes at a time.
+- **No pass walks a child list it doesn't need to.** The fit passes run
+  backward and add each element into its parent, positions stream forward
+  from a per-parent cursor, and every parent's flow child count is kept at
+  declaration.
+- **Byte-sized indices and enums** (§4.1), and float `min`/`max` without
+  NaN handling (`style.larger`, `style.clampSize`): Zig's `@max` on floats
+  costs about five extra instructions each.
+- **Emission skips elements that draw nothing** and opens a level only for
+  elements that clip, float, have a border, or form a hit region or a
+  focus scope.
+- **The interaction table is cleared slot by slot**, instead of zeroing
+  all 16,384 slots every frame.
+- **Each pass stays its own function.** Inlined into one body they were
+  about 3% slower, and fused into four loops 17% slower.
+
+Declaration, not layout, is now the larger half of a frame: about 110 µs
+of the box tree's 206 µs.
 
 ---
 
@@ -662,6 +710,11 @@ and the narrower signature avoids a type cycle: `TextStyle` depends on
 `Config.FontId`, which belongs to the `Context` the platform is a
 parameter of.
 
+`pub const thread_safe_measure = true;` is the one optional non-function
+declaration: it promises that `measureText` may be called from several
+threads at once, which enables parallel measurement (§10.5). It must be a
+`bool`.
+
 **Measurement must be additive:** measuring `a` and `b` separately must
 sum to measuring `a ++ b` (`width("one") + width(" ") + width("two") ==
 width("one two")`). zui measures each word and each space once, caches
@@ -896,14 +949,27 @@ at three levels, in increasing order of complexity:
    windows, a main view and an offscreen thumbnail render can run their
    frames concurrently, each as one task in an `Io.Group`. This needs no
    code in zui beyond the contract in §10.1.
-2. **Parallel measurement (v1.x).** On a frame with many cache misses,
-   such as the first frame or a font change, pass 3 first collects the
-   distinct missing (word, font, size) keys, measures them in chunks across
-   an `Io.Group`, writes them into the cache, and only then wraps. This
-   requires `measureText` to be thread-safe, which the platform declares
-   with `pub const thread_safe_measure = true;`, a comptime flag. Below a
-   threshold of missing keys (default 256), it measures inline, because
-   task overhead would exceed the work.
+2. **Parallel measurement (0.5).** A platform whose `measureText` is
+   thread-safe declares `pub const thread_safe_measure = true;`. Text is
+   then measured inline until the frame has made
+   `Config.parallel_measure_threshold` platform calls (default 256). At that
+   point the frame is evidently cold (the first frame, or a font or size
+   change), so zui collects the distinct missing (run, font, size) keys of
+   the rest of the frame's text, measures them 64 per task across an
+   `Io.Group`, stores them in the cache, and carries on inline, now
+   hitting the cache.
+   - **Warm frames pay nothing.** The draft collected misses before
+     measuring every frame, and that scan made the warm 1,000-text
+     benchmark 40% slower. Switching after the threshold costs nothing
+     until there are misses.
+   - **Cancelation is respected.** If the frame's task is canceled during
+     the batch, the measurements already made are kept, the rest are left
+     to the inline path, and the cancelation is passed on.
+   - **Measured:** 1,000 cold texts whose measurements cost about 1 µs each,
+     as with a shaping engine, take 4.6 ms on one thread and 1.1 ms in
+     parallel on 10 cores (4.3×).
+   - **The cache must hold the frame's misses,** or measurements evicted
+     before layout reads them are measured again inline.
 3. **Layout islands (later).** An element with `fixed` sizing on both
    axes and no floating descendants attached outside it is an *island*:
    nothing inside it can change anything outside it. Passes 1–6 can run
@@ -1074,15 +1140,36 @@ frame, or (in development) treat it as fatal.
 
 ### 14.3 Benchmarks
 
-`zig build bench`, in ReleaseFast, covers:
+`zig build bench` always builds in ReleaseFast and covers:
 - the §6.5 targets;
-- a deep tree (depth 64);
-- a wide tree (one parent with 4,000 children);
-- text-heavy frames with the cache cold and warm;
-- frames-in-flight pipelining throughput.
+- a deep tree (depth 64) and a wide tree (one parent with 4,000 children);
+- 1,000 texts with the cache cold (a new font size every frame);
+- the same cold text measured by a platform that costs about 1 µs per
+  call, on one thread and in parallel (§10.5);
+- frames per second with a render thread against one thread, using a
+  renderer stand-in that takes 200 µs a frame (§10.2): 1.8× as many frames
+  on the reference machine.
 
-It reports nanoseconds per element and the allocation count (which must
-be 0). A regression of more than 10% against the stored baseline fails CI.
+Each scenario runs in a new `Context` whose allocator counts every call
+after `init`; any allocation fails the run. It prints the fastest and
+median `endFrame`, the median whole frame, nanoseconds per element and
+platform calls per frame.
+
+| Flag | Effect |
+|---|---|
+| `--check-targets` | fail if a §6.5 target is missed |
+| `--json <path>` | save each single-threaded scenario's fastest frame |
+| `--compare <path>` | fail if any of them is more than 10% slower than in that file |
+
+**How CI uses it.** The targets are for a 2020 desktop core, and GitHub's
+shared runners are server cores that run zui about a third slower, so CI
+does not check them. Instead the benchmark job times the previous commit
+and the new one on the same runner, alternately, and fails if a scenario
+is more than 10% slower in each of three attempts. (The draft compared
+against a stored baseline. A file of times from one machine says nothing
+about another, so the comparison is always against a fresh measurement.)
+Checking the targets is a step for a reference machine:
+`zig build bench -- --check-targets`.
 
 ---
 
@@ -1204,7 +1291,7 @@ It lives outside the core because most applications will not need it.
 | 0.2 | input, hover/press/click/focus, clipping, scrolling, floating elements, the state table | the interaction tests pass; a reference raylib backend renders the example application |
 | 0.3 | TaskPool, the completion queue, `needsFrame`, frames in flight with a render thread | a thumbnail-grid example cancels off-screen loads, and an idle application uses 0% CPU |
 | 0.4 | `zui_widgets` (button, checkbox, slider, text field), `zui_reflect`, `zui_testing` snapshots | the widget set is built on the public API only (enforced by the module boundary, §3) |
-| 0.5 | parallel measurement; benchmarks that meet the §6.5 targets | targets met in CI |
+| 0.5 | parallel measurement; benchmarks that meet the §6.5 targets | targets met on a 2020 desktop core; CI fails on regressions (§14.3) |
 | later | layout islands, flex wrap, static subtrees | each one ships only if the benchmarks show a win |
 
 **Static subtrees** (later, opt-in) are a tree described as a comptime

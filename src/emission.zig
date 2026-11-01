@@ -2,11 +2,14 @@ const std = @import("std");
 const style = @import("style.zig");
 const interaction = @import("interaction.zig");
 
-/// One level of the depth-first walk.
+/// An open element whose subtree is drawn differently from its parent's:
+/// it clips, has a border to draw after its children, floats, is a hit
+/// region, or is a focus scope. Other elements open no level.
 pub fn EmitLevel(comptime Index: type) type {
     return struct {
         element: Index,
-        next_child: Index,
+        /// One past the last element of the subtree.
+        subtree_end: Index,
         /// Clip in effect for this element's own commands and its children.
         clip: style.Rect,
         /// Clip in effect before this element's own clip, for its border.
@@ -20,10 +23,11 @@ pub fn EmitLevel(comptime Index: type) type {
 
 /// Pass 7: render commands in paint order, plus the hit regions, the
 /// id → rect results and the focus order that the next frame's
-/// interaction queries read. A background and content are emitted when an
-/// element is entered, its border when it is left, so the border paints
-/// over the element's children. Elements entirely outside the clip are
-/// not drawn.
+/// interaction queries read. Elements are visited in declaration order,
+/// which is depth-first order. A background and content are emitted when
+/// an element is entered, its border when its subtree ends, so the border
+/// paints over the element's children. Elements entirely outside the clip
+/// are not drawn.
 pub fn run(comptime Ui: type, ui: *Ui, frame: *Ui.Frame) void {
     const scale: f32 = if (Ui.snaps_to_pixels) ui.platform.scale() else 1;
     const results = &ui.memory.results;
@@ -34,7 +38,7 @@ pub fn run(comptime Ui: type, ui: *Ui, frame: *Ui.Frame) void {
     const levels = &ui.emit_levels;
     levels[0] = .{
         .element = Ui.root_index,
-        .next_child = frame.first_child[Ui.root_index],
+        .subtree_end = @intCast(frame.element_count),
         .clip = viewport,
         .outer_clip = viewport,
         .pushed_clip = false,
@@ -45,18 +49,19 @@ pub fn run(comptime Ui: type, ui: *Ui, frame: *Ui.Frame) void {
     results.insert(frame.element_id[Ui.root_index], emitter.rectOf(Ui.root_index), interaction.no_region);
 
     var depth: usize = 0;
-    while (true) {
-        const next = levels[depth].next_child;
-        if (next == Ui.none_index) {
-            emitter.leave(&levels[depth]);
-            if (depth == 0) break;
-            depth -= 1;
-            continue;
+    for (1..frame.element_count) |index| {
+        const element: Ui.Index = @intCast(index);
+        while (levels[depth].subtree_end <= element) : (depth -= 1) emitter.leave(&levels[depth]);
+        if (emitter.enter(element, levels[depth], viewport)) |level| {
+            depth += 1;
+            levels[depth] = level;
         }
-        levels[depth].next_child = frame.next_sibling[next];
-        levels[depth + 1] = emitter.enter(next, levels[depth], viewport);
-        depth += 1;
     }
+    while (true) : (depth -= 1) {
+        emitter.leave(&levels[depth]);
+        if (depth == 0) break;
+    }
+    frame.diagnostics.needed.set(.render_commands, emitter.attempted_commands);
 
     if (frame.floating_count != 0) {
         std.sort.block(Ui.RenderCommand, frame.render_commands[0..frame.command_count], {}, lowerLayer(Ui));
@@ -79,6 +84,8 @@ fn Emitter(comptime Ui: type) type {
         frame: *Ui.Frame,
         results: *Ui.Results,
         scale: f32,
+        /// Reported as `needed.render_commands` once emission ends.
+        attempted_commands: u32 = 0,
 
         fn rectOf(self: *const Self, element: Ui.Index) style.Rect {
             return .{
@@ -100,7 +107,7 @@ fn Emitter(comptime Ui: type) type {
 
         fn push(self: *Self, command: Ui.RenderCommand) void {
             const frame = self.frame;
-            frame.diagnostics.needed.set(.render_commands, frame.diagnostics.needed.get(.render_commands) + 1);
+            self.attempted_commands += 1;
             if (frame.command_count >= frame.render_commands.len) {
                 frame.diagnostics.exceeded.insert(.render_commands);
                 if (frame.diagnostics.first_dropped_id == 0) frame.diagnostics.first_dropped_id = command.id;
@@ -110,16 +117,19 @@ fn Emitter(comptime Ui: type) type {
             frame.command_count += 1;
         }
 
-        fn enter(self: *Self, element: Ui.Index, parent: Level, viewport: style.Rect) Level {
+        /// Returns the level the element's subtree is drawn in, or null if
+        /// that is the parent's level unchanged.
+        fn enter(self: *Self, element: Ui.Index, parent: Level, viewport: style.Rect) ?Level {
             const frame = self.frame;
-            const element_id = frame.element_id[element];
             const flags = frame.flags[element];
             const floating = frame.isFloating(element);
+            if (!floating and !flags.emits() and frame.decoration_index[element] == Ui.none_index and frame.kindOf(element) == .none) return null;
+            const element_id = frame.element_id[element];
             const bounds = self.rectOf(element);
             const outer_clip = if (floating) viewport else parent.clip;
             var level: Level = .{
                 .element = element,
-                .next_child = frame.first_child[element],
+                .subtree_end = frame.subtree_end[element],
                 .clip = outer_clip,
                 .outer_clip = outer_clip,
                 .pushed_clip = false,
@@ -164,6 +174,8 @@ fn Emitter(comptime Ui: type) type {
                 level.pushed_clip = true;
                 self.push(.{ .bounds = self.snap(level.clip), .id = element_id, .z = level.z, .payload = .{ .clip_begin = self.snap(level.clip) } });
             }
+            const has_border = frame.decoration_index[element] != Ui.none_index and frame.decorations[frame.decoration_index[element]].border != null;
+            if (!level.pushed_clip and !has_border and !floating and level.region == parent.region and !flags.focus_scope) return null;
             return level;
         }
 
@@ -185,9 +197,10 @@ fn Emitter(comptime Ui: type) type {
                     .scroll_x = flags.scroll_x,
                     .scroll_y = flags.scroll_y,
                 },
-                .max_scroll = .{
-                    @max(0, frame.content_size[element][0] - frame.size[element][0]),
-                    @max(0, frame.content_size[element][1] - frame.size[element][1]),
+                // `content_size` is only computed for elements with children.
+                .max_scroll = if (frame.child_count[element] == 0) .{ 0, 0 } else .{
+                    style.larger(0, frame.content_size[element][0] - frame.size[element][0]),
+                    style.larger(0, frame.content_size[element][1] - frame.size[element][1]),
                 },
             };
             self.results.region_count += 1;

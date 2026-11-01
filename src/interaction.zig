@@ -77,20 +77,38 @@ pub fn Results(comptime max_regions: u32, comptime table_slots: u32) type {
 
         has_frame: bool,
         entries: [table_slots]Entry,
+        /// The slots of `entries` in use, so `clear` touches only those
+        /// rather than the whole table.
+        used_slots: [max_regions]u32,
+        used_slot_count: u32,
         regions: [max_regions]Region,
         region_count: u32,
         focusables: [max_regions]Focusable,
         focusable_count: u32,
 
-        pub fn clear(self: *Self) void {
+        pub fn reset(self: *Self) void {
             for (&self.entries) |*entry| entry.hash = 0;
+            self.used_slot_count = 0;
+            self.region_count = 0;
+            self.focusable_count = 0;
+            self.has_frame = false;
+        }
+
+        pub fn clear(self: *Self) void {
+            for (self.used_slots[0..self.used_slot_count]) |slot| self.entries[slot].hash = 0;
+            self.used_slot_count = 0;
             self.region_count = 0;
             self.focusable_count = 0;
         }
 
+        /// At most one insert per element, so `used_slots` cannot overflow.
         pub fn insert(self: *Self, hash: u64, rect: style.Rect, region: u32) void {
             var slot: usize = @as(usize, @truncate(hash)) & (table_slots - 1);
             while (self.entries[slot].hash != 0 and self.entries[slot].hash != hash) slot = (slot + 1) & (table_slots - 1);
+            if (self.entries[slot].hash == 0) {
+                self.used_slots[self.used_slot_count] = @intCast(slot);
+                self.used_slot_count += 1;
+            }
             self.entries[slot] = .{ .hash = hash, .rect = rect, .region = region };
         }
 

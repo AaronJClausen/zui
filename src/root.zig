@@ -52,10 +52,12 @@ test {
     std.testing.refAllDecls(@This());
     _ = @import("text.zig");
     _ = @import("state.zig");
+    _ = @import("parallel_measure.zig");
     _ = @import("tests/golden.zig");
     _ = @import("tests/invariants.zig");
     _ = @import("tests/memory.zig");
     _ = @import("tests/interaction.zig");
     _ = @import("tests/layers.zig");
     _ = @import("tests/tasks.zig");
+    _ = @import("tests/parallel.zig");
 }

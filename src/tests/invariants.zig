@@ -156,7 +156,7 @@ fn checkParent(frame: *const Frame, parent: Ui.Index) !void {
     child = frame.first_child[parent];
     while (child != Ui.none_index) : (child = frame.next_sibling[child]) {
         if (frame.isFloating(child)) continue;
-        const sizing = frame.sizingOf(child, along);
+        const sizing = sizingAlong(frame, child, along);
         // Overflow is only allowed once every shrinkable child is at its
         // minimum, or along an axis that scrolls.
         if (used > content_along + tolerance and sizing.rule != .fixed and !scrolls_along) {
@@ -166,7 +166,7 @@ fn checkParent(frame: *const Frame, parent: Ui.Index) !void {
         if (used < content_along - tolerance and sizing.rule == .grow and sizing.amount > 0) {
             try std.testing.expect(frame.size[child][a] >= sizing.max - tolerance);
         }
-        const across_sizing = frame.sizingOf(child, along.other());
+        const across_sizing = sizingAlong(frame, child, along.other());
         if (across_sizing.rule == .grow) {
             const expected = @max(frame.min_size[child][b], std.math.clamp(content_across, across_sizing.min, across_sizing.max));
             try std.testing.expectApproxEqAbs(expected, frame.size[child][b], tolerance);
@@ -217,4 +217,10 @@ test "layout is deterministic" {
         }
         try std.testing.expectEqualStrings(snapshots[0][0..lengths[0]], snapshots[1][0..lengths[1]]);
     }
+}
+
+fn sizingAlong(frame: *const Frame, child: Ui.Index, axis: zui.Axis) zui.Sizing {
+    return switch (axis) {
+        inline else => |comptime_axis| frame.sizingOf(child, comptime_axis),
+    };
 }

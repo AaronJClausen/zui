@@ -197,6 +197,21 @@ test "attaching to another element by id" {
     try expectRect(try harness.end(), .of("menu"), 50, 150, 40, 10);
 }
 
+test "a target declared later falls back to the parent" {
+    var harness: support.Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    const ui = harness.begin();
+    ui.box(.{ .layout = fixed(800, 100) });
+    ui.open(.{ .id = .of("panel"), .layout = fixed(200, 60) });
+    ui.box(.{ .id = .of("menu"), .layout = fixed(40, 10), .floating = .{ .attach_to = .{ .element = .of("later") }, .attach_point = .bottom_right } });
+    ui.close();
+    ui.box(.{ .id = .of("later"), .layout = fixed(50, 50) });
+
+    try expectRect(try harness.end(), .of("menu"), 200, 160, 40, 10);
+}
+
 test "grow on a root-attached floating element fills the viewport" {
     var harness: support.Harness = .{};
     try harness.init();
@@ -229,4 +244,55 @@ test "floating layers paint last and escape their ancestors' clip" {
         \\rect 200 0 20 20 #333333
         \\
     , try support.snapshot(try harness.end(), &buffer));
+}
+
+test "floating children add no gap to their parent's flow" {
+    var harness: support.Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    const ui = harness.begin();
+    ui.open(.{ .id = .of("row"), .layout = .{ .child_gap = 10 } });
+    ui.box(.{ .layout = fixed(20, 20) });
+    ui.box(.{ .layout = fixed(5, 5), .floating = .{} });
+    ui.box(.{ .layout = fixed(20, 20) });
+    ui.close();
+
+    try expectRect(try harness.end(), .of("row"), 0, 0, 50, 20);
+}
+
+test "alignment centers children inside the padding" {
+    var harness: support.Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    const ui = harness.begin();
+    ui.open(.{ .layout = .{ .sizing = .{ .width = .fixed(100), .height = .fixed(60) }, .padding = .all(10), .child_alignment = .{ .x = .center, .y = .end } } });
+    ui.box(.{ .id = .of("child"), .layout = fixed(20, 10) });
+    ui.close();
+
+    try expectRect(try harness.end(), .of("child"), 40, 40, 20, 10);
+}
+
+test "a row scrolls vertically to its tallest child" {
+    var harness: support.Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    scrollingRow(harness.begin());
+    _ = try harness.end();
+    const ui = harness.begin();
+    ui.setScrollOffset(strip, .{ 0, 1000 });
+    scrollingRow(ui);
+    _ = try harness.end();
+    try testing.expectEqual([2]f32{ 0, 55 }, harness.ui.scrollOffset(strip));
+}
+
+const strip: zui.Id = .of("strip");
+
+fn scrollingRow(ui: *Ui) void {
+    ui.open(.{ .id = strip, .scroll = .{}, .layout = .{ .sizing = .{ .width = .fixed(100), .height = .fixed(30) }, .padding = .{ .bottom = 5 } } });
+    ui.box(.{ .layout = fixed(20, 50) });
+    ui.box(.{ .layout = fixed(20, 80) });
+    ui.close();
 }

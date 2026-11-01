@@ -25,10 +25,17 @@ Implemented so far:
     options;
   - `zui_testing`: font-independent metrics, a driver that clicks, drags
     and types by element id, golden snapshots, and command checks.
+- **0.5:** performance. Layout and emission of 4,096 boxes went from
+  216 µs to 97 µs on a 2020 desktop core, and 1,000 cached texts from
+  346 µs to about 170 µs, which meets both of SPEC.md §6.5's targets.
+  Platforms with thread-safe text measurement get parallel measurement for
+  cold frames (4.3× as fast on 10 cores), and `zig build bench` measures
+  all of it.
 
 The reference backend and demo application live in
-[zui-raylib](https://github.com/AaronJClausen/zui-raylib). Parallel
-measurement and benchmarks (0.5) come next; see the roadmap in SPEC.md §16.
+[zui-raylib](https://github.com/AaronJClausen/zui-raylib). Later work
+(layout islands, flex wrap, static subtrees) ships only if the benchmarks
+show a win; see SPEC.md §16.
 
 ```zig
 const Ui = zui.Context(.{}, MyPlatform);
@@ -55,6 +62,7 @@ ui.release(frame);
 | `zig build test` | run the unit, golden, randomized-invariant, widget and compile-error tests (add `-Doptimize=ReleaseSafe` or `ReleaseFast` to test other modes) |
 | `zig build check` | compile one full frame, every widget and the test driver without producing output; add `-Dtarget=wasm32-freestanding` to check another target |
 | `zig build test -Dzui-debug=true` | keep id names, so duplicate-id and unbalanced-tree panics name the element |
+| `zig build bench` | run the benchmarks in ReleaseFast; add `-- --check-targets` to fail on a missed §6.5 target, or `-- --compare old.json` after `-- --json old.json` to check for regressions |
 | `zig build docs` | generate API documentation into `zig-out/docs` |
 | `zig build fmt` | format every Zig source file |
 | `zig build fmt-check` | fail if any file is not formatted, as CI does |
@@ -64,7 +72,9 @@ CI runs:
 - the tests in three optimize modes on Linux, Windows and macOS, plus as
   a 32-bit x86 Linux program;
 - `check` for six targets: 32- and 64-bit, big-endian, freestanding and
-  WebAssembly.
+  WebAssembly;
+- the benchmarks, against the commit before on the same runner, failing
+  on a slowdown of more than 10%.
 
 Those targets exist to catch assumptions about the host machine early:
 the first 32-bit build found two places that used a 64-bit hash as an

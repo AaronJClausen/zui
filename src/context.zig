@@ -9,6 +9,7 @@ const emission = @import("emission.zig");
 const interaction = @import("interaction.zig");
 const state_table = @import("state.zig");
 const tasks = @import("tasks.zig");
+const parallel_measure = @import("parallel_measure.zig");
 
 const Id = id_module.Id;
 
@@ -29,6 +30,14 @@ pub const Config = struct {
     measure_cache_entries: u32 = 4096,
     /// Number of frames that can be alive at once. 2 = double buffering.
     frames_in_flight: u8 = 2,
+    /// With a platform that declares `thread_safe_measure = true`: once a
+    /// frame has made this many platform calls, the misses in the rest of
+    /// its text are measured in parallel. A warm frame never gets here, and
+    /// for a few misses spawning tasks would cost more than it saves.
+    parallel_measure_threshold: u32 = 256,
+    /// The most distinct misses one frame measures in parallel; the rest
+    /// are measured inline.
+    parallel_measure_capacity: u32 = 4096,
     /// Payload type of `.custom` elements and render commands.
     CustomData: type = void,
     /// Payload type of `.image` elements, e.g. a texture handle.
@@ -109,7 +118,7 @@ pub const Diagnostics = struct {
 
 pub const EndFrameError = error{ CapacityExceeded, UnbalancedTree };
 
-const ContentKind = enum(u2) { none, text, image, custom };
+const ContentKind = enum(u8) { none, text, image, custom };
 
 pub const ElementFlags = packed struct(u16) {
     explicit_id: bool = false,
@@ -121,16 +130,28 @@ pub const ElementFlags = packed struct(u16) {
     clip_y: bool = false,
     scroll_x: bool = false,
     scroll_y: bool = false,
-    _: u7 = 0,
+    top_to_bottom: bool = false,
+    floating: bool = false,
+    _: u5 = 0,
 
     pub fn clips(self: ElementFlags) bool {
         return self.clip_x or self.clip_y;
+    }
+
+    /// Any flag that makes emission record the element: everything but
+    /// the layout direction.
+    pub fn emits(self: ElementFlags) bool {
+        var without_direction = self;
+        without_direction.top_to_bottom = false;
+        return @as(u16, @bitCast(without_direction)) != 0;
     }
 
     pub fn scrolls(self: ElementFlags, axis: style.Axis) bool {
         return if (axis == .x) self.scroll_x else self.scroll_y;
     }
 };
+
+const default_layout: style.Layout = .{};
 
 fn nextPowerOfTwo(value: u32) u32 {
     return std.math.ceilPowerOfTwoAssert(u32, @max(value, 2));
@@ -146,7 +167,9 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
         pub const FontId = config.FontId;
         pub const TextStyle = style.TextStyle(config.FontId);
         pub const RenderCommand = command_types.RenderCommand(TextStyle, config.ImageHandle, config.CustomData);
-        pub const Index = std.math.IntFittingRange(0, config.max_elements);
+        /// Rounded up to a whole number of bytes: a `u13` is stored in 16
+        /// bits anyway, and every load of one would be masked.
+        pub const Index = std.meta.Int(.unsigned, std.math.ceilPowerOfTwoAssert(u16, @max(8, @bitSizeOf(std.math.IntFittingRange(0, config.max_elements)))));
         pub const none_index: Index = config.max_elements;
         pub const root_index: Index = 0;
         pub const root_id: Id = .of("zui.root");
@@ -156,6 +179,9 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
         pub const snaps_to_pixels = @hasDecl(Platform, "scale");
 
         pub const Cache = text_layout.MeasureCache(config.FontId, config.measure_cache_entries, Platform);
+        pub const measures_in_parallel = @hasDecl(Platform, "thread_safe_measure") and Platform.thread_safe_measure;
+        pub const parallel_measure_threshold = config.parallel_measure_threshold;
+        const MeasureBatch = if (measures_in_parallel) parallel_measure.MeasureBatch(config.FontId, Platform, config.parallel_measure_capacity) else void;
         pub const States = state_table.StateTable(config.state_slots);
         pub const Results = interaction.Results(config.max_elements, id_table_slots);
         const InteractionState = interaction.State(config.max_depth + 1);
@@ -167,6 +193,7 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
         };
 
         pub const TextRecord = struct {
+            element: Index,
             bytes_start: u32,
             bytes_len: u32,
             style: TextStyle,
@@ -186,6 +213,8 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
             last_child: [max_elements]Index,
             next_sibling: [max_elements]Index,
             child_count: [max_elements]Index,
+            /// Children that take part in the flow: `child_count` minus floating ones.
+            flow_child_count: [max_elements]Index,
             layout_index: [max_elements]Index,
             decoration_index: [max_elements]Index,
             content_kind: [max_elements]ContentKind,
@@ -252,14 +281,17 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
                 }
             }
 
-            pub fn layoutOf(self: *const Frame, index: Index) style.Layout {
+            pub fn layoutOf(self: *const Frame, index: Index) *const style.Layout {
                 const layout_index = self.layout_index[index];
-                return if (layout_index == none_index) .{} else self.layouts[layout_index];
+                return if (layout_index == none_index) &default_layout else &self.layouts[layout_index];
             }
 
-            pub fn sizingOf(self: *const Frame, index: Index, axis: style.Axis) style.Sizing {
-                if (self.content_kind[index] == .text) return .fit;
-                return self.layoutOf(index).sizing.axis(axis);
+            /// Text elements never have a layout, so they are `.fit` here too.
+            pub fn sizingOf(self: *const Frame, index: Index, comptime axis: style.Axis) style.Sizing {
+                const layout_index = self.layout_index[index];
+                if (layout_index == none_index) return .fit;
+                const sizing = &self.layouts[layout_index].sizing;
+                return if (axis == .x) sizing.width else sizing.height;
             }
 
             pub fn kindOf(self: *const Frame, index: Index) ContentKind {
@@ -267,7 +299,7 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
             }
 
             pub fn isFloating(self: *const Frame, index: Index) bool {
-                return self.floating_index[index] != none_index;
+                return self.flags[index].floating;
             }
 
             pub fn floatingOf(self: *const Frame, index: Index) style.Floating {
@@ -294,6 +326,11 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
         const Memory = struct {
             frames: [config.frames_in_flight]Frame,
             cache: Cache,
+            measure_batch: MeasureBatch,
+            child_placements: [config.max_elements]layout.ChildPlacement,
+            /// Scratch shared by every frame: the width of each word or
+            /// paragraph measured in the current `endFrame`.
+            run_widths: [text_layout.maxRuns(config.max_text_bytes, config.max_elements)]f32,
             states: States,
             results: Results,
         };
@@ -348,8 +385,9 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
 
         fn prepareMemory(self: *Self) void {
             self.memory.cache.reset();
+            if (measures_in_parallel) self.memory.measure_batch.clearAll();
             self.memory.states.reset();
-            self.memory.results.has_frame = false;
+            self.memory.results.reset();
             for (&self.memory.frames) |*frame| {
                 frame.held = .init(false);
                 frame.element_count = 0;
@@ -423,7 +461,7 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
             frame.subtree_end[root_index] = @intCast(frame.element_count);
 
             layout.run(Self, self, frame);
-            emission.run(Self, self, frame);
+            @call(.never_inline, emission.run, .{ Self, self, frame });
 
             const results = &self.memory.results;
             results.has_frame = true;
@@ -600,11 +638,12 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
                 return;
             }
             const record_index = frame.text_count;
-            _ = self.appendElement(.none, .{}, .text, record_index) orelse return;
+            const element_index = self.appendElement(.none, .{}, .text, record_index) orelse return;
             const start = frame.text_bytes_used;
             @memcpy(frame.text_bytes[start..][0..content.len], content);
             frame.text_bytes_used += @intCast(content.len);
             frame.texts[record_index] = .{
+                .element = element_index,
                 .bytes_start = start,
                 .bytes_len = @intCast(content.len),
                 .style = text_style,
@@ -671,6 +710,9 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
             frame.last_child[index] = none_index;
             frame.next_sibling[index] = none_index;
             frame.child_count[index] = 0;
+            frame.size[index] = .{ 0, 0 };
+            frame.min_size[index] = .{ 0, 0 };
+            frame.flow_child_count[index] = 0;
             frame.content_kind[index] = kind;
             frame.content_index[index] = @intCast(record_index);
             frame.subtree_end[index] = index + 1;
@@ -710,6 +752,7 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
                 }
                 frame.last_child[parent] = index;
                 frame.child_count[parent] += 1;
+                if (element.floating == null) frame.flow_child_count[parent] += 1;
             }
 
             if (!element_id.isNone() and !self.registerId(frame, index)) {
@@ -729,6 +772,8 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
                 .focusable = element.focusable,
                 .focus_scope = element.focus_scope,
                 .disabled = element.disabled,
+                .top_to_bottom = if (element.layout) |element_layout| element_layout.direction == .top_to_bottom else false,
+                .floating = element.floating != null,
             };
             if (element.clip) |clip| {
                 flags.clip_x = clip.horizontal;
@@ -1027,9 +1072,12 @@ fn validatePlatform(comptime Platform: type, comptime FontId: type) void {
     if (@hasDecl(Platform, "wake") and @TypeOf(Platform.wake) != fn (*Platform) void) {
         @compileError(@typeName(Platform) ++ ".wake must be fn (*" ++ @typeName(Platform) ++ ") void");
     }
+    if (@hasDecl(Platform, "thread_safe_measure") and @TypeOf(Platform.thread_safe_measure) != bool) {
+        @compileError(@typeName(Platform) ++ ".thread_safe_measure must be a bool, found " ++ @typeName(@TypeOf(Platform.thread_safe_measure)));
+    }
     for (@typeInfo(Platform).@"struct".decls) |declaration| {
         if (std.mem.startsWith(u8, declaration.name, "zui")) {
-            @compileError(@typeName(Platform) ++ " declares `" ++ declaration.name ++ "`, which zui does not read; the optional hooks are `wake` and `scale`");
+            @compileError(@typeName(Platform) ++ " declares `" ++ declaration.name ++ "`, which zui does not read; the optional declarations are `wake`, `scale` and `thread_safe_measure`");
         }
     }
 }

@@ -1,6 +1,23 @@
 const std = @import("std");
 const Id = @import("id.zig").Id;
 
+/// `@max` for layout values. Zig's `@max` and `@min` on floats are NaN-aware,
+/// which costs about five extra instructions each; layout runs them for
+/// every element in every pass, and its values are never NaN unless the
+/// application passes one in.
+pub inline fn larger(a: f32, b: f32) f32 {
+    return if (a > b) a else b;
+}
+
+pub inline fn smaller(a: f32, b: f32) f32 {
+    return if (a < b) a else b;
+}
+
+/// `std.math.clamp` without the NaN handling; `min` wins if `min > max`.
+pub inline fn clampSize(value: f32, min: f32, max: f32) f32 {
+    return larger(min, smaller(value, max));
+}
+
 pub const Axis = enum(u1) {
     x,
     y,
@@ -103,11 +120,11 @@ pub const Rect = struct {
 
     /// The overlap of two rectangles; empty (zero-sized) when they do not meet.
     pub fn intersect(self: Rect, other: Rect) Rect {
-        const left = @max(self.x, other.x);
-        const top = @max(self.y, other.y);
-        const right = @min(self.x + self.width, other.x + other.width);
-        const bottom = @min(self.y + self.height, other.y + other.height);
-        return .{ .x = left, .y = top, .width = @max(0, right - left), .height = @max(0, bottom - top) };
+        const left = larger(self.x, other.x);
+        const top = larger(self.y, other.y);
+        const right = smaller(self.x + self.width, other.x + other.width);
+        const bottom = smaller(self.y + self.height, other.y + other.height);
+        return .{ .x = left, .y = top, .width = larger(0, right - left), .height = larger(0, bottom - top) };
     }
 
     pub fn isEmpty(self: Rect) bool {
@@ -131,7 +148,7 @@ pub const Sizing = struct {
     min: f32 = 0,
     max: f32 = std.math.inf(f32),
 
-    pub const Rule = enum(u2) { fit, grow, fixed, percent };
+    pub const Rule = enum(u8) { fit, grow, fixed, percent };
 
     pub const fit: Sizing = .{};
     pub const grow: Sizing = .{ .rule = .grow, .amount = 1 };
@@ -168,7 +185,7 @@ pub const Sizing2 = struct {
     }
 };
 
-pub const Direction = enum(u1) {
+pub const Direction = enum(u8) {
     left_to_right,
     top_to_bottom,
 
@@ -177,7 +194,7 @@ pub const Direction = enum(u1) {
     }
 };
 
-pub const Alignment = enum(u2) {
+pub const Alignment = enum(u8) {
     start,
     center,
     end,
@@ -266,7 +283,7 @@ pub const Floating = struct {
     z: i16 = 1,
 };
 
-pub const TextWrap = enum(u2) {
+pub const TextWrap = enum(u8) {
     /// Break between words to fit the element's width, and at newlines.
     words,
     /// Break only at newlines.

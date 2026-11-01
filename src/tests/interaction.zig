@@ -243,6 +243,14 @@ test "tab and shift-tab move focus in declaration order, wrapping" {
 }
 
 test "a focus scope keeps tab inside it" {
+    try expectFocusScopeHoldsTab(true);
+}
+
+test "a focus scope keeps tab inside it when it is not floating" {
+    try expectFocusScopeHoldsTab(false);
+}
+
+fn expectFocusScopeHoldsTab(floating: bool) !void {
     var harness: Harness = .{};
     try harness.init();
     defer harness.deinit();
@@ -255,7 +263,7 @@ test "a focus scope keeps tab inside it" {
         const ui = harness.beginWith(.{ .keys_pressed = if (frame_number == 0) &.{} else &tab });
         if (frame_number == 0) ui.requestFocus(ok);
         buttons(ui, .{});
-        ui.open(.{ .focus_scope = true, .floating = .{ .attach_to = .root } });
+        ui.open(.{ .focus_scope = true, .floating = if (floating) .{ .attach_to = .root } else null });
         ui.box(.{ .id = ok, .focusable = true, .layout = .{ .sizing = .{ .width = .fixed(10), .height = .fixed(10) } } });
         ui.box(.{ .id = cancel, .focusable = true, .layout = .{ .sizing = .{ .width = .fixed(10), .height = .fixed(10) } } });
         ui.close();
@@ -298,6 +306,21 @@ test "focus is dropped when its element disappears" {
     try finish(&harness);
     ui = try step(&harness, .{}, .{});
     try testing.expect(!ui.focused(a));
+    try finish(&harness);
+}
+
+test "an element that is no longer declared has no rect" {
+    var harness: Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    _ = try step(&harness, .{}, .{});
+    try finish(&harness);
+    var ui = harness.beginWith(.{});
+    try testing.expect(ui.rectOf(a) != null);
+    try finish(&harness);
+    ui = harness.beginWith(.{});
+    try testing.expect(ui.rectOf(a) == null);
     try finish(&harness);
 }
 

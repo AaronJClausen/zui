@@ -8,7 +8,8 @@ const compile_error_cases = [_]struct { name: []const u8, expected_error: []cons
     .{ .name = "font_id_not_integer", .expected_error = "zui: FontId must be an integer or enum type, got f32" },
     .{ .name = "platform_missing_measure_text", .expected_error = "platform_missing_measure_text.Platform does not implement zui.Platform: missing `measureText`" },
     .{ .name = "platform_measure_text_wrong_signature", .expected_error = "platform_measure_text_wrong_signature.Platform.measureText must be fn (*platform_measure_text_wrong_signature.Platform, []const u8, u16, f32) [2]f32, found fn (*platform_measure_text_wrong_signature.Platform, []const u8, f32) [2]f32" },
-    .{ .name = "platform_misspelled_hook", .expected_error = "platform_misspelled_hook.Platform declares `zuiWake`, which zui does not read; the optional hooks are `wake` and `scale`" },
+    .{ .name = "platform_misspelled_hook", .expected_error = "platform_misspelled_hook.Platform declares `zuiWake`, which zui does not read; the optional declarations are `wake`, `scale` and `thread_safe_measure`" },
+    .{ .name = "platform_thread_safe_measure_not_bool", .expected_error = "platform_thread_safe_measure_not_bool.Platform.thread_safe_measure must be a bool, found comptime_int" },
     .{ .name = "ids_repeated_name", .expected_error = "zui.ids: \"save\" appears more than once" },
     .{ .name = "custom_without_custom_data", .expected_error = "zui: custom() needs Config.CustomData set to your payload type" },
     .{ .name = "state_type_too_large", .expected_error = "zui: state type state_type_too_large.History is 80 bytes, but a state slot holds at most 64; store an index into your own storage instead" },
@@ -115,7 +116,25 @@ pub fn build(b: *std.Build) void {
     });
     b.step("check", "Type-check zui for the selected target").dependOn(&check_object.step);
 
-    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "tests", "zui_testing", "zui_widgets", "zui_reflect" };
+    const bench_executable = b.addExecutable(.{
+        .name = "zui-bench",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("bench/bench.zig"),
+            .target = target,
+            .optimize = .ReleaseFast,
+            .imports = &.{.{ .name = "zui", .module = b.createModule(.{
+                .root_source_file = b.path("src/root.zig"),
+                .target = target,
+                .optimize = .ReleaseFast,
+                .imports = &.{.{ .name = "zui_options", .module = build_options.createModule() }},
+            }) }},
+        }),
+    });
+    const run_bench = b.addRunArtifact(bench_executable);
+    if (b.args) |arguments| run_bench.addArgs(arguments);
+    b.step("bench", "Run the benchmarks in ReleaseFast (SPEC.md §14.3)").dependOn(&run_bench.step);
+
+    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "tests", "bench", "zui_testing", "zui_widgets", "zui_reflect" };
     b.step("fmt", "Format all Zig sources").dependOn(&b.addFmt(.{ .paths = formatted_paths }).step);
     b.step("fmt-check", "Fail if any Zig source is not formatted").dependOn(&b.addFmt(.{ .paths = formatted_paths, .check = true }).step);
 }

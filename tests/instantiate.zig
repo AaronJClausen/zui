@@ -102,6 +102,29 @@ fn declareWidgets(ui: *Ui) void {
     _ = zui_reflect.inspector(widgets, ui, .of("settings"), &settings);
 }
 
+const ThreadSafePlatform = struct {
+    pub const thread_safe_measure = true;
+
+    pub fn measureText(_: *ThreadSafePlatform, text: []const u8, _: u16, size: f32) [2]f32 {
+        return .{ @as(f32, @floatFromInt(text.len)) * size / 2, size };
+    }
+};
+
+const ParallelUi = zui.Context(.{ .max_elements = 64, .parallel_measure_threshold = 1 }, ThreadSafePlatform);
+
+var thread_safe_platform: ThreadSafePlatform = .{};
+var parallel_memory: [ParallelUi.required_bytes]u8 align(16) = undefined;
+
+export fn zuiCheckParallelMeasurement() usize {
+    var ui = ParallelUi.initBuffer(&parallel_memory, undefined, &thread_safe_platform) catch return 0;
+    ui.beginFrame(.{ .viewport = .{ 100, 100 } });
+    ui.text("measured on several threads", .{});
+    ui.text("once the first text missed", .{ .wrap = .newlines });
+    const frame = ui.endFrame() catch ui.lastFrame();
+    defer ui.release(frame);
+    return frame.commands().len;
+}
+
 const TestingUi = zui.Context(.{ .max_elements = 32 }, zui_testing.FixedMetricsPlatform(u16));
 
 var testing_platform: zui_testing.FixedMetricsPlatform(u16) = .{};
