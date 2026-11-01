@@ -4,7 +4,7 @@
 //! ```sh
 //! zig build bench                                  # print the tables
 //! zig build bench -- --check-targets               # fail if a §6.5 target is missed
-//! zig build bench -- --json results.json           # save each scenario's fastest frame
+//! zig build bench -- --json results.json           # save each scenario's fastest declaration and layout
 //! zig build bench -- --compare baseline.json       # fail on a >10% regression
 //! ```
 
@@ -50,6 +50,9 @@ fn ShapingPlatform(comptime thread_safe: bool) type {
 const Measurement = struct {
     name: []const u8,
     elements: u32,
+    /// `beginFrame` and the scene's `open`/`close` calls: everything before `endFrame`.
+    declare_min_ns: u64,
+    declare_median_ns: u64,
     /// Layout and emission: the time `endFrame` takes.
     layout_min_ns: u64,
     layout_median_ns: u64,
@@ -81,6 +84,7 @@ fn Scenario(comptime config: zui.Config, comptime Platform: type, comptime Scene
                 ui.release(try ui.endFrame());
             }
 
+            var declare_times: [max_timed_frames]u64 = undefined;
             var layout_times: [max_timed_frames]u64 = undefined;
             var frame_times: [max_timed_frames]u64 = undefined;
             const calls_before = ui.measureCalls();
@@ -92,17 +96,21 @@ fn Scenario(comptime config: zui.Config, comptime Platform: type, comptime Scene
                 const frame = try ui.endFrame();
                 const end = Io.Timestamp.now(io, .awake);
                 ui.release(frame);
+                declare_times[index] = @intCast(frame_start.durationTo(layout_start).nanoseconds);
                 layout_times[index] = @intCast(layout_start.durationTo(end).nanoseconds);
                 frame_times[index] = @intCast(frame_start.durationTo(end).nanoseconds);
             }
             const calls = ui.measureCalls() - calls_before;
             if (counting.allocations != allocations_after_init) return error.FramesAllocated;
 
+            std.mem.sortUnstable(u64, declare_times[0..frame_count], {}, std.sort.asc(u64));
             std.mem.sortUnstable(u64, layout_times[0..frame_count], {}, std.sort.asc(u64));
             std.mem.sortUnstable(u64, frame_times[0..frame_count], {}, std.sort.asc(u64));
             return .{
                 .name = Scene.name,
                 .elements = ui.lastFrame().element_count,
+                .declare_min_ns = declare_times[0],
+                .declare_median_ns = declare_times[frame_count / 2],
                 .layout_min_ns = layout_times[0],
                 .layout_median_ns = layout_times[frame_count / 2],
                 .frame_median_ns = frame_times[frame_count / 2],
@@ -288,6 +296,103 @@ const WideTree = struct {
     }
 };
 
+/// The zui-raylib demo's Documents view, declared by hand without
+/// zui_widgets: a toolbar, a sidebar of 40 documents and a text panel.
+/// About 100 small elements, most with ids, a decoration and a label.
+const DocumentsView = struct {
+    const name = "documents view";
+    const target_ns: ?u64 = null;
+    const config: zui.Config = .{ .max_elements = 4096 };
+
+    const panel: zui.Color = .rgb(0x20202a);
+    const border: zui.Color = .rgb(0x34344a);
+    const accent: zui.Color = .rgb(0x5b8cff);
+    const focus_ring: zui.Color = .rgb(0xffc65c);
+    const text_color: zui.Color = .rgb(0xe8e8f0);
+    const muted_text_color: zui.Color = .rgb(0x9a9aae);
+
+    fn declare(_: *DocumentsView, ui: anytype, _: usize) void {
+        ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .grow_both }, .background = .rgb(0x16161c) });
+        declareToolbar(ui);
+        ui.open(.{ .layout = .{ .sizing = .grow_both } });
+        declareSidebar(ui);
+        declareMainPanel(ui);
+        ui.close();
+        ui.close();
+    }
+
+    fn button(ui: anytype, id: zui.Id, content: []const u8) void {
+        ui.open(.{
+            .id = id,
+            .focusable = true,
+            .background = if (ui.widgetState(id) == .hovered) border else panel,
+            .border = if (ui.focused(id)) .{ .color = focus_ring, .widths = .all(2) } else null,
+            .corner_radius = .all(6),
+            .layout = .{ .sizing = .{ .height = .fixed(38) }, .padding = .symmetric(14, 0), .child_alignment = .{ .x = .center, .y = .center } },
+        });
+        ui.text(content, .{ .size = 20, .color = text_color });
+        ui.close();
+    }
+
+    fn declareToolbar(ui: anytype) void {
+        ui.open(.{
+            .id = .of("toolbar"),
+            .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(56) }, .padding = .symmetric(12, 8), .child_gap = 8, .child_alignment = .{ .y = .center } },
+            .background = panel,
+            .border = .{ .color = border, .widths = .{ .bottom = 1 } },
+        });
+        button(ui, .of("new"), "New");
+        button(ui, .of("open"), "Open");
+        button(ui, .of("save"), "Save");
+        ui.box(.{ .layout = .{ .sizing = .{ .width = .grow } } });
+        button(ui, .of("documents_view"), "Documents");
+        button(ui, .of("thumbnails_view"), "Thumbnails");
+        button(ui, .of("settings_view"), "Settings");
+        button(ui, .of("about"), "About");
+        ui.close();
+    }
+
+    fn declareSidebar(ui: anytype) void {
+        ui.open(.{
+            .id = .of("sidebar"),
+            .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(260), .height = .grow }, .padding = .all(8), .child_gap = 4 },
+            .background = .rgb(0x1a1a22),
+            .scroll = .{},
+        });
+        var name_buffer: [32]u8 = undefined;
+        for (0..40) |index| {
+            const id: zui.Id = .indexed("item", index);
+            const state = ui.widgetState(id);
+            ui.open(.{
+                .id = id,
+                .focusable = true,
+                .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(36) }, .padding = .symmetric(12, 8), .child_alignment = .{ .y = .center } },
+                .background = if (index == 2) accent else if (state == .hovered or state == .pressed) border else null,
+                .corner_radius = .all(4),
+                .border = if (ui.focused(id)) .{ .color = focus_ring, .widths = .all(1) } else null,
+            });
+            const document_name = std.fmt.bufPrint(&name_buffer, "Document {d}", .{index + 1}) catch unreachable;
+            ui.text(document_name, .{ .size = 20, .color = text_color });
+            ui.close();
+        }
+        ui.close();
+    }
+
+    fn declareMainPanel(ui: anytype) void {
+        ui.open(.{ .id = .of("content"), .layout = .{ .direction = .top_to_bottom, .sizing = .grow_both, .padding = .all(28), .child_gap = 18 } });
+        ui.text("zui + raylib", .{ .size = 40, .color = text_color });
+        ui.text("This window is laid out by zui and drawn by raylib. Every element is declared each frame as nested function calls; zui computes the layout and returns render commands, and the backend draws them.", .{ .size = 20, .color = muted_text_color });
+        ui.open(.{ .layout = .{ .child_gap = 12, .child_alignment = .{ .y = .center } } });
+        button(ui, .of("details_toggle"), "Show details");
+        ui.open(.{ .id = .of("hover_me"), .interactive = true, .layout = .{ .padding = .symmetric(14, 8) }, .background = panel, .corner_radius = .all(6) });
+        ui.text("Hover me", .{ .size = 20, .color = text_color });
+        ui.close();
+        ui.close();
+        ui.text("Clicks: 0   Last action: nothing yet   Selected: document 3", .{ .size = 20, .color = muted_text_color });
+        ui.close();
+    }
+};
+
 const shaping_config: zui.Config = .{
     .max_elements = 1200,
     .max_render_commands = 8192,
@@ -401,8 +506,33 @@ fn microseconds(nanoseconds: u64) f64 {
 
 /// The scenarios a regression check compares: the single-threaded ones,
 /// whose times don't depend on what the machine's other cores are doing.
-const compared_count = 5;
+const compared_count = 6;
 const regression_tolerance = 1.10;
+
+/// One fastest time a regression check compares. The layout time keeps the
+/// scenario's bare name, so it still matches baselines from before the
+/// declaration time was recorded.
+const ComparedTime = struct {
+    key_buffer: [64]u8,
+    key_len: usize,
+    nanoseconds: u64,
+
+    fn key(self: *const ComparedTime) []const u8 {
+        return self.key_buffer[0..self.key_len];
+    }
+};
+
+fn comparedTimes(measurements: []const Measurement, times: *[2 * compared_count]ComparedTime) []const ComparedTime {
+    for (measurements, 0..) |measurement, index| {
+        const layout_time = &times[2 * index];
+        layout_time.key_len = (std.fmt.bufPrint(&layout_time.key_buffer, "{s}", .{measurement.name}) catch unreachable).len;
+        layout_time.nanoseconds = measurement.layout_min_ns;
+        const declare_time = &times[2 * index + 1];
+        declare_time.key_len = (std.fmt.bufPrint(&declare_time.key_buffer, "{s}, declare", .{measurement.name}) catch unreachable).len;
+        declare_time.nanoseconds = measurement.declare_min_ns;
+    }
+    return times[0 .. 2 * measurements.len];
+}
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
@@ -416,6 +546,7 @@ pub fn main(init: std.process.Init) !void {
         try Scenario(text_config, GlyphTablePlatform, TextWallCold).run(io, gpa, 20, 400),
         try Scenario(DeepTree.config, GlyphTablePlatform, DeepTree).run(io, gpa, 20, 400),
         try Scenario(WideTree.config, GlyphTablePlatform, WideTree).run(io, gpa, 20, 400),
+        try Scenario(DocumentsView.config, GlyphTablePlatform, DocumentsView).run(io, gpa, 20, 400),
         try Scenario(shaping_config, ShapingPlatform(false), ShapedTextWall(false)).run(io, gpa, 2, 20),
         try Scenario(shaping_config, ShapingPlatform(true), ShapedTextWall(true)).run(io, gpa, 2, 20),
     };
@@ -425,7 +556,7 @@ pub fn main(init: std.process.Init) !void {
     var stdout_buffer: [4096]u8 = undefined;
     var stdout_writer = Io.File.stdout().writer(io, &stdout_buffer);
     const out = &stdout_writer.interface;
-    try out.print("{s:<28} {s:>8} {s:>11} {s:>11} {s:>11} {s:>8} {s:>12} {s:>9}\n", .{ "scenario", "elements", "layout min", "layout med", "frame med", "ns/elem", "target", "measures" });
+    try out.print("{s:<28} {s:>8} {s:>11} {s:>11} {s:>11} {s:>11} {s:>11} {s:>8} {s:>12} {s:>9}\n", .{ "scenario", "elements", "declare min", "declare med", "layout min", "layout med", "frame med", "ns/elem", "target", "measures" });
     var missed_target = false;
     for (measurements) |measurement| {
         const per_element = @as(f64, @floatFromInt(measurement.layout_min_ns)) / @as(f64, @floatFromInt(measurement.elements));
@@ -435,9 +566,11 @@ pub fn main(init: std.process.Init) !void {
             if (!met) missed_target = true;
             break :blk std.fmt.bufPrint(&target_buffer, "{s} {d:.0}us", .{ if (met) "ok" else "MISS", microseconds(target) }) catch unreachable;
         } else "";
-        try out.print("{s:<28} {d:>8} {d:>9.1}us {d:>9.1}us {d:>9.1}us {d:>8.1} {s:>12} {d:>9.0}\n", .{
+        try out.print("{s:<28} {d:>8} {d:>9.1}us {d:>9.1}us {d:>9.1}us {d:>9.1}us {d:>9.1}us {d:>8.1} {s:>12} {d:>9.0}\n", .{
             measurement.name,
             measurement.elements,
+            microseconds(measurement.declare_min_ns),
+            microseconds(measurement.declare_median_ns),
             microseconds(measurement.layout_min_ns),
             microseconds(measurement.layout_median_ns),
             microseconds(measurement.frame_median_ns),
@@ -446,54 +579,56 @@ pub fn main(init: std.process.Init) !void {
             measurement.platform_calls_per_frame,
         });
     }
-    const shaped_one_thread: f64 = @floatFromInt(measurements[5].layout_median_ns);
-    const shaped_parallel: f64 = @floatFromInt(measurements[6].layout_median_ns);
+    const shaped_one_thread: f64 = @floatFromInt(measurements[compared_count].layout_median_ns);
+    const shaped_parallel: f64 = @floatFromInt(measurements[compared_count + 1].layout_median_ns);
     try out.print("\nparallel measurement: {d:.2}x as fast as one thread\n", .{shaped_one_thread / shaped_parallel});
     try out.print("render thread: {d:.0} frames/s against {d:.0} on one thread ({d:.2}x)\n", .{ render_thread_rate, one_thread_rate, render_thread_rate / one_thread_rate });
     try out.writeAll("allocations after init: 0 in every scenario\n");
     try out.flush();
 
-    if (options.json_path) |path| try writeJson(io, path, measurements[0..compared_count]);
-    const regressed = if (options.compare_path) |path| try compare(io, arena, out, path, measurements[0..compared_count]) else false;
+    var compared_time_buffer: [2 * compared_count]ComparedTime = undefined;
+    const compared_times = comparedTimes(measurements[0..compared_count], &compared_time_buffer);
+    if (options.json_path) |path| try writeJson(io, path, compared_times);
+    const regressed = if (options.compare_path) |path| try compare(io, arena, out, path, compared_times) else false;
     try out.flush();
     if (regressed) return error.Regression;
     if (options.check_targets and missed_target) return error.TargetMissed;
 }
 
-fn writeJson(io: Io, path: []const u8, measurements: []const Measurement) !void {
+fn writeJson(io: Io, path: []const u8, times: []const ComparedTime) !void {
     const file = try Io.Dir.cwd().createFile(io, path, .{});
     defer file.close(io);
     var buffer: [1024]u8 = undefined;
     var file_writer = file.writer(io, &buffer);
     const writer = &file_writer.interface;
     try writer.writeAll("{\n");
-    for (measurements, 0..) |measurement, index| {
-        try writer.print("  \"{s}\": {d}{s}\n", .{ measurement.name, measurement.layout_min_ns, if (index + 1 < measurements.len) "," else "" });
+    for (times, 0..) |*time, index| {
+        try writer.print("  \"{s}\": {d}{s}\n", .{ time.key(), time.nanoseconds, if (index + 1 < times.len) "," else "" });
     }
     try writer.writeAll("}\n");
     try writer.flush();
 }
 
-/// Prints each scenario's change against the baseline and returns whether
-/// any is more than 10% slower. A scenario missing from the baseline is new
-/// and only printed.
-fn compare(io: Io, arena: std.mem.Allocator, out: *Io.Writer, path: []const u8, measurements: []const Measurement) !bool {
+/// Prints each time's change against the baseline and returns whether any
+/// is more than 10% slower. A time missing from the baseline is new and
+/// only printed.
+fn compare(io: Io, arena: std.mem.Allocator, out: *Io.Writer, path: []const u8, times: []const ComparedTime) !bool {
     const contents = try Io.Dir.cwd().readFileAlloc(io, path, arena, .limited(64 * 1024));
     const baseline = try std.json.parseFromSliceLeaky(std.json.ArrayHashMap(u64), arena, contents, .{});
     try out.writeAll("\nagainst the baseline (fastest frames):\n");
     var regressed = false;
-    for (measurements) |measurement| {
-        const before = baseline.map.get(measurement.name) orelse {
-            try out.print("  {s:<28} new\n", .{measurement.name});
+    for (times) |*time| {
+        const before = baseline.map.get(time.key()) orelse {
+            try out.print("  {s:<37} new\n", .{time.key()});
             continue;
         };
-        const ratio = @as(f64, @floatFromInt(measurement.layout_min_ns)) / @as(f64, @floatFromInt(before));
+        const ratio = @as(f64, @floatFromInt(time.nanoseconds)) / @as(f64, @floatFromInt(before));
         const slower = ratio > regression_tolerance;
         if (slower) regressed = true;
-        try out.print("  {s:<28} {d:>9.1}us -> {d:>9.1}us  {s}{d:.1}%{s}\n", .{
-            measurement.name,
+        try out.print("  {s:<37} {d:>9.1}us -> {d:>9.1}us  {s}{d:.1}%{s}\n", .{
+            time.key(),
             microseconds(before),
-            microseconds(measurement.layout_min_ns),
+            microseconds(time.nanoseconds),
             if (ratio >= 1) "+" else "",
             (ratio - 1) * 100,
             if (slower) "  REGRESSION" else "",

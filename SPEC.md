@@ -1143,6 +1143,8 @@ frame, or (in development) treat it as fatal.
 `zig build bench` always builds in ReleaseFast and covers:
 - the §6.5 targets;
 - a deep tree (depth 64) and a wide tree (one parent with 4,000 children);
+- the zui-raylib demo's Documents view, declared by hand: about 100 small
+  elements, most with an id, a decoration and a label;
 - 1,000 texts with the cache cold (a new font size every frame);
 - the same cold text measured by a platform that costs about 1 µs per
   call, on one thread and in parallel (§10.5);
@@ -1152,18 +1154,20 @@ frame, or (in development) treat it as fatal.
 
 Each scenario runs in a new `Context` whose allocator counts every call
 after `init`; any allocation fails the run. It prints the fastest and
-median `endFrame`, the median whole frame, nanoseconds per element and
-platform calls per frame.
+median declaration (from the start of `beginFrame` to the start of
+`endFrame`), the fastest and median `endFrame`, the median whole frame,
+nanoseconds per element of `endFrame` and platform calls per frame.
 
 | Flag | Effect |
 |---|---|
 | `--check-targets` | fail if a §6.5 target is missed |
-| `--json <path>` | save each single-threaded scenario's fastest frame |
+| `--json <path>` | save each single-threaded scenario's fastest declaration and fastest `endFrame` |
 | `--compare <path>` | fail if any of them is more than 10% slower than in that file |
 
 **How CI uses it.** The benchmark job times the previous commit and the
-new one on the same runner, alternately, and fails if a scenario is more
-than 10% slower in each of three attempts. (The draft compared against a
+new one on the same runner, alternately, and fails if a scenario's
+declaration or `endFrame` is more than 10% slower in each of three
+attempts. (The draft compared against a
 stored baseline. A file of times from one machine says nothing about
 another, so the comparison is always against a fresh measurement.) The
 targets are reported in the job summary but not enforced. GitHub's
