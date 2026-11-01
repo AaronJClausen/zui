@@ -90,9 +90,8 @@ jobs:
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: ${{ env.ZIG_VERSION }}
-      # The §6.5 targets are for a 2020 desktop core, which shared runners
-      # are not, so CI compares against the commit before instead: the
-      # same runner times both, and a slowdown of more than 10% fails.
+      # Fails if a §6.5 target is missed, or if this commit is more than
+      # 10% slower than the one before, timed on the same runner.
       - name: Check out the commit to compare against
         id: base
         env:
@@ -113,14 +112,14 @@ jobs:
           COMPARE: ${{ steps.base.outputs.compare }}
         run: |
           if [ "$COMPARE" != "true" ]; then
-            zig build bench | tee bench.txt
+            zig build bench -- --check-targets | tee bench.txt
           else
             # A shared runner's speed drifts between runs, so a regression
             # must show up in each of three alternating measurements.
             passed=false
             for attempt in 1 2 3; do
               (cd ../base && zig build bench -- --json "$GITHUB_WORKSPACE/base.json" > /dev/null)
-              if zig build bench -- --compare base.json | tee bench.txt; then
+              if zig build bench -- --check-targets --compare base.json | tee bench.txt; then
                 passed=true
                 break
               fi
