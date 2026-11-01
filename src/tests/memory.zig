@@ -129,6 +129,33 @@ test "text past max_text_bytes is dropped and reported" {
     try testing.expectEqual(@as(usize, 1), frame.commands().len);
 }
 
+test "a frame reports only what it asked for, not what the frame before it did" {
+    var platform: support.TestPlatform = .{};
+    var ui = try tinyUi(&platform);
+    defer ui.deinit(testing.allocator);
+
+    ui.beginFrame(.{ .viewport = .{ 100, 100 } });
+    ui.text("123456789", .{});
+    ui.open(.{});
+    ui.open(.{});
+    ui.open(.{});
+    ui.close();
+    ui.close();
+    ui.close();
+    for (0..3) |_| ui.box(.{});
+    try testing.expectError(error.CapacityExceeded, ui.endFrame());
+    ui.release(ui.lastFrame());
+
+    ui.beginFrame(.{ .viewport = .{ 100, 100 } });
+    ui.box(.{});
+    const frame = try ui.endFrame();
+    defer ui.release(frame);
+    const needed = ui.diagnostics().needed;
+    try testing.expectEqual(@as(u32, 2), needed.get(.elements));
+    try testing.expectEqual(@as(u32, 1), needed.get(.depth));
+    try testing.expectEqual(@as(u32, 0), needed.get(.text_bytes));
+}
+
 test "commands past max_render_commands are dropped and reported" {
     var platform: support.TestPlatform = .{};
     var ui = try tinyUi(&platform);
