@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ZIG_VERSION: 0.16.0
+
+jobs:
+  lint:
+    name: Format and docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - run: zig build fmt-check
+      - run: zig build docs
+
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - run: zig build test -Doptimize=Debug
+      - run: zig build test -Doptimize=ReleaseSafe
+      - run: zig build test -Doptimize=ReleaseFast
+
+  cross-check:
+    name: Cross-compile (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - wasm32-freestanding
+          - x86-linux
+          - aarch64-linux
+          - aarch64-macos
+          - x86_64-windows
+          - powerpc-linux
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - run: zig build check -Dtarget=${{ matrix.target }}
