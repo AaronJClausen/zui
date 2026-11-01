@@ -3,7 +3,11 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore: &ci_irrelevant_paths
+      - "assets/**"
+      - "**.md"
   pull_request:
+    paths-ignore: *ci_irrelevant_paths
   workflow_dispatch:
 
 permissions:
