@@ -224,7 +224,8 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
             /// One past the last element of this element's subtree, which is
             /// also its next sibling, if it has one.
             subtree_end: [max_elements]Index,
-            /// Index into `floatings`, or `none_index`.
+            /// Index into `floatings`. Only written for floating elements;
+            /// for any other element it holds whatever an earlier frame left.
             floating_index: [max_elements]Index,
             /// The extent of an element's children plus padding, for scrolling.
             content_size: [max_elements][2]f32,
@@ -747,8 +748,6 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
                 frame.floating_index[index] = @intCast(frame.floating_count);
                 frame.floatings[frame.floating_count] = floating;
                 frame.floating_count += 1;
-            } else {
-                frame.floating_index[index] = none_index;
             }
 
             if (element.layout) |element_layout| {
