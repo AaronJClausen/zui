@@ -1,46 +1,92 @@
 const std = @import("std");
 const style = @import("style.zig");
+const interaction = @import("interaction.zig");
 
-/// Pass 7: render commands in paint order. A background and content are
-/// emitted when an element is entered, its border when it is left, so the
-/// border paints over the element's children.
+/// One level of the depth-first walk.
+pub fn EmitLevel(comptime Index: type) type {
+    return struct {
+        element: Index,
+        next_child: Index,
+        /// Clip in effect for this element's own commands and its children.
+        clip: style.Rect,
+        /// Clip in effect before this element's own clip, for its border.
+        outer_clip: style.Rect,
+        pushed_clip: bool,
+        z: i16,
+        region: u32,
+        focus_scope: u64,
+    };
+}
+
+/// Pass 7: render commands in paint order, plus the hit regions, the
+/// id → rect results and the focus order that the next frame's
+/// interaction queries read. A background and content are emitted when an
+/// element is entered, its border when it is left, so the border paints
+/// over the element's children. Elements entirely outside the clip are
+/// not drawn.
 pub fn run(comptime Ui: type, ui: *Ui, frame: *Ui.Frame) void {
     const scale: f32 = if (Ui.snaps_to_pixels) ui.platform.scale() else 1;
-    var emitter: Emitter(Ui) = .{ .frame = frame, .scale = scale };
+    const results = &ui.memory.results;
+    results.clear();
+    var emitter: Emitter(Ui) = .{ .frame = frame, .results = results, .scale = scale };
+
+    const viewport: style.Rect = .{ .width = frame.viewport[0], .height = frame.viewport[1] };
+    const levels = &ui.emit_levels;
+    levels[0] = .{
+        .element = Ui.root_index,
+        .next_child = frame.first_child[Ui.root_index],
+        .clip = viewport,
+        .outer_clip = viewport,
+        .pushed_clip = false,
+        .z = 0,
+        .region = interaction.no_region,
+        .focus_scope = 0,
+    };
+    results.insert(frame.element_id[Ui.root_index], emitter.rectOf(Ui.root_index), interaction.no_region);
 
     var depth: usize = 0;
-    ui.emit_stack[0] = Ui.root_index;
-    ui.emit_cursor[0] = frame.first_child[Ui.root_index];
     while (true) {
-        const next = ui.emit_cursor[depth];
+        const next = levels[depth].next_child;
         if (next == Ui.none_index) {
-            emitter.leave(ui.emit_stack[depth]);
+            emitter.leave(&levels[depth]);
             if (depth == 0) break;
             depth -= 1;
             continue;
         }
-        ui.emit_cursor[depth] = frame.next_sibling[next];
-        emitter.enter(next);
+        levels[depth].next_child = frame.next_sibling[next];
+        levels[depth + 1] = emitter.enter(next, levels[depth], viewport);
         depth += 1;
-        ui.emit_stack[depth] = next;
-        ui.emit_cursor[depth] = frame.first_child[next];
     }
+
+    if (frame.floating_count != 0) {
+        std.sort.block(Ui.RenderCommand, frame.render_commands[0..frame.command_count], {}, lowerLayer(Ui));
+    }
+}
+
+fn lowerLayer(comptime Ui: type) fn (void, Ui.RenderCommand, Ui.RenderCommand) bool {
+    return struct {
+        fn lessThan(_: void, a: Ui.RenderCommand, b: Ui.RenderCommand) bool {
+            return a.z < b.z;
+        }
+    }.lessThan;
 }
 
 fn Emitter(comptime Ui: type) type {
     return struct {
         const Self = @This();
+        const Level = EmitLevel(Ui.Index);
 
         frame: *Ui.Frame,
+        results: *Ui.Results,
         scale: f32,
 
         fn rectOf(self: *const Self, element: Ui.Index) style.Rect {
-            return self.snap(.{
+            return .{
                 .x = self.frame.position[element][0],
                 .y = self.frame.position[element][1],
                 .width = self.frame.size[element][0],
                 .height = self.frame.size[element][1],
-            });
+            };
         }
 
         fn snap(self: *const Self, rect: style.Rect) style.Rect {
@@ -64,40 +110,105 @@ fn Emitter(comptime Ui: type) type {
             frame.command_count += 1;
         }
 
-        fn enter(self: *Self, element: Ui.Index) void {
+        fn enter(self: *Self, element: Ui.Index, parent: Level, viewport: style.Rect) Level {
             const frame = self.frame;
             const element_id = frame.element_id[element];
+            const flags = frame.flags[element];
+            const floating = frame.isFloating(element);
             const bounds = self.rectOf(element);
+            const outer_clip = if (floating) viewport else parent.clip;
+            var level: Level = .{
+                .element = element,
+                .next_child = frame.first_child[element],
+                .clip = outer_clip,
+                .outer_clip = outer_clip,
+                .pushed_clip = false,
+                .z = if (floating) frame.floatingOf(element).z else parent.z,
+                .region = parent.region,
+                .focus_scope = if (flags.focus_scope) element_id else parent.focus_scope,
+            };
+            const visible = bounds.intersect(outer_clip);
+            const drawn = !visible.isEmpty();
 
-            if (frame.decoration_index[element] != Ui.none_index) {
+            if (drawn and frame.decoration_index[element] != Ui.none_index) {
                 const decoration = frame.decorations[frame.decoration_index[element]];
                 if (decoration.background) |color| {
-                    self.push(.{ .bounds = bounds, .id = element_id, .payload = .{ .rectangle = .{ .color = color, .corner_radius = decoration.corner_radius } } });
+                    self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = level.z, .payload = .{ .rectangle = .{ .color = color, .corner_radius = decoration.corner_radius } } });
                 }
             }
 
             switch (frame.kindOf(element)) {
                 .none => {},
-                .image => self.push(.{ .bounds = bounds, .id = element_id, .payload = .{ .image = frame.images[frame.content_index[element]] } }),
-                .custom => self.push(.{ .bounds = bounds, .id = element_id, .payload = .{ .custom = frame.customs[frame.content_index[element]] } }),
-                .text => self.emitText(element, element_id),
+                .image => if (drawn) self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = level.z, .payload = .{ .image = frame.images[frame.content_index[element]] } }),
+                .custom => if (drawn) self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = level.z, .payload = .{ .custom = frame.customs[frame.content_index[element]] } }),
+                .text => self.emitText(element, element_id, level),
             }
+
+            if (flags.interactive or flags.scroll_x or flags.scroll_y or flags.disabled or floating) {
+                level.region = self.addRegion(element, visible, level.z, parent.region);
+            }
+            if (flags.explicit_id) self.results.insert(element_id, bounds, if (level.region != parent.region) level.region else interaction.no_region);
+            if (flags.focusable and !flags.disabled) {
+                self.results.focusables[self.results.focusable_count] = .{ .hash = element_id, .scope = parent.focus_scope };
+                self.results.focusable_count += 1;
+            }
+
+            if (flags.clips()) {
+                const clip_box: style.Rect = .{
+                    .x = if (flags.clip_x) bounds.x else outer_clip.x,
+                    .y = if (flags.clip_y) bounds.y else outer_clip.y,
+                    .width = if (flags.clip_x) bounds.width else outer_clip.width,
+                    .height = if (flags.clip_y) bounds.height else outer_clip.height,
+                };
+                level.clip = outer_clip.intersect(clip_box);
+                level.pushed_clip = true;
+                self.push(.{ .bounds = self.snap(level.clip), .id = element_id, .z = level.z, .payload = .{ .clip_begin = self.snap(level.clip) } });
+            }
+            return level;
         }
 
-        fn emitText(self: *Self, element: Ui.Index, element_id: u64) void {
+        /// Floating roots get a region even when not interactive: being on a
+        /// higher layer, they win the hit test over whatever they cover.
+        fn addRegion(self: *Self, element: Ui.Index, visible: style.Rect, z: i16, parent_region: u32) u32 {
+            const frame = self.frame;
+            const flags = frame.flags[element];
+            const index = self.results.region_count;
+            self.results.regions[index] = .{
+                .hash = frame.element_id[element],
+                .bounds = visible,
+                .z = z,
+                .parent = parent_region,
+                .flags = .{
+                    .interactive = flags.interactive or flags.disabled,
+                    .focusable = flags.focusable,
+                    .disabled = flags.disabled,
+                    .scroll_x = flags.scroll_x,
+                    .scroll_y = flags.scroll_y,
+                },
+                .max_scroll = .{
+                    @max(0, frame.content_size[element][0] - frame.size[element][0]),
+                    @max(0, frame.content_size[element][1] - frame.size[element][1]),
+                },
+            };
+            self.results.region_count += 1;
+            return index;
+        }
+
+        fn emitText(self: *Self, element: Ui.Index, element_id: u64, level: Level) void {
             const frame = self.frame;
             const record = frame.texts[frame.content_index[element]];
             const line_height = record.metrics.line_height;
             const alignment = record.style.alignment.fraction();
             for (frame.lines[record.first_line..][0..record.line_count], 0..) |line, line_number| {
                 const free = frame.size[element][0] - line.width;
-                const line_bounds = self.snap(.{
+                const line_bounds: style.Rect = .{
                     .x = frame.position[element][0] + if (free > 0) free * alignment else 0,
                     .y = frame.position[element][1] + @as(f32, @floatFromInt(line_number)) * line_height,
                     .width = line.width,
                     .height = line_height,
-                });
-                self.push(.{ .bounds = line_bounds, .id = element_id, .payload = .{ .text = .{
+                };
+                if (line_bounds.intersect(level.clip).isEmpty()) continue;
+                self.push(.{ .bounds = self.snap(line_bounds), .id = element_id, .z = level.z, .payload = .{ .text = .{
                     .content = frame.text_bytes[line.start..line.end],
                     .style = record.style,
                     .line = @intCast(line_number),
@@ -105,12 +216,16 @@ fn Emitter(comptime Ui: type) type {
             }
         }
 
-        fn leave(self: *Self, element: Ui.Index) void {
+        fn leave(self: *Self, level: *const Level) void {
             const frame = self.frame;
+            const element = level.element;
+            if (level.pushed_clip) self.push(.{ .bounds = self.snap(level.clip), .id = frame.element_id[element], .z = level.z, .payload = .clip_end });
             if (frame.decoration_index[element] == Ui.none_index) return;
             const decoration = frame.decorations[frame.decoration_index[element]];
             const border = decoration.border orelse return;
-            self.push(.{ .bounds = self.rectOf(element), .id = frame.element_id[element], .payload = .{ .border = .{
+            const bounds = self.rectOf(element);
+            if (bounds.intersect(level.outer_clip).isEmpty()) return;
+            self.push(.{ .bounds = self.snap(bounds), .id = frame.element_id[element], .z = level.z, .payload = .{ .border = .{
                 .color = border.color,
                 .widths = border.widths,
                 .corner_radius = decoration.corner_radius,

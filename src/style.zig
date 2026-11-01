@@ -1,4 +1,5 @@
 const std = @import("std");
+const Id = @import("id.zig").Id;
 
 pub const Axis = enum(u1) {
     x,
@@ -94,6 +95,24 @@ pub const Rect = struct {
     y: f32 = 0,
     width: f32 = 0,
     height: f32 = 0,
+
+    pub fn contains(self: Rect, point: [2]f32) bool {
+        return point[0] >= self.x and point[0] < self.x + self.width and
+            point[1] >= self.y and point[1] < self.y + self.height;
+    }
+
+    /// The overlap of two rectangles; empty (zero-sized) when they do not meet.
+    pub fn intersect(self: Rect, other: Rect) Rect {
+        const left = @max(self.x, other.x);
+        const top = @max(self.y, other.y);
+        const right = @min(self.x + self.width, other.x + other.width);
+        const bottom = @min(self.y + self.height, other.y + other.height);
+        return .{ .x = left, .y = top, .width = @max(0, right - left), .height = @max(0, bottom - top) };
+    }
+
+    pub fn isEmpty(self: Rect) bool {
+        return self.width <= 0 or self.height <= 0;
+    }
 };
 
 pub const Border = struct {
@@ -190,6 +209,63 @@ pub const Layout = struct {
     child_alignment: ChildAlignment = .{},
 };
 
+/// Which axes of an element clip its descendants.
+pub const Clip = struct {
+    horizontal: bool = true,
+    vertical: bool = true,
+
+    pub const both: Clip = .{};
+};
+
+/// Which axes of an element scroll. Scrolling also clips those axes, and
+/// needs an explicit id, because the offset lives in the state table.
+pub const Scroll = struct {
+    horizontal: bool = false,
+    vertical: bool = true,
+
+    pub const both: Scroll = .{ .horizontal = true, .vertical = true };
+};
+
+pub const AnchorPoint = enum(u4) {
+    top_left,
+    top_center,
+    top_right,
+    center_left,
+    center,
+    center_right,
+    bottom_left,
+    bottom_center,
+    bottom_right,
+
+    /// The point's position within a box, as fractions of its width and height.
+    pub fn fractions(self: AnchorPoint) [2]f32 {
+        const index = @intFromEnum(self);
+        return .{ @as(f32, @floatFromInt(index % 3)) / 2, @as(f32, @floatFromInt(index / 3)) / 2 };
+    }
+};
+
+pub const AttachTo = union(enum) {
+    /// The element's parent in the tree.
+    parent,
+    /// The viewport.
+    root,
+    /// Another element, which must be declared earlier in the frame.
+    element: Id,
+};
+
+/// An element positioned relative to another box instead of its parent's
+/// flow. It takes no space in its parent, paints in layer `z`, escapes its
+/// ancestors' clipping, and receives the pointer before lower layers.
+pub const Floating = struct {
+    attach_to: AttachTo = .parent,
+    /// The point of the floating element that is placed...
+    anchor: AnchorPoint = .top_left,
+    /// ...on this point of the box it attaches to.
+    attach_point: AnchorPoint = .top_left,
+    offset: [2]f32 = .{ 0, 0 },
+    z: i16 = 1,
+};
+
 pub const TextWrap = enum(u2) {
     /// Break between words to fit the element's width, and at newlines.
     words,
@@ -215,6 +291,21 @@ test "Color helpers" {
     try std.testing.expectEqual(Color{ .r = 0x33, .g = 0x66, .b = 0xff }, Color.rgb(0x3366ff));
     try std.testing.expectEqual(Color{ .r = 0x33, .g = 0x66, .b = 0xff, .a = 0x80 }, Color.rgba(0x3366ff80));
     try std.testing.expectEqual(Color{ .r = 128, .g = 128, .b = 128 }, Color.black.mix(.white, 0.5));
+}
+
+test "Rect intersection and containment" {
+    const rect: Rect = .{ .x = 0, .y = 0, .width = 10, .height = 10 };
+    try std.testing.expectEqual(Rect{ .x = 5, .y = 5, .width = 5, .height = 5 }, rect.intersect(.{ .x = 5, .y = 5, .width = 20, .height = 20 }));
+    try std.testing.expect(rect.intersect(.{ .x = 20, .y = 0, .width = 5, .height = 5 }).isEmpty());
+    try std.testing.expect(rect.contains(.{ 0, 9.5 }));
+    try std.testing.expect(!rect.contains(.{ 10, 5 }));
+}
+
+test "anchor points" {
+    try std.testing.expectEqual([2]f32{ 0, 0 }, AnchorPoint.top_left.fractions());
+    try std.testing.expectEqual([2]f32{ 0.5, 0.5 }, AnchorPoint.center.fractions());
+    try std.testing.expectEqual([2]f32{ 1, 1 }, AnchorPoint.bottom_right.fractions());
+    try std.testing.expectEqual([2]f32{ 0.5, 1 }, AnchorPoint.bottom_center.fractions());
 }
 
 test "Sizing decl literals" {

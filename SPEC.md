@@ -199,8 +199,10 @@ bytes of geometry.
 The arrays are *reserved* for the worst case, though. Every config kind
 gets `max_elements` slots, and commands and lines get
 `max_render_commands`, so the reservation is much larger than the core.
-Measured for the default `Config` in 0.1: **1.6 MiB per frame in flight,
-and 3.35 MiB of `required_bytes`** with two frames and the text cache. A
+Measured for the default `Config` in 0.2: **1.79 MiB per frame in flight,
+and 4.29 MiB of `required_bytes`**. That covers two frames, the text
+cache, the state table (96 KiB) and the previous frame's interaction
+results (480 KiB, §7.4). A
 frame only *touches* the slots it uses, so the cost per frame still scales
 with the elements declared. Applications with smaller UIs should lower the
 limits, and `required_bytes` reports the result exactly.
@@ -248,20 +250,27 @@ has to wait for layout.
 
 ```zig
 pub const Input = struct {
+    viewport: [2]f32,
+    dt_seconds: f32 = 0,
     pointer: ?[2]f32 = null,          // null when the pointer is outside the surface
     buttons: std.EnumSet(Button) = .initEmpty(),
-    wheel: [2]f32 = .{ 0, 0 },
+    wheel: [2]f32 = .{ 0, 0 },        // layout units; positive scrolls toward the end
     keys_pressed: []const Key = &.{}, // this frame's key-down events, in order
+    modifiers: Modifiers = .{},       // held: shift, control, alt, super
     text_input: []const u8 = "",      // UTF-8 typed this frame
-    viewport: [2]f32,
-    dt_seconds: f32,
 };
 ```
 
-`Key` is a small enum of navigation and editing keys (tab, arrows, enter,
-escape, backspace, delete, home, end, and the modifiers). Mapping
-platform key codes onto it is the backend's job. The slices only need to
-live until `beginFrame` returns, because zui copies what it keeps.
+`Key` is a small enum of navigation and editing keys: tab, enter, escape,
+space, backspace, delete, the arrows, home, end, page up and page down.
+Modifiers are a separate field because they are *held state* rather than
+events: shift-tab needs to know that shift is down while tab is pressed.
+Mapping platform key codes onto both is the backend's job.
+
+The slices only need to live until `beginFrame` returns, because zui
+copies what it keeps: at most `zui.max_keys_per_frame` (32) key events
+and `zui.max_text_input_bytes` (128) bytes of text per frame. The rest of
+a frame's events are dropped.
 
 ---
 
@@ -332,20 +341,63 @@ only per-character work, and it runs once per text element.
 
 ### 6.3 Clipping and scrolling
 
-An element with `.clip = .{ .horizontal = true, .vertical = true }` clips
-its descendants. Adding `.scroll = .{ ... }` makes its content offset
-come from a state slot (§9), and the slot also records the content size
-from the last layout. Wheel input goes to the deepest scroll container
-under the pointer that can still scroll in the wheel's direction. If it
-cannot, the input passes to the next container outward, as in browsers.
+An element with `.clip = .both` (or `.{ .horizontal = true, .vertical = false }`)
+clips its descendants. zui emits a `clip_begin` whose rectangle is
+already intersected with every enclosing clip, so a renderer only needs
+a scissor stack: push on `clip_begin`, pop on `clip_end`. Elements and
+lines of text entirely outside the active clip are not drawn at all, which
+keeps long scrolled lists cheap to render.
+
+`.scroll = .{}` (vertical by default; `.both`, or `.horizontal = true`)
+makes an element scroll on those axes, and clips them. The rules:
+- **It needs an id,** because the offset is kept in the state table (§9)
+  as a `zui.ScrollState` under that id. A scroll container without an id
+  panics in safe builds and only clips in release builds.
+- **Its children are not shrunk along a scrolled axis.** They keep their
+  size and overflow, which is what makes the content scrollable. For
+  example, a long line of text in a horizontally scrolling strip stays on
+  one line.
+- **The offset is clamped** to `[0, content − size]` at layout time, once
+  the content has been measured, and the clamped value is written back.
+  `ui.scrollOffset(id)` reads it, and `ui.setScrollOffset(id, offset)`
+  sets it; the new offset takes effect at the next layout.
+
+Wheel input goes to the deepest scroll container under the pointer that
+can still move in the wheel's direction. If it cannot, the input passes
+to the next container outward, as in browsers.
 
 ### 6.4 Floating elements
 
-Tooltips, dropdowns and modals are declared in place, with
-`.floating = .{ .attach_to = .parent | .root | .{ .element = id }, .anchor = ..., .offset = ..., .z = 1 }`.
-They take no space in their parent's layout. They are positioned in pass 6
-and emitted in their own z-layer in pass 7. Floating elements receive the
-pointer before anything in a lower z-layer.
+Tooltips, dropdowns and modals are declared in place:
+
+```zig
+.floating = .{
+    .attach_to = .parent,          // or .root (the viewport), or .{ .element = id }
+    .anchor = .top_center,         // this point of the floating element...
+    .attach_point = .bottom_center, // ...goes on this point of the target
+    .offset = .{ 0, 4 },
+    .z = 1,
+},
+```
+
+The anchor and attach points are one of nine positions, `.top_left`
+through `.bottom_right`. Floating elements follow these rules:
+- **They take no space** in their parent's flow, and are positioned after
+  it in pass 6, relative to their target.
+- **`grow` and `percent`** resolve against the viewport for `.root`, and
+  against the parent otherwise. An `.element` target may not be sized yet
+  when the parent is visited.
+- **An `.element` target must be declared earlier** in the frame. A later
+  or missing target falls back to the parent.
+- **They paint in their own layer** `z`. Commands are sorted stably by
+  `z`, so a floating element paints over everything in lower layers, in
+  declaration order within its layer. They escape their ancestors'
+  clipping, so a tooltip inside a scroll list stays visible.
+- **They win the hit test** over lower layers. A floating element always
+  gets a hit region, even when it is not interactive, so it covers what is
+  beneath it. Its own tree ancestors still count as hovered when they
+  contain the pointer, as in CSS, so a menu stays hovered while the
+  pointer is over its dropdown.
 
 ### 6.5 Performance targets
 
@@ -377,10 +429,16 @@ pub fn custom(self: *Self, data: config.CustomData, element: ElementConfig) void
 `text`, `image`, `custom` and `box` are leaves: they take no children and
 need no `close`.
 
-`ElementConfig` has an optional field for each config kind (`layout`,
-`background`, `corner_radius`, `border`, `clip`, `scroll`, `floating`,
+`ElementConfig` has a field for each config kind (`layout`, `background`,
+`corner_radius`, `border`, `clip`, `scroll`, `floating`, and later
 `semantics`), each with a default. Only the kinds that are set get
-stored. `text` copies its content into the frame arena, so the caller's
+stored. Four flags control interaction (§7.4):
+- `interactive` makes the element hit-tested, so it can be hovered,
+  pressed and clicked;
+- `focusable` makes it reachable with tab, and implies `interactive`;
+- `focus_scope` keeps tab inside the element's descendants;
+- `disabled` keeps the element hit-tested, so it still covers what is
+  beneath it, but it is never pressed, clicked or focused. `text` copies its content into the frame arena, so the caller's
 buffer may be reused immediately.
 
 Nesting follows the code, with `defer`:
@@ -465,10 +523,33 @@ pub fn hovered(self: *const Self, id: Id) bool
 pub fn pressed(self: *const Self, id: Id) bool           // button held, press began on id
 pub fn clicked(self: *const Self, id: Id) bool           // released on the same id it was pressed on
 pub fn focused(self: *const Self, id: Id) bool
-pub fn requestFocus(self: *Self, id: Id) void
+pub fn requestFocus(self: *Self, id: Id) void            // takes effect at the next beginFrame
+pub fn widgetState(self: *const Self, id: Id) WidgetState
 pub fn pointerLocal(self: *const Self, id: Id) ?[2]f32   // pointer relative to the element's last rect
 pub fn rectOf(self: *const Self, id: Id) ?Rect           // last frame's layout result
+pub fn pointer(self: *const Self) ?[2]f32
+pub fn keyPressed(self: *const Self, key: Key) bool
+pub fn modifiers(self: *const Self) Modifiers
+pub fn typedText(self: *const Self) []const u8
 ```
+
+The exact meanings:
+- **Hover.** The *hot* element is the topmost interactive element under
+  the pointer: highest layer first, then the last painted. `hovered` is
+  true for it and for each interactive ancestor that also contains the
+  pointer, as with CSS `:hover`.
+- **Press and click.** Both go to the hot element only. A click needs the
+  press and the release on the same element, and lasts one frame.
+- **Keyboard activation.** Enter or Space on the focused element also
+  counts as `clicked`, so every clickable element works from the keyboard.
+- **Focus.** Pressing on a focusable element focuses it; pressing anywhere
+  else clears focus. Focus is also cleared when its element is no longer
+  declared.
+- **Where the answers come from.** Every query reads a compact copy of
+  the previous frame's results: element rectangles by id, hit regions,
+  and the tab order. The copy lives in the `Context` rather than in a
+  frame, because with `frames_in_flight = 1` the previous frame's memory
+  is reused before the queries run.
 
 Because the queries run before the element is declared, styles can
 depend on interaction:
@@ -488,8 +569,9 @@ fn toolButton(ui: *Ui, id: zui.Id, label: []const u8, app: *App) void {
 ```
 
 `widgetState(id)` returns `.idle`, `.hovered`, `.pressed`, `.focused` or
-`.disabled`. Themes index it with an `std.EnumArray`, so adding a state
-is a compile error in every theme until the theme handles it.
+`.disabled`, checked in the order disabled, pressed, hovered, focused.
+Themes index it with an `std.EnumArray`, so adding a state is a compile
+error in every theme until the theme handles it.
 
 **Focus** moves with tab and shift-tab, in declaration order, among
 elements marked `.focusable = true`. Elements in a `.focus_scope`, such as
@@ -609,19 +691,23 @@ pub fn state(self: *Self, id: Id, comptime T: type) *T     // created zeroed on 
 pub fn stateIfPresent(self: *Self, id: Id, comptime T: type) ?*T
 ```
 
-- **The table** is open-addressed, with `state_slots` entries, keyed by
-  `(id, @typeName(T) hash)`. The same id can therefore hold, for example,
-  both a `ScrollState` and an application `Expanded` flag.
+- **The table** is open-addressed with linear probing, with `state_slots`
+  entries, keyed by `(id, @typeName(T) hash)`. The same id can therefore
+  hold, for example, both a `ScrollState` and an application `Expanded`
+  flag. Because the type is part of the key, asking for a different type
+  under the same id gives a different slot, never the wrong one.
 - **Payloads are limited** at comptime to `@sizeOf(T) <= 64` and
   `@alignOf(T) <= 16`. That keeps slots fixed-size, and the error tells
   you to store an index to your own storage instead.
 - **Eviction.** Each slot records the frame it was last touched. Slots not
   touched for `state_ttl_frames` (default 2) are freed at the start of the
   next frame. An element that disappears loses its state, which is the
-  immediate-mode equivalent of unmounting.
+  immediate-mode equivalent of unmounting. Freed slots use backward-shift
+  deletion, so the table never accumulates tombstones.
 - **Full table.** It does not corrupt anything: `state` returns a pointer
-  to a per-frame scratch value, and §13.2 reports
-  `error.StateTableFull` from `endFrame`.
+  to zeroed scratch memory, and `endFrame` reports
+  `error.CapacityExceeded` with the `.state_slots` limit in its
+  diagnostics (§13.2).
 
 ---
 
@@ -829,7 +915,7 @@ reported once per frame, with full context.
 | unbalanced `open`/`close` | depth counter at `endFrame` | panic naming the unclosed element's id, and its name when debug is on | the elements are closed implicitly, and `endFrame` reports `error.UnbalancedTree` |
 | duplicate id within a frame | insertion into the frame's id → element table | panic naming both declarations | the second element becomes non-interactive |
 | `close` without `open` | the depth counter would go below zero | panic | ignored |
-| state type mismatch on a slot key | the type-name hash is stored with the slot | panic | a fresh slot is used |
+| scroll container without an id | checked at `open` | panic | the element clips but does not scroll |
 
 With `-Dzui-debug`, `Id.of` keeps its name in a comptime table that is
 linked only in debug builds, so messages read

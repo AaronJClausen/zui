@@ -30,7 +30,14 @@ pub const Harness = struct {
     }
 
     pub fn begin(self: *Harness) *Ui {
-        self.ui.beginFrame(.{ .viewport = .{ 800, 600 } });
+        return self.beginWith(.{});
+    }
+
+    /// Begins a frame with input; the viewport is always 800×600.
+    pub fn beginWith(self: *Harness, input: InputWithoutViewport) *Ui {
+        var full: zui.Input = .{ .viewport = .{ 800, 600 } };
+        inline for (@typeInfo(InputWithoutViewport).@"struct".fields) |field| @field(full, field.name) = @field(input, field.name);
+        self.ui.beginFrame(full);
         return &self.ui;
     }
 
@@ -43,6 +50,19 @@ pub const Harness = struct {
         return frame;
     }
 };
+
+pub const InputWithoutViewport = struct {
+    pointer: ?[2]f32 = null,
+    buttons: std.EnumSet(zui.Button) = .initEmpty(),
+    wheel: [2]f32 = .{ 0, 0 },
+    keys_pressed: []const zui.Key = &.{},
+    modifiers: zui.Modifiers = .{},
+    text_input: []const u8 = "",
+};
+
+pub fn primaryDown() std.EnumSet(zui.Button) {
+    return .initOne(.primary);
+}
 
 pub fn expectRect(frame: *const Ui.Frame, id: zui.Id, x: f32, y: f32, width: f32, height: f32) !void {
     const rect = frame.rectOf(id) orelse return error.ElementNotFound;
@@ -60,7 +80,8 @@ pub fn snapshot(frame: *const Ui.Frame, buffer: []u8) ![]const u8 {
             .text => |text| try writer.print("text {d} {d} {d} {d} \"{s}\"\n", .{ bounds.x, bounds.y, bounds.width, bounds.height, text.content }),
             .image => |handle| try writer.print("image {d} {d} {d} {d} {d}\n", .{ bounds.x, bounds.y, bounds.width, bounds.height, handle }),
             .custom => try writer.print("custom {d} {d} {d} {d}\n", .{ bounds.x, bounds.y, bounds.width, bounds.height }),
-            .clip_begin, .clip_end => try writer.print("{t}\n", .{command.payload}),
+            .clip_begin => |clip| try writer.print("clip {d} {d} {d} {d}\n", .{ clip.x, clip.y, clip.width, clip.height }),
+            .clip_end => try writer.writeAll("clip_end\n"),
         }
     }
     return writer.buffered();

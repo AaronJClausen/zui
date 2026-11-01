@@ -13,6 +13,7 @@ const words = [_][]const u8{ "a", "zui", "layout", "immediate", "mode", "x", "fr
 const Generator = struct {
     random: std.Random,
     remaining: u32,
+    next_scroll_id: u32 = 0,
     text_buffer: [64]u8 = undefined,
 
     fn sizing(self: *Generator) zui.Sizing {
@@ -38,6 +39,31 @@ const Generator = struct {
         };
     }
 
+    /// Containers sometimes clip, scroll, float, or take part in interaction.
+    fn container(self: *Generator) zui.ElementConfig {
+        var element: zui.ElementConfig = .{
+            .layout = self.layout(),
+            .background = if (self.random.boolean()) .rgb(0x202020) else null,
+            .interactive = self.random.uintLessThan(u8, 4) == 0,
+        };
+        switch (self.random.uintLessThan(u8, 10)) {
+            0 => element.clip = .{ .horizontal = self.random.boolean(), .vertical = self.random.boolean() },
+            1 => {
+                element.id = .indexed("scroll", self.next_scroll_id);
+                self.next_scroll_id += 1;
+                element.scroll = .{ .horizontal = self.random.boolean(), .vertical = self.random.boolean() };
+            },
+            2 => element.floating = .{
+                .attach_to = if (self.random.boolean()) .parent else .root,
+                .anchor = self.random.enumValue(zui.AnchorPoint),
+                .attach_point = self.random.enumValue(zui.AnchorPoint),
+                .z = self.random.intRangeAtMost(i16, 1, 3),
+            },
+            else => {},
+        }
+        return element;
+    }
+
     fn sentence(self: *Generator) []const u8 {
         var writer: std.Io.Writer = .fixed(&self.text_buffer);
         const word_count = self.random.uintLessThan(u8, 6);
@@ -57,7 +83,7 @@ const Generator = struct {
                 0 => ui.text(self.sentence(), .{ .wrap = self.random.enumValue(zui.TextWrap) }),
                 1 => ui.box(.{ .layout = self.layout(), .background = .rgb(0x404040) }),
                 else => if (depth + 1 < Ui.max_depth) {
-                    ui.open(.{ .layout = self.layout(), .background = if (self.random.boolean()) .rgb(0x202020) else null });
+                    ui.open(self.container());
                     self.children(ui, depth + 1);
                     ui.close();
                 },
@@ -76,7 +102,36 @@ fn checkInvariants(frame: *const Frame) !void {
         }
         if (frame.child_count[element] != 0) try checkParent(frame, element);
     }
-    for (frame.commands()) |command| try std.testing.expectEqual(@as(i16, 0), command.z);
+    try checkCommands(frame);
+}
+
+/// Layers paint in nondecreasing z, and clip pairs balance within each layer.
+fn checkCommands(frame: *const Frame) !void {
+    var previous_z: i16 = std.math.minInt(i16);
+    var clip_depth: i32 = 0;
+    for (frame.commands()) |command| {
+        if (command.z != previous_z) {
+            try std.testing.expectEqual(@as(i32, 0), clip_depth);
+            try std.testing.expect(command.z > previous_z);
+            previous_z = command.z;
+        }
+        switch (command.payload) {
+            .clip_begin => clip_depth += 1,
+            .clip_end => clip_depth -= 1,
+            else => {},
+        }
+        try std.testing.expect(clip_depth >= 0);
+    }
+    try std.testing.expectEqual(@as(i32, 0), clip_depth);
+}
+
+fn flowCount(frame: *const Frame, parent: Ui.Index) u32 {
+    var count: u32 = 0;
+    var child = frame.first_child[parent];
+    while (child != Ui.none_index) : (child = frame.next_sibling[child]) {
+        if (!frame.isFloating(child)) count += 1;
+    }
+    return count;
 }
 
 fn checkParent(frame: *const Frame, parent: Ui.Index) !void {
@@ -88,15 +143,23 @@ fn checkParent(frame: *const Frame, parent: Ui.Index) !void {
     const content_across = @max(0, frame.size[parent][b] - parent_layout.padding.total(along.other()));
     const content_start = [2]f32{ frame.position[parent][0] + parent_layout.padding.left, frame.position[parent][1] + parent_layout.padding.top };
 
-    var used = parent_layout.child_gap * @as(f32, @floatFromInt(frame.child_count[parent] - 1));
+    const flow_count = flowCount(frame, parent);
+    if (flow_count == 0) return;
+    const scrolls_along = frame.flags[parent].scrolls(along);
+
+    var used = parent_layout.child_gap * @as(f32, @floatFromInt(flow_count - 1));
     var child = frame.first_child[parent];
-    while (child != Ui.none_index) : (child = frame.next_sibling[child]) used += frame.size[child][a];
+    while (child != Ui.none_index) : (child = frame.next_sibling[child]) {
+        if (!frame.isFloating(child)) used += frame.size[child][a];
+    }
 
     child = frame.first_child[parent];
     while (child != Ui.none_index) : (child = frame.next_sibling[child]) {
+        if (frame.isFloating(child)) continue;
         const sizing = frame.sizingOf(child, along);
-        // Overflow is only allowed once every shrinkable child is at its minimum.
-        if (used > content_along + tolerance and sizing.rule != .fixed) {
+        // Overflow is only allowed once every shrinkable child is at its
+        // minimum, or along an axis that scrolls.
+        if (used > content_along + tolerance and sizing.rule != .fixed and !scrolls_along) {
             try std.testing.expect(frame.size[child][a] <= frame.min_size[child][a] + tolerance);
         }
         // Free space is only left over once every growable child is at its max.
@@ -108,7 +171,8 @@ fn checkParent(frame: *const Frame, parent: Ui.Index) !void {
             const expected = @max(frame.min_size[child][b], std.math.clamp(content_across, across_sizing.min, across_sizing.max));
             try std.testing.expectApproxEqAbs(expected, frame.size[child][b], tolerance);
         }
-        // Children start inside the parent's content box.
+        // Children start inside the parent's content box. These frames never
+        // scroll, so every offset is zero.
         try std.testing.expect(frame.position[child][0] >= content_start[0] - tolerance);
         try std.testing.expect(frame.position[child][1] >= content_start[1] - tolerance);
     }

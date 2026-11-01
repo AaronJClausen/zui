@@ -11,6 +11,7 @@ const compile_error_cases = [_]struct { name: []const u8, expected_error: []cons
     .{ .name = "platform_misspelled_hook", .expected_error = "platform_misspelled_hook.Platform declares `zuiWake`, which zui does not read; the optional hooks are `wake` and `scale`" },
     .{ .name = "ids_repeated_name", .expected_error = "zui.ids: \"save\" appears more than once" },
     .{ .name = "custom_without_custom_data", .expected_error = "zui: custom() needs Config.CustomData set to your payload type" },
+    .{ .name = "state_type_too_large", .expected_error = "zui: state type state_type_too_large.History is 80 bytes, but a state slot holds at most 64; store an index into your own storage instead" },
 };
 
 pub fn build(b: *std.Build) void {

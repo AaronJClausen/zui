@@ -7,10 +7,16 @@ returns a flat list of render commands for the application's own renderer
 to draw.
 
 **Status:** pre-alpha. The design is specified in [SPEC.md](SPEC.md).
-Version 0.1 is implemented: the `Context` and its memory, element
-declaration, the layout passes, text wrapping with a measurement cache,
-and render commands. Interaction, scrolling and floating elements (0.2)
-and async tasks (0.3) are next; see the roadmap in SPEC.md §16.
+Implemented so far:
+- **0.1:** the `Context` and its memory, element declaration, the layout
+  passes, text wrapping with a measurement cache, and render commands.
+- **0.2:** input; hover, press, click and focus (including tab order and
+  focus scopes); clipping with culling; scroll containers driven by the
+  wheel; floating elements in their own paint layers; and per-element
+  state that persists across frames.
+
+Still missing from 0.2 is its reference raylib backend. Async tasks (0.3)
+come next; see the roadmap in SPEC.md §16.
 
 ```zig
 const Ui = zui.Context(.{}, MyPlatform);

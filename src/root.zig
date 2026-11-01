@@ -4,6 +4,7 @@ const std = @import("std");
 const context = @import("context.zig");
 const style = @import("style.zig");
 const id = @import("id.zig");
+const interaction = @import("interaction.zig");
 
 pub const Context = context.Context;
 pub const Config = context.Config;
@@ -29,11 +30,27 @@ pub const Alignment = style.Alignment;
 pub const ChildAlignment = style.ChildAlignment;
 pub const Layout = style.Layout;
 pub const TextWrap = style.TextWrap;
+pub const Clip = style.Clip;
+pub const Scroll = style.Scroll;
+pub const Floating = style.Floating;
+pub const AttachTo = style.AttachTo;
+pub const AnchorPoint = style.AnchorPoint;
+
+pub const Button = interaction.Button;
+pub const Key = interaction.Key;
+pub const Modifiers = interaction.Modifiers;
+pub const WidgetState = interaction.WidgetState;
+pub const ScrollState = interaction.ScrollState;
+pub const max_keys_per_frame = interaction.max_keys_per_frame;
+pub const max_text_input_bytes = interaction.max_text_input_bytes;
 
 test {
     std.testing.refAllDecls(@This());
     _ = @import("text.zig");
+    _ = @import("state.zig");
     _ = @import("tests/golden.zig");
     _ = @import("tests/invariants.zig");
     _ = @import("tests/memory.zig");
+    _ = @import("tests/interaction.zig");
+    _ = @import("tests/layers.zig");
 }

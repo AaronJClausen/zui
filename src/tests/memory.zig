@@ -135,7 +135,7 @@ test "commands past max_render_commands are dropped and reported" {
     defer ui.deinit(testing.allocator);
 
     ui.beginFrame(.{ .viewport = .{ 100, 100 } });
-    for (0..3) |_| ui.box(.{ .background = .white, .border = .{ .color = .black, .widths = .all(1) } });
+    for (0..3) |_| ui.box(.{ .background = .white, .border = .{ .color = .black, .widths = .all(1) }, .layout = .{ .sizing = .{ .width = .fixed(10), .height = .fixed(10) } } });
     try testing.expectError(error.CapacityExceeded, ui.endFrame());
     const frame = ui.lastFrame();
     defer ui.release(frame);

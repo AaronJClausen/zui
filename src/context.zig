@@ -6,6 +6,8 @@ const text_layout = @import("text.zig");
 const command_types = @import("commands.zig");
 const layout = @import("layout.zig");
 const emission = @import("emission.zig");
+const interaction = @import("interaction.zig");
+const state_table = @import("state.zig");
 
 const Id = id_module.Id;
 
@@ -18,9 +20,9 @@ pub const Config = struct {
     max_depth: u16 = 64,
     /// Render commands one frame may emit. Each wrapped line of text is one.
     max_render_commands: u32 = 8192,
-    /// Persistent per-id state slots (0.2). Must be a power of two.
+    /// Persistent per-id state slots. Must be a power of two.
     state_slots: u32 = 1024,
-    /// Frames a state slot survives without being touched (0.2).
+    /// Frames a state slot survives without being touched.
     state_ttl_frames: u8 = 2,
     /// Text measurement cache entries. Must be a power of two.
     measure_cache_entries: u32 = 4096,
@@ -41,11 +43,34 @@ pub const ElementConfig = struct {
     background: ?style.Color = null,
     corner_radius: style.CornerRadius = .zero,
     border: ?style.Border = null,
+    /// Hit-tested: can be hovered, pressed and clicked.
+    interactive: bool = false,
+    /// Reachable with tab; implies `interactive`.
+    focusable: bool = false,
+    /// Tab cycles only among the focusables inside this element, e.g. a modal.
+    focus_scope: bool = false,
+    /// Still hit-tested, so it blocks what is beneath it, but never pressed,
+    /// clicked or focused, and its widget state is `.disabled`.
+    disabled: bool = false,
+    clip: ?style.Clip = null,
+    scroll: ?style.Scroll = null,
+    floating: ?style.Floating = null,
 };
 
 pub const Input = struct {
     viewport: [2]f32,
     dt_seconds: f32 = 0,
+    /// Null when the pointer is outside the surface.
+    pointer: ?[2]f32 = null,
+    buttons: std.EnumSet(interaction.Button) = .initEmpty(),
+    /// In layout units; positive scrolls toward the end of the content.
+    wheel: [2]f32 = .{ 0, 0 },
+    /// This frame's key presses, in order. Copied; only needs to live
+    /// until `beginFrame` returns.
+    keys_pressed: []const interaction.Key = &.{},
+    modifiers: interaction.Modifiers = .{},
+    /// UTF-8 typed this frame. Copied, like `keys_pressed`.
+    text_input: []const u8 = "",
 };
 
 pub const Limit = enum {
@@ -53,6 +78,7 @@ pub const Limit = enum {
     text_bytes,
     depth,
     render_commands,
+    state_slots,
 
     /// The `Config` field that raises this limit.
     pub fn configField(self: Limit) []const u8 {
@@ -61,6 +87,7 @@ pub const Limit = enum {
             .text_bytes => "max_text_bytes",
             .depth => "max_depth",
             .render_commands => "max_render_commands",
+            .state_slots => "state_slots",
         };
     }
 };
@@ -82,6 +109,27 @@ pub const Diagnostics = struct {
 pub const EndFrameError = error{ CapacityExceeded, UnbalancedTree };
 
 const ContentKind = enum(u2) { none, text, image, custom };
+
+pub const ElementFlags = packed struct(u16) {
+    explicit_id: bool = false,
+    interactive: bool = false,
+    focusable: bool = false,
+    focus_scope: bool = false,
+    disabled: bool = false,
+    clip_x: bool = false,
+    clip_y: bool = false,
+    scroll_x: bool = false,
+    scroll_y: bool = false,
+    _: u7 = 0,
+
+    pub fn clips(self: ElementFlags) bool {
+        return self.clip_x or self.clip_y;
+    }
+
+    pub fn scrolls(self: ElementFlags, axis: style.Axis) bool {
+        return if (axis == .x) self.scroll_x else self.scroll_y;
+    }
+};
 
 fn nextPowerOfTwo(value: u32) u32 {
     return std.math.ceilPowerOfTwoAssert(u32, @max(value, 2));
@@ -106,6 +154,9 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
         pub const snaps_to_pixels = @hasDecl(Platform, "scale");
 
         pub const Cache = text_layout.MeasureCache(config.FontId, config.measure_cache_entries, Platform);
+        pub const States = state_table.StateTable(config.state_slots);
+        pub const Results = interaction.Results(config.max_elements, id_table_slots);
+        const InteractionState = interaction.State(config.max_depth + 1);
 
         pub const Decoration = struct {
             background: ?style.Color,
@@ -140,6 +191,15 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
             size: [max_elements][2]f32,
             min_size: [max_elements][2]f32,
             position: [max_elements][2]f32,
+            flags: [max_elements]ElementFlags,
+            /// One past the last element of this element's subtree.
+            subtree_end: [max_elements]Index,
+            /// Index into `floatings`, or `none_index`.
+            floating_index: [max_elements]Index,
+            /// The nearest floating ancestor-or-self, or `none_index`.
+            floating_root: [max_elements]Index,
+            /// The extent of an element's children plus padding, for scrolling.
+            content_size: [max_elements][2]f32,
 
             layouts: [max_elements]style.Layout,
             layout_count: u32,
@@ -151,6 +211,8 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
             image_count: u32,
             customs: [max_elements]config.CustomData,
             custom_count: u32,
+            floatings: [max_elements]style.Floating,
+            floating_count: u32,
 
             text_bytes: [config.max_text_bytes]u8,
             text_bytes_used: u32,
@@ -202,6 +264,14 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
                 return self.content_kind[index];
             }
 
+            pub fn isFloating(self: *const Frame, index: Index) bool {
+                return self.floating_index[index] != none_index;
+            }
+
+            pub fn floatingOf(self: *const Frame, index: Index) style.Floating {
+                return self.floatings[self.floating_index[index]];
+            }
+
             fn reset(self: *Frame, viewport: [2]f32) void {
                 self.element_count = 0;
                 self.layout_count = 0;
@@ -209,6 +279,7 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
                 self.text_count = 0;
                 self.image_count = 0;
                 self.custom_count = 0;
+                self.floating_count = 0;
                 self.text_bytes_used = 0;
                 self.line_count = 0;
                 self.command_count = 0;
@@ -221,6 +292,8 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
         const Memory = struct {
             frames: [config.frames_in_flight]Frame,
             cache: Cache,
+            states: States,
+            results: Results,
         };
 
         /// The bytes `initBuffer` needs; `init` makes one allocation of this size.
@@ -244,8 +317,9 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
         dropped_depth: u32 = 0,
 
         /// Scratch for the emission pass, kept here so frames stay plain data.
-        emit_stack: [max_depth + 1]Index = undefined,
-        emit_cursor: [max_depth + 1]Index = undefined,
+        emit_levels: [max_depth + 1]emission.EmitLevel(Index) = undefined,
+
+        input_state: InteractionState = .{},
 
         pub fn init(gpa: std.mem.Allocator, io: std.Io, platform: *Platform) std.mem.Allocator.Error!Self {
             const memory = try gpa.create(Memory);
@@ -263,6 +337,8 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
 
         fn prepareMemory(self: *Self) void {
             self.memory.cache.reset();
+            self.memory.states.reset();
+            self.memory.results.has_frame = false;
             for (&self.memory.frames) |*frame| {
                 frame.held = .init(false);
                 frame.element_count = 0;
@@ -286,6 +362,8 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
             );
             frame.reset(input.viewport);
             self.memory.cache.generation +%= 1;
+            self.resolveInput(input);
+            self.memory.states.evict(self.input_state.frame_number, config.state_ttl_frames);
             self.current = frame;
             self.dropped_depth = 0;
             self.depth = 0;
@@ -315,9 +393,14 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
         pub fn endFrame(self: *Self) EndFrameError!*const Frame {
             const frame = self.current orelse @panic("zui: endFrame() called without beginFrame()");
             if (self.depth != 1 or self.dropped_depth != 0) self.reportUnbalanced(frame);
+            frame.subtree_end[root_index] = @intCast(frame.element_count);
 
             layout.run(Self, self, frame);
             emission.run(Self, self, frame);
+
+            const results = &self.memory.results;
+            results.has_frame = true;
+            if (self.input_state.focus != 0 and !results.isFocusable(self.input_state.focus)) self.input_state.focus = 0;
 
             frame.held.store(true, .release);
             self.current = null;
@@ -336,6 +419,7 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
                 });
             }
             frame.diagnostics.unbalanced = true;
+            for (self.open_stack[1..self.depth]) |still_open| frame.subtree_end[still_open] = @intCast(frame.element_count);
             self.depth = 1;
             self.dropped_depth = 0;
         }
@@ -401,6 +485,7 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
                 return;
             }
             self.depth -= 1;
+            frame.subtree_end[self.open_stack[self.depth]] = @intCast(frame.element_count);
         }
 
         /// A leaf element: `open` and `close` in one call.
@@ -496,6 +581,18 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
             frame.child_count[index] = 0;
             frame.content_kind[index] = kind;
             frame.content_index[index] = @intCast(record_index);
+            frame.subtree_end[index] = index + 1;
+            frame.flags[index] = self.flagsFor(element_id, element);
+
+            if (element.floating) |floating| {
+                frame.floating_index[index] = @intCast(frame.floating_count);
+                frame.floatings[frame.floating_count] = floating;
+                frame.floating_count += 1;
+                frame.floating_root[index] = index;
+            } else {
+                frame.floating_index[index] = none_index;
+                frame.floating_root[index] = if (has_parent) frame.floating_root[parent] else none_index;
+            }
 
             if (element.layout) |element_layout| {
                 frame.layout_index[index] = @intCast(frame.layout_count);
@@ -523,11 +620,44 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
                 frame.child_count[parent] += 1;
             }
 
-            if (!element_id.isNone()) self.registerId(frame, index);
+            if (!element_id.isNone() and !self.registerId(frame, index)) {
+                frame.flags[index].interactive = false;
+                frame.flags[index].focusable = false;
+                frame.flags[index].scroll_x = false;
+                frame.flags[index].scroll_y = false;
+            }
             return index;
         }
 
-        fn registerId(self: *Self, frame: *Frame, index: Index) void {
+        fn flagsFor(self: *Self, element_id: Id, element: ElementConfig) ElementFlags {
+            _ = self;
+            var flags: ElementFlags = .{
+                .explicit_id = !element_id.isNone(),
+                .interactive = element.interactive or element.focusable,
+                .focusable = element.focusable,
+                .focus_scope = element.focus_scope,
+                .disabled = element.disabled,
+            };
+            if (element.clip) |clip| {
+                flags.clip_x = clip.horizontal;
+                flags.clip_y = clip.vertical;
+            }
+            if (element.scroll) |scroll| {
+                if (element_id.isNone()) {
+                    if (std.debug.runtime_safety) @panic("zui: a scroll container needs an id, because its offset is stored by id");
+                } else {
+                    flags.scroll_x = scroll.horizontal;
+                    flags.scroll_y = scroll.vertical;
+                }
+                flags.clip_x = flags.clip_x or scroll.horizontal;
+                flags.clip_y = flags.clip_y or scroll.vertical;
+            }
+            return flags;
+        }
+
+        /// Returns false for a duplicate, which in release builds becomes
+        /// non-interactive (safe builds panic).
+        fn registerId(self: *Self, frame: *Frame, index: Index) bool {
             _ = self;
             const hash = frame.element_id[index];
             var slot: usize = @as(usize, @truncate(hash)) & (id_table_slots - 1);
@@ -535,14 +665,14 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
                 const existing = frame.id_table[slot];
                 if (existing == none_index) {
                     frame.id_table[slot] = index;
-                    return;
+                    return true;
                 }
                 if (frame.element_id[existing] == hash) {
                     if (std.debug.runtime_safety) {
                         std.debug.panic("zui: duplicate id {f} in one frame", .{nameOf(frame, index)});
                     }
                     frame.diagnostics.duplicate_ids += 1;
-                    return;
+                    return false;
                 }
             }
         }
@@ -556,6 +686,184 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
         fn countDropped(self: *Self, frame: *Frame, limit: Limit) void {
             _ = self;
             frame.diagnostics.needed.set(limit, frame.diagnostics.needed.get(limit) + 1);
+        }
+
+        // =============================================================
+        // Interaction (answers describe the previous frame, SPEC.md §5)
+        // =============================================================
+
+        fn resolveInput(self: *Self, input: Input) void {
+            const it = &self.input_state;
+            const results = &self.memory.results;
+            const was_down = it.buttons.contains(.primary);
+            it.frame_number +%= 1;
+            it.pointer = input.pointer;
+            it.buttons = input.buttons;
+            it.modifiers = input.modifiers;
+            it.key_count = @intCast(@min(input.keys_pressed.len, interaction.max_keys_per_frame));
+            @memcpy(it.keys[0..it.key_count], input.keys_pressed[0..it.key_count]);
+            it.text_len = @intCast(@min(input.text_input.len, interaction.max_text_input_bytes));
+            @memcpy(it.text[0..it.text_len], input.text_input[0..it.text_len]);
+            it.clicked = 0;
+            if (it.pending_focus) |requested| {
+                it.focus = requested;
+                it.pending_focus = null;
+            }
+
+            var scroll_chain: [config.max_depth + 1]u32 = undefined;
+            var scroll_count: usize = 0;
+            it.hover_count = 0;
+            var hot_region: ?u32 = null;
+            if (results.has_frame) if (input.pointer) |point| if (results.topmostAt(point)) |top| {
+                var region_index = top;
+                while (region_index != interaction.no_region) : (region_index = results.regions[region_index].parent) {
+                    const region = results.regions[region_index];
+                    if (!region.bounds.contains(point)) continue;
+                    if (region.flags.interactive and it.hover_count < it.hover_chain.len) {
+                        if (hot_region == null) hot_region = region_index;
+                        it.hover_chain[it.hover_count] = region.hash;
+                        it.hover_count += 1;
+                    }
+                    if ((region.flags.scroll_x or region.flags.scroll_y) and scroll_count < scroll_chain.len) {
+                        scroll_chain[scroll_count] = region_index;
+                        scroll_count += 1;
+                    }
+                }
+            };
+
+            const is_down = it.buttons.contains(.primary);
+            if (is_down and !was_down) {
+                it.press_target = 0;
+                it.focus = 0;
+                if (hot_region) |index| {
+                    const region = results.regions[index];
+                    if (!region.flags.disabled) {
+                        it.press_target = region.hash;
+                        if (region.flags.focusable) it.focus = region.hash;
+                    }
+                }
+            } else if (!is_down and was_down) {
+                if (it.press_target != 0 and hot_region != null and results.regions[hot_region.?].hash == it.press_target) it.clicked = it.press_target;
+                it.press_target = 0;
+            } else if (!is_down) {
+                it.press_target = 0;
+            }
+
+            for (it.keys[0..it.key_count]) |key| switch (key) {
+                .tab => it.focus = results.nextFocus(it.focus, !it.modifiers.shift),
+                .enter, .space => if (it.focus != 0) {
+                    it.clicked = it.focus;
+                },
+                else => {},
+            };
+
+            for (0..2) |axis| {
+                if (input.wheel[axis] == 0) continue;
+                for (scroll_chain[0..scroll_count]) |region_index| {
+                    const region = results.regions[region_index];
+                    if (!region.flags.scrolls(axis)) continue;
+                    const scroll = self.memory.states.get(region.hash, interaction.ScrollState, it.frame_number, .create) orelse break;
+                    const moved = std.math.clamp(scroll.offset[axis] + input.wheel[axis], 0, region.max_scroll[axis]);
+                    if (moved != scroll.offset[axis]) {
+                        scroll.offset[axis] = moved;
+                        break;
+                    }
+                }
+            }
+        }
+
+        /// True for the topmost interactive element under the pointer and for
+        /// each interactive ancestor that also contains the pointer.
+        pub fn hovered(self: *const Self, element_id: Id) bool {
+            return self.input_state.isHovered(element_id.hash);
+        }
+
+        /// The primary button is held and the press began on this element.
+        pub fn pressed(self: *const Self, element_id: Id) bool {
+            return self.input_state.press_target == element_id.hash and self.input_state.buttons.contains(.primary);
+        }
+
+        /// The primary button was released over the element it was pressed
+        /// on, or the element is focused and Enter or Space was pressed.
+        pub fn clicked(self: *const Self, element_id: Id) bool {
+            return self.input_state.clicked == element_id.hash and !element_id.isNone();
+        }
+
+        pub fn focused(self: *const Self, element_id: Id) bool {
+            return self.input_state.focus == element_id.hash and !element_id.isNone();
+        }
+
+        /// Focus moves to `element_id` at the start of the next frame.
+        pub fn requestFocus(self: *Self, element_id: Id) void {
+            self.input_state.pending_focus = element_id.hash;
+        }
+
+        pub fn widgetState(self: *const Self, element_id: Id) interaction.WidgetState {
+            if (self.memory.results.regionFlags(element_id.hash).disabled) return .disabled;
+            if (self.pressed(element_id)) return .pressed;
+            if (self.hovered(element_id)) return .hovered;
+            if (self.focused(element_id)) return .focused;
+            return .idle;
+        }
+
+        /// The element's rectangle in the previous frame.
+        pub fn rectOf(self: *const Self, element_id: Id) ?style.Rect {
+            const entry = self.memory.results.find(element_id.hash) orelse return null;
+            return entry.rect;
+        }
+
+        /// The pointer relative to the element's top-left corner in the previous frame.
+        pub fn pointerLocal(self: *const Self, element_id: Id) ?[2]f32 {
+            const point = self.input_state.pointer orelse return null;
+            const rect = self.rectOf(element_id) orelse return null;
+            return .{ point[0] - rect.x, point[1] - rect.y };
+        }
+
+        pub fn pointer(self: *const Self) ?[2]f32 {
+            return self.input_state.pointer;
+        }
+
+        pub fn keyPressed(self: *const Self, key: interaction.Key) bool {
+            return self.input_state.keyPressed(key);
+        }
+
+        pub fn modifiers(self: *const Self) interaction.Modifiers {
+            return self.input_state.modifiers;
+        }
+
+        /// Text typed this frame, truncated to `interaction.max_text_input_bytes`.
+        pub fn typedText(self: *const Self) []const u8 {
+            return self.input_state.text[0..self.input_state.text_len];
+        }
+
+        // =============================================================
+        // Persistent state (SPEC.md §9)
+        // =============================================================
+
+        /// State for `element_id` that survives across frames while the id
+        /// keeps being used. Created zeroed. If the table is full, returns
+        /// zeroed scratch memory and reports `.state_slots`.
+        pub fn state(self: *Self, element_id: Id, comptime T: type) *T {
+            if (self.memory.states.get(element_id.hash, T, self.input_state.frame_number, .create)) |slot| return slot;
+            if (self.current) |frame| {
+                frame.diagnostics.exceeded.insert(.state_slots);
+                frame.diagnostics.needed.set(.state_slots, config.state_slots + 1);
+            }
+            return self.memory.states.scratch(T);
+        }
+
+        pub fn stateIfPresent(self: *Self, element_id: Id, comptime T: type) ?*T {
+            return self.memory.states.get(element_id.hash, T, self.input_state.frame_number, .existing_only);
+        }
+
+        pub fn scrollOffset(self: *Self, element_id: Id) [2]f32 {
+            const scroll = self.stateIfPresent(element_id, interaction.ScrollState) orelse return .{ 0, 0 };
+            return scroll.offset;
+        }
+
+        /// Clamped to the content at the next layout.
+        pub fn setScrollOffset(self: *Self, element_id: Id, offset: [2]f32) void {
+            self.state(element_id, interaction.ScrollState).offset = offset;
         }
 
         const ElementName = struct {
