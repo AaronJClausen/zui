@@ -114,3 +114,8 @@ generates for each field type.
 ## License
 
 MIT; see [LICENSE](LICENSE).
+
+The zui logo is adapted from the [Zig logo](https://codeberg.org/ziglang/logo)
+and, like it, is licensed under CC BY-SA 4.0; see
+[assets/LICENSE.md](assets/LICENSE.md). zui is not affiliated with or endorsed
+by the Zig Software Foundation.
