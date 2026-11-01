@@ -429,8 +429,8 @@ Measured in 0.5 on an Intel i9-10900K (a 2020 desktop CPU), with
 
 | Scenario | 0.4 | 0.5 | Target |
 |---|---|---|---|
-| 4,096 boxes, depth 8 | 216 µs | 97 µs (CI runners: 63–103 µs) | 100 µs |
-| 1,000 texts, warm cache | 346 µs | 166–176 µs (CI runners: 97–128 µs) | 250 µs |
+| 4,096 boxes, depth 8 | 216 µs | 97 µs (CI runners: 63–125 µs) | 100 µs |
+| 1,000 texts, warm cache | 346 µs | 166–176 µs (CI runners: 97–204 µs) | 250 µs |
 | 4,000 children of one parent | 163 µs | 65 µs | |
 | allocations after `init` | 0 | 0 | 0 |
 
@@ -1167,9 +1167,10 @@ than 10% slower in each of three attempts. (The draft compared against a
 stored baseline. A file of times from one machine says nothing about
 another, so the comparison is always against a fresh measurement.) The
 targets are reported in the job summary but not enforced. GitHub's
-runners differ too much for a fixed limit: two runs of the box tree took
-62.6 µs and 102.8 µs, so a target check would pass or fail depending on
-the machine. Enforcing the targets is a step for a reference machine:
+runners differ too much for a fixed limit: three runs of the box tree
+took 62.6, 102.8 and 125.3 µs, so a target check would pass or fail
+depending on the machine. Comparing two commits on one runner is stable:
+the same three runs agreed with themselves to within 6%. Enforcing the targets is a step for a reference machine:
 `zig build bench -- --check-targets`.
 
 ---
