@@ -754,9 +754,9 @@ render thread:                                └─▶ submit(N) ... release(N)
 `beginFrame` takes the next arena whose frame has been released. If none
 has been released, it waits on an `Io.Event` that `release` sets. This is
 the only point where zui blocks, and it is also backpressure: the UI cannot
-run ahead of the renderer by more than `frames_in_flight` frames. Until
-0.3, when this waiting arrives, `beginFrame` panics if every frame is
-still held.
+run ahead of the renderer by more than `frames_in_flight` frames. The
+event is reset before a second check for a free frame, which closes the
+race with a `release` that lands between the check and the wait.
 
 Each arena owns everything its frame references (element arrays, copied
 text, commands), so the two threads share no mutable memory.
@@ -764,68 +764,99 @@ text, commands), so the two threads share no mutable memory.
 ### 10.3 Tasks: async work owned by the UI
 
 A *task* is background work whose lifetime follows an element. A typical
-example is a thumbnail that loads while its list item is visible, and is
-canceled when the item scrolls away.
+example is a thumbnail that loads while its grid cell is declared, and is
+canceled when the cell scrolls away and stops being declared.
 
 ```zig
 pub fn TaskPool(comptime Result: type, comptime capacity: u16) type
 
-var thumbnails: zui.TaskPool(LoadError!Image, 64) = .init;
+var thumbnails: zui.TaskPool(Io.Cancelable!Thumbnail, 96) = .{ .discard = releaseThumbnail };
 
-fn thumbnail(ui: *Ui, path: []const u8, index: usize) void {
+fn thumbnailCell(ui: *Ui, io: Io, path: []const u8, index: usize) void {
     const id: zui.Id = .indexed("thumbnail", index);
     ui.open(.{ .id = id, .layout = .{ .sizing = .{ .width = .fixed(96), .height = .fixed(96) } } });
     defer ui.close();
 
-    switch (thumbnails.request(ui, id, loadImage, .{path})) {
+    switch (thumbnails.request(ui, id, loadThumbnail, .{ io, path }, .{ .key = hashOf(path) })) {
         .pending => ui.box(.{ .background = theme.placeholder, .layout = .{ .sizing = .grow_both } }),
-        .ready => |image| ui.image(image, .{ .layout = .{ .sizing = .grow_both } }),
+        .ready => |thumbnail| drawThumbnail(ui, thumbnail),
         .failed => |err| ui.text(@errorName(err), theme.error_text),
     }
 }
 ```
 
-The pool is **typed** by its result, which removes type erasure and casts
-at the call site. Its capacity is fixed, so a pool cannot grow without
-bound. Tasks run on the `Io` given to `Context.init`. How
-`request(ui, id, function, args)` works:
+The pool is **typed** by its result, so there is no type erasure and no
+casting at the call site. Its status union is generated from `Result`:
+- `.pending`;
+- `.ready`, with the value;
+- `.failed`, with the error, only when `Result` is an error union, so an
+  infallible pool needs no `.failed` prong.
+
+The capacity is fixed, so a pool cannot grow without bound. A request
+that finds every slot busy stays `.pending` and counts in
+`pool.stats.rejected`. Tasks run on the `Io` given to `Context.init`.
+
+How `request(ui, id, function, args, .{ .key = ... })` works:
 1. **First request for an id.** Claim a slot, then start the work with
    `io.concurrent`, falling back to `io.async` when the `Io` reports
-   `ConcurrencyUnavailable`. Running it in a wrapper means that when
-   `function` returns, the wrapper stores the result in the slot, pushes
-   the slot index onto the context's completion `Io.Queue` (with
-   `putOneUncancelable`, so a completion is never lost), and calls
-   `Platform.wake` if the platform has it. The function returns
-   `.pending`.
-2. **Later requests for the same id** return the slot's current state:
-   `.pending`, `.ready`, or `.failed`. They do not block and do no
-   work.
-3. **`beginFrame` drains the completion queue** with
-   `get(buffer, min = 0)`, which never blocks, and marks each completed
-   slot `.ready`. Results become visible at a frame boundary, which keeps
-   one frame internally consistent.
-4. **Unmounting.** In `endFrame`, any slot whose id was not requested this
-   frame has its `Future` canceled with `future.cancel(io)`. The task sees
-   `error.Canceled` at its next cancelation point, and the slot is freed
-   once the wrapper finishes. `Future.cancel` is not thread-safe, and only
-   the UI thread calls it, which fits the contract in §10.1.
-5. **Retry and invalidation.** `request` takes an optional `key: u64`,
-   such as a hash of `path`. A changed key cancels the old task and starts
-   a new one. This is how a list item that is reused for different data
-   gets fresh work.
+   `ConcurrencyUnavailable`. A wrapper runs `function`, stores the result
+   in the slot, pushes `{ slot, generation }` onto the pool's completion
+   `Io.Queue`, and wakes the platform. Without concurrency, `io.async`
+   may run the task inline, and then the very first request already
+   returns `.ready`.
+2. **Later requests for the same id and key** return the slot's state
+   without blocking or doing work.
+3. **Completions are drained at each request,** with `get(buffer, min =
+   0)`, which never blocks.
+   - The queue belongs to the pool, not the Context. It holds one entry
+     per slot, and a slot has at most one outstanding completion, so the
+     wrapper's `putOneUncancelable` never blocks, even when the task ran
+     inline on the UI thread.
+   - Each slot carries a **generation**, bumped whenever it is freed, so
+     a canceled task's late completion can never be credited to the next
+     task in the same slot.
+4. **Unmounting.** Each pool registers itself with the Context on its
+   first request. In `endFrame`, every registered pool cancels the tasks
+   whose id was not requested that frame. This works even for a pool that
+   made no request at all that frame.
+5. **A different key for the same id** cancels the old task and starts a
+   new one. This is how a cell that is reused for different data gets
+   fresh work.
 
-`Io.Future` has `await` and `cancel` but no non-blocking poll, which is
-why completion goes through the queue instead of each frame asking the
-futures.
+**Cancelation waits.** `Io.Future.cancel` is "await plus a cancel
+request": it returns only once the task has returned. Tasks must
+therefore reach cancelation points, meaning any `Io` call or
+`io.checkCancel()` in a long computation. Otherwise unmounting a task
+waits for it to finish, on the UI thread. (`Io.Future` has no
+non-blocking poll either, which is why completions go through a queue.)
 
-**Redraws on demand.** `ui.needsFrame()` is true when any of these hold:
-- the last input changed interaction state (hover, press or focus moved);
-- a task completed since the last frame;
-- a scroll inertia or caret blink is in progress;
-- the application called `ui.requestFrame()`.
+**Owned results.** When a slot is freed, the pool passes its result to
+the optional `discard` function on the UI thread. That happens whether
+the result was handed out as `.ready` or was produced by a task that was
+then canceled. `discard` is where results that own resources, such as
+GPU textures, are released. A task canceled before it ever ran produced
+no result, and is not passed to `discard`.
 
-An event loop that waits on platform events, plus `wake`, can sleep the
-rest of the time. An idle zui application uses no CPU.
+**Lifetime rules.** A pool and its Context reference each other by
+pointer, so neither may move after the pool's first request.
+`pool.deinit(ui)` cancels the pool's tasks and unregisters it.
+`Context.deinit` cancels the tasks of every pool still registered.
+
+**Redraws on demand.** `ui.needsFrame()` is true when the frame just
+drawn may be out of date:
+- the last input changed something: hover, a press, focus, a click, a
+  key, typed text, or a scroll that actually moved;
+- a task completed since the last `beginFrame`;
+- the application called `ui.requestFrame()`, for example during an
+  animation.
+
+When it is false, an event loop can sleep until the next input or
+`Platform.wake`. `wake` is called from the task's thread, so it must be
+thread-safe; zui-raylib implements it with `glfwPostEmptyEvent`.
+Measured with zui-raylib's demo in a hidden window: **0.0 ms of CPU over
+10 idle seconds** in both of its views. The same build with event
+waiting disabled used 1,515.6 ms (about 15% of a core) over those 10
+seconds.
 
 ### 10.4 Data from other threads
 

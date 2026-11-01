@@ -8,6 +8,7 @@ const layout = @import("layout.zig");
 const emission = @import("emission.zig");
 const interaction = @import("interaction.zig");
 const state_table = @import("state.zig");
+const tasks = @import("tasks.zig");
 
 const Id = id_module.Id;
 
@@ -321,6 +322,15 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
 
         input_state: InteractionState = .{},
 
+        /// Set by `release` from any thread; `beginFrame` waits on it when
+        /// every frame is still held by a renderer.
+        frame_released: std.Io.Event = .unset,
+        /// Set by task threads when a task completes (see `needsFrame`).
+        task_completed: std.atomic.Value(bool) = .init(false),
+        task_pools: ?*tasks.Registration = null,
+        interaction_changed: bool = true,
+        frame_requested: bool = false,
+
         pub fn init(gpa: std.mem.Allocator, io: std.Io, platform: *Platform) std.mem.Allocator.Error!Self {
             const memory = try gpa.create(Memory);
             var self: Self = .{ .memory = memory, .owns_memory = true, .platform = platform, .io = io };
@@ -345,7 +355,12 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
             }
         }
 
+        /// Cancels the tasks of every registered TaskPool, then frees memory.
         pub fn deinit(self: *Self, gpa: std.mem.Allocator) void {
+            while (self.task_pools) |registration| {
+                registration.cancel_all(registration);
+                self.task_pools = registration.next;
+            }
             if (self.owns_memory) gpa.destroy(self.memory);
             self.* = undefined;
         }
@@ -356,11 +371,10 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
 
         pub fn beginFrame(self: *Self, input: Input) void {
             if (self.current != null) @panic("zui: beginFrame() called again before endFrame()");
-            const frame = self.takeFreeFrame() orelse std.debug.panic(
-                "zui: all {d} frames in flight are still held; release() a frame before the next beginFrame()",
-                .{config.frames_in_flight},
-            );
+            const frame = self.waitForFreeFrame();
             frame.reset(input.viewport);
+            self.task_completed.store(false, .release);
+            self.frame_requested = false;
             self.memory.cache.generation +%= 1;
             self.resolveInput(input);
             self.memory.states.evict(self.input_state.frame_number, config.state_ttl_frames);
@@ -376,6 +390,18 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
             self.open_stack[0] = root;
             self.depth = 1;
             frame.diagnostics.needed.set(.depth, 1);
+        }
+
+        /// Blocks until a renderer releases a frame. Resetting the event
+        /// before the second check closes the race with a `release` that
+        /// lands between the check and the wait.
+        fn waitForFreeFrame(self: *Self) *Frame {
+            while (true) {
+                if (self.takeFreeFrame()) |frame| return frame;
+                self.frame_released.reset();
+                if (self.takeFreeFrame()) |frame| return frame;
+                self.frame_released.waitUncancelable(self.io);
+            }
         }
 
         fn takeFreeFrame(self: *Self) ?*Frame {
@@ -402,6 +428,9 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
             results.has_frame = true;
             if (self.input_state.focus != 0 and !results.isFocusable(self.input_state.focus)) self.input_state.focus = 0;
 
+            var registration = self.task_pools;
+            while (registration) |pool| : (registration = pool.next) pool.sweep(pool, self.input_state.frame_number);
+
             frame.held.store(true, .release);
             self.current = null;
             self.last_frame = frame;
@@ -426,9 +455,58 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
 
         /// Returns the frame's memory. Safe to call from any thread.
         pub fn release(self: *Self, frame: *const Frame) void {
-            _ = self;
             const mutable: *Frame = @constCast(frame);
             mutable.held.store(false, .release);
+            self.frame_released.set(self.io);
+        }
+
+        /// Whether the frame just drawn may be out of date, so the event loop
+        /// should run another one instead of waiting for input:
+        /// - the last input changed interaction state (hover, press, focus,
+        ///   a click, keys, typed text, or a scroll that moved);
+        /// - a task completed;
+        /// - `requestFrame` was called.
+        /// When it is false, an event loop can sleep until the next input or
+        /// `Platform.wake`, and an idle application uses no CPU.
+        pub fn needsFrame(self: *const Self) bool {
+            return self.interaction_changed or self.frame_requested or self.task_completed.load(.acquire);
+        }
+
+        /// Asks for one more frame, e.g. while an animation runs.
+        pub fn requestFrame(self: *Self) void {
+            self.frame_requested = true;
+        }
+
+        // =============================================================
+        // Task pools (SPEC.md §10.3)
+        // =============================================================
+
+        pub fn waker(self: *Self) tasks.Waker {
+            return .{
+                .task_completed = &self.task_completed,
+                .platform = @ptrCast(self.platform),
+                .wake = if (@hasDecl(Platform, "wake")) wakePlatform else null,
+            };
+        }
+
+        fn wakePlatform(platform: *anyopaque) void {
+            const typed: *Platform = @ptrCast(@alignCast(platform));
+            typed.wake();
+        }
+
+        pub fn registerTaskPool(self: *Self, registration: *tasks.Registration) void {
+            registration.next = self.task_pools;
+            self.task_pools = registration;
+        }
+
+        pub fn unregisterTaskPool(self: *Self, registration: *tasks.Registration) void {
+            var link = &self.task_pools;
+            while (link.*) |current| : (link = &current.next) {
+                if (current == registration) {
+                    link.* = current.next;
+                    return;
+                }
+            }
         }
 
         /// The most recent frame from `endFrame`, including one that
@@ -696,6 +774,10 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
             const it = &self.input_state;
             const results = &self.memory.results;
             const was_down = it.buttons.contains(.primary);
+            const previous_hover = hoverSignature(it);
+            const previous_press = it.press_target;
+            const previous_focus = it.focus;
+            var scrolled = false;
             it.frame_number +%= 1;
             it.pointer = input.pointer;
             it.buttons = input.buttons;
@@ -766,10 +848,20 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
                     const moved = std.math.clamp(scroll.offset[axis] + input.wheel[axis], 0, region.max_scroll[axis]);
                     if (moved != scroll.offset[axis]) {
                         scroll.offset[axis] = moved;
+                        scrolled = true;
                         break;
                     }
                 }
             }
+
+            self.interaction_changed = scrolled or it.clicked != 0 or it.key_count != 0 or it.text_len != 0 or
+                it.press_target != previous_press or it.focus != previous_focus or hoverSignature(it) != previous_hover;
+        }
+
+        fn hoverSignature(it: *const InteractionState) u64 {
+            var signature: u64 = it.hover_count;
+            for (it.hover_chain[0..it.hover_count]) |hash| signature = id_module.mix(signature, hash);
+            return signature;
         }
 
         /// True for the topmost interactive element under the pointer and for

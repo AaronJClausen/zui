@@ -14,10 +14,15 @@ Implemented so far:
   focus scopes); clipping with culling; scroll containers driven by the
   wheel; floating elements in their own paint layers; and per-element
   state that persists across frames.
+- **0.3:** `TaskPool`s of background work that is canceled when its
+  element stops being declared; `needsFrame`, so an idle application can
+  sleep at 0% CPU; and `beginFrame` waiting for a render thread to
+  release a frame.
 
 The reference backend and demo application live in
-[zui-raylib](https://github.com/AaronJClausen/zui-raylib). Async tasks
-(0.3) come next; see the roadmap in SPEC.md §16.
+[zui-raylib](https://github.com/AaronJClausen/zui-raylib). Widgets,
+reflection and testing helpers (0.4) come next; see the roadmap in
+SPEC.md §16.
 
 ```zig
 const Ui = zui.Context(.{}, MyPlatform);

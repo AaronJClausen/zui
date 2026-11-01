@@ -88,6 +88,15 @@ pub fn ids(comptime names: anytype) IdSet(names) {
 
 pub fn IdSet(comptime names: anytype) type {
     const name_count = names.len;
+    // The quota covers this whole evaluation, so size it from the input:
+    // hashing every byte once, then comparing every pair of names.
+    var total_name_bytes = 0;
+    for (0..name_count) |index| total_name_bytes += names[index].len;
+    @setEvalBranchQuota(1000 + 8 * total_name_bytes + 8 * name_count * name_count + 8 * total_name_bytes * name_count);
+
+    var hashes: [name_count]u64 = undefined;
+    for (0..name_count) |index| hashes[index] = fnv1a(names[index]);
+
     var field_names: [name_count][]const u8 = undefined;
     var field_types: [name_count]type = undefined;
     var field_attributes: [name_count]std.builtin.Type.StructField.Attributes = undefined;
@@ -96,7 +105,7 @@ pub fn IdSet(comptime names: anytype) type {
         for (0..index) |earlier_index| {
             const earlier: []const u8 = names[earlier_index];
             if (std.mem.eql(u8, earlier, name)) @compileError("zui.ids: \"" ++ name ++ "\" appears more than once");
-            if (fnv1a(earlier) == fnv1a(name)) @compileError("zui.ids: \"" ++ earlier ++ "\" and \"" ++ name ++ "\" have the same hash");
+            if (hashes[earlier_index] == hashes[index]) @compileError("zui.ids: \"" ++ earlier ++ "\" and \"" ++ name ++ "\" have the same hash");
         }
         const default_id: Id = .of(name);
         field_names[index] = name;
@@ -125,6 +134,16 @@ test "indexed and child ids are distinct and stable" {
     const list_a: Id = .of("list_a");
     const list_b: Id = .of("list_b");
     try std.testing.expect(!list_a.child("item").eql(list_b.child("item")));
+}
+
+test "ids handles a realistic number of names" {
+    const set = ids(.{
+        "toolbar",         "new",        "open",         "save",        "export",    "import",   "documents_view",
+        "thumbnails_view", "about",      "sidebar",      "content",     "details",   "hover_me", "dialog_close",
+        "grid",            "status_bar", "search_field", "filter_menu", "sort_menu", "settings", "profile",
+        "notifications",   "help",       "close_window", "minimize",    "maximize",  "undo",     "redo",
+    });
+    try std.testing.expect(set.redo.eql(.of("redo")));
 }
 
 test "ids builds a struct of ids" {

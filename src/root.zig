@@ -5,6 +5,7 @@ const context = @import("context.zig");
 const style = @import("style.zig");
 const id = @import("id.zig");
 const interaction = @import("interaction.zig");
+const tasks = @import("tasks.zig");
 
 pub const Context = context.Context;
 pub const Config = context.Config;
@@ -44,6 +45,9 @@ pub const ScrollState = interaction.ScrollState;
 pub const max_keys_per_frame = interaction.max_keys_per_frame;
 pub const max_text_input_bytes = interaction.max_text_input_bytes;
 
+pub const TaskPool = tasks.TaskPool;
+pub const TaskStats = tasks.Stats;
+
 test {
     std.testing.refAllDecls(@This());
     _ = @import("text.zig");
@@ -53,4 +57,5 @@ test {
     _ = @import("tests/memory.zig");
     _ = @import("tests/interaction.zig");
     _ = @import("tests/layers.zig");
+    _ = @import("tests/tasks.zig");
 }

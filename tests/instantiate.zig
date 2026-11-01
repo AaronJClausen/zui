@@ -21,6 +21,12 @@ var memory: [Ui.required_bytes]u8 align(16) = undefined;
 
 const Expanded = struct { open: bool };
 
+var pool: zui.TaskPool(error{Unavailable}!u32, 2) = .init;
+
+fn lookUp(value: u32) error{Unavailable}!u32 {
+    return if (value == 0) error.Unavailable else value;
+}
+
 export fn zuiCheckFrame(width: f32, height: f32, pointer_x: f32, pointer_y: f32) usize {
     var ui = Ui.initBuffer(&memory, undefined, &platform) catch return 0;
     ui.beginFrame(.{
@@ -50,7 +56,12 @@ export fn zuiCheckFrame(width: f32, height: f32, pointer_x: f32, pointer_y: f32)
     _ = ui.pointerLocal(save);
     _ = ui.rectOf(list);
     _ = ui.stateIfPresent(list, Expanded);
+    switch (pool.request(&ui, save, lookUp, .{3}, .{ .key = 1 })) {
+        .pending, .failed => ui.requestFrame(),
+        .ready => |value| _ = value,
+    }
     const frame = ui.endFrame() catch ui.lastFrame();
     defer ui.release(frame);
-    return frame.commands().len;
+    defer pool.deinit(&ui);
+    return frame.commands().len + @intFromBool(ui.needsFrame());
 }
