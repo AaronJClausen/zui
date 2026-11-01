@@ -46,6 +46,18 @@ jobs:
       - run: zig build test -Doptimize=ReleaseSafe
       - run: zig build test -Doptimize=ReleaseFast
 
+  test-32-bit:
+    name: Test (32-bit x86 Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - run: zig build test -Dtarget=x86-linux
+      - run: zig build test -Dtarget=x86-linux -Doptimize=ReleaseFast
+
   cross-check:
     name: Cross-compile (${{ matrix.target }})
     runs-on: ubuntu-latest

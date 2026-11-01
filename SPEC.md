@@ -112,6 +112,8 @@ pub const Config = struct {
     max_text_bytes: u32 = 64 * 1024,
     /// Maximum nesting depth of open elements.
     max_depth: u16 = 64,
+    /// Render commands one frame may emit. Each wrapped line of text is one.
+    max_render_commands: u32 = 8192,
     /// Persistent per-id state slots (§9). Must be a power of two.
     state_slots: u32 = 1024,
     /// Frames a state slot survives without being touched (§9).
@@ -190,10 +192,18 @@ pass streams through only the fields it uses.
 Config structs are stored once, in separate arrays per kind, and
 elements refer to them by index. An element without decoration costs no
 decoration memory. This is the same idea as Clay's separate config
-arrays, and it keeps the per-element core at about **40 bytes**
-(estimated: an 8-byte id, three 2-byte links, 4-byte config indices, a
-2-byte flag word, and 24 bytes of geometry). At the default 4096 elements
-that is about 160 KB per frame in flight.
+arrays, and it keeps the per-element core at about **48 bytes**: an
+8-byte id, seven 2-byte links and indices, a content-kind byte, and 24
+bytes of geometry.
+
+The arrays are *reserved* for the worst case, though. Every config kind
+gets `max_elements` slots, and commands and lines get
+`max_render_commands`, so the reservation is much larger than the core.
+Measured for the default `Config` in 0.1: **1.6 MiB per frame in flight,
+and 3.35 MiB of `required_bytes`** with two frames and the text cache. A
+frame only *touches* the slots it uses, so the cost per frame still scales
+with the elements declared. Applications with smaller UIs should lower the
+limits, and `required_bytes` reports the result exactly.
 
 ---
 
@@ -292,6 +302,11 @@ helpers are what keep literals short. Using one 16-byte struct also
 avoids a tag-dependent layout. Thanks to decl literals, config literals
 read as `.sizing = .{ .width = .grow, .height = .fixed(48) }` or
 `.sizing = .grow_both`.
+
+A `percent` child contributes nothing to a `fit` parent's size, because
+the parent's size would otherwise depend on the child's and the child's
+on the parent's. Percent is meant for parents whose size is decided some
+other way (`fixed`, `grow`, or the root).
 
 ### 6.2 Passes
 
@@ -525,17 +540,25 @@ semantics, the list is empty and costs nothing.
 
 ```zig
 const MyPlatform = struct {
-    /// Required. Width and height of `text` set in `style`, in layout units.
-    pub fn measureText(self: *MyPlatform, text: []const u8, style: zui.TextStyle) [2]f32 { ... }
+    /// Required. Width and height of `text` in `font` at `size`, in layout units.
+    /// `FontId` is `Config.FontId` (u16 by default).
+    pub fn measureText(self: *MyPlatform, text: []const u8, font: FontId, size: f32) [2]f32 { ... }
 
     /// Optional. Called from any thread when a task completes, so a sleeping
     /// event loop can wake and render a frame.
     pub fn wake(self: *MyPlatform) void { ... }
 
-    /// Optional. Layout units per physical pixel, for pixel snapping. Default 1.
+    /// Optional. Physical pixels per layout unit. When declared, command
+    /// bounds snap to whole physical pixels; without it, nothing is snapped.
     pub fn scale(self: *const MyPlatform) f32 { ... }
 };
 ```
+
+`measureText` takes the font and size rather than a whole `TextStyle`.
+Those two values are exactly what the measurement cache keys on (§8.3),
+and the narrower signature avoids a type cycle: `TextStyle` depends on
+`Config.FontId`, which belongs to the `Context` the platform is a
+parameter of.
 
 The platform is a **comptime** type parameter, not a vtable. Text
 measurement is the hottest call that leaves zui, so it is dispatched
@@ -555,8 +578,14 @@ Pass 3 wraps each text element against its final width:
    distinct (word, font, size) per cache lifetime.
 3. **Lay words into lines** greedily, using the width of a space measured
    once per (font, size).
-4. **Break a word wider than the line** at UTF-8 boundaries, measuring
-   prefixes by binary search. This is the rare path.
+
+**Words are never broken.** A text element's minimum width is its longest
+word (§6.2, pass 1), and no pass makes an element narrower than its
+minimum, so a line can only be narrower than a word when the parent is
+too small for that word. The word then gets a line of its own and
+overflows, as in CSS by default. (An earlier draft of this spec broke
+over-wide words at code points; the layout rules made that path
+unreachable, so 0.1 removed it.)
 
 ### 8.3 Measurement cache
 
@@ -628,7 +657,9 @@ render thread:                                └─▶ submit(N) ... release(N)
 `beginFrame` takes the next arena whose frame has been released. If none
 has been released, it waits on an `Io.Event` that `release` sets. This is
 the only point where zui blocks, and it is also backpressure: the UI cannot
-run ahead of the renderer by more than `frames_in_flight` frames.
+run ahead of the renderer by more than `frames_in_flight` frames. Until
+0.3, when this waiting arrives, `beginFrame` panics if every frame is
+still held.
 
 Each arena owns everything its frame references (element arrays, copied
 text, commands), so the two threads share no mutable memory.
@@ -806,8 +837,8 @@ linked only in debug builds, so messages read
 
 ### 13.2 Capacity limits (defined behavior, reported)
 
-Elements, text bytes, depth, state slots, task slots and the measurement
-cache all fail the same way:
+Elements, text bytes, depth, render commands (including wrapped lines),
+state slots, task slots and the measurement cache all fail the same way:
 1. The part that fits is kept. Overflowing elements are dropped from the
    frame, and their subtrees are skipped cheaply: the depth is still
    tracked, so `close` calls pair up correctly.

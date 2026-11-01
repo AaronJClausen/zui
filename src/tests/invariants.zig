@@ -1,0 +1,156 @@
+//! Randomized trees, checked against properties every layout must have.
+
+const std = @import("std");
+const zui = @import("../root.zig");
+const support = @import("support.zig");
+
+const Ui = support.Ui;
+const Frame = Ui.Frame;
+const tolerance = 0.01;
+
+const words = [_][]const u8{ "a", "zui", "layout", "immediate", "mode", "x", "frame", "comptime" };
+
+const Generator = struct {
+    random: std.Random,
+    remaining: u32,
+    text_buffer: [64]u8 = undefined,
+
+    fn sizing(self: *Generator) zui.Sizing {
+        return switch (self.random.uintLessThan(u8, 6)) {
+            0, 1 => .fit,
+            2 => .growWeighted(@floatFromInt(self.random.intRangeAtMost(u8, 1, 3))),
+            3 => .growBetween(0, @floatFromInt(self.random.intRangeAtMost(u16, 10, 300))),
+            4 => .fixed(@floatFromInt(self.random.intRangeAtMost(u16, 0, 250))),
+            else => .percent(@as(f32, @floatFromInt(self.random.intRangeAtMost(u8, 0, 100))) / 100),
+        };
+    }
+
+    fn layout(self: *Generator) zui.Layout {
+        return .{
+            .direction = if (self.random.boolean()) .left_to_right else .top_to_bottom,
+            .sizing = .{ .width = self.sizing(), .height = self.sizing() },
+            .padding = .all(@floatFromInt(self.random.uintLessThan(u8, 12))),
+            .child_gap = @floatFromInt(self.random.uintLessThan(u8, 9)),
+            .child_alignment = .{
+                .x = self.random.enumValue(zui.Alignment),
+                .y = self.random.enumValue(zui.Alignment),
+            },
+        };
+    }
+
+    fn sentence(self: *Generator) []const u8 {
+        var writer: std.Io.Writer = .fixed(&self.text_buffer);
+        const word_count = self.random.uintLessThan(u8, 6);
+        for (0..word_count) |index| {
+            if (index != 0) writer.writeByte(if (self.random.uintLessThan(u8, 5) == 0) '\n' else ' ') catch break;
+            writer.writeAll(words[self.random.uintLessThan(usize, words.len)]) catch break;
+        }
+        return writer.buffered();
+    }
+
+    fn children(self: *Generator, ui: *Ui, depth: u16) void {
+        const child_count = self.random.uintLessThan(u8, 5);
+        for (0..child_count) |_| {
+            if (self.remaining == 0) return;
+            self.remaining -= 1;
+            switch (self.random.uintLessThan(u8, 4)) {
+                0 => ui.text(self.sentence(), .{ .wrap = self.random.enumValue(zui.TextWrap) }),
+                1 => ui.box(.{ .layout = self.layout(), .background = .rgb(0x404040) }),
+                else => if (depth + 1 < Ui.max_depth) {
+                    ui.open(.{ .layout = self.layout(), .background = if (self.random.boolean()) .rgb(0x202020) else null });
+                    self.children(ui, depth + 1);
+                    ui.close();
+                },
+            }
+        }
+    }
+};
+
+fn checkInvariants(frame: *const Frame) !void {
+    for (0..frame.element_count) |index| {
+        const element: Ui.Index = @intCast(index);
+        for (0..2) |a| {
+            try std.testing.expect(std.math.isFinite(frame.size[element][a]));
+            try std.testing.expect(std.math.isFinite(frame.position[element][a]));
+            try std.testing.expect(frame.size[element][a] >= -tolerance);
+        }
+        if (frame.child_count[element] != 0) try checkParent(frame, element);
+    }
+    for (frame.commands()) |command| try std.testing.expectEqual(@as(i16, 0), command.z);
+}
+
+fn checkParent(frame: *const Frame, parent: Ui.Index) !void {
+    const parent_layout = frame.layoutOf(parent);
+    const along = parent_layout.direction.axis();
+    const a = @intFromEnum(along);
+    const b = 1 - a;
+    const content_along = @max(0, frame.size[parent][a] - parent_layout.padding.total(along));
+    const content_across = @max(0, frame.size[parent][b] - parent_layout.padding.total(along.other()));
+    const content_start = [2]f32{ frame.position[parent][0] + parent_layout.padding.left, frame.position[parent][1] + parent_layout.padding.top };
+
+    var used = parent_layout.child_gap * @as(f32, @floatFromInt(frame.child_count[parent] - 1));
+    var child = frame.first_child[parent];
+    while (child != Ui.none_index) : (child = frame.next_sibling[child]) used += frame.size[child][a];
+
+    child = frame.first_child[parent];
+    while (child != Ui.none_index) : (child = frame.next_sibling[child]) {
+        const sizing = frame.sizingOf(child, along);
+        // Overflow is only allowed once every shrinkable child is at its minimum.
+        if (used > content_along + tolerance and sizing.rule != .fixed) {
+            try std.testing.expect(frame.size[child][a] <= frame.min_size[child][a] + tolerance);
+        }
+        // Free space is only left over once every growable child is at its max.
+        if (used < content_along - tolerance and sizing.rule == .grow and sizing.amount > 0) {
+            try std.testing.expect(frame.size[child][a] >= sizing.max - tolerance);
+        }
+        const across_sizing = frame.sizingOf(child, along.other());
+        if (across_sizing.rule == .grow) {
+            const expected = @max(frame.min_size[child][b], std.math.clamp(content_across, across_sizing.min, across_sizing.max));
+            try std.testing.expectApproxEqAbs(expected, frame.size[child][b], tolerance);
+        }
+        // Children start inside the parent's content box.
+        try std.testing.expect(frame.position[child][0] >= content_start[0] - tolerance);
+        try std.testing.expect(frame.position[child][1] >= content_start[1] - tolerance);
+    }
+}
+
+fn buildRandomFrame(ui: *Ui, seed: u64, element_budget: u32) void {
+    var prng: std.Random.DefaultPrng = .init(seed);
+    var generator: Generator = .{ .random = prng.random(), .remaining = element_budget };
+    ui.beginFrame(.{ .viewport = .{ @floatFromInt(generator.random.intRangeAtMost(u16, 1, 1200)), @floatFromInt(generator.random.intRangeAtMost(u16, 1, 900)) } });
+    generator.children(ui, 1);
+}
+
+test "random trees satisfy the layout invariants" {
+    var harness: support.Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    for (0..2000) |seed| {
+        buildRandomFrame(&harness.ui, seed, @intCast(seed % 200 + 1));
+        const frame = harness.ui.endFrame() catch harness.ui.lastFrame();
+        checkInvariants(frame) catch |err| {
+            std.debug.print("invariant violated for seed {d}\n", .{seed});
+            return err;
+        };
+        harness.ui.release(frame);
+    }
+}
+
+test "layout is deterministic" {
+    var harness: support.Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    for (0..200) |seed| {
+        var snapshots: [2][32 * 1024]u8 = undefined;
+        var lengths: [2]usize = undefined;
+        for (0..2) |attempt| {
+            buildRandomFrame(&harness.ui, seed, 150);
+            const frame = harness.ui.endFrame() catch harness.ui.lastFrame();
+            lengths[attempt] = (try support.snapshot(frame, &snapshots[attempt])).len;
+            harness.ui.release(frame);
+        }
+        try std.testing.expectEqualStrings(snapshots[0][0..lengths[0]], snapshots[1][0..lengths[1]]);
+    }
+}
