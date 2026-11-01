@@ -191,6 +191,30 @@ test "release builds close an unbalanced tree and report it" {
     ui.release(ui.lastFrame());
 }
 
+test "ids from an earlier use of the same frame memory are forgotten" {
+    var harness: support.Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    var ui = harness.begin();
+    for (0..200) |index| ui.box(.{ .id = .indexed("earlier", index) });
+    ui.release(try ui.endFrame());
+
+    // With two or three frames in flight, one of these reuses the memory of
+    // the frame above, id table included.
+    for (0..3) |_| {
+        ui = harness.begin();
+        ui.box(.{ .id = .indexed("earlier", 150) });
+        ui.box(.{ .id = .indexed("later", 0) });
+        const frame = try ui.endFrame();
+        defer ui.release(frame);
+        try testing.expectEqual(@as(u32, 0), ui.diagnostics().duplicate_ids);
+        try testing.expect(frame.rectOf(.indexed("earlier", 150)) != null);
+        try testing.expectEqual(@as(?zui.Rect, null), frame.rectOf(.indexed("earlier", 1)));
+        try testing.expectEqual(@as(?zui.Rect, null), frame.rectOf(.indexed("earlier", 199)));
+    }
+}
+
 test "release builds count duplicate ids" {
     if (std.debug.runtime_safety) return error.SkipZigTest;
     var harness: support.Harness = .{};
