@@ -194,8 +194,9 @@ pass streams through only the fields it uses.
 | Array (length `max_elements`) | Type | Used by |
 |---|---|---|
 | `id` | `u64` | interaction, state, duplicate detection |
-| `parent`, `first_child`, `next_sibling` | `ElementIndex` | every pass |
-| `child_count` | `ElementIndex` | sizing passes |
+| `parent` | `ElementIndex` | every pass |
+| `subtree_end` | `ElementIndex`: one past the element's last descendant | walking children, emission |
+| `child_count`, `flow_child_count` | `ElementIndex` | sizing passes |
 | `layout` | `u32` index into the layout-config array, or `none` | sizing and positioning |
 | `decoration` | `u32` index, or `none` | command emission |
 | `content` | a tagged index: `none`, text, image, custom | text wrapping, emission |
@@ -204,12 +205,29 @@ pass streams through only the fields it uses.
 | `min_size` | `[2]f32` | the shrink pass |
 | `position` | `[2]f32` | positioning, hit testing |
 
+Elements are stored in declaration order (pre-order), so the tree needs
+no child or sibling links. A parent's first child, if it has one, is the
+next element, and each child's next sibling is `subtree_end[child]`:
+
+```zig
+var child = parent + 1;
+while (child < frame.subtree_end[parent]) : (child = frame.subtree_end[child]) {
+    // visit child
+}
+```
+
+`Frame.children(parent)` is this loop as an iterator. In 0.5 and earlier each
+element also stored `first_child`, `last_child` and `next_sibling`, and
+declaring an element wrote them for it and for its parent; dropping them
+made declaration 6–31% faster with no change to layout.
+
 Config structs are stored once, in separate arrays per kind, and
 elements refer to them by index. An element without decoration costs no
 decoration memory. This is the same idea as Clay's separate config
-arrays, and it keeps the per-element core at about **48 bytes**: an
-8-byte id, seven 2-byte links and indices, a content-kind byte, and 24
-bytes of geometry.
+arrays, and it keeps the per-element core at **59 bytes**: an 8-byte id,
+eight 2-byte links and indices, 2 bytes of flags, a content-kind byte,
+and 32 bytes of geometry (size, minimum size, position and content
+size).
 
 The arrays are *reserved* for the worst case, though. Every config kind
 gets `max_elements` slots, and commands and lines get

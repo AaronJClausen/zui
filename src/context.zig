@@ -209,9 +209,6 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
             element_id: [max_elements]u64,
             element_name: [max_elements]id_module.DebugName,
             parent: [max_elements]Index,
-            first_child: [max_elements]Index,
-            last_child: [max_elements]Index,
-            next_sibling: [max_elements]Index,
             child_count: [max_elements]Index,
             /// Children that take part in the flow: `child_count` minus floating ones.
             flow_child_count: [max_elements]Index,
@@ -223,7 +220,8 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
             min_size: [max_elements][2]f32,
             position: [max_elements][2]f32,
             flags: [max_elements]ElementFlags,
-            /// One past the last element of this element's subtree.
+            /// One past the last element of this element's subtree, which is
+            /// also its next sibling, if it has one.
             subtree_end: [max_elements]Index,
             /// Index into `floatings`, or `none_index`.
             floating_index: [max_elements]Index,
@@ -269,6 +267,26 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
                     .height = self.size[index][1],
                 };
             }
+
+            /// Elements are stored in declaration order, so a parent's first
+            /// child is the element after it, and each child's next sibling
+            /// is the element after the child's own subtree.
+            pub fn children(self: *const Frame, parent: Index) Children {
+                return .{ .frame = self, .next_child = parent + 1, .end = self.subtree_end[parent] };
+            }
+
+            pub const Children = struct {
+                frame: *const Frame,
+                next_child: Index,
+                end: Index,
+
+                pub fn next(self: *Children) ?Index {
+                    if (self.next_child >= self.end) return null;
+                    const child = self.next_child;
+                    self.next_child = self.frame.subtree_end[child];
+                    return child;
+                }
+            };
 
             pub fn lookup(self: *const Frame, hash: u64) ?Index {
                 var slot: usize = @as(usize, @truncate(hash)) & (id_table_slots - 1);
@@ -708,9 +726,6 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
             frame.element_id[index] = hash;
             frame.element_name[index] = element_id.debug_name;
             frame.parent[index] = parent;
-            frame.first_child[index] = none_index;
-            frame.last_child[index] = none_index;
-            frame.next_sibling[index] = none_index;
             frame.child_count[index] = 0;
             frame.size[index] = .{ 0, 0 };
             frame.min_size[index] = .{ 0, 0 };
@@ -745,12 +760,6 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
             } else frame.decoration_index[index] = none_index;
 
             if (has_parent) {
-                if (frame.last_child[parent] == none_index) {
-                    frame.first_child[parent] = index;
-                } else {
-                    frame.next_sibling[frame.last_child[parent]] = index;
-                }
-                frame.last_child[parent] = index;
                 frame.child_count[parent] += 1;
                 if (element.floating == null) frame.flow_child_count[parent] += 1;
             }

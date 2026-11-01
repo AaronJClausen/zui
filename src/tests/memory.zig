@@ -155,10 +155,12 @@ test "release builds close an unbalanced tree and report it" {
     defer harness.deinit();
 
     const ui = harness.begin();
-    ui.open(.{ .id = .of("never_closed") });
+    ui.open(.{ .id = .of("never_closed"), .layout = .{ .sizing = .{ .width = .fixed(100) } } });
+    ui.box(.{ .id = .of("child_of_never_closed"), .layout = .{ .sizing = .{ .width = .grow } } });
     try testing.expectError(error.UnbalancedTree, ui.endFrame());
     try testing.expect(ui.diagnostics().unbalanced);
     try testing.expect(ui.lastFrame().rectOf(.of("never_closed")) != null);
+    try testing.expectEqual(@as(f32, 100), ui.lastFrame().rectOf(.of("child_of_never_closed")).?.width);
     ui.release(ui.lastFrame());
 }
 

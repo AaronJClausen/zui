@@ -51,23 +51,19 @@ fn measureTexts(comptime Ui: type, ui: *Ui, frame: *Ui.Frame) void {
 /// Iterates the children that take part in a parent's flow.
 fn FlowChildren(comptime Ui: type) type {
     return struct {
-        frame: *const Ui.Frame,
-        next_child: Ui.Index,
+        all_children: Ui.Frame.Children,
         has_floating: bool,
 
         fn init(frame: *const Ui.Frame, parent: Ui.Index) @This() {
             return .{
-                .frame = frame,
-                .next_child = frame.first_child[parent],
+                .all_children = frame.children(parent),
                 .has_floating = frame.flow_child_count[parent] != frame.child_count[parent],
             };
         }
 
         fn next(self: *@This()) ?Ui.Index {
-            while (self.next_child != Ui.none_index) {
-                const child = self.next_child;
-                self.next_child = self.frame.next_sibling[child];
-                if (!self.has_floating or !self.frame.isFloating(child)) return child;
+            while (self.all_children.next()) |child| {
+                if (!self.has_floating or !self.all_children.frame.isFloating(child)) return child;
             }
             return null;
         }
@@ -212,8 +208,8 @@ fn distribute(comptime Ui: type, frame: *Ui.Frame, comptime axis: Axis) void {
 /// `.element` target may not be sized yet when its parent is visited).
 fn sizeFloatingChildren(comptime Ui: type, frame: *Ui.Frame, parent: Ui.Index, comptime axis: Axis) void {
     const a = @intFromEnum(axis);
-    var child = frame.first_child[parent];
-    while (child != Ui.none_index) : (child = frame.next_sibling[child]) {
+    var children = frame.children(parent);
+    while (children.next()) |child| {
         if (!frame.isFloating(child)) continue;
         const reference = switch (frame.floatingOf(child).attach_to) {
             .root => frame.viewport[a],

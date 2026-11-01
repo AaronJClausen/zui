@@ -100,6 +100,7 @@ fn checkInvariants(frame: *const Frame) !void {
             try std.testing.expect(std.math.isFinite(frame.position[element][a]));
             try std.testing.expect(frame.size[element][a] >= -tolerance);
         }
+        try checkChildren(frame, element);
         if (frame.child_count[element] != 0) try checkParent(frame, element);
     }
     try checkCommands(frame);
@@ -125,10 +126,28 @@ fn checkCommands(frame: *const Frame) !void {
     try std.testing.expectEqual(@as(i32, 0), clip_depth);
 }
 
+/// The child walk visits exactly the elements whose parent is `parent`, in
+/// declaration order, and counts the same children declaration did.
+fn checkChildren(frame: *const Frame, parent: Ui.Index) !void {
+    var count: u32 = 0;
+    var flow_count: u32 = 0;
+    var previous: ?Ui.Index = null;
+    var children = frame.children(parent);
+    while (children.next()) |child| {
+        try std.testing.expectEqual(parent, frame.parent[child]);
+        if (previous) |earlier| try std.testing.expect(child > earlier);
+        previous = child;
+        count += 1;
+        if (!frame.isFloating(child)) flow_count += 1;
+    }
+    try std.testing.expectEqual(@as(u32, frame.child_count[parent]), count);
+    try std.testing.expectEqual(@as(u32, frame.flow_child_count[parent]), flow_count);
+}
+
 fn flowCount(frame: *const Frame, parent: Ui.Index) u32 {
     var count: u32 = 0;
-    var child = frame.first_child[parent];
-    while (child != Ui.none_index) : (child = frame.next_sibling[child]) {
+    var children = frame.children(parent);
+    while (children.next()) |child| {
         if (!frame.isFloating(child)) count += 1;
     }
     return count;
@@ -148,13 +167,13 @@ fn checkParent(frame: *const Frame, parent: Ui.Index) !void {
     const scrolls_along = frame.flags[parent].scrolls(along);
 
     var used = parent_layout.child_gap * @as(f32, @floatFromInt(flow_count - 1));
-    var child = frame.first_child[parent];
-    while (child != Ui.none_index) : (child = frame.next_sibling[child]) {
+    var children = frame.children(parent);
+    while (children.next()) |child| {
         if (!frame.isFloating(child)) used += frame.size[child][a];
     }
 
-    child = frame.first_child[parent];
-    while (child != Ui.none_index) : (child = frame.next_sibling[child]) {
+    children = frame.children(parent);
+    while (children.next()) |child| {
         if (frame.isFloating(child)) continue;
         const sizing = sizingAlong(frame, child, along);
         // Overflow is only allowed once every shrinkable child is at its
