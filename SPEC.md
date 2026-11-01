@@ -642,6 +642,17 @@ and the narrower signature avoids a type cycle: `TextStyle` depends on
 `Config.FontId`, which belongs to the `Context` the platform is a
 parameter of.
 
+**Measurement must be additive:** measuring `a` and `b` separately must
+sum to measuring `a ++ b` (`width("one") + width(" ") + width("two") ==
+width("one two")`). zui measures each word and each space once, caches
+them, and wraps by adding them up. A platform with letter spacing must
+therefore count the spacing after *every* glyph, including the last.
+raylib's `MeasureTextEx` omits that last spacing. Used directly, it
+under-measures every word and space, and lines overflow their boxes. The
+zui-raylib backend found this, and compensates. Kerning across word
+boundaries is the one effect additive measurement cannot express, and at
+those boundaries it is usually negligible.
+
 The platform is a **comptime** type parameter, not a vtable. Text
 measurement is the hottest call that leaves zui, so it is dispatched
 directly and can be inlined. An application has one platform, so this is

@@ -15,8 +15,9 @@ Implemented so far:
   wheel; floating elements in their own paint layers; and per-element
   state that persists across frames.
 
-Still missing from 0.2 is its reference raylib backend. Async tasks (0.3)
-come next; see the roadmap in SPEC.md §16.
+The reference backend and demo application live in
+[zui-raylib](https://github.com/AaronJClausen/zui-raylib). Async tasks
+(0.3) come next; see the roadmap in SPEC.md §16.
 
 ```zig
 const Ui = zui.Context(.{}, MyPlatform);
