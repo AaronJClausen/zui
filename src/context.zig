@@ -579,7 +579,7 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
         // Declaration
         // =============================================================
 
-        pub fn open(self: *Self, element: ElementConfig) void {
+        pub inline fn open(self: *Self, element: ElementConfig) void {
             const frame = self.declaring();
             if (self.dropped_depth > 0) {
                 self.dropped_depth += 1;
@@ -617,7 +617,7 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
         }
 
         /// A leaf element: `open` and `close` in one call.
-        pub fn box(self: *Self, element: ElementConfig) void {
+        pub inline fn box(self: *Self, element: ElementConfig) void {
             _ = self.leaf(element, .none, 0);
         }
 
@@ -671,7 +671,7 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
             }
         }
 
-        fn leaf(self: *Self, element: ElementConfig, kind: ContentKind, record_index: u32) bool {
+        inline fn leaf(self: *Self, element: ElementConfig, kind: ContentKind, record_index: u32) bool {
             const frame = self.declaring();
             if (self.dropped_depth > 0) {
                 self.countDropped(frame, .elements);
@@ -684,7 +684,11 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
             return self.current orelse @panic("zui: elements can only be declared between beginFrame() and endFrame()");
         }
 
-        fn appendElement(self: *Self, element_id: Id, element: ElementConfig, kind: ContentKind, record_index: u32) ?Index {
+        /// `inline`, like `open`, `box` and `leaf`, so each call site is
+        /// specialized to its config literal: the fields left at their
+        /// defaults cost nothing, and the 168-byte `ElementConfig` is never
+        /// copied. Out of line, declaration was about 35% slower.
+        inline fn appendElement(self: *Self, element_id: Id, element: ElementConfig, kind: ContentKind, record_index: u32) ?Index {
             const frame = self.current.?;
             frame.diagnostics.needed.set(.elements, frame.diagnostics.needed.get(.elements) + 1);
             if (frame.element_count >= max_elements) {
