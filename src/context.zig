@@ -370,7 +370,11 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
         last_frame: ?*Frame = null,
         next_frame_slot: u8 = 0,
         open_stack: [max_depth]Index = undefined,
-        depth: u16 = 0,
+        /// Not a `u16`: `open` stores it and the next element reloads it,
+        /// which LLVM widens to a 32-bit load. A wider load cannot be
+        /// forwarded from a pending narrower store, so as a `u16` it stalled
+        /// every `open`, and the box tree declared 39% slower.
+        depth: u32 = 0,
         dropped_depth: u32 = 0,
 
         /// Scratch for the emission pass, kept here so frames stay plain data.
