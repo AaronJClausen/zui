@@ -10,7 +10,10 @@ fonts or threads.
 This document is the design contract. It states what zui does, the data
 structures and algorithms it uses, the guarantees it makes, and what it
 deliberately leaves out. Where a number is a **target** rather than a
-measurement, it says so.
+measurement, it says so. Where a feature is committed to but not yet
+built, it is marked *Planned for 0.x*, and [ROADMAP.md](ROADMAP.md) has
+its plan. [ARCHITECTURE.md](ARCHITECTURE.md) covers what surrounds the
+core: hosts, renderers, modules, and the contracts that connect them.
 
 ---
 
@@ -40,6 +43,12 @@ measurement, it says so.
 7. **A small core, with extensions beside it.** Widgets, reflection-driven
    inspectors and backends are separate modules that use only the public
    API. Anything they can do, application code can do too.
+8. **One frame boundary.** Everything from outside a frame (time, host
+   events, input, task completions, feed deliveries) is applied at
+   `beginFrame`, and everything leaving it is produced by `endFrame`.
+   Declaration never sees data change under it, and a frame's inputs can
+   be relayed, replayed or sent elsewhere (ARCHITECTURE.md §2). *Planned
+   for 0.6:* task completions are still drained at each `request` (§10.3).
 
 ### Non-goals
 
@@ -48,12 +57,12 @@ version. Each has a reason:
 
 | Not in core | Why | Where it goes instead |
 |---|---|---|
-| Rendering, windowing, input polling | they are platform-specific, and owning them would tie zui to one stack | backend packages, application code |
-| Font rasterization, shaping | they are large, and the platform already has them | the `Platform.measureText` hook (§8) |
+| Rendering, windowing, input polling, OS services | they are platform-specific, and owning them would tie zui to one stack | renderers and hosts, separate packages that implement contracts defined in the core (ARCHITECTURE.md) |
+| Font rasterization, shaping | they are large, and the platform already has them | the `Platform.measureText` hook (§8), supplied by the renderer |
 | A retained widget tree | immediate mode is the model; state lives in a small keyed table (§9) | — |
 | CSS-style cascading styles | cascades cost time per element and hide where values come from | themes as plain structs (§12) |
 | Animation system | easing policies vary by application | `dt`, plus per-id state slots (§9) |
-| Flex wrap (`flex-wrap`) in v1 | it adds a pass and complicates shrinking | a later version (§16) |
+| Flex wrap (`flex-wrap`) in v1 | it adds a pass and complicates shrinking | *planned for 0.10*, as an opt-in pass (ROADMAP.md L7) |
 | Accessibility tree generation | it is platform-specific | the optional `semantics` config, emitted as a separate list (§7.6) |
 
 ---
@@ -81,11 +90,17 @@ zui/                     the core module "zui"
   src/interaction.zig    hit testing, hover/press/focus, scrolling
   src/state.zig          the keyed state table
   src/tasks.zig          TaskPool and the completion queue
-  src/commands.zig       the RenderCommand union and emission
-  src/debug.zig          the debug overlay (compiled out unless enabled)
+  src/commands.zig       the RenderCommand union
+  src/emission.zig       render commands, clip and hit regions
 zui_widgets/             optional module: button, checkbox, slider, text field, dropdown, disclosure
 zui_reflect/             optional module: struct inspectors generated with @typeInfo
 zui_testing/             optional module: test platform, input driver, snapshots, command checks
+zui_app/                 optional module: Platform from a host and a renderer, and the standard loop (planned for 0.7)
+zui_wire/                optional module: the wire format for frame records and commands (planned for 0.9)
+zui_debug/               optional module: the element inspector (planned for 0.12)
+zui_motion/              optional module: tweens and exit animations (planned for 0.14)
+zui_color/               optional module: HSL, OKLCH and OKLab, mixing, palettes (planned)
+zui_icons/               optional module: icon names to icon-font codepoints (planned)
 ```
 
 Each optional module's root file is named after it
@@ -96,14 +111,17 @@ only through `@import("zui")`: **the compiler, not a review, keeps them
 on the public API.** `zui_reflect` also imports `zui_widgets`.
 
 Backends (`zui-raylib`, `zui-sokol`, `zui-terminal`) are separate packages
-that depend on `zui`. They are never dependencies of it.
+that depend on `zui`. They are never dependencies of it. *Planned for
+0.7:* they become renderers and hosts implementing contracts defined in
+this repo, and native hosts live in one `zui-host` repo, one directory per
+OS (ARCHITECTURE.md §1, §8).
 
 Build options, exposed as a `zui_options` module through `b.addOptions`:
 
 | Option | Default | Effect |
 |---|---|---|
-| `-Dzui-debug=bool` | `false` | compiles in the debug overlay and the duplicate-id names (§13). Otherwise those code paths are not analyzed at all. |
-| `-Dzui-safety=bool` | follows `std.debug.runtime_safety` | the invariant sweeps in §14 |
+| `-Dzui-debug=bool` | `false` | keeps each id's name, so panics and diagnostics name elements instead of printing hashes (§13). Otherwise those code paths are not analyzed at all. |
+| `-Dzui-safety=bool` | follows `std.debug.runtime_safety` | the invariant sweeps in §14. *Planned for 0.12.* |
 
 ---
 
@@ -349,6 +367,18 @@ A `percent` child contributes nothing to a `fit` parent's size, because
 the parent's size would otherwise depend on the child's and the child's
 on the parent's. Percent is meant for parents whose size is decided some
 other way (`fixed`, `grow`, or the root).
+
+As in CSS, a percentage is of the parent's content box, **not counting
+gaps**, and a percent child can shrink like a `fit` or `grow` child. Two
+`.percent(0.5)` children with a 10-unit gap and a 50-unit child that
+cannot shrink, in a 210-unit row, come out 70, 70 and 50: the overflow
+of 80 is taken from the two largest. (Clay subtracts the gaps first and
+never shrinks percent children, so its version of that row overflows.)
+
+A `grow` child starts from its content size, and free space is added on
+top, as with CSS `flex-basis: auto`. Two `grow` children whose contents
+are 8 and 128 wide share 300 units as 90 and 210, not 150 each. *Planned
+for 0.10:* a zero basis (`.growEqual`) for equal columns.
 
 ### 6.2 Passes
 
@@ -699,6 +729,8 @@ compile error that names the config field to set.
 
 ### 7.6 Semantics (optional)
 
+*Planned for 0.12.*
+
 An element can carry `.semantics = .{ .role = .button, .label = "Save" }`.
 Frames then also contain `Frame.semantics()`: a flat list of
 `{ id, role, label, bounds, state }` in tree order, for a backend that
@@ -903,7 +935,10 @@ How `request(ui, id, function, args, .{ .key = ... })` works:
 2. **Later requests for the same id and key** return the slot's state
    without blocking or doing work.
 3. **Completions are drained at each request,** with `get(buffer, min =
-   0)`, which never blocks.
+   0)`, which never blocks. *Planned for 0.6:* registered pools drain in
+   `beginFrame` instead, as §5 says and principle 8 requires, so every
+   request in a frame sees the same state; in 0.9 `TaskPool` becomes a
+   feed that delivers once (ROADMAP.md A2, F1).
    - The queue belongs to the pool, not the Context. It holds one entry
      per slot, and a slot has at most one outstanding completion, so the
      wrapper's `putOneUncancelable` never blocks, even when the task ran
@@ -1068,9 +1103,10 @@ reported once per frame, with full context.
 | `close` without `open` | the depth counter would go below zero | panic | ignored |
 | scroll container without an id | checked at `open` | panic | the element clips but does not scroll |
 
-With `-Dzui-debug`, `Id.of` keeps its name in a comptime table that is
-linked only in debug builds, so messages read
-`duplicate id "save" (from toolbar and from file_menu)`, not a hex hash.
+With `-Dzui-debug`, `Id.of` keeps its name, so panics name the element
+(`zui: duplicate id "save" (0x…) in one frame`) instead of printing only
+a hex hash.
+Without it, the name is not stored at all.
 
 ### 13.2 Capacity limits (defined behavior, reported)
 
@@ -1105,7 +1141,7 @@ frame, or (in development) treat it as fatal.
 - **Randomized trees.** A seeded generator builds random trees of 1–5,000
   elements with random sizing rules, and runs the invariant checks on each
   (the same approach as the model-checked table in the asserts lesson).
-- **Golden layouts.** About 50 hand-written trees with exact expected
+- **Golden layouts.** About 30 hand-written trees with exact expected
   rectangles, covering every sizing rule, alignment, padding, gap, wrap
   mode and floating anchor.
 - **Allocation discipline.** Every test runs with a failing allocator after
@@ -1205,12 +1241,12 @@ targets is a step for a reference machine:
 | To... | Use |
 |---|---|
 | draw something zui does not know | `custom(data, config)`, with your `CustomData` |
-| size a custom leaf from its content | `.layout.sizing = .fixed(...)` from your own measurement, or a `Platform.measureCustom(data) [2]f32` hook (optional declaration) |
+| size a custom leaf from its content | `.layout.sizing = .fixed(...)` from your own measurement. *Planned for 0.10:* optional `measureCustom(data) [2]f32` and `imageSize(handle) [2]f32` on the renderer (ARCHITECTURE.md §3.2) |
 | add widgets | functions over the public API; `zui_widgets` (§15.1) is the reference set |
-| bridge accessibility | `Frame.semantics()` (§7.6) |
-| animate | `state(id, T)` for per-element animation state, plus `Input.dt_seconds` |
+| bridge accessibility | `Frame.semantics()` (§7.6, planned for 0.12) |
+| animate | `state(id, T)` for per-element animation state, plus `Input.dt_seconds`. *Planned for 0.14:* `zui_motion` |
 | render | iterate `Frame.commands()`; backends are ordinary packages |
-| debug visually | `-Dzui-debug` adds `ui.debugOverlay()`, which declares an inspector panel showing the hovered element's id, rect and config |
+| debug visually | *Planned for 0.12:* `zui_debug`, an inspector panel showing the element tree and the hovered element's id, rect and config, built on a read-only `Frame.inspect` |
 
 ### 15.1 Widgets
 
@@ -1319,8 +1355,20 @@ It lives outside the core because most applications will not need it.
 | 0.3 | TaskPool, the completion queue, `needsFrame`, frames in flight with a render thread | a thumbnail-grid example cancels off-screen loads, and an idle application uses 0% CPU |
 | 0.4 | `zui_widgets` (button, checkbox, slider, text field), `zui_reflect`, `zui_testing` snapshots | the widget set is built on the public API only (enforced by the module boundary, §3) |
 | 0.5 | parallel measurement; benchmarks that meet the §6.5 targets | targets met on a 2020 desktop core; CI reports them (§14.3) |
-| 0.6 | regression checks that hold on any CPU: CI counts instructions under Callgrind, for a build with a fixed `-Dcpu` and a fixed number of frames per scenario, and fails on more than 2% growth over the parent commit; `zig build bench-compare -- <ref>` builds both commits, alternates them on the contributor's machine and reports the median ratio with its spread | the instruction counts repeat exactly between runners; the local comparison catches a stall that leaves the instruction count unchanged, such as `depth: u16` (PERF-ITEMS.md) |
-| later | layout islands, flex wrap, static subtrees | each one ships only if the benchmarks show a win |
+| 0.6 | measure and audit: CI counts instructions under Callgrind, for a build with a fixed `-Dcpu` and a fixed number of frames per scenario, and fails on more than 2% growth over the parent commit; `zig build bench-compare -- <ref>` alternates two commits locally and reports the median ratio with its spread; the async audit; task completions applied at `beginFrame` (principle 8); startup benchmarks; `-Dzui-trace` | the instruction counts repeat exactly between runners; the local comparison catches the `depth: u16` stall (PERF-ITEMS.md); an off trace build's instruction counts are unchanged |
+| 0.7 | the contracts (the breaking release): renderer and host contracts, `Surface`, host events, conformance suites, `zui_app`; letter spacing through a `MeasureKey`; display scale and zoom; the raylib adapter host | every backend passes the conformance suites and runs the demo through `zui_app` |
+| 0.8 | the first native host, Windows, with the system material behind the window | the demo runs on it unchanged, passes the host suite and idles at 0% CPU |
+| 0.9 | feeds (with `TaskPool` as a feed that delivers once), the relay tap, `zui_wire`, replay, rendering in another process, file watching | task tests pass unchanged; a recorded session replays to identical commands |
+| 0.10 | text and layout: the single-line wrap fast path, a whole-string metrics cache, `.growEqual`, aspect ratio and natural sizes, dividers, decorated images, floating options (§6.4), right-to-left layout, flex wrap, drag and drop, the next-frame deadline | golden, snapshot and interaction tests for each; warm text faster by 0.6's measure; no change to the other §6.5 scenarios beyond noise |
+| 0.11 | effects: gradients, shadows, glow, backdrop blur, transforms, materials, each lowered for renderers without it | lowering tested for each; one renderer draws each |
+| 0.12 | `zui_debug` over a read-only `Frame.inspect`; the semantics list (§7.6); `-Dzui-safety` (§3); a demo running in a browser | the inspector driven by `zui_testing` over the Documents view; the Windows host bridges semantics to UI Automation |
+| 0.13 | macOS, Linux and web hosts; notifications, dialogs, URLs and menus; native and custom window decorations; more than one window | each host passes the host suite and runs the demo unchanged |
+| 0.14 | `zui_motion` (tweens over `state` and `dt_seconds`), opt-in exit animations, drag and momentum scrolling | tweens tested frame by frame; an idle application still sleeps; a full ghost buffer is reported like other limits (§13.2) |
+| 0.15 | text field: selection, word movement, clipboard, multiple lines, IME | `zui_testing` tests for each; IME on Windows |
+| later | docking, a grid layout, layout islands, static subtrees, SIMD | each one ships only with a measured win or a demonstrated need |
+
+[ROADMAP.md](ROADMAP.md) breaks each release into items, with what
+grounds each one and how it is judged.
 
 **Static subtrees** (later, opt-in) are a tree described as a comptime
 value, whose layout is computed during the build and stored as a constant

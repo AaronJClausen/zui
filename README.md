@@ -33,9 +33,15 @@ Implemented so far:
   all of it.
 
 The reference backend and demo application live in
-[zui-raylib](https://github.com/AaronJClausen/zui-raylib). Later work
-(layout islands, flex wrap, static subtrees) ships only if the benchmarks
-show a win; see SPEC.md §16.
+[zui-raylib](https://github.com/AaronJClausen/zui-raylib).
+
+Next: measurement you can trust and an audit of the async model (0.6),
+then contracts for renderers and hosts (0.7), a native Windows host
+(0.8), feeds and a wire format for streaming frames in and out (0.9), and
+from there text, layout, effects, an inspector, more hosts, motion and
+text editing. [ROADMAP.md](ROADMAP.md) has the plan, where each item
+stands and where to pick up, and [ARCHITECTURE.md](ARCHITECTURE.md) how
+the pieces connect.
 
 ```zig
 const Ui = zui.Context(.{}, MyPlatform);
