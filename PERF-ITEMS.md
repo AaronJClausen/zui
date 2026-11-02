@@ -27,7 +27,7 @@ numbers.
 
 | Item | Outcome |
 |---|---|
-| 0. Measure declaration | Shipped. `zig build bench` has declare columns, a Documents-view scenario, and CI compares declaration too. The `perf` profile is below. |
+| 0. Measure declaration | Shipped. `zig build bench` has declare columns, a Documents-view scenario, and `--compare` checks declaration too. The `perf` profile is below. |
 | 5, step 1. Delete `floating_root` | Shipped. −16 KiB of `required_bytes`; declaration flat except the Documents view (−7%). |
 | 1. Stop copying `ElementConfig` | Shipped, variant 1 (`inline`). Declaration −7% to −40%, `endFrame` unchanged; demo binary +1.5%. |
 | 2. Remove the child links | Shipped. Declaration −6% to −31%, layout unchanged, −48 KiB of `required_bytes`. |

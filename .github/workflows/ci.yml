@@ -89,51 +89,16 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: ${{ env.ZIG_VERSION }}
-      # Fails if this commit is more than 10% slower than the one before,
-      # timed on the same runner. The §6.5 targets are reported but not
-      # enforced: runners differ by 2x (62.6 µs to 125.3 µs for the box tree
-      # across three runs), so a fixed limit would fail at random.
-      - name: Check out the commit to compare against
-        id: base
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: |
-          if [ -z "$BASE_SHA" ] || ! git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
-            echo "No earlier commit to compare against."
-            exit 0
-          fi
-          git worktree add ../base "$BASE_SHA"
-          if (cd ../base && zig build -l | grep -q "^  bench "); then
-            echo "compare=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "The earlier commit has no benchmarks."
-          fi
+      # Times are reported, never compared: a runner can time one commit 45%
+      # slower than its parent when no other machine can reproduce it. This
+      # still fails on any allocation after init, which no CPU can change.
       - name: Benchmark
-        env:
-          COMPARE: ${{ steps.base.outputs.compare }}
         run: |
           # Without this, `| tee` hides a failing benchmark: steps without a
           # `shell:` run as `bash -e`, not `bash -eo pipefail`.
           set -o pipefail
-          if [ "$COMPARE" != "true" ]; then
-            zig build bench | tee bench.txt
-          else
-            # A shared runner's speed drifts between runs, so a regression
-            # must show up in each of three alternating measurements.
-            passed=false
-            for attempt in 1 2 3; do
-              (cd ../base && zig build bench -- --json "$GITHUB_WORKSPACE/base.json" > /dev/null)
-              if zig build bench -- --compare base.json | tee bench.txt; then
-                passed=true
-                break
-              fi
-              echo "Attempt $attempt measured a regression; measuring again."
-            done
-            [ "$passed" = true ] || exit 1
-          fi
+          zig build bench | tee bench.txt
           { echo '```'; cat bench.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

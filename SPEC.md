@@ -1187,17 +1187,15 @@ nanoseconds per element of `endFrame` and platform calls per frame.
 | `--json <path>` | save each single-threaded scenario's fastest declaration and fastest `endFrame` |
 | `--compare <path>` | fail if any of them is more than 10% slower than in that file |
 
-**How CI uses it.** The benchmark job times the previous commit and the
-new one on the same runner, alternately, and fails if a scenario's
-declaration or `endFrame` is more than 10% slower in each of three
-attempts. (The draft compared against a
-stored baseline. A file of times from one machine says nothing about
-another, so the comparison is always against a fresh measurement.) The
-targets are reported in the job summary but not enforced. GitHub's
-runners differ too much for a fixed limit: three runs of the box tree
-took 62.6, 102.8 and 125.3 µs, so a target check would pass or fail
-depending on the machine. Comparing two commits on one runner is stable:
-the same three runs agreed with themselves to within 6%. Enforcing the targets is a step for a reference machine:
+**How CI uses it.** The benchmark job runs it without flags: it fails on
+an allocation and reports the times, but compares nothing. Timing two
+commits on one runner was tried and dropped. GitHub's runners range from
+62.6 to 125.3 µs for the box tree, and one runner timed a commit 45%
+slower than the commit before in three alternating attempts, while two
+other runners and a bisect on the same CPU model found no difference. A
+comparison is meaningful on one machine with nothing else running:
+`--json` at the old commit, then `--compare` at the new one. Enforcing the
+targets is a step for a reference machine:
 `zig build bench -- --check-targets`.
 
 ---
@@ -1320,7 +1318,8 @@ It lives outside the core because most applications will not need it.
 | 0.2 | input, hover/press/click/focus, clipping, scrolling, floating elements, the state table | the interaction tests pass; a reference raylib backend renders the example application |
 | 0.3 | TaskPool, the completion queue, `needsFrame`, frames in flight with a render thread | a thumbnail-grid example cancels off-screen loads, and an idle application uses 0% CPU |
 | 0.4 | `zui_widgets` (button, checkbox, slider, text field), `zui_reflect`, `zui_testing` snapshots | the widget set is built on the public API only (enforced by the module boundary, §3) |
-| 0.5 | parallel measurement; benchmarks that meet the §6.5 targets | targets met on a 2020 desktop core; CI reports them and fails on regressions (§14.3) |
+| 0.5 | parallel measurement; benchmarks that meet the §6.5 targets | targets met on a 2020 desktop core; CI reports them (§14.3) |
+| 0.6 | regression checks that hold on any CPU: CI counts instructions under Callgrind, for a build with a fixed `-Dcpu` and a fixed number of frames per scenario, and fails on more than 2% growth over the parent commit; `zig build bench-compare -- <ref>` builds both commits, alternates them on the contributor's machine and reports the median ratio with its spread | the instruction counts repeat exactly between runners; the local comparison catches a stall that leaves the instruction count unchanged, such as `depth: u16` (PERF-ITEMS.md) |
 | later | layout islands, flex wrap, static subtrees | each one ships only if the benchmarks show a win |
 
 **Static subtrees** (later, opt-in) are a tree described as a comptime
