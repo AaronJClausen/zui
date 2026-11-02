@@ -481,6 +481,9 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
             const frame = self.current orelse @panic("zui: endFrame() called without beginFrame()");
             if (self.depth != 1 or self.dropped_depth != 0) self.reportUnbalanced(frame);
             frame.subtree_end[root_index] = @intCast(frame.element_count);
+            const needed = &frame.diagnostics.needed;
+            needed.set(.elements, needed.get(.elements) + frame.element_count);
+            needed.set(.text_bytes, needed.get(.text_bytes) + frame.text_bytes_used);
 
             layout.run(Self, self, frame);
             @call(.never_inline, emission.run, .{ Self, self, frame });
@@ -653,14 +656,16 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
                 self.countDropped(frame, .elements);
                 return;
             }
-            const needed_bytes = frame.diagnostics.needed.get(.text_bytes) + @as(u32, @intCast(content.len));
-            frame.diagnostics.needed.set(.text_bytes, needed_bytes);
             if (frame.text_bytes_used + content.len > config.max_text_bytes) {
+                self.countDroppedTextBytes(frame, content.len);
                 self.recordOverflow(frame, .text_bytes, 0);
                 return;
             }
             const record_index = frame.text_count;
-            const element_index = self.appendElement(.none, .{}, .text, record_index) orelse return;
+            const element_index = self.appendElement(.none, .{}, .text, record_index) orelse {
+                self.countDroppedTextBytes(frame, content.len);
+                return;
+            };
             frame.subtree_end[element_index] = element_index + 1;
             const start = frame.text_bytes_used;
             @memcpy(frame.text_bytes[start..][0..content.len], content);
@@ -717,8 +722,8 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
         /// copied. Out of line, declaration was about 35% slower.
         inline fn appendElement(self: *Self, element_id: Id, element: ElementConfig, kind: ContentKind, record_index: u32) ?Index {
             const frame = self.current.?;
-            frame.diagnostics.needed.set(.elements, frame.diagnostics.needed.get(.elements) + 1);
             if (frame.element_count >= max_elements) {
+                self.countDropped(frame, .elements);
                 self.recordOverflow(frame, .elements, element_id.hash);
                 return null;
             }
@@ -833,6 +838,11 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
             _ = self;
             frame.diagnostics.exceeded.insert(limit);
             if (frame.diagnostics.first_dropped_id == 0) frame.diagnostics.first_dropped_id = hash;
+        }
+
+        fn countDroppedTextBytes(self: *Self, frame: *Frame, byte_count: usize) void {
+            _ = self;
+            frame.diagnostics.needed.set(.text_bytes, frame.diagnostics.needed.get(.text_bytes) + @as(u32, @intCast(byte_count)));
         }
 
         fn countDropped(self: *Self, frame: *Frame, limit: Limit) void {
