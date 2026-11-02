@@ -480,8 +480,13 @@ What made the difference, in order of effect:
 - **Each pass stays its own function.** Inlined into one body they were
   about 3% slower, and fused into four loops 17% slower.
 
-Declaration, not layout, is now the larger half of a frame: about 110 µs
-of the box tree's 206 µs.
+In 0.5, declaration was the larger half of a frame: about 110 µs of the
+box tree's 206 µs. `zig build bench` now times it on its own (§14.3).
+Inlining `open` and `box` so the 168-byte `ElementConfig` is never
+copied, dropping the child links (§4.3), and writing fewer per-element
+fields cut it by 21–56%: the box tree's declaration went from 104 µs
+to 72 µs and the wide tree's from 124 µs to 54 µs, with layout
+unchanged.
 
 ---
 

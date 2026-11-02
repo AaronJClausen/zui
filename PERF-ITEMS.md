@@ -15,10 +15,83 @@ This document lists ideas for reducing it. Each item says:
 - **Spec:** whether it departs from SPEC.md, and if so, whether that is
   worth it.
 
-Nothing here has been tried yet. The 0.5 work is a warning: four
-plausible layout optimizations made layout slower, and only measuring
-showed it. So the measurement comes first (item 0), and every item ships
-only if its numbers say so.
+The 0.5 work is a warning: four plausible layout optimizations made
+layout slower, and only measuring showed it. So the measurement comes
+first (item 0), and every item ships only if its numbers say so.
+
+## Results so far
+
+Measured on the reference machine as the fastest of 15 alternating runs
+of `zig build bench`. Each commit message has its own before-and-after
+numbers.
+
+| Item | Outcome |
+|---|---|
+| 0. Measure declaration | Shipped. `zig build bench` has declare columns, a Documents-view scenario, and CI compares declaration too. The `perf` profile is below. |
+| 5, step 1. Delete `floating_root` | Shipped. −16 KiB of `required_bytes`; declaration flat except the Documents view (−7%). |
+| 1. Stop copying `ElementConfig` | Shipped, variant 1 (`inline`). Declaration −7% to −40%, `endFrame` unchanged; demo binary +1.5%. |
+| 2. Remove the child links | Shipped. Declaration −6% to −31%, layout unchanged, −48 KiB of `required_bytes`. |
+| 3. Counters out of frame memory | Moving the counts to `Context` changed nothing (±3%). Deriving them instead is measured below, with the stall the profile found. Its test, that a frame does not inherit the previous frame's counts, was kept. |
+| 4. Clear only the used id slots | Shipped, but marginal: −2% to −4% (1–3 µs) on the 4,000-element trees, whose tables are 32 KiB; 0.1 µs at the default config's 16 KiB table. +16 KiB of `required_bytes`. |
+| 5, step 2. Fewer per-element writes | Shipped: `floating_index` only for floating elements (−1% to −19%, most in the Documents view), `subtree_end` only for leaves (box tree −2%). |
+| 5, step 3. Pack the hot fields | Not tried. Once the stall below is fixed, no instruction in the box tree's declaration has more than 4% of its samples, so packing has no hot spot to target. |
+| 6. Static subtrees | Not tried: waits for an application with enough static structure. |
+
+Together, against the item-0 commit (the same library code as 0.5):
+
+| Scenario | Declaration | `endFrame` |
+|---|---|---|
+| 4,096 boxes, depth 8 | 104.0 → 71.8 µs (−31%) | 99.1 → 99.5 µs |
+| 4,000 children of one parent | 123.9 → 54.0 µs (−56%) | 64.9 → 67.0 µs |
+| 1,000 texts, warm cache | 25.8 → 15.4 µs (−40%) | 184.1 → 182.3 µs |
+| depth 64 | 1.9 → 1.5 µs (−21%) | 1.9 → 2.0 µs |
+| Documents view | 7.4 → 3.4 µs (−54%) | 6.4 → 6.5 µs |
+
+The wide tree's `endFrame` moves between about 65 and 67 µs from one
+build to the next, whatever the change, so its +3% is code placement.
+
+### The profile: a store-forwarding stall on `depth`
+
+Profiled with `perf` in WSL, in an `x86_64-linux-gnu` build with LLVM and
+LLD. This `perf` cannot resolve symbols at Zig's 0x1000000 image base, so
+the samples from `perf script -F ip` were matched to `nm` by hand.
+
+After the shipped items, 27.5% of the box tree's declaration samples land
+on a single load: `appendElement` reloading `Context.depth` to find the
+parent, `open_stack[depth - 1]`.
+- `depth` is a `u16`, and the previous `open` wrote it with a 16-bit store.
+- LLVM widened the reload to 32 bits. A load wider than a recent store
+  cannot be forwarded from the store buffer, so every `open` waits for the
+  previous one's store to reach the cache.
+- The reload happens because `appendElement` first increments
+  `needed.elements` through the frame pointer, which might alias `self`.
+  Without that store, LLVM reuses the `depth` it already loaded for the
+  depth check.
+
+That is also why moving the counts to `Context` (item 3 as planned)
+changed nothing: it is still a store through a pointer before the reload.
+
+Two fixes, against the branch's last commit (fastest of 20 alternating
+runs of declaration):
+
+| Change | 4,096 boxes | 4,000 children | 1,000 texts | depth 64 | Documents view |
+|---|---|---|---|---|---|
+| none | 71.8 µs | 54.0 µs | 15.3 µs | 1.5 µs | 3.4 µs |
+| `depth: u32` | 52.3 µs (−27%) | 53.8 µs (0%) | 14.3 µs (−7%) | 1.2 µs (−20%) | 3.3 µs (−3%) |
+| derived counts | 52.0 µs (−28%) | 53.3 µs (−1%) | 14.2 µs (−7%) | 1.1 µs (−27%) | 3.3 µs (−3%) |
+| both | 51.3 µs (−29%) | 53.0 µs (−2%) | 13.8 µs (−10%) | 1.2 µs (−20%) | 3.2 µs (−6%) |
+
+- **`depth: u32`** is one line. Loads and stores of `depth` are then the
+  same width, so forwarding works whether or not LLVM reloads it.
+- **Derived counts** go further than item 3 planned: in the normal case
+  `needed.elements` is `element_count` and `needed.text_bytes` is
+  `text_bytes_used`. Only dropped elements and bytes are counted as they
+  happen, and `endFrame` adds the stored totals. That removes the
+  per-element read-modify-write instead of moving it. The capacity tests,
+  including the overflowing frames, pass unchanged.
+
+The wide tree has no `open`s, so it gains nothing from either. `endFrame`
+is within ±1% for all three. Neither change is on the branch yet.
 
 ## 0. First, measure declaration on its own
 
