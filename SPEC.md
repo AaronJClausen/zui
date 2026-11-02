@@ -483,10 +483,10 @@ What made the difference, in order of effect:
 In 0.5, declaration was the larger half of a frame: about 110 µs of the
 box tree's 206 µs. `zig build bench` now times it on its own (§14.3).
 Inlining `open` and `box` so the 168-byte `ElementConfig` is never
-copied, dropping the child links (§4.3), and writing fewer per-element
-fields cut it by 21–56%: the box tree's declaration went from 104 µs
-to 72 µs and the wide tree's from 124 µs to 54 µs, with layout
-unchanged.
+copied, dropping the child links (§4.3), writing fewer per-element
+fields, and fixing a store-forwarding stall on the open-element depth
+cut it by 42–56%: the box tree's declaration went from 104 µs to 52 µs
+and the wide tree's from 124 µs to 55 µs, with layout unchanged.
 
 ---
 

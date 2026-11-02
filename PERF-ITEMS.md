@@ -21,8 +21,8 @@ first (item 0), and every item ships only if its numbers say so.
 
 ## Results so far
 
-Measured on the reference machine as the fastest of 15 alternating runs
-of `zig build bench`. Each commit message has its own before-and-after
+Measured on the reference machine as the fastest of 15 to 20 alternating
+runs of `zig build bench`. Each commit message has its own before-and-after
 numbers.
 
 | Item | Outcome |
@@ -31,24 +31,25 @@ numbers.
 | 5, step 1. Delete `floating_root` | Shipped. −16 KiB of `required_bytes`; declaration flat except the Documents view (−7%). |
 | 1. Stop copying `ElementConfig` | Shipped, variant 1 (`inline`). Declaration −7% to −40%, `endFrame` unchanged; demo binary +1.5%. |
 | 2. Remove the child links | Shipped. Declaration −6% to −31%, layout unchanged, −48 KiB of `required_bytes`. |
-| 3. Counters out of frame memory | Moving the counts to `Context` changed nothing (±3%). Deriving them instead is measured below, with the stall the profile found. Its test, that a frame does not inherit the previous frame's counts, was kept. |
-| 4. Clear only the used id slots | Shipped, but marginal: −2% to −4% (1–3 µs) on the 4,000-element trees, whose tables are 32 KiB; 0.1 µs at the default config's 16 KiB table. +16 KiB of `required_bytes`. |
+| 3. Counters out of frame memory | Moving the counts to `Context` changed nothing (±3%). Shipped instead: count only dropped elements and bytes, and add the stored totals in `endFrame`. Declaration −2% to −8% on top of the `depth` fix below. |
+| Found by the profile: `depth: u32` | Shipped. Box tree declaration −28%, depth 64 −20%, text −6%. See below. |
+| 4. Clear only the used id slots | Shipped, then reverted: −2% to −4% (1–3 µs) on the 4,000-element trees, whose tables are 32 KiB, but 0.1 µs at the default config's 16 KiB table, for +16 KiB of `required_bytes`. Its test, that a reused frame forgets the earlier ids, was kept. |
 | 5, step 2. Fewer per-element writes | Shipped: `floating_index` only for floating elements (−1% to −19%, most in the Documents view), `subtree_end` only for leaves (box tree −2%). |
-| 5, step 3. Pack the hot fields | Not tried. Once the stall below is fixed, no instruction in the box tree's declaration has more than 4% of its samples, so packing has no hot spot to target. |
+| 5, step 3. Pack the hot fields | Not tried. With the stall below fixed, no instruction in the box tree's declaration has more than 4% of its samples, so packing has no hot spot to target. |
 | 6. Static subtrees | Not tried: waits for an application with enough static structure. |
 
 Together, against the item-0 commit (the same library code as 0.5):
 
 | Scenario | Declaration | `endFrame` |
 |---|---|---|
-| 4,096 boxes, depth 8 | 104.0 → 71.8 µs (−31%) | 99.1 → 99.5 µs |
-| 4,000 children of one parent | 123.9 → 54.0 µs (−56%) | 64.9 → 67.0 µs |
-| 1,000 texts, warm cache | 25.8 → 15.4 µs (−40%) | 184.1 → 182.3 µs |
-| depth 64 | 1.9 → 1.5 µs (−21%) | 1.9 → 2.0 µs |
-| Documents view | 7.4 → 3.4 µs (−54%) | 6.4 → 6.5 µs |
+| 4,096 boxes, depth 8 | 104.0 → 51.8 µs (−50%) | 99.1 → 100.0 µs |
+| 4,000 children of one parent | 123.9 → 54.5 µs (−56%) | 64.9 → 67.9 µs |
+| 1,000 texts, warm cache | 25.8 → 13.9 µs (−46%) | 184.1 → 184.2 µs |
+| depth 64 | 1.9 → 1.1 µs (−42%) | 1.9 → 1.9 µs |
+| Documents view | 7.4 → 3.4 µs (−54%) | 6.4 → 6.4 µs |
 
 The wide tree's `endFrame` moves between about 65 and 67 µs from one
-build to the next, whatever the change, so its +3% is code placement.
+build to the next, whatever the change, so its +5% is code placement.
 
 ### The profile: a store-forwarding stall on `depth`
 
@@ -56,7 +57,7 @@ Profiled with `perf` in WSL, in an `x86_64-linux-gnu` build with LLVM and
 LLD. This `perf` cannot resolve symbols at Zig's 0x1000000 image base, so
 the samples from `perf script -F ip` were matched to `nm` by hand.
 
-After the shipped items, 27.5% of the box tree's declaration samples land
+After items 1, 2, 4 and 5, 27.5% of the box tree's declaration samples land
 on a single load: `appendElement` reloading `Context.depth` to find the
 parent, `open_stack[depth - 1]`.
 - `depth` is a `u16`, and the previous `open` wrote it with a 16-bit store.
@@ -71,8 +72,8 @@ parent, `open_stack[depth - 1]`.
 That is also why moving the counts to `Context` (item 3 as planned)
 changed nothing: it is still a store through a pointer before the reload.
 
-Two fixes, against the branch's last commit (fastest of 20 alternating
-runs of declaration):
+Two fixes, measured together and apart against the code before them
+(fastest of 20 alternating runs of declaration):
 
 | Change | 4,096 boxes | 4,000 children | 1,000 texts | depth 64 | Documents view |
 |---|---|---|---|---|---|
@@ -90,8 +91,8 @@ runs of declaration):
   per-element read-modify-write instead of moving it. The capacity tests,
   including the overflowing frames, pass unchanged.
 
-The wide tree has no `open`s, so it gains nothing from either. `endFrame`
-is within ±1% for all three. Neither change is on the branch yet.
+The wide tree has a single `open`, so it gains nothing from either.
+`endFrame` is within ±1% for all three. Both shipped, `depth: u32` first.
 
 ## 0. First, measure declaration on its own
 
