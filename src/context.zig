@@ -176,7 +176,6 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
         pub const max_elements = config.max_elements;
         pub const max_depth = config.max_depth;
         const id_table_slots = nextPowerOfTwo(config.max_elements * 2);
-        const IdTableSlot = std.meta.Int(.unsigned, std.math.ceilPowerOfTwoAssert(u16, @max(8, @bitSizeOf(std.math.IntFittingRange(0, id_table_slots - 1)))));
         pub const snaps_to_pixels = @hasDecl(Platform, "scale");
 
         pub const Cache = text_layout.MeasureCache(config.FontId, config.measure_cache_entries, Platform);
@@ -252,10 +251,6 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
             command_count: u32,
 
             id_table: [id_table_slots]Index,
-            /// The `id_table` slots this frame filled, so the next `reset`
-            /// clears only those instead of the whole table.
-            filled_id_slots: [max_elements]IdTableSlot,
-            filled_id_slot_count: u32,
             diagnostics: Diagnostics,
             viewport: [2]f32,
             held: std.atomic.Value(bool),
@@ -342,8 +337,7 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
                 self.command_count = 0;
                 self.diagnostics = .{};
                 self.viewport = frame_viewport;
-                for (self.filled_id_slots[0..self.filled_id_slot_count]) |slot| self.id_table[slot] = none_index;
-                self.filled_id_slot_count = 0;
+                @memset(&self.id_table, none_index);
             }
         };
 
@@ -415,8 +409,6 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
             for (&self.memory.frames) |*frame| {
                 frame.held = .init(false);
                 frame.element_count = 0;
-                @memset(&frame.id_table, none_index);
-                frame.filled_id_slot_count = 0;
             }
         }
 
@@ -821,8 +813,6 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
                 const existing = frame.id_table[slot];
                 if (existing == none_index) {
                     frame.id_table[slot] = index;
-                    frame.filled_id_slots[frame.filled_id_slot_count] = @intCast(slot);
-                    frame.filled_id_slot_count += 1;
                     return true;
                 }
                 if (frame.element_id[existing] == hash) {
