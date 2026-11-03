@@ -184,8 +184,10 @@ presented frame.
 
 **Spec.** §14.3.
 
-**Status.** The scenarios are done, specified in SPEC.md §14.3. At
-`a6d8e34` on the reference machine, the fastest samples were:
+**Status.** Done: the scenarios are specified in SPEC.md §14.3. The
+demo's cold start moved to C4, because the demo lives in zui-raylib,
+which keeps today's `Platform` until 0.7. With the library at `a6d8e34`
+on the reference machine, the fastest samples were:
 
 | Scenario | Fastest |
 |---|---|
@@ -193,9 +195,6 @@ presented frame.
 | `initBuffer`, default config | 10.0 µs |
 | first frame, Documents view | 30.3 µs (steady: 9.9 µs) |
 | first frame, 1,000 texts | 230.0 µs |
-
-The demo's cold start is not measured yet: the demo lives in zui-raylib,
-which keeps today's `Platform` until 0.7.
 
 ### P2. Trace zones
 
@@ -295,7 +294,9 @@ so `Context` does not change. `zui_app.run` is the standard loop: poll,
 apply the frame record, declare, end the frame, submit, release, wait
 until the deadline. It reports capabilities and fallbacks in effect.
 
-**Done when:** the demo runs on `zui_app` with less code than today.
+**Done when:** the demo runs on `zui_app` with less code than today, and
+its time from process start to its first presented frame is measured
+(moved from P1).
 
 **Spec.** §3; ARCHITECTURE.md §3.1.
 
