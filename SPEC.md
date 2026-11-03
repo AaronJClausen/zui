@@ -253,8 +253,9 @@ gets `max_elements` slots, and commands and lines get
 Measured for the default `Config` in 0.2: **1.79 MiB per frame in flight,
 and 4.29 MiB of `required_bytes`**. That covers two frames, the text
 cache, the state table (96 KiB) and the previous frame's interaction
-results (480 KiB, §7.4). A
-frame only *touches* the slots it uses, so the cost per frame still scales
+results (480 KiB, §7.4). By `a6d8e34`, `required_bytes` had grown to
+4.63 MiB; `zig build bench` prints the current figure (§14.3). A frame
+only *touches* the slots it uses, so the cost per frame still scales
 with the elements declared. Applications with smaller UIs should lower the
 limits, and `required_bytes` reports the result exactly.
 
@@ -1306,17 +1307,31 @@ frame, or (in development) treat it as fatal.
 - frames per second with a render thread against one thread, using a
   renderer stand-in that takes 200 µs a frame (§10.2): 1.8× as many frames
   on the reference machine.
+- startup, 50 samples each:
+  - `init` at the default `Config`, each sample into memory the process
+    has never touched, so its page faults are counted;
+  - `initBuffer` into one static buffer, which only the first sample
+    touches for the first time: zui's own preparation of the memory;
+  - the first frame of a new `Context`, from the start of `beginFrame`
+    to the end of `endFrame`, for the Documents view and for 1,000 texts:
+    every measurement misses the cache, and the frame's memory is touched
+    for the first time.
 
-Each scenario runs in a new `Context` whose allocator counts every call
-after `init`; any allocation fails the run. It prints the fastest and
-median declaration (from the start of `beginFrame` to the start of
-`endFrame`), the fastest and median `endFrame`, the median whole frame,
-nanoseconds per element of `endFrame` and platform calls per frame.
+  On the reference machine at `a6d8e34`, the fastest samples were 74.6 µs,
+  10.0 µs, 30.3 µs and 230.0 µs.
+
+Each steady-frame scenario runs in a new `Context` whose allocator counts
+every call after `init`; any allocation fails the run, as it does in a
+first frame. It prints the fastest and median declaration (from the start
+of `beginFrame` to the start of `endFrame`), the fastest and median
+`endFrame`, the median whole frame, nanoseconds per element of `endFrame`
+and platform calls per frame, then the fastest and median of each startup
+scenario and `required_bytes` at the default `Config`.
 
 | Flag | Effect |
 |---|---|
 | `--check-targets` | fail if a §6.5 target is missed |
-| `--json <path>` | save each single-threaded scenario's fastest declaration and fastest `endFrame` |
+| `--json <path>` | save each single-threaded scenario's fastest declaration and fastest `endFrame`, and each startup scenario's fastest sample |
 | `--compare <path>` | fail if any of them is more than 10% slower than in that file |
 
 **How CI uses it.** The benchmark job runs it without flags: it fails on

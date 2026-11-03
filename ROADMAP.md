@@ -27,7 +27,7 @@ Each item says:
 | 0.4 | `zui_widgets`, `zui_reflect`, `zui_testing` | shipped |
 | 0.5 | layout performance, parallel measurement, benchmarks | shipped |
 | after 0.5 | declaration work: −42% to −56% | on `main` (no release is tagged yet) |
-| 0.6 | measure and audit: regression checks, the async audit, the frame boundary, the input format, startup and trace profiling | **in progress** (R2 done) |
+| 0.6 | measure and audit: regression checks, the async audit, the frame boundary, the input format, startup and trace profiling | **in progress** (R2 and P1 done) |
 | 0.7 | the contracts: renderer, host, surface, conformance, `zui_app`; input as an ordered event log; the raylib adapter | planned (the breaking release) |
 | 0.8 | the first native host: Windows | planned |
 | 0.9 | feeds and the wire format | planned |
@@ -50,16 +50,17 @@ Measured on the reference machine (i9-10900K) at `508e10c`:
 
 ## Picking up from here
 
-The plan was settled on 2026-11-01. R2 is done; nothing else from 0.6
+The plan was settled on 2026-11-01. R2 and P1 are done; nothing else from 0.6
 on exists yet. To continue:
 
 1. **Judge each item against a commit, not a file.** On the machine you
    measure on, `zig build bench-compare -- a6d8e34` compares the working
    tree with the last commit before 0.6 (R2), with each commit measured
    by its own scenarios. At `a6d8e34` on the reference machine, the box
-   tree's `endFrame` was 101.2 µs, 1.2 µs over its §6.5 target.
+   tree's `endFrame` was 101.2 µs, 1.2 µs over its §6.5 target. The
+   startup times (P1) are new after it, so compare those against the
+   commit that added them.
 2. **Work through the rest of 0.6 in this order:**
-   - P1, so startup has numbers before anything changes it;
    - A2, which is small and concrete, starting at `src/tasks.zig:118`
      and `:147`;
    - A1, whose review may add items to 0.6 or 0.7;
@@ -182,6 +183,19 @@ presented frame.
 **Done when:** the scenarios are in `--json` and `--compare`.
 
 **Spec.** §14.3.
+
+**Status.** The scenarios are done, specified in SPEC.md §14.3. At
+`a6d8e34` on the reference machine, the fastest samples were:
+
+| Scenario | Fastest |
+|---|---|
+| `init`, default config (4.63 MiB, not 4.29: the config grew after 0.2) | 74.6 µs |
+| `initBuffer`, default config | 10.0 µs |
+| first frame, Documents view | 30.3 µs (steady: 9.9 µs) |
+| first frame, 1,000 texts | 230.0 µs |
+
+The demo's cold start is not measured yet: the demo lives in zui-raylib,
+which keeps today's `Platform` until 0.7.
 
 ### P2. Trace zones
 

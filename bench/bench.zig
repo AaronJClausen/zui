@@ -473,6 +473,84 @@ fn simulateRender(comptime Ui: type, io: Io, frame: *const Ui.Frame) void {
     while (start.durationTo(Io.Timestamp.now(io, .awake)).nanoseconds < 200 * std.time.ns_per_us) {}
 }
 
+const StartupMeasurement = struct {
+    name: []const u8,
+    min_ns: u64,
+    median_ns: u64,
+};
+
+const startup_samples = 50;
+
+fn startupMeasurement(name: []const u8, times: *[startup_samples]u64) StartupMeasurement {
+    std.mem.sortUnstable(u64, times, {}, std.sort.asc(u64));
+    return .{ .name = name, .min_ns = times[0], .median_ns = times[startup_samples / 2] };
+}
+
+const DefaultUi = zui.Context(.{}, GlyphTablePlatform);
+
+/// Each sample gets memory the process has never touched, so its page
+/// faults are timed, as they are when an application starts.
+fn timeInit(io: Io, gpa: std.mem.Allocator) !StartupMeasurement {
+    var platform: GlyphTablePlatform = .{};
+    var times: [startup_samples]u64 = undefined;
+    for (&times) |*time| {
+        const start = Io.Timestamp.now(io, .awake);
+        var ui = try DefaultUi.init(gpa, io, &platform);
+        time.* = @intCast(start.durationTo(Io.Timestamp.now(io, .awake)).nanoseconds);
+        ui.deinit(gpa);
+    }
+    return startupMeasurement("init, default config", &times);
+}
+
+var init_buffer: [DefaultUi.required_bytes]u8 align(16) = undefined;
+
+/// Only the first sample touches `init_buffer` for the first time, so this
+/// is the time zui itself spends preparing memory.
+fn timeInitBuffer(io: Io) !StartupMeasurement {
+    var platform: GlyphTablePlatform = .{};
+    var times: [startup_samples]u64 = undefined;
+    for (&times) |*time| {
+        const start = Io.Timestamp.now(io, .awake);
+        var ui = try DefaultUi.initBuffer(&init_buffer, io, &platform);
+        // Nothing else reads `init_buffer`, so without this LLVM deletes
+        // every write `initBuffer` makes to it, and the sample times nothing.
+        std.mem.doNotOptimizeAway(&ui);
+        time.* = @intCast(start.durationTo(Io.Timestamp.now(io, .awake)).nanoseconds);
+        ui.deinit(undefined);
+    }
+    return startupMeasurement("initBuffer, default config", &times);
+}
+
+/// The first frame of each new `Context`: every measurement misses the
+/// cache, and the frame's memory is touched for the first time.
+fn FirstFrame(comptime name: []const u8, comptime config: zui.Config, comptime Scene: type) type {
+    return struct {
+        const Ui = zui.Context(config, GlyphTablePlatform);
+
+        fn run(io: Io, gpa: std.mem.Allocator) !StartupMeasurement {
+            var platform: GlyphTablePlatform = .{};
+            var scene: Scene = .{};
+            if (@hasField(Scene, "sentences")) _ = scene.sentences.get();
+            var times: [startup_samples]u64 = undefined;
+            for (&times) |*time| {
+                var counting: CountingAllocator = .{ .backing = gpa };
+                var ui = try Ui.init(counting.allocator(), io, &platform);
+                defer ui.deinit(counting.allocator());
+                const allocations_after_init = counting.allocations;
+
+                const start = Io.Timestamp.now(io, .awake);
+                ui.beginFrame(.{ .viewport = .{ 1600, 1200 } });
+                scene.declare(&ui, 0);
+                const frame = try ui.endFrame();
+                time.* = @intCast(start.durationTo(Io.Timestamp.now(io, .awake)).nanoseconds);
+                ui.release(frame);
+                if (counting.allocations != allocations_after_init) return error.FramesAllocated;
+            }
+            return startupMeasurement("first frame, " ++ name, &times);
+        }
+    };
+}
+
 const Options = struct {
     json_path: ?[]const u8 = null,
     compare_path: ?[]const u8 = null,
@@ -520,18 +598,26 @@ const ComparedTime = struct {
     fn key(self: *const ComparedTime) []const u8 {
         return self.key_buffer[0..self.key_len];
     }
+
+    fn init(comptime key_format: []const u8, name: []const u8, nanoseconds: u64) ComparedTime {
+        var time: ComparedTime = .{ .key_buffer = undefined, .key_len = undefined, .nanoseconds = nanoseconds };
+        time.key_len = (std.fmt.bufPrint(&time.key_buffer, key_format, .{name}) catch unreachable).len;
+        return time;
+    }
 };
 
-fn comparedTimes(measurements: []const Measurement, times: *[2 * compared_count]ComparedTime) []const ComparedTime {
-    for (measurements, 0..) |measurement, index| {
-        const layout_time = &times[2 * index];
-        layout_time.key_len = (std.fmt.bufPrint(&layout_time.key_buffer, "{s}", .{measurement.name}) catch unreachable).len;
-        layout_time.nanoseconds = measurement.layout_min_ns;
-        const declare_time = &times[2 * index + 1];
-        declare_time.key_len = (std.fmt.bufPrint(&declare_time.key_buffer, "{s}, declare", .{measurement.name}) catch unreachable).len;
-        declare_time.nanoseconds = measurement.declare_min_ns;
+fn comparedTimes(measurements: []const Measurement, startup_measurements: []const StartupMeasurement, times: []ComparedTime) []const ComparedTime {
+    var count: usize = 0;
+    for (measurements) |measurement| {
+        times[count] = .init("{s}", measurement.name, measurement.layout_min_ns);
+        times[count + 1] = .init("{s}, declare", measurement.name, measurement.declare_min_ns);
+        count += 2;
     }
-    return times[0 .. 2 * measurements.len];
+    for (startup_measurements) |measurement| {
+        times[count] = .init("{s}", measurement.name, measurement.min_ns);
+        count += 1;
+    }
+    return times[0..count];
 }
 
 pub fn main(init: std.process.Init) !void {
@@ -549,6 +635,12 @@ pub fn main(init: std.process.Init) !void {
         try Scenario(DocumentsView.config, GlyphTablePlatform, DocumentsView).run(io, gpa, 20, 400),
         try Scenario(shaping_config, ShapingPlatform(false), ShapedTextWall(false)).run(io, gpa, 2, 20),
         try Scenario(shaping_config, ShapingPlatform(true), ShapedTextWall(true)).run(io, gpa, 2, 20),
+    };
+    const startup_measurements = [_]StartupMeasurement{
+        try timeInit(io, gpa),
+        try timeInitBuffer(io),
+        try FirstFrame("documents view", DocumentsView.config, DocumentsView).run(io, gpa),
+        try FirstFrame("1000 texts", text_config, TextWall).run(io, gpa),
     };
     const one_thread_rate = try framesPerSecond(io, gpa, false);
     const render_thread_rate = try framesPerSecond(io, gpa, true);
@@ -584,10 +676,16 @@ pub fn main(init: std.process.Init) !void {
     try out.print("\nparallel measurement: {d:.2}x as fast as one thread\n", .{shaped_one_thread / shaped_parallel});
     try out.print("render thread: {d:.0} frames/s against {d:.0} on one thread ({d:.2}x)\n", .{ render_thread_rate, one_thread_rate, render_thread_rate / one_thread_rate });
     try out.writeAll("allocations after init: 0 in every scenario\n");
+
+    try out.print("\n{s:<28} {s:>11} {s:>11}\n", .{ "startup", "min", "median" });
+    for (startup_measurements) |measurement| {
+        try out.print("{s:<28} {d:>9.1}us {d:>9.1}us\n", .{ measurement.name, microseconds(measurement.min_ns), microseconds(measurement.median_ns) });
+    }
+    try out.print("init allocates {d:.2} MiB at the default config\n", .{@as(f64, @floatFromInt(DefaultUi.required_bytes)) / (1024 * 1024)});
     try out.flush();
 
-    var compared_time_buffer: [2 * compared_count]ComparedTime = undefined;
-    const compared_times = comparedTimes(measurements[0..compared_count], &compared_time_buffer);
+    var compared_time_buffer: [2 * compared_count + startup_measurements.len]ComparedTime = undefined;
+    const compared_times = comparedTimes(measurements[0..compared_count], &startup_measurements, &compared_time_buffer);
     if (options.json_path) |path| try writeJson(io, path, compared_times);
     const regressed = if (options.compare_path) |path| try compare(io, arena, out, path, compared_times) else false;
     try out.flush();
