@@ -27,7 +27,7 @@ Each item says:
 | 0.4 | `zui_widgets`, `zui_reflect`, `zui_testing` | shipped |
 | 0.5 | layout performance, parallel measurement, benchmarks | shipped |
 | after 0.5 | declaration work: −42% to −56% | on `main` (no release is tagged yet) |
-| 0.6 | measure and audit: regression checks, the async audit, the frame boundary, the input format, startup and trace profiling | **in progress** (R2 and P1 done) |
+| 0.6 | measure and audit: regression checks, the async audit, the frame boundary, the input format, startup and trace profiling | **in progress** (R2, P1 and A2 done) |
 | 0.7 | the contracts: renderer, host, surface, conformance, `zui_app`; input as an ordered event log; the raylib adapter | planned (the breaking release) |
 | 0.8 | the first native host: Windows | planned |
 | 0.9 | feeds and the wire format | planned |
@@ -50,8 +50,8 @@ Measured on the reference machine (i9-10900K) at `508e10c`:
 
 ## Picking up from here
 
-The plan was settled on 2026-11-01. R2 and P1 are done; nothing else from 0.6
-on exists yet. To continue:
+The plan was settled on 2026-11-01. R2, P1 and A2 are done; nothing
+else from 0.6 on exists yet. To continue:
 
 1. **Judge each item against a commit, not a file.** On the machine you
    measure on, `zig build bench-compare -- a6d8e34` compares the working
@@ -61,13 +61,11 @@ on exists yet. To continue:
    startup times (P1) are new after it, so compare those against the
    commit that added them.
 2. **Work through the rest of 0.6 in this order:**
-   - A2, which is small and concrete, starting at `src/tasks.zig:118`
-     and `:147`;
    - A1, whose review may add items to 0.6 or 0.7;
    - R1, then P2 and I3, which are both judged by R1's counts.
 3. **Follow "Spec first, then code"** below. R1 is already specified in
-   SPEC.md §16, A2 in the §10.3 note, and I3's event log in the §5.1
-   note; the rest need their designs in SPEC.md before code.
+   SPEC.md §16, and I3's event log in the §5.1 note; the rest need
+   their designs in SPEC.md before code.
 
 Things to know when resuming:
 - **ARCHITECTURE.md §3 is sketches, not code.** No `zui.Surface`,
@@ -169,6 +167,21 @@ only read.
 and both see the same state, and the existing task tests pass.
 
 **Spec.** §5, §10.3.
+
+**Status.** Done. `beginFrame` applies each registered pool's
+completions after resolving input; `request` only reads (TaskPool has no
+`get`). Two consequences:
+- **The completion queue had to go.** It held one entry per slot, which
+  was only enough because every request drained it. Left until
+  `beginFrame`, a canceled task's stale completion stayed queued, and the
+  next task in that slot blocked forever in `putOneUncancelable` when it
+  finished, hanging the cancel that waited for it. A slot now records the
+  generation its task finished with, in an atomic, and a pool-wide flag
+  lets `beginFrame` skip pools where nothing finished. A1 should look for
+  other bounded queues whose bound relied on how often they were drained.
+- **An inline task is ready one frame later.** Without concurrency, the
+  first request used to return `.ready`; it now returns `.pending`, and
+  the completion wakes the platform for the next frame.
 
 ### P1. Startup benchmarks
 

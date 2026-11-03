@@ -438,6 +438,8 @@ pub fn Context(comptime config: Config, comptime Platform: type) type {
             self.frame_requested = false;
             self.memory.cache.generation +%= 1;
             self.resolveInput(input);
+            var registration = self.task_pools;
+            while (registration) |pool| : (registration = pool.next) pool.apply_completions(pool);
             self.memory.states.evict(self.input_state.frame_number, config.state_ttl_frames);
             self.current = frame;
             self.dropped_depth = 0;

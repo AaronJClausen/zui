@@ -4,11 +4,12 @@ const std = @import("std");
 const Io = std.Io;
 const Id = @import("id.zig").Id;
 
-/// What a pool shares with the Context it registers with: how to wake
-/// the event loop, and the list the Context walks at `endFrame` to cancel
-/// the tasks of elements that were not declared.
+/// A pool's entry in the Context's list of pools, which the Context walks
+/// at `beginFrame` to apply completions and at `endFrame` to cancel the
+/// tasks of elements that were not declared.
 pub const Registration = struct {
     next: ?*Registration = null,
+    apply_completions: *const fn (registration: *Registration) void,
     sweep: *const fn (registration: *Registration, frame_number: u32) void,
     cancel_all: *const fn (registration: *Registration) void,
 };
@@ -78,6 +79,9 @@ pub fn TaskPool(comptime Result: type, comptime capacity: u16) type {
             key: u64 = 0,
             last_requested: u32 = 0,
             generation: u32 = 0,
+            /// Stored by the task after `result`; equal to `generation` once
+            /// the slot's current task has finished.
+            finished_generation: std.atomic.Value(u32) = .init(0),
             future: Io.Future(void) = undefined,
             /// Set by the task after writing `result`; read only after the
             /// task has been joined by `await` or `cancel`.
@@ -85,12 +89,11 @@ pub fn TaskPool(comptime Result: type, comptime capacity: u16) type {
             result: Result = undefined,
         };
 
-        const Completion = struct { slot: u16, generation: u32 };
-
         slots: [capacity]Slot = @splat(.{}),
-        completion_buffer: [capacity]Completion = undefined,
-        completions: Io.Queue(Completion) = undefined,
-        registration: Registration = .{ .sweep = sweepRegistration, .cancel_all = cancelAllRegistration },
+        /// Set by a task after its `finished_generation`, so `beginFrame`
+        /// only looks through the slots of pools where something finished.
+        any_finished: std.atomic.Value(bool) = .init(false),
+        registration: Registration = .{ .apply_completions = applyCompletionsRegistration, .sweep = sweepRegistration, .cancel_all = cancelAllRegistration },
         registered: bool = false,
         io: Io = undefined,
         waker: Waker = undefined,
@@ -108,14 +111,14 @@ pub fn TaskPool(comptime Result: type, comptime capacity: u16) type {
             key: u64 = 0,
         };
 
-        /// The state of `element_id`'s task, starting it on the first
-        /// request. Never blocks, except to cancel a task whose key changed.
+        /// The state of `element_id`'s task as of `beginFrame`, starting it
+        /// on the first request. Never blocks, except to cancel a task whose
+        /// key changed.
         pub fn request(self: *Self, ui: anytype, element_id: Id, comptime function: anytype, arguments: std.meta.ArgsTuple(@TypeOf(function)), options: RequestOptions) PoolStatus {
             comptime checkContext(@TypeOf(ui));
             if (element_id.isNone()) @panic("zui: a task needs an element id, because it is canceled when the id disappears");
             if (!self.registered) self.register(ui);
             const frame_number = ui.input_state.frame_number;
-            self.drainCompletions();
 
             if (self.find(element_id.hash)) |slot| {
                 if (slot.key == options.key) {
@@ -137,15 +140,15 @@ pub fn TaskPool(comptime Result: type, comptime capacity: u16) type {
                 .key = options.key,
                 .last_requested = frame_number,
                 .generation = next_generation,
+                .finished_generation = .init(next_generation -% 1),
             };
             self.stats.started += 1;
             const task_arguments = .{ self, slot_index, slot.generation, arguments };
             const Runner = TaskRunner(function);
+            // Without concurrency, `io.async` may run the task to completion
+            // right here; it is still `.pending` until the next `beginFrame`.
             slot.future = self.io.concurrent(Runner.run, task_arguments) catch self.io.async(Runner.run, task_arguments);
-            // Without concurrency `io.async` may already have run the task;
-            // its completion is in the queue either way.
-            self.drainCompletions();
-            return self.statusOf(slot);
+            return .pending;
         }
 
         /// Cancels every task and unregisters from the Context.
@@ -168,10 +171,8 @@ pub fn TaskPool(comptime Result: type, comptime capacity: u16) type {
                 fn run(pool: *Self, slot_index: u16, generation: u32, arguments: std.meta.ArgsTuple(@TypeOf(function))) void {
                     pool.slots[slot_index].result = @call(.auto, function, arguments);
                     pool.slots[slot_index].has_result = true;
-                    // The queue holds one entry per slot and each slot has
-                    // at most one outstanding completion, so this never
-                    // blocks, even when the task ran inline on the UI thread.
-                    pool.completions.putOneUncancelable(pool.io, .{ .slot = slot_index, .generation = generation }) catch {};
+                    pool.slots[slot_index].finished_generation.store(generation, .release);
+                    pool.any_finished.store(true, .release);
                     pool.waker.notify();
                 }
             };
@@ -179,7 +180,6 @@ pub fn TaskPool(comptime Result: type, comptime capacity: u16) type {
 
         fn register(self: *Self, ui: anytype) void {
             self.io = ui.io;
-            self.completions = .init(&self.completion_buffer);
             self.waker = ui.waker();
             ui.registerTaskPool(&self.registration);
             self.registered = true;
@@ -208,12 +208,10 @@ pub fn TaskPool(comptime Result: type, comptime capacity: u16) type {
             return null;
         }
 
-        fn drainCompletions(self: *Self) void {
-            var drained: [capacity]Completion = undefined;
-            const count = self.completions.getUncancelable(self.io, &drained, 0) catch 0;
-            for (drained[0..count]) |completion| {
-                const slot = &self.slots[completion.slot];
-                if (slot.state != .running or slot.generation != completion.generation) continue;
+        fn applyCompletions(self: *Self) void {
+            if (!self.any_finished.swap(false, .acquire)) return;
+            for (&self.slots) |*slot| {
+                if (slot.state != .running or slot.finished_generation.load(.acquire) != slot.generation) continue;
                 _ = slot.future.await(self.io);
                 slot.state = .completed;
                 self.stats.completed += 1;
@@ -232,13 +230,17 @@ pub fn TaskPool(comptime Result: type, comptime capacity: u16) type {
             }
             if (slot.has_result) if (self.discard) |discard| discard(slot.result);
             slot.state = .free;
-            // Any completion this task already queued is now stale.
-            slot.generation +%= 1;
         }
 
+        fn applyCompletionsRegistration(registration: *Registration) void {
+            const self: *Self = @alignCast(@fieldParentPtr("registration", registration));
+            self.applyCompletions();
+        }
+
+        /// A task that completed during this frame is still `.running`, so
+        /// freeing it counts it as canceled and hands its result to `discard`.
         fn sweepRegistration(registration: *Registration, frame_number: u32) void {
             const self: *Self = @alignCast(@fieldParentPtr("registration", registration));
-            self.drainCompletions();
             for (&self.slots) |*slot| {
                 if (slot.state != .free and slot.last_requested != frame_number) self.free(slot, true);
             }

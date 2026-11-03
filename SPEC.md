@@ -89,7 +89,7 @@ zui/                     the core module "zui"
   src/text.zig           word splitting, wrapping, the measurement cache
   src/interaction.zig    hit testing, hover/press/focus, scrolling
   src/state.zig          the keyed state table
-  src/tasks.zig          TaskPool and the completion queue
+  src/tasks.zig          TaskPool and its slots
   src/commands.zig       the RenderCommand union
   src/emission.zig       render commands, clip and hit regions
 zui_widgets/             optional module: button, checkbox, slider, text field, dropdown, disclosure
@@ -273,13 +273,15 @@ pub fn release(self: *Self, frame: *const Frame) void
    - Selects the next free frame arena, or blocks if every arena is still
      held by a renderer (§10.2), and resets it. This is O(1): the arena's
      counters reset, and its memory is not cleared.
-   - Drains the task completion queue without blocking (§10.3).
    - Advances the state table's generation counter (§9).
    - Resolves interaction against the **previous** frame's hit regions:
      hover, press and release, the focus target, and the scroll target.
      Results are kept by id for the queries in §7.4. *Planned for 0.7:*
      it processes the frame's input events one at a time, in arrival
      order (§5.1).
+   - Applies the completions of every registered task pool, without
+     blocking (§10.3). Every request in the frame sees the pools as they
+     are now.
 2. **Declaration.** The application calls `open`, `close`, `text`, and
    the other declaration functions. These only *append* to arrays. No
    layout happens yet.
@@ -1019,24 +1021,23 @@ How `request(ui, id, function, args, .{ .key = ... })` works:
 1. **First request for an id.** Claim a slot, then start the work with
    `io.concurrent`, falling back to `io.async` when the `Io` reports
    `ConcurrencyUnavailable`. A wrapper runs `function`, stores the result
-   in the slot, pushes `{ slot, generation }` onto the pool's completion
-   `Io.Queue`, and wakes the platform. Without concurrency, `io.async`
-   may run the task inline, and then the very first request already
-   returns `.ready`.
+   in the slot, marks the slot finished with the generation it started
+   with, and wakes the platform. The first request returns `.pending`,
+   even when, without concurrency, `io.async` ran the task inline.
 2. **Later requests for the same id and key** return the slot's state
    without blocking or doing work.
-3. **Completions are drained at each request,** with `get(buffer, min =
-   0)`, which never blocks. *Planned for 0.6:* registered pools drain in
-   `beginFrame` instead, as §5 says and principle 8 requires, so every
-   request in a frame sees the same state; in 0.9 `TaskPool` becomes a
-   feed that delivers once (ROADMAP.md A2, F1).
-   - The queue belongs to the pool, not the Context. It holds one entry
-     per slot, and a slot has at most one outstanding completion, so the
-     wrapper's `putOneUncancelable` never blocks, even when the task ran
-     inline on the UI thread.
-   - Each slot carries a **generation**, bumped whenever it is freed, so
-     a canceled task's late completion can never be credited to the next
-     task in the same slot.
+3. **Completions are applied at `beginFrame`** (§5, principle 8), never
+   during declaration, so every request in a frame sees the same state.
+   A task that finishes mid-frame is `.ready` from the next frame. In 0.9
+   `TaskPool` becomes a feed that delivers once (ROADMAP.md F1).
+   - Each slot carries a **generation**, advanced whenever it is claimed,
+     and a finished task records the generation it was started with, so
+     a canceled task can never complete the next task in the same slot.
+   - A pool-wide flag, set by the wrapper, lets `beginFrame` skip pools
+     in which nothing finished.
+   - A task that finishes in the frame its id stops being requested is
+     canceled at `endFrame` like any other: it counts in
+     `stats.canceled`, and its result goes to `discard`.
 4. **Unmounting.** Each pool registers itself with the Context on its
    first request. In `endFrame`, every registered pool cancels the tasks
    whose id was not requested that frame. This works even for a pool that
@@ -1050,7 +1051,7 @@ request": it returns only once the task has returned. Tasks must
 therefore reach cancelation points, meaning any `Io` call or
 `io.checkCancel()` in a long computation. Otherwise unmounting a task
 waits for it to finish, on the UI thread. (`Io.Future` has no
-non-blocking poll either, which is why completions go through a queue.)
+non-blocking poll either, which is why a finished task marks its slot.)
 
 **Owned results.** When a slot is freed, the pool passes its result to
 the optional `discard` function on the UI thread. That happens whether

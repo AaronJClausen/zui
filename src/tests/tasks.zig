@@ -172,7 +172,7 @@ test "a full pool keeps new requests pending and counts them" {
     try testing.expectEqual(@as(u64, 1), pool.stats.rejected);
 }
 
-test "without concurrency, a task runs inline and is ready on its first request" {
+test "without concurrency, a task runs inline and is ready at the next beginFrame" {
     var single_threaded: Io.Threaded = .init_single_threaded;
     defer single_threaded.deinit();
     const io = single_threaded.io();
@@ -184,9 +184,42 @@ test "without concurrency, a task runs inline and is ready on its first request"
     defer pool.deinit(&ui);
 
     ui.beginFrame(.{ .viewport = .{ 100, 100 } });
-    const status = pool.request(&ui, .of("inline"), doubleAfterAMoment, .{ io, 4 }, .{});
+    const first = pool.request(&ui, .of("inline"), doubleAfterAMoment, .{ io, 4 }, .{});
     ui.release(try ui.endFrame());
-    try testing.expectEqual(@as(u32, 8), status.ready);
+    try testing.expectEqual(.pending, std.meta.activeTag(first));
+    try testing.expectEqual(@as(u64, 1), pool.stats.started);
+    try testing.expect(ui.needsFrame());
+
+    ui.beginFrame(.{ .viewport = .{ 100, 100 } });
+    const second = pool.request(&ui, .of("inline"), doubleAfterAMoment, .{ io, 4 }, .{});
+    ui.release(try ui.endFrame());
+    try testing.expectEqual(@as(u32, 8), second.ready);
+}
+
+test "every request in a frame sees the pool as it was at beginFrame" {
+    const WakingUi = zui.Context(.{ .max_elements = 16 }, WakingPlatform);
+    var platform: WakingPlatform = .{};
+    var ui = try WakingUi.init(testing.allocator, testing.io, &platform);
+    defer ui.deinit(testing.allocator);
+    var pool: zui.TaskPool(u32, 1) = .init;
+    defer pool.deinit(&ui);
+    const id: zui.Id = .of("mid_frame");
+
+    ui.beginFrame(.{ .viewport = .{ 10, 10 } });
+    const before_completion = pool.request(&ui, id, doubleAfterAMoment, .{ testing.io, 5 }, .{});
+    var waited: u32 = 0;
+    while (platform.wakes.load(.acquire) == 0 and waited < 2000) : (waited += 1) testing.io.sleep(.fromMilliseconds(1), .awake) catch {};
+    try testing.expectEqual(@as(u32, 1), platform.wakes.load(.acquire)); // the task has completed
+    const after_completion = pool.request(&ui, id, doubleAfterAMoment, .{ testing.io, 5 }, .{});
+    ui.release(try ui.endFrame());
+    try testing.expectEqual(.pending, std.meta.activeTag(before_completion));
+    try testing.expectEqual(.pending, std.meta.activeTag(after_completion));
+
+    ui.beginFrame(.{ .viewport = .{ 10, 10 } });
+    const next_frame = pool.request(&ui, id, doubleAfterAMoment, .{ testing.io, 5 }, .{});
+    ui.release(try ui.endFrame());
+    try testing.expectEqual(@as(u32, 10), next_frame.ready);
+    try testing.expectEqual(@as(u64, 1), pool.stats.completed);
 }
 
 const needs_frame_button: zui.Id = .of("button");

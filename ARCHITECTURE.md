@@ -83,11 +83,6 @@ through the frame record:** no clocks, random numbers or file reads
 during declaration that bypass a feed. That is documented as the
 application's side of the contract, not enforced.
 
-*Planned for 0.6:* task completions are drained at each `request` today
-(`src/tasks.zig`), so two elements in one frame can see the same pool in
-different states. Moving the drain to `beginFrame` brings tasks under
-this rule.
-
 ## 3. The contracts
 
 Each contract is a comptime interface, checked the way `Platform` is
