@@ -35,11 +35,12 @@ Implemented so far:
 The reference backend and demo application live in
 [zui-raylib](https://github.com/AaronJClausen/zui-raylib).
 
-Next: measurement you can trust and an audit of the async model (0.6),
-then contracts for renderers and hosts (0.7), a native Windows host
-(0.8), feeds and a wire format for streaming frames in and out (0.9), and
-from there text, layout, effects, an inspector, more hosts, motion and
-text editing. [ROADMAP.md](ROADMAP.md) has the plan, where each item
+Next: measurement you can trust, an audit of the async model and the
+design of event-based input (0.6), then contracts for renderers and hosts
+and input as an ordered event log with many pointers (0.7), a native
+Windows host (0.8), feeds and a wire format for streaming frames in and
+out (0.9), and from there text, layout and gestures, effects and HDR, an
+inspector, more hosts, motion and text editing. [ROADMAP.md](ROADMAP.md) has the plan, where each item
 stands and where to pick up, and [ARCHITECTURE.md](ARCHITECTURE.md) how
 the pieces connect.
 

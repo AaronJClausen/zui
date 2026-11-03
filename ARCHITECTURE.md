@@ -40,10 +40,11 @@ and is not library code.
 ```
 
 - **The core depends on nothing,** and everything depends on it. It owns
-  the vocabulary: `Input`, host events, `RenderCommand`, `Color`, `Rect`,
-  `Surface`, the capability structs. A renderer that imports `zui` only
-  for those types pays nothing for the layout engine, because Zig only
-  analyzes what is used, so no separate types package is needed.
+  the vocabulary: `Input` and its events, host events, `RenderCommand`,
+  `Color`, `Rect`, `Surface`, the capability structs. A renderer that
+  imports `zui` only for those types pays nothing for the layout engine,
+  because Zig only analyzes what is used, so no separate types package is
+  needed.
 - **Hosts and renderers never import each other.** They meet at one
   type, `zui.Surface`, which the host creates and the renderer draws into
   (§3.4).
@@ -59,11 +60,19 @@ and it is as much part of the common language as the types are.
 
 | Inbound, applied at `beginFrame`, in this order | Outbound, produced by `endFrame` |
 |---|---|
-| 1. time (`dt_seconds`) | render commands |
-| 2. host events: system theme, scale, locale, power, lifecycle and signals, dropped files | hit regions |
-| 3. input: pointer, buttons, wheel, keys, text | the semantics list |
+| 1. frame parameters: time (`dt_seconds`), viewport, zoom | render commands |
+| 2. host events: system theme, scale, locale, power, lifecycle and signals, dropped files, HDR headroom | hit regions |
+| 3. input events, in arrival order: pointers, wheel, keys, text, accessibility actions | the semantics list |
 | 4. task completions | window-chrome regions (title bar, resize edges) |
 | 5. feed deliveries | the deadline for the next frame |
+
+**Input is an ordered event log, not sampled state** *(planned for 0.7,
+ROADMAP.md I4)*. Each event carries the host's timestamp, so a press and
+release between two frames is still a click, velocity is computed from
+the host's clock rather than read during the frame, and replay gives the
+same gestures. Today `Input` samples the buttons at poll time, which
+loses fast taps; the format changes in the breaking release because the
+host contract and the wire format would otherwise freeze it.
 
 Together, the inbound side is a **frame record**. A relay tap receives
 each frame record after it is applied, so a recorder, a network link or a
@@ -120,6 +129,7 @@ renderer never sees it:
 | shadow, glow | nothing |
 | backdrop blur | a rectangle in the element's fallback tint |
 | transform | the untransformed element (and its hit region stays untransformed) |
+| extended color (G6) | the color clamped to `Color`; tone mapping to a display is the renderer's |
 
 Capabilities are comptime-known, so lowering costs nothing for a renderer
 that supports everything. A renderer's exhaustive `switch` covers only
@@ -154,7 +164,9 @@ Two kinds of implementation share the contract:
 - **Adapter hosts** wrap a library that insists on owning its window,
   such as raylib, with fewer capabilities (one window, no materials).
   They let the contract be proven before native hosts exist, and let an
-  application move to a native host without changing its UI code.
+  application move to a native host without changing its UI code. A
+  library that only reports input state goes through `zui.InputSampler`,
+  which turns successive states into events (I4).
 
 ### 3.4 Surface
 
@@ -265,7 +277,15 @@ fallback in effect, so none of them is silent to a developer who looks.
 | right-to-left layout, flex wrap, responsive helpers | core; breakpoint helpers in a module | L6, L7 |
 | gradients, shadows, glow, backdrop blur, transforms | core defines and lowers the commands; renderers draw them | G1–G3 |
 | the desktop showing through the window (Mica, vibrancy) | host asks the OS; renderer clears to transparent; core lets backgrounds be absent | H8 |
-| drag and drop between elements | core interaction | I1 |
+| drag and drop between elements | core interaction, arbitrated with other gestures | I1, I5 |
+| many pointers: touch, pen, mouse | host reports pointer events; core keeps a pointer table | I4 |
+| gestures the OS recognizes (trackpad pinch and rotate) | host, as input events | I4 |
+| gestures zui recognizes: pan, zoom, drag, long press, double tap, momentum | core, from what each element declares it accepts | I5 |
+| custom gestures, such as a lasso | modules or the application, over `pointerEvents` and `state` | I5 |
+| other devices: gamepads, dials, crowns | host maps them to key and pointer events; core merges them into intents | I4, I5 |
+| accessibility actions (Invoke, RangeValue, Scroll) | host bridge, as input events naming an element | V2 |
+| HDR and wide gamut | core's color type; renderer tone-maps; host reports headroom | G6 |
+
 | files dropped from the OS | host event | H6 |
 | next-frame deadline, frame-rate caps, vsync | core reports the deadline; host paces | I2, H2 |
 | trace zones for profiling | core, compiled out unless enabled | P2 |

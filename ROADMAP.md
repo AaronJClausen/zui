@@ -4,13 +4,14 @@ SPEC.md is the contract for the core: what zui does, and, marked
 *Planned for 0.x*, what it has committed to do. ARCHITECTURE.md is the map
 of everything around the core: hosts, renderers, modules, and how they
 connect. This file is the plan for building both: what ships in each
-release, in what order, and how each item is judged. PERF-ITEMS.md
-remains the record of the declaration work and its measurements.
+release, in what order, and how each item is judged. The commits of the
+declaration work after 0.5 record its measurements.
 
-The items come from three sources: a comparison with
+The items come from four sources: a comparison with
 [Clay](https://github.com/nicbarker/clay) at `e6cc369` (v0.14) made
-against zui at `508e10c`, the owner's notes, and the architecture they
-led to. Each item says:
+against zui at `508e10c`, the owner's notes, the architecture they led
+to, and a review of input on 2026-11-02, from which I3–I5 and G6 came.
+Each item says:
 - **Grounding:** what we know, with the code that shows it.
 - **Plan:** what to change.
 - **Done when:** the test or measurement that decides it.
@@ -25,13 +26,13 @@ led to. Each item says:
 | 0.3 | task pools, `needsFrame`, frames held by a render thread | shipped |
 | 0.4 | `zui_widgets`, `zui_reflect`, `zui_testing` | shipped |
 | 0.5 | layout performance, parallel measurement, benchmarks | shipped |
-| after 0.5 | PERF-ITEMS.md items 0–5: declaration −42% to −56% | on `main` (no release is tagged yet) |
-| 0.6 | measure and audit: regression checks, the async audit, the frame boundary, startup and trace profiling | **next** |
-| 0.7 | the contracts: renderer, host, surface, conformance, `zui_app`; the raylib adapter | planned (the breaking release) |
+| after 0.5 | declaration work: −42% to −56% | on `main` (no release is tagged yet) |
+| 0.6 | measure and audit: regression checks, the async audit, the frame boundary, the input format, startup and trace profiling | **next** |
+| 0.7 | the contracts: renderer, host, surface, conformance, `zui_app`; input as an ordered event log; the raylib adapter | planned (the breaking release) |
 | 0.8 | the first native host: Windows | planned |
 | 0.9 | feeds and the wire format | planned |
-| 0.10 | text and layout | planned |
-| 0.11 | effects | planned |
+| 0.10 | text, layout and gestures | planned |
+| 0.11 | effects and HDR | planned |
 | 0.12 | seeing the UI: inspector, semantics, safety sweeps, web demo | planned |
 | 0.13 | more hosts and services: macOS, Linux, web; notifications, dialogs, decorations, windows | planned |
 | 0.14 | motion | planned |
@@ -62,10 +63,10 @@ To start:
    - A2, which is small and concrete, starting at `src/tasks.zig:118`
      and `:147`;
    - A1, whose review may add items to 0.6 or 0.7;
-   - R1, then P2, whose "unchanged when off" check needs R1.
+   - R1, then P2 and I3, which are both judged by R1's counts.
 3. **Follow "Spec first, then code"** below. R1 is already specified in
-   SPEC.md §16, and A2 in the §10.3 note; the rest need their designs in
-   SPEC.md before code.
+   SPEC.md §16, A2 in the §10.3 note, and I3's event log in the §5.1
+   note; the rest need their designs in SPEC.md before code.
 
 Things to know when resuming:
 - **ARCHITECTURE.md §3 is sketches, not code.** No `zui.Surface`,
@@ -74,7 +75,7 @@ Things to know when resuming:
 - **The other repos are untouched.** zui-raylib, zui-sokol and
   zui-terminal keep today's `Platform` until 0.7. `zui-host` does not
   exist yet; it is created with H2 in 0.8.
-- **No release is tagged.** 0.1 to 0.5 and the PERF-ITEMS.md work are on
+- **No release is tagged.** 0.1 to 0.5 and the declaration work are on
   `main`.
 - **Item IDs are stable.** A letter names a series (R regression checks,
   A async, P profiling, C contracts, T text, S scale, H hosts, F feeds and
@@ -93,7 +94,8 @@ Things to know when resuming:
   native host, because a contract with one implementation is not yet a
   contract.
 - **One breaking release.** 0.7 changes `measureText` (T3), how scale
-  reaches layout (S1), and moves backends onto the contracts. Every
+  reaches layout (S1), and input from sampled state to an event log (I4),
+  and moves backends onto the contracts. Every
   backend, `zui_testing` and `bench/` are updated in the same week, and
   the release notes say what to change.
 - **After 0.7, new commands do not break renderers.** Optional commands
@@ -126,8 +128,9 @@ frames per scenario; fail on more than 2% growth over the parent commit.
 Builds both commits, alternates them locally, and reports the median
 ratio and its spread.
 
-**Done when:** it catches the `depth: u16` stall (PERF-ITEMS.md), which
-leaves the instruction count unchanged.
+**Done when:** it catches the `depth: u16` store-forwarding stall fixed
+in `946405e`, which leaves the instruction count unchanged: a 16-bit
+store followed by a 32-bit reload cost the box tree's declaration 27%.
 
 ### A1. The async and parallel audit
 
@@ -177,8 +180,9 @@ presented frame.
 
 ### P2. Trace zones
 
-**Grounding.** The PERF-ITEMS.md profiles needed hand-matched `perf`
-samples and temporary `never_inline` calls to see per-function costs.
+**Grounding.** The profiles of the declaration work needed hand-matched
+`perf` samples and temporary `never_inline` calls to see per-function
+costs.
 
 **Plan.** `-Dzui-trace` adds a zone per layout pass, per emission and
 per `beginFrame` step, for a profiler such as Tracy, and is not analyzed
@@ -189,6 +193,43 @@ noise: pinned cores, fixed frequency, alternating runs.
 instruction counts (R1) are unchanged.
 
 **Spec.** §3 build options, §14.3.
+
+### I3. The input format, settled before the host contract
+
+**Grounding.**
+- `Input.buttons` is the state at poll time (`src/context.zig:902`), so a
+  press and release between two polls is never a click. zui sleeps until
+  input arrives, which makes that likely, and a touch tap usually
+  vanishes.
+- There is one pointer: one `press_target` and one `hover_chain`
+  (`src/interaction.zig:181`).
+- `Key` has no letters (`src/interaction.zig:8`), so Ctrl+S or Ctrl+C
+  cannot be expressed, and modifiers are sampled once per frame rather
+  than per key.
+- C2's `poll(record)` and F3's encoding freeze whatever the frame record
+  is. Changing it after 0.8 would break every host and the wire format.
+
+A prototype that modeled all inbound data as routed values handled by a
+comptime registry of state "machines" was weighed against this. Its
+event stream and central arbitration are kept (I4, I5). The registry, a
+message bus between elements, and a single manipulation kind are not:
+they duplicate the state table, keep modules from shipping their own
+gestures, and route a gesture by kind where it must be routed by motion
+component (I5).
+
+**Plan.** Specify the event log (SPEC.md §5.1's note) and the
+per-pointer table, then rebuild today's `resolveInput` over the log
+behind the current API, with `max_pointers = 1`.
+
+**Done when:**
+- the interaction, widget and `zui_testing` tests pass unchanged;
+- R1's counts on the mouse-only scenarios are no higher than today's;
+- an idle application still sleeps;
+- a press and release inside one frame is a click;
+- 133 moves in one frame (an 8 kHz mouse at 60 Hz) cost at most one
+  hover hit test per pointer.
+
+**Spec.** §5.1, §7.4.
 
 ---
 
@@ -262,7 +303,7 @@ display-scale change has no event.
 
 **Plan.** Two separate factors: the display scale, from the host per
 window (with a host event when it changes), and the application's zoom,
-in `Input`. Layout stays in logical units; text is measured at size ×
+among `Input`'s frame parameters. Layout stays in logical units; text is measured at size ×
 zoom, so zoom is part of the measurement key; hit testing and snapping
 use both.
 
@@ -270,6 +311,37 @@ use both.
 between monitors of different scale relayouts it.
 
 **Spec.** §5.1, §8.1, §8.3.
+
+### I4. Input as an ordered event log
+
+**Grounding.** I3.
+
+**Plan.**
+- `Input` keeps the frame's parameters (`viewport`, `dt_seconds`) and
+  gains `events`, in arrival order: pointer down, move, up, cancel and
+  leave, each with a pointer id, pointer kind, button, pressure, tilt and
+  the host's timestamp; wheel with a position and a precise/line flag;
+  key down and up with repeat and per-event modifiers; text; and the OS's
+  own pinch and rotate. The sampled fields go.
+- `Key` covers letters, digits, punctuation and function keys, and
+  `ui.chordPressed(.{ .key = .s, .modifiers = .{ .control = true } })`
+  matches the modifiers as they were at that key.
+- A per-pointer table, sized by `Config.max_pointers` (default 10),
+  replaces `press_target` and `hover_chain`. Touch never hovers.
+- Moves are coalesced per pointer: only the last move before another
+  event of that pointer is hit-tested, and the rest are kept as history
+  for velocity.
+- `zui.InputSampler` turns successive sampled states into events, for
+  backends such as raylib that only offer state.
+- `zui_testing.Driver` emits events, so `click` can run in one frame, and
+  gains `tap`, `pinch` and multi-pointer `drag`.
+- `Config.max_events_per_frame` replaces `zui.max_keys_per_frame`.
+
+**Done when:** I3's checks still hold on the new `Input`, H1 passes C3
+through `InputSampler`, and a test presses two buttons with two pointers
+at once.
+
+**Spec.** §5.1, §7.4, §13.2, §14.2; ARCHITECTURE.md §2, §3.3.
 
 ### H1. The raylib adapter host
 
@@ -525,9 +597,12 @@ change to the §6.5 scenarios beyond noise.
 
 **Plan.** Typed drag sources and drop targets as interaction state:
 `ui.dragging(id)`, `ui.dropped(target_id, T)`, with the payload in the
-state table. Files from the OS are a host event (H6), not this.
+state table. A drag source declares `.gestures.drag`, so I5 decides
+between dragging, scrolling and clicking. Files from the OS are a host
+event (H6), not this.
 
-**Done when:** `zui_testing.Driver.drag` moves an item between two lists.
+**Done when:** `zui_testing.Driver.drag` moves an item between two lists,
+including out of a list that scrolls by dragging.
 
 **Spec.** §7.4.
 
@@ -537,12 +612,65 @@ state table. Files from the OS are a host event (H6), not this.
 animation needs "a frame within 16 ms", and a frame-rate cap needs to
 know it.
 
-**Plan.** `ui.nextFrameDeadline() ?Instant`, set by `requestFrameBy`;
-`zui_app` passes it to `host.waitUntil`.
+**Plan.** `ui.nextFrameDeadline() ?Instant`, the earliest of every
+`requestFrameBy`, a running glide (I5), and a pending long press or
+double tap; `zui_app` passes it to `host.waitUntil`.
 
 **Done when:** the demo's caret blinks while the process otherwise idles.
 
 **Spec.** §10.3.
+
+### I5. Gestures: capabilities, arbitration and custom recognizers
+
+**Grounding.**
+- The slider drags with `pressed` and `pointerLocal`
+  (`zui_widgets/zui_widgets.zig:268`), M3 planned drag-to-scroll, and I1
+  plans drag and drop. Nested, all three want the same pointer, and
+  nothing decides between them.
+- Routing a gesture by kind alone fails: a vertical drag on a horizontal
+  carousel inside a vertical list goes to the carousel, and a pinch that
+  starts on a list inside a map goes to the list. The input prototype's
+  scene could not show this, because its map accepts both axes.
+
+**Plan.**
+- Elements declare what they accept, as a packed set stored in their hit
+  region the way scrolling is today:
+  `.gestures = .{ .pan = .vertical, .zoom = true, .drag = true, .long_press = true, .double_tap = true, .custom = true }`.
+  A scroll container accepts pan on its scrolled axes by default.
+- **One rule decides.** When a pointer passes the touch slop, its axis is
+  locked, and the pointer goes to the innermost region that accepts that
+  component and still has room to move (from `max_scroll`), which also
+  gives scroll chaining. With two pointers, scale and rotation go to the
+  innermost region that accepts zoom. A release that nothing claimed is a
+  tap.
+- **Delays are opt-in.** Only an element with `.double_tap` delays its
+  single tap until the double-tap window passes, so "this gesture waits
+  for that one to fail" is local and static, never a graph.
+- **Intents are queries that merge devices:**
+  `ui.manipulation(id) ?Manipulation` (translation, scale, rotation and
+  pivot, summed over the frame), `contextRequested` (right click, long
+  press, the menu key), `dismissed` (Escape, back, gamepad B), and
+  `adjusted` and `navigated` (arrows, D-pad, dial). `clicked` stays the
+  activation query.
+- **Momentum** is core state in the state table, keyed by the element,
+  so it ends when the element is no longer declared, and it sets I2's
+  deadline.
+- **Custom gestures are code in declaration, not registered machines.**
+  `ui.pointerEvents(id)` returns the frame's events of pointers pressed
+  on or claimed by `id`. A recognizer keeps its state in `state(id, T)`,
+  so it can read application state, and a module can ship one as a plain
+  function. An element with `.custom` keeps its ancestors from taking the
+  pointer until it calls `ui.claim(pointer)` or `ui.decline(pointer)`.
+  That decision lands at the next `beginFrame`, a frame later than a
+  built-in claim; no events are lost meanwhile.
+
+**Done when:** interaction tests cover a button in a list in a zoomable
+map, a carousel in a vertical list, a pinch that starts on the list, a
+slider in a drag-scrolled list, a long press, a double tap next to a
+single tap, a flick within one frame, and a lasso written as a module
+function competing with the map's pan.
+
+**Spec.** §6.3, §7.1, §7.4, §9.
 
 ---
 
@@ -589,6 +717,32 @@ language.
 
 **Spec.** §4.1, §7.5.
 
+### G6. HDR and wide gamut
+
+**Grounding.** Colors are RGBA8 (SPEC.md §12), so nothing can be brighter
+than SDR white or outside sRGB.
+
+**Plan.**
+- `Config.Color: type = zui.Color`, which may be `zui.ExtendedColor`
+  (4×f16, linear scRGB, where 1.0 is SDR white), following `ImageHandle`.
+  An SDR application keeps 4-byte colors.
+- `RendererCapabilities.extended_color`. Without it, emission clamps
+  extended colors to `Color`, as one more lowering row. Tone mapping to
+  the display belongs to the renderer, because only it knows the display;
+  over the wire (F5), the core cannot.
+- The display's headroom above SDR white is a host event per window
+  (C2), for applications that want it.
+- The output format (an FP16 swapchain, HDR10) is negotiated between host
+  and renderer through `Surface`; without support on both sides it is SDR.
+- Wide gamut (P3, Rec.2020) is values outside 0 to 1, converted by
+  `zui_color` (K1); themes written as sRGB hex convert at comptime.
+
+**Done when:** a golden test lays out with `ExtendedColor`, lowering
+clamps it for an SDR renderer, and the Windows host shows HDR white
+brighter than SDR white on an HDR display.
+
+**Spec.** §4.1, §7.5, §12; ARCHITECTURE.md §3.2, §3.3.
+
 ---
 
 ## 0.12: seeing the UI
@@ -616,7 +770,11 @@ demo toggles it with a key.
 of it exists. Clay's only accessibility story is the browser's DOM.
 
 **Plan.** As §7.6. Window-chrome roles (title bar, resize edge) for H7
-travel in the same list.
+travel in the same list. Accessibility actions (UI Automation's Invoke,
+RangeValue and Scroll) arrive as I4 events naming an element id, and
+answer through the same queries as other input: Invoke is `clicked`,
+RangeValue is `adjusted`, Scroll is `manipulation`. An element's I5
+gestures are the actions the list reports it supports.
 
 **Done when:** a widget test checks the list for each control, and the
 Windows host bridges it to UI Automation.
@@ -696,14 +854,8 @@ full buffer is reported like other limits.
 
 ### M3. Drag and momentum scrolling
 
-**Plan.** `Scroll.drag: bool = false`: a press that moves past a
-threshold scrolls and cancels the click; release velocity decays with
-`dt_seconds`.
-
-**Done when:** `Driver.drag` scrolls a list, a short press still clicks,
-and momentum stops at the clamped offset.
-
-**Spec.** §6.3, §7.4.
+**Status.** Merged into I5, in 0.10: dragging to scroll is a pan gesture,
+and momentum is core state that I5's arbitration starts and stops.
 
 ---
 
@@ -714,8 +866,9 @@ and momentum stops at the clamped offset.
 **Grounding.** §15.1: "Not in 0.4: selection, the clipboard, word
 movement, IME composition and multiple lines." Clay has no text input.
 
-**Plan.** Selection, word movement, the clipboard (through the host,
-H2), multiple lines, then IME composition through the frame record.
+**Plan.** Selection, word movement, the clipboard (through the host, H2,
+with its shortcuts as I4 chords), multiple lines, then IME composition as
+I4 events to the focused element.
 
 **Done when:** each has `zui_testing` tests, and IME works on Windows.
 
@@ -753,8 +906,15 @@ These depend only on the public API, so they can land in any release.
 
 - **Docking and tear-off panels,** once H9 has more than one window.
 - **A grid layout,** if L7's wrapping is not enough.
-- **Layout islands and static subtrees** (SPEC.md §16, PERF-ITEMS.md
-  item 6), and PERF-ITEMS.md item 5 step 3.
+- **Layout islands and static subtrees** (SPEC.md §16). A static subtree
+  could be pre-recorded element records copied in with one `@memcpy` and
+  laid out normally, which keeps text working; it waits for an
+  application with enough static structure.
+- **Packing the per-element fields declaration writes** into one record,
+  partly departing from §4.3's structure of arrays. Since the `depth`
+  fix, no instruction in the box tree's declaration has more than 4% of
+  its samples, so there is no hot spot for it yet.
+
 - **P3. SIMD candidates:** each measured by R1 and R2 before it ships.
 
 ## Not taken from Clay
@@ -781,6 +941,11 @@ These are deliberate, and each is a reason to choose zui:
 | Who orchestrates | the host, through one contract; adapters for libraries that own their window (H1) |
 | Input recording | relayed, not recorded: a recorder is one listener on the tap (F2) |
 | Signals | lifecycle events; uncatchable signals are not representable (C2) |
+| The input format | an ordered event log with host timestamps, not sampled state, in the 0.7 breaking release (I3, I4) |
+| Pointers | many, in a comptime-sized table; a mouse is one pointer (I4) |
+| Gesture arbitration | elements declare what they accept; the core decides with one rule, by motion component (I5) |
+| Custom gestures | code in declaration over `pointerEvents` and `state`, not a comptime registry of machines (I5) |
+| Tasks and feeds | stay deliveries of their own in the frame record, not routed input values (A2, F1) |
 
 ### Open
 
@@ -798,3 +963,9 @@ Each is planned with the first option.
    wire client first, because F5 builds it anyway.
 6. **H2, sokol_gfx as the first renderer on a native surface?** Planned:
    yes; it already backs zui-sokol.
+7. **I5, a custom recognizer's claim lands a frame late: accept that, or
+   let `.custom` elements declare a claim condition the core evaluates?**
+   Planned: accept it, until a recognizer shows that it matters.
+8. **I4, physical key codes as well as logical keys?** Planned: logical
+   only, adding physical when a game-style key binding needs it.
+

@@ -276,7 +276,9 @@ pub fn release(self: *Self, frame: *const Frame) void
    - Advances the state table's generation counter (§9).
    - Resolves interaction against the **previous** frame's hit regions:
      hover, press and release, the focus target, and the scroll target.
-     Results are kept by id for the queries in §7.4.
+     Results are kept by id for the queries in §7.4. *Planned for 0.7:*
+     it processes the frame's input events one at a time, in arrival
+     order (§5.1).
 2. **Declaration.** The application calls `open`, `close`, `text`, and
    the other declaration functions. These only *append* to arrays. No
    layout happens yet.
@@ -322,6 +324,66 @@ The slices only need to live until `beginFrame` returns, because zui
 copies what it keeps: at most `zui.max_keys_per_frame` (32) key events
 and `zui.max_text_input_bytes` (128) bytes of text per frame. The rest of
 a frame's events are dropped.
+
+*Planned for 0.7 (ROADMAP.md I3, I4):* input becomes an ordered event
+log. Sampled `buttons` lose a press and release that both fall between
+two polls, which is common when the application sleeps until input
+arrives, and they can describe only one pointer.
+
+```zig
+pub const Input = struct {
+    viewport: [2]f32,
+    dt_seconds: f32 = 0,
+    events: []const Event = &.{}, // in arrival order
+};
+
+pub const Event = union(enum) {
+    pointer_down: PointerButton,
+    pointer_up: PointerButton,
+    pointer_move: PointerMove,
+    pointer_cancel: PointerId, // the OS took the pointer: palm rejection, a system gesture
+    pointer_leave: PointerId,
+    wheel: Wheel,              // position, delta, and whether the delta is precise or in lines
+    key_down: KeyEvent,        // key, modifiers held at that moment, repeat
+    key_up: KeyEvent,
+    text: []const u8,
+    os_gesture: OsGesture,     // pinch and rotate the OS recognized, at a position
+};
+
+pub const Pointer = struct {
+    id: PointerId,
+    kind: enum { mouse, touch, pen },
+    position: [2]f32,
+    seconds: f64,              // the host's timestamp
+    pressure: f32 = 1,
+    tilt: [2]f32 = .{ 0, 0 },
+};
+```
+
+`PointerButton` and `PointerMove` extend `Pointer` with the button, and
+with the coalesced history of a move. The rules:
+- **Events are processed in order.** A press and release in one frame is
+  a click, and "release, then a new touch" is handled in that order.
+- **Moves are coalesced per pointer.** Only the last move before another
+  event of the same pointer is hit-tested; the earlier ones stay as
+  history, for velocity. A mouse that reports at 8 kHz costs one hover
+  hit test per frame, as today.
+- **Velocity comes from the host's timestamps,** never from a clock read
+  during the frame, so replay is deterministic.
+- **Touch never hovers.** A mouse or pen hovers while it is over the
+  surface.
+- **`Key` grows** to letters, digits, punctuation and function keys.
+  Modifiers travel with each key event, so shift-tab followed by tab in
+  one frame is resolved correctly.
+- **Limits:** `Config.max_pointers` (default 10) sizes the pointer table;
+  a contact beyond it is ignored until a slot frees, as digitizers do.
+  `Config.max_events_per_frame` replaces `zui.max_keys_per_frame`, and
+  events past it are dropped and reported (§13.2).
+- **Sampled backends** use `zui.InputSampler`, which turns successive
+  states into events.
+
+Accessibility actions (Invoke, RangeValue, Scroll) join the union in
+0.12 as events naming an element id (ROADMAP.md V2).
 
 ---
 
@@ -429,7 +491,11 @@ makes an element scroll on those axes, and clips them. The rules:
 
 Wheel input goes to the deepest scroll container under the pointer that
 can still move in the wheel's direction. If it cannot, the input passes
-to the next container outward, as in browsers.
+to the next container outward, as in browsers. *Planned for 0.10:*
+dragging and two-finger gestures follow the same rule by the motion
+component they carry: a drag locks to an axis once it passes the touch
+slop, and goes to the innermost element that accepts panning on that axis
+and still has room (ROADMAP.md I5).
 
 ### 6.4 Floating elements
 
@@ -546,8 +612,14 @@ stored. Four flags control interaction (§7.4):
 - `focusable` makes it reachable with tab, and implies `interactive`;
 - `focus_scope` keeps tab inside the element's descendants;
 - `disabled` keeps the element hit-tested, so it still covers what is
-  beneath it, but it is never pressed, clicked or focused. `text` copies its content into the frame arena, so the caller's
-buffer may be reused immediately.
+  beneath it, but it is never pressed, clicked or focused.
+
+*Planned for 0.10:* `.gestures` declares what else an element accepts
+(pan on an axis, zoom, drag, long press, double tap, a custom
+recognizer), as a packed set stored in its hit region (ROADMAP.md I5).
+
+`text` copies its content into the frame arena, so the caller's buffer
+may be reused immediately.
 
 Nesting follows the code, with `defer`:
 
@@ -698,6 +770,21 @@ error in every theme until the theme handles it.
 elements marked `.focusable = true`. Elements in a `.focus_scope`, such as
 a modal, keep focus inside the scope.
 
+*Planned for 0.7 (ROADMAP.md I4):* the queries answer for every pointer.
+`hovered` is true under any pointer that can hover; `pressed` while any
+pointer whose press began on the element is down; `clicked` when one of
+them is released over it. `pointer()` and `pointerLocal` follow the
+primary pointer: the mouse, or the first touch to go down while no other
+was down. `chordPressed(.{ .key = .s, .modifiers = .{ .control = true } })`
+matches a key with the modifiers held when it was pressed.
+
+*Planned for 0.10 (ROADMAP.md I5):* queries that merge devices into
+intents: `manipulation(id)` (translation, scale, rotation and pivot,
+summed over the frame, from a drag, a pinch, the wheel or momentum),
+`contextRequested`, `dismissed`, `adjusted` and `navigated`. Custom
+recognizers read `pointerEvents(id)` and take or give up a pointer with
+`claim` and `decline`.
+
 ### 7.5 Render commands
 
 ```zig
@@ -843,6 +930,9 @@ pub fn stateIfPresent(self: *Self, id: Id, comptime T: type) ?*T
   next frame. An element that disappears loses its state, which is the
   immediate-mode equivalent of unmounting. Freed slots use backward-shift
   deletion, so the table never accumulates tombstones.
+- **Gestures** keep their state here too *(planned for 0.10)*: momentum,
+  and the state of custom recognizers, so both end when their element is
+  no longer declared (ROADMAP.md I5).
 - **Full table.** It does not corrupt anything: `state` returns a pointer
   to zeroed scratch memory, and `endFrame` reports
   `error.CapacityExceeded` with the `.state_slots` limit in its
@@ -1082,6 +1172,9 @@ const Theme = struct {
 
 zui provides `Color` (RGBA8 with `.rgb(0x3366ff)` and `.mix`), `Edges`,
 `CornerRadius`, and decl-literal helpers (`.all(n)`, `.symmetric(h, v)`).
+*Planned for 0.11:* `Config.Color` may be `zui.ExtendedColor` (4×f16,
+linear scRGB) for HDR and wide gamut, clamped for renderers without
+support (ROADMAP.md G6).
 It provides no theme registry, no inheritance and no cascade. Swapping a
 theme means passing a different struct, so the cost is exactly the cost
 of reading a field.
@@ -1111,7 +1204,8 @@ Without it, the name is not stored at all.
 ### 13.2 Capacity limits (defined behavior, reported)
 
 Elements, text bytes, depth, render commands (including wrapped lines),
-state slots, task slots and the measurement cache all fail the same way:
+state slots, task slots, the measurement cache, and, from 0.7, input
+events per frame all fail the same way:
 1. The part that fits is kept. Overflowing elements are dropped from the
    frame, and their subtrees are skipped cheaply: the depth is still
    tracked, so `close` calls pair up correctly.
@@ -1177,7 +1271,9 @@ frame, or (in development) treat it as fatal.
   and releases them, and calls `declare(app, ui)` once per frame. (The
   draft's `ui.simulate(.{ .click = id })` returned an `Input` instead. A
   click takes two frames, so a helper that runs them is simpler to use
-  than one that returns their inputs.)
+  than one that returns their inputs.) *Planned for 0.7:* the driver
+  emits input events, so a click fits in one frame, and it gains `tap`,
+  `pinch` and drags with several pointers (ROADMAP.md I4).
 - **`snapshot(writer, commands, names)`** writes one line per command,
   for golden-file tests:
 
@@ -1355,15 +1451,16 @@ It lives outside the core because most applications will not need it.
 | 0.3 | TaskPool, the completion queue, `needsFrame`, frames in flight with a render thread | a thumbnail-grid example cancels off-screen loads, and an idle application uses 0% CPU |
 | 0.4 | `zui_widgets` (button, checkbox, slider, text field), `zui_reflect`, `zui_testing` snapshots | the widget set is built on the public API only (enforced by the module boundary, §3) |
 | 0.5 | parallel measurement; benchmarks that meet the §6.5 targets | targets met on a 2020 desktop core; CI reports them (§14.3) |
-| 0.6 | measure and audit: CI counts instructions under Callgrind, for a build with a fixed `-Dcpu` and a fixed number of frames per scenario, and fails on more than 2% growth over the parent commit; `zig build bench-compare -- <ref>` alternates two commits locally and reports the median ratio with its spread; the async audit; task completions applied at `beginFrame` (principle 8); startup benchmarks; `-Dzui-trace` | the instruction counts repeat exactly between runners; the local comparison catches the `depth: u16` stall (PERF-ITEMS.md); an off trace build's instruction counts are unchanged |
-| 0.7 | the contracts (the breaking release): renderer and host contracts, `Surface`, host events, conformance suites, `zui_app`; letter spacing through a `MeasureKey`; display scale and zoom; the raylib adapter host | every backend passes the conformance suites and runs the demo through `zui_app` |
+| 0.6 | measure and audit: CI counts instructions under Callgrind, for a build with a fixed `-Dcpu` and a fixed number of frames per scenario, and fails on more than 2% growth over the parent commit; `zig build bench-compare -- <ref>` alternates two commits locally and reports the median ratio with its spread; the async audit; task completions applied at `beginFrame` (principle 8); the input event log specified and prototyped behind today's API; startup benchmarks; `-Dzui-trace` | the instruction counts repeat exactly between runners; the local comparison catches the `depth: u16` stall fixed in `946405e`; an off trace build's instruction counts are unchanged; input over the event log costs no more than today |
+| 0.7 | the contracts (the breaking release): renderer and host contracts, `Surface`, host events, conformance suites, `zui_app`; letter spacing through a `MeasureKey`; display scale and zoom; input as an ordered event log with many pointers; the raylib adapter host | every backend passes the conformance suites and runs the demo through `zui_app`; a click inside one frame is kept |
 | 0.8 | the first native host, Windows, with the system material behind the window | the demo runs on it unchanged, passes the host suite and idles at 0% CPU |
 | 0.9 | feeds (with `TaskPool` as a feed that delivers once), the relay tap, `zui_wire`, replay, rendering in another process, file watching | task tests pass unchanged; a recorded session replays to identical commands |
-| 0.10 | text and layout: the single-line wrap fast path, a whole-string metrics cache, `.growEqual`, aspect ratio and natural sizes, dividers, decorated images, floating options (§6.4), right-to-left layout, flex wrap, drag and drop, the next-frame deadline | golden, snapshot and interaction tests for each; warm text faster by 0.6's measure; no change to the other §6.5 scenarios beyond noise |
-| 0.11 | effects: gradients, shadows, glow, backdrop blur, transforms, materials, each lowered for renderers without it | lowering tested for each; one renderer draws each |
+| 0.10 | text and layout: the single-line wrap fast path, a whole-string metrics cache, `.growEqual`, aspect ratio and natural sizes, dividers, decorated images, floating options (§6.4), right-to-left layout, flex wrap, drag and drop, the next-frame deadline, gestures with arbitration and momentum | golden, snapshot and interaction tests for each; warm text faster by 0.6's measure; no change to the other §6.5 scenarios beyond noise |
+| 0.11 | effects: gradients, shadows, glow, backdrop blur, transforms, materials, each lowered for renderers without it; HDR and wide-gamut color | lowering tested for each; one renderer draws each |
 | 0.12 | `zui_debug` over a read-only `Frame.inspect`; the semantics list (§7.6); `-Dzui-safety` (§3); a demo running in a browser | the inspector driven by `zui_testing` over the Documents view; the Windows host bridges semantics to UI Automation |
 | 0.13 | macOS, Linux and web hosts; notifications, dialogs, URLs and menus; native and custom window decorations; more than one window | each host passes the host suite and runs the demo unchanged |
-| 0.14 | `zui_motion` (tweens over `state` and `dt_seconds`), opt-in exit animations, drag and momentum scrolling | tweens tested frame by frame; an idle application still sleeps; a full ghost buffer is reported like other limits (§13.2) |
+| 0.14 | `zui_motion` (tweens over `state` and `dt_seconds`), opt-in exit animations | tweens tested frame by frame; an idle application still sleeps; a full ghost buffer is reported like other limits (§13.2) |
+
 | 0.15 | text field: selection, word movement, clipboard, multiple lines, IME | `zui_testing` tests for each; IME on Windows |
 | later | docking, a grid layout, layout islands, static subtrees, SIMD | each one ships only with a measured win or a demonstrated need |
 
