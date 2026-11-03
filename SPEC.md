@@ -38,8 +38,9 @@ core: hosts, renderers, modules, and the contracts that connect them.
    measured in the comptime lesson's antipatterns B1 and B2).
 6. **Explicit threading.** One thread declares a frame. Finished frames
    are immutable, so they can move to a render thread. Background work
-   reports back through a queue that the UI drains. There is no hidden
-   locking.
+   reports back through state the UI thread reads at `beginFrame`: a
+   task marks its slot finished (§10.3), and an application's own
+   producers use queues (§10.4). There is no hidden locking.
 7. **A small core, with extensions beside it.** Widgets, reflection-driven
    inspectors and backends are separate modules that use only the public
    API. Anything they can do, application code can do too.
@@ -47,8 +48,9 @@ core: hosts, renderers, modules, and the contracts that connect them.
    events, input, task completions, feed deliveries) is applied at
    `beginFrame`, and everything leaving it is produced by `endFrame`.
    Declaration never sees data change under it, and a frame's inputs can
-   be relayed, replayed or sent elsewhere (ARCHITECTURE.md §2). *Planned
-   for 0.6:* task completions are still drained at each `request` (§10.3).
+   be relayed, replayed or sent elsewhere (ARCHITECTURE.md §2). Task
+   completions follow it from 0.6 (§10.3); host events, events in the
+   input log and feeds follow it as they arrive, in 0.7 and 0.9.
 
 ### Non-goals
 

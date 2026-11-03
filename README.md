@@ -31,18 +31,24 @@ Implemented so far:
   Platforms with thread-safe text measurement get parallel measurement for
   cold frames (4.3× as fast on 10 cores), and `zig build bench` measures
   all of it.
+- **0.6, in progress:** `zig build bench-compare` runs two commits'
+  benchmarks alternately and reports each change with its spread; startup
+  benchmarks for `init`, `initBuffer` and first frames; and task
+  completions applied only at `beginFrame`, so every request in a frame
+  sees the same state.
 
 The reference backend and demo application live in
 [zui-raylib](https://github.com/AaronJClausen/zui-raylib).
 
-Next: measurement you can trust, an audit of the async model and the
-design of event-based input (0.6), then contracts for renderers and hosts
+Next: the rest of 0.6 (an audit of the async model, instruction counts
+in CI, trace zones and the design of event-based input), then contracts for renderers and hosts
 and input as an ordered event log with many pointers (0.7), a native
 Windows host (0.8), feeds and a wire format for streaming frames in and
 out (0.9), and from there text, layout and gestures, effects and HDR, an
-inspector, more hosts, motion and text editing. [ROADMAP.md](ROADMAP.md) has the plan, where each item
-stands and where to pick up, and [ARCHITECTURE.md](ARCHITECTURE.md) how
-the pieces connect.
+inspector, more hosts, motion and text editing.
+[ROADMAP.md](ROADMAP.md) has the plan, where each item stands and where
+to pick up, and [ARCHITECTURE.md](ARCHITECTURE.md) how the pieces
+connect.
 
 ```zig
 const Ui = zui.Context(.{}, MyPlatform);

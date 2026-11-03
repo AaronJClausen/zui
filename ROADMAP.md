@@ -40,32 +40,38 @@ Each item says:
 | alongside | modules (K) and developer experience (D) | any release, once unblocked |
 | later | docking, grid, layout islands, static subtrees, SIMD | only with a measured or demonstrated need |
 
-Measured on the reference machine (i9-10900K) at `508e10c`:
+Measured on the reference machine (i9-10900K) at `a6d8e34`, the last
+commit before 0.6; the library code is unchanged from `508e10c`, where
+the box tree took 100.0 µs:
 
 | Scenario | Declaration | `endFrame` | §6.5 target |
 |---|---|---|---|
-| 4,096 boxes, depth 8 | 51.8 µs | 100.0 µs | 100 µs (no headroom) |
-| 1,000 texts, warm cache | 13.9 µs | 184.2 µs | 250 µs |
-| 4,000 children of one parent | 54.5 µs | 67.9 µs | |
+| 4,096 boxes, depth 8 | 52.2 µs | 101.2 µs | 100 µs (missed by 1.2 µs) |
+| 1,000 texts, warm cache | 14.1 µs | 184.2 µs | 250 µs |
+| 4,000 children of one parent | 52.9 µs | 65.8 µs | |
 
 ## Picking up from here
 
-The plan was settled on 2026-11-01. R2, P1 and A2 are done; nothing
-else from 0.6 on exists yet. To continue:
+The plan was settled on 2026-11-01. On 2026-11-02, R2 (`375193b`), P1
+(`30b4f73`) and A2 (`b4e47a6`) were done and pushed; the rest of 0.6
+does not exist yet. **Resume at A1.** To continue:
 
 1. **Judge each item against a commit, not a file.** On the machine you
    measure on, `zig build bench-compare -- a6d8e34` compares the working
    tree with the last commit before 0.6 (R2), with each commit measured
-   by its own scenarios. At `a6d8e34` on the reference machine, the box
-   tree's `endFrame` was 101.2 µs, 1.2 µs over its §6.5 target. The
-   startup times (P1) are new after it, so compare those against the
-   commit that added them.
+   by its own scenarios. The startup times (P1) are new after
+   `a6d8e34`, so compare those against `30b4f73` or later.
 2. **Work through the rest of 0.6 in this order:**
-   - A1, whose review may add items to 0.6 or 0.7;
+   - A1, whose review may add items to 0.6 or 0.7. Before writing it,
+     settle open decision 9 with the owner, and bring the problems it
+     finds to the owner sorted and bounded before they become items
+     here;
    - R1, then P2 and I3, which are both judged by R1's counts.
 3. **Follow "Spec first, then code"** below. R1 is already specified in
    SPEC.md §16, and I3's event log in the §5.1 note; the rest need
    their designs in SPEC.md before code.
+4. **Commit and push each item when it is done,** with its status
+   written here and its marker removed from SPEC.md in the same commit.
 
 Things to know when resuming:
 - **ARCHITECTURE.md §3 is sketches, not code.** No `zui.Surface`,
@@ -147,6 +153,13 @@ waits on the UI thread until the task reaches a cancelation point.
 who owns the thread, what crosses it, where it can block the UI thread,
 and how it behaves with each kind of `Io` (threaded, evented,
 single-threaded). Each problem found becomes an item.
+
+**Leads from A2.** A2 found a queue whose fixed size was only enough
+because it was drained at every request (see its status). Look for other
+fixed-size buffers whose bound depends on how often something empties
+them, and for every place a cancel waits on the UI thread. Note too that
+with a single-threaded `Io`, a task runs inline inside `request`, so a
+slow task blocks declaration there.
 
 **Done when:** the review is merged, and every problem it found is an item
 here or fixed.
@@ -979,6 +992,9 @@ These are deliberate, and each is a reason to choose zui:
 | Gesture arbitration | elements declare what they accept; the core decides with one rule, by motion component (I5) |
 | Custom gestures | code in declaration over `pointerEvents` and `state`, not a comptime registry of machines (I5) |
 | Tasks and feeds | stay deliveries of their own in the frame record, not routed input values (A2, F1) |
+| How task completions reach `beginFrame` | each slot records the generation its task finished with; no queue, whose size relied on draining at every request (A2) |
+| Comparing two commits' times | each commit's own `zig build bench`, alternated, judged by the middle half of the per-round ratios beyond 2% (R2) |
+| The demo's cold start | measured with C4, when the demo moves to `zui_app`, not in P1 |
 
 ### Open
 
@@ -1001,4 +1017,8 @@ Each is planned with the first option.
    Planned: accept it, until a recognizer shows that it matters.
 8. **I4, physical key codes as well as logical keys?** Planned: logical
    only, adding physical when a game-style key binding needs it.
+9. **A1, where the review lives, and for how long?** Planned:
+   `docs/ASYNC_REVIEW.md`, kept, since A1 says the review stays in the
+   repo; the alternative is folding it into SPEC.md §10 and deleting it,
+   as with earlier working docs. Ask the owner when A1 starts.
 
