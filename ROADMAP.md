@@ -27,7 +27,7 @@ Each item says:
 | 0.4 | `zui_widgets`, `zui_reflect`, `zui_testing` | shipped |
 | 0.5 | layout performance, parallel measurement, benchmarks | shipped |
 | after 0.5 | declaration work: −42% to −56% | on `main` (no release is tagged yet) |
-| 0.6 | measure and audit: regression checks, the async audit, the frame boundary, the input format, startup and trace profiling | **next** |
+| 0.6 | measure and audit: regression checks, the async audit, the frame boundary, the input format, startup and trace profiling | **in progress** (R2 done) |
 | 0.7 | the contracts: renderer, host, surface, conformance, `zui_app`; input as an ordered event log; the raylib adapter | planned (the breaking release) |
 | 0.8 | the first native host: Windows | planned |
 | 0.9 | feeds and the wire format | planned |
@@ -50,15 +50,15 @@ Measured on the reference machine (i9-10900K) at `508e10c`:
 
 ## Picking up from here
 
-The plan was settled on 2026-11-01. No code for 0.6 or later exists yet.
-To start:
+The plan was settled on 2026-11-01. R2 is done; nothing else from 0.6
+on exists yet. To continue:
 
-1. **Record a baseline.** The numbers above are from `508e10c`. On the
-   machine you will measure on, run
-   `zig build bench -- --json baseline.json` at the current `main` and
-   keep the file; every 0.6 item is judged against it.
-2. **Work through 0.6 in this order:**
-   - R2, so later items can be compared locally;
+1. **Judge each item against a commit, not a file.** On the machine you
+   measure on, `zig build bench-compare -- a6d8e34` compares the working
+   tree with the last commit before 0.6 (R2), with each commit measured
+   by its own scenarios. At `a6d8e34` on the reference machine, the box
+   tree's `endFrame` was 101.2 µs, 1.2 µs over its §6.5 target.
+2. **Work through the rest of 0.6 in this order:**
    - P1, so startup has numbers before anything changes it;
    - A2, which is small and concrete, starting at `src/tasks.zig:118`
      and `:147`;
@@ -131,6 +131,11 @@ ratio and its spread.
 **Done when:** it catches the `depth: u16` store-forwarding stall fixed
 in `946405e`, which leaves the instruction count unchanged: a 16-bit
 store followed by a 32-bit reload cost the box tree's declaration 27%.
+
+**Status.** Done: `bench/compare.zig`, specified in SPEC.md §14.3.
+`zig build bench-compare -- 946405e~1 946405e` reports the box tree's
+declaration −26.4% (middle half −27.5% to −26.1%) and calls it faster; a
+commit compared with itself calls nothing faster or slower.
 
 ### A1. The async and parallel audit
 

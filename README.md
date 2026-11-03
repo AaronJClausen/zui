@@ -70,6 +70,7 @@ ui.release(frame);
 | `zig build check` | compile one full frame, every widget and the test driver without producing output; add `-Dtarget=wasm32-freestanding` to check another target |
 | `zig build test -Dzui-debug=true` | keep id names, so duplicate-id and unbalanced-tree panics name the element |
 | `zig build bench` | run the benchmarks in ReleaseFast; add `-- --check-targets` to fail on a missed §6.5 target, or `-- --compare old.json` after `-- --json old.json` to check for regressions |
+| `zig build bench-compare -- main` | run the benchmarks of `main` and of the working tree alternately, and report each time's median change and its spread; `-- <base> <head>` compares two commits (SPEC.md §14.3) |
 | `zig build docs` | generate API documentation into `zig-out/docs` |
 | `zig build fmt` | format every Zig source file |
 | `zig build fmt-check` | fail if any file is not formatted, as CI does |
@@ -83,7 +84,7 @@ CI runs:
 - the benchmarks, failing on any allocation after `init`. Times and the
   SPEC.md §6.5 targets are reported in the job summary but not compared:
   runners vary too much. Check for slowdowns on your own machine with
-  `--json` and `--compare`.
+  `zig build bench-compare`.
 
 Those targets exist to catch assumptions about the host machine early:
 the first 32-bit build found two places that used a 64-bit hash as an

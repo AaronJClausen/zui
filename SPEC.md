@@ -1325,10 +1325,29 @@ commits on one runner was tried and dropped. GitHub's runners range from
 62.6 to 125.3 µs for the box tree, and one runner timed a commit 45%
 slower than the commit before in three alternating attempts, while two
 other runners and a bisect on the same CPU model found no difference. A
-comparison is meaningful on one machine with nothing else running:
-`--json` at the old commit, then `--compare` at the new one. Enforcing the
-targets is a step for a reference machine:
-`zig build bench -- --check-targets`.
+comparison is meaningful on one machine with nothing else running, through
+`zig build bench-compare` below, or `--json` at the old commit and then
+`--compare` at the new one. Enforcing the targets is a step for a
+reference machine: `zig build bench -- --check-targets`.
+
+**Comparing two commits.** `zig build bench-compare -- <base> [<head>]`
+checks out each commit in a git worktree under `.zig-cache`, with the
+head defaulting to the working tree, uncommitted changes included. It
+runs each commit's own `zig build bench -- --json` once to build and warm
+up, then alternately for `--rounds` rounds (10 by default), swapping
+which goes first each round. For each time `--json` saves, it prints:
+- the median of the rounds' head/base ratios;
+- the middle half of those ratios, as the spread;
+- *faster* or *slower* only when that whole middle half is more than 2%
+  from no change.
+
+On the reference machine, a commit compared with itself gives middle
+halves that all contain zero and stay within 2%, except in scenarios
+under 2 µs, where Windows' timer steps of 100 ns are 5% to 9%. The
+`depth: u16` stall fixed in `946405e`, which left the instruction count
+unchanged, comes out at −26.4% (−27.5% to −26.1%) for the box tree's
+declaration. Ten rounds take about 45 seconds there, most of it spent
+building the worktrees.
 
 ---
 
