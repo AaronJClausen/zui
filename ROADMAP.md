@@ -1,21 +1,15 @@
-# Roadmap and rollout plan
+# Roadmap
 
-SPEC.md is the contract for the core: what zui does, and, marked
-*Planned for 0.x*, what it has committed to do. ARCHITECTURE.md is the map
-of everything around the core: hosts, renderers, modules, and how they
-connect. This file is the plan for building both: what ships in each
-release, in what order, and how each item is judged. The commits of the
-declaration work after 0.5 record its measurements.
+SPEC.md is the contract, and its §21 orders the work into stages by what
+depends on what. This file is how each stage is built and judged: its
+items, what is known about each, and what decides that it is done.
+ARCHITECTURE.md maps where each part lives.
 
-The items come from four sources: a comparison with
-[Clay](https://github.com/nicbarker/clay) at `e6cc369` (v0.14) made
-against zui at `508e10c`, the owner's notes, the architecture they led
-to, and a review of input on 2026-11-02, from which I3–I5 and G6 came.
 Each item says:
 - **Grounding:** what we know, with the code that shows it.
 - **Plan:** what to change.
 - **Done when:** the test or measurement that decides it.
-- **Spec:** the sections it changes.
+- **Spec:** the sections it implements.
 
 ## Where we are
 
@@ -23,222 +17,217 @@ Each item says:
 |---|---|---|
 | 0.1 | layout core, text wrapping, measurement cache, render commands | shipped |
 | 0.2 | input, focus, clipping, scrolling, floating, state | shipped |
-| 0.3 | task pools, `needsFrame`, frames held by a render thread | shipped |
+| 0.3 | task pools, `needsFrame`, frames held by a render thread | shipped; task pools are deleted in stage 2 |
 | 0.4 | `zui_widgets`, `zui_reflect`, `zui_testing` | shipped |
 | 0.5 | layout performance, parallel measurement, benchmarks | shipped |
-| after 0.5 | declaration work: −42% to −56% | on `main` (no release is tagged yet) |
-| 0.6 | measure and audit: regression checks, the async audit, the frame boundary, the input format, startup and trace profiling | **in progress** (R2, P1 and A2 done) |
-| 0.7 | the contracts: renderer, host, surface, conformance, `zui_app`; input as an ordered event log; the raylib adapter | planned (the breaking release) |
-| 0.8 | the first native host: Windows | planned |
-| 0.9 | feeds and the wire format | planned |
-| 0.10 | text, layout and gestures | planned |
-| 0.11 | effects and HDR | planned |
-| 0.12 | seeing the UI: inspector, semantics, safety sweeps, web demo | planned |
-| 0.13 | more hosts and services: macOS, Linux, web; notifications, dialogs, decorations, windows | planned |
-| 0.14 | motion | planned |
-| 0.15 | text editing | planned |
-| alongside | modules (K) and developer experience (D) | any release, once unblocked |
-| later | docking, grid, layout islands, static subtrees, SIMD | only with a measured or demonstrated need |
+| after 0.5 | declaration work: −42% to −56% | on `main` |
+| 0.6, in part | `bench-compare` (R2), startup benchmarks (P1), task completions at `beginFrame` (A2), the async design (A1) | done; the rest of 0.6 became stage 1 |
 
-Measured on the reference machine (i9-10900K) at `a6d8e34`, the last
-commit before 0.6; the library code is unchanged from `508e10c`, where
-the box tree took 100.0 µs:
+No release is tagged; everything is on `main`. From here, work is
+tracked by stage rather than by release number. Each stage may be tagged
+when it is done.
 
-| Scenario | Declaration | `endFrame` | §6.5 target |
+Measured on the reference machine (i9-10900K) at `a6d8e34`, against the
+budgets of SPEC.md §20.2:
+
+| Scenario | Declaration | `endFrame` | Budget |
 |---|---|---|---|
-| 4,096 boxes, depth 8 | 52.2 µs | 101.2 µs | 100 µs (missed by 1.2 µs) |
-| 1,000 texts, warm cache | 14.1 µs | 184.2 µs | 250 µs |
+| 4,096 boxes, depth 8 | 52.2 µs | 101.2 µs | declaration < 55 µs (met); layout and emission < 100 µs (missed by 1.2 µs) |
+| 1,000 texts, warm caches | 14.1 µs | 184.2 µs | < 120 µs (missed; T1 and T2 are the plan) |
 | 4,000 children of one parent | 52.9 µs | 65.8 µs | |
 
 ## Picking up from here
 
-The plan was settled on 2026-11-01. On 2026-11-02, R2 (`375193b`), P1
-(`30b4f73`) and A2 (`b4e47a6`) were done and pushed; the rest of 0.6
-does not exist yet. **Resume at A1.** To continue:
+**Resume at stage 1: R1, then P2.** Everything after depends on R1's
+counts to judge it.
 
 1. **Judge each item against a commit, not a file.** On the machine you
    measure on, `zig build bench-compare -- a6d8e34` compares the working
-   tree with the last commit before 0.6 (R2), with each commit measured
-   by its own scenarios. The startup times (P1) are new after
+   tree with the last commit before 0.6. Startup times (P1) are new after
    `a6d8e34`, so compare those against `30b4f73` or later.
-2. **Work through the rest of 0.6 in this order:**
-   - A1, whose review may add items to 0.6 or 0.7. Before writing it,
-     settle open decision 9 with the owner, and bring the problems it
-     finds to the owner sorted and bounded before they become items
-     here;
-   - R1, then P2 and I3, which are both judged by R1's counts.
-3. **Follow "Spec first, then code"** below. R1 is already specified in
-   SPEC.md §16, and I3's event log in the §5.1 note; the rest need
-   their designs in SPEC.md before code.
-4. **Commit and push each item when it is done,** with its status
-   written here and its marker removed from SPEC.md in the same commit.
+2. **The spec is already written.** Every item below implements sections
+   of SPEC.md that exist; an item that finds the spec wrong changes it in
+   the same commit, with the reason.
+3. **Commit and push each item when it is done,** with its status written
+   here in the same commit.
 
 Things to know when resuming:
-- **ARCHITECTURE.md §3 is sketches, not code.** No `zui.Surface`,
-  `RendererCapabilities`, `Feed` or `zui_app` exists yet. The names may
-  change when 0.7 builds them, and the doc is updated in the same commit.
+- **The code still has the old shape.** `Platform`, `TaskPool`, sampled
+  `Input`, `dt_seconds` and an error-returning `endFrame` all exist until
+  stage 2. ARCHITECTURE.md §7 lists each difference and where it lives.
+- **Source comments cite old section numbers** of SPEC.md (`§6.5`,
+  `§10.3`, `§14.3`). They are corrected or removed as stage 2 rewrites
+  the files they are in. `bench --check-targets` still checks the old
+  text target of 250 µs until R1 updates it to §20.2's budgets.
 - **The other repos are untouched.** zui-raylib, zui-sokol and
-  zui-terminal keep today's `Platform` until 0.7. `zui-host` does not
-  exist yet; it is created with H2 in 0.8.
-- **No release is tagged.** 0.1 to 0.5 and the declaration work are on
-  `main`.
+  zui-terminal keep today's `Platform` until stage 2. `zui-host` does not
+  exist yet; it is created with H2 in stage 4.
 - **Item IDs are stable.** A letter names a series (R regression checks,
-  A async, P profiling, C contracts, T text, S scale, H hosts, F feeds and
-  the wire, L layout, I interaction, G graphics, V visibility, M motion,
-  E editing, K modules, D developer experience). A new item takes the next
-  number in its series, and numbers are never reused, so a gap such as G4
-  is an item that was merged into another.
-- **The open decisions** below are each planned with their first option.
-  Revisit one when its item's release starts, not before.
+  A async, P profiling, C contracts, T text, S scale, H hosts, F the frame
+  record and the wire, L layout, I interaction, G graphics, V visibility,
+  M motion, E editing, K modules, D developer experience). A new item
+  takes the next number in its series, and numbers are never reused, so a
+  gap is an item that was merged or retired.
 
-## How releases ship
+## How stages ship
 
-- **Measure, then build on the contracts, then prove them twice.** 0.6
-  gives every later change a trustworthy measure. 0.7 defines the
-  contracts and proves them with an adapter; 0.8 proves them again with a
-  native host, because a contract with one implementation is not yet a
-  contract.
-- **One breaking release.** 0.7 changes `measureText` (T3), how scale
-  reaches layout (S1), and input from sampled state to an event log (I4),
-  and moves backends onto the contracts. Every
-  backend, `zui_testing` and `bench/` are updated in the same week, and
-  the release notes say what to change.
-- **After 0.7, new commands do not break renderers.** Optional commands
-  are lowered by the core for renderers that cannot draw them
-  (ARCHITECTURE.md §3.2), which is why effects (0.11) can come after the
-  breaking release.
-- **New optional modules before new core.** If a feature can be built on
-  the public API, it is, and the core only gains what a module proves it
-  cannot do without.
-- **Items may land early.** An item whose prerequisites have shipped can
-  land in an earlier release than listed; T1 and T2, for example, need
-  only 0.6.
-- **Spec first, then code.** When a release starts, its items' designs
-  land in SPEC.md (or ARCHITECTURE.md) marked *Planned for 0.x*, and the
-  marker comes off in the commit that ships each one.
+- **Measure first.** Stage 1 gives every later change a trustworthy
+  measure.
+- **One breaking change, made once.** Stage 2 changes the shape of
+  `Context`, the frame record, input and outside data together, and
+  stage 3 adds the contracts on top, before any native host or wire
+  format can freeze the old shapes. Every backend, `zui_testing` and
+  `bench/` are updated in the same week, and the notes say what to
+  change.
+- **Prove each contract twice.** An adapter proves it in stage 3; a
+  native host proves it again in stage 4, because a contract with one
+  implementation is not yet a contract.
+- **After stage 3, new commands never break renderers.** Optional
+  commands are lowered by the core for renderers that do not declare
+  them, which is why effects can come in stage 8.
+- **A module before core.** A feature that can be built on the public API
+  is; the core gains only what a module proves it cannot do without.
+- **Items may land early** once their prerequisites have. T1 and T2, for
+  example, need only stage 1.
+- **A speedup ships with its measurement,** and one that is not measured
+  does not ship.
 
 ---
 
-## 0.6: measure and audit
-
-### R1. Instruction counts in CI
-
-Specified in SPEC.md §16: Callgrind, a fixed `-Dcpu`, a fixed number of
-frames per scenario; fail on more than 2% growth over the parent commit.
-
-**Done when:** the counts repeat exactly between runners.
+## Done
 
 ### R2. `zig build bench-compare -- <ref>`
 
 Builds both commits, alternates them locally, and reports the median
-ratio and its spread.
-
-**Done when:** it catches the `depth: u16` store-forwarding stall fixed
-in `946405e`, which leaves the instruction count unchanged: a 16-bit
-store followed by a 32-bit reload cost the box tree's declaration 27%.
-
-**Status.** Done: `bench/compare.zig`, specified in SPEC.md §14.3.
-`zig build bench-compare -- 946405e~1 946405e` reports the box tree's
-declaration −26.4% (middle half −27.5% to −26.1%) and calls it faster; a
-commit compared with itself calls nothing faster or slower.
-
-### A1. The async and parallel audit
-
-**Grounding.** zui runs work on other threads in three places: tasks
-(§10.3), parallel measurement (§10.5) and frames released from a render
-thread (§10.2). Hosts, feeds and signals will add more. Canceling a task
-waits on the UI thread until the task reaches a cancelation point.
-
-**Plan.** A written review, kept in the repo, answering for each place:
-who owns the thread, what crosses it, where it can block the UI thread,
-and how it behaves with each kind of `Io` (threaded, evented,
-single-threaded). Each problem found becomes an item.
-
-**Leads from A2.** A2 found a queue whose fixed size was only enough
-because it was drained at every request (see its status). Look for other
-fixed-size buffers whose bound depends on how often something empties
-them, and for every place a cancel waits on the UI thread. Note too that
-with a single-threaded `Io`, a task runs inline inside `request`, so a
-slow task blocks declaration there.
-
-**Done when:** the review is merged, and every problem it found is an item
-here or fixed.
-
-**Spec.** §10, as the review finds.
-
-### A2. Apply task completions at `beginFrame`
-
-**Grounding.** SPEC.md §5 says `beginFrame` drains the completion queue,
-but each pool drains at every `request` (`src/tasks.zig:118`, `:147`).
-Two requests to one pool in one frame can therefore see different states,
-and completions are not part of the frame record (ARCHITECTURE.md §2).
-
-**Plan.** Registered pools drain in `beginFrame`; `request` and `get`
-only read.
-
-**Done when:** a test completes a task between two requests in one frame
-and both see the same state, and the existing task tests pass.
-
-**Spec.** §5, §10.3.
-
-**Status.** Done. `beginFrame` applies each registered pool's
-completions after resolving input; `request` only reads (TaskPool has no
-`get`). Two consequences:
-- **The completion queue had to go.** It held one entry per slot, which
-  was only enough because every request drained it. Left until
-  `beginFrame`, a canceled task's stale completion stayed queued, and the
-  next task in that slot blocked forever in `putOneUncancelable` when it
-  finished, hanging the cancel that waited for it. A slot now records the
-  generation its task finished with, in an atomic, and a pool-wide flag
-  lets `beginFrame` skip pools where nothing finished. A1 should look for
-  other bounded queues whose bound relied on how often they were drained.
-- **An inline task is ready one frame later.** Without concurrency, the
-  first request used to return `.ready`; it now returns `.pending`, and
-  the completion wakes the platform for the next frame.
+ratio and its spread (SPEC.md §20.3). `zig build bench-compare --
+946405e~1 946405e` reports the box tree's declaration −26.4% (middle half
+−27.5% to −26.1%) and calls it faster: the `depth: u16` store-forwarding
+stall, which left the instruction count unchanged. A commit compared with
+itself calls nothing faster or slower.
 
 ### P1. Startup benchmarks
 
-**Grounding.** `zig build bench` measures steady frames only. Nothing
-measures `init` (one allocation of 4.29 MiB at the default config, §4.2),
-the first frame (every text cold) or a cold start of the demo.
-
-**Plan.** Add `init`, `initBuffer` and first-frame scenarios to
-`bench/`, and measure the demo's time from process start to its first
-presented frame.
-
-**Done when:** the scenarios are in `--json` and `--compare`.
-
-**Spec.** §14.3.
-
-**Status.** Done: the scenarios are specified in SPEC.md §14.3. The
-demo's cold start moved to C4, because the demo lives in zui-raylib,
-which keeps today's `Platform` until 0.7. With the library at `a6d8e34`
-on the reference machine, the fastest samples were:
+`init`, `initBuffer` and first-frame scenarios, in `--json` and
+`--compare`. With the library at `a6d8e34`, the fastest samples were:
 
 | Scenario | Fastest |
 |---|---|
-| `init`, default config (4.63 MiB, not 4.29: the config grew after 0.2) | 74.6 µs |
+| `init`, default config (4.63 MiB) | 74.6 µs |
 | `initBuffer`, default config | 10.0 µs |
 | first frame, Documents view | 30.3 µs (steady: 9.9 µs) |
 | first frame, 1,000 texts | 230.0 µs |
 
-### P2. Trace zones
+The demo's cold start moved to C4, because the demo lives in zui-raylib.
+
+### A1. The async and parallel audit
+
+Done as a design: sources, demand and the loader replace task pools, and
+are SPEC.md §14 and §15. The working document was folded into SPEC.md and
+deleted. Its two lessons stay:
+- **A bounded queue whose bound relies on how often it is drained** is a
+  hang waiting to happen. `KeyedLoads` sizes its completion ring by
+  claims, so it cannot overflow however rarely it is drained.
+- **A cancel that waits on the UI thread** is never acceptable. zui no
+  longer cancels anything; an abandon flag is read by the producer at its
+  own pace.
+
+### A2. Task completions at `beginFrame`
+
+`beginFrame` applies each pool's completions; `request` only reads. The
+code is deleted with `TaskPool` in stage 2 (A5), but what it showed shapes
+the sources: completions belong to the frame record, and with an inline
+`Io` a result is ready one frame later, not during the request.
+
+---
+
+## Stage 1: measure
+
+### R1. Instruction counts in CI
+
+**Plan.** Callgrind with a fixed `-Dcpu` and a fixed number of frames per
+scenario; fail on more than 2% growth over the parent commit. Update
+`--check-targets` to §20.2's budgets.
+
+**Done when:** the counts repeat exactly between runners.
+
+**Spec.** §20.3.
+
+### P2. The tracer contract
 
 **Grounding.** The profiles of the declaration work needed hand-matched
 `perf` samples and temporary `never_inline` calls to see per-function
 costs.
 
-**Plan.** `-Dzui-trace` adds a zone per layout pass, per emission and
-per `beginFrame` step, for a profiler such as Tracy, and is not analyzed
-at all when off. A short guide in the repo covers profiling with minimal
-noise: pinned cores, fixed frequency, alternating runs.
+**Plan.** `Features.Tracer`: a zone per layout pass, per emission step
+and per `beginFrame` step, through `zuiBegin` and `zuiEnd`, and nothing
+analyzed when it is `void`. A Tracy binding as the first tracer, and a
+short guide to profiling with minimal noise: pinned cores, fixed
+frequency, alternating runs.
 
-**Done when:** a trace of the demo shows every pass, and an off build's
-instruction counts (R1) are unchanged.
+**Done when:** a trace of the demo shows every pass, and a build without a
+tracer has R1 counts unchanged.
 
-**Spec.** §3 build options, §14.3.
+**Spec.** §4, §16.5.
 
-### I3. The input format, settled before the host contract
+---
+
+## Stage 2: the frame record
+
+The breaking change, made once. Everything in this stage lands before
+stage 3 adds the host and renderer contracts.
+
+### C5. `Context(config)` and the text contract
+
+**Grounding.** `Platform` mixes what belongs to three parties: text
+measurement belongs to the renderer (it owns the fonts), `wake` to the
+host (it owns the loop), and `scale()` is read during the frame, outside
+any record, so a replayed frame can lay out differently from the
+original.
+
+**Plan.** `Context(comptime config: Config)`, with `Config.Text` holding
+the text contract (`zuiMeasure`, optional `zuiSegment`,
+`zui_thread_safe`, `zuiFingerprint`), and `init(gpa, io, text)`. With
+`Text = void`, `text` is absent from the API. The rule that every
+`zui`-prefixed declaration must belong to a contract is checked here
+first.
+
+**Done when:** every test, widget and benchmark builds on `Context(config)`;
+compile-error tests pin each contract message.
+
+**Spec.** §4, §5, §9.4, §16.1.
+
+### T3. Letter spacing, through a measurement key
+
+**Grounding.** `measureText(text, font, size)` cannot express letter
+spacing per text, and the additive-measurement rule means a backend
+cannot add it afterwards.
+
+**Plan.** `TextStyle.letter_spacing`, and `MeasureKey { font, size,
+letter_spacing }` passed to `zuiMeasure` and used as the cache key, with
+`size` already multiplied by zoom. Text commands carry the spacing.
+
+**Done when:** a golden test lays out spaced text, and every renderer
+draws it.
+
+**Spec.** §9.1, §9.4.
+
+### S1. The frame record's parameters: time, scale and zoom
+
+**Grounding.** `Platform.scale` only snaps command bounds
+(`src/emission.zig:32`). Nothing lets an application zoom its UI. Time
+arrives as `dt_seconds`, so deadlines and velocities cannot be expressed
+in the host's clock.
+
+**Plan.** `FrameRecord.params = .{ now, viewport, scale, zoom }`.
+`ui.dt()` is derived from two records. Layout stays in logical units;
+text is measured at `size × zoom`; snapping uses `scale × zoom`.
+
+**Done when:** golden tests at three zoom levels, and a replayed record
+reproduces the frame exactly with any scale.
+
+**Spec.** §6.2.
+
+### I4. Input as an ordered event log
 
 **Grounding.**
 - `Input.buttons` is the state at poll time (`src/context.zig:902`), so a
@@ -247,725 +236,536 @@ instruction counts (R1) are unchanged.
   vanishes.
 - There is one pointer: one `press_target` and one `hover_chain`
   (`src/interaction.zig:181`).
-- `Key` has no letters (`src/interaction.zig:8`), so Ctrl+S or Ctrl+C
-  cannot be expressed, and modifiers are sampled once per frame rather
-  than per key.
-- C2's `poll(record)` and F3's encoding freeze whatever the frame record
-  is. Changing it after 0.8 would break every host and the wire format.
+- `Key` has no letters (`src/interaction.zig:8`), so Ctrl+S cannot be
+  expressed, and modifiers are sampled once per frame rather than per key.
 
-A prototype that modeled all inbound data as routed values handled by a
-comptime registry of state "machines" was weighed against this. Its
-event stream and central arbitration are kept (I4, I5). The registry, a
-message bus between elements, and a single manipulation kind are not:
-they duplicate the state table, keep modules from shipping their own
-gestures, and route a gesture by kind where it must be routed by motion
-component (I5).
+I3, which was to settle this format before the host contract, is merged
+here: the format is SPEC.md §7.
 
-**Plan.** Specify the event log (SPEC.md §5.1's note) and the
-per-pointer table, then rebuild today's `resolveInput` over the log
-behind the current API, with `max_pointers = 1`.
+**Plan.** `FrameRecord.events` as SPEC.md §7.1; a pointer table of
+`max_input_contacts`; moves coalesced per pointer; `Key` with letters,
+digits, punctuation and function keys, plus the opaque scancode;
+`chordPressed`;
+`zui.InputSampler` for backends that report only state;
+`zui_testing.Driver` emitting events, with `tap`, `pinch` and
+multi-pointer `drag`. First rebuild `resolveInput` over the log with
+`max_input_contacts = 1` behind today's queries, then widen.
 
 **Done when:**
-- the interaction, widget and `zui_testing` tests pass unchanged;
-- R1's counts on the mouse-only scenarios are no higher than today's;
-- an idle application still sleeps;
+- the interaction, widget and `zui_testing` tests pass on events;
 - a press and release inside one frame is a click;
-- 133 moves in one frame (an 8 kHz mouse at 60 Hz) cost at most one
-  hover hit test per pointer.
+- 133 moves in one frame cost at most one hover hit test per pointer;
+- two pointers press two buttons at once;
+- R1's counts on the mouse-only scenarios are no higher than before.
 
-**Spec.** §5.1, §7.4.
+**Spec.** §7.1, §11.
+
+### I6. The environment and host requests
+
+**Plan.** `Environment`, kept by the core and updated by
+`environment` events; `ui.environment()`. `HostRequests` in the frame:
+the hot element's cursor and the focused editable's IME area.
+
+**Done when:** a test changes the theme by event and a widget follows it;
+the cursor request follows hover.
+
+**Spec.** §7.2, §7.3.
+
+### I2. `nextFrame()`
+
+**Grounding.** `needsFrame` is yes or no. A blinking caret needs "a frame
+at this instant", and a frame-rate cap needs to know it.
+
+**Plan.** `NextFrame = union { immediately, at: Instant, on_event }`,
+from requested frames, pending sources, `requestFrameAt`, momentum and
+gesture timers. `needsFrame` goes.
+
+**Done when:** a test's caret blinks with frames only at its instants,
+and an idle context reports `.on_event`.
+
+**Spec.** §6.6.
+
+### C6. `endFrame` always returns a frame
+
+**Plan.** `endFrame() *const Frame`; the part that fit is laid out, and
+`frame.diagnostics` names the limit, by how much, the peak and the first
+id. `diagnostics.check()` returns `error.CapacityExceeded`. `lastFrame`
+goes. `tryBeginFrame` for hosts that cannot block.
+
+**Done when:** the memory tests pass with the new reporting, and a frame
+over every limit still draws what fit.
+
+**Spec.** §6.3, §6.5, §17.
+
+### A3. Sources in the core
+
+**Plan.** `Config.Sources`; the contract checked at instantiation;
+`beginFrame` swapping each field in order or injecting
+`record.deliveries`; `ui.source(.field)` recording demand;
+`framesSinceRead`; refusals in diagnostics; `zui.Status`,
+`StatusWithProgress`, `Waker`, `Wake`.
+
+**Done when:** a frame with ten idle sources costs no more instructions
+than one with none; every check of SPEC.md §14.9 has its compile-error or
+safety test.
+
+**Spec.** §14.
+
+### A4. `zui_async`
+
+**Plan.** `Latest`, `Stream`, `Task` and `KeyedLoads` as SPEC.md §19.1,
+and `expectSourceConforms` in `zui_testing`, run against each.
+
+**Done when:** each passes the conformance suite under ThreadSanitizer
+and on a single-threaded `Io`; the demo's thumbnail grid runs on
+`KeyedLoads` with no wait on the UI thread, idles at 0% CPU, and 100
+loads finishing between two frames cause one wake.
+
+**Spec.** §19.1, §19.4.
+
+### A5. Delete `TaskPool`
+
+**Plan.** Remove `src/tasks.zig`, its tests and every reference; the
+demo's loads move to A4's sources.
+
+**Done when:** nothing in this repository or the backends names a task
+pool.
 
 ---
 
-## 0.7: the contracts
+## Stage 3: the contracts
 
-ARCHITECTURE.md §3 has the designs.
+### C1. The renderer contract, the generated commands, lowering
 
-### C1. The renderer contract, and lowering
+**Plan.** `zuiSubmit`, `zui_surfaces`, `zui_commands`,
+`zui_extended_color`; `Config.commands` generating `RenderCommand` with
+`@Union`; emission lowering what the renderer did not declare, listed in
+the diagnostics. zui-raylib, zui-sokol and zui-terminal become renderers.
 
-**Plan.** `zui.RendererCapabilities` and `accepted_surfaces`; `submit`
-and `measureText` on the renderer. Emission lowers optional commands the
-renderer did not declare. zui-raylib, zui-sokol and zui-terminal become
-renderers.
+**Done when:** each backend passes C3's renderer suite, and a renderer
+that declares nothing optional compiles a `switch` over the base commands
+only.
 
-**Done when:** each backend passes C3's renderer suite, and lowering is
-tested for each optional command as it is added.
+**Spec.** §13.1, §13.3, §16.2.
 
-**Spec.** §7.5, §8; ARCHITECTURE.md §3.2.
+### C2. The host contract and the surface
 
-### C2. The host contract, the surface and host events
-
-**Plan.** `poll`, `wake`, `waitUntil`, `surface`, `scale`; `zui.Surface`;
-the host-event vocabulary in the frame record: system theme, scale,
-locale, power, network, lifecycle (interrupt, terminate request, hang-up,
-session ending, suspend, resume) and dropped files.
+**Plan.** `zuiPoll`, `zuiWaker`, `zuiWait`, `zuiSurface`, `zuiApply`;
+`zui.Surface`; `RecordBuilder`; sticky wakes.
 
 **Done when:** the raylib adapter (H1) passes C3's host suite.
 
-**Spec.** §5, §5.1; ARCHITECTURE.md §2, §3.3, §3.4.
+**Spec.** §16.3, §16.4.
 
 ### C3. Conformance suites
 
-**Plan.** `zui_testing.expectRendererConforms` and `expectHostConforms`
-(ARCHITECTURE.md §5), and a CI recipe the backends copy.
+**Plan.** `expectRendererConforms` and `expectHostConforms`, and a CI
+recipe the backends copy.
 
 **Done when:** every backend's CI runs them.
 
-**Spec.** §14.2.
+**Spec.** §19.4.
 
-### C4. `zui_app`: the runner, and `Platform` from host and renderer
+### C4. `zui_app`
 
-**Plan.** `zui_app.Platform(Host, Renderer)` builds today's `Platform`,
-so `Context` does not change. `zui_app.run` is the standard loop: poll,
-apply the frame record, declare, end the frame, submit, release, wait
-until the deadline. It reports capabilities and fallbacks in effect.
+**Plan.** `contextConfig(Renderer, overrides)` and `run(App, init,
+options)`: the loop of SPEC.md §6.1, a render thread when the renderer
+allows, host requests applied, pacing to `nextFrame`, capabilities and
+fallbacks reported.
 
 **Done when:** the demo runs on `zui_app` with less code than today, and
 its time from process start to its first presented frame is measured
-(moved from P1).
+(from P1).
 
-**Spec.** §3; ARCHITECTURE.md §3.1.
+**Spec.** §6.1, §19.5.
 
-### T3. Letter spacing, through a measurement key
+### C7. `Features`
 
-**Grounding.** `measureText(text, font, size)` (§8.1) cannot express
-letter spacing per text, and the additive-measurement rule means a
-backend cannot add it after the fact. Clay has `letterSpacing`.
+**Plan.** `Features.semantics`, `gestures`, `flex_wrap` and
+`safety_sweeps`, each removing its code, memory and API when off; calling
+an API whose feature is off is a compile error naming the field.
 
-**Plan.** `TextStyle.letter_spacing: f32 = 0`, and `MeasureKey { font,
-size, letter_spacing }` passed to the renderer and used as the cache key.
-Text commands carry the spacing.
+**Done when:** R1 shows a build with every feature off is no larger or
+slower than today's.
 
-**Done when:** a golden test lays out spaced text, and every renderer
-draws it.
-
-**Spec.** §7.3, §8.1, §8.3.
-
-### S1. Display scale and zoom
-
-**Grounding.** `Platform.scale` only snaps command bounds to pixels
-(`src/emission.zig:32`). Nothing lets an application zoom its UI, and a
-display-scale change has no event.
-
-**Plan.** Two separate factors: the display scale, from the host per
-window (with a host event when it changes), and the application's zoom,
-among `Input`'s frame parameters. Layout stays in logical units; text is measured at size ×
-zoom, so zoom is part of the measurement key; hit testing and snapping
-use both.
-
-**Done when:** golden tests at three zoom levels, and moving the demo
-between monitors of different scale relayouts it.
-
-**Spec.** §5.1, §8.1, §8.3.
-
-### I4. Input as an ordered event log
-
-**Grounding.** I3.
-
-**Plan.**
-- `Input` keeps the frame's parameters (`viewport`, `dt_seconds`) and
-  gains `events`, in arrival order: pointer down, move, up, cancel and
-  leave, each with a pointer id, pointer kind, button, pressure, tilt and
-  the host's timestamp; wheel with a position and a precise/line flag;
-  key down and up with repeat and per-event modifiers; text; and the OS's
-  own pinch and rotate. The sampled fields go.
-- `Key` covers letters, digits, punctuation and function keys, and
-  `ui.chordPressed(.{ .key = .s, .modifiers = .{ .control = true } })`
-  matches the modifiers as they were at that key.
-- A per-pointer table, sized by `Config.max_pointers` (default 10),
-  replaces `press_target` and `hover_chain`. Touch never hovers.
-- Moves are coalesced per pointer: only the last move before another
-  event of that pointer is hit-tested, and the rest are kept as history
-  for velocity.
-- `zui.InputSampler` turns successive sampled states into events, for
-  backends such as raylib that only offer state.
-- `zui_testing.Driver` emits events, so `click` can run in one frame, and
-  gains `tap`, `pinch` and multi-pointer `drag`.
-- `Config.max_events_per_frame` replaces `zui.max_keys_per_frame`.
-
-**Done when:** I3's checks still hold on the new `Input`, H1 passes C3
-through `InputSampler`, and a test presses two buttons with two pointers
-at once.
-
-**Spec.** §5.1, §7.4, §13.2, §14.2; ARCHITECTURE.md §2, §3.3.
+**Spec.** §4, §4.1.
 
 ### H1. The raylib adapter host
 
-**Plan.** zui-raylib implements the host contract with
-`.windows = .one` and no system material, and its renderer accepts the
-adapter's surface.
+**Plan.** zui-raylib implements the host contract with one window and no
+system material, through `InputSampler`.
 
 **Done when:** it passes C3's host suite, and the demo runs on it through
 `zui_app`.
 
 ---
 
-## 0.8: the first native host
+## Stage 4: a native host
 
 ### H2. The Windows host
 
 **Grounding.** The owner develops on Windows, and Windows has every
-system feature planned (materials, signals, scale changes, file drop),
-so it tests the contract hardest.
+system feature planned (materials, signals, scale changes, file drop), so
+it tests the contract hardest.
 
 **Plan.** In `zui-host/windows`: Win32 windows and the event loop,
 `win32` surfaces, per-monitor scale, lifecycle events from console
 control events and `WM_QUERYENDSESSION`, the clipboard, dropped files,
-frame pacing to the deadline, and the system material (H8). zui-sokol's
-renderer accepts its surface, through sokol_gfx without sokol_app.
+pacing to `nextFrame`, cursor and IME requests. zui-sokol's renderer
+accepts its surface, through sokol_gfx without sokol_app.
 
-**Done when:** the demo runs on it unchanged from H1, it passes C3, and
-it idles at 0% CPU.
-
-**Spec.** ARCHITECTURE.md only.
+**Done when:** the demo runs on it unchanged from H1, it passes C3, and it
+idles at 0% CPU.
 
 ### H8. The desktop showing through the window
 
-**Grounding.** The owner's "slate": on Windows 11 the desktop shows
-faintly through a window, blurred. Windows offers Mica and Acrylic
-(`DwmSetWindowAttribute`), macOS vibrancy (`NSVisualEffectView`), KDE a
-blur protocol; GNOME and browsers offer nothing comparable.
+**Grounding.** Windows offers Mica and Acrylic (`DwmSetWindowAttribute`),
+macOS vibrancy (`NSVisualEffectView`), KDE a blur protocol; GNOME and
+browsers offer nothing comparable.
 
-**Plan.** `HostCapabilities.system_material`, and a material per window.
-The renderer clears to transparent, and elements without a background
-let it show. Where the host has none, the root draws the theme's solid
-background instead (the fallback, ARCHITECTURE.md §4).
+**Plan.** `HostCapabilities.system_material` and a material per window.
+The renderer clears to transparent, and elements without a background let
+it show; without one, the root draws the theme's solid background.
 
 **Done when:** the Windows host shows Mica on Windows 11 and the solid
 fallback on Windows 10, with the same application code.
 
-**Spec.** §7.5 (the root background), ARCHITECTURE.md §3.3.
-
 ---
 
-## 0.9: feeds and the wire format
+## Stage 5: the wire
 
-### F1. Feeds
+F1, feeds, is retired: sources (A3) are the mechanism for outside data.
 
-**Plan.** `zui.Feed(T, options)` as ARCHITECTURE.md §3.5 describes, and
-`TaskPool` rebuilt as a feed that delivers once, with its API unchanged.
+### F2. Relay
 
-**Done when:** the task tests pass unchanged on the new `TaskPool`, and
-feed tests cover both deliveries, both drop policies, waking and
-unmounting.
-
-**Spec.** §10.3, §10.4 (the queue pattern becomes feeds).
-
-### F2. The relay tap
-
-**Plan.** `ui.relay(listener)`: each listener receives the frame record
-after `beginFrame` applies it, without allocating. A listener that is
-slower than the frame rate is the listener's problem to buffer.
+**Plan.** `relayTo(listener)`: each applied record, with deliveries from
+`zuiDelivery`, without allocating when no listener is attached.
 
 **Done when:** a test relays a session into a buffer and gets back
-exactly the records it applied.
+exactly the records applied.
 
-**Spec.** §5.
+**Spec.** §6.8.
 
 ### F3. `zui_wire`
 
-**Plan.** As ARCHITECTURE.md §3.6: versioned encoding of frame records
-and commands, deltas between frames, serialization of application
-payloads, and font fingerprints.
+**Plan.** A versioned encoding of records and frames, as deltas; payloads
+serialized when plain data and otherwise through `zuiSerialize`; the text
+contract's fingerprint.
 
-**Done when:** round trips are tested for every record and command kind,
-and a delta stream of the demo is measured against full frames.
+**Done when:** round trips are tested for every event, delivery and
+command kind, and a delta stream of the demo is measured against full
+frames.
 
-**Spec.** ARCHITECTURE.md §3.6.
+**Spec.** §19.6.
 
 ### F4. Replay in `zui_testing`
 
-**Plan.** `Driver.replay(records)` drives an application from relayed
-records; snapshots can be stored in the wire format.
+**Done when:** a recorded demo session replays to identical commands
+without starting any work.
 
-**Done when:** a recorded demo session replays to identical commands.
-
-**Spec.** §14.2.
+**Spec.** §6.8, §19.4.
 
 ### F5. Rendering somewhere else
 
-**Plan.** A wire renderer that streams commands out, and a wire host
-that feeds relayed records in, so a remote client is just a host plus a
-renderer. The browser demo (V4) is the first client.
+**Plan.** A wire renderer and a wire host, so a remote client is a host
+plus a renderer. The browser demo (V4) is the first client.
 
-**Done when:** the demo runs in one process and draws in another,
-with input going back.
+**Done when:** the demo runs in one process and draws in another, with
+input going back.
 
 ### F6. Watching files
 
-**Plan.** A feed of file changes, from the host, which `zui_debug` uses
-to reload themes and assets while the application runs.
+**Plan.** A source of file changes from the host (`zuiFileWatch`), which
+`zui_debug` uses to reload themes and assets.
 
 **Done when:** editing a theme file restyles the running demo.
 
 ---
 
-## 0.10: text and layout
+## Stage 6: text and layout
 
-### T1. A single-line fast path in wrapping
+### T1. The single-line fast path
 
 **Grounding.** `text.wrapLines` (`src/text.zig:276`) walks every word of
-every text element, even a label whose unwrapped width already fits.
-Clay emits one line without walking the words when the text has no
-newline and its preferred width fits.
+every text, even a label whose unwrapped width already fits.
 
-**Plan.** Record in `Metrics` whether the text has a paragraph break. In
-`wrapLines`, with `.words` or `.newlines` and no break, if
-`preferred_width <= max_width + tolerance`, emit one line.
+**Plan.** Record whether a text has a paragraph break; with none, and an
+unwrapped width that fits, emit one line.
 
-**Done when:** the golden and randomized tests pass unchanged, and the
-warm 1,000-text `endFrame` is faster by 0.6's measure.
+**Done when:** the golden and randomized tests pass unchanged, and warm
+text is faster by R1 and R2.
 
-**Spec.** §8.2.
+**Spec.** §9.2.
 
-### T2. Look up whole strings before words
+### T2. The whole-string cache
 
-**Grounding.** A warm text element costs one cache probe per word per
-frame (`text.measureMetrics`, `src/text.zig:161`); 1,000 texts take
-184 µs in `endFrame`, against 100 µs for 4,096 boxes. Clay keys its cache
-by the whole string and pays one probe per element. zui's per-word cache
-is better for text that changes every frame (`"Frame 1234"`), because
-only the new words are measured, so it stays.
+**Grounding.** A warm text costs one probe per word per frame
+(`src/text.zig:161`): 1,000 texts take 184 µs against a 120 µs budget.
+The per-word cache stays, because text that changes every frame measures
+only its new words.
 
-**Plan.** A second, smaller table keyed by the whole string and the
-measurement key, holding only `Metrics`. A hit with T1's fast path needs
-no per-word work at all; a text that must wrap falls back to the word
-cache for its run widths.
+**Plan.** A second table keyed by the whole string and `MeasureKey`,
+holding the metrics. A hit with T1's fast path does no per-word work.
 
-**Done when:** warm 1,000-text `endFrame` improves by 0.6's measure, and
-a frame that changes every string is no slower. A profile (P2) checks
-first that per-word probes are the main cost; if not, T2 is dropped.
+**Done when:** warm 1,000 texts meet §20.2's budget, and a frame that
+changes every string is no slower. A profile (P2) first confirms per-word
+probes are the main cost.
 
-**Spec.** §8.3, §4.2's memory figures.
+**Spec.** §9.3.
 
-### L1. A grow basis: equal columns
+### T4. Line-break segmentation
+
+**Grounding.** Breaking only at ASCII spaces cannot wrap CJK or Thai.
+
+**Plan.** The optional `zuiSegment` on the text contract, writing break
+opportunities into a `BreakSink`; ASCII spaces and newlines without it.
+
+**Done when:** a golden test wraps CJK text with a segmenting test
+contract, and texts without it are no slower.
+
+**Spec.** §9.2, §9.4.
+
+### L1. A grow basis
 
 **Grounding.** Two `.grow` siblings holding "a" and "abcdefghijklmnop" in
-300 px come out 90 / 210, as with CSS `flex-basis: auto` (§6.1). Clay
-gives 150 / 150. zui has no way to ask for equal columns.
+300 px come out 90 / 210, as with CSS `flex-basis: auto`. There is no way
+to ask for equal columns.
 
-**Plan.** `Sizing.basis: enum { content, zero } = .content`, with
-`.growEqual` and `growEqualWeighted(w)`. A zero-basis child starts from
-its minimum before free space is shared, keeping weights, which Clay
-lacks.
+**Plan.** `Sizing.basis`, and `Sizing.grow_equal`.
 
-**Done when:** golden tests for both bases, and the weight invariant
-holds for each.
+**Done when:** golden tests for both bases, with the weight invariant.
 
-**Spec.** §6.1, §6.2.
+**Spec.** §8.1.
 
-### L2. Aspect ratio, and the natural size of images and custom leaves
+### L2. Aspect ratio and natural sizes
 
-**Grounding.** An image has no size of its own; the application must
-give it `fixed` sizing. Clay has `aspectRatio`.
-
-**Plan.**
-- `Layout.aspect_ratio: ?f32` (width / height). After the width pass, an
-  aspect-ratio element's height becomes effectively fixed before the
-  height pass. That derives height from width only: widths are settled
-  before heights (§6.2), so a width derived from a `grow` height would
-  need another width pass, and is left out until something needs it.
-- Optional `imageSize(handle)` and `measureCustom(data)` on the renderer
-  (§15). An image that arrives later reports its size through a feed
-  (F1).
+**Plan.** `Layout.aspect_ratio`, deriving height from the settled width;
+`Image.natural_size` for `fit` images.
 
 **Done when:** golden tests cover aspect ratio under every rule on the
 other axis, and a `fit` image takes its natural size.
 
-**Spec.** §6.1, §6.2, §8.1, §15.
+**Spec.** §8.1, §10.1.
 
-### L3. Dividers, and decorated images
+### L3. Dividers and decorated images
 
-**Grounding.** Clay draws borders between children. zui's image command
-carries only the handle (`src/emission.zig:152`).
+**Plan.** `Border.between_children`; image commands with `corner_radius`
+and `tint`.
 
-**Plan.** `Border.between_children: f32 = 0`; image commands carry
-`corner_radius` and `tint: Color = .white`.
+**Done when:** snapshot tests for both.
 
-**Done when:** snapshot tests for both; renderers draw them (the defaults
-mean renderers that ignore them still draw correctly).
-
-**Spec.** §7.1, §7.5.
+**Spec.** §10.1, §13.1.
 
 ### L4. Floating options
 
-**Grounding.**
-- Every floating element gets a hit region (`src/emission.zig:157`), so
-  a tooltip blocks what is under it. Clay can pass the pointer through.
-- Floating elements always escape their ancestors' clip. Clay can clip
-  to the attached parent.
-- A target declared after the floating element falls back to the parent
-  (`src/layout.zig:421`).
+**Grounding.** Every floating element gets a hit region
+(`src/emission.zig:157`), so a tooltip blocks what is under it; floating
+elements always escape their ancestors' clip; a target declared after
+the floating element falls back to the parent (`src/layout.zig:421`).
 
-**Plan.** `Floating.capture: bool = true`; `Floating.clip: enum { none,
-target } = .none`; later targets placed after pass 6 by shifting the
-floating subtree (`index..subtree_end`, which is contiguous).
+**Plan.** `Floating.capture`, `Floating.clip`, and later targets placed
+after pass 6 by shifting the contiguous subtree.
 
 **Done when:** interaction, layer and golden tests for each.
 
-**Spec.** §6.4.
-
-### L5. What `percent` and `grow` mean
-
-**Status.** Done: SPEC.md §6.1 describes both, with the probe numbers.
+**Spec.** §8.4.
 
 ### L6. Right-to-left layout
 
-**Grounding.** Every direction today is left-to-right or top-to-bottom.
-Right-to-left languages need rows, alignment, padding and text alignment
-mirrored.
-
-**Plan.** `Direction.right_to_left`, and `Layout.mirrored` applied to a
-subtree, resolving `start` and `end` (padding, alignment, anchors) by
-direction. Bidirectional text itself stays with the renderer's shaping.
+**Plan.** `Direction.right_to_left`, `Layout.mirrored`, and logical
+padding, alignment and anchors, following the environment's direction.
 
 **Done when:** golden tests mirror every alignment and anchor.
 
-**Spec.** §6.1, §6.4, §7.3.
+**Spec.** §8.1.
 
-### L7. Responsive layout: wrap and breakpoints
+### L7. Wrap
 
-**Grounding.** The owner's "size-based layout shifts and reordering".
-Reordering is already plain code in immediate mode: branch on
-`ui.viewport()` or the previous frame's `rectOf(parent)`. Wrapping rows
-are a non-goal for v1 (§1).
-
-**Plan.** Flex wrap in the core (a wrap pass between distribute and
-position, for parents that opt in), and breakpoint helpers in a module.
-Lifts the §1 non-goal.
+**Plan.** A wrap pass between distribution and positioning, for parents
+that opt in, compiled out without `features.flex_wrap`. Breakpoints are
+plain code over `ui.viewport()` or `rectOf`.
 
 **Done when:** golden tests for wrapping under each alignment, and no
-change to the §6.5 scenarios beyond noise.
+change to the budget scenarios with the feature off.
 
-**Spec.** §1, §6.1, §6.2.
+**Spec.** §8.1, §8.2.
 
-### I1. Drag and drop between elements
+### L8. Static styles
 
-**Plan.** Typed drag sources and drop targets as interaction state:
-`ui.dragging(id)`, `ui.dropped(target_id, T)`, with the payload in the
-state table. A drag source declares `.gestures.drag`, so I5 decides
-between dragging, scrolling and clicking. Files from the OS are a host
-event (H6), not this.
+**Plan.** `zui.static` and `Static(T)`; config references in element
+storage as pointers into the frame arena or static memory; fields on the
+element overriding the style's.
 
-**Done when:** `zui_testing.Driver.drag` moves an item between two lists,
-including out of a list that scrolls by dragging.
-
-**Spec.** §7.4.
-
-### I2. A deadline for the next frame
-
-**Grounding.** `needsFrame` (§10.3) is yes or no. A blinking caret or an
-animation needs "a frame within 16 ms", and a frame-rate cap needs to
-know it.
-
-**Plan.** `ui.nextFrameDeadline() ?Instant`, the earliest of every
-`requestFrameBy`, a running glide (I5), and a pending long press or
-double tap; `zui_app` passes it to `host.waitUntil`.
-
-**Done when:** the demo's caret blinks while the process otherwise idles.
+**Done when:** the box tree's declaration stays within its 55 µs budget
+with references, and declaring an element with a static style copies no
+config (R1).
 
 **Spec.** §10.3.
 
-### I5. Gestures: capabilities, arbitration and custom recognizers
+---
+
+## Stage 7: gestures
+
+### I5. Gestures: arbitration, intents, momentum, custom recognizers
 
 **Grounding.**
 - The slider drags with `pressed` and `pointerLocal`
-  (`zui_widgets/zui_widgets.zig:268`), M3 planned drag-to-scroll, and I1
-  plans drag and drop. Nested, all three want the same pointer, and
-  nothing decides between them.
-- Routing a gesture by kind alone fails: a vertical drag on a horizontal
-  carousel inside a vertical list goes to the carousel, and a pinch that
-  starts on a list inside a map goes to the list. The input prototype's
-  scene could not show this, because its map accepts both axes.
+  (`zui_widgets/zui_widgets.zig:268`); drag-to-scroll and drag and drop
+  want the same pointer, and nothing decides between them.
+- Routing by gesture kind fails: a vertical drag on a horizontal carousel
+  inside a vertical list goes to the carousel, and a pinch that starts on
+  a list inside a map goes to the list.
 
-**Plan.**
-- Elements declare what they accept, as a packed set stored in their hit
-  region the way scrolling is today:
-  `.gestures = .{ .pan = .vertical, .zoom = true, .drag = true, .long_press = true, .double_tap = true, .custom = true }`.
-  A scroll container accepts pan on its scrolled axes by default.
-- **One rule decides.** When a pointer passes the touch slop, its axis is
-  locked, and the pointer goes to the innermost region that accepts that
-  component and still has room to move (from `max_scroll`), which also
-  gives scroll chaining. With two pointers, scale and rotation go to the
-  innermost region that accepts zoom. A release that nothing claimed is a
-  tap.
-- **Delays are opt-in.** Only an element with `.double_tap` delays its
-  single tap until the double-tap window passes, so "this gesture waits
-  for that one to fail" is local and static, never a graph.
-- **Intents are queries that merge devices:**
-  `ui.manipulation(id) ?Manipulation` (translation, scale, rotation and
-  pivot, summed over the frame), `contextRequested` (right click, long
-  press, the menu key), `dismissed` (Escape, back, gamepad B), and
-  `adjusted` and `navigated` (arrows, D-pad, dial). `clicked` stays the
-  activation query.
-- **Momentum** is core state in the state table, keyed by the element,
-  so it ends when the element is no longer declared, and it sets I2's
-  deadline.
-- **Custom gestures are code in declaration, not registered machines.**
-  `ui.pointerEvents(id)` returns the frame's events of pointers pressed
-  on or claimed by `id`. A recognizer keeps its state in `state(id, T)`,
-  so it can read application state, and a module can ship one as a plain
-  function. An element with `.custom` keeps its ancestors from taking the
-  pointer until it calls `ui.claim(pointer)` or `ui.decline(pointer)`.
-  That decision lands at the next `beginFrame`, a frame later than a
-  built-in claim; no events are lost meanwhile.
+**Plan.** As SPEC.md §11.3–§11.4: accepted gestures in hit regions, one
+rule by motion component, opt-in delays, intents, momentum in the state
+table, and custom recognizers over `pointerEvents`, `claim` and
+`decline`.
 
 **Done when:** interaction tests cover a button in a list in a zoomable
 map, a carousel in a vertical list, a pinch that starts on the list, a
 slider in a drag-scrolled list, a long press, a double tap next to a
 single tap, a flick within one frame, and a lasso written as a module
-function competing with the map's pan.
+function against the map's pan.
 
-**Spec.** §6.3, §7.1, §7.4, §9.
+**Spec.** §11.3, §11.4.
 
----
+### I1. Drag and drop between elements
 
-## 0.11: effects
+**Plan.** `dragging`, `dropped` and `startDrag`, with typed payloads in
+the state table, arbitrated by I5.
 
-### G1. Gradients, shadows and glow
+**Done when:** `zui_testing.Driver.drag` moves an item between two lists,
+including out of a list that scrolls by dragging.
 
-**Plan.** Optional commands: linear and radial gradients (interpolated
-in OKLab, K1), box shadows, glow. Lowered per ARCHITECTURE.md §3.2.
-
-**Done when:** snapshot and lowering tests, and one renderer draws each.
-
-**Spec.** §7.1, §7.5.
-
-### G2. Backdrop blur
-
-**Grounding.** A blur of zui's own content behind a panel, distinct from
-the desktop showing through the window (H8).
-
-**Plan.** An optional command with a fallback tint, lowered to a
-rectangle in that tint.
-
-**Done when:** one renderer blurs, the others draw the tint.
-
-**Spec.** §7.5.
-
-### G3. Transforms
-
-**Plan.** Scale, rotate, mirror and skew, applied when painting only, as
-in CSS: layout ignores them, and hit testing inverts them.
-
-**Done when:** an interaction test clicks a rotated button, and lowering
-draws it unrotated.
-
-**Spec.** §6, §7.4, §7.5.
-
-### G5. Shaders
-
-**Plan.** The renderer's own typed `MaterialHandle`, like `ImageHandle`,
-carried by elements and commands. zui does not know any shading
-language.
-
-**Done when:** one renderer draws a material from the demo.
-
-**Spec.** §4.1, §7.5.
-
-### G6. HDR and wide gamut
-
-**Grounding.** Colors are RGBA8 (SPEC.md §12), so nothing can be brighter
-than SDR white or outside sRGB.
-
-**Plan.**
-- `Config.Color: type = zui.Color`, which may be `zui.ExtendedColor`
-  (4×f16, linear scRGB, where 1.0 is SDR white), following `ImageHandle`.
-  An SDR application keeps 4-byte colors.
-- `RendererCapabilities.extended_color`. Without it, emission clamps
-  extended colors to `Color`, as one more lowering row. Tone mapping to
-  the display belongs to the renderer, because only it knows the display;
-  over the wire (F5), the core cannot.
-- The display's headroom above SDR white is a host event per window
-  (C2), for applications that want it.
-- The output format (an FP16 swapchain, HDR10) is negotiated between host
-  and renderer through `Surface`; without support on both sides it is SDR.
-- Wide gamut (P3, Rec.2020) is values outside 0 to 1, converted by
-  `zui_color` (K1); themes written as sRGB hex convert at comptime.
-
-**Done when:** a golden test lays out with `ExtendedColor`, lowering
-clamps it for an SDR renderer, and the Windows host shows HDR white
-brighter than SDR white on an HDR display.
-
-**Spec.** §4.1, §7.5, §12; ARCHITECTURE.md §3.2, §3.3.
+**Spec.** §11.5.
 
 ---
 
-## 0.12: seeing the UI
+## Stage 8: effects
 
-### V1. `zui_debug`: an inspector
+- **G1. Gradients, shadows and glow,** as optional commands, interpolated
+  in OKLab.
+- **G2. Backdrop blur** of zui's own content, lowered to a tint.
+- **G3. Transforms,** applied when painting only; hit testing inverts
+  them.
+- **G5. Materials,** the renderer's own typed `MaterialHandle`.
+- **G6. HDR and wide gamut:** `Config.Color = zui.ExtendedColor`, clamped
+  for renderers without `zui_extended_color`; headroom from the
+  environment; the output format negotiated through `Surface`.
 
-**Grounding.** Clay's `Clay_SetDebugModeEnabled(true)` shows the element
-tree and each element's config. SPEC.md once promised
-`ui.debugOverlay()`, which was never written.
+**Done when (each):** snapshot and lowering tests, and one renderer draws
+it; for G3, an interaction test clicks a rotated button; for G6, the
+Windows host shows HDR white brighter than SDR white.
 
-**Plan.** An optional module over a read-only `Frame.inspect(index)` and
-`Frame.elementCount()`: a collapsible tree, the hovered element
-highlighted, its config, the frame's diagnostics, the capabilities and
-fallbacks in effect (C4), and a performance overlay. Over the wire (F5)
-it can run in another process.
+**Spec.** §13.1, §13.3, §16.4, §18.
+
+---
+
+## Stage 9: seeing the UI
+
+### V1. `zui_debug`
+
+**Plan.** An inspector over `Frame.inspect`: the element tree, the
+hovered element and its configs, diagnostics, lowerings and fallbacks,
+and a performance overlay from the tracer.
 
 **Done when:** `zui_testing` drives it over the Documents view, and the
 demo toggles it with a key.
 
-**Spec.** §3, §15.
+**Spec.** §19.7.
 
-### V2. The semantics list
+### V2. Semantics and accessibility actions
 
-**Grounding.** §7.6 specifies `.semantics` and `Frame.semantics()`; none
-of it exists. Clay's only accessibility story is the browser's DOM.
-
-**Plan.** As §7.6. Window-chrome roles (title bar, resize edge) for H7
-travel in the same list. Accessibility actions (UI Automation's Invoke,
-RangeValue and Scroll) arrive as I4 events naming an element id, and
-answer through the same queries as other input: Invoke is `clicked`,
-RangeValue is `adjusted`, Scroll is `manipulation`. An element's I5
-gestures are the actions the list reports it supports.
+**Plan.** `Frame.semantics()` with `features.semantics`; actions arrive as
+events and answer through the intent queries.
 
 **Done when:** a widget test checks the list for each control, and the
 Windows host bridges it to UI Automation.
 
-**Spec.** §7.6.
+**Spec.** §13.5.
 
-### V3. `-Dzui-safety`
+### V3. Safety sweeps
 
-**Grounding.** §3 lists the option; `build.zig` has only `-Dzui-debug`.
-
-**Plan.** The invariant checks that read only a `Frame` move into the
-core behind the option, run at the end of `endFrame`.
+**Plan.** `features.safety_sweeps`: the invariant checks that read only a
+`Frame`, at the end of `endFrame`.
 
 **Done when:** the randomized tests run through it, and a debug demo runs
 with it on.
 
-**Spec.** §3, §14.1.
+**Spec.** §20.1.
 
-### V4. A demo you can open in a browser
+### V4. The demo in a browser
 
-**Plan.** The web host (H5) and a canvas or WebGL renderer, or the demo
-streaming over the wire (F5) to a thin browser client, published from CI.
+**Plan.** The demo streaming over the wire (F5) to a thin browser client,
+published from CI.
 
 **Done when:** the demo runs at its native frame rate in a browser.
 
 ---
 
-## 0.13: more hosts and services
+## Stage 10: reach
 
 - **H3. macOS** (Cocoa; vibrancy for H8).
-- **H4. Linux** (Wayland, then X11; KDE blur for H8 where offered).
-- **H5. Web** (a canvas surface; no system material).
-- **H6. Services:** notifications, file dialogs, opening URLs, and native
-  menus, each an optional host declaration (ARCHITECTURE.md §4).
-- **H7. Native and custom window decorations:** native frames by default;
-  a custom title bar uses window-chrome regions (V2) so the OS still
-  moves, resizes and snaps the window.
-- **H9. More than one window:** one `Context` per window, created through
-  the host; a documented pattern for state shared between windows (one UI
-  thread, or feeds between them).
+- **H4. Linux** (Wayland, then X11; KDE blur where offered).
+- **H5. Web** (a canvas surface; `tryBeginFrame`, since it cannot block).
+- **H6. Services:** clipboard, notifications, file dialogs, opening URLs,
+  native menus, each an optional host declaration.
+- **H7. Window decorations:** native by default; a custom title bar uses
+  chrome regions so the OS still moves, resizes and snaps the window.
+- **H9. Many windows:** one `Context` per window, with sources published
+  into each.
 
 **Done when (each):** the host passes C3, and the demo runs on it
 unchanged.
 
 ---
 
-## 0.14: motion
+## Stage 11: polish
 
-### M1. `zui_motion`: enter animations and tweens
-
-**Grounding.** §1 lists an animation system as a non-goal because easing
-policies vary. Clay's transitions show that a small, policy-free
-mechanism is useful.
-
-**Plan.** An optional module over `state(id, T)` and `dt_seconds`:
-`motion.value(ui, id, target, .{ .duration = 0.15, .ease = easeOut })`,
-which requests frames by deadline (I2) while it moves.
-
-**Done when:** `zui_testing` runs a tween with a fixed `dt`, and an idle
-application still sleeps.
-
-**Spec.** §1, §15.
-
-### M2. Exit animations
-
-**Grounding.** An element that stops being declared is gone, and its
-state is freed two frames later (§9). Clay keeps exiting elements.
-
-**Plan.** Opt-in `.exit_seconds`: the subtree's last commands keep being
-emitted as a ghost that takes no space and cannot be hit, from a
-fixed-size buffer in `Context` with its own `Config` limit.
-
-**Done when:** a layer test shows a ghost for exactly its duration, and a
-full buffer is reported like other limits.
-
-**Spec.** §5, §9, §13.2.
-
-### M3. Drag and momentum scrolling
-
-**Status.** Merged into I5, in 0.10: dragging to scroll is a pan gesture,
-and momentum is core state that I5's arbitration starts and stops.
-
----
-
-## 0.15: text editing
-
-### E1. The rest of the text field
-
-**Grounding.** §15.1: "Not in 0.4: selection, the clipboard, word
-movement, IME composition and multiple lines." Clay has no text input.
-
-**Plan.** Selection, word movement, the clipboard (through the host, H2,
-with its shortcuts as I4 chords), multiple lines, then IME composition as
-I4 events to the focused element.
-
-**Done when:** each has `zui_testing` tests, and IME works on Windows.
-
-**Spec.** §5.1, §15.1.
-
----
-
-## Alongside: modules
-
-These depend only on the public API, so they can land in any release.
-
-- **K1. `zui_color`:** HSL, OKLCH and OKLab conversions, mixing and
-  palettes, all usable at comptime. CMYK is for print and stays out,
-  apart from one conversion if asked for.
-- **K2. Base themes:** dark, light and high-contrast themes for
-  `zui_widgets`, switching on the host's system-theme event (C2).
-- **K3. `zui_icons`:** names to codepoints in an icon font; glyphs drawn
-  by the renderer.
-- **K4. `zui-themes`:** theme packs for the OS design languages (Windows,
-  macOS, GNOME, KDE), each a module of themes and widget skins.
-
-## Alongside: developer experience
-
-- **D1. `zui-examples` and a template project** that a new application
-  starts from.
-- **D2. Sample applications for specific uses:** a settings screen
-  (`zui_reflect`, saved as ZON), a data feed, a multi-window tool, a
-  remote session.
+- **M1. `zui_motion`:** tweens over `state(id, T)` and `dt()`, requesting
+  frames by instant and finishing at once under `reduced_motion`.
+- **M2. Exit animations:** `exit_seconds` and the ghost buffer.
+- **E1. Text editing:** selection, word movement, the clipboard through
+  the host, multiple lines, and IME composition with the IME area in
+  `HostRequests`.
+- **K1. `zui_color`:** OKLab, OKLCH and HSL, mixing and palettes, at
+  comptime.
+- **K2. The default skin:** light, dark and high contrast, following the
+  environment.
+- **K3. `zui_icons`.**
+- **K4. `zui-themes`:** skins for Windows, macOS, GNOME and KDE.
+- **K5. The skin contract:** `Widgets(Ui, Skin)` and `zuiStyle`, so a
+  theme pack restyles every widget without forking it.
+- **D1. `zui-examples`** and a template project.
+- **D2. Samples:** a settings screen with `zui_reflect` and ZON, a data
+  feed, a multi-window tool, a remote session.
 - **D3. A developer-experience audit:** a new user builds each sample from
   the docs alone, and every place they get stuck becomes an item.
-- **D4. Profiling guide:** with P2's trace zones, how to see exactly what
-  a frame does.
+- **D4. A profiling guide** over P2's tracer.
+
+**Done when (each):** `zui_testing` coverage; IME works on Windows.
+
+**Spec.** §19.2, §19.8, §19.9.
+
+---
 
 ## Later
 
+Only with a measured win or a demonstrated need:
 - **Docking and tear-off panels,** once H9 has more than one window.
-- **A grid layout,** if L7's wrapping is not enough.
-- **Layout islands and static subtrees** (SPEC.md §16). A static subtree
-  could be pre-recorded element records copied in with one `@memcpy` and
-  laid out normally, which keeps text working; it waits for an
-  application with enough static structure.
-- **Packing the per-element fields declaration writes** into one record,
-  partly departing from §4.3's structure of arrays. Since the `depth`
-  fix, no instruction in the box tree's declaration has more than 4% of
-  its samples, so there is no hot spot for it yet.
-
-- **P3. SIMD candidates:** each measured by R1 and R2 before it ships.
+- **A grid layout,** if wrap is not enough.
+- **Layout islands** (SPEC.md §8.5), with a benchmark above roughly 10k
+  elements.
+- **Static subtrees:** pre-recorded element records copied in with one
+  `@memcpy` and laid out normally.
+- **Packing the per-element fields declaration writes** into one record.
+  Since the `depth` fix, no instruction in the box tree's declaration has
+  more than 4% of its samples, so there is no hot spot for it yet.
+- **P3. SIMD candidates,** each measured by R1 and R2 before it ships.
 
 ## Not taken from Clay
 
-These are deliberate, and each is a reason to choose zui:
+Deliberate, and each a reason to choose zui:
 - a global current context;
 - `void*` payloads and callbacks in the hot path;
 - 32-bit ids;
@@ -980,45 +780,40 @@ These are deliberate, and each is a reason to choose zui:
 
 | Decision | Outcome |
 |---|---|
-| The frame boundary | the cornerstone: everything inbound at `beginFrame`, everything outbound from `endFrame` (A2) |
-| Feeds | the general mechanism for outside data; `TaskPool` is a feed that delivers once (F1) |
-| Where the contracts live | in the `zui` repo, beside `Platform` (C1, C2) |
+| The frame boundary | the cornerstone: a record in at `beginFrame`, a frame out of `endFrame` |
+| Outside data | sources swapped at `beginFrame`, demand out, a loader between frames; zui starts and cancels nothing (A1) |
+| `TaskPool` and feeds | deleted and retired; sources replace both (A5, F1) |
+| `Platform` | split: the text contract in `Config`, `Waker` from the host, scale in the record (C5, S1) |
+| Time | an instant in the record, not a delta (S1) |
+| Replay | one `beginFrame`; a record with deliveries is a replay |
+| `endFrame` | always returns a frame; limits are diagnostics (C6) |
+| Render commands | generated from what the renderer declares; the rest lowered (C1) |
+| Contract members | all `zui`-prefixed; unknown ones are compile errors |
+| Static styles | approved: pointers to comptime configs, measured against the declaration budget (L8) |
+| Budgets | as in SPEC.md §20.2, including warm text < 120 µs and declaration < 55 µs |
+| Where the contracts live | in the `zui` repo |
 | Native hosts | one `zui-host` repo, one directory per OS |
 | Who orchestrates | the host, through one contract; adapters for libraries that own their window (H1) |
-| Input recording | relayed, not recorded: a recorder is one listener on the tap (F2) |
-| Signals | lifecycle events; uncatchable signals are not representable (C2) |
-| The input format | an ordered event log with host timestamps, not sampled state, in the 0.7 breaking release (I3, I4) |
-| Pointers | many, in a comptime-sized table; a mouse is one pointer (I4) |
-| Gesture arbitration | elements declare what they accept; the core decides with one rule, by motion component (I5) |
-| Custom gestures | code in declaration over `pointerEvents` and `state`, not a comptime registry of machines (I5) |
-| Tasks and feeds | stay deliveries of their own in the frame record, not routed input values (A2, F1) |
-| How task completions reach `beginFrame` | each slot records the generation its task finished with; no queue, whose size relied on draining at every request (A2) |
-| Comparing two commits' times | each commit's own `zig build bench`, alternated, judged by the middle half of the per-round ratios beyond 2% (R2) |
-| The demo's cold start | measured with C4, when the demo moves to `zui_app`, not in P1 |
+| Signals | lifecycle events; uncatchable signals are not representable |
+| Input | an ordered event log with host instants, many pointers (I4) |
+| Gesture arbitration | elements declare what they accept; one rule, by motion component (I5) |
+| Custom gestures | code in declaration over `pointerEvents` and `state`, not a registry |
+| Comparing two commits | each commit's own benchmarks, alternated, judged by the middle half beyond 2% (R2) |
+| The inspector | a module over `Frame.inspect` (V1) |
+| Animation | not in the core; `zui_motion` (M1) |
+| Safety checks | built, as `features.safety_sweeps` (V3) |
 
 ### Open
 
-Each is planned with the first option.
+Each is planned with its first option. SPEC.md §22 has those that change
+the spec.
 
-1. **V1, inspector in a module or in the core?** Planned: a module, over
-   `Frame.inspect`.
-2. **T3, letter spacing by `MeasureKey` (breaking) or by encoding it in
-   `FontId`?** Planned: `MeasureKey`, in the 0.7 breaking release.
-3. **M1, reword the animation non-goal to "not in the core"?** Planned:
-   yes.
-4. **V3, `-Dzui-safety`: build it or delete it from the spec?** Planned:
-   build it.
-5. **V4, a web renderer, or a thin client over the wire?** Planned: the
-   wire client first, because F5 builds it anyway.
+1. **`Task` restarts:** one run at a time, or generation-tagged runs?
+   Planned: one at a time.
+2. **`unread_frames_before_release`'s default.** Planned: 30 frames.
+3. **A custom recognizer's claim lands a frame late.** Planned: accept it.
+4. **Physical keys.** Planned: logical keys plus the opaque scancode.
+5. **V4, a web renderer or a thin client over the wire?** Planned: the
+   wire client first, since F5 builds it anyway.
 6. **H2, sokol_gfx as the first renderer on a native surface?** Planned:
    yes; it already backs zui-sokol.
-7. **I5, a custom recognizer's claim lands a frame late: accept that, or
-   let `.custom` elements declare a claim condition the core evaluates?**
-   Planned: accept it, until a recognizer shows that it matters.
-8. **I4, physical key codes as well as logical keys?** Planned: logical
-   only, adding physical when a game-style key binding needs it.
-9. **A1, where the review lives, and for how long?** Planned:
-   `docs/ASYNC_REVIEW.md`, kept, since A1 says the review stays in the
-   repo; the alternative is folding it into SPEC.md §10 and deleting it,
-   as with earlier working docs. Ask the owner when A1 starts.
-

@@ -1,71 +1,89 @@
-# zui: technical specification
+# zui: specification
 
-zui is an immediate-mode UI **layout** library for Zig 0.16, in the spirit
-of Clay. Each frame, the application declares its UI as nested function
-calls. zui computes a flexbox-style layout and returns a flat list of render
-commands, which the application's own renderer draws. zui owns layout,
-interaction state and the frame's memory. It does not own windows, GPUs,
-fonts or threads.
+zui is an immediate-mode UI engine for Zig 0.16. Each frame, the
+application declares its UI as nested function calls. zui lays it out,
+resolves interaction, and returns a frame of plain data: render commands,
+hit regions, semantics and requests to the host. Drawing, windowing,
+fonts, threads and the application's own work all belong to someone else,
+and zui reaches each of them only through a contract checked at compile
+time.
 
-This document is the design contract. It states what zui does, the data
-structures and algorithms it uses, the guarantees it makes, and what it
-deliberately leaves out. Where a number is a **target** rather than a
-measurement, it says so. Where a feature is committed to but not yet
-built, it is marked *Planned for 0.x*, and [ROADMAP.md](ROADMAP.md) has
-its plan. [ARCHITECTURE.md](ARCHITECTURE.md) covers what surrounds the
-core: hosts, renderers, modules, and the contracts that connect them.
+The whole system fits in one line:
+
+```
+Frame = endFrame(declare(beginFrame(state, FrameRecord, Sources)))
+```
+
+A **frame record** comes in: time, the viewport, events, and whatever
+outside data the application's sources received. A **frame** goes out:
+everything a renderer, a host, an accessibility bridge and the
+application's loader need. Between the two, declaration reads only what
+came in, and nothing changes under it. Every feature in this document is
+either part of one of those two values, or part of the state that carries
+from one frame to the next.
+
+This document is the contract. Where it states a number, it is a
+**budget** the implementation is measured against (§20). §21 orders the
+work; ROADMAP.md says what exists today and where each stage stands, and
+ARCHITECTURE.md maps where each feature lives across the layers and
+repositories.
 
 ---
 
-## 1. Design principles
+## 1. Principles
 
-1. **Layout, not rendering.** zui produces render commands. Drawing them
-   is the application's job, so zui works with any renderer: raylib,
-   sokol, Vulkan, a terminal, a test recorder.
-2. **No allocation per frame.** All memory is reserved at initialization.
-   A frame touches only memory it already owns, and the cost of a frame is
-   proportional to the number of elements declared.
-3. **Linear time.** Every layout pass is O(n) in elements, and text
-   wrapping is O(n) in characters. No pass revisits a subtree an unbounded
-   number of times.
-4. **Plain data in, plain data out.** Configuration is structs with
-   defaults. Output is a slice of tagged unions. There are no callbacks in
-   the hot path, no inheritance, and no style cascade.
-5. **Comptime where it changes the generated code, and nowhere else.**
-   Comptime decides IDs, limits, the platform, user payload types and
-   compiled-out debug features. The layout engine itself is an ordinary
-   loop over arrays, because specialization multiplies code size (5–12×
-   measured in the comptime lesson's antipatterns B1 and B2).
-6. **Explicit threading.** One thread declares a frame. Finished frames
-   are immutable, so they can move to a render thread. Background work
-   reports back through state the UI thread reads at `beginFrame`: a
-   task marks its slot finished (§10.3), and an application's own
-   producers use queues (§10.4). There is no hidden locking.
-7. **A small core, with extensions beside it.** Widgets, reflection-driven
-   inspectors and backends are separate modules that use only the public
-   API. Anything they can do, application code can do too.
-8. **One frame boundary.** Everything from outside a frame (time, host
-   events, input, task completions, feed deliveries) is applied at
+1. **Layout and interaction, not rendering.** zui produces data that
+   describes what to draw and what was hit. It works with any renderer,
+   host or toolkit, including ones that do not exist yet.
+2. **One frame boundary.** Everything from outside a frame is applied at
    `beginFrame`, and everything leaving it is produced by `endFrame`.
-   Declaration never sees data change under it, and a frame's inputs can
-   be relayed, replayed or sent elsewhere (ARCHITECTURE.md §2). Task
-   completions follow it from 0.6 (§10.3); host events, events in the
-   input log and feeds follow it as they arrive, in 0.7 and 0.9.
+   Declaration never sees data change under it, so any frame can be
+   recorded, relayed, replayed or computed in another process.
+3. **Determinism by construction.** A frame is a function of the previous
+   frame's persistent state and the frame record. zui reads no clock, no
+   environment and no callback during a frame that the record did not
+   carry. The application's side of this is documented in §6.8.
+4. **Memory fixed at compile time.** All of zui's memory is one
+   reservation whose size is a comptime constant. A frame allocates
+   nothing, and exceeding a limit is defined, reported behavior, never
+   corruption.
+5. **Linear time, data-oriented.** Every pass is O(n) in elements and
+   text wrapping O(n) in bytes. Elements live in structure-of-arrays in
+   declaration order, and no pass recurses.
+6. **Plain data in, plain data out.** Configuration is structs with
+   defaults. Output is slices of tagged unions. There are no callbacks in
+   the hot path, no inheritance and no style cascade.
+7. **Comptime proves, precomputes and prunes.** Comptime is used where it
+   turns a run-time mistake into a compile error, moves work out of the
+   frame, or removes code the application did not ask for. It is not used
+   to specialize the layout engine per tree, because that multiplies code
+   size for no measured gain.
+8. **Contracts, never implementations.** Every dependency on the outside
+   world is a comptime contract defined in the core: text, renderers,
+   hosts, sources, tracers. The core names no concrete backend. Every
+   default zui ships is a module built on the public API, replaceable by
+   the application's own.
+9. **zui owns no application work.** It starts nothing, cancels nothing,
+   and never runs application code on another thread. Outside data
+   arrives through sources; what the UI wants goes out as demand.
+10. **Pay only for what you declare.** A feature that is off, a payload
+    type that is `void` or a source struct that is empty generates no
+    code, no memory and no per-frame cost.
+11. **Nothing is silent.** Exceeded limits, refused publishes, lowered
+    commands and fallbacks in effect are all reported, by name, in terms
+    of the `Config` field or contract declaration that changes them.
 
 ### Non-goals
 
-These are out of scope for the core, permanently or until a later
-version. Each has a reason:
-
-| Not in core | Why | Where it goes instead |
+| Not in zui | Why | Where it goes instead |
 |---|---|---|
-| Rendering, windowing, input polling, OS services | they are platform-specific, and owning them would tie zui to one stack | renderers and hosts, separate packages that implement contracts defined in the core (ARCHITECTURE.md) |
-| Font rasterization, shaping | they are large, and the platform already has them | the `Platform.measureText` hook (§8), supplied by the renderer |
-| A retained widget tree | immediate mode is the model; state lives in a small keyed table (§9) | — |
-| CSS-style cascading styles | cascades cost time per element and hide where values come from | themes as plain structs (§12) |
-| Animation system | easing policies vary by application | `dt`, plus per-id state slots (§9) |
-| Flex wrap (`flex-wrap`) in v1 | it adds a pass and complicates shrinking | *planned for 0.10*, as an opt-in pass (ROADMAP.md L7) |
-| Accessibility tree generation | it is platform-specific | the optional `semantics` config, emitted as a separate list (§7.6) |
+| rasterization, GPU, windows, OS services | platform-specific; owning them ties zui to one stack | renderers and hosts, behind contracts (§16) |
+| font loading, shaping, glyph rasterization | large, and every platform already has them | the text contract (§9.4) |
+| a retained widget tree | immediate mode is the model | the keyed state table (§12) |
+| a style cascade | it costs time per element and hides where values come from | themes and skins as plain structs (§18) |
+| a task runner or scheduler | work belongs to the application and its `Io` | sources and demand (§14) |
+| reactive data flow | operators and derived streams hide when values change | sources deliver plain values to a frame (§14) |
+| localization (numbers, dates, plurals) | a library of its own | the application |
 
 ---
 
@@ -73,568 +91,753 @@ version. Each has a reason:
 
 | Term | Meaning |
 |---|---|
-| **Context** | the object that owns all of zui's memory. One per independent UI surface (window, offscreen panel). |
-| **Frame** | one declaration pass plus layout. Produces a `Frame` result: commands, hit regions, and the task and semantics lists. |
+| **Context** | owns all of zui's memory for one independent surface (a window, an offscreen panel). Not thread-safe. |
+| **Frame record** | everything inbound for one frame: parameters, events and source deliveries (§6.2). |
+| **Frame** | everything outbound from one frame: commands, hit regions, semantics, host requests, diagnostics (§6.5). Immutable after `endFrame`. |
+| **Declaration** | the application's calls between `beginFrame` and `endFrame`. |
 | **Element** | a node declared with `open`/`close`, or a leaf such as `text`. |
 | **Id** | a 64-bit hash naming an element across frames. Required for anything interactive or stateful. |
-| **Platform** | a comptime type parameter that supplies text measurement and, optionally, wakeups. |
-| **State slot** | a small piece of per-id memory that survives across frames (scroll offset, focus, a task handle). |
+| **Contract** | a set of `zui`-prefixed declarations a type provides to play a role: text, renderer, host, source, tracer, skin (§16). |
+| **Source** | application memory that producers publish into from any thread, swapped into the frame at `beginFrame` (§14). |
+| **Demand** | what declaration read from sources, reported after `endFrame` (§14.5). |
+| **Loader** | application code that runs between frames, reads demand, and starts or releases work. |
+| **State slot** | per-id, per-type memory that survives across frames while its element is declared (§12). |
+| **Lowering** | replacing a command the renderer did not declare with one it can draw (§13.3). |
 
 ---
 
-## 3. Package layout
+## 3. System shape
+
+### 3.1 Layers
+
+| Layer | Holds | Bound |
+|---|---|---|
+| **Core** (`zui`) | layout, interaction, state, the frame boundary, sources and demand, the shared vocabulary, every contract and its checks | no OS calls, no drawing, no threads of its own beyond `Io` it is given; identical behavior on every target |
+| **Modules** (`zui_*`, this repo) | defaults built on the public API: async sources, widgets, reflection, testing, the app runner, wire, debug, motion, color, icons | the public API only, enforced by the module boundary (§3.3) |
+| **Renderers** | drawing, fonts, text measurement, images, materials | implement the renderer and text contracts; never import a host |
+| **Hosts** | windows, the event loop, OS events and services, frame pacing | implement the host contract; never import a renderer |
+| **Theme packs** | design languages as skins | data only |
 
 ```
-zui/                     the core module "zui"
-  src/root.zig           public API: Context, Id, config types, Frame
-  src/layout.zig         the layout passes
-  src/text.zig           word splitting, wrapping, the measurement cache
-  src/interaction.zig    hit testing, hover/press/focus, scrolling
-  src/state.zig          the keyed state table
-  src/tasks.zig          TaskPool and its slots
-  src/commands.zig       the RenderCommand union
-  src/emission.zig       render commands, clip and hit regions
-zui_widgets/             optional module: button, checkbox, slider, text field, dropdown, disclosure
-zui_reflect/             optional module: struct inspectors generated with @typeInfo
-zui_testing/             optional module: test platform, input driver, snapshots, command checks
-zui_app/                 optional module: Platform from a host and a renderer, and the standard loop (planned for 0.7)
-zui_wire/                optional module: the wire format for frame records and commands (planned for 0.9)
-zui_debug/               optional module: the element inspector (planned for 0.12)
-zui_motion/              optional module: tweens and exit animations (planned for 0.14)
-zui_color/               optional module: HSL, OKLCH and OKLab, mixing, palettes (planned)
-zui_icons/               optional module: icon names to icon-font codepoints (planned)
+                          application
+                               │
+                    zui_app (optional runner)
+              ┌────────────────┼─────────────────┐
+            host               │              renderer
+   (native, adapter, wire)     │      (sokol, raylib, web, wire)
+              └───────┬────────┴────────┬────────┘
+                      │                 │
+        modules: async, widgets,     zui_wire
+        motion, debug, color, ...       │
+                      └────────┬────────┘
+                               │
+                           zui core
+           (engine, vocabulary, contracts and their checks)
 ```
 
-Each optional module's root file is named after it
-(`zui_widgets/zui_widgets.zig`), because Zig names types after their file
-and users read those names in compile errors. A module can only import
-files inside its own directory, so the optional modules can reach zui
-only through `@import("zui")`: **the compiler, not a review, keeps them
-on the public API.** `zui_reflect` also imports `zui_widgets`.
+- **The core depends on nothing,** and owns the vocabulary every layer
+  speaks: `FrameRecord`, `Event`, `RenderCommand`, `Color`, `Rect`,
+  `Instant`, `Surface`, `Waker`, `Status`, the capability sets. A
+  renderer that imports `zui` only for those types pays nothing for the
+  engine, because Zig analyzes only what is used.
+- **Hosts and renderers meet at one type,** `zui.Surface` (§16.4).
+- **The application, or `zui_app`, is the composition root.** It is the
+  only place that names a concrete host and renderer.
 
-Backends (`zui-raylib`, `zui-sokol`, `zui-terminal`) are separate packages
-that depend on `zui`. They are never dependencies of it. *Planned for
-0.7:* they become renderers and hosts implementing contracts defined in
-this repo, and native hosts live in one `zui-host` repo, one directory per
-OS (ARCHITECTURE.md §1, §8).
+### 3.2 Repositories
 
-Build options, exposed as a `zui_options` module through `b.addOptions`:
+| Repository | Holds |
+|---|---|
+| `zui` | the core, the contracts, and the modules |
+| `zui-host` | native hosts, one directory per OS |
+| `zui-raylib`, `zui-sokol`, `zui-terminal`, `zui-web` | renderers; `zui-raylib` also ships an adapter host |
+| `zui-themes` | skins for OS design languages |
+| `zui-examples` | samples and the template project |
+
+### 3.3 The module boundary
+
+Each module's root file is named after it (`zui_widgets/zui_widgets.zig`),
+because Zig names types after their file and users read those names in
+compile errors. A module can import only files in its own directory, so
+modules reach zui only through `@import("zui")`: **the compiler keeps
+them on the public API.** Anything a module does, application code can do,
+and any module can be replaced by the application's own.
+
+### 3.4 Build options
 
 | Option | Default | Effect |
 |---|---|---|
-| `-Dzui-debug=bool` | `false` | keeps each id's name, so panics and diagnostics name elements instead of printing hashes (§13). Otherwise those code paths are not analyzed at all. |
-| `-Dzui-safety=bool` | follows `std.debug.runtime_safety` | the invariant sweeps in §14. *Planned for 0.12.* |
+| `-Dzui-debug=bool` | `false` | `Id.of` keeps its name, so panics and diagnostics name elements. Off, those paths are never analyzed. It is a build option, not a `Config` field, because ids are created outside any `Context`. |
+
+Everything else is per-`Context` configuration (§4).
+
+### 3.5 Targets
+
+The core builds for every target Zig does, including 32-bit, big-endian,
+`wasm32-freestanding` and freestanding embedded. It uses no OS API, keeps
+no global state, never assumes `usize` is 64 bits, and can run with
+`frames_in_flight = 1` on an `Io` that has no threads (§15). CI builds a
+full frame for each of these classes.
 
 ---
 
-## 4. The Context
-
-### 4.1 Type and configuration
+## 4. Configuration
 
 ```zig
+pub fn Context(comptime config: Config) type
+
 pub const Config = struct {
-    /// Maximum elements declared in one frame.
-    max_elements: u32 = 4096,
-    /// Bytes of text one frame may reference (copied into the frame arena).
-    max_text_bytes: u32 = 64 * 1024,
-    /// Maximum nesting depth of open elements.
-    max_depth: u16 = 64,
-    /// Render commands one frame may emit. Each wrapped line of text is one.
-    max_render_commands: u32 = 8192,
-    /// Persistent per-id state slots (§9). Must be a power of two.
-    state_slots: u32 = 1024,
-    /// Frames a state slot survives without being touched (§9).
-    state_ttl_frames: u8 = 2,
-    /// Text measurement cache entries (§8.3). Must be a power of two.
-    measure_cache_entries: u32 = 4096,
-    /// Number of frames that can be alive at once (§10.2). 2 = double buffering.
+    limits: Limits = .{},
+
+    /// The text contract (§9.4). `void` removes `text` from the API.
+    Text: type = void,
+    /// The application's sources (§14). `void` generates nothing.
+    Sources: type = void,
+    /// Optional commands the renderer draws; the rest are lowered (§13.3).
+    commands: CommandSet = .initEmpty(),
+
+    ImageHandle: type = void,     // the renderer's image, e.g. a texture id; `void` removes `image`
+    CustomData: type = void,      // what a self-drawn element carries, e.g. a 3D viewport's camera
+    MaterialHandle: type = void,  // the renderer's shader or material
+    FontId: type = u16,           // the renderer's font identifier, passed back in `MeasureKey`
+    Color: type = zui.Color,      // `zui.Color` (RGBA8) or `zui.ExtendedColor` (HDR)
+
+    features: Features = .{},
+    /// Frames alive at once: one being declared plus those a renderer holds.
     frames_in_flight: u8 = 2,
-    /// With a thread-safe platform (§10.5): after this many inline
-    /// measurements in one frame, the frame's remaining misses are measured
-    /// in parallel.
-    parallel_measure_threshold: u32 = 256,
-    /// The most distinct misses one frame measures in parallel.
-    parallel_measure_capacity: u32 = 4096,
-    /// Payload type of `.custom` elements and render commands.
-    CustomData: type = void,
-    /// Payload type of `.image` elements, e.g. a texture handle.
-    ImageHandle: type = u64,
-    /// Font identifier type passed back to the platform.
-    FontId: type = u16,
 };
 
-pub fn Context(comptime config: Config, comptime Platform: type) type
+pub const Limits = struct {
+    max_elements: u32 = 4096,               // declared per frame
+    max_depth: u16 = 64,                    // nesting of `open` inside `open`
+    max_text_bytes: u32 = 64 * 1024,        // UTF-8 bytes of all `text` content per frame
+    max_render_commands: u32 = 8192,        // per frame
+    state_slots: u32 = 1024,                // persistent `(id, type)` entries (§12); a power of two
+    state_frames_until_eviction: u8 = 2,    // counted from the last frame its element was declared
+    measure_cache_entries: u32 = 4096,      // the segment cache (§9.3); a power of two
+    string_cache_entries: u32 = 1024,       // the whole-string cache (§9.3); a power of two
+    max_input_contacts: u8 = 10,            // e.g. fingers, pens and mice touching or hovering at once
+    max_events_per_frame: u16 = 256,        // input events kept from one record
+    max_text_input_bytes: u16 = 256,        // typed and IME-committed text kept from one record
+    parallel_measure_threshold: u32 = 256,  // cache misses in one frame before measuring in parallel
+    parallel_measure_capacity: u32 = 4096,  // distinct misses one cold frame can batch
+    exit_ghost_commands: u32 = 0,           // commands kept for exit animations; 0 compiles them out
+};
+
+pub const Features = struct {
+    semantics: bool = false,                          // the accessibility tree (§13.5)
+    gestures: bool = true,                            // pan, zoom, drag, long press, double tap (§11.4)
+    flex_wrap: bool = false,                          // `Layout.wrap` (§8.1)
+    safety_sweeps: bool = std.debug.runtime_safety,   // invariant checks at the end of `endFrame` (§20.1)
+    /// The tracer contract (§16.5). `void` compiles tracing out.
+    Tracer: type = void,
+};
 ```
 
-`Context` validates `config` at comptime, using the lesson's
-`@compileError` pattern with exact messages:
-- `state_slots` and `measure_cache_entries` must be powers of two
-  (`"zui: state_slots must be a power of two, got 1000"`);
-- `frames_in_flight` must be at least 1;
-- `Platform` must implement the interface in §8.1. That check reuses the
-  `assertImplements` pattern, so a missing `measureText` is reported as
-  `"MyPlatform does not implement zui.Platform: missing \`measureText\`"`
-  instead of failing somewhere deep inside the layout code.
+### 4.1 What comptime derives from `Config`
 
-The index type is the smallest whole-byte unsigned integer that holds
-`max_elements`: `u16` for the default 4,096. (The draft used the smallest
-integer, a `u13`. It is stored in 16 bits anyway, and every load of one is
-masked; rounding up made the 4,096-box benchmark 10% faster.) The enums
-stored per element (`Sizing.Rule`, `Direction`, `Alignment`, `TextWrap`,
-the content kind) are `u8`-backed for the same reason.
+| Derived | From | Effect |
+|---|---|---|
+| element index type | `max_elements` | the smallest whole-byte unsigned integer that holds it (`u16` by default) |
+| memory plan | every limit, every payload type | the offset of every array in the reservation, and `required_bytes`, as constants (§5) |
+| `RenderCommand` | `commands`, `ImageHandle`, `CustomData`, `MaterialHandle`, `Color` | a union with exactly the variants this renderer draws (§13.1) |
+| `FrameRecord`, `Deliveries`, `SourceField` | `Sources` | one delivery field per source, and a `FieldEnum` for `ui.source` (§14) |
+| API surface | payload types, `Text`, features | `image`, `custom`, `text`, `semantics` and the gesture queries exist only when their type or feature is set; calling one that does not is a compile error naming the field to set |
+| contract checks | `Text`, `Sources`, `Tracer` | run once, at instantiation, with exact messages (§16.1) |
 
-### 4.2 Memory
+### 4.2 Validation
+
+Every check is a `@compileError` with an exact message, pinned by a
+compile-error test:
+- `"zui: limits.state_slots must be a power of two, got 1000"` (also
+  `measure_cache_entries`, `string_cache_entries`);
+- `"zui: frames_in_flight must be at least 1"`;
+- `"zui: Color must be zui.Color or zui.ExtendedColor, got [4]u8"`;
+- `"zui: commands includes .material but MaterialHandle is void"`;
+- every contract violation, in the form of §16.1.
+
+Limit names in diagnostics come from `std.meta.FieldEnum(Limits)`, so a
+message can never name a field that does not exist.
+
+---
+
+## 5. Memory
 
 ```zig
-pub fn init(gpa: std.mem.Allocator, io: std.Io, platform: *Platform) !Self
-pub fn initBuffer(buffer: []align(16) u8, io: std.Io, platform: *Platform) error{BufferTooSmall}!Self
-pub fn deinit(self: *Self, gpa: std.mem.Allocator) void
-pub const required_bytes: usize // comptime-known size for initBuffer
+pub fn init(gpa: Allocator, io: Io, text: *config.Text) Allocator.Error!Self
+pub fn initBuffer(buffer: []align(cache_line) u8, io: Io, text: *config.Text) error{BufferTooSmall}!Self
+pub fn deinit(self: *Self, gpa: Allocator) void
+pub const required_bytes: usize   // the size of the one reservation; what `initBuffer` needs
 ```
 
-The `io` is used for tasks (§10.3) and for waiting on frames held by a
-renderer (§10.2). A program with neither can pass any `Io`, and nothing
-will be called on it.
+When `Text` is `void`, the `text` parameter is absent.
 
-`init` makes **exactly one allocation**, of `required_bytes`. Everything
-is carved out of it: `frames_in_flight` frame arenas, the state table, the
-measurement cache, the hit-test table and the scratch stacks.
-`required_bytes` is a comptime constant, so embedded applications can
-place the whole UI in a static buffer with `initBuffer`.
+- **One reservation.** `init` makes exactly one allocation, of
+  `required_bytes`, and `initBuffer` makes none, so a UI can live in a
+  static buffer. The memory plan is a comptime table of offsets, so
+  carving the buffer is a handful of constant additions.
+- **What it holds:** `frames_in_flight` frame arenas, the state table,
+  the measurement caches, the previous frame's interaction results, the
+  pointer table, the relay buffer, and scratch stacks.
+- **What `io` is for:** only zui's own work: waiting for a frame a
+  renderer holds (§15.2) and measuring cold text in parallel (§15.3). An
+  application with `frames_in_flight = 1` and no thread-safe text passes
+  any `Io`, and nothing is called on it.
+- **A frame touches only what it uses.** Arenas are reserved for the
+  worst case, and reset in O(1) by resetting counters. The cost of a
+  frame is proportional to what was declared, not to the limits.
 
-Each frame arena is sized for the worst case of `max_elements` and
-`max_text_bytes`. When a frame exceeds a limit, that is a defined,
-reported condition (§13.2), never memory corruption.
+### 5.1 Element storage
 
-### 4.3 Element storage
+Per-frame elements are stored as structure-of-arrays in declaration
+(pre-) order, so each pass streams only the fields it needs and the tree
+needs no child or sibling links:
 
-Per-frame element data is stored as structure-of-arrays, so each layout
-pass streams through only the fields it uses.
-
-| Array (length `max_elements`) | Type | Used by |
+| Array | Type | Used by |
 |---|---|---|
 | `id` | `u64` | interaction, state, duplicate detection |
 | `parent` | `ElementIndex` | every pass |
-| `subtree_end` | `ElementIndex`: one past the element's last descendant | walking children, emission |
-| `child_count`, `flow_child_count` | `ElementIndex` | sizing passes |
-| `layout` | `u32` index into the layout-config array, or `none` | sizing and positioning |
-| `decoration` | `u32` index, or `none` | command emission |
-| `content` | a tagged index: `none`, text, image, custom | text wrapping, emission |
-| `flags` | `packed struct(u16)`: clips, scrolls, floating, interactive, has_semantics, ... | every pass |
-| `size` | `[2]f32` | sizing passes |
-| `min_size` | `[2]f32` | the shrink pass |
-| `position` | `[2]f32` | positioning, hit testing |
+| `subtree_end` | `ElementIndex` | walking children, emission |
+| `flow_child_count` | `ElementIndex` | sizing |
+| `layout`, `decoration` | config reference (§10.3) | sizing, positioning, emission |
+| `content` | tagged reference: none, text, image, custom | text, emission |
+| `flags` | `packed struct(u16)` | every pass |
+| `size`, `min_size`, `position`, `content_size` | `[2]f32` each | layout, hit testing |
 
-Elements are stored in declaration order (pre-order), so the tree needs
-no child or sibling links. A parent's first child, if it has one, is the
-next element, and each child's next sibling is `subtree_end[child]`:
+A parent's first child is the next element, and each child's next
+sibling is `subtree_end[child]`:
 
 ```zig
 var child = parent + 1;
 while (child < frame.subtree_end[parent]) : (child = frame.subtree_end[child]) {
-    // visit child
+    visit(child);
 }
 ```
 
-`Frame.children(parent)` is this loop as an iterator. In 0.5 and earlier each
-element also stored `first_child`, `last_child` and `next_sibling`, and
-declaring an element wrote them for it and for its parent; dropping them
-made declaration 6–31% faster with no change to layout.
-
-Config structs are stored once, in separate arrays per kind, and
-elements refer to them by index. An element without decoration costs no
-decoration memory. This is the same idea as Clay's separate config
-arrays, and it keeps the per-element core at **59 bytes**: an 8-byte id,
-eight 2-byte links and indices, 2 bytes of flags, a content-kind byte,
-and 32 bytes of geometry (size, minimum size, position and content
-size).
-
-The arrays are *reserved* for the worst case, though. Every config kind
-gets `max_elements` slots, and commands and lines get
-`max_render_commands`, so the reservation is much larger than the core.
-Measured for the default `Config` in 0.2: **1.79 MiB per frame in flight,
-and 4.29 MiB of `required_bytes`**. That covers two frames, the text
-cache, the state table (96 KiB) and the previous frame's interaction
-results (480 KiB, §7.4). By `a6d8e34`, `required_bytes` had grown to
-4.63 MiB; `zig build bench` prints the current figure (§14.3). A frame
-only *touches* the slots it uses, so the cost per frame still scales
-with the elements declared. Applications with smaller UIs should lower the
-limits, and `required_bytes` reports the result exactly.
+Configs are stored once per kind and referenced, so an element without a
+decoration costs no decoration memory.
 
 ---
 
-## 5. Frame lifecycle
+## 6. The frame boundary
+
+### 6.1 The loop
+
+With `zui_app` (§19.5), the loop is one call:
 
 ```zig
-pub fn beginFrame(self: *Self, input: Input) void
-pub fn endFrame(self: *Self) EndFrameError!*const Frame
+pub fn main(init: std.process.Init) !void {
+    try zui_app.run(App, init, .{ .title = "zui demo", .size = .{ 1280, 720 } });
+}
+```
+
+Written by hand, it is the same six steps, in this order:
+
+```zig
+while (host.zuiPoll(window, &record)) {
+    ui.beginFrame(&record, &app.sources);
+    app.declare(&ui);
+    const frame = ui.endFrame();
+    try renderer.zuiSubmit(surface, frame);
+    ui.release(frame);              // or from the render thread
+    app.load(&ui, io);              // the loader: demand → work
+    host.zuiWait(ui.nextFrame());
+}
+```
+
+The loader runs after `endFrame`, so it sees the demand of the frame just
+declared, and before the wait, so work it starts can wake the next one.
+
+### 6.2 The frame record
+
+```zig
+pub const FrameRecord = struct {
+    params: FrameParams,
+    /// In arrival order. Valid until beginFrame returns.
+    events: []const Event = &.{},
+    /// Set to replay: each source takes its recorded delivery instead of swapping.
+    deliveries: ?*const Deliveries = null,   // present only when Sources != void
+};
+
+pub const FrameParams = struct {
+    now: Instant,              // the host's monotonic clock
+    viewport: [2]f32,          // width and height, in layout units
+    scale: f32 = 1,            // physical pixels per layout unit, from the display
+    zoom: f32 = 1,             // the application's zoom, multiplied into layout
+};
+```
+
+- **Time is an instant, not a delta.** `ui.dt()` is derived from two
+  records' `now`. Deadlines (§6.6), velocities and gesture timers are in
+  the same clock, so replay reproduces them exactly.
+- **Scale and zoom are parameters,** not callbacks, so a recorded frame
+  carries everything its pixels depended on. Layout is in logical units;
+  text is measured at `size × zoom`; snapping uses `scale × zoom`.
+- **The record is borrowed.** zui copies what it keeps (at most
+  `max_events_per_frame` events and `max_text_input_bytes` of text);
+  overflow is dropped and reported (§17.2).
+
+### 6.3 `beginFrame`
+
+```zig
+pub fn beginFrame(self: *Self, record: *const FrameRecord, sources: *config.Sources) void
+pub fn tryBeginFrame(self: *Self, record: *const FrameRecord, sources: *config.Sources) error{NoFreeFrame}!void
+```
+
+With `Sources = void`, the `sources` parameter is absent; the variant is
+chosen at comptime.
+
+In order:
+1. **Take a frame arena.** `beginFrame` waits for one if a renderer holds
+   all of them (§15.2), which is zui's only wait. `tryBeginFrame` returns
+   `error.NoFreeFrame` instead, for hosts that cannot block.
+2. **Advance the state table's generation** and evict slots past their
+   TTL (§12).
+3. **Apply events in arrival order** (§7): environment changes, then
+   pointer, key, text and action events against the previous frame's hit
+   regions.
+4. **Swap each source,** in `Sources` field order, in an `inline for`; or,
+   when `record.deliveries` is set, inject each recorded delivery
+   instead (§14.3). Refusals are added to the diagnostics.
+5. **Relay.** If a relay listener is attached, it receives the applied
+   record, with deliveries filled in (§6.8).
+
+### 6.4 Declaration
+
+The application calls the declaration API (§10). Declaration only
+appends to arrays and reads: the previous frame's interaction results,
+the current frame's swapped sources, and the state table. No layout
+runs, and nothing it reads changes until the next `beginFrame`.
+
+### 6.5 `endFrame` and the frame
+
+```zig
+pub fn endFrame(self: *Self) *const Frame
 pub fn release(self: *Self, frame: *const Frame) void
 ```
 
-1. **`beginFrame(input)`**
-   - Selects the next free frame arena, or blocks if every arena is still
-     held by a renderer (§10.2), and resets it. This is O(1): the arena's
-     counters reset, and its memory is not cleared.
-   - Advances the state table's generation counter (§9).
-   - Resolves interaction against the **previous** frame's hit regions:
-     hover, press and release, the focus target, and the scroll target.
-     Results are kept by id for the queries in §7.4. *Planned for 0.7:*
-     it processes the frame's input events one at a time, in arrival
-     order (§5.1).
-   - Applies the completions of every registered task pool, without
-     blocking (§10.3). Every request in the frame sees the pools as they
-     are now.
-2. **Declaration.** The application calls `open`, `close`, `text`, and
-   the other declaration functions. These only *append* to arrays. No
-   layout happens yet.
-3. **`endFrame()`**
-   - Checks that `open` and `close` balanced (§13.1).
-   - Runs the layout passes (§6).
-   - Emits render commands, hit regions and semantics (§7.5–7.6).
-   - Cancels the tasks of ids that were not declared (§10.3).
-   - Returns the frame, or an error with diagnostics if a limit was
-     exceeded (§13.2). On a limit error the frame is still valid: the
-     elements that fit were laid out and emitted.
-4. **`release(frame)`** returns the frame's arena once the renderer is
-   done with it. With `frames_in_flight = 1` it must be called before the
-   next `beginFrame`.
-
-The **one-frame latency** of interaction is deliberate, and standard for
-immediate mode. A click is resolved against what was on screen when the
-user clicked, which is the previous frame. It also means declaration never
-has to wait for layout.
-
-### 5.1 Input
+`endFrame` checks the tree's balance, runs layout (§8), emits (§13),
+settles source demand (§14.5), and returns the frame. **It always
+returns a usable frame.** If a limit was exceeded, the part that fit was
+laid out, and `frame.diagnostics` says what to raise; an application that
+wants an error writes `try frame.diagnostics.check()`.
 
 ```zig
-pub const Input = struct {
-    viewport: [2]f32,
-    dt_seconds: f32 = 0,
-    pointer: ?[2]f32 = null,          // null when the pointer is outside the surface
-    buttons: std.EnumSet(Button) = .initEmpty(),
-    wheel: [2]f32 = .{ 0, 0 },        // layout units; positive scrolls toward the end
-    keys_pressed: []const Key = &.{}, // this frame's key-down events, in order
-    modifiers: Modifiers = .{},       // held: shift, control, alt, super
-    text_input: []const u8 = "",      // UTF-8 typed this frame
+pub const Frame = struct {
+    pub fn commands(self: *const Frame) []const RenderCommand
+    pub fn hitRegions(self: *const Frame) []const HitRegion
+    pub fn semantics(self: *const Frame) []const SemanticNode     // features.semantics
+    pub fn chromeRegions(self: *const Frame) []const ChromeRegion // title bar, resize edges
+    pub fn requests(self: *const Frame) HostRequests              // cursor, IME area, text input
+    pub fn inspect(self: *const Frame, index: ElementIndex) ElementView   // by declaration order, for inspectors
+    pub fn elementCount(self: *const Frame) ElementIndex
+    diagnostics: Diagnostics,
+    number: u64,                // frames since `init`, from 0
 };
 ```
 
-`Key` is a small enum of navigation and editing keys: tab, enter, escape,
-space, backspace, delete, the arrows, home, end, page up and page down.
-Modifiers are a separate field because they are *held state* rather than
-events: shift-tab needs to know that shift is down while tab is pressed.
-Mapping platform key codes onto both is the backend's job.
+Everything a frame references lives in its arena and stays valid until
+`release`, which is a single atomic store and callable from any thread.
 
-The slices only need to live until `beginFrame` returns, because zui
-copies what it keeps: at most `zui.max_keys_per_frame` (32) key events
-and `zui.max_text_input_bytes` (128) bytes of text per frame. The rest of
-a frame's events are dropped.
-
-*Planned for 0.7 (ROADMAP.md I3, I4):* input becomes an ordered event
-log. Sampled `buttons` lose a press and release that both fall between
-two polls, which is common when the application sleeps until input
-arrives, and they can describe only one pointer.
+### 6.6 When the next frame is needed
 
 ```zig
-pub const Input = struct {
-    viewport: [2]f32,
-    dt_seconds: f32 = 0,
-    events: []const Event = &.{}, // in arrival order
+pub const NextFrame = union(enum) {
+    immediately,
+    at: Instant,
+    on_event,      // sleep until input or a `Waker` wakes the host
 };
+pub fn nextFrame(self: *const Self) NextFrame
+pub fn requestFrame(self: *Self) void
+pub fn requestFrameAt(self: *Self, instant: Instant) void   // e.g. the caret's next blink
+```
 
+`nextFrame` is `.immediately` when a source has something not yet
+swapped (§14.4) or a frame was requested; otherwise `.at` the earliest of
+every `requestFrameAt`, running momentum, and pending long-press and
+double-tap timers; otherwise `.on_event`. The host sleeps accordingly, so
+an idle UI uses no CPU and a blinking caret costs one frame per blink.
+
+### 6.7 One frame of latency
+
+Interaction queries answer for the **previous** frame's layout, because a
+click is resolved against what was on screen when the user clicked.
+Declaration therefore never waits for layout, and styles can depend on
+interaction before the element is declared.
+
+### 6.8 Relay, replay and determinism
+
+```zig
+pub fn relayTo(self: *Self, listener: ?zui.Relay(FrameRecord)) void
+```
+
+- **Relay.** A listener receives each applied record during
+  `beginFrame`, including the deliveries each source reported through
+  `zuiDelivery`. The record is valid only during the call; a listener
+  copies what it keeps, and a slow listener buffers on its own side. With
+  no listener, nothing is copied.
+- **Replay.** Feeding recorded records back, with `deliveries` set,
+  drives declaration to the same commands. No loader runs during replay,
+  and declaration starts no work (§14.1), so replay does no real I/O.
+- **The application's side.** Replay is exact if declaration reads the
+  outside world only through the record and its sources: no clock, random
+  number or file read that bypasses them. This is documented, not
+  enforced. Text measurement is the one outside call during a frame; it
+  is deterministic for a given set of fonts, which the wire format
+  fingerprints (§19.6).
+
+---
+
+## 7. Input and environment
+
+### 7.1 Events
+
+```zig
 pub const Event = union(enum) {
     pointer_down: PointerButton,
     pointer_up: PointerButton,
-    pointer_move: PointerMove,
-    pointer_cancel: PointerId, // the OS took the pointer: palm rejection, a system gesture
-    pointer_leave: PointerId,
-    wheel: Wheel,              // position, delta, and whether the delta is precise or in lines
-    key_down: KeyEvent,        // key, modifiers held at that moment, repeat
+    pointer_move: PointerMove,      // with coalesced history
+    pointer_cancel: PointerId,      // the OS took the pointer
+    pointer_leave: PointerId,       // a hovering pointer left the surface
+    wheel: Wheel,                   // position, delta, precise or in lines
+    key_down: KeyEvent,
     key_up: KeyEvent,
-    text: []const u8,
-    os_gesture: OsGesture,     // pinch and rotate the OS recognized, at a position
+    text: []const u8,               // committed UTF-8
+    composition: Composition,       // IME preedit text and caret
+    os_gesture: OsGesture,          // pinch, rotate, swipe the OS recognized
+    action: AccessibilityAction,    // invoke, set value, scroll, focus, naming an element id
+    environment: EnvironmentChange,
+    files_dropped: FilesDropped,
+    lifecycle: Lifecycle,           // suspend, resume, terminate request, low memory
 };
 
 pub const Pointer = struct {
     id: PointerId,
     kind: enum { mouse, touch, pen },
-    position: [2]f32,
-    seconds: f64,              // the host's timestamp
-    pressure: f32 = 1,
-    tilt: [2]f32 = .{ 0, 0 },
+    position: [2]f32,               // layout units, from the surface's top-left
+    at: Instant,                    // when the host received it, not when zui applied it
+    pressure: f32 = 1,              // 0 to 1; 1 for devices without pressure
+    tilt: [2]f32 = .{ 0, 0 },       // a pen's tilt from vertical, in radians, on x and y
+};
+
+pub const KeyEvent = struct {
+    key: Key,                       // logical: letters, digits, punctuation, navigation, function keys
+    modifiers: Modifiers,           // as held at this event
+    repeat: bool = false,
+    scancode: u32 = 0,              // the host's physical code, opaque, for game-style bindings
+    at: Instant,                    // when the host received it
 };
 ```
 
-`PointerButton` and `PointerMove` extend `Pointer` with the button, and
-with the coalesced history of a move. The rules:
-- **Events are processed in order.** A press and release in one frame is
-  a click, and "release, then a new touch" is handled in that order.
-- **Moves are coalesced per pointer.** Only the last move before another
-  event of the same pointer is hit-tested; the earlier ones stay as
-  history, for velocity. A mouse that reports at 8 kHz costs one hover
-  hit test per frame, as today.
-- **Velocity comes from the host's timestamps,** never from a clock read
-  during the frame, so replay is deterministic.
-- **Touch never hovers.** A mouse or pen hovers while it is over the
-  surface.
-- **`Key` grows** to letters, digits, punctuation and function keys.
-  Modifiers travel with each key event, so shift-tab followed by tab in
-  one frame is resolved correctly.
-- **Limits:** `Config.max_pointers` (default 10) sizes the pointer table;
-  a contact beyond it is ignored until a slot frees, as digitizers do.
-  `Config.max_events_per_frame` replaces `zui.max_keys_per_frame`, and
-  events past it are dropped and reported (§13.2).
-- **Sampled backends** use `zui.InputSampler`, which turns successive
-  states into events.
+The rules:
+- **Events apply in order.** A press and release in one frame is a
+  click; "release, then a new touch" is handled in that order.
+- **Moves coalesce per pointer.** Only the last move before another event
+  of the same pointer is hit-tested; earlier ones are history, for
+  velocity. A mouse reporting at 8 kHz costs one hover hit test per
+  pointer per frame.
+- **Velocity uses the events' instants,** never a clock read in the
+  frame.
+- **Touch never hovers.** Mouse and pen hover while over the surface.
+- **The pointer table** has `max_input_contacts` slots. A contact beyond
+  it is ignored until a slot frees, as digitizers do.
+- **Sampled input** (a library that reports only current state) goes
+  through `zui.InputSampler`, which turns successive states into events.
 
-Accessibility actions (Invoke, RangeValue, Scroll) join the union in
-0.12 as events naming an element id (ROADMAP.md V2).
+### 7.2 Environment
+
+```zig
+pub const Environment = struct {
+    theme: enum { light, dark } = .light,
+    contrast: enum { normal, high } = .normal,
+    reduced_motion: bool = false,
+    reduced_transparency: bool = false,
+    text_scale: f32 = 1,            // the user's text size preference, e.g. 1.25; applied by skins, not by layout
+    locale: Locale = .default,      // e.g. "fr-CA"; zui only reports it
+    direction: Direction = .left_to_right,  // the language's reading direction, which `mirrored = null` follows
+    hdr_headroom: f32 = 1,          // display peak over SDR white, e.g. 4; 1 is an SDR display
+    power: enum { plugged, battery, saver } = .plugged,
+    window_focused: bool = true,    // the OS window has keyboard focus, not an element
+};
+
+pub fn environment(self: *const Self) *const Environment
+```
+
+The environment is state the core keeps; `EnvironmentChange` events
+update it, so a record carries only what changed. Skins, motion and
+widgets read it, which is how a theme follows the system's dark mode and
+an animation honors reduced motion.
+
+### 7.3 Host requests
+
+Some outputs are for the host, not the renderer. They are part of the
+frame, so they replay and relay like commands:
+
+```zig
+pub const HostRequests = struct {
+    cursor: Cursor = .default,          // of the hot element
+    text_input: ?TextInputArea = null,  // focused editable's caret rect: where the IME window goes
+};
+```
 
 ---
 
-## 6. Layout
+## 8. Layout
 
-### 6.1 Model
+### 8.1 The model
 
-Every element is a box with an axis (`left_to_right` or `top_to_bottom`),
-padding, a gap between its children, child alignment on both axes, and a
-sizing rule per axis:
+Every element is a box with a direction, padding, a gap between its
+children, alignment on both axes, and a sizing rule per axis.
 
 ```zig
+pub const Layout = struct {
+    direction: Direction = .left_to_right,   // how children flow: .left_to_right, .right_to_left, .top_to_bottom
+    sizing: Sizing2 = .{},
+    padding: Edges = .{},                    // logical: start/end resolve by direction
+    child_gap: f32 = 0,                      // between adjacent children, not around them
+    child_alignment: Alignment2 = .{},       // where the children as a group sit, on each axis
+    aspect_ratio: ?f32 = null,               // width / height
+    wrap: bool = false,                      // features.flex_wrap
+    mirrored: ?bool = null,                  // null: follow the environment's direction
+};
+
 pub const Sizing = struct {
-    rule: enum(u2) { fit, grow, fixed, percent } = .fit,
-    /// fixed: the size. percent: the fraction of the parent's content box (0..1). grow: the weight.
+    rule: enum(u8) { fit, grow, fixed, percent } = .fit,
+    /// fixed: the size. percent: fraction of the parent's content box. grow: the weight.
     amount: f32 = 0,
-    min: f32 = 0,
+    basis: enum(u8) { content, zero } = .content,   // grow only: start from the content's size, or from `min`
+    min: f32 = 0,                                   // layout units, for every rule
     max: f32 = std.math.inf(f32),
 
     pub const fit: Sizing = .{};
     pub const grow: Sizing = .{ .rule = .grow, .amount = 1 };
-    pub fn fixed(size: f32) Sizing { ... }
-    pub fn percent(fraction: f32) Sizing { ... }
-    pub fn growWeighted(weight: f32) Sizing { ... }
-    pub fn fitBetween(min: f32, max: f32) Sizing { ... }
-};
-
-pub const Sizing2 = struct {
-    width: Sizing = .fit,
-    height: Sizing = .fit,
-    pub const grow_both: Sizing2 = .{ .width = .grow, .height = .grow };
+    pub const grow_equal: Sizing = .{ .rule = .grow, .amount = 1, .basis = .zero };
+    pub fn fixed(size: f32) Sizing
+    pub fn percent(fraction: f32) Sizing
+    pub fn growWeighted(weight: f32) Sizing   // 2: twice the free space of a `.grow` sibling
+    pub fn fitBetween(min: f32, max: f32) Sizing
 };
 ```
 
-`Sizing` is a struct with declarations, rather than a tagged union,
-because Zig forbids a field and a declaration with the same name, and the
-helpers are what keep literals short. Using one 16-byte struct also
-avoids a tag-dependent layout. Thanks to decl literals, config literals
-read as `.sizing = .{ .width = .grow, .height = .fixed(48) }` or
-`.sizing = .grow_both`.
+`Sizing` is a struct with declarations rather than a union so that decl
+literals stay short: `.sizing = .{ .width = .grow, .height = .fixed(48) }`.
 
-A `percent` child contributes nothing to a `fit` parent's size, because
-the parent's size would otherwise depend on the child's and the child's
-on the parent's. Percent is meant for parents whose size is decided some
-other way (`fixed`, `grow`, or the root).
+The meanings, which follow CSS where CSS has an answer:
+- **`fit`** is the size of the content, clamped to `min` and `max`.
+- **`grow`** with a content basis starts from its content and shares free
+  space by weight, as `flex-basis: auto`. With a zero basis it starts
+  from its minimum, which gives equal columns while keeping weights.
+- **`percent`** is a fraction of the parent's content box, not counting
+  gaps. It contributes nothing to a `fit` parent, whose size would
+  otherwise depend on it in a cycle.
+- **Shrinking.** When children overflow, the largest shrinkable child
+  shrinks first until it matches the next largest, never below its
+  minimum. Percent children shrink like the others.
+- **Aspect ratio** derives height from the settled width. Deriving width
+  from height would need a second width pass and is not supported.
+- **Direction** is logical. `right_to_left` mirrors rows, alignment,
+  padding and floating anchors; `mirrored` applies it to a subtree.
+  Bidirectional text inside a run is the text contract's (§9.4).
+- **Wrap** moves children that overflow a row onto new lines, for parents
+  that opt in, in a pass between distribution and positioning.
 
-As in CSS, a percentage is of the parent's content box, **not counting
-gaps**, and a percent child can shrink like a `fit` or `grow` child. Two
-`.percent(0.5)` children with a 10-unit gap and a 50-unit child that
-cannot shrink, in a 210-unit row, come out 70, 70 and 50: the overflow
-of 80 is taken from the two largest. (Clay subtracts the gaps first and
-never shrinks percent children, so its version of that row overflows.)
+### 8.2 Passes
 
-A `grow` child starts from its content size, and free space is added on
-top, as with CSS `flex-basis: auto`. Two `grow` children whose contents
-are 8 and 128 wide share 300 units as 90 and 210, not 150 each. *Planned
-for 0.10:* a zero basis (`.growEqual`) for equal columns.
-
-### 6.2 Passes
-
-All passes iterate over the element arrays in declaration (pre-) order or
-in reverse. None of them recurses.
-
-| # | Pass | Direction | Work |
+| # | Pass | Order | Work |
 |---|---|---|---|
-| 0 | measure text | each text element | every word (or paragraph, or the whole text, by wrap mode) is measured through the cache, and its width recorded for pass 3. |
-| 1 | fit widths | reverse order (children before parents) | each `fit` width becomes the sum of its children along its axis (or their maximum across it), plus padding and gaps, clamped to min/max. Text contributes the width of its longest word as its minimum and its unwrapped width as its preferred width. Each element adds its size into its parent's as it is reached, so no child list is walked. |
-| 2 | distribute widths | forward (parents before children) | inside each parent along the width axis: `percent` and `fixed` children first, then free space goes to `grow` children by weight. If the children overflow, they shrink: the largest shrinkable child shrinks first until it matches the next largest (Clay's approach), never below its minimum. The parent's content size is recorded for scrolling and alignment. |
-| 3 | wrap text | each text element | with its width now known, the text is wrapped into lines (§8.2) from the widths pass 0 recorded, which fixes its height. |
-| 4 | fit heights | reverse | as pass 1, for heights. |
-| 5 | distribute heights | forward | as pass 2, for heights. |
-| 6 | position | forward | each parent, once placed, prepares a cursor from its content box, alignment and scroll offset, and each child takes its place from its parent's cursor. Floating elements are positioned relative to their attach target (§6.4). |
-| 7 | emit | forward, then per z-layer | render commands, clip regions, hit regions (§7.5). Elements that draw nothing are skipped; a border waits until the element's subtree ends. |
+| 0 | measure text | each text | look up whole strings, then segments, through the caches (§9.3) |
+| 1 | fit widths | reverse | each `fit` width from its children, plus padding and gaps; each element adds itself into its parent, so no child list is walked |
+| 2 | distribute widths | forward | fixed and percent first, then free space by weight, then shrinking |
+| 3 | wrap text, apply aspect ratios | each text / each element | lines from the widths pass 0 recorded; heights from widths |
+| 4 | fit heights | reverse | as 1 |
+| 5 | distribute heights | forward | as 2 |
+| 5½ | wrap rows | forward | only for `wrap` parents, compiled out without `features.flex_wrap` |
+| 6 | position | forward | a cursor per parent from its content box, alignment, direction and scroll offset; floating elements from their targets (§8.4) |
+| 7 | emit | forward, then by layer | commands, clips, hit regions, semantics (§13) |
 
-Widths are settled before heights because text wrapping needs the width,
-and the height depends on the wrap. This is the one ordering constraint,
-and it is why the passes come in pairs.
+Widths settle before heights because wrapping needs the width and the
+height depends on the wrap. That is the one ordering constraint, and why
+the passes come in pairs. Each pass is its own tight loop: fusing passes
+was measured slower, so they stay separate.
 
-Each pass is a tight loop over a few arrays. Measuring is the only
-per-character work, and it runs once per text element. §6.5 has the
-measured cost, and what fusing passes did to it.
+### 8.3 Clipping and scrolling
 
-### 6.3 Clipping and scrolling
+- **`clip`** on either axis clips descendants. `clip_begin` carries a
+  rectangle already intersected with every enclosing clip, so a renderer
+  needs only a scissor stack. Elements and lines entirely outside the
+  active clip are not emitted.
+- **`scroll`** makes an element scroll on its axes, and clips them. It
+  needs an id, because the offset is kept in the state table as a
+  `zui.ScrollState`; without one, safe builds panic and release builds
+  clip without scrolling.
+- **Scrolled children are not shrunk** along the scrolled axis; they keep
+  their size, which is what makes them scrollable.
+- **The offset is clamped** to `[0, content − size]` at layout time and
+  written back. `ui.scrollOffset(id)` and `ui.setScrollOffset(id, offset)`
+  read and set it.
+- **Routing.** Wheel and pan go to the innermost scroll container under
+  the pointer that accepts that axis and still has room, then outward:
+  the same rule as every other gesture (§11.4).
 
-An element with `.clip = .both` (or `.{ .horizontal = true, .vertical = false }`)
-clips its descendants. zui emits a `clip_begin` whose rectangle is
-already intersected with every enclosing clip, so a renderer only needs
-a scissor stack: push on `clip_begin`, pop on `clip_end`. Elements and
-lines of text entirely outside the active clip are not drawn at all, which
-keeps long scrolled lists cheap to render.
-
-`.scroll = .{}` (vertical by default; `.both`, or `.horizontal = true`)
-makes an element scroll on those axes, and clips them. The rules:
-- **It needs an id,** because the offset is kept in the state table (§9)
-  as a `zui.ScrollState` under that id. A scroll container without an id
-  panics in safe builds and only clips in release builds.
-- **Its children are not shrunk along a scrolled axis.** They keep their
-  size and overflow, which is what makes the content scrollable. For
-  example, a long line of text in a horizontally scrolling strip stays on
-  one line.
-- **The offset is clamped** to `[0, content − size]` at layout time, once
-  the content has been measured, and the clamped value is written back.
-  `ui.scrollOffset(id)` reads it, and `ui.setScrollOffset(id, offset)`
-  sets it; the new offset takes effect at the next layout.
-
-Wheel input goes to the deepest scroll container under the pointer that
-can still move in the wheel's direction. If it cannot, the input passes
-to the next container outward, as in browsers. *Planned for 0.10:*
-dragging and two-finger gestures follow the same rule by the motion
-component they carry: a drag locks to an axis once it passes the touch
-slop, and goes to the innermost element that accepts panning on that axis
-and still has room (ROADMAP.md I5).
-
-### 6.4 Floating elements
-
-Tooltips, dropdowns and modals are declared in place:
+### 8.4 Floating elements
 
 ```zig
 .floating = .{
-    .attach_to = .parent,          // or .root (the viewport), or .{ .element = id }
-    .anchor = .top_center,         // this point of the floating element...
-    .attach_point = .bottom_center, // ...goes on this point of the target
-    .offset = .{ 0, 4 },
-    .z = 1,
+    .attach_to = .parent,            // .root, or .{ .element = id }
+    .anchor = .top_center,           // this point of the floating element
+    .attach_point = .bottom_center,  // goes on this point of the target
+    .offset = .{ 0, 4 },             // layout units, after anchoring
+    .z = 1,                          // paint layer; higher paints above, the root is 0
+    .capture = true,                 // false: the pointer passes through
+    .clip = .none,                   // .target: clipped to the attach target's clip
 },
 ```
 
-The anchor and attach points are one of nine positions, `.top_left`
-through `.bottom_right`. Floating elements follow these rules:
-- **They take no space** in their parent's flow, and are positioned after
-  it in pass 6, relative to their target.
+- **They take no space** in their parent's flow.
 - **`grow` and `percent`** resolve against the viewport for `.root`, and
-  against the parent otherwise. An `.element` target may not be sized yet
-  when the parent is visited.
-- **An `.element` target must be declared earlier** in the frame. A later
-  or missing target falls back to the parent.
-- **They paint in their own layer** `z`. Commands are sorted stably by
-  `z`, so a floating element paints over everything in lower layers, in
-  declaration order within its layer. They escape their ancestors'
-  clipping, so a tooltip inside a scroll list stays visible.
-- **They win the hit test** over lower layers. A floating element always
-  gets a hit region, even when it is not interactive, so it covers what is
-  beneath it. Its own tree ancestors still count as hovered when they
-  contain the pointer, as in CSS, so a menu stays hovered while the
-  pointer is over its dropdown.
+  against the parent otherwise.
+- **An element target may be declared later.** Floating subtrees whose
+  target comes later are placed after pass 6 by shifting the subtree,
+  which is contiguous (`index..subtree_end`).
+- **They paint in layer `z`,** sorted stably, so declaration order holds
+  within a layer, and they escape their ancestors' clips unless
+  `.clip = .target`.
+- **They win the hit test** over lower layers when `capture` is true, and
+  their tree ancestors still count as hovered, so a menu stays hovered
+  while the pointer is over its dropdown.
 
-### 6.5 Performance targets
+### 8.5 Layout islands *(later, measured)*
 
-The targets, for one 2020-era desktop core:
-- **4,096 boxes, depth 8, no text:** layout and emission under 100 µs.
-- **1,000 text elements averaging 40 characters, all measurements cached:**
-  under 250 µs.
-- **Allocation:** zero after `init`.
-
-Measured in 0.5 on an Intel i9-10900K (a 2020 desktop CPU), with
-`zig build bench`, as the fastest of 400 frames:
-
-| Scenario | 0.4 | 0.5 | Target |
-|---|---|---|---|
-| 4,096 boxes, depth 8 | 216 µs | 97 µs (CI runners: 63–125 µs) | 100 µs |
-| 1,000 texts, warm cache | 346 µs | 166–176 µs (CI runners: 97–204 µs) | 250 µs |
-| 4,000 children of one parent | 163 µs | 65 µs | |
-| allocations after `init` | 0 | 0 | 0 |
-
-The box tree is 512 chains of 8 nested boxes with mixed sizing rules, so
-nearly every element is a parent: the most layout work a tree of that
-size can ask for. Shallower, wider trees cost less per element. Its time
-is within a few percent of the target, so it has no headroom.
-
-What made the difference, in order of effect:
-- **Text is looked up once per frame.** Measuring records the width of
-  every word in a scratch buffer (`text.maxRuns` entries, sized by
-  `max_text_bytes + max_elements`), and wrapping reads the widths back
-  instead of hashing each word again.
-- **The cache key is one hash.** Wyhash of the bytes, seeded with the font
-  and size, instead of a hash and two mixes, and the word splitter scans
-  16 bytes at a time.
-- **No pass walks a child list it doesn't need to.** The fit passes run
-  backward and add each element into its parent, positions stream forward
-  from a per-parent cursor, and every parent's flow child count is kept at
-  declaration.
-- **Byte-sized indices and enums** (§4.1), and float `min`/`max` without
-  NaN handling (`style.larger`, `style.clampSize`): Zig's `@max` on floats
-  costs about five extra instructions each.
-- **Emission skips elements that draw nothing** and opens a level only for
-  elements that clip, float, have a border, or form a hit region or a
-  focus scope.
-- **The interaction table is cleared slot by slot**, instead of zeroing
-  all 16,384 slots every frame.
-- **Each pass stays its own function.** Inlined into one body they were
-  about 3% slower, and fused into four loops 17% slower.
-
-In 0.5, declaration was the larger half of a frame: about 110 µs of the
-box tree's 206 µs. `zig build bench` now times it on its own (§14.3).
-Inlining `open` and `box` so the 168-byte `ElementConfig` is never
-copied, dropping the child links (§4.3), writing fewer per-element
-fields, and fixing a store-forwarding stall on the open-element depth
-cut it by 42–56%: the box tree's declaration went from 104 µs to 52 µs
-and the wide tree's from 124 µs to 55 µs, with layout unchanged.
+An element sized `fixed` on both axes with no floating descendants
+attached outside it cannot affect anything outside it, so passes 1–6 may
+run for such islands in parallel. It ships only if a benchmark above
+roughly 10k elements shows a win (§20).
 
 ---
 
-## 7. Declaration API
+## 9. Text
 
-### 7.1 Elements
+### 9.1 Style
 
 ```zig
-pub fn open(self: *Self, element: ElementConfig) void
-pub fn close(self: *Self) void
-/// A leaf element: `open` and `close` in one call.
-pub fn box(self: *Self, element: ElementConfig) void
-pub fn text(self: *Self, content: []const u8, style: TextStyle) void
-pub fn image(self: *Self, handle: config.ImageHandle, element: ElementConfig) void
-pub fn custom(self: *Self, data: config.CustomData, element: ElementConfig) void
+pub const TextStyle = struct {
+    font: config.FontId = 0,
+    size: f32 = 16,                       // layout units, not points
+    letter_spacing: f32 = 0,              // layout units added after each glyph
+    line_height: f32 = 0,                 // 0: the font's own
+    color: config.Color = .black,
+    wrap: enum(u8) { words, newlines, none } = .words,   // at break opportunities; only at newlines; never
+    alignment: enum(u8) { start, center, end } = .start, // of each line in the box; start follows direction
+};
+
+pub const MeasureKey = struct {
+    font: config.FontId,
+    size: f32,              // already multiplied by zoom
+    letter_spacing: f32,
+};
 ```
 
-`text`, `image`, `custom` and `box` are leaves: they take no children and
-need no `close`.
+Text is UTF-8 and is copied into the frame arena, so the caller's buffer
+may be reused at once.
 
-`ElementConfig` has a field for each config kind (`layout`, `background`,
-`corner_radius`, `border`, `clip`, `scroll`, `floating`, and later
-`semantics`), each with a default. Only the kinds that are set get
-stored. Four flags control interaction (§7.4):
-- `interactive` makes the element hit-tested, so it can be hovered,
-  pressed and clicked;
-- `focusable` makes it reachable with tab, and implies `interactive`;
-- `focus_scope` keeps tab inside the element's descendants;
-- `disabled` keeps the element hit-tested, so it still covers what is
-  beneath it, but it is never pressed, clicked or focused.
+### 9.2 Wrapping
 
-*Planned for 0.10:* `.gestures` declares what else an element accepts
-(pan on an axis, zoom, drag, long press, double tap, a custom
-recognizer), as a packed set stored in its hit region (ROADMAP.md I5).
+1. **Segment** each text into break opportunities: ASCII spaces and
+   newlines by default, or the text contract's own segmentation (§9.4),
+   which is how CJK, Thai and UAX #14 line breaking work.
+2. **Measure** each distinct segment once per cache lifetime.
+3. **Lay segments into lines** greedily, adding their widths.
 
-`text` copies its content into the frame arena, so the caller's buffer
-may be reused immediately.
+- **The fast path.** A text with no paragraph break whose unwrapped width
+  fits its box is emitted as one line without walking its segments.
+- **Segments are never broken.** A text's minimum width is its widest
+  segment, and no pass makes an element narrower than its minimum, so an
+  over-wide segment gets a line of its own and overflows, as in CSS.
+- **One command per line,** so renderers never wrap.
 
-Nesting follows the code, with `defer`:
+### 9.3 Caches
+
+| Cache | Key | Holds | Why both |
+|---|---|---|---|
+| strings | `(hash(bytes), MeasureKey)` | the whole text's metrics: unwrapped width, widest segment, has break | a warm label costs one probe, not one per word |
+| segments | `(hash(bytes), MeasureKey)` | one segment's size | text that changes every frame (`"Frame 1234"`) measures only its new segments |
+
+Both are open-addressed, sized by `Limits`, persistent across frames, and
+evict the least recently used entry in the probe window. Hashing is one
+wyhash of the bytes, seeded with the key. Steady-state frames make almost
+no calls to the text contract.
+
+### 9.4 The text contract
+
+```zig
+const Fonts = struct {
+    /// Required. Size of `run` in layout units.
+    pub fn zuiMeasure(self: *Fonts, run: []const u8, key: zui.MeasureKey) [2]f32 { ... }
+
+    /// Optional. Break opportunities in `text`; without it, ASCII spaces and newlines.
+    pub fn zuiSegment(self: *Fonts, text: []const u8, breaks: *zui.BreakSink) void { ... }
+    /// Optional. `zuiMeasure` may be called from several threads at once (§15.3).
+    pub const zui_thread_safe = true;
+    /// Optional. Identifies the fonts, so a frame measured elsewhere can be checked (§19.6).
+    pub fn zuiFingerprint(self: *const Fonts) u64 { ... }
+};
+```
+
+**Measurement must be additive over segments:** measuring two adjacent
+segments separately must sum to measuring them together. zui caches
+segments and wraps by adding, so a contract with letter spacing counts
+the spacing after every glyph, including the last. Kerning across a
+break opportunity is the one effect this cannot express, and is usually
+negligible there. A contract that shapes text returns shaped widths.
+
+---
+
+## 10. Declaration
+
+### 10.1 Elements
+
+```zig
+pub fn open(self: *Self, element: Element) void
+pub fn close(self: *Self) void
+pub fn box(self: *Self, element: Element) void                                        // a leaf
+pub fn text(self: *Self, content: []const u8, style: TextStyle) void                  // Text != void
+pub fn image(self: *Self, image: Image, element: Element) void                        // ImageHandle != void
+pub fn custom(self: *Self, data: config.CustomData, element: Element) void            // CustomData != void
+
+pub const Image = struct {
+    handle: config.ImageHandle,
+    natural_size: ?[2]f32 = null,       // a `fit` image takes this size
+    tint: config.Color = .white,        // multiplied into the pixels; white leaves them unchanged
+    corner_radius: CornerRadius = .{},
+};
+```
+
+```zig
+pub const Element = struct {
+    id: Id = .none,                     // needed for queries, state, scrolling and focus
+    style: ?Static(Style) = null,       // comptime-built, zero-copy (§10.3)
+    layout: ?Layout = null,             // overrides style.layout
+    decoration: ?Decoration = null,     // background, border, corner radius, material, effects
+    clip: Axes = .none,                 // the axes on which descendants are cut off, e.g. .vertical
+    scroll: ?Scroll = null,
+    floating: ?Floating = null,
+    interactive: bool = false,          // takes hover, press and click, and blocks them below it
+    focusable: bool = false,            // implies interactive
+    focus_scope: bool = false,          // Tab cycles inside this subtree, as in a dialog
+    disabled: bool = false,             // no hover, press or focus; queries report `.disabled`
+    gestures: Gestures = .{},           // features.gestures (§11.4)
+    cursor: ?Cursor = null,             // the pointer's shape while this element is hot
+    semantics: ?Semantics = null,       // features.semantics (§13.5)
+    exit_seconds: f32 = 0,              // limits.exit_ghost_commands (§19.9)
+};
+```
+
+Only the config kinds that are set are stored. Nesting follows the code,
+with `defer`:
 
 ```zig
 fn toolbar(ui: *Ui, app: *App) void {
-    ui.open(.{
-        .id = .of("toolbar"),
-        .layout = .{ .direction = .left_to_right, .sizing = .{ .width = .grow, .height = .fixed(40) }, .padding = .all(4), .child_gap = 4 },
-        .background = theme.panel,
-    });
+    ui.open(.{ .id = .of("toolbar"), .style = styles.toolbar });
     defer ui.close();
 
     toolButton(ui, .of("save"), "Save", app);
@@ -642,921 +845,968 @@ fn toolbar(ui: *Ui, app: *App) void {
 }
 ```
 
-A "component" is just a function that declares elements. zui has no
-component type, registry or lifecycle.
+A component is a function that declares elements. zui has no component
+type, registry or lifecycle.
 
-### 7.2 Ids
+### 10.2 Ids
 
 ```zig
 pub const Id = struct {
     hash: u64,
-    pub fn of(comptime name: []const u8) Id            // hashed at compile time
-    pub fn indexed(comptime name: []const u8, index: usize) Id
-    pub fn dynamic(name: []const u8) Id                 // hashed at run time
-    pub fn child(parent: Id, comptime name: []const u8) Id
+    pub fn of(comptime name: []const u8) Id                              // .of("save")
+    pub fn indexed(comptime name: []const u8, index: usize) Id           // a list row: .indexed("row", i)
+    pub fn dynamic(name: []const u8) Id                                  // a run-time name, e.g. a file path
+    pub fn child(parent: Id, comptime name: []const u8) Id               // inside a repeated component
     pub fn indexedChild(parent: Id, comptime name: []const u8, index: usize) Id
-    pub const none: Id;
+    pub const none: Id;                                                  // zui assigns an internal id
 };
+
+pub fn ids(comptime names: anytype) IdSet(names)
 ```
 
-- **The hash is 64-bit FNV-1a,** which is cheap to evaluate at comptime.
-  The width is 64 bits because 32-bit ids collide in practice: with 8,000
-  ids per frame, the birthday bound gives a roughly 1% chance of a
-  collision every frame at 32 bits, and about 2 × 10⁻¹² at 64 bits.
-- **`of` and `indexed` hash the name at compile time.** At run time, `of`
-  costs a constant and `indexed` costs one mix with the index. Hashing is
-  by *content*, so the same name always gives the same id however the
-  string is stored (the slice memoization trap from the lesson, B8, does
-  not apply to a hash).
-- **`child(parent, name)`** mixes the parent's hash with the name, so that
-  repeated components (`list_item` inside two different lists) do not
-  collide. Element ids are never mixed with their parent implicitly. That
-  would make an id depend on where the element sits in the tree, so that
-  moving an element would silently reset its state.
-- **`indexedChild(parent, name, index)`** is `child` for the items of a
-  list, such as a dropdown's options, which must not collide with the
-  options of another dropdown.
-- **Elements without an id** get an internal one from their parent's id
-  and their sibling index. They cannot be queried and cannot hold state,
-  which is what you want for purely decorative boxes.
+- **64-bit FNV-1a, by content.** 32-bit ids collide in practice: at 8,000
+  ids a frame the birthday bound is about 1% per frame, against about
+  2 × 10⁻¹² at 64 bits.
+- **`of` and `indexed` hash at compile time.** At run time `of` is a
+  constant and `indexed` one mix.
+- **Ids are never mixed with their parent implicitly,** so moving an
+  element in the tree never silently resets its state. Repeated
+  components use `child` and `indexedChild` explicitly.
+- **Elements without an id** get an internal one from their parent and
+  sibling index. They cannot be queried or hold state.
+- **`zui.ids(.{ "save", "export" })`** returns a struct with one `Id`
+  field per name, checked at comptime for duplicates and collisions.
+  Across a frame, duplicates are detected at run time (§17.1).
 
-`zui.ids(.{ "save", "export", "close" })` returns a struct with one `Id`
-field per name. It checks at comptime that no two names collide. This is
-the duplicate check possible within one declaration, given that comptime
-has no global state. Across the whole frame, duplicates are detected at
-run time (§13.1).
-
-### 7.3 Text
+### 10.3 Static styles
 
 ```zig
-pub const TextStyle = struct {
-    font: config.FontId = 0,
-    size: f32 = 16,
-    color: Color = .black,
-    line_height: f32 = 0, // 0 = use the font's own
-    wrap: enum { words, newlines, none } = .words,
-    alignment: enum { start, center, end } = .start,
+pub const Style = struct {
+    layout: Layout = .{},
+    decoration: Decoration = .{},
+};
+
+pub fn Static(comptime T: type) type   // a pointer to a value in read-only memory
+pub fn static(comptime value: anytype) Static(@TypeOf(value))
+
+const styles = struct {
+    const toolbar = zui.static(zui.Style{
+        .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(40) }, .padding = .all(4), .child_gap = 4 },
+        .decoration = .{ .background = theme.panel },
+    });
 };
 ```
 
-Text is UTF-8. zui splits it into words at ASCII spaces and newlines,
-and measures through the platform (§8). It does not shape text: a
-platform that shapes text returns shaped widths from `measureText`.
+A `Static(T)` can only be made at comptime, so the value lives in
+read-only memory for the life of the program. An element with a static
+style stores a reference to it instead of copying it: declaration writes
+one pointer, not a whole config, and it is safe under any number of
+frames in flight. Fields set on the element itself override the style's.
 
-### 7.4 Interaction queries
+Config references in element storage are therefore pointers, either into
+the frame arena or to static memory. The extra width on 64-bit targets is
+paid for by never copying a static config; the box tree's declaration
+budget (§20.2) is measured with it.
 
-Every query answers for the **previous** frame (§5), by id:
+---
+
+## 11. Interaction
+
+### 11.1 Queries
+
+Every query answers for the previous frame, by id:
 
 ```zig
 pub fn hovered(self: *const Self, id: Id) bool
-pub fn pressed(self: *const Self, id: Id) bool           // button held, press began on id
-pub fn clicked(self: *const Self, id: Id) bool           // released on the same id it was pressed on
+pub fn pressed(self: *const Self, id: Id) bool
+pub fn clicked(self: *const Self, id: Id) bool
 pub fn focused(self: *const Self, id: Id) bool
-pub fn requestFocus(self: *Self, id: Id) void            // at the next beginFrame, if id is then focusable and enabled
 pub fn widgetState(self: *const Self, id: Id) WidgetState
-pub fn pointerLocal(self: *const Self, id: Id) ?[2]f32   // pointer relative to the element's last rect
-pub fn rectOf(self: *const Self, id: Id) ?Rect           // last frame's layout result
-pub fn pointer(self: *const Self) ?[2]f32
+pub fn rectOf(self: *const Self, id: Id) ?Rect                  // as laid out last frame
+pub fn pointerLocal(self: *const Self, id: Id) ?[2]f32          // the primary pointer, from the element's top-left
+pub fn requestFocus(self: *Self, id: Id) void
+
+pub fn primaryPointer(self: *const Self) ?Pointer               // the mouse, or the first touch still down
 pub fn keyPressed(self: *const Self, key: Key) bool
-pub fn keysPressed(self: *const Self) []const Key        // in the order they happened
-pub fn modifiers(self: *const Self) Modifiers
-pub fn typedText(self: *const Self) []const u8
-```
-
-Two more queries exist for widgets. They answer for the current frame,
-not the previous one:
-
-```zig
-pub fn measureText(self: *Self, content: []const u8, font: FontId, size: f32) [2]f32 // through the cache
+pub fn chordPressed(self: *const Self, chord: Chord) bool
+pub fn keyEvents(self: *const Self) []const KeyEvent            // this frame's, in order
+pub fn typedText(self: *const Self) []const u8                  // committed text this frame, for the focused element
+pub fn composition(self: *const Self) ?Composition
+pub fn dt(self: *const Self) f32                                // seconds between this record's `now` and the last
+pub fn now(self: *const Self) Instant
 pub fn viewport(self: *const Self) [2]f32
+pub fn measureText(self: *Self, content: []const u8, style: TextStyle) [2]f32   // through the caches
 ```
 
-The exact meanings:
-- **Hover.** The *hot* element is the topmost interactive element under
-  the pointer: highest layer first, then the last painted. `hovered` is
-  true for it and for each interactive ancestor that also contains the
-  pointer, as with CSS `:hover`.
-- **Press and click.** Both go to the hot element only. A click needs the
-  press and the release on the same element, and lasts one frame.
-- **Keyboard activation.** Enter or Space on the focused element also
-  counts as `clicked`, so every clickable element works from the keyboard.
-- **Focus.** Pressing on a focusable element focuses it; pressing anywhere
-  else clears focus. Focus is also cleared when its element is no longer
-  declared.
-- **Where the answers come from.** Every query reads a compact copy of
-  the previous frame's results: element rectangles by id, hit regions,
-  and the tab order. The copy lives in the `Context` rather than in a
-  frame, because with `frames_in_flight = 1` the previous frame's memory
-  is reused before the queries run.
+- **Hover.** The hot element is the topmost interactive element under a
+  hovering pointer: highest layer, then last painted. It and each
+  interactive ancestor containing the pointer are hovered.
+- **Press and click** go to the hot element. A click is a press and a
+  release on the same element by the same pointer, and lasts one frame.
+  `pressed` is true while any pointer whose press began on the element is
+  down.
+- **Keyboard and accessibility activation.** Enter or Space on the
+  focused element, and an `invoke` action naming the element, also count
+  as `clicked`, so everything clickable works without a pointer.
+- **`widgetState`** is `.disabled`, `.pressed`, `.hovered`, `.focused` or
+  `.idle`, checked in that order. Skins index it with `std.EnumArray`, so
+  a new state is a compile error in every skin until it is handled.
+- **The answers come from a compact copy** of the previous frame's
+  rectangles, hit regions and tab order, kept in the `Context` so they
+  survive `frames_in_flight = 1`.
 
-Because the queries run before the element is declared, styles can
-depend on interaction:
+### 11.2 Focus
+
+Pressing a focusable element focuses it; pressing elsewhere clears focus;
+an element that stops being declared loses it. Tab and Shift-Tab move in
+declaration order among focusable, enabled elements, and a `focus_scope`
+keeps focus inside its descendants. `requestFocus` takes effect at the
+next `beginFrame`.
+
+### 11.3 Intents
+
+Queries that merge devices into what the user meant:
+
+| Query | From |
+|---|---|
+| `clicked(id)` | click, tap, Enter/Space, `invoke` action |
+| `manipulation(id) ?Manipulation` | drag, pinch, rotate, wheel, momentum, `scroll` action: translation, scale, rotation and pivot, summed over the frame |
+| `contextRequested(id)` | right click, long press, the menu key |
+| `dismissed(id)` | Escape, back, gamepad B |
+| `adjusted(id) ?i32` | arrows on a focused slider, a dial, `set_value` action |
+| `navigated(id) ?Direction` | arrows, D-pad |
+
+### 11.4 Gestures
+
+*Compiled out without `features.gestures`.*
+
+Elements declare what they accept, as a packed set stored in their hit
+region:
 
 ```zig
-fn toolButton(ui: *Ui, id: zui.Id, label: []const u8, app: *App) void {
-    ui.open(.{
-        .id = id,
-        .interactive = true,
-        .background = theme.button.get(ui.widgetState(id)),
-        .layout = .{ .padding = .symmetric(12, 6) },
-    });
-    defer ui.close();
-    ui.text(label, theme.button_text);
-    if (ui.clicked(id)) app.handle(id);
-}
+.gestures = .{
+    .pan = .vertical,   // the axes it scrolls or pans on: .horizontal, .vertical, .both
+    .zoom = true,       // two-pointer scale and rotation
+    .drag = true,       // moves a drag-and-drop payload (§11.5), not the view
+    .long_press = true,
+    .double_tap = true, // delays this element's single tap
+    .custom = true,     // the application's recognizer claims or declines
+},
 ```
 
-`widgetState(id)` returns `.idle`, `.hovered`, `.pressed`, `.focused` or
-`.disabled`, checked in the order disabled, pressed, hovered, focused.
-Themes index it with an `std.EnumArray`, so adding a state is a compile
-error in every theme until the theme handles it.
+A scroll container accepts pan on its scrolled axes by default.
 
-**Focus** moves with tab and shift-tab, in declaration order, among
-elements marked `.focusable = true`. Elements in a `.focus_scope`, such as
-a modal, keep focus inside the scope.
+- **One rule decides.** Once a pointer passes the touch slop, its axis
+  locks, and the pointer goes to the innermost region that accepts that
+  motion component and still has room to move. That rule is also scroll
+  chaining. With two pointers, scale and rotation go to the innermost
+  region that accepts zoom. A release nothing claimed is a tap.
+- **Delays are opt-in and local.** Only an element with `double_tap`
+  delays its single tap until the double-tap window passes.
+- **Momentum** is state in the state table under the element, so it ends
+  when the element is no longer declared, and it sets the next frame's
+  deadline (§6.6).
+- **Custom recognizers are code in declaration.** `ui.pointerEvents(id)`
+  returns the frame's events of pointers pressed on or claimed by `id`.
+  A recognizer keeps its state in `state(id, T)`. An element with
+  `custom` holds its ancestors off a pointer until it calls
+  `ui.claim(pointer)` or `ui.decline(pointer)`; the decision applies at
+  the next `beginFrame`, and no events are lost meanwhile. A module ships
+  a recognizer as a plain function.
 
-*Planned for 0.7 (ROADMAP.md I4):* the queries answer for every pointer.
-`hovered` is true under any pointer that can hover; `pressed` while any
-pointer whose press began on the element is down; `clicked` when one of
-them is released over it. `pointer()` and `pointerLocal` follow the
-primary pointer: the mouse, or the first touch to go down while no other
-was down. `chordPressed(.{ .key = .s, .modifiers = .{ .control = true } })`
-matches a key with the modifiers held when it was pressed.
+### 11.5 Drag and drop
 
-*Planned for 0.10 (ROADMAP.md I5):* queries that merge devices into
-intents: `manipulation(id)` (translation, scale, rotation and pivot,
-summed over the frame, from a drag, a pinch, the wheel or momentum),
-`contextRequested`, `dismissed`, `adjusted` and `navigated`. Custom
-recognizers read `pointerEvents(id)` and take or give up a pointer with
-`claim` and `decline`.
+```zig
+pub fn dragging(self: *const Self, source: Id) ?Drag
+pub fn dropped(self: *Self, target: Id, comptime Payload: type) ?Payload   // released on `target` this frame
+pub fn startDrag(self: *Self, source: Id, payload: anytype) void
+```
 
-### 7.5 Render commands
+A drag source declares `.gestures.drag`, so §11.4 decides between
+dragging, scrolling and clicking. The payload lives in the state table,
+typed, so dropping one type on a target that expects another yields
+`null`, never a reinterpretation. Files from the OS are a
+`files_dropped` event, not this.
+
+---
+
+## 12. Persistent state
+
+```zig
+pub fn state(self: *Self, id: Id, comptime T: type) *T              // zeroed on first use
+pub fn stateIfPresent(self: *Self, id: Id, comptime T: type) ?*T   // null instead of creating it
+```
+
+- **Keyed by `(id, type)`.** The same id can hold a `ScrollState` and an
+  application's `Expanded` flag in separate slots, and asking for another
+  type never returns the wrong one.
+- **Fixed slots.** `@sizeOf(T) <= 64` and `@alignOf(T) <= 16`, checked at
+  comptime; the error says to store an index to the application's own
+  storage instead.
+- **Eviction.** A slot untouched for `state_frames_until_eviction`
+  frames is freed at the next `beginFrame`, with backward-shift deletion,
+  so the table accumulates no tombstones. An element that disappears loses its state:
+  the immediate-mode equivalent of unmounting.
+- **Full table.** `state` returns zeroed scratch memory and the frame
+  reports the `state_slots` limit (§17.2). Nothing is corrupted.
+
+Scroll offsets, focus, caret positions, gesture and momentum state,
+motion and drag payloads all live here.
+
+---
+
+## 13. Output
+
+### 13.1 Render commands
 
 ```zig
 pub const RenderCommand = struct {
-    bounds: Rect,
-    id: u64,
-    z: i16,
-    payload: union(enum) {
-        rectangle: struct { color: Color, corner_radius: CornerRadius },
-        border: struct { color: Color, widths: Edges, corner_radius: CornerRadius },
-        text: struct { content: []const u8, style: TextStyle, line: u32 },
-        image: config.ImageHandle,
-        clip_begin: Rect,
-        clip_end,
-        custom: config.CustomData,
-    },
+    bounds: Rect,       // layout units, snapped to physical pixels
+    id: u64,            // the declaring element's id hash, for custom renderers and inspectors
+    z: i16,             // paint layer, from `floating.z`
+    payload: Payload,   // generated from Config
 };
 ```
 
-`Frame.commands()` returns `[]const RenderCommand`, in paint order: by z,
-then by declaration order. A text element produces one command per
-wrapped line, so renderers never have to wrap text themselves. All
-slices point into the frame's arena and stay valid until `release`.
+**Base commands** exist for every renderer: `rectangle`, `border`,
+`text` (one per line), `clip_begin`, `clip_end`, plus `image` when
+`ImageHandle` is set and `custom` when `CustomData` is set.
+**Optional commands** exist only when `Config.commands` includes them:
+`gradient`, `shadow`, `backdrop_blur`, `transform_begin`/`transform_end`,
+`material`.
 
-Payload types come from `Config`, so `.custom` and `.image` carry your
-own types, with no casting from `*anyopaque` or `u64`. If `CustomData` is
-`void`, the `custom` declaration function does not exist: calling it is a
-compile error that names the config field to set.
+`Payload` is a union built with `@Union` from exactly those variants, so
+a renderer's exhaustive `switch` covers what it draws and nothing else.
+Adding an optional command to zui never breaks an existing renderer;
+adding a base command always does, at compile time.
 
-### 7.6 Semantics (optional)
+### 13.2 Order and snapping
 
-*Planned for 0.12.*
+`Frame.commands()` is in paint order: by layer, then declaration order.
+A border is emitted after its element's subtree. Bounds snap to whole
+physical pixels using the frame's `scale × zoom`.
 
-An element can carry `.semantics = .{ .role = .button, .label = "Save" }`.
-Frames then also contain `Frame.semantics()`: a flat list of
-`{ id, role, label, bounds, state }` in tree order, for a backend that
-bridges to the platform's accessibility API. When no element sets
-semantics, the list is empty and costs nothing.
+### 13.3 Lowering
+
+Emission replaces what the renderer did not declare, so the renderer
+never sees it:
+
+| Optional | Lowered to |
+|---|---|
+| gradient | a rectangle in its mean color, in OKLab |
+| shadow, glow | nothing |
+| backdrop blur | a rectangle in its fallback tint |
+| transform | the untransformed element; its hit region stays untransformed |
+| material | the element's fallback background |
+| `ExtendedColor` without `.extended_color` | the color clamped to `Color` |
+
+Capabilities are comptime-known, so lowering costs nothing when the
+renderer supports everything, and each lowering is listed in the frame's
+diagnostics for the inspector.
+
+### 13.4 Hit regions and chrome
+
+Hit regions carry the id, rectangle, clip, layer, flags and accepted
+gestures of every interactive or floating-capture element. Chrome
+regions mark title bars and resize edges, so a host with a custom title
+bar still lets the OS move, resize and snap the window.
+
+### 13.5 Semantics
+
+*With `features.semantics`.*
+
+`.semantics = .{ .role = .button, .label = "Save" }` adds an entry to
+`Frame.semantics()`: id, role, label, value, bounds, state and supported
+actions, in tree order. A host bridges it to the platform's accessibility
+API, and actions come back as `action` events naming the id, answered by
+the same queries as other input (§11.3). An element's gestures are the
+actions it reports. Without the feature, none of this is compiled.
 
 ---
 
-## 8. Platform interface
+## 14. Sources: data in, demand out
 
-### 8.1 Required and optional declarations
+### 14.1 Principles
+
+1. **zui starts nothing, cancels nothing,** and never runs application
+   code on another thread. Work belongs to whoever started it, on the
+   `Io` they chose.
+2. **Nothing on the UI thread waits for outside work.** The only wait in
+   a frame is a renderer's backpressure (§15.2).
+3. **Declaration never starts work; it expresses demand.** Reading a
+   source records that it was read. The loader starts work between
+   frames, from that demand. This keeps replay free of I/O and keeps an
+   inline `Io` from blocking declaration.
+4. **Sources are swapped at `beginFrame`,** so declaration never sees
+   them change and every delivery is in the frame record.
+5. **The handoff calls no `Io`.** Publishing is plain atomics over memory
+   reserved up front, so it behaves the same from a thread pool, a fiber,
+   a single-threaded `Io`, an OS thread or a C callback.
+6. **Registration is comptime.** Sources are the fields of one struct
+   type. There is no run-time registry, no stored pointer into
+   application memory between frames, and no source that can be
+   forgotten.
+7. **The core holds the contract; modules hold the data structures.**
+   Anything that implements §14.2 is a source.
+
+### 14.2 The source contract
 
 ```zig
-const MyPlatform = struct {
-    /// Required. Width and height of `text` in `font` at `size`, in layout units.
-    /// `FontId` is `Config.FontId` (u16 by default).
-    pub fn measureText(self: *MyPlatform, text: []const u8, font: FontId, size: f32) [2]f32 { ... }
+const MySource = struct {
+    /// Required. What one swap received, as a value: `?T` for `Latest(T)`.
+    pub const Delivery = ...;
+    /// Required. The read-only handle declaration gets: `.get()`, `.items()`, `.status()`.
+    pub const View = ...;
 
-    /// Optional. Called from any thread when a task completes, so a sleeping
-    /// event loop can wake and render a frame.
-    pub fn wake(self: *MyPlatform) void { ... }
+    /// Required. UI thread, in beginFrame: make what was published readable.
+    pub fn zuiSwap(self: *MySource) void { ... }
+    /// Required. UI thread, in declaration.
+    pub fn zuiView(self: *MySource) View { ... }
+    /// Required. UI thread, after a swap: what it received, for the relay.
+    pub fn zuiDelivery(self: *const MySource, delivery: *Delivery) void { ... }
+    /// Required. UI thread, instead of zuiSwap: make a recorded delivery readable.
+    pub fn zuiInject(self: *MySource, delivery: *const Delivery) void { ... }
 
-    /// Optional. Physical pixels per layout unit. When declared, command
-    /// bounds snap to whole physical pixels; without it, nothing is snapped.
-    pub fn scale(self: *const MyPlatform) f32 { ... }
+    /// Optional. Any thread: published and not yet swapped.
+    pub fn zuiPending(self: *const MySource) bool { ... }
+    /// Optional. UI thread, in endFrame: settle this frame's demand.
+    pub fn zuiEndFrame(self: *MySource, info: zui.EndFrameInfo) void { ... }
+    /// Optional. UI thread, after zuiSwap: publishes refused since the last swap.
+    pub fn zuiRefusedCount(self: *MySource) u32 { ... }
+};
+
+pub const EndFrameInfo = struct {
+    frame_number: u64,
+    frames_in_flight: u8,   // a value read this frame may be in use until this many frames pass
 };
 ```
 
-`measureText` takes the font and size rather than a whole `TextStyle`.
-Those two values are exactly what the measurement cache keys on (§8.3),
-and the narrower signature avoids a type cycle: `TextStyle` depends on
-`Config.FontId`, which belongs to the `Context` the platform is a
-parameter of.
+| Optional | Without it |
+|---|---|
+| `zuiPending` | the source never makes `nextFrame` immediate; its producers' wakes still end a wait |
+| `zuiEndFrame` | nothing is called at `endFrame` |
+| `zuiRefusedCount` | refusals are not reported |
 
-`pub const thread_safe_measure = true;` is the one optional non-function
-declaration: it promises that `measureText` may be called from several
-threads at once, which enables parallel measurement (§10.5). It must be a
-`bool`.
-
-**Measurement must be additive:** measuring `a` and `b` separately must
-sum to measuring `a ++ b` (`width("one") + width(" ") + width("two") ==
-width("one two")`). zui measures each word and each space once, caches
-them, and wraps by adding them up. A platform with letter spacing must
-therefore count the spacing after *every* glyph, including the last.
-raylib's `MeasureTextEx` omits that last spacing. Used directly, it
-under-measures every word and space, and lines overflow their boxes. The
-zui-raylib backend found this, and compensates. Kerning across word
-boundaries is the one effect additive measurement cannot express, and at
-those boundaries it is usually negligible.
-
-The platform is a **comptime** type parameter, not a vtable. Text
-measurement is the hottest call that leaves zui, so it is dispatched
-directly and can be inlined. An application has one platform, so this is
-one instantiation of the engine, not the B1 explosion. `@hasDecl` checks
-for the optional declarations, and their default behavior is documented.
-The check rejects unknown `pub` declarations whose names start with
-`zui`, because a misspelled optional hook would otherwise be silently
-ignored (lesson B5).
-
-### 8.2 Wrapping
-
-Pass 3 wraps each text element against its final width:
-1. **Split into words** once per element, recording each word's byte
-   range and whether a newline follows it.
-2. **Measure each word through the cache** (§8.3): one `measureText` per
-   distinct (word, font, size) per cache lifetime.
-3. **Lay words into lines** greedily, using the width of a space measured
-   once per (font, size).
-
-**Words are never broken.** A text element's minimum width is its longest
-word (§6.2, pass 1), and no pass makes an element narrower than its
-minimum, so a line can only be narrower than a word when the parent is
-too small for that word. The word then gets a line of its own and
-overflows, as in CSS by default. (An earlier draft of this spec broke
-over-wide words at code points; the layout rules made that path
-unreachable, so 0.1 removed it.)
-
-### 8.3 Measurement cache
-
-The cache is an open-addressed table with `measure_cache_entries`
-entries. The key is `(hash64(bytes), font, quantized size)`. The value is
-the size and a last-used generation. On a miss, zui calls the platform.
-When probing fails, it evicts the least recently used of the probe window.
-The cache lives in the `Context` and persists across frames, which is why
-steady-state frames make almost no platform calls.
-
----
-
-## 9. Persistent state
-
-Some state has to survive between frames: scroll offsets, focus, text
-cursor positions, open/closed toggles, task handles. zui keeps it in one
-keyed table, never in the element arrays.
+### 14.3 The core's API
 
 ```zig
-pub fn state(self: *Self, id: Id, comptime T: type) *T     // created zeroed on first use
-pub fn stateIfPresent(self: *Self, id: Id, comptime T: type) ?*T
+pub const SourceField = std.meta.FieldEnum(config.Sources);
+pub const Deliveries = zui.Deliveries(config.Sources);
+
+pub fn source(self: *Self, comptime field: SourceField) SourceView(field)          // ui.source(.quotes)
+pub fn framesSinceRead(self: *const Self, comptime field: SourceField) u64       // frames, not time (§14.5)
 ```
 
-- **The table** is open-addressed with linear probing, with `state_slots`
-  entries, keyed by `(id, @typeName(T) hash)`. The same id can therefore
-  hold, for example, both a `ScrollState` and an application `Expanded`
-  flag. Because the type is part of the key, asking for a different type
-  under the same id gives a different slot, never the wrong one.
-- **Payloads are limited** at comptime to `@sizeOf(T) <= 64` and
-  `@alignOf(T) <= 16`. That keeps slots fixed-size, and the error tells
-  you to store an index to your own storage instead.
-- **Eviction.** Each slot records the frame it was last touched. Slots not
-  touched for `state_ttl_frames` (default 2) are freed at the start of the
-  next frame. An element that disappears loses its state, which is the
-  immediate-mode equivalent of unmounting. Freed slots use backward-shift
-  deletion, so the table never accumulates tombstones.
-- **Gestures** keep their state here too *(planned for 0.10)*: momentum,
-  and the state of custom recognizers, so both end when their element is
-  no longer declared (ROADMAP.md I5).
-- **Full table.** It does not corrupt anything: `state` returns a pointer
-  to zeroed scratch memory, and `endFrame` reports
-  `error.CapacityExceeded` with the `.state_slots` limit in its
-  diagnostics (§13.2).
+- **`source`** sets the field's demand bit and returns its `View`. Every
+  read in a frame sees what the swap made readable. Outside a frame, it
+  panics in safe builds.
+- **`Deliveries`** is a struct built with `@Struct`, one field per
+  source, named as in `Sources`, typed as that source's `Delivery`.
+- **Replay** sets `FrameRecord.deliveries`, and `beginFrame` calls
+  `zuiInject` instead of `zuiSwap` (§6.3). There is one entry point for
+  live and recorded frames.
+
+### 14.4 Waking
+
+```zig
+pub const Waker = struct {
+    context: *anyopaque,                     // the host's own pointer, passed back to `wakeFn`
+    wakeFn: *const fn (*anyopaque) void,
+    pub fn wake(self: Waker) void
+};
+pub const Wake = enum {
+    needed,             // this publish made the source fresh: call `wake`
+    already_pending,    // an earlier publish since the last swap already did
+};
+```
+
+`Waker` is core vocabulary: a host makes one (§16.3), and any source can
+use it without depending on a module. Every publish reports whether it
+moved the source from swapped to fresh; only that publish wakes, so a
+hundred loads finishing between two frames cost one wake. A `Waker` is
+called at most once per source per frame, so its indirect call costs
+nothing that matters, and it keeps producers free of the host's type.
+
+A host's wake must be **sticky**: one that arrives while the loop is not
+waiting ends its next wait. Otherwise a publish between `nextFrame` and
+the wait is lost. The host conformance suite checks it (§19.4).
+
+### 14.5 Demand
+
+- **Per source:** `framesSinceRead(.field)` is 0 when the last completed
+  frame read it, 1 when the one before did, and `maxInt(u64)` when none
+  has. It counts frames, not time, so a sleeping UI never looks as if no
+  one were watching.
+- **Per key:** keyed sources record the keys their view was asked for,
+  and settle them in `zuiEndFrame`.
+- **Abandoning.** Keyed and task sources carry an atomic abandon flag the
+  UI sets when demand lapses and the producer reads at its own pace. It
+  is written only when demand changes, and nothing waits on it.
+- **Flicker is free.** A policy counts unread frames before letting go,
+  so a tab switch or a collapsed section reopened next frame costs
+  nothing.
+
+### 14.6 Status
+
+```zig
+pub fn Status(comptime Result: type) type
+pub fn StatusWithProgress(comptime Result: type, comptime Progress: type) type
+```
+
+| Tag | Payload | When |
+|---|---|---|
+| `.idle` | none | nothing started |
+| `.running` | `Progress` | started, not finished |
+| `.ready` | the payload of `Result` | finished with a value |
+| `.failed` | the error set of `Result`, without `Canceled` | **only when `Result` is an error union** |
+| `.canceled` | none | the producer gave up with `error.Canceled` |
+
+`Status` is plain core data, so a widget can take one without knowing
+where it came from, and an infallible result has no `.failed` prong to
+handle.
+
+### 14.7 Refusals
+
+A full source refuses the newest publish; the item stays the producer's,
+so nothing leaks. After each swap, refusals are added to the frame's
+diagnostics with the field's name:
+``"zui: source `quotes` refused 12 items; raise its capacity"``.
+Drop-oldest is not offered: it would have the producer advance the
+reader's tail, which races with the read.
+
+### 14.8 Limits zui cannot remove
+
+- **A source outlives its producers.** The application joins its work on
+  its own `Io` (an `Io.Group`) before freeing its sources.
+- **One reader.** A source is swapped by one `Context`; safe builds
+  assert it.
+- **Large data travels by handle.** A publish copies its value once, so
+  a catalog or decoded image is published as a handle to immutable data,
+  and handed back for release by the source.
+- **A producer that may run on the UI thread never waits for space.** On
+  a single-threaded `Io`, the swap that would free space runs on the same
+  thread; it handles `error.Full` instead.
+- **Pointers mean nothing in another process.** `zui_wire` requires each
+  `Delivery` to be plain data or to declare `zuiSerialize` and
+  `zuiDeserialize`, checked when it is instantiated (§19.6).
+
+### 14.9 What is checked
+
+| Mistake | Caught |
+|---|---|
+| `Sources` not a struct, or a field that is not a source | compile error naming the field and the missing declaration |
+| a misspelled optional declaration | compile error (§16.1) |
+| reading a source not in `Sources` | impossible: `field` is a `FieldEnum` |
+| a source never swapped | impossible: every field is swapped |
+| a missing `Status` prong, or `.failed` on an infallible result | compile error from the exhaustive switch |
+| two contexts swapping one source; two producers on a single-producer source; a run finished twice | safe-build assertion |
+| a full source; a forgotten release | diagnostics naming the field |
 
 ---
 
-## 10. Concurrency
+## 15. Concurrency
 
-zui is single-threaded where that is fastest (declaration and layout of
-one context) and explicit everywhere threads meet. It integrates with
-Zig 0.16's `std.Io`: `io.async`/`io.concurrent`, `Io.Future`, `Io.Group`
-and `Io.Queue`. Tasks therefore work with any `Io` implementation the
-application chooses: threaded, evented, or single-threaded blocking.
-
-### 10.1 Threading contract
+### 15.1 Threading contract
 
 | Object | Contract |
 |---|---|
-| `Context` | not thread-safe. One thread at a time calls `beginFrame` through `endFrame`, and the thread may change between frames. |
-| `*const Frame` | immutable after `endFrame`, and safe to read from any thread until `release`. |
-| `release` | callable from any thread. It is a single atomic store that returns the arena. |
-| `TaskPool` | `request`/`get` from the UI thread; tasks complete on any thread. |
-| `Platform.wake` | must be callable from any thread. |
+| `Context` | one thread at a time from `beginFrame` through `endFrame`; the thread may change between frames |
+| `*const Frame` | immutable after `endFrame`; readable from any thread until `release` |
+| `release` | any thread; one atomic store |
+| a source | published into from any thread; swapped, read and settled by its one `Context` |
+| `Waker.wake` | any thread; sticky |
+| the text contract | the UI thread, and also zui's measuring tasks when `zui_thread_safe` |
 
-### 10.2 Pipelining with a render thread
+### 15.2 Frames in flight
 
-With `frames_in_flight = 2`, the UI thread can build frame N+1 while a
-render thread still submits frame N:
+With `frames_in_flight = 2`, the UI thread declares frame N+1 while a
+render thread submits frame N. `beginFrame` takes the next released
+arena, or waits on an `Io.Event` that `release` sets: the only place zui
+blocks, and the backpressure that keeps the UI at most
+`frames_in_flight` frames ahead. The event is reset before a second check
+for a free arena, which closes the race with a `release` between the
+check and the wait. Each arena owns everything its frame references, so
+the threads share no mutable memory.
 
-```
-UI thread:      begin(N) declare endFrame(N) ─┐  begin(N+1) declare endFrame(N+1) ...
-                                              │ hand over *const Frame
-render thread:                                └─▶ submit(N) ... release(N)
-```
+### 15.3 Parallel measurement
 
-`beginFrame` takes the next arena whose frame has been released. If none
-has been released, it waits on an `Io.Event` that `release` sets. This is
-the only point where zui blocks, and it is also backpressure: the UI cannot
-run ahead of the renderer by more than `frames_in_flight` frames. The
-event is reset before a second check for a free frame, which closes the
-race with a `release` that lands between the check and the wait.
+With `zui_thread_safe` text, text is measured inline until a frame has
+made `parallel_measure_threshold` calls. The frame is then evidently cold
+(the first frame, a font or zoom change), so zui collects the rest of
+the frame's distinct misses, measures them in batches across an
+`Io.Group`, stores them in the cache, and continues inline on hits. Warm
+frames never pay for the check. A cancelation of the frame's task keeps
+the measurements made and passes the cancelation on.
 
-Each arena owns everything its frame references (element arrays, copied
-text, commands), so the two threads share no mutable memory.
+### 15.4 Many contexts
 
-### 10.3 Tasks: async work owned by the UI
-
-A *task* is background work whose lifetime follows an element. A typical
-example is a thumbnail that loads while its grid cell is declared, and is
-canceled when the cell scrolls away and stops being declared.
-
-```zig
-pub fn TaskPool(comptime Result: type, comptime capacity: u16) type
-
-var thumbnails: zui.TaskPool(Io.Cancelable!Thumbnail, 96) = .{ .discard = releaseThumbnail };
-
-fn thumbnailCell(ui: *Ui, io: Io, path: []const u8, index: usize) void {
-    const id: zui.Id = .indexed("thumbnail", index);
-    ui.open(.{ .id = id, .layout = .{ .sizing = .{ .width = .fixed(96), .height = .fixed(96) } } });
-    defer ui.close();
-
-    switch (thumbnails.request(ui, id, loadThumbnail, .{ io, path }, .{ .key = hashOf(path) })) {
-        .pending => ui.box(.{ .background = theme.placeholder, .layout = .{ .sizing = .grow_both } }),
-        .ready => |thumbnail| drawThumbnail(ui, thumbnail),
-        .failed => |err| ui.text(@errorName(err), theme.error_text),
-    }
-}
-```
-
-The pool is **typed** by its result, so there is no type erasure and no
-casting at the call site. Its status union is generated from `Result`:
-- `.pending`;
-- `.ready`, with the value;
-- `.failed`, with the error, only when `Result` is an error union, so an
-  infallible pool needs no `.failed` prong.
-
-The capacity is fixed, so a pool cannot grow without bound. A request
-that finds every slot busy stays `.pending` and counts in
-`pool.stats.rejected`. Tasks run on the `Io` given to `Context.init`.
-
-How `request(ui, id, function, args, .{ .key = ... })` works:
-1. **First request for an id.** Claim a slot, then start the work with
-   `io.concurrent`, falling back to `io.async` when the `Io` reports
-   `ConcurrencyUnavailable`. A wrapper runs `function`, stores the result
-   in the slot, marks the slot finished with the generation it started
-   with, and wakes the platform. The first request returns `.pending`,
-   even when, without concurrency, `io.async` ran the task inline.
-2. **Later requests for the same id and key** return the slot's state
-   without blocking or doing work.
-3. **Completions are applied at `beginFrame`** (§5, principle 8), never
-   during declaration, so every request in a frame sees the same state.
-   A task that finishes mid-frame is `.ready` from the next frame. In 0.9
-   `TaskPool` becomes a feed that delivers once (ROADMAP.md F1).
-   - Each slot carries a **generation**, advanced whenever it is claimed,
-     and a finished task records the generation it was started with, so
-     a canceled task can never complete the next task in the same slot.
-   - A pool-wide flag, set by the wrapper, lets `beginFrame` skip pools
-     in which nothing finished.
-   - A task that finishes in the frame its id stops being requested is
-     canceled at `endFrame` like any other: it counts in
-     `stats.canceled`, and its result goes to `discard`.
-4. **Unmounting.** Each pool registers itself with the Context on its
-   first request. In `endFrame`, every registered pool cancels the tasks
-   whose id was not requested that frame. This works even for a pool that
-   made no request at all that frame.
-5. **A different key for the same id** cancels the old task and starts a
-   new one. This is how a cell that is reused for different data gets
-   fresh work.
-
-**Cancelation waits.** `Io.Future.cancel` is "await plus a cancel
-request": it returns only once the task has returned. Tasks must
-therefore reach cancelation points, meaning any `Io` call or
-`io.checkCancel()` in a long computation. Otherwise unmounting a task
-waits for it to finish, on the UI thread. (`Io.Future` has no
-non-blocking poll either, which is why a finished task marks its slot.)
-
-**Owned results.** When a slot is freed, the pool passes its result to
-the optional `discard` function on the UI thread. That happens whether
-the result was handed out as `.ready` or was produced by a task that was
-then canceled. `discard` is where results that own resources, such as
-GPU textures, are released. A task canceled before it ever ran produced
-no result, and is not passed to `discard`.
-
-**Lifetime rules.** A pool and its Context reference each other by
-pointer, so neither may move after the pool's first request.
-`pool.deinit(ui)` cancels the pool's tasks and unregisters it.
-`Context.deinit` cancels the tasks of every pool still registered.
-
-**Redraws on demand.** `ui.needsFrame()` is true when the frame just
-drawn may be out of date:
-- the last input changed something: hover, a press, focus, a click, a
-  key, typed text, or a scroll that actually moved;
-- a task completed since the last `beginFrame`;
-- the application called `ui.requestFrame()`, for example during an
-  animation.
-
-When it is false, an event loop can sleep until the next input or
-`Platform.wake`. `wake` is called from the task's thread, so it must be
-thread-safe; zui-raylib implements it with `glfwPostEmptyEvent`.
-Measured with zui-raylib's demo in a hidden window: **0.0 ms of CPU over
-10 idle seconds** in both of its views. The same build with event
-waiting disabled used 1,515.6 ms (about 15% of a core) over those 10
-seconds.
-
-### 10.4 Data from other threads
-
-Application-level background state (network messages, file watchers) is
-the application's to own. zui documents one pattern and adds no machinery
-for it: give each producer an `Io.Queue(Message)`, and drain it at the
-start of the frame, before declaration, with `get(buffer, 0)`. Mutations
-then happen on the UI thread at a frame boundary, and declaration never
-observes half-applied updates.
-
-### 10.5 Parallel layout
-
-The sizing passes and text wrapping are sequential within a context,
-because each depends on results from the pass before. Parallelism enters
-at three levels, in increasing order of complexity:
-1. **Contexts in parallel (v1).** Contexts share nothing, so separate
-   windows, a main view and an offscreen thumbnail render can run their
-   frames concurrently, each as one task in an `Io.Group`. This needs no
-   code in zui beyond the contract in §10.1.
-2. **Parallel measurement (0.5).** A platform whose `measureText` is
-   thread-safe declares `pub const thread_safe_measure = true;`. Text is
-   then measured inline until the frame has made
-   `Config.parallel_measure_threshold` platform calls (default 256). At that
-   point the frame is evidently cold (the first frame, or a font or size
-   change), so zui collects the distinct missing (run, font, size) keys of
-   the rest of the frame's text, measures them 64 per task across an
-   `Io.Group`, stores them in the cache, and carries on inline, now
-   hitting the cache.
-   - **Warm frames pay nothing.** The draft collected misses before
-     measuring every frame, and that scan made the warm 1,000-text
-     benchmark 40% slower. Switching after the threshold costs nothing
-     until there are misses.
-   - **Cancelation is respected.** If the frame's task is canceled during
-     the batch, the measurements already made are kept, the rest are left
-     to the inline path, and the cancelation is passed on.
-   - **Measured:** 1,000 cold texts whose measurements cost about 1 µs each,
-     as with a shaping engine, take 4.6 ms on one thread and 1.1 ms in
-     parallel on 10 cores (4.3×).
-   - **The cache must hold the frame's misses,** or measurements evicted
-     before layout reads them are measured again inline.
-3. **Layout islands (later).** An element with `fixed` sizing on both
-   axes and no floating descendants attached outside it is an *island*:
-   nothing inside it can change anything outside it. Passes 1–6 can run
-   for islands in parallel once their parents' passes reach them. This
-   only pays above roughly 10k elements (an estimate), so it is opt-in per
-   element (`.layout_island = true`) and must be justified by the
-   benchmarks before it ships.
+Contexts share nothing, so separate windows, an offscreen panel or a
+thumbnail render run their frames concurrently with no code in zui. Each
+context has its own sources; data shared between windows is published
+into each.
 
 ---
 
-## 11. Comptime features
+## 16. Contracts
 
-Each feature is listed with what it removes at run time and what it
-costs, so the "comptime only where it changes the generated code" rule
-can be audited.
+### 16.1 How every contract is checked
 
-| Feature | Mechanism | Runtime effect | Cost |
-|---|---|---|---|
-| Compile-time ids | `Id.of(comptime name)` hashes with FNV-1a during compilation | an id is a constant | none |
-| Collision-checked id sets | `zui.ids(.{...})` checks for duplicates and collisions at comptime | none | compile time, linear in names |
-| Exact memory | `Config` limits → `@Int` index types, comptime `required_bytes` | one allocation, dense indices | recompile to change the limits |
-| Typed payloads | `CustomData`, `ImageHandle` in `Config` | no casts, no `*anyopaque` | none |
-| Direct platform dispatch | `Platform` is a comptime type | `measureText` can be inlined | one engine instantiation per platform |
-| Exhaustive themes | `std.EnumArray(WidgetState, Style)` | none | none; new states are compile errors |
-| Compiled-out debugging | `-Dzui-debug` gates code that is then never analyzed | zero bytes when off | none |
-| Typed tasks | `TaskPool(Result, capacity)` | no type erasure | one pool type per result type |
-| Typed event thunks (widgets) | `onClick(comptime handler, context: *T)` generates a trampoline | `*T` with no cast | one small function per handler |
+A type implements a contract by declaring `zui`-prefixed members.
+Everything else on the type is its own business, so a contract never
+collides with its API, and one type may implement several (a renderer is
+usually also the text contract).
 
-What zui deliberately does **not** do at comptime:
-- **It does not specialize layout per element or per tree.** That is B1
-  and B2 at UI scale.
-- **It does not take `anytype` configs.** Config parameters are concrete
-  types, so a mistake is reported at the call site in terms of zui's
-  types (B4).
-- **It does not pre-bake whole trees, in v1.** §16 describes static
-  subtrees as a measured, opt-in later feature.
+**The exceptions are types the application names directly,** which keep
+their plain names because they are the implementer's own API as much as
+the contract's:
 
----
-
-## 12. Styling and themes
-
-Styles are plain values. A theme is the application's own struct:
-
-```zig
-const Theme = struct {
-    panel: zui.Color,
-    button: std.EnumArray(zui.WidgetState, zui.Color),
-    button_text: zui.TextStyle,
-    spacing: f32,
-};
-```
-
-zui provides `Color` (RGBA8 with `.rgb(0x3366ff)` and `.mix`), `Edges`,
-`CornerRadius`, and decl-literal helpers (`.all(n)`, `.symmetric(h, v)`).
-*Planned for 0.11:* `Config.Color` may be `zui.ExtendedColor` (4×f16,
-linear scRGB) for HDR and wide gamut, clamped for renderers without
-support (ROADMAP.md G6).
-It provides no theme registry, no inheritance and no cascade. Swapping a
-theme means passing a different struct, so the cost is exactly the cost
-of reading a field.
-
----
-
-## 13. Errors and diagnostics
-
-Declaration functions never return errors. A UI written as nested calls
-with `try` on every line is unreadable, and most failures are better
-reported once per frame, with full context.
-
-### 13.1 Programmer errors (detected, then asserted or reported)
-
-| Condition | Detection | In safe builds | In release builds |
-|---|---|---|---|
-| unbalanced `open`/`close` | depth counter at `endFrame` | panic naming the unclosed element's id, and its name when debug is on | the elements are closed implicitly, and `endFrame` reports `error.UnbalancedTree` |
-| duplicate id within a frame | insertion into the frame's id → element table | panic naming both declarations | the second element becomes non-interactive |
-| `close` without `open` | the depth counter would go below zero | panic | ignored |
-| scroll container without an id | checked at `open` | panic | the element clips but does not scroll |
-
-With `-Dzui-debug`, `Id.of` keeps its name, so panics name the element
-(`zui: duplicate id "save" (0x…) in one frame`) instead of printing only
-a hex hash.
-Without it, the name is not stored at all.
-
-### 13.2 Capacity limits (defined behavior, reported)
-
-Elements, text bytes, depth, render commands (including wrapped lines),
-state slots, task slots, the measurement cache, and, from 0.7, input
-events per frame all fail the same way:
-1. The part that fits is kept. Overflowing elements are dropped from the
-   frame, and their subtrees are skipped cheaply: the depth is still
-   tracked, so `close` calls pair up correctly.
-2. A sticky diagnostic records which limit was hit, by how much, and the
-   id at which it first happened.
-3. `endFrame` returns `error.CapacityExceeded`. The frame is still
-   available through `ui.lastFrame()`, and `ui.diagnostics()` says which
-   `Config` field to raise and the peak value it needed.
-
-The application decides what to do: log the problem, render the partial
-frame, or (in development) treat it as fatal.
-
----
-
-## 14. Testing and verification
-
-### 14.1 zui's own tests
-
-- **Layout invariants**, checked on every test frame by
-  `src/tests/invariants.zig` (it reads the frame's internal arrays, so it
-  is not part of `zui_testing`):
-  - each child lies within its parent's clip box, unless it is floating;
-  - the sizes of `grow` siblings are proportional to their weights,
-    except where a min/max clamp applies;
-  - no size is negative or NaN;
-  - commands are in nondecreasing z order.
-- **Randomized trees.** A seeded generator builds random trees of 1–5,000
-  elements with random sizing rules, and runs the invariant checks on each
-  (the same approach as the model-checked table in the asserts lesson).
-- **Golden layouts.** About 30 hand-written trees with exact expected
-  rectangles, covering every sizing rule, alignment, padding, gap, wrap
-  mode and floating anchor.
-- **Allocation discipline.** Every test runs with a failing allocator after
-  `init`, which proves that frames do not allocate.
-- **Compile-time guarantees** through `expect_errors` in `build.zig`, as
-  in the comptime lesson: an invalid `Config`, a platform missing
-  `measureText`, an `Id` collision in `zui.ids`, calling `custom` with
-  `CustomData = void`, an oversized state type, a slider over a `bool`,
-  and five misuses of `zui_reflect` (§15.2). Each is pinned to its exact
-  message. Remember that `contains` matches line *endings*, so a message
-  must end with stable text, not a generated type name.
-
-### 14.2 Tools for applications
-
-`zui_testing` holds what an application needs to test its own UI:
-
-- **`FixedMetricsPlatform(FontId)`** has deterministic text metrics:
-  each byte is `size / 2` wide and `size` tall (8×16 at the default size),
-  so tests don't depend on fonts.
-- **`Driver(Ui)`** runs frames with simulated input, by element id:
-
-  ```zig
-  var driver: zui_testing.Driver(Ui) = .{ .ui = &ui };
-  _ = try driver.frame(&app, App.declare, .{});           // declares the ids
-  _ = try driver.click(&app, App.declare, .of("save"));   // press frame, release frame
-  _ = try driver.drag(&app, App.declare, .of("volume"), .{ 0.5, 0.5 }, .{ 0.9, 0.5 });
-  _ = try driver.typeText(&app, App.declare, "Ada");
-  _ = try driver.pressKeys(&app, App.declare, &.{ .home, .delete });
-  ```
-
-  Points are fractions of the element's rectangle in the previous frame,
-  so tests never hard-code coordinates. Each helper runs complete frames
-  and releases them, and calls `declare(app, ui)` once per frame. (The
-  draft's `ui.simulate(.{ .click = id })` returned an `Input` instead. A
-  click takes two frames, so a helper that runs them is simpler to use
-  than one that returns their inputs.) *Planned for 0.7:* the driver
-  emits input events, so a click fits in one frame, and it gains `tap`,
-  `pinch` and drags with several pointers (ROADMAP.md I4).
-- **`snapshot(writer, commands, names)`** writes one line per command,
-  for golden-file tests:
-
-  ```text
-  rectangle id=panel x=0 y=0 w=84 h=36 color=#202020
-  rectangle id=increment x=8 y=8 w=40 h=20 color=#3366ff80 radius=4
-  text x=52 y=8 w=24 h=16 size=16 color=#ffffff "Add"
-  ```
-
-  Only ids that are fields of `names` (a `zui.ids(...)` set) are written,
-  so snapshots don't change when an unrelated internal id does, and they
-  read the same in debug and release builds. Values at their defaults
-  (z 0, no corner radius, opaque alpha, font 0) are left out.
-  `expectSnapshot` compares against an expected string.
-- **`checkCommands(commands)`** checks what any frame must satisfy:
-  finite, non-negative bounds; z that never decreases; and balanced clip
-  commands. `findViolation` returns the first violation instead of
-  printing it.
-
-### 14.3 Benchmarks
-
-`zig build bench` always builds in ReleaseFast and covers:
-- the §6.5 targets;
-- a deep tree (depth 64) and a wide tree (one parent with 4,000 children);
-- the zui-raylib demo's Documents view, declared by hand: about 100 small
-  elements, most with an id, a decoration and a label;
-- 1,000 texts with the cache cold (a new font size every frame);
-- the same cold text measured by a platform that costs about 1 µs per
-  call, on one thread and in parallel (§10.5);
-- frames per second with a render thread against one thread, using a
-  renderer stand-in that takes 200 µs a frame (§10.2): 1.8× as many frames
-  on the reference machine.
-- startup, 50 samples each:
-  - `init` at the default `Config`, each sample into memory the process
-    has never touched, so its page faults are counted;
-  - `initBuffer` into one static buffer, which only the first sample
-    touches for the first time: zui's own preparation of the memory;
-  - the first frame of a new `Context`, from the start of `beginFrame`
-    to the end of `endFrame`, for the Documents view and for 1,000 texts:
-    every measurement misses the cache, and the frame's memory is touched
-    for the first time.
-
-  On the reference machine at `a6d8e34`, the fastest samples were 74.6 µs,
-  10.0 µs, 30.3 µs and 230.0 µs.
-
-Each steady-frame scenario runs in a new `Context` whose allocator counts
-every call after `init`; any allocation fails the run, as it does in a
-first frame. It prints the fastest and median declaration (from the start
-of `beginFrame` to the start of `endFrame`), the fastest and median
-`endFrame`, the median whole frame, nanoseconds per element of `endFrame`
-and platform calls per frame, then the fastest and median of each startup
-scenario and `required_bytes` at the default `Config`.
-
-| Flag | Effect |
-|---|---|
-| `--check-targets` | fail if a §6.5 target is missed |
-| `--json <path>` | save each single-threaded scenario's fastest declaration and fastest `endFrame`, and each startup scenario's fastest sample |
-| `--compare <path>` | fail if any of them is more than 10% slower than in that file |
-
-**How CI uses it.** The benchmark job runs it without flags: it fails on
-an allocation and reports the times, but compares nothing. Timing two
-commits on one runner was tried and dropped. GitHub's runners range from
-62.6 to 125.3 µs for the box tree, and one runner timed a commit 45%
-slower than the commit before in three alternating attempts, while two
-other runners and a bisect on the same CPU model found no difference. A
-comparison is meaningful on one machine with nothing else running, through
-`zig build bench-compare` below, or `--json` at the old commit and then
-`--compare` at the new one. Enforcing the targets is a step for a
-reference machine: `zig build bench -- --check-targets`.
-
-**Comparing two commits.** `zig build bench-compare -- <base> [<head>]`
-checks out each commit in a git worktree under `.zig-cache`, with the
-head defaulting to the working tree, uncommitted changes included. It
-runs each commit's own `zig build bench -- --json` once to build and warm
-up, then alternately for `--rounds` rounds (10 by default), swapping
-which goes first each round. For each time `--json` saves, it prints:
-- the median of the rounds' head/base ratios;
-- the middle half of those ratios, as the spread;
-- *faster* or *slower* only when that whole middle half is more than 2%
-  from no change.
-
-On the reference machine, a commit compared with itself gives middle
-halves that all contain zero and stay within 2%, except in scenarios
-under 2 µs, where Windows' timer steps of 100 ns are 5% to 9%. The
-`depth: u16` stall fixed in `946405e`, which left the instruction count
-unchanged, comes out at −26.4% (−27.5% to −26.1%) for the box tree's
-declaration. Ten rounds take about 45 seconds there, most of it spent
-building the worktrees.
-
----
-
-## 15. Extension points
-
-| To... | Use |
-|---|---|
-| draw something zui does not know | `custom(data, config)`, with your `CustomData` |
-| size a custom leaf from its content | `.layout.sizing = .fixed(...)` from your own measurement. *Planned for 0.10:* optional `measureCustom(data) [2]f32` and `imageSize(handle) [2]f32` on the renderer (ARCHITECTURE.md §3.2) |
-| add widgets | functions over the public API; `zui_widgets` (§15.1) is the reference set |
-| bridge accessibility | `Frame.semantics()` (§7.6, planned for 0.12) |
-| animate | `state(id, T)` for per-element animation state, plus `Input.dt_seconds`. *Planned for 0.14:* `zui_motion` |
-| render | iterate `Frame.commands()`; backends are ordinary packages |
-| debug visually | *Planned for 0.12:* `zui_debug`, an inspector panel showing the element tree and the hovered element's id, rect and config, built on a read-only `Frame.inspect` |
-
-### 15.1 Widgets
-
-`zui_widgets.Widgets(Ui)` is a value that holds a `Theme`. Its methods
-declare widgets into a `*Ui`:
-
-```zig
-const widgets: zui_widgets.Widgets(Ui) = .{ .theme = .{ .accent = .rgb(0x2fbf71) } };
-
-if (widgets.button(ui, .of("save"), "Save", .{})) save();
-_ = widgets.checkbox(ui, .of("autosave"), "Autosave", &settings.autosave, .{});
-_ = widgets.slider(ui, .of("volume"), &settings.volume, .{ .min = 0, .max = 100, .step = 5 });
-if (widgets.textField(ui, .of("name"), &settings.name, .{ .placeholder = "Name" }).submitted) rename();
-_ = widgets.dropdownEnum(ui, .of("quality"), &settings.quality, .{});
-```
-
-| Widget | Edits | Returns | Keyboard |
-|---|---|---|---|
-| `button` | nothing | clicked | Enter, Space |
-| `checkbox` | `*bool` | toggled | Enter, Space |
-| `slider` | `*` any integer or float | changed | arrows, Page Up/Down, Home, End |
-| `textField` | `*EditableText` | `.{ changed, submitted }` | characters, Left, Right, Home, End, Backspace, Delete, Enter |
-| `dropdown` / `dropdownEnum` | `*usize` / `*` any enum | changed | Up/Down while closed; Tab within the open list; Escape |
-| `disclosure` | `*bool` (expanded) | toggled | Enter, Space |
-| `label`, `mutedLabel`, `labeledRow` | nothing | nothing | none |
-
-How they are built, all from §7:
-- **Every control is focusable** and draws the theme's focus ring when
-  focused. Colors come from `widgetState`, indexed by an `EnumArray`.
-- **The slider places its thumb with `grow` weights,** not with the
-  previous frame's width. The filled track has weight `fraction`, the
-  rest `1 - fraction`, and the fixed-width thumb sits between them, so the
-  thumb is right from the very first frame. Dragging maps `pointerLocal`
-  through the previous frame's width, which is what the pointer was over.
-- **The text field** keeps its caret position in `state(id, ...)`. It
-  splits the text at the caret into two text elements around a caret box,
-  and scrolls an inner horizontal scroll container to keep the caret in
-  view. A click places the caret at the nearest character boundary,
-  measured with `ui.measureText`. Keys are handled in order
-  (`keysPressed`), and the caret always moves by whole UTF-8 characters.
-  `EditableText` wraps a caller-owned buffer; input that does not fit is
-  cut at a character boundary. Not in 0.4: selection, the clipboard, word
-  movement, IME composition and multiple lines.
-- **The dropdown's list** is a floating element attached to the button,
-  in layer `theme.popup_z + 1`. Below it, in layer `theme.popup_z`, an
-  invisible interactive element covers the viewport and closes the list
-  when clicked. The list is a focus scope, so Tab stays inside it while it
-  is open, and choosing an option returns focus to the button.
-
-### 15.2 Reflection
-
-`zui_reflect.inspector(widgets, ui, id, &value)` declares an editor for
-each field of a struct with the widgets above, and returns whether any
-field changed. (The draft's signature had no `widgets` argument. The
-inspector needs a theme, and taking the application's own `widgets` value
-keeps the two consistent.)
-
-| Field type | Editor |
-|---|---|
-| `bool` | checkbox |
-| integer or float, with `min` and `max` | slider and the value |
-| integer or float, otherwise | − and + buttons that move by `step` (default 1, or 0.1 for floats), saturating at the type's limits and at `min` or `max` if either is given |
-| exhaustive enum | dropdown |
-| `zui_widgets.EditableText` | text field |
-| `[]const u8` | read-only text |
-| struct | collapsible section, which reads that struct's own options |
-
-Labels default to the field name with underscores as spaces and the first
-letter capitalized: `max_fps` becomes "Max fps". Options come from a
-**typed** declaration:
-
-```zig
-const Settings = struct {
-    max_fps: u16 = 144,
-    frames_rendered: u64 = 0,
-
-    pub const zui_inspector: zui_reflect.Options(@This()) = .{ .fields = .{
-        .max_fps = .{ .label = "Frame cap", .min = 30, .max = 240, .step = 10 },
-        .frames_rendered = .{ .hidden = true },
-    } };
-};
-```
-
-`Options(T)` holds a struct built with `@Struct`, with one `FieldOptions`
-field per field of `T`, so the compiler itself rejects a misspelled field
-name: `no field named 'volum' in struct
-'zui_reflect.FieldOptionsOf(Settings)'`. zui_reflect adds its own errors
-for:
-- a `zui_inspector` declared without the type, which would otherwise
-  accept any misspelling;
-- `min`, `max` or `step` on a field that is not a number;
-- `min` above `max`, or a `step` that is not above 0;
-- a visible field of a type it cannot edit, quoting the
-  `.hidden = true` line that fixes it.
-
-It lives outside the core because most applications will not need it.
-
----
-
-## 16. Roadmap
-
-| Version | Scope | Exit criteria |
+| Contract | Unprefixed declarations | Why |
 |---|---|---|
-| 0.1 | Context, memory, element declaration, sizing passes, text wrapping with the cache, render commands, golden and invariant tests | all §14.1 tests pass; zero allocations per frame |
-| 0.2 | input, hover/press/click/focus, clipping, scrolling, floating elements, the state table | the interaction tests pass; a reference raylib backend renders the example application |
-| 0.3 | TaskPool, the completion queue, `needsFrame`, frames in flight with a render thread | a thumbnail-grid example cancels off-screen loads, and an idle application uses 0% CPU |
-| 0.4 | `zui_widgets` (button, checkbox, slider, text field), `zui_reflect`, `zui_testing` snapshots | the widget set is built on the public API only (enforced by the module boundary, §3) |
-| 0.5 | parallel measurement; benchmarks that meet the §6.5 targets | targets met on a 2020 desktop core; CI reports them (§14.3) |
-| 0.6 | measure and audit: CI counts instructions under Callgrind, for a build with a fixed `-Dcpu` and a fixed number of frames per scenario, and fails on more than 2% growth over the parent commit; `zig build bench-compare -- <ref>` alternates two commits locally and reports the median ratio with its spread; the async audit; task completions applied at `beginFrame` (principle 8); the input event log specified and prototyped behind today's API; startup benchmarks; `-Dzui-trace` | the instruction counts repeat exactly between runners; the local comparison catches the `depth: u16` stall fixed in `946405e`; an off trace build's instruction counts are unchanged; input over the event log costs no more than today |
-| 0.7 | the contracts (the breaking release): renderer and host contracts, `Surface`, host events, conformance suites, `zui_app`; letter spacing through a `MeasureKey`; display scale and zoom; input as an ordered event log with many pointers; the raylib adapter host | every backend passes the conformance suites and runs the demo through `zui_app`; a click inside one frame is kept |
-| 0.8 | the first native host, Windows, with the system material behind the window | the demo runs on it unchanged, passes the host suite and idles at 0% CPU |
-| 0.9 | feeds (with `TaskPool` as a feed that delivers once), the relay tap, `zui_wire`, replay, rendering in another process, file watching | task tests pass unchanged; a recorded session replays to identical commands |
-| 0.10 | text and layout: the single-line wrap fast path, a whole-string metrics cache, `.growEqual`, aspect ratio and natural sizes, dividers, decorated images, floating options (§6.4), right-to-left layout, flex wrap, drag and drop, the next-frame deadline, gestures with arbitration and momentum | golden, snapshot and interaction tests for each; warm text faster by 0.6's measure; no change to the other §6.5 scenarios beyond noise |
-| 0.11 | effects: gradients, shadows, glow, backdrop blur, transforms, materials, each lowered for renderers without it; HDR and wide-gamut color | lowering tested for each; one renderer draws each |
-| 0.12 | `zui_debug` over a read-only `Frame.inspect`; the semantics list (§7.6); `-Dzui-safety` (§3); a demo running in a browser | the inspector driven by `zui_testing` over the Documents view; the Windows host bridges semantics to UI Automation |
-| 0.13 | macOS, Linux and web hosts; notifications, dialogs, URLs and menus; native and custom window decorations; more than one window | each host passes the host suite and runs the demo unchanged |
-| 0.14 | `zui_motion` (tweens over `state` and `dt_seconds`), opt-in exit animations | tweens tested frame by frame; an idle application still sleeps; a full ghost buffer is reported like other limits (§13.2) |
+| Source | `Delivery`, `View` | the application writes `Source.View`; the wire format names `Delivery` |
+| Renderer | `ImageHandle`, `MaterialHandle`, `CustomData`, `FontId` | they are the renderer's real types, which `contextConfig` copies into `Config` |
 
-| 0.15 | text field: selection, word movement, clipboard, multiple lines, IME | `zui_testing` tests for each; IME on Windows |
-| later | docking, a grid layout, layout islands, static subtrees, SIMD | each one ships only with a measured win or a demonstrated need |
+These are the only plain names a contract reads. They are checked like
+the prefixed ones: a missing required one is a compile error, and an
+optional one that is absent takes its documented default (`void` for the
+payload types, `u16` for `FontId`).
 
-[ROADMAP.md](ROADMAP.md) breaks each release into items, with what
-grounds each one and how it is judged.
+- **A missing required declaration** is a compile error naming the type,
+  the contract and the declaration:
+  ``"zui: SokolRenderer does not implement zui.Renderer: missing `zuiSubmit`"``.
+- **A wrong signature** is reported by name, with the expected type.
+- **An unknown `zui`-prefixed declaration** (one that belongs to no zui
+  contract) is a compile error, so a misspelled optional one is never
+  silently ignored: ``"zui: AppSources.quotes declares unknown `zuiPendng`"``.
+- **Every optional declaration has a documented default.**
+- Each message is pinned by a compile-error test.
 
-**Static subtrees** (later, opt-in) are a tree described as a comptime
-value, whose layout is computed during the build and stored as a constant
-command array, for fixed toolbars and HUD frames. They are deferred
-because the lesson measured the costs (about 2 µs per comptime iteration;
-5× code size for unrolling), and the win only exists for subtrees with
-no text measurement, or with text in fonts whose metrics are embedded with
-`@embedFile`.
+### 16.2 Renderer
+
+```zig
+const SokolRenderer = struct {
+    pub const zui_commands: zui.CommandSet = .initMany(&.{ .gradient, .shadow });              // optional commands it draws
+    pub const zui_surfaces: zui.SurfaceKinds = .initMany(&.{ .win32, .cocoa, .wayland, .x11 }); // native windows it can draw into
+    pub const zui_extended_color = false;                                                      // accepts HDR colors
+    pub const ImageHandle = Texture;
+    pub const MaterialHandle = void;
+    pub const FontId = u16;
+
+    pub fn zuiSubmit(self: *SokolRenderer, surface: zui.Surface, frame: *const Ui.Frame) !void { ... }
+    pub fn zuiMeasure(self: *SokolRenderer, run: []const u8, key: zui.MeasureKey) [2]f32 { ... }
+};
+```
+
+`zui_app.contextConfig(Renderer, .{ ... })` builds a `Config` from a
+renderer's declarations (commands, payload types, text), so the
+renderer's vocabulary and the core's never disagree.
+
+### 16.3 Host
+
+```zig
+const Win32Host = struct {
+    pub const zui_capabilities: zui.HostCapabilities = .{ .windows = .many, .system_material = true }; // material: Mica, vibrancy
+    pub const zui_surfaces: zui.SurfaceKinds = .initOne(.win32);
+
+    pub fn zuiPoll(self: *Win32Host, window: zui.WindowId, record: *zui.RecordBuilder) bool { ... } // false: the window closed
+    pub fn zuiWaker(self: *Win32Host) zui.Waker { ... }
+    pub fn zuiWait(self: *Win32Host, next: zui.NextFrame) void { ... }
+    pub fn zuiSurface(self: *Win32Host, window: zui.WindowId) zui.Surface { ... }
+    pub fn zuiApply(self: *Win32Host, window: zui.WindowId, requests: zui.HostRequests) void { ... } // cursor, IME window
+
+    pub const zuiClipboard = struct { ... };       // optional services
+    pub const zuiNotifications = struct { ... };
+    pub const zuiFileDialogs = struct { ... };
+    pub const zuiOpenUrl = struct { ... };
+    pub const zuiMenus = struct { ... };
+    pub const zuiFileWatch = struct { ... };       // a source of file changes
+};
+```
+
+- **Native hosts** own the window and loop, one per OS.
+- **Adapter hosts** wrap a library that insists on owning its window
+  (raylib), with fewer capabilities, through `InputSampler`.
+- **Signal handlers** only set an atomic flag and wake; the lifecycle
+  event arrives in the next record. SIGKILL and SIGSTOP cannot be caught,
+  so they are not values of `Lifecycle`.
+- **Services** are optional nested declarations, reached through
+  `zui_app` with `has_*` guards (§16.6).
+
+### 16.4 Surface
+
+`zui.Surface` is a tagged union of native handles: `win32`, `cocoa`,
+`wayland`, `x11`, `web`, `offscreen`. A host and renderer whose
+`zui_surfaces` share no kind are a compile error naming both. Output
+formats (an FP16 swapchain for HDR) are negotiated through it, and fall
+back to SDR unless both sides support them.
+
+### 16.5 Tracer
+
+```zig
+const TracyTracer = struct {
+    pub fn zuiBegin(comptime zone: zui.TraceZone) Span { ... }   // zone: e.g. .fit_widths, .emit, .swap_sources
+    pub fn zuiEnd(span: Span) void { ... }
+};
+```
+
+With `Features.Tracer` set, every pass, emission step and `beginFrame`
+step is a zone. With `void`, no tracing code is analyzed, so an off
+build's instruction counts are unchanged.
+
+### 16.6 When something is missing
+
+| Case | Absence is | Examples |
+|---|---|---|
+| zui needs it | **a compile error** naming it | `zuiMeasure`; a base command a renderer cannot draw; a host without `zuiPoll` |
+| zui uses it implicitly | **a documented fallback** | no material: the fallback background; no blur: the tint; an unhandled lifecycle event: the OS default |
+| the application asks for it by name | **a compile error at the call**, unless guarded by `has_*` | notifications on a target without them |
+| the target has it, this machine does not | **a returned status** | Mica on Windows 10; notifications the user denied |
+
+`zui_app` reports every fallback in effect at run time, and the inspector
+lists them, so none is silent to a developer who looks.
 
 ---
 
-## 17. A complete minimal application
+## 17. Errors and diagnostics
+
+Declaration functions never return errors. Failures are reported once per
+frame, with full context.
+
+### 17.1 Programmer errors
+
+| Condition | Safe builds | Release builds |
+|---|---|---|
+| unbalanced `open`/`close` | panic naming the unclosed element | closed implicitly; reported |
+| `close` without `open` | panic | ignored; reported |
+| duplicate id in a frame | panic naming both declarations | the second is non-interactive; reported |
+| `scroll` or `focusable` without an id | panic | clips without scrolling / not focusable; reported |
+| `ui.source` outside a frame | panic | reads the last frame's view; the demand is not recorded |
+
+With `-Dzui-debug`, ids keep their names, so messages read
+`zui: duplicate id "save" (0x…) in one frame`.
+
+### 17.2 Limits
+
+Elements, depth, text bytes, commands, state slots, cache entries,
+events, pointers, ghost commands and source capacities all fail the same
+way:
+1. The part that fits is kept. Overflowing elements are dropped, their
+   subtrees skipped cheaply with depth still tracked, so `close` pairs up.
+2. `frame.diagnostics` records which limit, by how much, the peak needed,
+   and the id where it first happened.
+3. `frame.diagnostics.check()` returns `error.CapacityExceeded` for
+   applications that want to stop; `zui_app` logs it once per limit.
+
+---
+
+## 18. Styling, color and themes
+
+- **`Color`** is RGBA8, with `.rgb(0x3366ff)`, `.rgba`, `.mix`, and
+  comptime conversion from hex. **`ExtendedColor`** is 4×f16 linear
+  scRGB, where 1.0 is SDR white; values above it are HDR, values outside
+  0–1 are wide gamut. `Config.Color` picks one, so an SDR application
+  keeps 4-byte colors.
+- **A theme is the application's struct.** zui has no theme registry, no
+  inheritance and no cascade. Switching theme passes a different value,
+  and costs a field read.
+- **State-dependent styles** index `std.EnumArray(WidgetState, T)`, so a
+  new state is a compile error in every theme until handled.
+- **Comptime precomputation:** colors in OKLCH or hex, palettes, and
+  whole static styles (§10.3) are computed during the build and live in
+  read-only memory.
+
+---
+
+## 19. Modules
+
+Every module is a default built on the public API. Each names what it
+rides on, so an application that replaces it knows what to implement.
+
+### 19.1 `zui_async`: the default sources
+
+| Source | For | Producers | Delivery |
+|---|---|---|---|
+| `Latest(T)` | the newest value only: battery, sync state, progress | one | `?T` if a new one was swapped |
+| `Stream(T, .{ .capacity, .producers })` | every item, in order: messages, log lines | one or many | the items swapped this frame |
+| `Task(Result, .{ .Progress })` | one piece of work with a status | one run at a time | `?Status` if it changed |
+| `KeyedLoads(Key, Result, .{ .capacity, .unread_frames_before_release, .owns_resources, .Progress })` | many keyed loads driven by demand: thumbnails, remote rows, search results per query | many | keys completed this frame, with status |
+
+- **`Latest`** is a triple buffer and one atomic byte (middle index and a
+  fresh bit). A publish exchanges the producer's back buffer with the
+  middle one; a swap exchanges front and middle if fresh. The view reads
+  the front buffer in place. Two publishes between swaps lose the first,
+  so `Latest` holds plain data or handles the producer keeps alive.
+- **`Stream`** is a bounded ring with a sequence per slot. Many producers
+  claim with a compare-and-swap on the head; one producer compiles to a
+  plain store. A swap first releases the slots the previous frame read,
+  then walks forward while slots are written, stopping without waiting at
+  the first claimed but unwritten slot. Items are read in place, through
+  an iterator, because they may wrap.
+- **`Task`** is a `Latest` of its status plus run bookkeeping. The loader
+  calls `begin(waker)` for a `Run`; the producer calls `progress` and
+  exactly one `finish`. `begin` refuses while the previous run's final
+  status is unswapped, which keeps it single-producer; restartable work
+  is keyed. `zui_async.publishing(f)` adapts a plain function into one
+  that finishes a `Run`. `clear` hands back an owned result once
+  `frames_in_flight` frames have passed since it was last read.
+- **`KeyedLoads`** moves keys through *wanted* (`get` asked; `.idle`) →
+  *loading* (the loader took it from `toStart`; `.running`) → *ready*
+  (`.ready`/`.failed`) → *releasing* (unread too long; handed back by
+  `toRelease`). `get` never starts work. Completions go through a ring
+  sized by claims, so it can never overflow however rarely it is drained.
+  Slot generations stop an abandoned load from completing the next one.
+  An abandoned load still finishes, into `toRelease`. A value is never
+  released before `max(unread_frames_before_release, frames_in_flight)`
+  unread frames, computed rather than configured, so a texture is never
+  freed under a frame in flight. `toRelease` exists only with
+  `owns_resources`, and a forgotten release shows as a full source, not a
+  leak. `Progress` must fit in 64 bits, checked at comptime.
+- **Costs:** a swap with nothing published is one atomic load; a publish
+  is one copy and one atomic exchange; producer-side and reader-side
+  atomics sit on separate cache lines; memory is fixed at comptime in the
+  application's own struct.
 
 ```zig
-const std = @import("std");
-const zui = @import("zui");
-const Backend = @import("zui-raylib");
+// Keyed by a hash of the image's path; with owns_resources, textures come back through toRelease to be freed.
+const ThumbnailLoads = zui_async.KeyedLoads(u64, DecodeError!Texture, .{ .capacity = 128, .owns_resources = true });
 
-const Ui = zui.Context(.{ .max_elements = 2048, .ImageHandle = Backend.Texture }, Backend.Platform);
+const AppSources = struct {
+    catalog: zui_async.Task(FetchError!*const Catalog, .{ .Progress = f32 }) = .{},
+    quotes: zui_async.Stream(Quote, .{ .capacity = 64, .producers = .many }) = .{},   // capacity: items published but not yet released
+    thumbnails: ThumbnailLoads = .{},
+};
 
-const ids = zui.ids(.{ "root", "sidebar", "content", "save" });
-
-pub fn main(init: std.process.Init) !void {
-    var backend = try Backend.open(init.gpa, "zui demo", .{ 1280, 720 });
-    defer backend.close();
-
-    var ui = try Ui.init(init.gpa, init.io, &backend.platform);
-    defer ui.deinit(init.gpa);
-
-    var saved_count: u32 = 0;
-    while (backend.pollEvents(ui.needsFrame())) |input| {
-        ui.beginFrame(input);
-        {
-            ui.open(.{ .id = ids.root, .layout = .{ .direction = .left_to_right, .sizing = .grow_both } });
-            defer ui.close();
-
-            ui.open(.{ .id = ids.sidebar, .layout = .{ .sizing = .{ .width = .fixed(240), .height = .grow } }, .background = .rgb(0x1e1e24) });
-            ui.close();
-
-            ui.open(.{ .id = ids.content, .layout = .{ .sizing = .grow_both, .padding = .all(16) } });
-            defer ui.close();
-
-            ui.open(.{ .id = ids.save, .interactive = true, .background = if (ui.hovered(ids.save)) .rgb(0x3a6ff7) else .rgb(0x2c55c4), .layout = .{ .padding = .symmetric(12, 6) } });
-            ui.text("Save", .{ .color = .white });
-            ui.close();
-            if (ui.clicked(ids.save)) saved_count += 1;
-        }
-        const frame = ui.endFrame() catch ui.lastFrame();
-        backend.render(frame.commands());
-        ui.release(frame);
+fn declare(app: *App, ui: *Ui) void {
+    switch (ui.source(.catalog).status()) {
+        .idle, .canceled => widgets.label(ui, "Catalog not loaded"),
+        .running => |fraction| widgets.progressBar(ui, .of("catalog_progress"), fraction),
+        .ready => |catalog| catalogGrid(ui, catalog),
+        .failed => |err| errorBanner(ui, err),
     }
+    for (ui.source(.quotes).items()) |quote| tickerRow(ui, quote);
+}
+
+fn catalogGrid(ui: *Ui, catalog: *const Catalog) void {
+    const thumbnails = ui.source(.thumbnails);
+    for (catalog.visibleItems(ui), 0..) |item, index| {
+        widgets.asyncImage(ui, .indexed("thumbnail", index), thumbnails.get(item.path_hash));
+    }
+}
+
+pub fn zuiLoader(app: *App, ui: *const Ui, io: std.Io) void {
+    if (ui.framesSinceRead(.catalog) == 0 and app.sources.catalog.isIdle()) {
+        if (app.sources.catalog.begin(app.waker)) |run| {
+            app.work.async(io, zui_async.publishing(fetchCatalog), .{ run, io, app.catalog_url });
+        } else |_| {}
+    }
+    var to_start = app.sources.thumbnails.toStart(app.waker);
+    while (to_start.next()) |load| app.work.async(io, loadThumbnail, .{ load, io });
+    var to_release = app.sources.thumbnails.toRelease();
+    while (to_release.next()) |released| if (released) |texture| app.renderer.unload(texture) else |_| {};
 }
 ```
 
-The example uses one allocation for zui, a comptime-hashed id for every
-interactive element, and a frame loop that sleeps when nothing changes.
-Everything the renderer needs arrives as one slice.
+Scrolling the grid stops asking for keys that scrolled away; after the
+release window their textures come back through `toRelease` and running
+loads are asked to abandon. Scrolling back within the window finds them
+ready.
+
+### 19.2 `zui_widgets`
+
+`Widgets(Ui, Skin)` declares controls into a `*Ui`, styled by any type
+that implements the skin contract (`zuiStyle(widget, state) Style`), so
+theme packs and applications bring their own look without forking the
+widgets. The default skin follows the environment's theme and contrast.
+
+| Widget | Edits | Returns |
+|---|---|---|
+| `button` | nothing | clicked |
+| `checkbox`, `toggle` | `*bool` | toggled |
+| `slider` | any integer or float | changed |
+| `textField`, `textArea` | `*EditableText` | `.{ changed, submitted }` |
+| `dropdown`, `dropdownEnum` | `*usize`, any enum | changed |
+| `disclosure` | `*bool` | toggled |
+| `progressBar`, `asyncImage`, `label`, `labeledRow` | nothing | nothing |
+
+Every control is focusable, draws the skin's focus ring, reports
+semantics when the feature is on, and is operable by keyboard and by
+accessibility actions. The slider places its thumb with grow weights, so
+it is right on the first frame. Text editing covers selection, word
+movement, the clipboard through the host, multiple lines and IME
+composition, with the IME area reported in `HostRequests`.
+
+### 19.3 `zui_reflect`
+
+`inspector(widgets, ui, id, &value)` declares an editor per field of a
+struct, with options from a **typed** declaration:
+
+```zig
+pub const zui_inspector: zui_reflect.Options(@This()) = .{ .fields = .{
+    .max_fps = .{ .label = "Frame cap", .min = 30, .max = 240, .step = 10 },
+    .frames_rendered = .{ .hidden = true },
+} };
+```
+
+`Options(T)` has one field per field of `T`, built with `@Struct`, so a
+misspelled field name is a compile error, as are numeric options on a
+non-number, `min` above `max`, and a visible field of a type it cannot
+edit (the message quotes the `.hidden = true` line that fixes it).
+
+### 19.4 `zui_testing`
+
+- **`FixedMetricsText`**: deterministic metrics (each byte `size / 2`
+  wide), so tests never depend on fonts.
+- **`Driver(Ui)`**: runs complete frames from events, by element id, with
+  points as fractions of the element's previous rectangle: `click`,
+  `tap`, `drag`, `pinch`, multi-pointer drags, `typeText`, `pressKeys`,
+  `action`, and `frameDelivering(.{ .catalog = .{ .ready = &catalog } })`
+  to set any source's state without threads.
+- **`replay(records)`**: drives an application from relayed records.
+- **`snapshot` / `expectSnapshot`**: one line per command, for named ids
+  only, defaults omitted, identical in debug and release.
+- **`checkCommands`**: finite bounds, nondecreasing layers, balanced
+  clips and transforms.
+- **Conformance suites**, which every implementation runs in its own CI:
+  `expectRendererConforms(Renderer)` draws recorded frames and checks clip
+  balance, that every declared command is handled, and pixels within a
+  tolerance; `expectHostConforms(Host)` checks event order, wake from
+  another thread, sticky wake, and that waits honor `NextFrame`;
+  `expectSourceConforms(Source)` stresses publish, swap, inject and
+  refusal under many producers.
+
+### 19.5 `zui_app`
+
+The composition root as a library: `contextConfig(Renderer, overrides)`,
+and `run(App, init, options)`, which owns the loop of §6.1, calls the
+application's `zuiDeclare` and optional `zuiLoader`, moves submission to
+a render thread when the renderer allows, applies host requests, paces
+to `nextFrame`, and reports capabilities and fallbacks. An application
+that wants its own loop writes the six lines of §6.1 instead.
+
+### 19.6 `zui_wire`
+
+A versioned, little-endian encoding of both sides of the frame boundary:
+records in, frames out, as deltas from the previous frame. Payloads
+(`ImageHandle`, `CustomData`, deliveries) serialize automatically when
+they are plain data, and otherwise must declare `zuiSerialize` and
+`zuiDeserialize`, checked at comptime:
+``"zui_wire: delivery of source `catalog` holds a pointer (*const Catalog); declare zuiSerialize on it to send it"``.
+A stream carries the text contract's fingerprint, and a renderer whose
+fonts differ rejects it rather than drawing overflowing text. A wire
+renderer and a wire host make a remote client nothing more than a host
+plus a renderer.
+
+### 19.7 `zui_debug`
+
+An inspector over `Frame.inspect`: the element tree, the hovered element
+and its configs, the frame's diagnostics, lowerings and fallbacks in
+effect, and a performance overlay from the tracer. Over the wire it runs
+in another process.
+
+### 19.8 `zui_color`, `zui_icons`
+
+OKLab, OKLCH and HSL conversion, mixing and palettes, all usable at
+comptime; icon names to codepoints in an icon font, drawn as text.
+
+### 19.9 `zui_motion`
+
+Tweens over `state(id, T)` and `dt()`, which request frames by deadline
+while they move and finish instantly under `reduced_motion`. Exit
+animations use the core's ghost buffer: an element with `exit_seconds`
+keeps emitting its last commands, taking no space and receiving no hits,
+from `limits.exit_ghost_commands` (0 compiles it out).
+
+---
+
+## 20. Verification and budgets
+
+### 20.1 Tests
+
+- **Invariants**, on every test frame: children within their parent's
+  clip unless floating; grow siblings proportional to weight except where
+  clamped; no negative or NaN size; commands in nondecreasing layer
+  order. With `features.safety_sweeps`, the checks that read only a
+  `Frame` run at the end of `endFrame` in any build.
+- **Randomized trees** of 1–5,000 elements from a seed, through the
+  invariants.
+- **Golden layouts** with exact rectangles for every sizing rule, basis,
+  aspect ratio, alignment, direction, wrap mode and floating option.
+- **Allocation discipline:** every test runs with a failing allocator
+  after `init`.
+- **Compile-error tests** for every message in this document.
+- **Sources under ThreadSanitizer,** with many producers against a reader
+  that swaps at random intervals, and on a single-threaded `Io` where
+  every producer runs inline.
+- **Replay:** a recorded session replays to identical commands without
+  starting any work.
+
+### 20.2 Budgets
+
+On one 2020-era desktop core (the reference is an i9-10900K):
+
+| Scenario | Budget |
+|---|---|
+| 4,096 boxes, depth 8: layout and emission | < 100 µs |
+| 4,096 boxes, depth 8: declaration | < 55 µs |
+| 1,000 texts of ~40 bytes, warm caches: layout and emission | < 120 µs |
+| 133 pointer moves in one frame | one hover hit test per pointer |
+| a frame with 10 idle sources | no more instructions than with none |
+| an idle application | 0% CPU |
+| allocations after `init` | 0 |
+
+### 20.3 Measuring
+
+- **`zig build bench`**, always ReleaseFast: the budget scenarios, deep
+  and wide trees, a realistic document view, cold text on one thread and
+  in parallel, a render thread against one thread, and startup (`init`,
+  `initBuffer`, first frames). It fails on any allocation after `init`.
+- **`zig build bench-compare -- <base> [<head>]`** alternates two commits
+  on one machine and reports the median ratio with its middle half,
+  calling a change only when that whole range is beyond 2%.
+- **Instruction counts in CI**, under Callgrind with a fixed `-Dcpu` and a
+  fixed number of frames, failing on more than 2% growth over the parent
+  commit. Wall-clock times on shared runners are reported, never
+  compared.
+- **Every feature that claims a speedup ships with its measurement,** and
+  a feature whose win is not measured does not ship.
+
+---
+
+## 21. Build order
+
+The order follows the dependencies of the design, not a calendar.
+
+| Stage | Delivers | Done when |
+|---|---|---|
+| 1. Measure | instruction counts in CI; the tracer contract | counts repeat exactly between runners; an off tracer leaves them unchanged |
+| 2. The frame record *(the breaking change, made once)* | `Context(config)` with the text contract; `FrameRecord` with `now`, scale and zoom; input as events with the pointer table; the environment; `endFrame` that always returns a frame; `NextFrame`; sources in the core, `Status`, `Waker`; `zui_async`; `MeasureKey` with letter spacing; `TaskPool` deleted | the interaction, widget and testing suites pass on events; a click inside one frame is kept; the demo's thumbnail grid runs on `KeyedLoads` with no UI-thread wait and idles at 0% CPU; 100 loads between two frames cause one wake |
+| 3. Contracts | renderer, host, surface; the generated command union and lowering; `zui_app`; conformance suites; the raylib adapter | every backend passes its suite and runs the demo through `zui_app` |
+| 4. A native host | Windows, with the system material, per-monitor scale, lifecycle, clipboard and drop | the demo runs unchanged, passes the host suite, and idles at 0% CPU |
+| 5. The wire | relay, replay, `zui_wire`, wire host and renderer, file watching as a source | a session replays to identical commands; the demo draws in another process |
+| 6. Text and layout | string cache and fast path, segmentation, grow basis, aspect ratio, natural sizes, floating options, right-to-left, wrap, static styles | goldens for each; warm text within its budget; no other budget regresses |
+| 7. Gestures | intents, gesture arbitration, momentum, custom recognizers, drag and drop | the nested-gesture scenes: a carousel in a list, a pinch starting on a list inside a map, a lasso module against a map's pan |
+| 8. Effects | optional commands, lowering, transforms with hit inversion, materials, `ExtendedColor` | lowering tested for each; one renderer draws each; HDR white brighter than SDR on the Windows host |
+| 9. Seeing the UI | `zui_debug`, semantics with accessibility actions, safety sweeps, the demo in a browser | the Windows host bridges semantics to UI Automation |
+| 10. Reach | macOS, Linux and web hosts; services; window decorations; many windows | each host passes its suite and runs the demo unchanged |
+| 11. Polish | `zui_motion` and exit ghosts; full text editing with IME; `zui_color`, `zui_icons`, skins and theme packs; samples and the template | each with `zui_testing` coverage; IME on Windows |
+| Later | docking, a grid layout, layout islands, static subtrees, SIMD | only with a measured win or a demonstrated need |
+
+Two rules hold throughout:
+- **One breaking release.** Everything that changes the shape of the
+  record, the context's parameters or the contracts lands in stage 2 and
+  3, before any host or wire format freezes it.
+- **A module before core.** A feature that can be built on the public API
+  is; the core gains only what a module proves it cannot do without.
+
+---
+
+## 22. Open questions
+
+1. **`Task` restarts.** One run at a time, with restartable work keyed in
+   `KeyedLoads`, or generation-tagged runs? Planned: one at a time,
+   since generations would need several writers on one triple buffer.
+2. **`unread_frames_before_release`'s default.** Planned: 30 frames,
+   since reloading a thumbnail costs far more than keeping it.
+3. **A custom recognizer's claim lands a frame late.** Planned: accept it,
+   until a recognizer shows that it matters.
+4. **Physical keys.** Planned: logical keys plus the opaque scancode; a
+   physical key enum only when a binding needs portable physical keys.

@@ -14,10 +14,10 @@ Implemented so far:
   focus scopes); clipping with culling; scroll containers driven by the
   wheel; floating elements in their own paint layers; and per-element
   state that persists across frames.
-- **0.3:** `TaskPool`s of background work that is canceled when its
-  element stops being declared; `needsFrame`, so an idle application can
-  sleep at 0% CPU; and `beginFrame` waiting for a render thread to
-  release a frame.
+- **0.3:** `TaskPool`s of background work tied to an element;
+  `needsFrame`, so an idle application can sleep at 0% CPU; and
+  `beginFrame` waiting for a render thread to release a frame. Task pools
+  are replaced by sources in stage 2.
 - **0.4:** three optional modules built only on the public API:
   - `zui_widgets`: button, checkbox, slider, text field, dropdown and
     disclosure;
@@ -27,28 +27,30 @@ Implemented so far:
     and types by element id, golden snapshots, and command checks.
 - **0.5:** performance. Layout and emission of 4,096 boxes went from
   216 µs to 97 µs on a 2020 desktop core, and 1,000 cached texts from
-  346 µs to about 170 µs, which meets both of SPEC.md §6.5's targets.
+  346 µs to about 170 µs.
   Platforms with thread-safe text measurement get parallel measurement for
   cold frames (4.3× as fast on 10 cores), and `zig build bench` measures
   all of it.
-- **0.6, in progress:** `zig build bench-compare` runs two commits'
-  benchmarks alternately and reports each change with its spread; startup
-  benchmarks for `init`, `initBuffer` and first frames; and task
-  completions applied only at `beginFrame`, so every request in a frame
-  sees the same state.
+- **0.6, in part:** `zig build bench-compare`, which runs two commits'
+  benchmarks alternately and reports each change with its spread;
+  startup benchmarks for `init`, `initBuffer` and first frames; and the
+  design of sources, demand and the loader that replace task pools.
 
 The reference backend and demo application live in
 [zui-raylib](https://github.com/AaronJClausen/zui-raylib).
 
-Next: the rest of 0.6 (an audit of the async model, instruction counts
-in CI, trace zones and the design of event-based input), then contracts for renderers and hosts
-and input as an ordered event log with many pointers (0.7), a native
-Windows host (0.8), feeds and a wire format for streaming frames in and
-out (0.9), and from there text, layout and gestures, effects and HDR, an
-inspector, more hosts, motion and text editing.
-[ROADMAP.md](ROADMAP.md) has the plan, where each item stands and where
-to pick up, and [ARCHITECTURE.md](ARCHITECTURE.md) how the pieces
-connect.
+Next, in the order of SPEC.md §21: instruction counts in CI and a tracer
+contract (stage 1); then the one breaking change (stage 2): a
+`Context(config)` with the text contract, a frame record with time,
+scale, zoom and input as events, `endFrame` that always returns a frame,
+and sources with `zui_async` in place of task pools. After that come the
+renderer and host contracts with `zui_app`, a native Windows host, the
+wire format, and from there text, layout, gestures, effects, an
+inspector and accessibility, more hosts, motion and text editing.
+[ROADMAP.md](ROADMAP.md) has each stage's items and where to pick up, and
+[ARCHITECTURE.md](ARCHITECTURE.md) how the pieces connect.
+
+Today's API, which stage 2 changes to the loop of SPEC.md §6.1:
 
 ```zig
 const Ui = zui.Context(.{}, MyPlatform);
@@ -75,8 +77,8 @@ ui.release(frame);
 | `zig build test` | run the unit, golden, randomized-invariant, widget and compile-error tests (add `-Doptimize=ReleaseSafe` or `ReleaseFast` to test other modes) |
 | `zig build check` | compile one full frame, every widget and the test driver without producing output; add `-Dtarget=wasm32-freestanding` to check another target |
 | `zig build test -Dzui-debug=true` | keep id names, so duplicate-id and unbalanced-tree panics name the element |
-| `zig build bench` | run the benchmarks in ReleaseFast; add `-- --check-targets` to fail on a missed §6.5 target, or `-- --compare old.json` after `-- --json old.json` to check for regressions |
-| `zig build bench-compare -- main` | run the benchmarks of `main` and of the working tree alternately, and report each time's median change and its spread; `-- <base> <head>` compares two commits (SPEC.md §14.3) |
+| `zig build bench` | run the benchmarks in ReleaseFast; add `-- --check-targets` to fail on a missed performance target, or `-- --compare old.json` after `-- --json old.json` to check for regressions |
+| `zig build bench-compare -- main` | run the benchmarks of `main` and of the working tree alternately, and report each time's median change and its spread; `-- <base> <head>` compares two commits (SPEC.md §20.3) |
 | `zig build docs` | generate API documentation into `zig-out/docs` |
 | `zig build fmt` | format every Zig source file |
 | `zig build fmt-check` | fail if any file is not formatted, as CI does |
@@ -88,7 +90,7 @@ CI runs:
 - `check` for six targets: 32- and 64-bit, big-endian, freestanding and
   WebAssembly;
 - the benchmarks, failing on any allocation after `init`. Times and the
-  SPEC.md §6.5 targets are reported in the job summary but not compared:
+  SPEC.md §20.2 budgets are reported in the job summary but not compared:
   runners vary too much. Check for slowdowns on your own machine with
   `zig build bench-compare`.
 
@@ -123,8 +125,8 @@ _ = widgets.slider(ui, .of("volume"), &settings.volume, .{ .max = 100 });
 _ = zui_reflect.inspector(widgets, ui, .of("settings"), &settings);
 ```
 
-SPEC.md §15.1 lists the widgets, and §15.2 covers what the inspector
-generates for each field type.
+SPEC.md §19.2 lists the widgets, and §19.3 covers the inspector's typed
+options.
 
 ## License
 
