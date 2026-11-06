@@ -22,6 +22,7 @@ Each item says:
 | 0.5 | layout performance, parallel measurement, benchmarks | shipped |
 | after 0.5 | declaration work: −42% to −56% | on `main` |
 | 0.6, in part | `bench-compare` (R2), startup benchmarks (P1), task completions at `beginFrame` (A2), the async design (A1) | done; the rest of 0.6 became stage 1 |
+| stage 2, in part | the code brought to the spec's shape: C5, S1, I4, C6, A5 and `nextFrame` (I2) | on `main`; the other repos still need the same change |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
@@ -52,16 +53,18 @@ counts to judge it.
    here in the same commit.
 
 Things to know when resuming:
-- **The code still has the old shape.** `Platform`, `TaskPool`, sampled
-  `Input`, `dt_seconds` and an error-returning `endFrame` all exist until
-  stage 2. ARCHITECTURE.md §7 lists each difference and where it lives.
-- **Source comments cite old section numbers** of SPEC.md (`§6.5`,
-  `§10.3`, `§14.3`). They are corrected or removed as stage 2 rewrites
-  the files they are in. `bench --check-targets` still checks the old
-  text target of 250 µs until R1 updates it to §20.2's budgets.
-- **The other repos are untouched.** zui-raylib, zui-sokol and
-  zui-terminal keep today's `Platform` until stage 2. `zui-host` does not
-  exist yet; it is created with H2 in stage 4.
+- **The code has the spec's shape where the feature exists.** What is
+  still missing (sources, the environment, generated commands, static
+  styles, skins) is listed in ARCHITECTURE.md §7 with the item that adds
+  it. With `TaskPool` deleted, nothing brings outside data into a frame
+  until A3 and A4.
+- **`bench --check-targets` checks §20.2's budgets,** including
+  declaration for the box tree. R1 still has to make the counts repeat.
+- **The other repos are behind.** zui-raylib, zui-sokol and zui-terminal
+  still use `Platform`, `Input` and `TaskPool`, and must move to the text
+  contract, `FrameRecord` (through `zui.InputSampler`) and
+  `endFrame() *const Frame`. `zui-host` does not exist yet; it is created
+  with H2 in stage 4.
 - **Item IDs are stable.** A letter names a series (R regression checks,
   A async, P profiling, C contracts, T text, S scale, H hosts, F the frame
   record and the wire, L layout, I interaction, G graphics, V visibility,
@@ -194,6 +197,8 @@ first.
 **Done when:** every test, widget and benchmark builds on `Context(config)`;
 compile-error tests pin each contract message.
 
+**Status.** Done in this repository.
+
 **Spec.** §4, §5, §9.4, §16.1.
 
 ### T3. Letter spacing, through a measurement key
@@ -208,6 +213,10 @@ letter_spacing }` passed to `zuiMeasure` and used as the cache key, with
 
 **Done when:** a golden test lays out spaced text, and every renderer
 draws it.
+
+**Status.** The key, the style field and the cache are done; the golden
+test needs a test contract that applies spacing, and the renderers draw
+nothing yet.
 
 **Spec.** §9.1, §9.4.
 
@@ -224,6 +233,8 @@ text is measured at `size × zoom`; snapping uses `scale × zoom`.
 
 **Done when:** golden tests at three zoom levels, and a replayed record
 reproduces the frame exactly with any scale.
+
+**Status.** Done but for replay, which waits for F2 and F4.
 
 **Spec.** §6.2.
 
@@ -258,7 +269,11 @@ multi-pointer `drag`. First rebuild `resolveInput` over the log with
 - two pointers press two buttons at once;
 - R1's counts on the mouse-only scenarios are no higher than before.
 
-**Spec.** §7.1, §11.
+**Status.** Done but for `pinch`, which waits for gestures (I5), and R1's
+counts, which wait for R1. Every hovering pointer is hit-tested once a
+frame even without a move, so hover follows a layout that moved under a
+still mouse. A lifted touch stays readable until the next frame, so the
+frame that sees a tap can ask where it was.
 
 ### I6. The environment and host requests
 
@@ -283,6 +298,9 @@ gesture timers. `needsFrame` goes.
 **Done when:** a test's caret blinks with frames only at its instants,
 and an idle context reports `.on_event`.
 
+**Status.** `requestFrame` and `requestFrameAt` are done; pending sources,
+momentum and gesture timers join it with A3 and I5.
+
 **Spec.** §6.6.
 
 ### C6. `endFrame` always returns a frame
@@ -294,6 +312,8 @@ goes. `tryBeginFrame` for hosts that cannot block.
 
 **Done when:** the memory tests pass with the new reporting, and a frame
 over every limit still draws what fit.
+
+**Status.** Done.
 
 **Spec.** §6.3, §6.5, §17.
 
@@ -330,6 +350,8 @@ demo's loads move to A4's sources.
 
 **Done when:** nothing in this repository or the backends names a task
 pool.
+
+**Status.** Done in this repository; the demo's loads wait for A4.
 
 ---
 

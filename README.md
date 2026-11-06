@@ -14,10 +14,9 @@ Implemented so far:
   focus scopes); clipping with culling; scroll containers driven by the
   wheel; floating elements in their own paint layers; and per-element
   state that persists across frames.
-- **0.3:** `TaskPool`s of background work tied to an element;
-  `needsFrame`, so an idle application can sleep at 0% CPU; and
-  `beginFrame` waiting for a render thread to release a frame. Task pools
-  are replaced by sources in stage 2.
+- **0.3:** `beginFrame` waiting for a render thread to release a frame,
+  and a way for an idle application to sleep at 0% CPU. Its task pools
+  were deleted in stage 2, to be replaced by sources.
 - **0.4:** three optional modules built only on the public API:
   - `zui_widgets`: button, checkbox, slider, text field, dropdown and
     disclosure;
@@ -28,7 +27,7 @@ Implemented so far:
 - **0.5:** performance. Layout and emission of 4,096 boxes went from
   216 µs to 97 µs on a 2020 desktop core, and 1,000 cached texts from
   346 µs to about 170 µs.
-  Platforms with thread-safe text measurement get parallel measurement for
+  Text contracts with thread-safe measurement get parallel measurement for
   cold frames (4.3× as fast on 10 cores), and `zig build bench` measures
   all of it.
 - **0.6, in part:** `zig build bench-compare`, which runs two commits'
@@ -39,31 +38,36 @@ Implemented so far:
 The reference backend and demo application live in
 [zui-raylib](https://github.com/AaronJClausen/zui-raylib).
 
+- **Stage 2, in part:** `Context(config)` with the text contract and
+  `Config.limits`; a frame record with time, scale, zoom and input as an
+  ordered event log over a pointer table; `endFrame` that always returns
+  a frame; and `nextFrame()`.
+
 Next, in the order of SPEC.md §21: instruction counts in CI and a tracer
-contract (stage 1); then the one breaking change (stage 2): a
-`Context(config)` with the text contract, a frame record with time,
-scale, zoom and input as events, `endFrame` that always returns a frame,
-and sources with `zui_async` in place of task pools. After that come the
+contract (stage 1); then the rest of stage 2: the environment, and sources
+with `zui_async`. After that come the
 renderer and host contracts with `zui_app`, a native Windows host, the
 wire format, and from there text, layout, gestures, effects, an
 inspector and accessibility, more hosts, motion and text editing.
 [ROADMAP.md](ROADMAP.md) has each stage's items and where to pick up, and
 [ARCHITECTURE.md](ARCHITECTURE.md) how the pieces connect.
 
-Today's API, which stage 2 changes to the loop of SPEC.md §6.1:
+Today's API, until stage 3 adds the host and renderer contracts of
+SPEC.md §6.1:
 
 ```zig
-const Ui = zui.Context(.{}, MyPlatform);
-var ui = try Ui.init(gpa, io, &platform);
+const Ui = zui.Context(.{ .Text = MyFonts }); // MyFonts declares zuiMeasure
+var ui = try Ui.init(gpa, io, &fonts);
 defer ui.deinit(gpa);
 
-ui.beginFrame(.{ .viewport = .{ 800, 600 } });
-ui.open(.{ .id = .of("toolbar"), .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(40) }, .padding = .all(4) }, .background = .rgb(0x202020) });
+ui.beginFrame(&.{ .params = .{ .now = now, .viewport = .{ 800, 600 } }, .events = events });
+ui.open(.{ .id = .of("toolbar"), .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(40) }, .padding = .all(4) }, .decoration = .{ .background = .rgb(0x202020) } });
 ui.text("Hello, zui", .{ .color = .white });
 ui.close();
-const frame = ui.endFrame() catch ui.lastFrame();
+const frame = ui.endFrame();
 for (frame.commands()) |command| renderer.draw(command);
 ui.release(frame);
+waitFor(ui.nextFrame());
 ```
 
 ## Requirements

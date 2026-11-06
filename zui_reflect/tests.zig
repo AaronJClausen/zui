@@ -5,15 +5,18 @@ const zui_widgets = @import("zui_widgets");
 const zui_reflect = @import("zui_reflect.zig");
 
 const testing = std.testing;
-const Platform = zui_testing.FixedMetricsPlatform(u16);
+const Text = zui_testing.FixedMetricsText(u16);
 const Ui = zui.Context(.{
-    .max_elements = 512,
-    .max_text_bytes = 4096,
-    .max_depth = 24,
-    .max_render_commands = 1024,
-    .state_slots = 256,
-    .measure_cache_entries = 1024,
-}, Platform);
+    .limits = .{
+        .max_elements = 512,
+        .max_text_bytes = 4096,
+        .max_depth = 24,
+        .max_render_commands = 1024,
+        .state_slots = 256,
+        .measure_cache_entries = 1024,
+    },
+    .Text = Text,
+});
 const widgets: zui_widgets.Widgets(Ui) = .{};
 
 const Audio = struct {
@@ -68,13 +71,13 @@ const App = struct {
 };
 
 const Fixture = struct {
-    platform: Platform = .{},
+    text: Text = .{},
     ui: Ui = undefined,
     driver: zui_testing.Driver(Ui) = undefined,
     app: App = undefined,
 
     fn init(fixture: *Fixture) !void {
-        fixture.ui = try .init(testing.allocator, testing.io, &fixture.platform);
+        fixture.ui = try .init(testing.allocator, testing.io, &fixture.text);
         fixture.driver = .{ .ui = &fixture.ui, .viewport = .{ 600, 800 } };
         fixture.app.init();
         _ = try fixture.frame();
@@ -85,7 +88,7 @@ const Fixture = struct {
     }
 
     fn frame(fixture: *Fixture) !*const Ui.Frame {
-        return fixture.driver.frame(&fixture.app, App.declare, .{});
+        return fixture.driver.frame(&fixture.app, App.declare, &.{});
     }
 
     fn click(fixture: *Fixture, id: zui.Id) !void {
@@ -110,7 +113,7 @@ test "each field gets the editor for its type" {
     try testing.expect(frame.rectOf(settings_id.child("frames_rendered").child("increment")) == null);
     try testing.expect(frame.rectOf(settings_id.child("callback")) == null);
     try zui_testing.checkCommands(frame.commands());
-    try testing.expect(fixture.ui.diagnostics().ok());
+    try testing.expect(frame.diagnostics.ok());
 
     try testing.expect(hasText(frame, "Frame cap"));
     try testing.expect(hasText(frame, "Player name"));

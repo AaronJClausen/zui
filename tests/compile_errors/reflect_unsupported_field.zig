@@ -2,13 +2,13 @@ const zui = @import("zui");
 const zui_widgets = @import("zui_widgets");
 const zui_reflect = @import("zui_reflect");
 
-const Platform = struct {
-    pub fn measureText(_: *Platform, _: []const u8, _: u16, _: f32) [2]f32 {
+const Text = struct {
+    pub fn zuiMeasure(_: *Text, _: []const u8, _: zui.MeasureKey(u16)) [2]f32 {
         return .{ 0, 0 };
     }
 };
 
-const Ui = zui.Context(.{}, Platform);
+const Ui = zui.Context(.{ .Text = Text });
 const widgets: zui_widgets.Widgets(Ui) = .{};
 
 const Settings = struct {

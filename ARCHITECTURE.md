@@ -174,22 +174,24 @@ The stage is the one in SPEC.md §21 that builds it.
 
 ## 7. From today's code to the spec
 
-What exists today is releases 0.1–0.5 and the start of 0.6. Stage 2
-changes its shape once; until then the code and the spec differ in these
-places:
+What exists today is releases 0.1–0.5, the start of 0.6, and the part of
+stage 2 that reshaped what already existed: `Context(config)` with
+`Config.limits` and the text contract, the frame record with `now`,
+scale and zoom, input as an ordered event log over a pointer table,
+`endFrame` that always returns a frame, `nextFrame()`, and `Element`
+with `decoration` and `clip: Axes`. `TaskPool` is deleted.
 
-| Today | The spec | Where today |
-|---|---|---|
-| `Context(config, Platform)`; `Platform` measures text, wakes and reports scale | `Context(config)`; `Config.Text`; `Waker` from the host; scale in the record | `src/context.zig` |
-| `TaskPool` and `needsFrame` | sources, demand, the loader, `nextFrame()` | `src/tasks.zig` (deleted) |
-| `Input` sampled once per frame, one pointer, `dt_seconds` | `FrameRecord` with events, a pointer table, `now` | `src/context.zig`, `src/interaction.zig` |
-| `endFrame` returns an error union; `lastFrame()` | always a frame; `diagnostics.check()` | `src/context.zig` |
-| `measureText(text, font, size)` | `zuiMeasure(run, MeasureKey)` | `src/text.zig` |
-| `thread_safe_measure` | `zui_thread_safe` | `src/parallel_measure.zig` |
-| one fixed `RenderCommand` union | generated from `Config.commands` | `src/commands.zig`, `src/emission.zig` |
-| configs copied into the frame | config references, static styles | `src/context.zig`, `src/style.zig` |
-| `Widgets(Ui)` | `Widgets(Ui, Skin)` | `zui_widgets/` |
-| limits as `Config` fields, e.g. `state_ttl_frames` | `Config.limits`, with `state_frames_until_eviction` and `max_input_contacts` | `src/context.zig` |
+The code and the spec still differ in these places, each closed by the
+roadmap item named:
+
+| Today | The spec | Where today | Item |
+|---|---|---|---|
+| no way to bring outside data into a frame; `TaskPool` is gone and nothing replaces it yet | sources, demand, the loader, `Waker`, `Status`, `zui_async` | `src/context.zig` | A3, A4 |
+| no environment; no host requests | `Environment` from `environment` events; `HostRequests` in the frame | `src/context.zig` | I6 |
+| one fixed `RenderCommand` union, `image` and `custom` present even when their payload is `void` | generated from `Config.commands` and the payload types | `src/commands.zig`, `src/emission.zig` | C1 |
+| configs copied into the frame | config references, static styles | `src/context.zig`, `src/style.zig` | L8 |
+| `Widgets(Ui)` with a `Theme` struct | `Widgets(Ui, Skin)` | `zui_widgets/` | K5 |
+| `Frame` exposes its storage arrays and `rectOf` | `Frame.inspect(index)` | `src/context.zig` | V1 |
 
 Unchanged in shape: element storage in pre-order structure-of-arrays, the
 layout passes, the segment cache, ids, the state table, the frame arenas,
@@ -206,5 +208,6 @@ parallel measurement and the module boundary.
 | `zui-examples` | samples and the template project |
 
 The renderer repositories change in the same week as the core: their
-`Platform` becomes a text contract when stage 2 changes `Context`, and
-they become renderers when stage 3 adds the contracts.
+`Platform` becomes a text contract (`zuiMeasure`) now that `Context`
+takes one, their loops build a `FrameRecord` through `zui.InputSampler`,
+and they become renderers when stage 3 adds the contracts.

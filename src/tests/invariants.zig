@@ -20,7 +20,7 @@ const Generator = struct {
         return switch (self.random.uintLessThan(u8, 6)) {
             0, 1 => .fit,
             2 => .growWeighted(@floatFromInt(self.random.intRangeAtMost(u8, 1, 3))),
-            3 => .growBetween(0, @floatFromInt(self.random.intRangeAtMost(u16, 10, 300))),
+            3 => .{ .rule = .grow, .amount = 1, .max = @floatFromInt(self.random.intRangeAtMost(u16, 10, 300)) },
             4 => .fixed(@floatFromInt(self.random.intRangeAtMost(u16, 0, 250))),
             else => .percent(@as(f32, @floatFromInt(self.random.intRangeAtMost(u8, 0, 100))) / 100),
         };
@@ -40,14 +40,16 @@ const Generator = struct {
     }
 
     /// Containers sometimes clip, scroll, float, or take part in interaction.
-    fn container(self: *Generator) zui.ElementConfig {
-        var element: zui.ElementConfig = .{
+    fn container(self: *Generator) zui.Element {
+        var element: zui.Element = .{
             .layout = self.layout(),
-            .background = if (self.random.boolean()) .rgb(0x202020) else null,
+            .decoration = .{
+                .background = if (self.random.boolean()) .rgb(0x202020) else null,
+            },
             .interactive = self.random.uintLessThan(u8, 4) == 0,
         };
         switch (self.random.uintLessThan(u8, 10)) {
-            0 => element.clip = .{ .horizontal = self.random.boolean(), .vertical = self.random.boolean() },
+            0 => element.clip = self.random.enumValue(zui.Axes),
             1 => {
                 element.id = .indexed("scroll", self.next_scroll_id);
                 self.next_scroll_id += 1;
@@ -81,7 +83,7 @@ const Generator = struct {
             self.remaining -= 1;
             switch (self.random.uintLessThan(u8, 4)) {
                 0 => ui.text(self.sentence(), .{ .wrap = self.random.enumValue(zui.TextWrap) }),
-                1 => ui.box(.{ .layout = self.layout(), .background = .rgb(0x404040) }),
+                1 => ui.box(.{ .layout = self.layout(), .decoration = .{ .background = .rgb(0x404040) } }),
                 else => if (depth + 1 < Ui.max_depth) {
                     ui.open(self.container());
                     self.children(ui, depth + 1);
@@ -200,7 +202,7 @@ fn checkParent(frame: *const Frame, parent: Ui.Index) !void {
 fn buildRandomFrame(ui: *Ui, seed: u64, element_budget: u32) void {
     var prng: std.Random.DefaultPrng = .init(seed);
     var generator: Generator = .{ .random = prng.random(), .remaining = element_budget };
-    ui.beginFrame(.{ .viewport = .{ @floatFromInt(generator.random.intRangeAtMost(u16, 1, 1200)), @floatFromInt(generator.random.intRangeAtMost(u16, 1, 900)) } });
+    ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ @floatFromInt(generator.random.intRangeAtMost(u16, 1, 1200)), @floatFromInt(generator.random.intRangeAtMost(u16, 1, 900)) } } });
     generator.children(ui, 1);
 }
 
@@ -211,7 +213,7 @@ test "random trees satisfy the layout invariants" {
 
     for (0..2000) |seed| {
         buildRandomFrame(&harness.ui, seed, @intCast(seed % 200 + 1));
-        const frame = harness.ui.endFrame() catch harness.ui.lastFrame();
+        const frame = harness.ui.endFrame();
         checkInvariants(frame) catch |err| {
             std.debug.print("invariant violated for seed {d}\n", .{seed});
             return err;
@@ -230,7 +232,7 @@ test "layout is deterministic" {
         var lengths: [2]usize = undefined;
         for (0..2) |attempt| {
             buildRandomFrame(&harness.ui, seed, 150);
-            const frame = harness.ui.endFrame() catch harness.ui.lastFrame();
+            const frame = harness.ui.endFrame();
             lengths[attempt] = (try support.snapshot(frame, &snapshots[attempt])).len;
             harness.ui.release(frame);
         }

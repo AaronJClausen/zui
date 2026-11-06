@@ -159,9 +159,11 @@ pub fn Widgets(comptime UiType: type) type {
             ui.open(.{
                 .id = id,
                 .focusable = true,
-                .background = if (state == .hovered or state == .pressed) theme.control.get(state) else null,
-                .border = self.focusRingOr(ui, id, null),
-                .corner_radius = .all(theme.corner_radius),
+                .decoration = .{
+                    .background = if (state == .hovered or state == .pressed) theme.control.get(state) else null,
+                    .border = self.focusRingOr(ui, id, null),
+                    .corner_radius = .all(theme.corner_radius),
+                },
                 .layout = .{
                     .sizing = .{ .width = .grow, .height = .fixed(theme.control_height) },
                     .padding = .symmetric(theme.gap, 0),
@@ -188,9 +190,11 @@ pub fn Widgets(comptime UiType: type) type {
                 .id = id,
                 .focusable = true,
                 .disabled = options.disabled,
-                .background = theme.control.get(ui.widgetState(id)),
-                .border = self.focusRingOr(ui, id, null),
-                .corner_radius = .all(theme.corner_radius),
+                .decoration = .{
+                    .background = theme.control.get(ui.widgetState(id)),
+                    .border = self.focusRingOr(ui, id, null),
+                    .corner_radius = .all(theme.corner_radius),
+                },
                 .layout = .{
                     .sizing = .{ .width = options.width, .height = .fixed(theme.control_height) },
                     .padding = .symmetric(theme.horizontal_padding, 0),
@@ -222,9 +226,11 @@ pub fn Widgets(comptime UiType: type) type {
             });
             const outline_color = if (state == .hovered or state == .pressed) theme.accent else theme.border_color;
             ui.open(.{
-                .background = if (checked.* and !options.disabled) theme.accent else theme.field_background,
-                .border = self.focusRingOr(ui, id, .{ .color = outline_color, .widths = .all(1) }),
-                .corner_radius = .all(theme.corner_radius),
+                .decoration = .{
+                    .background = if (checked.* and !options.disabled) theme.accent else theme.field_background,
+                    .border = self.focusRingOr(ui, id, .{ .color = outline_color, .widths = .all(1) }),
+                    .corner_radius = .all(theme.corner_radius),
+                },
                 .layout = .{
                     .sizing = .{ .width = .fixed(theme.checkbox_size), .height = .fixed(theme.checkbox_size) },
                     .child_alignment = .{ .x = .center, .y = .center },
@@ -233,8 +239,10 @@ pub fn Widgets(comptime UiType: type) type {
             if (checked.*) {
                 const mark_size = @round(theme.checkbox_size * 0.45);
                 ui.box(.{
-                    .background = if (options.disabled) theme.disabled_text_color else theme.check_mark,
-                    .corner_radius = .all(2),
+                    .decoration = .{
+                        .background = if (options.disabled) theme.disabled_text_color else theme.check_mark,
+                        .corner_radius = .all(2),
+                    },
                     .layout = .{ .sizing = .{ .width = .fixed(mark_size), .height = .fixed(mark_size) } },
                 });
             }
@@ -265,13 +273,13 @@ pub fn Widgets(comptime UiType: type) type {
             var proposed = previous;
 
             if (!options.disabled) {
-                if (ui.pressed(id)) if (ui.pointerLocal(id)) |local| if (ui.rectOf(id)) |rect| {
+                if (pointerActivated(ui, id)) if (ui.pointerLocal(id)) |local| if (ui.rectOf(id)) |rect| {
                     const travel = rect.width - theme.slider_thumb_size[0];
                     if (travel > 0) proposed = options.min + range * (local[0] - theme.slider_thumb_size[0] / 2) / travel;
                 };
                 if (ui.focused(id)) {
                     const key_step = options.step orelse if (@typeInfo(Value) == .int) 1 else range / 100;
-                    for (ui.keysPressed()) |key| switch (key) {
+                    for (ui.keyEvents()) |key_event| switch (key_event.key) {
                         .left, .down => proposed -= key_step,
                         .right, .up => proposed += key_step,
                         .page_down => proposed -= key_step * 10,
@@ -303,23 +311,29 @@ pub fn Widgets(comptime UiType: type) type {
             // The grow weights split the track's free space at the value,
             // so the thumb lands in place without last frame's width.
             ui.box(.{
-                .background = if (options.disabled) theme.track else theme.accent,
-                .corner_radius = track_radius,
+                .decoration = .{
+                    .background = if (options.disabled) theme.track else theme.accent,
+                    .corner_radius = track_radius,
+                },
                 .layout = .{ .sizing = .{ .width = .growWeighted(fraction), .height = .fixed(theme.track_thickness) } },
             });
             ui.box(.{
-                .background = switch (state) {
-                    .pressed => theme.accent,
-                    .disabled => theme.disabled_text_color,
-                    else => theme.thumb,
+                .decoration = .{
+                    .background = switch (state) {
+                        .pressed => theme.accent,
+                        .disabled => theme.disabled_text_color,
+                        else => theme.thumb,
+                    },
+                    .border = self.focusRingOr(ui, id, null),
+                    .corner_radius = .all(theme.corner_radius),
                 },
-                .border = self.focusRingOr(ui, id, null),
-                .corner_radius = .all(theme.corner_radius),
                 .layout = .{ .sizing = .{ .width = .fixed(theme.slider_thumb_size[0]), .height = .fixed(theme.slider_thumb_size[1]) } },
             });
             ui.box(.{
-                .background = theme.track,
-                .corner_radius = track_radius,
+                .decoration = .{
+                    .background = theme.track,
+                    .corner_radius = track_radius,
+                },
                 .layout = .{ .sizing = .{ .width = .growWeighted(1 - fraction), .height = .fixed(theme.track_thickness) } },
             });
             ui.close();
@@ -367,12 +381,12 @@ pub fn Widgets(comptime UiType: type) type {
             if (focused and !caret.was_focused) position = text.len;
             caret.was_focused = focused;
 
-            if (!options.disabled and ui.pressed(id)) if (ui.pointerLocal(scroll_id)) |local| {
+            if (!options.disabled and pointerActivated(ui, id)) if (ui.pointerLocal(scroll_id)) |local| {
                 position = positionAt(ui, text.slice(), style, local[0] + ui.scrollOffset(scroll_id)[0]);
             };
 
             if (focused) {
-                for (ui.keysPressed()) |key| switch (key) {
+                for (ui.keyEvents()) |key_event| switch (key_event.key) {
                     .left => position = previousBoundary(text.slice(), position),
                     .right => position = nextBoundary(text.slice(), position),
                     .home => position = 0,
@@ -391,7 +405,7 @@ pub fn Widgets(comptime UiType: type) type {
                     else => {},
                 };
 
-                var printable: [zui.max_text_input_bytes]u8 = undefined;
+                var printable: [Ui.limits.max_text_input_bytes]u8 = undefined;
                 var printable_len: usize = 0;
                 for (ui.typedText()) |byte| {
                     if (byte < 0x20 or byte == 0x7f) continue;
@@ -407,7 +421,7 @@ pub fn Widgets(comptime UiType: type) type {
             const before = text.slice()[0..position];
             const after = text.slice()[position..];
             if (focused) if (ui.rectOf(scroll_id)) |visible| {
-                const caret_left = if (before.len == 0) 0 else ui.measureText(before, style.font, style.size)[0];
+                const caret_left = if (before.len == 0) 0 else ui.measureText(before, style)[0];
                 const caret_right = caret_left + theme.caret_width;
                 var offset = ui.scrollOffset(scroll_id);
                 if (caret_left < offset[0]) offset[0] = caret_left;
@@ -419,9 +433,11 @@ pub fn Widgets(comptime UiType: type) type {
                 .id = id,
                 .focusable = true,
                 .disabled = options.disabled,
-                .background = theme.field_background,
-                .border = self.focusRingOr(ui, id, .{ .color = theme.border_color, .widths = .all(1) }),
-                .corner_radius = .all(theme.corner_radius),
+                .decoration = .{
+                    .background = theme.field_background,
+                    .border = self.focusRingOr(ui, id, .{ .color = theme.border_color, .widths = .all(1) }),
+                    .corner_radius = .all(theme.corner_radius),
+                },
                 .layout = .{
                     .sizing = .{ .width = options.width, .height = .fixed(theme.control_height) },
                     .padding = .symmetric(theme.gap, 0),
@@ -439,7 +455,9 @@ pub fn Widgets(comptime UiType: type) type {
                 if (before.len != 0) ui.text(before, style);
                 ui.box(.{
                     .id = id.child("caret"),
-                    .background = if (focused) theme.caret else null,
+                    .decoration = .{
+                        .background = if (focused) theme.caret else null,
+                    },
                     .layout = .{ .sizing = .{ .width = .fixed(theme.caret_width), .height = .fixed(style.size) } },
                 });
                 if (after.len != 0) ui.text(after, style);
@@ -456,7 +474,7 @@ pub fn Widgets(comptime UiType: type) type {
             var boundary: usize = 0;
             while (boundary < text.len) {
                 boundary = nextBoundary(text, boundary);
-                const width = ui.measureText(text[0..boundary], style.font, style.size)[0];
+                const width = ui.measureText(text[0..boundary], style)[0];
                 const distance = @abs(width - x);
                 if (distance < nearest_distance) {
                     nearest = boundary;
@@ -514,17 +532,19 @@ pub fn Widgets(comptime UiType: type) type {
             var width = options.width;
             if (width.rule == .fit) {
                 var widest_label: f32 = 0;
-                for (labels) |option_label| widest_label = @max(widest_label, ui.measureText(option_label, style.font, style.size)[0]);
-                const indicator_width = ui.measureText(theme.dropdown_indicator, style.font, style.size)[0];
+                for (labels) |option_label| widest_label = @max(widest_label, ui.measureText(option_label, style)[0]);
+                const indicator_width = ui.measureText(theme.dropdown_indicator, style)[0];
                 width.min = @max(width.min, widest_label + indicator_width + theme.gap + 2 * theme.horizontal_padding);
             }
             ui.open(.{
                 .id = id,
                 .focusable = true,
                 .disabled = options.disabled,
-                .background = theme.control.get(ui.widgetState(id)),
-                .border = self.focusRingOr(ui, id, null),
-                .corner_radius = .all(theme.corner_radius),
+                .decoration = .{
+                    .background = theme.control.get(ui.widgetState(id)),
+                    .border = self.focusRingOr(ui, id, null),
+                    .corner_radius = .all(theme.corner_radius),
+                },
                 .layout = .{
                     .sizing = .{ .width = width, .height = .fixed(theme.control_height) },
                     .padding = .symmetric(theme.horizontal_padding, 0),
@@ -555,9 +575,11 @@ pub fn Widgets(comptime UiType: type) type {
                 .id = id.child("popup"),
                 .focus_scope = true,
                 .floating = .{ .attach_to = .{ .element = id }, .attach_point = .bottom_left, .offset = .{ 0, 4 }, .z = theme.popup_z + 1 },
-                .background = theme.popup_background,
-                .border = .{ .color = theme.border_color, .widths = .all(1) },
-                .corner_radius = .all(theme.corner_radius),
+                .decoration = .{
+                    .background = theme.popup_background,
+                    .border = .{ .color = theme.border_color, .widths = .all(1) },
+                    .corner_radius = .all(theme.corner_radius),
+                },
                 .layout = .{
                     .direction = .top_to_bottom,
                     .padding = .all(4),
@@ -570,12 +592,14 @@ pub fn Widgets(comptime UiType: type) type {
                 ui.open(.{
                     .id = option_id,
                     .focusable = true,
-                    .background = switch (ui.widgetState(option_id)) {
-                        .hovered, .pressed => theme.option_highlight,
-                        else => if (index == selected) theme.selected_option else null,
+                    .decoration = .{
+                        .background = switch (ui.widgetState(option_id)) {
+                            .hovered, .pressed => theme.option_highlight,
+                            else => if (index == selected) theme.selected_option else null,
+                        },
+                        .border = self.focusRingOr(ui, option_id, null),
+                        .corner_radius = .all(theme.corner_radius),
                     },
-                    .border = self.focusRingOr(ui, option_id, null),
-                    .corner_radius = .all(theme.corner_radius),
                     .layout = .{
                         .sizing = .{ .width = .grow, .height = .fixed(theme.control_height) },
                         .padding = .symmetric(theme.horizontal_padding - 4, 0),
@@ -620,6 +644,17 @@ pub fn Widgets(comptime UiType: type) type {
                 .disabled => self.theme.disabled_text_color,
             };
             return style;
+        }
+
+        /// Held down, or pressed and released within this frame by a
+        /// pointer that is still over it. Not a keyboard activation, which
+        /// says nothing about where the pointer is.
+        fn pointerActivated(ui: *const Ui, id: zui.Id) bool {
+            if (ui.pressed(id)) return true;
+            if (!ui.clicked(id)) return false;
+            const local = ui.pointerLocal(id) orelse return false;
+            const rect = ui.rectOf(id) orelse return false;
+            return local[0] >= 0 and local[1] >= 0 and local[0] < rect.width and local[1] < rect.height;
         }
 
         fn focusRingOr(self: Self, ui: *const Ui, id: zui.Id, unfocused: ?zui.Border) ?zui.Border {

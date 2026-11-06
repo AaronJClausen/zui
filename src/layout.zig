@@ -1,10 +1,3 @@
-//! The layout passes of SPEC.md §6.2. Elements are stored in declaration
-//! (pre-)order, so every parent's index is lower than its children's:
-//! iterating backward visits children before parents, forward the reverse.
-//!
-//! Floating elements take no space in their parent's flow. They are sized
-//! like any element, but positioned relative to the box they attach to.
-
 const std = @import("std");
 const style = @import("style.zig");
 const text = @import("text.zig");
@@ -31,20 +24,22 @@ pub fn run(comptime Ui: type, ui: *Ui, frame: *Ui.Frame) void {
 }
 
 /// Measures inline until the frame has made `parallel_measure_threshold`
-/// platform calls. If the platform is thread-safe, the misses in the rest
-/// of the frame's text are then measured in parallel first. Warm frames
-/// stay on the inline path and pay nothing for the parallel one.
+/// calls to the text contract. If the contract is thread-safe, the misses
+/// in the rest of the frame's text are then measured in parallel first.
+/// Warm frames stay on the inline path and pay nothing for the parallel one.
 fn measureTexts(comptime Ui: type, ui: *Ui, frame: *Ui.Frame) void {
-    const calls_before = ui.memory.cache.platform_calls;
+    if (!Ui.has_text) return;
+    const cache = &ui.memory.cache;
+    const calls_before = cache.measure_calls;
     var switched_to_parallel = false;
     var run_count: u32 = 0;
     for (frame.texts[0..frame.text_count], 0..) |*record, text_index| {
-        if (Ui.measures_in_parallel and !switched_to_parallel and ui.memory.cache.platform_calls - calls_before >= Ui.parallel_measure_threshold) {
+        if (Ui.measures_in_parallel and !switched_to_parallel and cache.measure_calls - calls_before >= Ui.limits.parallel_measure_threshold) {
             switched_to_parallel = true;
-            parallel_measure.prefetch(Ui, ui, frame.texts[text_index..frame.text_count], frame.text_bytes[0..frame.text_bytes_used], Ui.parallel_measure_threshold);
+            parallel_measure.prefetch(Ui, ui, frame.texts[text_index..frame.text_count], frame.text_bytes[0..frame.text_bytes_used], frame.zoom, Ui.limits.parallel_measure_threshold);
         }
         const content = frame.text_bytes[record.bytes_start..][0..record.bytes_len];
-        record.metrics = text.measureMetrics(&ui.memory.cache, ui.platform, content, record.style.wrap, record.style.font, record.style.size, record.style.line_height, &ui.memory.run_widths, &run_count);
+        record.metrics = text.measureMetrics(ui.measurer(record.style, frame.zoom), content, record.style.wrap, record.style.line_height, &ui.memory.run_widths, &run_count);
     }
 }
 
@@ -122,7 +117,7 @@ fn fit(comptime Ui: type, frame: *Ui.Frame, comptime axis: Axis) void {
 
 fn contentSize(comptime Ui: type, frame: *const Ui.Frame, element: Ui.Index, comptime axis: Axis) ContentSize {
     const a = @intFromEnum(axis);
-    if (frame.kindOf(element) == .text) {
+    if (Ui.has_text and frame.kindOf(element) == .text) {
         const record = frame.texts[frame.content_index[element]];
         if (axis == .x) return .{ .preferred = record.metrics.preferred_width, .min = record.metrics.min_width };
         const height = @as(f32, @floatFromInt(record.line_count)) * record.metrics.line_height;
@@ -325,6 +320,7 @@ fn canShrink(comptime Ui: type, frame: *const Ui.Frame, child: Ui.Index, comptim
 
 /// Pass 3: with widths known, wrap every text element into lines.
 fn wrapTexts(comptime Ui: type, ui: *Ui, frame: *Ui.Frame) void {
+    if (!Ui.has_text) return;
     for (frame.texts[0..frame.text_count]) |*record| {
         const element = record.element;
         const content = frame.text_bytes[record.bytes_start..][0..record.bytes_len];
@@ -341,7 +337,7 @@ fn wrapTexts(comptime Ui: type, ui: *Ui, frame: *Ui.Frame) void {
         );
         record.line_count = frame.line_count - record.first_line;
         if (!fitted) {
-            frame.diagnostics.exceeded.insert(.render_commands);
+            frame.diagnostics.exceeded.insert(.max_render_commands);
             if (frame.diagnostics.first_dropped_id == 0) frame.diagnostics.first_dropped_id = frame.element_id[element];
         }
     }
@@ -442,7 +438,7 @@ inline fn scrollOffset(comptime Ui: type, ui: *Ui, frame: *const Ui.Frame, paren
 /// lookup makes `startChildren` save and restore registers for every parent.
 fn clampedScrollOffset(comptime Ui: type, ui: *Ui, frame: *const Ui.Frame, parent: Ui.Index) [2]f32 {
     const flags = frame.flags[parent];
-    const scroll = ui.memory.states.get(frame.element_id[parent], interaction.ScrollState, ui.input_state.frame_number, .create) orelse return .{ 0, 0 };
+    const scroll = ui.memory.states.get(frame.element_id[parent], interaction.ScrollState, ui.stateGeneration(), .create) orelse return .{ 0, 0 };
     for (0..2) |a| {
         const scrolls = if (a == 0) flags.scroll_x else flags.scroll_y;
         const limit = larger(0, frame.content_size[parent][a] - frame.size[parent][a]);

@@ -29,10 +29,9 @@ pub fn EmitLevel(comptime Index: type) type {
 /// paints over the element's children. Elements entirely outside the clip
 /// are not drawn.
 pub fn run(comptime Ui: type, ui: *Ui, frame: *Ui.Frame) void {
-    const scale: f32 = if (Ui.snaps_to_pixels) ui.platform.scale() else 1;
     const results = &ui.memory.results;
     results.clear();
-    var emitter: Emitter(Ui) = .{ .frame = frame, .results = results, .scale = scale };
+    var emitter: Emitter(Ui) = .{ .frame = frame, .results = results, .pixels_per_unit = frame.pixels_per_unit, .units_per_pixel = 1 / frame.pixels_per_unit };
 
     const viewport: style.Rect = .{ .width = frame.viewport[0], .height = frame.viewport[1] };
     const levels = &ui.emit_levels;
@@ -61,7 +60,7 @@ pub fn run(comptime Ui: type, ui: *Ui, frame: *Ui.Frame) void {
         emitter.leave(&levels[depth]);
         if (depth == 0) break;
     }
-    frame.diagnostics.needed.set(.render_commands, emitter.attempted_commands);
+    frame.diagnostics.needed.set(.max_render_commands, emitter.attempted_commands);
 
     if (frame.floating_count != 0) {
         std.sort.block(Ui.RenderCommand, frame.render_commands[0..frame.command_count], {}, lowerLayer(Ui));
@@ -83,7 +82,10 @@ fn Emitter(comptime Ui: type) type {
 
         frame: *Ui.Frame,
         results: *Ui.Results,
-        scale: f32,
+        pixels_per_unit: f32,
+        /// Multiplied rather than dividing by `pixels_per_unit`: snapping
+        /// runs for every command, and a division costs several multiplies.
+        units_per_pixel: f32,
         /// Reported as `needed.render_commands` once emission ends.
         attempted_commands: u32 = 0,
 
@@ -96,12 +98,14 @@ fn Emitter(comptime Ui: type) type {
             };
         }
 
+        /// To whole physical pixels.
         fn snap(self: *const Self, rect: style.Rect) style.Rect {
-            if (!Ui.snaps_to_pixels) return rect;
-            const left = @round(rect.x * self.scale) / self.scale;
-            const top = @round(rect.y * self.scale) / self.scale;
-            const right = @round((rect.x + rect.width) * self.scale) / self.scale;
-            const bottom = @round((rect.y + rect.height) * self.scale) / self.scale;
+            const scale = self.pixels_per_unit;
+            const inverse = self.units_per_pixel;
+            const left = @round(rect.x * scale) * inverse;
+            const top = @round(rect.y * scale) * inverse;
+            const right = @round((rect.x + rect.width) * scale) * inverse;
+            const bottom = @round((rect.y + rect.height) * scale) * inverse;
             return .{ .x = left, .y = top, .width = right - left, .height = bottom - top };
         }
 
@@ -109,7 +113,7 @@ fn Emitter(comptime Ui: type) type {
             const frame = self.frame;
             self.attempted_commands += 1;
             if (frame.command_count >= frame.render_commands.len) {
-                frame.diagnostics.exceeded.insert(.render_commands);
+                frame.diagnostics.exceeded.insert(.max_render_commands);
                 if (frame.diagnostics.first_dropped_id == 0) frame.diagnostics.first_dropped_id = command.id;
                 return;
             }
@@ -151,7 +155,7 @@ fn Emitter(comptime Ui: type) type {
                 .none => {},
                 .image => if (drawn) self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = level.z, .payload = .{ .image = frame.images[frame.content_index[element]] } }),
                 .custom => if (drawn) self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = level.z, .payload = .{ .custom = frame.customs[frame.content_index[element]] } }),
-                .text => self.emitText(element, element_id, level),
+                .text => if (Ui.has_text) self.emitText(element, element_id, level),
             }
 
             if (flags.interactive or flags.scroll_x or flags.scroll_y or flags.disabled or floating) {

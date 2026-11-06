@@ -1,6 +1,6 @@
 const style = @import("style.zig");
 
-pub fn RenderCommand(comptime TextStyle: type, comptime ImageHandle: type, comptime CustomData: type) type {
+pub fn RenderCommand(comptime TextStyle: type, comptime Image: type, comptime CustomData: type) type {
     return struct {
         bounds: style.Rect,
         /// The element's id hash (internal for elements declared without an id).
@@ -12,7 +12,7 @@ pub fn RenderCommand(comptime TextStyle: type, comptime ImageHandle: type, compt
             rectangle: Rectangle,
             border: Border,
             text: Text,
-            image: ImageHandle,
+            image: Image,
             clip_begin: style.Rect,
             clip_end,
             custom: CustomData,

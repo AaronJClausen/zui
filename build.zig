@@ -4,12 +4,14 @@ const std = @import("std");
 /// system matches the *end* of an error line, so each `expected_error` is a
 /// complete message.
 const compile_error_cases = [_]struct { name: []const u8, expected_error: []const u8 }{
-    .{ .name = "state_slots_not_power_of_two", .expected_error = "zui: state_slots must be a power of two, got 1000" },
+    .{ .name = "state_slots_not_power_of_two", .expected_error = "zui: limits.state_slots must be a power of two, got 1000" },
     .{ .name = "font_id_not_integer", .expected_error = "zui: FontId must be an integer or enum type, got f32" },
-    .{ .name = "platform_missing_measure_text", .expected_error = "platform_missing_measure_text.Platform does not implement zui.Platform: missing `measureText`" },
-    .{ .name = "platform_measure_text_wrong_signature", .expected_error = "platform_measure_text_wrong_signature.Platform.measureText must be fn (*platform_measure_text_wrong_signature.Platform, []const u8, u16, f32) [2]f32, found fn (*platform_measure_text_wrong_signature.Platform, []const u8, f32) [2]f32" },
-    .{ .name = "platform_misspelled_hook", .expected_error = "platform_misspelled_hook.Platform declares `zuiWake`, which zui does not read; the optional declarations are `wake`, `scale` and `thread_safe_measure`" },
-    .{ .name = "platform_thread_safe_measure_not_bool", .expected_error = "platform_thread_safe_measure_not_bool.Platform.thread_safe_measure must be a bool, found comptime_int" },
+    .{ .name = "text_missing_measure", .expected_error = "zui: text_missing_measure.Text does not implement zui.Text: missing `zuiMeasure`" },
+    .{ .name = "text_measure_wrong_signature", .expected_error = "zui: text_measure_wrong_signature.Text.zuiMeasure must be fn (*text_measure_wrong_signature.Text, []const u8, style.MeasureKey(u16)) [2]f32, found fn (*text_measure_wrong_signature.Text, []const u8, u16, f32) [2]f32" },
+    .{ .name = "text_unknown_declaration", .expected_error = "zui: text_unknown_declaration.Text declares unknown `zui_threadsafe`" },
+    .{ .name = "text_thread_safe_not_bool", .expected_error = "zui: text_thread_safe_not_bool.Text.zui_thread_safe must be a bool, found comptime_int" },
+    .{ .name = "text_without_text_contract", .expected_error = "zui: text() needs Config.Text set to a text contract" },
+    .{ .name = "image_without_image_handle", .expected_error = "zui: image() needs Config.ImageHandle set to your image type" },
     .{ .name = "ids_repeated_name", .expected_error = "zui.ids: \"save\" appears more than once" },
     .{ .name = "custom_without_custom_data", .expected_error = "zui: custom() needs Config.CustomData set to your payload type" },
     .{ .name = "state_type_too_large", .expected_error = "zui: state type state_type_too_large.History is 80 bytes, but a state slot holds at most 64; store an index into your own storage instead" },
@@ -132,7 +134,7 @@ pub fn build(b: *std.Build) void {
     });
     const run_bench = b.addRunArtifact(bench_executable);
     if (b.args) |arguments| run_bench.addArgs(arguments);
-    b.step("bench", "Run the benchmarks in ReleaseFast (SPEC.md §14.3)").dependOn(&run_bench.step);
+    b.step("bench", "Run the benchmarks in ReleaseFast").dependOn(&run_bench.step);
 
     const bench_compare_executable = b.addExecutable(.{
         .name = "zui-bench-compare",

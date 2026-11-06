@@ -1,5 +1,3 @@
-//! Clipping, scrolling and floating elements. Hand-computed like golden.zig.
-
 const std = @import("std");
 const zui = @import("../root.zig");
 const support = @import("support.zig");
@@ -23,9 +21,9 @@ test "clipping emits a clip pair and skips what is fully hidden" {
 
     const ui = harness.begin();
     ui.open(.{ .layout = fixedColumn(100, 50), .clip = .both });
-    ui.box(.{ .layout = fixed(100, 40), .background = .rgb(0x111111) });
-    ui.box(.{ .layout = fixed(100, 40), .background = .rgb(0x222222) }); // half visible
-    ui.box(.{ .layout = fixed(100, 40), .background = .rgb(0x333333) }); // fully below the clip
+    ui.box(.{ .layout = fixed(100, 40), .decoration = .{ .background = .rgb(0x111111) } });
+    ui.box(.{ .layout = fixed(100, 40), .decoration = .{ .background = .rgb(0x222222) } }); // half visible
+    ui.box(.{ .layout = fixed(100, 40), .decoration = .{ .background = .rgb(0x333333) } }); // fully below the clip
     ui.close();
 
     var buffer: [512]u8 = undefined;
@@ -63,7 +61,7 @@ test "clipping one axis leaves the other to the enclosing clip" {
     try harness.init();
     defer harness.deinit();
 
-    harness.begin().box(.{ .layout = fixed(100, 20), .clip = .{ .horizontal = true, .vertical = false } });
+    harness.begin().box(.{ .layout = fixed(100, 20), .clip = .horizontal });
     var buffer: [512]u8 = undefined;
     try testing.expectEqualStrings("clip 0 0 100 600\nclip_end\n", try support.snapshot(try harness.end(), &buffer));
 }
@@ -74,7 +72,7 @@ const list: zui.Id = .of("list");
 /// 100 high, so the largest offset is 50.
 fn scrollList(ui: *Ui) void {
     ui.open(.{ .id = list, .layout = fixedColumn(100, 50), .scroll = .{} });
-    for (0..5) |row| ui.box(.{ .id = .indexed("row", row), .layout = fixed(100, 20), .background = .white });
+    for (0..5) |row| ui.box(.{ .id = .indexed("row", row), .layout = fixed(100, 20), .decoration = .{ .background = .white } });
     ui.close();
 }
 
@@ -230,10 +228,10 @@ test "floating layers paint last and escape their ancestors' clip" {
     defer harness.deinit();
 
     const ui = harness.begin();
-    ui.open(.{ .layout = fixed(100, 50), .clip = .both, .background = .rgb(0x111111) });
-    ui.box(.{ .layout = fixed(20, 20), .background = .rgb(0x333333), .floating = .{ .offset = .{ 200, 0 } } });
+    ui.open(.{ .layout = fixed(100, 50), .clip = .both, .decoration = .{ .background = .rgb(0x111111) } });
+    ui.box(.{ .layout = fixed(20, 20), .decoration = .{ .background = .rgb(0x333333) }, .floating = .{ .offset = .{ 200, 0 } } });
     ui.close();
-    ui.box(.{ .layout = fixed(10, 10), .background = .rgb(0x222222) });
+    ui.box(.{ .layout = fixed(10, 10), .decoration = .{ .background = .rgb(0x222222) } });
 
     var buffer: [512]u8 = undefined;
     try testing.expectEqualStrings(

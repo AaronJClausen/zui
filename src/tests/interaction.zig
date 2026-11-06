@@ -1,5 +1,5 @@
-//! Interaction queries answer for the previous frame (SPEC.md §5), so each
-//! test declares a frame, then begins the next one with the input under test.
+//! Interaction queries answer for the previous frame's layout, so each test
+//! declares a frame, then begins the next one with the input under test.
 
 const std = @import("std");
 const zui = @import("../root.zig");
@@ -22,7 +22,7 @@ fn buttons(ui: *Ui, options: ButtonOptions) void {
     ui.close();
 }
 
-fn step(harness: *Harness, input: support.InputWithoutViewport, options: ButtonOptions) !*Ui {
+fn step(harness: *Harness, input: zui.InputSampler.Sample, options: ButtonOptions) !*Ui {
     const ui = harness.beginWith(input);
     buttons(ui, options);
     return ui;
@@ -142,7 +142,7 @@ test "hover covers interactive ancestors; the click goes to the innermost" {
     const card: zui.Id = .of("card");
     const inner: zui.Id = .of("inner_button");
     for (0..4) |frame_number| {
-        const input: support.InputWithoutViewport = switch (frame_number) {
+        const input: zui.InputSampler.Sample = switch (frame_number) {
             0, 1 => .{ .pointer = .{ 20, 20 } },
             2 => .{ .pointer = .{ 20, 20 }, .buttons = support.primaryDown() },
             else => .{ .pointer = .{ 20, 20 } },
@@ -344,12 +344,13 @@ test "key presses and typed text are copied for the frame" {
     defer harness.deinit();
 
     var typed = "hi".*;
-    const ui = harness.beginWith(.{ .keys_pressed = &.{ .escape, .left }, .text_input = &typed, .modifiers = .{ .control = true } });
+    const ui = harness.beginWith(.{ .keys_pressed = &.{ .escape, .left }, .text = &typed, .modifiers = .{ .control = true } });
     typed = "xx".*;
     try testing.expect(ui.keyPressed(.escape));
     try testing.expect(!ui.keyPressed(.tab));
     try testing.expectEqualStrings("hi", ui.typedText());
-    try testing.expect(ui.modifiers().control);
+    try testing.expectEqual(@as(usize, 2), ui.keyEvents().len);
+    try testing.expect(ui.keyEvents()[1].modifiers.control);
     try finish(&harness);
 }
 
@@ -377,18 +378,162 @@ test "state persists while used and is evicted after its time to live" {
 }
 
 test "a full state table hands out scratch memory and reports it" {
-    const SmallStateUi = zui.Context(.{ .max_elements = 16, .state_slots = 2 }, support.TestPlatform);
-    var platform: support.TestPlatform = .{};
-    var ui = try SmallStateUi.init(testing.allocator, testing.io, &platform);
+    const SmallStateUi = zui.Context(.{ .limits = .{ .max_elements = 16, .state_slots = 2 } });
+    var ui = try SmallStateUi.init(testing.allocator, testing.io);
     defer ui.deinit(testing.allocator);
 
     const Counter = struct { count: u32 };
-    ui.beginFrame(.{ .viewport = .{ 10, 10 } });
+    ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 10, 10 } } });
     ui.state(.of("one"), Counter).count = 1;
     ui.state(.of("two"), Counter).count = 2;
     ui.state(.of("three"), Counter).count = 3;
-    try testing.expectError(error.CapacityExceeded, ui.endFrame());
-    ui.release(ui.lastFrame());
-    try testing.expect(ui.diagnostics().exceeded.contains(.state_slots));
-    try testing.expectEqualStrings("state_slots", zui.Limit.state_slots.configField());
+    const frame = ui.endFrame();
+    defer ui.release(frame);
+    try testing.expectError(error.CapacityExceeded, frame.diagnostics.check());
+    try testing.expect(frame.diagnostics.exceeded.contains(.state_slots));
+}
+
+/// Declares `buttons` and returns the frame, so the next frame's events are
+/// hit-tested against it.
+fn declareButtons(harness: *Harness, events: []const zui.Event) !*Ui {
+    const ui = harness.beginEvents(events);
+    buttons(ui, .{});
+    return ui;
+}
+
+test "a press and a release inside one frame is a click" {
+    var harness: Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    _ = try declareButtons(&harness, &.{});
+    try finish(&harness);
+    const pointer = support.mouse(.{ 10, 10 });
+    const ui = try declareButtons(&harness, &.{
+        .{ .pointer_down = .{ .pointer = pointer } },
+        .{ .pointer_up = .{ .pointer = pointer } },
+    });
+    try testing.expect(ui.clicked(a));
+    try testing.expect(!ui.pressed(a));
+    try finish(&harness);
+}
+
+test "a release then a new touch in one frame are handled in that order" {
+    var harness: Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    _ = try declareButtons(&harness, &.{});
+    try finish(&harness);
+    _ = try declareButtons(&harness, &.{.{ .pointer_down = .{ .pointer = support.touch(1, .{ 10, 10 }) } }});
+    try finish(&harness);
+    const ui = try declareButtons(&harness, &.{
+        .{ .pointer_up = .{ .pointer = support.touch(1, .{ 10, 10 }) } },
+        .{ .pointer_down = .{ .pointer = support.touch(2, .{ 150, 10 }) } },
+    });
+    try testing.expect(ui.clicked(a));
+    try testing.expect(ui.pressed(b));
+    try testing.expect(!ui.pressed(a));
+    try finish(&harness);
+}
+
+test "two pointers press two buttons at once" {
+    var harness: Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    _ = try declareButtons(&harness, &.{});
+    try finish(&harness);
+    var ui = try declareButtons(&harness, &.{
+        .{ .pointer_down = .{ .pointer = support.touch(1, .{ 10, 10 }) } },
+        .{ .pointer_down = .{ .pointer = support.touch(2, .{ 150, 10 }) } },
+    });
+    try testing.expect(ui.pressed(a));
+    try testing.expect(ui.pressed(b));
+    try testing.expectEqual([2]f32{ 10, 10 }, ui.primaryPointer().?.position); // the first touch still down
+    try finish(&harness);
+
+    ui = try declareButtons(&harness, &.{
+        .{ .pointer_up = .{ .pointer = support.touch(1, .{ 10, 10 }) } },
+        .{ .pointer_up = .{ .pointer = support.touch(2, .{ 150, 10 }) } },
+    });
+    try testing.expect(ui.clicked(a));
+    try testing.expect(ui.clicked(b));
+    try testing.expectEqual([2]f32{ 10, 10 }, ui.primaryPointer().?.position); // lifted, still readable this frame
+    try finish(&harness);
+}
+
+test "touch never hovers" {
+    var harness: Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    _ = try declareButtons(&harness, &.{});
+    try finish(&harness);
+    const ui = try declareButtons(&harness, &.{.{ .pointer_down = .{ .pointer = support.touch(1, .{ 10, 10 }) } }});
+    try testing.expect(ui.pressed(a));
+    try testing.expect(!ui.hovered(a));
+    try finish(&harness);
+}
+
+test "moves coalesce: only where a pointer ends up is hit-tested" {
+    var harness: Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    _ = try declareButtons(&harness, &.{});
+    try finish(&harness);
+    var moves: [133]zui.Event = undefined;
+    for (&moves, 0..) |*event, index| {
+        const x: f32 = if (index == moves.len - 1) 150 else @floatFromInt(index % 100);
+        event.* = .{ .pointer_move = .{ .pointer = support.mouse(.{ x, 10 }) } };
+    }
+    const ui = try declareButtons(&harness, &moves);
+    try testing.expect(!ui.hovered(a));
+    try testing.expect(ui.hovered(b));
+    try finish(&harness);
+}
+
+test "chords match the modifiers held at the key" {
+    var harness: Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    const ui = harness.beginEvents(&.{
+        .{ .key_down = .{ .key = .s, .modifiers = .{ .control = true }, .at = .zero } },
+        .{ .key_down = .{ .key = .z, .at = .zero } },
+    });
+    try testing.expect(ui.chordPressed(.{ .key = .s, .modifiers = .{ .control = true } }));
+    try testing.expect(!ui.chordPressed(.{ .key = .s }));
+    try testing.expect(!ui.chordPressed(.{ .key = .z, .modifiers = .{ .control = true } }));
+    try testing.expect(ui.keyPressed(.z));
+    try finish(&harness);
+}
+
+test "events and contacts beyond their limits are dropped and reported" {
+    const SmallInputUi = zui.Context(.{ .limits = .{ .max_elements = 16, .max_events_per_frame = 2, .max_input_contacts = 1, .max_text_input_bytes = 4 } });
+    var ui = try SmallInputUi.init(testing.allocator, testing.io);
+    defer ui.deinit(testing.allocator);
+
+    ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 10, 10 } }, .events = &.{
+        .{ .text = "abc" },
+        .{ .text = "def" },
+        .{ .text = "ghi" },
+    } });
+    try testing.expectEqualStrings("abcd", ui.typedText());
+    var frame = ui.endFrame();
+    try testing.expect(frame.diagnostics.exceeded.contains(.max_events_per_frame));
+    try testing.expectEqual(@as(u32, 3), frame.diagnostics.needed.get(.max_events_per_frame));
+    try testing.expect(frame.diagnostics.exceeded.contains(.max_text_input_bytes));
+    try testing.expectEqual(@as(u32, 6), frame.diagnostics.needed.get(.max_text_input_bytes));
+    ui.release(frame);
+
+    ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 10, 10 } }, .events = &.{
+        .{ .pointer_down = .{ .pointer = support.touch(1, .{ 1, 1 }) } },
+        .{ .pointer_down = .{ .pointer = support.touch(2, .{ 2, 2 }) } },
+    } });
+    try testing.expectEqual([2]f32{ 1, 1 }, ui.primaryPointer().?.position);
+    frame = ui.endFrame();
+    try testing.expect(frame.diagnostics.exceeded.contains(.max_input_contacts));
+    ui.release(frame);
 }

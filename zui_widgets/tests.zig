@@ -4,27 +4,30 @@ const zui_testing = @import("zui_testing");
 const zui_widgets = @import("zui_widgets.zig");
 
 const testing = std.testing;
-const Platform = zui_testing.FixedMetricsPlatform(u16);
+const Text = zui_testing.FixedMetricsText(u16);
 const Ui = zui.Context(.{
-    .max_elements = 256,
-    .max_text_bytes = 4096,
-    .max_depth = 16,
-    .max_render_commands = 512,
-    .state_slots = 256,
-    .measure_cache_entries = 1024,
-}, Platform);
+    .limits = .{
+        .max_elements = 256,
+        .max_text_bytes = 4096,
+        .max_depth = 16,
+        .max_render_commands = 512,
+        .state_slots = 256,
+        .measure_cache_entries = 1024,
+    },
+    .Text = Text,
+});
 const Widgets = zui_widgets.Widgets(Ui);
 const Driver = zui_testing.Driver(Ui);
 
 const widgets: Widgets = .{};
 
 const Fixture = struct {
-    platform: Platform = .{},
+    text: Text = .{},
     ui: Ui = undefined,
     driver: Driver = undefined,
 
     fn init(fixture: *Fixture) !void {
-        fixture.ui = try .init(testing.allocator, testing.io, &fixture.platform);
+        fixture.ui = try .init(testing.allocator, testing.io, &fixture.text);
         fixture.driver = .{ .ui = &fixture.ui };
     }
 
@@ -72,7 +75,7 @@ const Form = struct {
 fn start(fixture: *Fixture, form: *Form, initial_name: []const u8) !void {
     try fixture.init();
     form.init(initial_name);
-    _ = try fixture.driver.frame(form, Form.declare, .{});
+    _ = try fixture.driver.frame(form, Form.declare, &.{});
 }
 
 test "a button reports each click once, and a disabled one never" {
@@ -84,7 +87,7 @@ test "a button reports each click once, and a disabled one never" {
 
     _ = try driver.click(&form, Form.declare, Form.ids.save);
     try testing.expectEqual(@as(u32, 1), form.clicks);
-    _ = try driver.frame(&form, Form.declare, .{});
+    _ = try driver.frame(&form, Form.declare, &.{});
     try testing.expectEqual(@as(u32, 1), form.clicks);
 
     _ = try driver.pressKeys(&form, Form.declare, &.{.enter});
@@ -141,7 +144,7 @@ test "the slider thumb is drawn at the value" {
     defer fixture.deinit();
 
     form.volume = 0.25;
-    const frame = try fixture.driver.frame(&form, Form.declare, .{});
+    const frame = try fixture.driver.frame(&form, Form.declare, &.{});
     const track = frame.rectOf(Form.ids.volume).?;
     const thumb = thumbOf(frame.commands(), track) orelse return error.ThumbNotFound;
     const travel = track.width - widgets.theme.slider_thumb_size[0];
@@ -269,10 +272,10 @@ test "a long text field scrolls to keep the caret visible" {
             ui.close();
         }
     };
-    _ = try driver.frame(&form, Narrow.declare, .{});
+    _ = try driver.frame(&form, Narrow.declare, &.{});
     _ = try driver.focus(&form, Narrow.declare, Form.ids.name);
     _ = try driver.typeText(&form, Narrow.declare, "0123456789abcde");
-    var frame = try driver.frame(&form, Narrow.declare, .{});
+    var frame = try driver.frame(&form, Narrow.declare, &.{});
     const field = frame.rectOf(Form.ids.name).?;
     try testing.expectEqual(@as(f32, 100), field.width);
     var caret = frame.rectOf(Form.ids.name.child("caret")).?;
@@ -285,7 +288,7 @@ test "a long text field scrolls to keep the caret visible" {
     try testing.expectEqualStrings("0123456789a|bcde", form.name.slice());
 
     _ = try driver.pressKeys(&form, Narrow.declare, &.{.home});
-    frame = try driver.frame(&form, Narrow.declare, .{});
+    frame = try driver.frame(&form, Narrow.declare, &.{});
     caret = frame.rectOf(Form.ids.name.child("caret")).?;
     try testing.expectEqual(field.x + widgets.theme.gap, caret.x);
 }
@@ -298,7 +301,7 @@ test "a dropdown opens, chooses, and closes" {
     const driver = &fixture.driver;
 
     _ = try driver.click(&form, Form.declare, Form.ids.quality);
-    var frame = try driver.frame(&form, Form.declare, .{});
+    var frame = try driver.frame(&form, Form.declare, &.{});
     const button = frame.rectOf(Form.ids.quality).?;
     const third_option = frame.rectOf(Form.ids.quality.indexedChild("option", 2)) orelse return error.PopupNotOpen;
     try testing.expect(third_option.y > button.y + button.height);
@@ -307,7 +310,7 @@ test "a dropdown opens, chooses, and closes" {
     _ = try driver.click(&form, Form.declare, Form.ids.quality.indexedChild("option", 2));
     try testing.expectEqual(.high_quality, form.quality);
     try testing.expectEqual(@as(u32, 1), form.quality_changes);
-    frame = try driver.frame(&form, Form.declare, .{});
+    frame = try driver.frame(&form, Form.declare, &.{});
     try testing.expect(frame.rectOf(Form.ids.quality.indexedChild("option", 0)) == null);
     try testing.expect(fixture.ui.focused(Form.ids.quality));
 
@@ -325,13 +328,13 @@ test "a dropdown closes on Escape and on a click outside, without changing" {
 
     _ = try driver.click(&form, Form.declare, Form.ids.quality);
     _ = try driver.pressKeys(&form, Form.declare, &.{.escape});
-    var frame = try driver.frame(&form, Form.declare, .{});
+    var frame = try driver.frame(&form, Form.declare, &.{});
     try testing.expect(frame.rectOf(Form.ids.quality.indexedChild("option", 0)) == null);
 
     _ = try driver.click(&form, Form.declare, Form.ids.quality);
-    _ = try driver.frame(&form, Form.declare, .{});
+    _ = try driver.frame(&form, Form.declare, &.{});
     _ = try driver.clickAt(&form, Form.declare, Form.ids.save, .{ 4, 0.5 });
-    frame = try driver.frame(&form, Form.declare, .{});
+    frame = try driver.frame(&form, Form.declare, &.{});
     try testing.expect(frame.rectOf(Form.ids.quality.indexedChild("option", 0)) == null);
     try testing.expectEqual(.medium, form.quality);
     try testing.expectEqual(@as(u32, 0), form.quality_changes);
@@ -345,7 +348,7 @@ test "an open dropdown keeps Tab inside its list" {
     const driver = &fixture.driver;
 
     _ = try driver.click(&form, Form.declare, Form.ids.quality);
-    _ = try driver.frame(&form, Form.declare, .{});
+    _ = try driver.frame(&form, Form.declare, &.{});
     try testing.expect(fixture.ui.focused(Form.ids.quality.indexedChild("option", 1)));
     for (0..3) |_| _ = try driver.pressKeys(&form, Form.declare, &.{.tab});
     try testing.expect(fixture.ui.focused(Form.ids.quality.indexedChild("option", 1)));
@@ -359,9 +362,9 @@ test "widgets render valid commands" {
     try start(&fixture, &form, "Ada");
     defer fixture.deinit();
     form.autosave = true;
-    const frame = try fixture.driver.frame(&form, Form.declare, .{});
+    const frame = try fixture.driver.frame(&form, Form.declare, &.{});
     try zui_testing.checkCommands(frame.commands());
-    try testing.expect(fixture.ui.diagnostics().ok());
+    try testing.expect(frame.diagnostics.ok());
 }
 
 test "labels from identifiers" {

@@ -1,9 +1,6 @@
-//! `zig build bench` runs these in ReleaseFast and prints one row per
-//! scenario (SPEC.md §14.3).
-//!
 //! ```sh
 //! zig build bench                                  # print the tables
-//! zig build bench -- --check-targets               # fail if a §6.5 target is missed
+//! zig build bench -- --check-targets               # fail if a SPEC.md §20.2 budget is missed
 //! zig build bench -- --json results.json           # save each scenario's fastest declaration and layout
 //! zig build bench -- --compare baseline.json       # fail on a >10% regression
 //! ```
@@ -14,35 +11,35 @@ const Io = std.Io;
 
 /// Text measurement with the cost profile of a bitmap font: one table
 /// lookup per byte.
-const GlyphTablePlatform = struct {
+const GlyphTableText = struct {
     advances: [256]f32 = blk: {
         var table: [256]f32 = undefined;
         for (&table, 0..) |*advance, byte| advance.* = 6 + @as(f32, @floatFromInt(byte % 5));
         break :blk table;
     },
 
-    pub fn measureText(self: *GlyphTablePlatform, text: []const u8, _: u16, size: f32) [2]f32 {
+    pub fn zuiMeasure(self: *GlyphTableText, text: []const u8, key: zui.MeasureKey(u16)) [2]f32 {
         var width: f32 = 0;
-        for (text) |byte| width += self.advances[byte];
-        return .{ width * size / 16, size };
+        for (text) |byte| width += self.advances[byte] + key.letter_spacing;
+        return .{ width * key.size / 16, key.size };
     }
 };
 
 /// Text measurement with the cost profile of a shaping engine: about a
 /// microsecond for a short word.
-fn ShapingPlatform(comptime thread_safe: bool) type {
+fn ShapingText(comptime thread_safe: bool) type {
     return struct {
         const Self = @This();
-        pub const thread_safe_measure = thread_safe;
+        pub const zui_thread_safe = thread_safe;
         const rounds_per_byte = 160;
 
-        pub fn measureText(_: *Self, text: []const u8, _: u16, size: f32) [2]f32 {
+        pub fn zuiMeasure(_: *Self, text: []const u8, key: zui.MeasureKey(u16)) [2]f32 {
             var state: u64 = 0x9e3779b97f4a7c15;
             for (text) |byte| {
                 for (0..rounds_per_byte) |_| state = (state ^ byte) *% 0x100000001b3;
             }
             std.mem.doNotOptimizeAway(state);
-            return .{ @as(f32, @floatFromInt(text.len)) * size / 2, size };
+            return .{ @as(f32, @floatFromInt(text.len)) * key.size / 2, key.size };
         }
     };
 }
@@ -58,43 +55,46 @@ const Measurement = struct {
     layout_median_ns: u64,
     /// Declaration, layout and emission together.
     frame_median_ns: u64,
-    target_ns: ?u64 = null,
-    platform_calls_per_frame: f64,
+    layout_target_ns: ?u64 = null,
+    declare_target_ns: ?u64 = null,
+    measure_calls_per_frame: f64,
 };
 
 const max_timed_frames = 400;
 
-fn Scenario(comptime config: zui.Config, comptime Platform: type, comptime Scene: type) type {
+fn Scenario(comptime limits: zui.Limits, comptime Text: type, comptime Scene: type) type {
     return struct {
-        const Ui = zui.Context(config, Platform);
+        const Ui = zui.Context(.{ .limits = limits, .Text = Text });
 
         /// Times `frame_count` frames after `warmup_frames`, in a fresh
         /// Context whose allocator counts every call after `init`.
         fn run(io: Io, gpa: std.mem.Allocator, warmup_frames: usize, frame_count: usize) !Measurement {
-            var platform: Platform = .{};
+            var text: Text = .{};
             var counting: CountingAllocator = .{ .backing = gpa };
-            var ui = try Ui.init(counting.allocator(), io, &platform);
+            var ui = try Ui.init(counting.allocator(), io, &text);
             defer ui.deinit(counting.allocator());
             const allocations_after_init = counting.allocations;
 
             var scene: Scene = .{};
             for (0..warmup_frames) |index| {
-                ui.beginFrame(.{ .viewport = .{ 1600, 1200 } });
+                ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 1600, 1200 } } });
                 scene.declare(&ui, index);
-                ui.release(try ui.endFrame());
+                ui.release(ui.endFrame());
             }
 
+            var element_count: u32 = 0;
             var declare_times: [max_timed_frames]u64 = undefined;
             var layout_times: [max_timed_frames]u64 = undefined;
             var frame_times: [max_timed_frames]u64 = undefined;
             const calls_before = ui.measureCalls();
             for (0..frame_count) |index| {
                 const frame_start = Io.Timestamp.now(io, .awake);
-                ui.beginFrame(.{ .viewport = .{ 1600, 1200 } });
+                ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 1600, 1200 } } });
                 scene.declare(&ui, warmup_frames + index);
                 const layout_start = Io.Timestamp.now(io, .awake);
-                const frame = try ui.endFrame();
+                const frame = ui.endFrame();
                 const end = Io.Timestamp.now(io, .awake);
+                element_count = frame.elementCount();
                 ui.release(frame);
                 declare_times[index] = @intCast(frame_start.durationTo(layout_start).nanoseconds);
                 layout_times[index] = @intCast(layout_start.durationTo(end).nanoseconds);
@@ -108,14 +108,15 @@ fn Scenario(comptime config: zui.Config, comptime Platform: type, comptime Scene
             std.mem.sortUnstable(u64, frame_times[0..frame_count], {}, std.sort.asc(u64));
             return .{
                 .name = Scene.name,
-                .elements = ui.lastFrame().element_count,
+                .elements = element_count,
                 .declare_min_ns = declare_times[0],
                 .declare_median_ns = declare_times[frame_count / 2],
                 .layout_min_ns = layout_times[0],
                 .layout_median_ns = layout_times[frame_count / 2],
                 .frame_median_ns = frame_times[frame_count / 2],
-                .target_ns = Scene.target_ns,
-                .platform_calls_per_frame = @as(f64, @floatFromInt(calls)) / @as(f64, @floatFromInt(frame_count)),
+                .layout_target_ns = Scene.layout_target_ns,
+                .declare_target_ns = if (@hasDecl(Scene, "declare_target_ns")) Scene.declare_target_ns else null,
+                .measure_calls_per_frame = @as(f64, @floatFromInt(calls)) / @as(f64, @floatFromInt(frame_count)),
             };
         }
     };
@@ -153,13 +154,14 @@ const CountingAllocator = struct {
     }
 };
 
-/// SPEC.md §6.5: 4,096 boxes, depth 8, no text. 512 rows, each a chain of
+/// 4,096 boxes, depth 8, no text. 512 rows, each a chain of
 /// 8 nested boxes with a mix of sizing rules, so nearly every element is a
 /// parent: the most per-element work a tree of this size can ask for.
 const BoxTree = struct {
     const name = "4096 boxes, depth 8";
-    const target_ns: ?u64 = 100 * std.time.ns_per_us;
-    const config: zui.Config = .{ .max_elements = 4200, .max_render_commands = 8192 };
+    const layout_target_ns: ?u64 = 100 * std.time.ns_per_us;
+    const declare_target_ns: ?u64 = 55 * std.time.ns_per_us;
+    const limits: zui.Limits = .{ .max_elements = 4200, .max_render_commands = 8192 };
 
     fn declare(_: *BoxTree, ui: anytype, _: usize) void {
         ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .grow_both, .child_gap = 1 } });
@@ -169,11 +171,13 @@ const BoxTree = struct {
                     0 => .{ .width = .grow, .height = .fit },
                     1 => .{ .width = .fit, .height = .fixed(2) },
                     2 => .{ .width = .percent(0.9), .height = .fit },
-                    else => .{ .width = .growBetween(4, 400), .height = .fit },
+                    else => .{ .width = .{ .rule = .grow, .amount = 1, .min = 4, .max = 400 }, .height = .fit },
                 };
                 ui.open(.{
                     .layout = .{ .sizing = sizing, .padding = .all(1), .child_gap = 1, .direction = if (depth % 2 == 0) .left_to_right else .top_to_bottom },
-                    .background = if (depth % 3 == 0) zui.Color.rgb(0x202030) else null,
+                    .decoration = .{
+                        .background = if (depth % 3 == 0) zui.Color.rgb(0x202030) else null,
+                    },
                 });
             }
             for (0..8) |_| ui.close();
@@ -245,13 +249,12 @@ fn coldSize(frame_index: usize) f32 {
     return 14 + @as(f32, @floatFromInt(frame_index % 1024)) / 128;
 }
 
-const text_config: zui.Config = .{ .max_elements = 1200, .max_render_commands = 8192, .max_text_bytes = 64 * 1024 };
+const text_limits: zui.Limits = .{ .max_elements = 1200, .max_render_commands = 8192, .max_text_bytes = 64 * 1024 };
 
-/// SPEC.md §6.5: 1,000 text elements averaging 40 characters, all
-/// measurements cached.
+/// 1,000 text elements averaging 40 characters, all measurements cached.
 const TextWall = struct {
     const name = "1000 texts, warm cache";
-    const target_ns: ?u64 = 250 * std.time.ns_per_us;
+    const layout_target_ns: ?u64 = 120 * std.time.ns_per_us;
     sentences: Sentences(false) = .{},
 
     fn declare(self: *TextWall, ui: anytype, _: usize) void {
@@ -261,7 +264,7 @@ const TextWall = struct {
 
 const TextWallCold = struct {
     const name = "1000 texts, cold cache";
-    const target_ns: ?u64 = null;
+    const layout_target_ns: ?u64 = null;
     sentences: Sentences(false) = .{},
 
     fn declare(self: *TextWallCold, ui: anytype, frame_index: usize) void {
@@ -271,8 +274,8 @@ const TextWallCold = struct {
 
 const DeepTree = struct {
     const name = "depth 64";
-    const target_ns: ?u64 = null;
-    const config: zui.Config = .{ .max_elements = 128, .max_depth = 80 };
+    const layout_target_ns: ?u64 = null;
+    const limits: zui.Limits = .{ .max_elements = 128, .max_depth = 80 };
 
     fn declare(_: *DeepTree, ui: anytype, _: usize) void {
         for (0..64) |depth| ui.open(.{ .layout = .{ .sizing = .{ .width = .grow, .height = .fit }, .padding = .all(1), .direction = if (depth % 2 == 0) .left_to_right else .top_to_bottom } });
@@ -283,14 +286,16 @@ const DeepTree = struct {
 
 const WideTree = struct {
     const name = "4000 children of one parent";
-    const target_ns: ?u64 = null;
-    const config: zui.Config = .{ .max_elements = 4100, .max_render_commands = 8192 };
+    const layout_target_ns: ?u64 = null;
+    const limits: zui.Limits = .{ .max_elements = 4100, .max_render_commands = 8192 };
 
     fn declare(_: *WideTree, ui: anytype, _: usize) void {
         ui.open(.{ .layout = .{ .sizing = .grow_both, .child_gap = 1 } });
         for (0..4000) |index| ui.box(.{
             .layout = .{ .sizing = .{ .width = if (index % 2 == 0) .grow else .fixed(1), .height = .fixed(8) } },
-            .background = .rgb(0x303040),
+            .decoration = .{
+                .background = .rgb(0x303040),
+            },
         });
         ui.close();
     }
@@ -301,8 +306,8 @@ const WideTree = struct {
 /// About 100 small elements, most with ids, a decoration and a label.
 const DocumentsView = struct {
     const name = "documents view";
-    const target_ns: ?u64 = null;
-    const config: zui.Config = .{ .max_elements = 4096 };
+    const layout_target_ns: ?u64 = null;
+    const limits: zui.Limits = .{ .max_elements = 4096 };
 
     const panel: zui.Color = .rgb(0x20202a);
     const border: zui.Color = .rgb(0x34344a);
@@ -312,7 +317,7 @@ const DocumentsView = struct {
     const muted_text_color: zui.Color = .rgb(0x9a9aae);
 
     fn declare(_: *DocumentsView, ui: anytype, _: usize) void {
-        ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .grow_both }, .background = .rgb(0x16161c) });
+        ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .grow_both }, .decoration = .{ .background = .rgb(0x16161c) } });
         declareToolbar(ui);
         ui.open(.{ .layout = .{ .sizing = .grow_both } });
         declareSidebar(ui);
@@ -325,9 +330,11 @@ const DocumentsView = struct {
         ui.open(.{
             .id = id,
             .focusable = true,
-            .background = if (ui.widgetState(id) == .hovered) border else panel,
-            .border = if (ui.focused(id)) .{ .color = focus_ring, .widths = .all(2) } else null,
-            .corner_radius = .all(6),
+            .decoration = .{
+                .background = if (ui.widgetState(id) == .hovered) border else panel,
+                .border = if (ui.focused(id)) .{ .color = focus_ring, .widths = .all(2) } else null,
+                .corner_radius = .all(6),
+            },
             .layout = .{ .sizing = .{ .height = .fixed(38) }, .padding = .symmetric(14, 0), .child_alignment = .{ .x = .center, .y = .center } },
         });
         ui.text(content, .{ .size = 20, .color = text_color });
@@ -338,8 +345,10 @@ const DocumentsView = struct {
         ui.open(.{
             .id = .of("toolbar"),
             .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(56) }, .padding = .symmetric(12, 8), .child_gap = 8, .child_alignment = .{ .y = .center } },
-            .background = panel,
-            .border = .{ .color = border, .widths = .{ .bottom = 1 } },
+            .decoration = .{
+                .background = panel,
+                .border = .{ .color = border, .widths = .{ .bottom = 1 } },
+            },
         });
         button(ui, .of("new"), "New");
         button(ui, .of("open"), "Open");
@@ -356,7 +365,9 @@ const DocumentsView = struct {
         ui.open(.{
             .id = .of("sidebar"),
             .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(260), .height = .grow }, .padding = .all(8), .child_gap = 4 },
-            .background = .rgb(0x1a1a22),
+            .decoration = .{
+                .background = .rgb(0x1a1a22),
+            },
             .scroll = .{},
         });
         var name_buffer: [32]u8 = undefined;
@@ -367,9 +378,11 @@ const DocumentsView = struct {
                 .id = id,
                 .focusable = true,
                 .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(36) }, .padding = .symmetric(12, 8), .child_alignment = .{ .y = .center } },
-                .background = if (index == 2) accent else if (state == .hovered or state == .pressed) border else null,
-                .corner_radius = .all(4),
-                .border = if (ui.focused(id)) .{ .color = focus_ring, .widths = .all(1) } else null,
+                .decoration = .{
+                    .background = if (index == 2) accent else if (state == .hovered or state == .pressed) border else null,
+                    .corner_radius = .all(4),
+                    .border = if (ui.focused(id)) .{ .color = focus_ring, .widths = .all(1) } else null,
+                },
             });
             const document_name = std.fmt.bufPrint(&name_buffer, "Document {d}", .{index + 1}) catch unreachable;
             ui.text(document_name, .{ .size = 20, .color = text_color });
@@ -384,7 +397,7 @@ const DocumentsView = struct {
         ui.text("This window is laid out by zui and drawn by raylib. Every element is declared each frame as nested function calls; zui computes the layout and returns render commands, and the backend draws them.", .{ .size = 20, .color = muted_text_color });
         ui.open(.{ .layout = .{ .child_gap = 12, .child_alignment = .{ .y = .center } } });
         button(ui, .of("details_toggle"), "Show details");
-        ui.open(.{ .id = .of("hover_me"), .interactive = true, .layout = .{ .padding = .symmetric(14, 8) }, .background = panel, .corner_radius = .all(6) });
+        ui.open(.{ .id = .of("hover_me"), .interactive = true, .layout = .{ .padding = .symmetric(14, 8) }, .decoration = .{ .background = panel, .corner_radius = .all(6) } });
         ui.text("Hover me", .{ .size = 20, .color = text_color });
         ui.close();
         ui.close();
@@ -393,7 +406,7 @@ const DocumentsView = struct {
     }
 };
 
-const shaping_config: zui.Config = .{
+const shaping_limits: zui.Limits = .{
     .max_elements = 1200,
     .max_render_commands = 8192,
     .max_text_bytes = 64 * 1024,
@@ -401,14 +414,14 @@ const shaping_config: zui.Config = .{
     .parallel_measure_capacity = 8192,
 };
 
-/// SPEC.md §10.5: cold frames whose measurements cost about a microsecond
+/// Cold frames whose measurements cost about a microsecond
 /// each, as with a shaping engine, measured on one thread and then across
 /// the `Io`'s threads.
 fn ShapedTextWall(comptime parallel: bool) type {
     return struct {
         const Self = @This();
         const name = if (parallel) "shaped text, parallel" else "shaped text, one thread";
-        const target_ns: ?u64 = null;
+        const layout_target_ns: ?u64 = null;
         sentences: Sentences(true) = .{},
 
         fn declare(self: *Self, ui: anytype, frame_index: usize) void {
@@ -417,12 +430,12 @@ fn ShapedTextWall(comptime parallel: bool) type {
     };
 }
 
-/// SPEC.md §10.2: frames rendered on a second thread while the next one is
+/// Frames rendered on a second thread while the next one is
 /// declared and laid out, against the same work on one thread.
 fn framesPerSecond(io: Io, gpa: std.mem.Allocator, render_thread: bool) !f64 {
-    const Ui = zui.Context(text_config, GlyphTablePlatform);
-    var platform: GlyphTablePlatform = .{};
-    var ui = try Ui.init(gpa, io, &platform);
+    const Ui = zui.Context(.{ .limits = text_limits, .Text = GlyphTableText });
+    var text: GlyphTableText = .{};
+    var ui = try Ui.init(gpa, io, &text);
     defer ui.deinit(gpa);
     var sentences: Sentences(false) = .{};
 
@@ -433,9 +446,9 @@ fn framesPerSecond(io: Io, gpa: std.mem.Allocator, render_thread: bool) !f64 {
 
     const start = Io.Timestamp.now(io, .awake);
     for (0..frame_count) |_| {
-        ui.beginFrame(.{ .viewport = .{ 1600, 1200 } });
+        ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 1600, 1200 } } });
         declareTextWall(&ui, sentences.get(), 16);
-        const frame = try ui.endFrame();
+        const frame = ui.endFrame();
         if (renderer != null) {
             queue.putOneUncancelable(io, frame) catch unreachable;
         } else {
@@ -486,32 +499,32 @@ fn startupMeasurement(name: []const u8, times: *[startup_samples]u64) StartupMea
     return .{ .name = name, .min_ns = times[0], .median_ns = times[startup_samples / 2] };
 }
 
-const DefaultUi = zui.Context(.{}, GlyphTablePlatform);
+const DefaultUi = zui.Context(.{ .Text = GlyphTableText });
 
 /// Each sample gets memory the process has never touched, so its page
 /// faults are timed, as they are when an application starts.
 fn timeInit(io: Io, gpa: std.mem.Allocator) !StartupMeasurement {
-    var platform: GlyphTablePlatform = .{};
+    var text: GlyphTableText = .{};
     var times: [startup_samples]u64 = undefined;
     for (&times) |*time| {
         const start = Io.Timestamp.now(io, .awake);
-        var ui = try DefaultUi.init(gpa, io, &platform);
+        var ui = try DefaultUi.init(gpa, io, &text);
         time.* = @intCast(start.durationTo(Io.Timestamp.now(io, .awake)).nanoseconds);
         ui.deinit(gpa);
     }
     return startupMeasurement("init, default config", &times);
 }
 
-var init_buffer: [DefaultUi.required_bytes]u8 align(16) = undefined;
+var init_buffer: [DefaultUi.required_bytes]u8 align(DefaultUi.buffer_alignment) = undefined;
 
 /// Only the first sample touches `init_buffer` for the first time, so this
 /// is the time zui itself spends preparing memory.
 fn timeInitBuffer(io: Io) !StartupMeasurement {
-    var platform: GlyphTablePlatform = .{};
+    var text: GlyphTableText = .{};
     var times: [startup_samples]u64 = undefined;
     for (&times) |*time| {
         const start = Io.Timestamp.now(io, .awake);
-        var ui = try DefaultUi.initBuffer(&init_buffer, io, &platform);
+        var ui = try DefaultUi.initBuffer(&init_buffer, io, &text);
         // Nothing else reads `init_buffer`, so without this LLVM deletes
         // every write `initBuffer` makes to it, and the sample times nothing.
         std.mem.doNotOptimizeAway(&ui);
@@ -523,25 +536,25 @@ fn timeInitBuffer(io: Io) !StartupMeasurement {
 
 /// The first frame of each new `Context`: every measurement misses the
 /// cache, and the frame's memory is touched for the first time.
-fn FirstFrame(comptime name: []const u8, comptime config: zui.Config, comptime Scene: type) type {
+fn FirstFrame(comptime name: []const u8, comptime limits: zui.Limits, comptime Scene: type) type {
     return struct {
-        const Ui = zui.Context(config, GlyphTablePlatform);
+        const Ui = zui.Context(.{ .limits = limits, .Text = GlyphTableText });
 
         fn run(io: Io, gpa: std.mem.Allocator) !StartupMeasurement {
-            var platform: GlyphTablePlatform = .{};
+            var text: GlyphTableText = .{};
             var scene: Scene = .{};
             if (@hasField(Scene, "sentences")) _ = scene.sentences.get();
             var times: [startup_samples]u64 = undefined;
             for (&times) |*time| {
                 var counting: CountingAllocator = .{ .backing = gpa };
-                var ui = try Ui.init(counting.allocator(), io, &platform);
+                var ui = try Ui.init(counting.allocator(), io, &text);
                 defer ui.deinit(counting.allocator());
                 const allocations_after_init = counting.allocations;
 
                 const start = Io.Timestamp.now(io, .awake);
-                ui.beginFrame(.{ .viewport = .{ 1600, 1200 } });
+                ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 1600, 1200 } } });
                 scene.declare(&ui, 0);
-                const frame = try ui.endFrame();
+                const frame = ui.endFrame();
                 time.* = @intCast(start.durationTo(Io.Timestamp.now(io, .awake)).nanoseconds);
                 ui.release(frame);
                 if (counting.allocations != allocations_after_init) return error.FramesAllocated;
@@ -576,6 +589,13 @@ fn parseOptions(arguments: []const [:0]const u8) !Options {
         }
     }
     return options;
+}
+
+fn budgetText(buffer: []u8, fastest_ns: u64, budget_ns: ?u64, missed_any: *bool) []const u8 {
+    const budget = budget_ns orelse return "";
+    const met = fastest_ns <= budget;
+    if (!met) missed_any.* = true;
+    return std.fmt.bufPrint(buffer, "{s} {d:.0}us", .{ if (met) "ok" else "MISS", microseconds(budget) }) catch unreachable;
 }
 
 fn microseconds(nanoseconds: u64) f64 {
@@ -627,20 +647,20 @@ pub fn main(init: std.process.Init) !void {
     const options = try parseOptions(try init.minimal.args.toSlice(arena));
 
     const measurements = [_]Measurement{
-        try Scenario(BoxTree.config, GlyphTablePlatform, BoxTree).run(io, gpa, 20, 400),
-        try Scenario(text_config, GlyphTablePlatform, TextWall).run(io, gpa, 20, 400),
-        try Scenario(text_config, GlyphTablePlatform, TextWallCold).run(io, gpa, 20, 400),
-        try Scenario(DeepTree.config, GlyphTablePlatform, DeepTree).run(io, gpa, 20, 400),
-        try Scenario(WideTree.config, GlyphTablePlatform, WideTree).run(io, gpa, 20, 400),
-        try Scenario(DocumentsView.config, GlyphTablePlatform, DocumentsView).run(io, gpa, 20, 400),
-        try Scenario(shaping_config, ShapingPlatform(false), ShapedTextWall(false)).run(io, gpa, 2, 20),
-        try Scenario(shaping_config, ShapingPlatform(true), ShapedTextWall(true)).run(io, gpa, 2, 20),
+        try Scenario(BoxTree.limits, GlyphTableText, BoxTree).run(io, gpa, 20, 400),
+        try Scenario(text_limits, GlyphTableText, TextWall).run(io, gpa, 20, 400),
+        try Scenario(text_limits, GlyphTableText, TextWallCold).run(io, gpa, 20, 400),
+        try Scenario(DeepTree.limits, GlyphTableText, DeepTree).run(io, gpa, 20, 400),
+        try Scenario(WideTree.limits, GlyphTableText, WideTree).run(io, gpa, 20, 400),
+        try Scenario(DocumentsView.limits, GlyphTableText, DocumentsView).run(io, gpa, 20, 400),
+        try Scenario(shaping_limits, ShapingText(false), ShapedTextWall(false)).run(io, gpa, 2, 20),
+        try Scenario(shaping_limits, ShapingText(true), ShapedTextWall(true)).run(io, gpa, 2, 20),
     };
     const startup_measurements = [_]StartupMeasurement{
         try timeInit(io, gpa),
         try timeInitBuffer(io),
-        try FirstFrame("documents view", DocumentsView.config, DocumentsView).run(io, gpa),
-        try FirstFrame("1000 texts", text_config, TextWall).run(io, gpa),
+        try FirstFrame("documents view", DocumentsView.limits, DocumentsView).run(io, gpa),
+        try FirstFrame("1000 texts", text_limits, TextWall).run(io, gpa),
     };
     const one_thread_rate = try framesPerSecond(io, gpa, false);
     const render_thread_rate = try framesPerSecond(io, gpa, true);
@@ -648,17 +668,15 @@ pub fn main(init: std.process.Init) !void {
     var stdout_buffer: [4096]u8 = undefined;
     var stdout_writer = Io.File.stdout().writer(io, &stdout_buffer);
     const out = &stdout_writer.interface;
-    try out.print("{s:<28} {s:>8} {s:>11} {s:>11} {s:>11} {s:>11} {s:>11} {s:>8} {s:>12} {s:>9}\n", .{ "scenario", "elements", "declare min", "declare med", "layout min", "layout med", "frame med", "ns/elem", "target", "measures" });
+    try out.print("{s:<28} {s:>8} {s:>11} {s:>11} {s:>11} {s:>11} {s:>11} {s:>8} {s:>14} {s:>14} {s:>9}\n", .{ "scenario", "elements", "declare min", "declare med", "layout min", "layout med", "frame med", "ns/elem", "declare budget", "layout budget", "measures" });
     var missed_target = false;
     for (measurements) |measurement| {
         const per_element = @as(f64, @floatFromInt(measurement.layout_min_ns)) / @as(f64, @floatFromInt(measurement.elements));
-        var target_buffer: [32]u8 = undefined;
-        const target_text = if (measurement.target_ns) |target| blk: {
-            const met = measurement.layout_min_ns <= target;
-            if (!met) missed_target = true;
-            break :blk std.fmt.bufPrint(&target_buffer, "{s} {d:.0}us", .{ if (met) "ok" else "MISS", microseconds(target) }) catch unreachable;
-        } else "";
-        try out.print("{s:<28} {d:>8} {d:>9.1}us {d:>9.1}us {d:>9.1}us {d:>9.1}us {d:>9.1}us {d:>8.1} {s:>12} {d:>9.0}\n", .{
+        var declare_budget_buffer: [32]u8 = undefined;
+        var layout_budget_buffer: [32]u8 = undefined;
+        const declare_budget = budgetText(&declare_budget_buffer, measurement.declare_min_ns, measurement.declare_target_ns, &missed_target);
+        const layout_budget = budgetText(&layout_budget_buffer, measurement.layout_min_ns, measurement.layout_target_ns, &missed_target);
+        try out.print("{s:<28} {d:>8} {d:>9.1}us {d:>9.1}us {d:>9.1}us {d:>9.1}us {d:>9.1}us {d:>8.1} {s:>14} {s:>14} {d:>9.0}\n", .{
             measurement.name,
             measurement.elements,
             microseconds(measurement.declare_min_ns),
@@ -667,8 +685,9 @@ pub fn main(init: std.process.Init) !void {
             microseconds(measurement.layout_median_ns),
             microseconds(measurement.frame_median_ns),
             per_element,
-            target_text,
-            measurement.platform_calls_per_frame,
+            declare_budget,
+            layout_budget,
+            measurement.measure_calls_per_frame,
         });
     }
     const shaped_one_thread: f64 = @floatFromInt(measurements[compared_count].layout_median_ns);

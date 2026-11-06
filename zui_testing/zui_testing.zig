@@ -1,18 +1,14 @@
-//! Tools for testing applications built on zui: deterministic text
-//! metrics, a driver that clicks, drags and types by element id, golden
-//! text snapshots of render commands, and command invariant checks.
-//!
 //! ```zig
-//! const Ui = zui.Context(.{}, zui_testing.FixedMetricsPlatform(u16));
+//! const Ui = zui.Context(.{ .Text = zui_testing.FixedMetricsText(u16) });
 //!
 //! test "saving clears the dirty flag" {
-//!     var platform: zui_testing.FixedMetricsPlatform(u16) = .{};
-//!     var ui: Ui = try .init(std.testing.allocator, std.testing.io, &platform);
+//!     var text: zui_testing.FixedMetricsText(u16) = .{};
+//!     var ui: Ui = try .init(std.testing.allocator, std.testing.io, &text);
 //!     defer ui.deinit(std.testing.allocator);
 //!     var driver: zui_testing.Driver(Ui) = .{ .ui = &ui };
 //!
 //!     var app: App = .{ .dirty = true };
-//!     _ = try driver.frame(&app, App.declare, .{});
+//!     _ = try driver.frame(&app, App.declare, &.{});
 //!     _ = try driver.click(&app, App.declare, .of("save"));
 //!     try std.testing.expect(!app.dirty);
 //! }
@@ -21,21 +17,22 @@
 const std = @import("std");
 const zui = @import("zui");
 
-/// Text metrics that don't depend on fonts: each byte is `size / 2` wide
-/// and `size` tall, so at the default size of 16 a character is 8×16.
-pub fn FixedMetricsPlatform(comptime FontId: type) type {
+/// A text contract whose metrics don't depend on fonts: each byte is
+/// `size / 2` wide and `size` tall, so at the default size of 16 a
+/// character is 8×16.
+pub fn FixedMetricsText(comptime FontId: type) type {
     return struct {
         const Self = @This();
 
-        pub fn measureText(_: *Self, text: []const u8, _: FontId, size: f32) [2]f32 {
-            return .{ @as(f32, @floatFromInt(text.len)) * size / 2, size };
+        pub fn zuiMeasure(_: *Self, text: []const u8, key: zui.MeasureKey(FontId)) [2]f32 {
+            return .{ @as(f32, @floatFromInt(text.len)) * key.size / 2, key.size };
         }
     };
 }
 
-/// Runs frames with simulated input. Interaction in zui answers for the
-/// previous frame, so every helper that targets an element by id needs
-/// that element to have been declared in an earlier frame.
+/// Runs complete frames from events. Interaction in zui answers for the
+/// previous frame's layout, so every helper that targets an element by id
+/// needs that element to have been declared in an earlier frame.
 ///
 /// `declare` is called once per frame as `declare(app, ui)`.
 pub fn Driver(comptime Ui: type) type {
@@ -44,37 +41,20 @@ pub fn Driver(comptime Ui: type) type {
 
         ui: *Ui,
         viewport: [2]f32 = .{ 800, 600 },
-        pointer: ?[2]f32 = null,
-        buttons: std.EnumSet(zui.Button) = .initEmpty(),
+        now: zui.Instant = .zero,
+        frame_interval_ns: u64 = std.time.ns_per_s / 60,
+        /// Held for every key the driver presses.
         modifiers: zui.Modifiers = .{},
-        dt_seconds: f32 = 1.0 / 60.0,
 
-        pub const Step = struct {
-            keys: []const zui.Key = &.{},
-            text: []const u8 = "",
-            wheel: [2]f32 = .{ 0, 0 },
-        };
-
-        /// One frame: begin with the driver's pointer, buttons and
-        /// modifiers plus `step`, declare, end, and release. The returned
-        /// frame stays readable until the next frame begins.
-        pub fn frame(self: *Self, app: anytype, comptime declare: anytype, step: Step) !*const Ui.Frame {
-            self.ui.beginFrame(.{
-                .viewport = self.viewport,
-                .dt_seconds = self.dt_seconds,
-                .pointer = self.pointer,
-                .buttons = self.buttons,
-                .wheel = step.wheel,
-                .keys_pressed = step.keys,
-                .modifiers = self.modifiers,
-                .text_input = step.text,
-            });
+        /// One frame from `events`: begin, declare, end, and release. The
+        /// returned frame stays readable until the next frame begins.
+        pub fn frame(self: *Self, app: anytype, comptime declare: anytype, events: []const zui.Event) !*const Ui.Frame {
+            self.now = self.now.addNanoseconds(self.frame_interval_ns);
+            self.ui.beginFrame(&.{ .params = .{ .now = self.now, .viewport = self.viewport }, .events = events });
             declare(app, self.ui);
-            const ended = self.ui.endFrame() catch |err| {
-                self.ui.release(self.ui.lastFrame());
-                return err;
-            };
+            const ended = self.ui.endFrame();
             self.ui.release(ended);
+            try ended.diagnostics.check();
             return ended;
         }
 
@@ -85,51 +65,112 @@ pub fn Driver(comptime Ui: type) type {
             return .{ rect.x + rect.width * fractions[0], rect.y + rect.height * fractions[1] };
         }
 
-        pub fn hover(self: *Self, app: anytype, comptime declare: anytype, element_id: zui.Id) !*const Ui.Frame {
-            self.pointer = try self.pointOn(element_id, .{ 0.5, 0.5 });
-            return self.frame(app, declare, .{});
+        fn mouseAt(self: *const Self, position: [2]f32) zui.Pointer {
+            return .{ .id = .mouse, .kind = .mouse, .position = position, .at = self.now };
         }
 
-        /// Presses and releases the primary button on the element's center:
-        /// two frames. The click is visible to the second frame's declarations.
+        fn touchAt(self: *const Self, finger: usize, position: [2]f32) zui.Pointer {
+            return .{ .id = @enumFromInt(1 + finger), .kind = .touch, .position = position, .at = self.now };
+        }
+
+        pub fn hover(self: *Self, app: anytype, comptime declare: anytype, element_id: zui.Id) !*const Ui.Frame {
+            const pointer = self.mouseAt(try self.pointOn(element_id, .{ 0.5, 0.5 }));
+            return self.frame(app, declare, &.{.{ .pointer_move = .{ .pointer = pointer } }});
+        }
+
+        /// Presses and releases the mouse on the element's center in one
+        /// frame, whose declarations see the click.
         pub fn click(self: *Self, app: anytype, comptime declare: anytype, element_id: zui.Id) !*const Ui.Frame {
             return self.clickAt(app, declare, element_id, .{ 0.5, 0.5 });
         }
 
         pub fn clickAt(self: *Self, app: anytype, comptime declare: anytype, element_id: zui.Id, fractions: [2]f32) !*const Ui.Frame {
-            self.pointer = try self.pointOn(element_id, fractions);
-            self.buttons.insert(.primary);
-            _ = try self.frame(app, declare, .{});
-            self.buttons.remove(.primary);
-            return self.frame(app, declare, .{});
+            const pointer = self.mouseAt(try self.pointOn(element_id, fractions));
+            return self.frame(app, declare, &.{
+                .{ .pointer_move = .{ .pointer = pointer } },
+                .{ .pointer_down = .{ .pointer = pointer } },
+                .{ .pointer_up = .{ .pointer = pointer } },
+            });
         }
 
-        /// Presses at `from`, moves to `to` with the button held, and
-        /// releases there: three frames. Both points are fractions of the
-        /// element's rectangle when the drag starts, and may lie outside it.
+        /// A finger down and up on the element's center in one frame.
+        pub fn tap(self: *Self, app: anytype, comptime declare: anytype, element_id: zui.Id) !*const Ui.Frame {
+            const pointer = self.touchAt(0, try self.pointOn(element_id, .{ 0.5, 0.5 }));
+            return self.frame(app, declare, &.{
+                .{ .pointer_down = .{ .pointer = pointer } },
+                .{ .pointer_up = .{ .pointer = pointer } },
+            });
+        }
+
+        /// Presses the mouse at `from`, moves to `to` with the button held,
+        /// and releases there: three frames. Both points are fractions of
+        /// the element's rectangle when the drag starts, and may lie outside it.
         pub fn drag(self: *Self, app: anytype, comptime declare: anytype, element_id: zui.Id, from: [2]f32, to: [2]f32) !*const Ui.Frame {
+            const start = self.mouseAt(try self.pointOn(element_id, from));
             const end_point = try self.pointOn(element_id, to);
-            self.pointer = try self.pointOn(element_id, from);
-            self.buttons.insert(.primary);
-            _ = try self.frame(app, declare, .{});
-            self.pointer = end_point;
-            _ = try self.frame(app, declare, .{});
-            self.buttons.remove(.primary);
-            return self.frame(app, declare, .{});
+            _ = try self.frame(app, declare, &.{
+                .{ .pointer_move = .{ .pointer = start } },
+                .{ .pointer_down = .{ .pointer = start } },
+            });
+            const end = self.mouseAt(end_point);
+            _ = try self.frame(app, declare, &.{.{ .pointer_move = .{ .pointer = end } }});
+            return self.frame(app, declare, &.{.{ .pointer_up = .{ .pointer = self.mouseAt(end_point) } }});
         }
 
+        pub const Stroke = struct { from: [2]f32, to: [2]f32 };
+
+        pub const max_fingers = 10;
+
+        /// One finger per stroke, all down together, moving together and
+        /// lifting together: three frames, as `drag`.
+        ///
+        /// ```zig
+        /// // Two fingers spreading apart across a map.
+        /// _ = try driver.dragFingers(&app, App.declare, .of("map"), &.{
+        ///     .{ .from = .{ 0.4, 0.5 }, .to = .{ 0.2, 0.5 } },
+        ///     .{ .from = .{ 0.6, 0.5 }, .to = .{ 0.8, 0.5 } },
+        /// });
+        /// ```
+        pub fn dragFingers(self: *Self, app: anytype, comptime declare: anytype, element_id: zui.Id, strokes: []const Stroke) !*const Ui.Frame {
+            std.debug.assert(strokes.len <= max_fingers);
+            var events: [max_fingers]zui.Event = undefined;
+            var ends: [max_fingers][2]f32 = undefined;
+            for (strokes, 0..) |stroke, finger| {
+                ends[finger] = try self.pointOn(element_id, stroke.to);
+                events[finger] = .{ .pointer_down = .{ .pointer = self.touchAt(finger, try self.pointOn(element_id, stroke.from)) } };
+            }
+            _ = try self.frame(app, declare, events[0..strokes.len]);
+            for (0..strokes.len) |finger| events[finger] = .{ .pointer_move = .{ .pointer = self.touchAt(finger, ends[finger]) } };
+            _ = try self.frame(app, declare, events[0..strokes.len]);
+            for (0..strokes.len) |finger| events[finger] = .{ .pointer_up = .{ .pointer = self.touchAt(finger, ends[finger]) } };
+            return self.frame(app, declare, events[0..strokes.len]);
+        }
+
+        /// Each key down and up, in order, in one frame, with `modifiers` held.
         pub fn pressKeys(self: *Self, app: anytype, comptime declare: anytype, keys: []const zui.Key) !*const Ui.Frame {
-            return self.frame(app, declare, .{ .keys = keys });
+            var events: [Ui.limits.max_events_per_frame]zui.Event = undefined;
+            var count: usize = 0;
+            for (keys) |key| {
+                if (count + 2 > events.len) {
+                    _ = try self.frame(app, declare, events[0..count]);
+                    count = 0;
+                }
+                const key_event: zui.KeyEvent = .{ .key = key, .modifiers = self.modifiers, .at = self.now };
+                events[count] = .{ .key_down = key_event };
+                events[count + 1] = .{ .key_up = key_event };
+                count += 2;
+            }
+            return self.frame(app, declare, events[0..count]);
         }
 
-        /// Delivers `text` as typed input in frames of at most
-        /// `zui.max_text_input_bytes`, so nothing is truncated.
+        /// Delivers `text` in frames of at most `limits.max_text_input_bytes`,
+        /// split at character boundaries, so nothing is truncated.
         pub fn typeText(self: *Self, app: anytype, comptime declare: anytype, text: []const u8) !*const Ui.Frame {
             var remaining = text;
             while (true) {
-                var chunk_len = @min(remaining.len, zui.max_text_input_bytes);
+                var chunk_len = @min(remaining.len, Ui.limits.max_text_input_bytes);
                 while (chunk_len < remaining.len and isContinuationByte(remaining[chunk_len])) chunk_len -= 1;
-                const ended = try self.frame(app, declare, .{ .text = remaining[0..chunk_len] });
+                const ended = try self.frame(app, declare, &.{.{ .text = remaining[0..chunk_len] }});
                 remaining = remaining[chunk_len..];
                 if (remaining.len == 0) return ended;
             }
@@ -138,7 +179,7 @@ pub fn Driver(comptime Ui: type) type {
         /// Focus moves at the start of the next frame, which this runs.
         pub fn focus(self: *Self, app: anytype, comptime declare: anytype, element_id: zui.Id) !*const Ui.Frame {
             self.ui.requestFocus(element_id);
-            return self.frame(app, declare, .{});
+            return self.frame(app, declare, &.{});
         }
     };
 }
@@ -182,10 +223,11 @@ pub fn snapshot(writer: *std.Io.Writer, commands: anytype, names: anytype) std.I
                 if (text.line != 0) try writer.print(" line={d}", .{text.line});
                 try writeFont(writer, text.style.font);
                 try writer.print(" size={d}", .{text.style.size});
+                if (text.style.letter_spacing != 0) try writer.print(" spacing={d}", .{text.style.letter_spacing});
                 try writeColor(writer, text.style.color);
                 try writer.print(" \"{s}\"", .{text.content});
             },
-            .image => |handle| try writeHandle(writer, handle),
+            .image => |image| try writeHandle(writer, image.handle),
             .clip_begin, .clip_end, .custom => {},
         }
         try writer.writeByte('\n');
@@ -294,8 +336,11 @@ pub fn findViolation(commands: anytype) ?Violation {
     return null;
 }
 
-const TestPlatform = FixedMetricsPlatform(u16);
-const TestUi = zui.Context(.{ .max_elements = 64, .max_text_bytes = 1024, .max_render_commands = 128, .state_slots = 64, .measure_cache_entries = 64 }, TestPlatform);
+const TestText = FixedMetricsText(u16);
+const TestUi = zui.Context(.{
+    .limits = .{ .max_elements = 64, .max_text_bytes = 1024, .max_render_commands = 128, .state_slots = 64, .measure_cache_entries = 64 },
+    .Text = TestText,
+});
 
 const Counter = struct {
     count: u32 = 0,
@@ -304,26 +349,26 @@ const Counter = struct {
 
     fn declare(counter: *Counter, ui: *TestUi) void {
         if (ui.clicked(ids.increment)) counter.count += 1;
-        ui.open(.{ .id = ids.panel, .background = .rgb(0x202020), .layout = .{ .padding = .all(8), .child_gap = 4 } });
-        ui.box(.{ .id = ids.increment, .interactive = true, .background = .rgba(0x3366ff80), .corner_radius = .all(4), .layout = .{ .sizing = .{ .width = .fixed(40), .height = .fixed(20) } } });
+        ui.open(.{ .id = ids.panel, .decoration = .{ .background = .rgb(0x202020) }, .layout = .{ .padding = .all(8), .child_gap = 4 } });
+        ui.box(.{ .id = ids.increment, .interactive = true, .decoration = .{ .background = .rgba(0x3366ff80), .corner_radius = .all(4) }, .layout = .{ .sizing = .{ .width = .fixed(40), .height = .fixed(20) } } });
         ui.text("Add", .{ .color = .white });
         ui.close();
     }
 };
 
-fn initTestUi(platform: *TestPlatform) !TestUi {
-    return .init(std.testing.allocator, std.testing.io, platform);
+fn initTestUi(text: *TestText) !TestUi {
+    return .init(std.testing.allocator, std.testing.io, text);
 }
 
 test "the driver clicks by id" {
-    var platform: TestPlatform = .{};
-    var ui = try initTestUi(&platform);
+    var text_contract: TestText = .{};
+    var ui = try initTestUi(&text_contract);
     defer ui.deinit(std.testing.allocator);
     var driver: Driver(TestUi) = .{ .ui = &ui };
 
     var counter: Counter = .{};
     try std.testing.expectError(error.ElementNotFound, driver.click(&counter, Counter.declare, Counter.ids.increment));
-    _ = try driver.frame(&counter, Counter.declare, .{});
+    _ = try driver.frame(&counter, Counter.declare, &.{});
     _ = try driver.click(&counter, Counter.declare, Counter.ids.increment);
     try std.testing.expectEqual(@as(u32, 1), counter.count);
     _ = try driver.clickAt(&counter, Counter.declare, Counter.ids.panel, .{ 0.95, 0.5 });
@@ -331,13 +376,13 @@ test "the driver clicks by id" {
 }
 
 test "snapshots name the ids they are given" {
-    var platform: TestPlatform = .{};
-    var ui = try initTestUi(&platform);
+    var text_contract: TestText = .{};
+    var ui = try initTestUi(&text_contract);
     defer ui.deinit(std.testing.allocator);
     var driver: Driver(TestUi) = .{ .ui = &ui };
 
     var counter: Counter = .{};
-    const frame = try driver.frame(&counter, Counter.declare, .{});
+    const frame = try driver.frame(&counter, Counter.declare, &.{});
     try checkCommands(frame.commands());
     try expectSnapshot(frame.commands(), Counter.ids,
         \\rectangle id=panel x=0 y=0 w=84 h=36 color=#202020
@@ -366,16 +411,47 @@ test "typeText splits long input at UTF-8 boundaries" {
             recorder.frames += 1;
         }
     };
-    var platform: TestPlatform = .{};
-    var ui = try initTestUi(&platform);
+    var text_contract: TestText = .{};
+    var ui = try initTestUi(&text_contract);
     defer ui.deinit(std.testing.allocator);
     var driver: Driver(TestUi) = .{ .ui = &ui };
 
-    const text = "é" ** 100;
+    const text = "é" ** 200;
     var recorder: Recorder = .{};
     _ = try driver.typeText(&recorder, Recorder.declare, text);
     try std.testing.expectEqualStrings(text, recorder.received[0..recorder.len]);
     try std.testing.expectEqual(@as(usize, 2), recorder.frames);
+}
+
+test "the driver taps and drags with several fingers" {
+    const Pad = struct {
+        taps: u32 = 0,
+        pressed_together: bool = false,
+
+        fn declare(pad: *@This(), ui: *TestUi) void {
+            if (ui.clicked(.of("pad"))) pad.taps += 1;
+            if (ui.pressed(.of("pad")) and ui.pressed(.of("other"))) pad.pressed_together = true;
+            ui.open(.{ .layout = .{ .child_gap = 10 } });
+            ui.box(.{ .id = .of("pad"), .interactive = true, .layout = .{ .sizing = .{ .width = .fixed(40), .height = .fixed(40) } } });
+            ui.box(.{ .id = .of("other"), .interactive = true, .layout = .{ .sizing = .{ .width = .fixed(40), .height = .fixed(40) } } });
+            ui.close();
+        }
+    };
+    var text_contract: TestText = .{};
+    var ui = try initTestUi(&text_contract);
+    defer ui.deinit(std.testing.allocator);
+    var driver: Driver(TestUi) = .{ .ui = &ui };
+
+    var pad: Pad = .{};
+    _ = try driver.frame(&pad, Pad.declare, &.{});
+    _ = try driver.tap(&pad, Pad.declare, .of("pad"));
+    try std.testing.expectEqual(@as(u32, 1), pad.taps);
+    _ = try driver.dragFingers(&pad, Pad.declare, .of("pad"), &.{
+        .{ .from = .{ 0.5, 0.5 }, .to = .{ 0.5, 0.5 } },
+        .{ .from = .{ 1.75, 0.5 }, .to = .{ 1.75, 0.5 } },
+    });
+    try std.testing.expect(pad.pressed_together);
+    try std.testing.expectEqual(@as(u32, 2), pad.taps);
 }
 
 test "findViolation rejects broken command lists" {

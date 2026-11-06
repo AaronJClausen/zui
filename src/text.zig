@@ -58,15 +58,16 @@ pub fn fontBits(font: anytype) u64 {
 }
 
 /// Persistent, open-addressed cache of text measurements, keyed by the
-/// bytes, the font and the size. It outlives frames, which is why
-/// steady-state frames make almost no platform calls.
-pub fn MeasureCache(comptime FontId: type, comptime entry_count: u32, comptime Platform: type) type {
+/// bytes and the `MeasureKey`. It outlives frames, which is why
+/// steady-state frames make almost no calls to the text contract.
+pub fn MeasureCache(comptime FontId: type, comptime entry_count: u32, comptime Text: type) type {
     return struct {
         const Self = @This();
         const probe_window = 8;
+        pub const Key = style.MeasureKey(FontId);
 
-        /// The key hashes the bytes with the font and size as the seed;
-        /// two different texts share one with probability 2^-64.
+        /// `key` hashes the bytes seeded with the `MeasureKey`; two
+        /// different texts share one with probability 2^-64.
         const Entry = struct {
             key: u64,
             measured: [2]f32,
@@ -75,26 +76,28 @@ pub fn MeasureCache(comptime FontId: type, comptime entry_count: u32, comptime P
 
         entries: [entry_count]Entry,
         generation: u32,
-        platform_calls: u64,
+        measure_calls: u64,
 
         pub fn reset(self: *Self) void {
             for (&self.entries) |*entry| entry.key = 0;
             self.generation = 1;
-            self.platform_calls = 0;
+            self.measure_calls = 0;
         }
 
-        pub fn measure(self: *Self, platform: *Platform, text: []const u8, font: FontId, size: f32) [2]f32 {
-            const key = keyOf(text, font, size);
-            if (self.lookup(key)) |measured| return measured;
-            const measured = platform.measureText(text, font, size);
-            self.platform_calls += 1;
-            self.insert(key, measured);
+        pub fn measure(self: *Self, text_contract: *Text, text: []const u8, key: Key) [2]f32 {
+            const hash = hashOf(text, key);
+            if (self.lookup(hash)) |measured| return measured;
+            const measured = text_contract.zuiMeasure(text, key);
+            self.measure_calls += 1;
+            self.insert(hash, measured);
             return measured;
         }
 
-        pub fn keyOf(text: []const u8, font: FontId, size: f32) u64 {
-            const size_bits: u32 = @bitCast(size);
-            return nonZero(std.hash.Wyhash.hash(fontBits(font) << 32 | size_bits, text));
+        pub fn hashOf(text: []const u8, key: Key) u64 {
+            const size_bits: u32 = @bitCast(key.size);
+            const spacing_bits: u32 = @bitCast(key.letter_spacing);
+            const seed = (fontBits(key.font) << 32 | size_bits) ^ (@as(u64, spacing_bits) *% 0x9e3779b97f4a7c15);
+            return nonZero(std.hash.Wyhash.hash(seed, text));
         }
 
         /// Marks a hit as used this generation, so it is evicted last.
@@ -154,22 +157,42 @@ pub fn maxRuns(max_text_bytes: u32, max_texts: u32) u32 {
     return max_text_bytes + max_texts;
 }
 
+/// Measures through the cache with one text's key, which carries the
+/// zoomed size, and returns layout units.
+pub fn Measurer(comptime Cache: type, comptime Text: type) type {
+    return struct {
+        const Self = @This();
+
+        cache: *Cache,
+        text_contract: *Text,
+        key: Cache.Key,
+        inverse_zoom: f32,
+
+        pub fn measure(self: Self, run: []const u8) [2]f32 {
+            const measured = self.cache.measure(self.text_contract, run, self.key);
+            return .{ measured[0] * self.inverse_zoom, measured[1] * self.inverse_zoom };
+        }
+
+        fn width(self: Self, run: []const u8) f32 {
+            if (run.len == 0) return 0;
+            return self.measure(run)[0];
+        }
+    };
+}
+
 /// Measures `text` and appends the width of each of its runs to
 /// `run_widths`: each word for `.words`, each paragraph for `.newlines`,
 /// the whole text for `.none`. Wrapping reads them back, so each run is
 /// looked up in the cache once per frame, not twice.
 pub fn measureMetrics(
-    cache: anytype,
-    platform: anytype,
+    measurer: anytype,
     text: []const u8,
     wrap: style.TextWrap,
-    font: anytype,
-    size: f32,
     line_height_override: f32,
     run_widths: []f32,
     run_count: *u32,
 ) Metrics {
-    const space = cache.measure(platform, " ", font, size);
+    const space = measurer.measure(" ");
     var metrics: Metrics = .{
         .preferred_width = 0,
         .min_width = 0,
@@ -182,14 +205,14 @@ pub fn measureMetrics(
 
     switch (wrap) {
         .none => {
-            const width = runs.append(cache.measure(platform, text, font, size)[0]);
+            const width = runs.append(measurer.measure(text)[0]);
             metrics.preferred_width = width;
             metrics.min_width = width;
         },
         .newlines => {
             var widest: f32 = 0;
             var paragraphs = std.mem.splitScalar(u8, text, '\n');
-            while (paragraphs.next()) |paragraph| widest = @max(widest, runs.append(measureRun(cache, platform, paragraph, font, size)));
+            while (paragraphs.next()) |paragraph| widest = @max(widest, runs.append(measurer.width(paragraph)));
             metrics.preferred_width = widest;
             metrics.min_width = widest;
         },
@@ -200,7 +223,7 @@ pub fn measureMetrics(
             var paragraph_has_word = false;
             var words: WordIterator = .{ .text = text };
             while (words.next()) |word| {
-                const word_width = runs.append(measureRun(cache, platform, text[word.start..word.end], font, size));
+                const word_width = runs.append(measurer.width(text[word.start..word.end]));
                 widest_word = @max(widest_word, word_width);
                 paragraph_width += word_width + if (paragraph_has_word) space[0] else 0;
                 paragraph_has_word = true;
@@ -260,11 +283,6 @@ const RunWriter = struct {
         return width;
     }
 };
-
-fn measureRun(cache: anytype, platform: anytype, run: []const u8, font: anytype, size: f32) f32 {
-    if (run.len == 0) return 0;
-    return cache.measure(platform, run, font, size)[0];
-}
 
 /// Appends the lines of `text` laid out within `max_width`, from the run
 /// widths `measureMetrics` recorded. `base` is the offset of `text` in the
@@ -355,16 +373,22 @@ const LineOutput = struct {
     }
 };
 
-const TestPlatform = struct {
-    pub fn measureText(_: *TestPlatform, text: []const u8, _: u16, size: f32) [2]f32 {
-        return .{ @as(f32, @floatFromInt(text.len)) * size / 2, size };
+const FixedMetricsText = struct {
+    pub fn zuiMeasure(_: *FixedMetricsText, text: []const u8, key: style.MeasureKey(u16)) [2]f32 {
+        return .{ @as(f32, @floatFromInt(text.len)) * key.size / 2, key.size };
     }
 };
 
-fn testCache() MeasureCache(u16, 64, TestPlatform) {
-    var cache: MeasureCache(u16, 64, TestPlatform) = undefined;
+const TestCache = MeasureCache(u16, 64, FixedMetricsText);
+
+fn testCache() TestCache {
+    var cache: TestCache = undefined;
     cache.reset();
     return cache;
+}
+
+fn testMeasurer(cache: *TestCache, text_contract: *FixedMetricsText, zoom: f32) Measurer(TestCache, FixedMetricsText) {
+    return .{ .cache = cache, .text_contract = text_contract, .key = .{ .font = 0, .size = 16 * zoom, .letter_spacing = 0 }, .inverse_zoom = 1 / zoom };
 }
 
 test "words split at spaces and newlines" {
@@ -375,22 +399,31 @@ test "words split at spaces and newlines" {
     try std.testing.expectEqual(@as(?Word, null), words.next());
 }
 
-test "the cache answers repeats without calling the platform" {
+test "the cache answers repeats without calling the text contract" {
     var cache = testCache();
-    var platform: TestPlatform = .{};
-    try std.testing.expectEqual([2]f32{ 40, 16 }, cache.measure(&platform, "hello", 0, 16));
-    try std.testing.expectEqual([2]f32{ 40, 16 }, cache.measure(&platform, "hello", 0, 16));
-    try std.testing.expectEqual(@as(u64, 1), cache.platform_calls);
-    _ = cache.measure(&platform, "hello", 0, 20);
-    try std.testing.expectEqual(@as(u64, 2), cache.platform_calls);
+    var text_contract: FixedMetricsText = .{};
+    try std.testing.expectEqual([2]f32{ 40, 16 }, cache.measure(&text_contract, "hello", .{ .font = 0, .size = 16, .letter_spacing = 0 }));
+    try std.testing.expectEqual([2]f32{ 40, 16 }, cache.measure(&text_contract, "hello", .{ .font = 0, .size = 16, .letter_spacing = 0 }));
+    try std.testing.expectEqual(@as(u64, 1), cache.measure_calls);
+    _ = cache.measure(&text_contract, "hello", .{ .font = 0, .size = 20, .letter_spacing = 0 });
+    _ = cache.measure(&text_contract, "hello", .{ .font = 0, .size = 16, .letter_spacing = 1 });
+    try std.testing.expectEqual(@as(u64, 3), cache.measure_calls);
+}
+
+test "zoomed text is measured at the zoomed size and returned in layout units" {
+    var cache = testCache();
+    var text_contract: FixedMetricsText = .{};
+    try std.testing.expectEqual([2]f32{ 40, 16 }, testMeasurer(&cache, &text_contract, 2).measure("hello"));
+    try std.testing.expectEqual([2]f32{ 80, 32 }, cache.measure(&text_contract, "hello", .{ .font = 0, .size = 32, .letter_spacing = 0 }));
+    try std.testing.expectEqual(@as(u64, 1), cache.measure_calls);
 }
 
 test "metrics: preferred and minimum widths" {
     var cache = testCache();
-    var platform: TestPlatform = .{};
+    var text_contract: FixedMetricsText = .{};
     var run_widths: [16]f32 = undefined;
     var run_count: u32 = 0;
-    const metrics = measureMetrics(&cache, &platform, "aa bbbb\nc", .words, @as(u16, 0), 16, 0, &run_widths, &run_count);
+    const metrics = measureMetrics(testMeasurer(&cache, &text_contract, 1), "aa bbbb\nc", .words, 0, &run_widths, &run_count);
     try std.testing.expectEqual(@as(u32, 3), run_count);
     try std.testing.expectEqual(@as(f32, 7 * 8), metrics.preferred_width);
     try std.testing.expectEqual(@as(f32, 4 * 8), metrics.min_width);
@@ -399,13 +432,13 @@ test "metrics: preferred and minimum widths" {
 
 test "wrapping: greedy, paragraphs, and whole words" {
     var cache = testCache();
-    var platform: TestPlatform = .{};
+    var text_contract: FixedMetricsText = .{};
     var lines: [16]Line = undefined;
     var count: u32 = 0;
     var run_widths: [16]f32 = undefined;
     var run_count: u32 = 0;
     const text = "one two three\nfour abcdefghij";
-    const metrics = measureMetrics(&cache, &platform, text, .words, @as(u16, 0), 16, 0, &run_widths, &run_count);
+    const metrics = measureMetrics(testMeasurer(&cache, &text_contract, 1), text, .words, 0, &run_widths, &run_count);
     try std.testing.expect(wrapLines(text, 100, .words, metrics, &run_widths, 64, &lines, &count));
     const expected = [_][]const u8{ "one two", "three", "four", "abcdefghij" };
     try std.testing.expectEqual(expected.len, count);

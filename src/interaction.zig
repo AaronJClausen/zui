@@ -1,26 +1,8 @@
 const std = @import("std");
 const style = @import("style.zig");
-
-pub const Button = enum { primary, secondary, middle };
-
-/// Navigation and editing keys. Mapping platform key codes onto these is
-/// the backend's job.
-pub const Key = enum { tab, enter, escape, space, backspace, delete, left, right, up, down, home, end, page_up, page_down };
-
-/// Held modifier keys, as state rather than events.
-pub const Modifiers = packed struct(u4) {
-    shift: bool = false,
-    control: bool = false,
-    alt: bool = false,
-    super: bool = false,
-};
+const input = @import("input.zig");
 
 pub const WidgetState = enum { idle, hovered, pressed, focused, disabled };
-
-/// Per frame, zui keeps at most this many key events and bytes of typed
-/// text; the rest of a frame's events are dropped.
-pub const max_keys_per_frame = 32;
-pub const max_text_input_bytes = 128;
 
 /// Scroll position of a scroll container, kept in the state table under
 /// the container's id.
@@ -164,37 +146,166 @@ pub fn Results(comptime max_regions: u32, comptime table_slots: u32) type {
     };
 }
 
-/// Input copied out of `Input` plus what is derived from it each frame.
-pub fn State(comptime max_chain: usize) type {
+/// One slot of the pointer table: a contact touching or hovering over the
+/// surface.
+pub fn Contact(comptime max_chain: usize) type {
     return struct {
         const Self = @This();
 
-        pointer: ?[2]f32 = null,
-        buttons: std.EnumSet(Button) = .initEmpty(),
-        modifiers: Modifiers = .{},
-        keys: [max_keys_per_frame]Key = undefined,
-        key_count: u8 = 0,
-        text: [max_text_input_bytes]u8 = undefined,
-        text_len: u8 = 0,
+        pointer: input.Pointer,
+        buttons: std.EnumSet(input.Button),
+        /// The element the primary button's press began on, or 0.
+        press_target: u64,
+        /// When its primary press began, counted across contacts, so the
+        /// first touch still down can be found.
+        press_order: u64,
+        /// Moved since its hover was last hit-tested. Moves coalesce: only
+        /// the last one before another event of this pointer is tested.
+        hover_stale: bool,
+        /// Interactive elements under the pointer, innermost first. Empty
+        /// for touch, which never hovers.
+        hover_chain: [max_chain]u64,
+        hover_count: u16,
+        /// A touch that lifted this frame. It stays until the next frame
+        /// begins, so the frame that sees a tap can still ask where it was.
+        lifted: bool,
 
-        /// Interactive elements under the pointer, innermost first.
-        hover_chain: [max_chain]u64 = undefined,
-        hover_count: u16 = 0,
-        press_target: u64 = 0,
-        clicked: u64 = 0,
-        focus: u64 = 0,
-        pending_focus: ?u64 = null,
-        frame_number: u32 = 0,
+        pub fn init(pointer: input.Pointer) Self {
+            return .{ .pointer = pointer, .buttons = .initEmpty(), .press_target = 0, .press_order = 0, .hover_stale = false, .hover_chain = undefined, .hover_count = 0, .lifted = false };
+        }
+
+        pub fn hovers(self: *const Self) bool {
+            return self.pointer.kind != .touch;
+        }
+
+        pub fn isHovering(self: *const Self, hash: u64) bool {
+            return std.mem.indexOfScalar(u64, self.hover_chain[0..self.hover_count], hash) != null;
+        }
+    };
+}
+
+/// The pointer table plus what this frame's events delivered, which the
+/// interaction queries read until the next `beginFrame`.
+pub fn State(comptime max_contacts: u8, comptime max_chain: usize, comptime max_events: u16, comptime max_text_bytes: u16) type {
+    return struct {
+        const Self = @This();
+        pub const Slot = Contact(max_chain);
+
+        contacts: [max_contacts]?Slot,
+        presses_begun: u64,
+
+        key_events: [max_events]input.KeyEvent,
+        key_event_count: u16,
+        text: [max_text_bytes]u8,
+        text_len: u16,
+        clicked: [max_events]u64,
+        clicked_count: u16,
+
+        focus: u64,
+        pending_focus: ?u64,
+
+        pub fn reset(self: *Self) void {
+            self.contacts = @splat(null);
+            self.presses_begun = 0;
+            self.focus = 0;
+            self.pending_focus = null;
+            self.clearFrameEvents();
+        }
+
+        pub fn clearFrameEvents(self: *Self) void {
+            for (&self.contacts) |*slot| {
+                if (slot.*) |*contact| if (contact.lifted) {
+                    slot.* = null;
+                };
+            }
+            self.key_event_count = 0;
+            self.text_len = 0;
+            self.clicked_count = 0;
+        }
+
+        pub fn find(self: *Self, id: input.PointerId) ?*Slot {
+            for (&self.contacts) |*slot| {
+                if (slot.*) |*contact| if (contact.pointer.id == id) return contact;
+            }
+            return null;
+        }
+
+        /// The contact for `pointer`, taking a free slot for a new one.
+        /// Null when the table is full: like a digitizer, the extra contact
+        /// is ignored until a slot frees.
+        pub fn findOrAdd(self: *Self, pointer: input.Pointer) ?*Slot {
+            if (self.find(pointer.id)) |contact| {
+                contact.lifted = false;
+                return contact;
+            }
+            for (&self.contacts) |*slot| {
+                if (slot.* == null) {
+                    slot.* = .init(pointer);
+                    return &slot.*.?;
+                }
+            }
+            return null;
+        }
+
+        pub fn remove(self: *Self, contact: *Slot) void {
+            for (&self.contacts) |*slot| {
+                if (slot.*) |*occupied| if (occupied == contact) {
+                    slot.* = null;
+                    return;
+                };
+            }
+        }
 
         pub fn isHovered(self: *const Self, hash: u64) bool {
-            for (self.hover_chain[0..self.hover_count]) |hovered| {
-                if (hovered == hash) return true;
+            for (&self.contacts) |*slot| {
+                if (slot.*) |*contact| if (contact.isHovering(hash)) return true;
             }
             return false;
         }
 
-        pub fn keyPressed(self: *const Self, key: Key) bool {
-            return std.mem.indexOfScalar(Key, self.keys[0..self.key_count], key) != null;
+        pub fn isPressed(self: *const Self, hash: u64) bool {
+            for (&self.contacts) |*slot| {
+                if (slot.*) |*contact| if (contact.press_target == hash and contact.buttons.contains(.primary)) return true;
+            }
+            return false;
+        }
+
+        pub fn isClicked(self: *const Self, hash: u64) bool {
+            return std.mem.indexOfScalar(u64, self.clicked[0..self.clicked_count], hash) != null;
+        }
+
+        /// Each click takes at least one event, so `clicked` cannot overflow.
+        pub fn addClick(self: *Self, hash: u64) void {
+            if (self.isClicked(hash)) return;
+            self.clicked[self.clicked_count] = hash;
+            self.clicked_count += 1;
+        }
+
+        /// The mouse or a pen while over the surface, or else the first
+        /// touch still down.
+        pub fn primaryPointer(self: *const Self) ?input.Pointer {
+            var first_touch: ?*const Slot = null;
+            for (&self.contacts) |*slot| {
+                if (slot.*) |*contact| {
+                    if (contact.hovers()) return contact.pointer;
+                    if (first_touch == null or contact.press_order < first_touch.?.press_order) first_touch = contact;
+                }
+            }
+            return if (first_touch) |touch| touch.pointer else null;
+        }
+
+        pub fn keyPressed(self: *const Self, key: input.Key) bool {
+            for (self.key_events[0..self.key_event_count]) |event| {
+                if (event.key == key) return true;
+            }
+            return false;
+        }
+
+        pub fn chordPressed(self: *const Self, chord: input.Chord) bool {
+            for (self.key_events[0..self.key_event_count]) |event| {
+                if (event.key == chord.key and event.modifiers == chord.modifiers) return true;
+            }
+            return false;
         }
     };
 }

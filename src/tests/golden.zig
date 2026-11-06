@@ -1,4 +1,4 @@
-//! Hand-computed layouts. Characters are 8×16 (see support.TestPlatform),
+//! Hand-computed layouts. Characters are 8×16 (see support.FixedMetricsText),
 //! the viewport is 800×600, and zui's root stacks children top to bottom.
 
 const std = @import("std");
@@ -70,7 +70,7 @@ test "grow stops at max and the rest goes to the others" {
 
     const ui = harness.begin();
     ui.open(.{ .layout = .{ .sizing = .{ .width = .fixed(300) } } });
-    ui.box(.{ .id = .of("capped"), .layout = .{ .sizing = .{ .width = .growBetween(0, 50) } } });
+    ui.box(.{ .id = .of("capped"), .layout = .{ .sizing = .{ .width = .{ .rule = .grow, .amount = 1, .max = 50 } } } });
     ui.box(.{ .id = .of("open"), .layout = .{ .sizing = .{ .width = .grow } } });
     ui.close();
 
@@ -374,10 +374,12 @@ test "backgrounds, children, then borders: paint order" {
     const ui = harness.begin();
     ui.open(.{
         .layout = .{ .sizing = .{ .width = .fixed(100), .height = .fixed(50) }, .padding = .all(5) },
-        .background = .rgb(0x111111),
-        .border = .{ .color = .rgb(0x222222), .widths = .all(1) },
+        .decoration = .{
+            .background = .rgb(0x111111),
+            .border = .{ .color = .rgb(0x222222), .widths = .all(1) },
+        },
     });
-    ui.box(.{ .layout = .{ .sizing = .grow_both }, .background = .rgb(0x333333) });
+    ui.box(.{ .layout = .{ .sizing = .grow_both }, .decoration = .{ .background = .rgb(0x333333) } });
     ui.close();
 
     var buffer: [256]u8 = undefined;
@@ -397,8 +399,8 @@ test "elements without ids get the same internal ids every frame" {
     var first_ids: [2]u64 = undefined;
     for (0..2) |frame_number| {
         const ui = harness.begin();
-        ui.open(.{ .background = .rgb(0x101010), .layout = .{ .sizing = .{ .width = .fixed(10), .height = .fixed(10) } } });
-        ui.box(.{ .background = .rgb(0x202020), .layout = .{ .sizing = .grow_both } });
+        ui.open(.{ .decoration = .{ .background = .rgb(0x101010) }, .layout = .{ .sizing = .{ .width = .fixed(10), .height = .fixed(10) } } });
+        ui.box(.{ .decoration = .{ .background = .rgb(0x202020) }, .layout = .{ .sizing = .grow_both } });
         ui.close();
         const frame = try harness.end();
         const commands = frame.commands();
@@ -424,48 +426,39 @@ test "rectOf misses undeclared ids" {
 
 test "image and custom elements carry typed payloads" {
     const Shape = enum { circle, star };
-    const PayloadUi = zui.Context(.{ .max_elements = 16, .CustomData = Shape, .ImageHandle = u32 }, support.TestPlatform);
-    var platform: support.TestPlatform = .{};
-    var ui = try PayloadUi.init(testing.allocator, testing.io, &platform);
+    const PayloadUi = zui.Context(.{ .limits = .{ .max_elements = 16 }, .CustomData = Shape, .ImageHandle = u32 });
+    var ui = try PayloadUi.init(testing.allocator, testing.io);
     defer ui.deinit(testing.allocator);
 
-    ui.beginFrame(.{ .viewport = .{ 100, 100 } });
-    ui.image(42, .{ .layout = .{ .sizing = .{ .width = .fixed(10), .height = .fixed(10) } } });
+    ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 100, 100 } } });
+    ui.image(.{ .handle = 42 }, .{ .layout = .{ .sizing = .{ .width = .fixed(10), .height = .fixed(10) } } });
     ui.custom(.star, .{ .layout = .{ .sizing = .{ .width = .fixed(5), .height = .fixed(5) } } });
-    const frame = try ui.endFrame();
+    const frame = ui.endFrame();
     defer ui.release(frame);
 
     const commands = frame.commands();
-    try testing.expectEqual(@as(u32, 42), commands[0].payload.image);
+    try testing.expectEqual(@as(u32, 42), commands[0].payload.image.handle);
     try testing.expectEqual(Shape.star, commands[1].payload.custom);
     try testing.expectEqual(zui.Rect{ .x = 0, .y = 10, .width = 5, .height = 5 }, commands[1].bounds);
 }
 
-test "platforms that declare a scale get pixel-snapped commands" {
-    const SnappingPlatform = struct {
-        pub fn measureText(_: *@This(), text: []const u8, _: u16, size: f32) [2]f32 {
-            return .{ @as(f32, @floatFromInt(text.len)) * size / 2, size };
-        }
-        pub fn scale(_: *const @This()) f32 {
-            return 1;
-        }
-    };
-    const SnappingUi = zui.Context(.{ .max_elements = 16 }, SnappingPlatform);
-    var platform: SnappingPlatform = .{};
-    var ui = try SnappingUi.init(testing.allocator, testing.io, &platform);
-    defer ui.deinit(testing.allocator);
+test "letter spacing is part of the measurement key" {
+    var harness: support.Harness = .{};
+    try harness.init();
+    defer harness.deinit();
 
-    ui.beginFrame(.{ .viewport = .{ 100, 10 } });
-    ui.open(.{ .layout = .{ .sizing = .{ .width = .fixed(100), .height = .fixed(10) } } });
-    for (0..3) |_| ui.box(.{ .background = .white, .layout = .{ .sizing = .{ .width = .grow, .height = .grow } } });
+    const ui = harness.begin();
+    ui.open(.{ .id = .of("plain") });
+    ui.text("abc", .{});
     ui.close();
-    const frame = try ui.endFrame();
-    defer ui.release(frame);
-
-    var widths: [3]f32 = undefined;
-    for (frame.commands(), &widths) |command, *width| width.* = command.bounds.width;
-    try testing.expectEqual([3]f32{ 33, 34, 33 }, widths);
-    try testing.expectEqual(@as(f32, 100), frame.commands()[2].bounds.x + frame.commands()[2].bounds.width);
+    ui.open(.{ .id = .of("spaced") });
+    ui.text("abc", .{ .letter_spacing = 2 });
+    ui.close();
+    const frame = try harness.end();
+    // "abc" and the space, once per key.
+    try testing.expectEqual(@as(u64, 4), harness.ui.measureCalls());
+    try expectRect(frame, .of("plain"), 0, 0, 24, 16);
+    try expectRect(frame, .of("spaced"), 0, 16, 24, 16);
 }
 
 test "a steady frame measures nothing new" {

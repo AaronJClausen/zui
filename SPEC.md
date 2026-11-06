@@ -730,12 +730,17 @@ pub const TextStyle = struct {
     alignment: enum(u8) { start, center, end } = .start, // of each line in the box; start follows direction
 };
 
-pub const MeasureKey = struct {
-    font: config.FontId,
-    size: f32,              // already multiplied by zoom
-    letter_spacing: f32,
-};
+pub fn MeasureKey(comptime FontId: type) type {   // a Context's is `Ui.MeasureKey`
+    return struct {
+        font: FontId,
+        size: f32,              // already multiplied by zoom
+        letter_spacing: f32,    // likewise
+    };
+}
 ```
+
+`MeasureKey` is generic because `font` has the renderer's own `FontId`
+type, so a text contract names it with that type: `zui.MeasureKey(u16)`.
 
 Text is UTF-8 and is copied into the frame arena, so the caller's buffer
 may be reused at once.
@@ -772,7 +777,7 @@ no calls to the text contract.
 ```zig
 const Fonts = struct {
     /// Required. Size of `run` in layout units.
-    pub fn zuiMeasure(self: *Fonts, run: []const u8, key: zui.MeasureKey) [2]f32 { ... }
+    pub fn zuiMeasure(self: *Fonts, run: []const u8, key: zui.MeasureKey(u16)) [2]f32 { ... }
 
     /// Optional. Break opportunities in `text`; without it, ASCII spaces and newlines.
     pub fn zuiSegment(self: *Fonts, text: []const u8, breaks: *zui.BreakSink) void { ... }
@@ -1392,7 +1397,7 @@ const SokolRenderer = struct {
     pub const FontId = u16;
 
     pub fn zuiSubmit(self: *SokolRenderer, surface: zui.Surface, frame: *const Ui.Frame) !void { ... }
-    pub fn zuiMeasure(self: *SokolRenderer, run: []const u8, key: zui.MeasureKey) [2]f32 { ... }
+    pub fn zuiMeasure(self: *SokolRenderer, run: []const u8, key: zui.MeasureKey(FontId)) [2]f32 { ... }
 };
 ```
 

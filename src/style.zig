@@ -165,10 +165,6 @@ pub const Sizing = struct {
         return .{ .rule = .grow, .amount = weight };
     }
 
-    pub fn growBetween(min: f32, max: f32) Sizing {
-        return .{ .rule = .grow, .amount = 1, .min = min, .max = max };
-    }
-
     pub fn fitBetween(min: f32, max: f32) Sizing {
         return .{ .rule = .fit, .min = min, .max = max };
     }
@@ -209,11 +205,11 @@ pub const Alignment = enum(u8) {
     }
 };
 
-pub const ChildAlignment = struct {
+pub const Alignment2 = struct {
     x: Alignment = .start,
     y: Alignment = .start,
 
-    pub fn axis(self: ChildAlignment, which: Axis) Alignment {
+    pub fn axis(self: Alignment2, which: Axis) Alignment {
         return if (which == .x) self.x else self.y;
     }
 };
@@ -223,15 +219,26 @@ pub const Layout = struct {
     sizing: Sizing2 = .{},
     padding: Edges = .{},
     child_gap: f32 = 0,
-    child_alignment: ChildAlignment = .{},
+    child_alignment: Alignment2 = .{},
 };
 
-/// Which axes of an element clip its descendants.
-pub const Clip = struct {
-    horizontal: bool = true,
-    vertical: bool = true,
+pub const Axes = enum(u2) {
+    none,
+    horizontal,
+    vertical,
+    both,
 
-    pub const both: Clip = .{};
+    pub fn includes(self: Axes, axis: Axis) bool {
+        return self == .both or self == if (axis == .x) Axes.horizontal else Axes.vertical;
+    }
+};
+
+/// Background, border and corner radius: what an element draws behind and
+/// around its children.
+pub const Decoration = struct {
+    background: ?Color = null,
+    border: ?Border = null,
+    corner_radius: CornerRadius = .zero,
 };
 
 /// Which axes of an element scroll. Scrolling also clips those axes, and
@@ -292,13 +299,26 @@ pub const TextWrap = enum(u8) {
     none,
 };
 
+/// What the text contract is asked to measure. `size` already includes the
+/// frame's zoom.
+pub fn MeasureKey(comptime FontId: type) type {
+    return struct {
+        font: FontId,
+        size: f32,
+        letter_spacing: f32,
+    };
+}
+
 pub fn TextStyle(comptime FontId: type) type {
     return struct {
         font: FontId = std.mem.zeroes(FontId),
+        /// Layout units, not points.
         size: f32 = 16,
-        color: Color = .black,
-        /// 0 means the height the platform measures for the font.
+        /// Layout units added after each glyph, including the last.
+        letter_spacing: f32 = 0,
+        /// 0 means the height the text contract measures for the font.
         line_height: f32 = 0,
+        color: Color = .black,
         wrap: TextWrap = .words,
         alignment: Alignment = .start,
     };
