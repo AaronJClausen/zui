@@ -34,23 +34,23 @@ Implemented so far:
   benchmarks alternately and reports each change with its spread;
   startup benchmarks for `init`, `initBuffer` and first frames; and the
   design of sources, demand and the loader that replace task pools.
-
-The reference backend and demo application live in
-[zui-raylib](https://github.com/AaronJClausen/zui-raylib).
-
 - **Stage 2, in part:** `Context(config)` with the text contract and
   `Config.limits`; a frame record with time, scale, zoom and input as an
   ordered event log over a pointer table; `endFrame` that always returns
   a frame; and `nextFrame()`.
 
+The reference backend and demo application live in
+[zui-raylib](https://github.com/AaronJClausen/zui-raylib). It and the
+other backends still use the API from before stage 2.
+
 Next, in the order of SPEC.md §21: instruction counts in CI and a tracer
-contract (stage 1); then the rest of stage 2: the environment, and sources
-with `zui_async`. After that come the
-renderer and host contracts with `zui_app`, a native Windows host, the
+contract (stage 1); then the rest of stage 2: the environment, sources
+with `zui_async`, and the backends moved to the new API. After that come
+the renderer and host contracts with `zui_app`, a native Windows host, the
 wire format, and from there text, layout, gestures, effects, an
 inspector and accessibility, more hosts, motion and text editing.
-[ROADMAP.md](ROADMAP.md) has each stage's items and where to pick up, and
-[ARCHITECTURE.md](ARCHITECTURE.md) how the pieces connect.
+[ROADMAP.md](ROADMAP.md) keeps the queue of work in order, and
+[ARCHITECTURE.md](ARCHITECTURE.md) shows how the pieces connect.
 
 Today's API, until stage 3 adds the host and renderer contracts of
 SPEC.md §6.1:

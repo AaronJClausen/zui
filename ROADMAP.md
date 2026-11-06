@@ -22,7 +22,7 @@ Each item says:
 | 0.5 | layout performance, parallel measurement, benchmarks | shipped |
 | after 0.5 | declaration work: −42% to −56% | on `main` |
 | 0.6, in part | `bench-compare` (R2), startup benchmarks (P1), task completions at `beginFrame` (A2), the async design (A1) | done; the rest of 0.6 became stage 1 |
-| stage 2, in part | the code brought to the spec's shape: C5, S1, I4, C6, A5 and `nextFrame` (I2) | on `main`; the other repos still need the same change |
+| stage 2, in part | the code brought to the spec's shape: C5, S1, I4, C6, A5 and `nextFrame` (I2) | on `main`; the other repos still need the same change (C8) |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
@@ -37,34 +37,59 @@ budgets of SPEC.md §20.2:
 | 1,000 texts, warm caches | 14.1 µs | 184.2 µs | < 120 µs (missed; T1 and T2 are the plan) |
 | 4,000 children of one parent | 52.9 µs | 65.8 µs | |
 
-## Picking up from here
+## The queue
 
-**Resume at stage 1: R1, then P2.** Everything after depends on R1's
-counts to judge it.
+Work is taken from the top. The first row whose status is not
+`waiting` is the next item, and CLAUDE.md says how to take it on. An item
+too large for one sitting lands in slices, each a commit with every check
+green, and its **Status** line below says which slice is next.
 
-1. **Judge each item against a commit, not a file.** On the machine you
-   measure on, `zig build bench-compare -- a6d8e34` compares the working
-   tree with the last commit before 0.6. Startup times (P1) are new after
-   `a6d8e34`, so compare those against `30b4f73` or later.
-2. **The spec is already written.** Every item below implements sections
-   of SPEC.md that exist; an item that finds the spec wrong changes it in
-   the same commit, with the reason.
-3. **Commit and push each item when it is done,** with its status written
-   here in the same commit.
+| Item | Stage | Where | Waits for | Status |
+|---|---|---|---|---|
+| R1. Instruction counts in CI | 1 | `bench/`, `.github/workflows/ci.yml`, `build.zig` | | next |
+| P2. The tracer contract | 1 | `src/` (`Features.Tracer`), a recording test tracer; the Tracy binding per open decision 7 | R1 | |
+| T3. Letter spacing: the golden test | 2 | `src/tests/golden.zig` with a spacing test contract | | in progress: key, style and cache done |
+| I6. The environment and host requests | 2 | `src/input.zig`, `src/context.zig`, `src/tests/interaction.zig`, `zui_widgets/` | | |
+| A3. Sources in the core | 2 | a new `src/sources.zig`, `src/context.zig`, `src/contracts.zig`, `tests/compile_errors/` | R1 | |
+| A4. `zui_async` | 2 | a new `zui_async/` module; `expectSourceConforms` in `zui_testing/` | A3 | |
+| C8. The backends on the stage-2 API | 2 | `../zui-raylib`, `../zui-sokol`, `../zui-terminal` | A4, T3 | |
+| T1. The single-line fast path | 6, early | `src/text.zig` | R1 | |
+| T2. The whole-string cache | 6, early | `src/text.zig`, `Limits.string_cache_entries` | T1, P2 | |
+| P4. The box tree's layout and emission within budget | 6, early | `src/layout.zig`, `src/emission.zig` | R1, P2 | |
+| C1. The renderer contract, generated commands, lowering | 3 | `src/commands.zig`, `src/emission.zig`, `src/contracts.zig` | C8 | |
+| C2. The host contract and the surface | 3 | `src/contracts.zig`, a new `src/surface.zig` | C1 | |
+| C3. Conformance suites | 3 | `zui_testing/` | C1, C2 | |
+| C7. `Features` | 3 | `src/context.zig` | P2 | |
+| C4. `zui_app` | 3 | a new `zui_app/` module | C3 | |
+| H1. The raylib adapter host | 3 | `../zui-raylib` | C4 | |
 
-Things to know when resuming:
+After the queue come stage 4 (H2, H8, in `../zui-host`) and then stages
+5 to 11 in the order of SPEC.md §21. They join the queue as it runs short.
+
+Statuses: `next` (the first open row), `in progress` (a slice has
+landed), `waiting on <what>` (blocked by something the next session cannot
+do: a decision, CI, a push), or empty (not started). A finished item's
+row is removed, and the item moves to *Done*. An item whose remaining
+work is waiting on CI or another repository counts as done for the rows
+that wait for it, as long as what they need from it has landed.
+
+Things to know:
+- **Judge each item against a commit, not a file.** On the machine you
+  measure on, `zig build bench-compare -- a6d8e34` compares the working
+  tree with the last commit before 0.6. Startup times (P1) are new after
+  `a6d8e34`, so compare those against `30b4f73` or later.
+- **The spec is already written.** Every item implements sections of
+  SPEC.md that exist; an item that finds the spec wrong changes it in the
+  same commit, with the reason.
 - **The code has the spec's shape where the feature exists.** What is
-  still missing (sources, the environment, generated commands, static
-  styles, skins) is listed in ARCHITECTURE.md §7 with the item that adds
+  still missing is listed in ARCHITECTURE.md §7 with the item that adds
   it. With `TaskPool` deleted, nothing brings outside data into a frame
   until A3 and A4.
+- **Stage 2 ends in the other repos.** Its *Done when* in SPEC.md §21
+  (the demo's thumbnail grid on `KeyedLoads`, idling at 0% CPU) can only
+  be met in zui-raylib, which is C8.
 - **`bench --check-targets` checks §20.2's budgets,** including
   declaration for the box tree. R1 still has to make the counts repeat.
-- **The other repos are behind.** zui-raylib, zui-sokol and zui-terminal
-  still use `Platform`, `Input` and `TaskPool`, and must move to the text
-  contract, `FrameRecord` (through `zui.InputSampler`) and
-  `endFrame() *const Frame`. `zui-host` does not exist yet; it is created
-  with H2 in stage 4.
 - **Item IDs are stable.** A letter names a series (R regression checks,
   A async, P profiling, C contracts, T text, S scale, H hosts, F the frame
   record and the wire, L layout, I interaction, G graphics, V visibility,
@@ -153,6 +178,11 @@ scenario; fail on more than 2% growth over the parent commit. Update
 
 **Done when:** the counts repeat exactly between runners.
 
+**Grounding.** Valgrind does not run on Windows, where the owner works;
+counts can be taken locally in a Linux container (Docker is installed).
+Repeating between runners can only be shown by CI, so the last step of
+this item is `waiting on CI` until two runs are compared.
+
 **Spec.** §20.3.
 
 ### P2. The tracer contract
@@ -169,6 +199,11 @@ frequency, alternating runs.
 
 **Done when:** a trace of the demo shows every pass, and a build without a
 tracer has R1 counts unchanged.
+
+**Slices.** `Features` exists only as this item adds it, with `Tracer`
+alone (C7 adds the rest). First the contract, its compile-error tests and
+a test tracer that records zones, so a test asserts every pass is a zone;
+then the Tracy binding; then the trace of the demo, which needs C8.
 
 **Spec.** §4, §16.5.
 
@@ -216,7 +251,7 @@ draws it.
 
 **Status.** The key, the style field and the cache are done; the golden
 test needs a test contract that applies spacing, and the renderers draw
-nothing yet.
+nothing yet (C8).
 
 **Spec.** §9.1, §9.4.
 
@@ -351,7 +386,35 @@ demo's loads move to A4's sources.
 **Done when:** nothing in this repository or the backends names a task
 pool.
 
-**Status.** Done in this repository; the demo's loads wait for A4.
+**Status.** Done in this repository; the demo's loads wait for A4, and
+the backends for C8.
+
+### C8. The backends on the stage-2 API
+
+**Grounding.** zui-raylib, zui-sokol and zui-terminal pin zui at
+`c41b571`, before stage 2. They still declare a `Platform` with
+`measureText(text, font, size)`, `scale` and `wake`
+(`../zui-raylib/src/root.zig:31`), read `zui.Input`, and zui-raylib's
+demo loads through `TaskPool` (`../zui-raylib/examples/demo.zig`).
+
+**Plan.** In each repository, on top of the zui commit that finishes A4:
+- `Platform` becomes a text contract: `zuiMeasure` with a `MeasureKey`,
+  counting letter spacing after every glyph, and text commands drawn with
+  their spacing (T3);
+- the loop builds a `FrameRecord` through `zui.InputSampler`, takes
+  `endFrame() *const Frame`, and sleeps on `nextFrame()`;
+- zui-raylib's demo moves its loads to `zui_async`, with the thumbnail
+  grid on `KeyedLoads`.
+
+Develop against this checkout with `zig build test --fork=../zui`; the
+pin moves once the zui commit is pushed.
+
+**Done when:** each backend's tests and demo build on zui's `main`, and
+stage 2's own test (SPEC.md §21) holds in zui-raylib's demo: the
+thumbnail grid runs on `KeyedLoads` with no wait on the UI thread, idles
+at 0% CPU, and 100 loads finishing between two frames cause one wake.
+
+**Spec.** §9.4, §6, §19.1, §21.
 
 ---
 
@@ -534,6 +597,23 @@ changes every string is no slower. A profile (P2) first confirms per-word
 probes are the main cost.
 
 **Spec.** §9.3.
+
+### P4. The box tree's layout and emission within budget
+
+**Grounding.** At `a6d8e34` the box tree's `endFrame` took 101.2 µs
+against a 100 µs budget, and no item was aimed at it. Stage 2 has changed
+emission since (scale and zoom snapping, the frame's diagnostics), so the
+first step is to measure it again.
+
+**Plan.** Re-measure on the reference machine. If it is still over, take
+a P2 trace of the passes and work on the costliest, judged by R1's counts
+and `bench-compare`.
+
+**Done when:** `zig build bench -- --check-targets` meets both box-tree
+budgets on the reference machine, and no other scenario is slower by
+`bench-compare`.
+
+**Spec.** §8.2, §20.2.
 
 ### T4. Line-break segmentation
 
@@ -839,3 +919,8 @@ the spec.
    wire client first, since F5 builds it anyway.
 6. **H2, sokol_gfx as the first renderer on a native surface?** Planned:
    yes; it already backs zui-sokol.
+7. **Where the Tracy binding lives (P2).** A `zui_tracy` module in this
+   repository, with Tracy as a lazy dependency so that applications that
+   do not import it never fetch it, or a binding in the demo's
+   repository? Planned: the module, so that every backend's demo can
+   trace. Ask before adding the dependency.

@@ -207,7 +207,7 @@ parallel measurement and the module boundary.
 | `zui-themes` | skins for OS design languages |
 | `zui-examples` | samples and the template project |
 
-The renderer repositories change in the same week as the core: their
+The renderer repositories change in the same week as the core (C8): their
 `Platform` becomes a text contract (`zuiMeasure`) now that `Context`
 takes one, their loops build a `FrameRecord` through `zui.InputSampler`,
 and they become renderers when stage 3 adds the contracts.
