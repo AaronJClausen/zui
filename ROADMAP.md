@@ -26,7 +26,7 @@ Each item says:
 | stage 2 | the code brought to the spec's shape: C5, S1, I4, C6, A5 and `nextFrame` (I2); letter spacing (T3); the environment and host requests (I6); sources in the core (A3); `zui_async` (A4); the backends on the new API, the demo's thumbnails on `KeyedLoads` (C8) | done; the demo idles at 0% CPU |
 | stage 3 | the renderer contract and the generated commands (C1); the host contract and `RecordBuilder` (C2); the conformance suites (C3); `Features` (C7); `zui_app` (C4); the raylib adapter host (H1) | done; the backends are renderers and pass the renderer suite in CI, raylib's host passes the host suite, and the demo runs through `zui_app`, presenting its first frame 288 ms after the process starts; lowering comes with stage 8's commands |
 | stage 4 | the Windows host (H2), with dropped files and lifecycle events in the record; the system material (H8); `zui_app` with the application's own text contract (C9) | done; zui-sokol's tour runs on it unchanged, through `zui_app`, and idles at 0% CPU, and the same code shows Mica or a solid background |
-| stage 5, begun | relay (F2); `zui_wire` (F3); replay in `zui_testing` (F4) | done; a recorded session of zui-sokol's tour replays to identical commands without starting any work, and zui-sokol's tour goes over the wire at a hundredth of its frames' whole size, but for the screen that moves every box |
+| stage 5, begun | relay (F2); `zui_wire` (F3); replay in `zui_testing` (F4); the wire host, renderer and client (F5) | done; a recorded session of zui-sokol's tour replays to identical commands without starting any work, zui-sokol's tour goes over the wire at a hundredth of its frames' whole size, but for the screen that moves every box, and it runs in one process and draws in another on the Windows host, its keys going back |
 | stage 6, early | the single-line fast path (T1), the whole-string cache (T2), the box tree's layout passes (P4, in part) | done; warm text and the box tree's layout and emission within their budgets; the box tree's declaration is not (P5) |
 
 No release is tagged; everything is on `main`. From here, work is
@@ -61,7 +61,6 @@ green, and its **Status** line below says which slice is next.
 |---|---|---|---|---|
 | P4. The box tree's layout and emission within budget | 6, early | `src/layout.zig`, `src/emission.zig` | | waiting on P5 |
 | P5. The box tree's declaration within budget | 6, early | `src/context.zig` | L8 | waiting on L8 |
-| F5. Rendering somewhere else | 5 | `zui_wire/`, a wire host and renderer; `../zui-host` for the demo | F3 | in progress |
 | F6. Watching files | 5 | `../zui-host` | H2 | |
 | L8. Static styles | 6 | `src/context.zig`, `src/style.zig` | | |
 | T4. Line-break segmentation | 6 | `src/text.zig` | | |
@@ -136,6 +135,62 @@ Things to know:
 ---
 
 ## Done
+
+### F5. Rendering somewhere else
+
+**Plan.** A wire renderer and a wire host, so a remote client is a host
+plus a renderer. **Done when:** the demo runs in one process and draws in
+another, with input going back. **Spec.** §16.4, §19.6.
+
+`zui_wire.Host(Ui)` takes one end of a `std.Io.net` stream with
+`attach`, reads the client's header and first record, then reads records
+on a task of the `Io`; a poll gives what arrived since the last one (the
+newest viewport and scale, every event in order) in the client's clock,
+counted on from the last record between records, so `.at` waits and
+wakes need nothing from the client. The connection ending closes the
+window. It gives a new `wire` surface, the core's only change, into which
+`zui_wire.Renderer(Ui)` writes each frame as changes, after a header with
+the application's fonts' fingerprint, from `zui_app`'s render thread.
+`zui_wire.Client(Ui)` is the other end, over any host and renderer: it
+sends a record when it holds events or the viewport or scale changed,
+presents the newest frame that came back and applies its host requests,
+reading frames on a task that wakes its host; closing it stops sending
+first and reads until the application has closed its end, so the
+application never writes into a closed connection.
+
+Tests, over loopback TCP: the wire host passes zui's host suite; an
+application run by `zui_app` on the wire host and renderer is drawn by a
+client on another thread, two clicks going back and the button's cursor
+coming back; a client refuses a stream measured with other fonts; the
+host closes on bytes that are not a record and reports `Malformed`. They
+pass in the three modes on Windows, and on Linux and x86-linux in
+Docker. `zig build check` instantiates the three for every target with a
+network.
+
+The demo: zui-host's `zig build remote -- --check tour.bmp` starts
+zui-sokol's tour, unchanged, in a second process on the wire host and
+renderer, listening on a loopback port it prints, and draws it in a
+window of the Windows host with zui-sokol's renderer through a client.
+It presses Ctrl+2, Ctrl+4 and Ctrl+9 and waits for frames showing each
+screen's tagline, saves the window, and closes it, after which the tour's
+process exits with 0. In five runs in a row on the reference machine,
+each run took under a second; the welcome screen's first frame arrived
+3 to 5 ms after the client connected, and each screen came back within
+the script's 50 ms polling interval of its key.
+
+Decided here:
+- **Who makes the connection:** the application, which hands the wire
+  host a stream with `attach` (under `zui_app`, in its `init`), since a
+  host's `init` takes only the `Io` and the window's options.
+- **Whose clock a record carries:** the client's host's; the wire host
+  counts on from the last record, so the client sends only records with
+  events or a new viewport or scale, never one for time alone.
+- **Where host requests go:** with the frame, which already carries them,
+  for the client to apply to its own host; the wire host's `zuiApply`
+  does nothing.
+- **What a client skips:** frames that arrive faster than it presents
+  them; each is decoded, since frames are changes, and only the newest is
+  drawn.
 
 ### F4. Replay in `zui_testing`
 
@@ -1246,23 +1301,7 @@ Done: H2 and H8 are in *Done*.
 ## Stage 5: the wire
 
 F1, feeds, is retired: sources (A3) are the mechanism for outside data.
-F2, F3 and F4 are in *Done*.
-
-### F5. Rendering somewhere else
-
-**Plan.** A wire renderer and a wire host, so a remote client is a host
-plus a renderer. The browser demo (V4) is the first client.
-
-**Done when:** the demo runs in one process and draws in another, with
-input going back.
-
-**Status.** `zui_wire.Host(Ui)`, `Renderer(Ui)` and `Client(Ui)` have
-landed, with a `wire` surface kind, over `std.Io.net` streams: the wire
-host passes zui's host suite over a loopback connection, and an
-application run by `zui_app` on them is drawn by a client in another
-thread, its clicks going back and its cursor coming back. Next: the
-tour in one process, drawn in another by zui-host's Windows host and
-zui-sokol's renderer, in `../zui-host`.
+F2, F3, F4 and F5 are in *Done*.
 
 ### F6. Watching files
 
@@ -1724,6 +1763,8 @@ Deliberate, and each a reason to choose zui:
 | Serializing a payload with pointers (F3) | `zuiSerialize(self, serializer)` and `zuiDeserialize(deserializer)`, taking the wire's types as `anytype`, so a source never imports `zui_wire` |
 | Replay in tests (F4) | `Recording(Ui)`, a relay listener, and `Driver.replay(app, declare, record)`, one frame per record |
 | What the loader changes between frames (F4) | delivered by the source when relayed, so a replay without a loader shows it: `KeyedLoads` relays the keys loading and the abandoned loads that finished |
+| How a remote client joins (F5) | `zui_wire.Host` and `Renderer` where the application runs, over a stream the application attaches; `zui_wire.Client` over any host and renderer where it draws; a `wire` surface kind between the two halves |
+| Time on the wire (F5) | the client's host's clock, counted on by the wire host between records, so records are sent only for events or a new viewport or scale |
 
 ### Open
 

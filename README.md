@@ -68,7 +68,9 @@ Implemented so far:
   refuses it. `zui_wire.Host` and `zui_wire.Renderer` run an application
   whose window is elsewhere, and `zui_wire.Client` joins any host and
   renderer to it over a socket, sending input and drawing the frames
-  that come back. In tests, `zui_testing.Recording` keeps a session's records
+  that come back: zui-host's `zig build remote` runs zui-sokol's tour in
+  one process and draws it in another, keys going one way and frames the
+  other. In tests, `zui_testing.Recording` keeps a session's records
   and `driver.replay` runs them again, with no loader: a recorded session
   of the tour replays to identical commands without starting any work,
   but for the counts its gallery keeps outside its sources.
@@ -123,7 +125,7 @@ backends are [zui-sokol](https://github.com/AaronJClausen/zui-sokol) and
 [zui-terminal](https://github.com/AaronJClausen/zui-terminal); native
 hosts live in [zui-host](https://github.com/AaronJClausen/zui-host).
 
-Next, in the order of SPEC.md §21: the wire format, and from there text,
+Next, in the order of SPEC.md §21: file watching, and from there text,
 layout, gestures, effects, an inspector and accessibility, more hosts,
 motion and text editing. The box tree's layout budget (P4) comes early,
 as the text fast path and string cache did.

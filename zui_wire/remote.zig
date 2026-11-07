@@ -6,6 +6,7 @@ const Io = std.Io;
 const Stream = Io.net.Stream;
 
 const socket_buffer_bytes = 64 * 1024;
+const closing_patience_ns = std.time.ns_per_s;
 
 /// The host a context runs on when its window is in another process: each
 /// record comes from a `Client` over a connection, and each frame goes back
@@ -77,9 +78,12 @@ pub fn Host(comptime Ui: type) type {
 
         /// Closes the connection, ending the task that reads it.
         pub fn deinit(self: *Self) void {
+            const still_connected = self.connected();
             const link = self.link orelse return;
             self.link = null;
-            link.stream.shutdown(self.io, .both) catch {};
+            // Shutting down a connection the client already ended is an
+            // unexpected error on Windows, which a debug build reports.
+            if (still_connected) link.stream.shutdown(self.io, .both) catch {};
             link.reading.cancel(self.io);
             link.stream.close(self.io);
             link.encoder.deinit(link.gpa);
@@ -469,8 +473,19 @@ pub fn Client(comptime Ui: type) type {
         }
 
         /// Closes the connection, which ends the application's next poll.
+        /// It stops sending first, and reads until the application has
+        /// closed its end, for up to `closing_patience_ns`, so the
+        /// application never writes a frame into a closed connection.
         pub fn deinit(self: *Self) void {
-            self.stream.shutdown(self.io, .both) catch {};
+            // Shutting down a connection the application already ended is an
+            // unexpected error on Windows, which a debug build reports.
+            if (!self.isClosed()) {
+                self.stream.shutdown(self.io, .send) catch {};
+                const deadline = Io.Timestamp.now(self.io, .awake).addDuration(.fromNanoseconds(closing_patience_ns));
+                while (!self.isClosed() and Io.Timestamp.now(self.io, .awake).nanoseconds < deadline.nanoseconds) {
+                    self.io.sleep(.fromMilliseconds(1), .awake) catch break;
+                }
+            }
             self.reading.cancel(self.io);
             self.stream.close(self.io);
             self.ready.deinit(self.gpa);

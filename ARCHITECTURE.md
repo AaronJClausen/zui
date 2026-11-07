@@ -250,4 +250,7 @@ renderer also draws into a native host's `win32` window without
 sokol_app, with D3D11 through a DirectComposition swapchain that keeps
 alpha so a system material shows (H8), and zui-host runs zui-sokol's tour
 that way (H2), through `zui_app` with the tour's own text contract (C9). zui-host pins zui and zui-sokol by commit, as the renderers pin
-zui; its Windows host runs its message loop on a thread of its own.
+zui; its Windows host runs its message loop on a thread of its own. Its
+`remote` example runs zui-sokol's tour on `zui_wire`'s host and renderer
+in one process, and draws it in another, through a `zui_wire.Client` over
+the Windows host and zui-sokol's renderer (F5).

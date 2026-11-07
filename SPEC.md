@@ -2010,7 +2010,9 @@ while (try client.frame(&host, &renderer)) {}
   presents the newest frame that arrived with its own renderer, applying
   its host requests; frames that arrive faster are skipped. Frames are
   read on a task of the `Io`, which wakes the client's host. Closing the
-  client closes the application's window.
+  client closes the application's window: it stops sending, and reads
+  until the application has closed its end, so no frame is written into
+  a closed connection.
 
 ### 19.7 `zui_debug`
 
