@@ -123,6 +123,9 @@ pub const CornerRadius = style.CornerRadius;
 pub const Rect = style.Rect;
 pub const Border = style.Border;
 pub const Decoration = style.Decoration;
+pub const Style = style.Style;
+pub const Static = style.Static;
+pub const static = style.static;
 pub const Sizing = style.Sizing;
 pub const Sizing2 = style.Sizing2;
 pub const Direction = style.Direction;
@@ -159,4 +162,5 @@ test {
     _ = @import("tests/renderers.zig");
     _ = @import("tests/hosts.zig");
     _ = @import("tests/relay.zig");
+    _ = @import("tests/styles.zig");
 }

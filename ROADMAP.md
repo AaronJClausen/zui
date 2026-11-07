@@ -27,7 +27,7 @@ Each item says:
 | stage 3 | the renderer contract and the generated commands (C1); the host contract and `RecordBuilder` (C2); the conformance suites (C3); `Features` (C7); `zui_app` (C4); the raylib adapter host (H1) | done; the backends are renderers and pass the renderer suite in CI, raylib's host passes the host suite, and the demo runs through `zui_app`, presenting its first frame 288 ms after the process starts; lowering comes with stage 8's commands |
 | stage 4 | the Windows host (H2), with dropped files and lifecycle events in the record; the system material (H8); `zui_app` with the application's own text contract (C9) | done; zui-sokol's tour runs on it unchanged, through `zui_app`, and idles at 0% CPU, and the same code shows Mica or a solid background |
 | stage 5 | relay (F2); `zui_wire` (F3); replay in `zui_testing` (F4); the wire host, renderer and client (F5); file watching as a source (F6) | done; editing a theme file restyles a running window on the Windows host within 4 ms; a recorded session of zui-sokol's tour replays to identical commands without starting any work, zui-sokol's tour goes over the wire at a hundredth of its frames' whole size, but for the screen that moves every box, and it runs in one process and draws in another on the Windows host, its keys going back |
-| stage 6, early | the single-line fast path (T1), the whole-string cache (T2), the box tree's layout passes (P4, in part) | done; warm text and the box tree's layout and emission within their budgets; the box tree's declaration is not (P5) |
+| stage 6, early | the single-line fast path (T1), the whole-string cache (T2), the box tree's layout passes (P4, in part), static styles (L8) | done; a box tree of static styles declares in 34.5 µs; warm text and the box tree's layout and emission within their budgets; the box tree's declaration is not (P5) |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
@@ -60,8 +60,7 @@ green, and its **Status** line below says which slice is next.
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
 | P4. The box tree's layout and emission within budget | 6, early | `src/layout.zig`, `src/emission.zig` | | waiting on P5 |
-| P5. The box tree's declaration within budget | 6, early | `src/context.zig` | L8 | waiting on L8 |
-| L8. Static styles | 6 | `src/context.zig`, `src/style.zig` | | |
+| P5. The box tree's declaration within budget | 6, early | `src/context.zig` | L8 | |
 | T4. Line-break segmentation | 6 | `src/text.zig` | | |
 | L1. A grow basis | 6 | `src/layout.zig` | | |
 | L2. Aspect ratio and natural sizes | 6 | `src/layout.zig` | | |
@@ -134,6 +133,70 @@ Things to know:
 ---
 
 ## Done
+
+### L8. Static styles
+
+**Plan.** `zui.static` and `Static(T)`; config references in element
+storage as pointers into the frame arena or static memory; fields on the
+element overriding the style's. **Done when:** the box tree's
+declaration stays within its 55 µs budget with references, and declaring
+an element with a static style copies no config (R1). **Spec.** §10.3.
+
+`zui.Style` (a layout and a decoration), `zui.Static(T)`, which holds a
+pointer to read-only memory, and `zui.static(comptime value)`, which is
+the only way to make one; `Element.style`, with `layout` and
+`decoration` set on the element replacing the style's. A frame now keeps
+`layout: [max_elements]*const Layout`, pointing at a copy in its arena,
+a static style's, or one default layout, and `decoration:
+[max_elements]?*const Decoration`, null where nothing is drawn (a static
+style whose decoration draws nothing included); `Frame.layoutOf` and the
+new `decorationOf` read them. Copies go through a cursor into the arena,
+`next_layout` and `next_decoration`, rather than a count, which saved
+the address arithmetic that otherwise made declaration grow by up to 4%.
+
+Tests: a styled element lays out and draws exactly as one with the same
+configs copied; the frame holds the static style's own addresses;
+an element's own layout or empty decoration replaces the style's, and a
+static decoration that draws nothing is none; a style's direction flows
+its children. `zig build check` declares a styled element on every
+target. A new scenario, `4096 static-styled boxes`, is the box tree with
+each element's configs in one of 32 static styles.
+
+`zig build counts` against `342b04a`, in a local Docker container: the
+box tree's declaration −2.35% (588,151 to 574,326) and `endFrame` −4.8%;
+`endFrame` fewer in every scenario (−0.3% to −5.0%), declaration within
++0.7% elsewhere (depth 64, 14,405 to 14,502), the wide tree's −3.9%. The
+static-styled tree declares in 445,291 instructions, 22.5% fewer than
+copying, with the same `endFrame`. `zig build bench -- --check-targets`,
+four runs: the static-styled tree's declaration 34.5 to 34.7 µs at best,
+within the 55 µs budget; the copying box tree's 57.7 to 58.5 µs, still
+over it (P5), and its layout and emission 92.3 to 94.4 µs; warm text
+97.5 to 102.7 µs. `zig build bench-compare -- 342b04a` (4 rounds): the
+box tree's declaration −6.1% and the wide tree's −8.3%, depth 64's
+`endFrame` −4.5%; slower, warm text's `endFrame` +7.0% (91.4 to 98.4 µs,
+within its 120 µs budget, with 0.8% fewer instructions) and the
+documents view's first frame +5.8%. Callgrind's cache simulation puts
+warm text's extra time in the wider arrays: 6% more first-level read
+misses, from two 8-byte references an element where there were two
+2-byte indices.
+
+Tried and dropped:
+- **Indices into tables of references** (`layout_index` into
+  `layout_refs`): read misses back to before, but declaration +4.2% for
+  the box tree and +10.6% for the wide tree, a store more per config;
+- **a `decorated` flag,** writing the decoration only where one is drawn:
+  warm text's misses unchanged, and the static-styled tree's declaration
+  +11.6%, reading each style's decoration to set the flag.
+
+Decided here:
+- **What a reference is:** a pointer, as SPEC.md §10.3 says, also for the
+  default layout, a constant in read-only memory, so a pass never
+  branches on whether an element has a layout.
+- **Overriding** is by kind: an element's `layout` replaces the style's
+  layout whole, as does its `decoration`, so a reference is never
+  merged into a copy.
+
+What remains: the copying box tree's declaration budget is P5's.
 
 ### F6. Watching files
 
@@ -1440,6 +1503,10 @@ own switch is about 35. What is left:
 - **The machine.** `afacf87` declared the box tree in 68.5 µs here, where
   `a6d8e34` took 52.2 µs when the budget was last met; measure on a quiet
   machine at a fixed frequency first.
+- **After L8** the box tree's declaration is 574,326 instructions and
+  57.7 µs at best; the same tree with static styles declares in 445,291
+  and 34.5 µs, so what is left is the per-element stores, not the copy
+  of each layout. The two config references are now 8 bytes each.
 
 **Plan.** With L8's config references in place, pack the per-element
 fields declaration writes (parent, counts, kind, content index, flags,
@@ -1533,18 +1600,6 @@ item decides how (SPEC.md §8.1 records it).
 the feature off, R1 counts are unchanged.
 
 **Spec.** §8.1, §8.2.
-
-### L8. Static styles
-
-**Plan.** `zui.static` and `Static(T)`; config references in element
-storage as pointers into the frame arena or static memory; fields on the
-element overriding the style's.
-
-**Done when:** the box tree's declaration stays within its 55 µs budget
-with references, and declaring an element with a static style copies no
-config (R1).
-
-**Spec.** §10.3.
 
 ---
 
@@ -1745,6 +1800,7 @@ Deliberate, and each a reason to choose zui:
 | Render commands | generated from what the renderer declares; the rest lowered (C1) |
 | Contract members | all `zui`-prefixed; unknown ones are compile errors |
 | Static styles | approved: pointers to comptime configs, measured against the declaration budget (L8) |
+| Config references (L8) | pointers in element storage, the default layout one constant; an element's own `layout` or `decoration` replaces the style's whole |
 | Budgets | as in SPEC.md §20.2, including warm text < 120 µs and declaration < 55 µs |
 | Where the contracts live | in the `zui` repo |
 | Native hosts | one `zui-host` repo, one directory per OS |

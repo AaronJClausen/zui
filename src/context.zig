@@ -149,6 +149,9 @@ pub const Diagnostics = struct {
 pub const Element = struct {
     /// Needed for queries, state, scrolling and focus.
     id: Id = .none,
+    /// Made at comptime with `zui.static` and referenced, not copied.
+    /// `layout` and `decoration` set here replace the style's.
+    style: ?style.Static(style.Style) = null,
     layout: ?style.Layout = null,
     decoration: ?style.Decoration = null,
     /// The axes on which descendants are cut off.
@@ -274,6 +277,7 @@ pub fn Context(comptime config: Config) type {
         const InputState = interaction.State(limits.max_input_contacts, limits.max_depth + 1, limits.max_events_per_frame, limits.max_text_input_bytes, limits.max_dropped_path_bytes);
 
         pub const Decoration = style.Decoration;
+        const default_layout: style.Layout = .{};
 
         pub const TextRecord = struct {
             element: Index,
@@ -304,8 +308,11 @@ pub fn Context(comptime config: Config) type {
             child_count: [max_elements]Index,
             /// Children that take part in the flow: `child_count` minus floating ones.
             flow_child_count: [max_elements]Index,
-            layout_index: [max_elements]Index,
-            decoration_index: [max_elements]Index,
+            /// The element's layout: the default, one copied into `layouts`, or
+            /// a static style's.
+            layout: [max_elements]*const style.Layout,
+            /// Null for an element that draws no background or border.
+            decoration: [max_elements]?*const Decoration,
             content_kind: [max_elements]ContentKind,
             /// Index into the record of the element's `content_kind`; not
             /// written for `.none`.
@@ -324,12 +331,12 @@ pub fn Context(comptime config: Config) type {
             /// The extent of an element's children plus padding, for scrolling.
             content_size: [max_elements][2]f32,
 
-            /// One more than can be declared: `layouts[none_index]` is the
-            /// default layout, so an element without one needs no branch.
-            layouts: [max_elements + 1]style.Layout,
-            layout_count: u32,
+            /// The configs an element set itself, copied in declaration.
+            layouts: [max_elements]style.Layout,
+            /// Where the next copied layout goes.
+            next_layout: [*]style.Layout,
             decorations: [max_elements]Decoration,
-            decoration_count: u32,
+            next_decoration: [*]Decoration,
             texts: [if (has_text) max_elements else 0]TextRecord,
             text_count: u32,
             images: [max_elements]Image,
@@ -415,7 +422,12 @@ pub fn Context(comptime config: Config) type {
             }
 
             pub fn layoutOf(self: *const Frame, index: Index) *const style.Layout {
-                return &self.layouts[self.layout_index[index]];
+                return self.layout[index];
+            }
+
+            /// Null for an element that draws no background or border.
+            pub fn decorationOf(self: *const Frame, index: Index) ?*const Decoration {
+                return self.decoration[index];
             }
 
             /// Text elements never have a layout, so they are `.fit` here too.
@@ -440,8 +452,8 @@ pub fn Context(comptime config: Config) type {
                 self.number = number;
                 self.params = params;
                 self.element_count = 0;
-                self.layout_count = 0;
-                self.decoration_count = 0;
+                self.next_layout = &self.layouts;
+                self.next_decoration = &self.decorations;
                 self.text_count = 0;
                 self.image_count = 0;
                 self.custom_count = 0;
@@ -452,7 +464,6 @@ pub fn Context(comptime config: Config) type {
                 self.diagnostics = .{};
                 self.host_requests = .{};
                 self.pixels_per_unit = params.scale * params.zoom;
-                self.layouts[none_index] = .{};
                 @memset(&self.id_table, none_index);
             }
         };
@@ -1068,17 +1079,18 @@ pub fn Context(comptime config: Config) type {
             }
 
             if (element.layout) |element_layout| {
-                frame.layout_index[index] = @intCast(frame.layout_count);
-                frame.layouts[frame.layout_count] = element_layout;
-                frame.layout_count += 1;
-            } else frame.layout_index[index] = none_index;
+                frame.next_layout[0] = element_layout;
+                frame.layout[index] = &frame.next_layout[0];
+                frame.next_layout += 1;
+            } else frame.layout[index] = if (element.style) |static_style| &static_style.value.layout else &default_layout;
 
-            const decoration = element.decoration orelse style.Decoration{};
-            if (decoration.background != null or decoration.border != null) {
-                frame.decoration_index[index] = @intCast(frame.decoration_count);
-                frame.decorations[frame.decoration_count] = decoration;
-                frame.decoration_count += 1;
-            } else frame.decoration_index[index] = none_index;
+            if (element.decoration) |decoration| {
+                if (decoration.background != null or decoration.border != null) {
+                    frame.next_decoration[0] = decoration;
+                    frame.decoration[index] = &frame.next_decoration[0];
+                    frame.next_decoration += 1;
+                } else frame.decoration[index] = null;
+            } else frame.decoration[index] = if (element.style) |static_style| drawnDecoration(&static_style.value.decoration) else null;
 
             if (!is_root) {
                 frame.child_count[parent] += 1;
@@ -1102,6 +1114,18 @@ pub fn Context(comptime config: Config) type {
             frame.host_requests.cursor = cursor;
         }
 
+        inline fn directionOf(element: Element) style.Direction {
+            if (element.layout) |element_layout| return element_layout.direction;
+            if (element.style) |static_style| return static_style.value.layout.direction;
+            return default_layout.direction;
+        }
+
+        /// A static decoration that draws nothing is stored as none, so
+        /// emission skips it as it skips an element without one.
+        inline fn drawnDecoration(decoration: *const Decoration) ?*const Decoration {
+            return if (decoration.background != null or decoration.border != null) decoration else null;
+        }
+
         inline fn flagsFor(element_id: Id, element: Element) ElementFlags {
             var flags: ElementFlags = .{
                 .explicit_id = !element_id.isNone(),
@@ -1111,7 +1135,7 @@ pub fn Context(comptime config: Config) type {
                 .disabled = element.disabled,
                 .clip_x = element.clip.includes(.x),
                 .clip_y = element.clip.includes(.y),
-                .top_to_bottom = if (element.layout) |element_layout| element_layout.direction == .top_to_bottom else false,
+                .top_to_bottom = directionOf(element) == .top_to_bottom,
                 .floating = element.floating != null,
             };
             if (element.scroll) |scroll| {

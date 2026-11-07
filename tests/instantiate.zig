@@ -31,6 +31,8 @@ var memory: [Ui.required_bytes]u8 align(Ui.buffer_alignment) = undefined;
 
 const Expanded = struct { open: bool };
 
+const check_style = zui.static(zui.Style{ .layout = .{ .sizing = .{ .width = .fixed(8), .height = .fixed(8) } }, .decoration = .{ .background = .white } });
+
 export fn zuiCheckFrame(width: f32, height: f32, pointer_x: f32, pointer_y: f32) usize {
     var ui = Ui.initBuffer(&memory, undefined, &check_text) catch return 0;
     const at: zui.Instant = .fromNanoseconds(1);
@@ -67,6 +69,7 @@ export fn zuiCheckFrame(width: f32, height: f32, pointer_x: f32, pointer_y: f32)
     ui.open(.{ .id = list, .scroll = .both, .focus_scope = true, .layout = .{ .sizing = .{ .width = .fixed(50), .height = .fixed(20) } } });
     ui.box(.{ .clip = .both, .disabled = ui.clicked(save) or ui.pressed(save) or ui.focused(save), .layout = .{ .sizing = .{ .width = .fixed(80), .height = .fixed(80) } } });
     ui.box(.{ .floating = .{ .attach_to = .{ .element = save }, .anchor = .center, .z = 2 }, .interactive = true });
+    ui.box(.{ .style = check_style, .decoration = if (ui.hovered(save)) .{ .background = .black } else null });
     ui.close();
     ui.close();
     ui.state(save, Expanded).open = ui.keyPressed(.enter) and ui.chordPressed(.{ .key = .tab, .modifiers = .{ .shift = true } }) and ui.typedText().len == 1 and ui.keyEvents().len == 2;

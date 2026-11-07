@@ -974,7 +974,8 @@ A `Static(T)` can only be made at comptime, so the value lives in
 read-only memory for the life of the program. An element with a static
 style stores a reference to it instead of copying it: declaration writes
 one pointer, not a whole config, and it is safe under any number of
-frames in flight. Fields set on the element itself override the style's.
+frames in flight. A `layout` or `decoration` set on the element itself
+replaces the style's.
 
 Config references in element storage are therefore pointers, either into
 the frame arena or to static memory. The extra width on 64-bit targets is

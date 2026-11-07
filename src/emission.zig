@@ -131,7 +131,7 @@ fn Emitter(comptime Ui: type) type {
             const frame = self.frame;
             const flags = frame.flags[element];
             const floating = frame.isFloating(element);
-            if (!floating and !flags.emits() and frame.decoration_index[element] == Ui.none_index and frame.kindOf(element) == .none) return null;
+            if (!floating and !flags.emits() and frame.decorationOf(element) == null and frame.kindOf(element) == .none) return null;
             const element_id = frame.element_id[element];
             const bounds = self.rectOf(element);
             const outer_clip = if (floating) viewport else parent.clip;
@@ -148,12 +148,9 @@ fn Emitter(comptime Ui: type) type {
             const visible = bounds.intersect(outer_clip);
             const drawn = !visible.isEmpty();
 
-            if (drawn and frame.decoration_index[element] != Ui.none_index) {
-                const decoration = frame.decorations[frame.decoration_index[element]];
-                if (decoration.background) |color| {
-                    self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = level.z, .payload = .{ .rectangle = .{ .color = color, .corner_radius = decoration.corner_radius } } });
-                }
-            }
+            if (drawn) if (frame.decorationOf(element)) |decoration| if (decoration.background) |color| {
+                self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = level.z, .payload = .{ .rectangle = .{ .color = color, .corner_radius = decoration.corner_radius } } });
+            };
 
             switch (frame.kindOf(element)) {
                 .none => {},
@@ -182,7 +179,7 @@ fn Emitter(comptime Ui: type) type {
                 level.pushed_clip = true;
                 self.push(.{ .bounds = self.snap(level.clip), .id = element_id, .z = level.z, .payload = .{ .clip_begin = self.snap(level.clip) } });
             }
-            const has_border = frame.decoration_index[element] != Ui.none_index and frame.decorations[frame.decoration_index[element]].border != null;
+            const has_border = if (frame.decorationOf(element)) |decoration| decoration.border != null else false;
             if (!level.pushed_clip and !has_border and !floating and level.region == parent.region and !flags.focus_scope) return null;
             return level;
         }
@@ -241,8 +238,7 @@ fn Emitter(comptime Ui: type) type {
             const frame = self.frame;
             const element = level.element;
             if (level.pushed_clip) self.push(.{ .bounds = self.snap(level.clip), .id = frame.element_id[element], .z = level.z, .payload = .clip_end });
-            if (frame.decoration_index[element] == Ui.none_index) return;
-            const decoration = frame.decorations[frame.decoration_index[element]];
+            const decoration = frame.decorationOf(element) orelse return;
             const border = decoration.border orelse return;
             const bounds = self.rectOf(element);
             if (bounds.intersect(level.outer_clip).isEmpty()) return;

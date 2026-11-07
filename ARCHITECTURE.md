@@ -208,7 +208,9 @@ surface. `zui_testing` records a session's records and replays them
 (`Recording`, `Driver.replay`); and so has file watching, a host service
 that publishes `zui.FileChange`s into a source the application chooses,
 which zui-host's Windows host implements. From stage 6, the single-line
-fast path and the whole-string cache have landed.
+fast path, the whole-string cache and static styles have landed: element
+storage holds config references, pointers into the frame arena or to a
+style made at comptime with `zui.static`.
 
 The code and the spec still differ in these places, each closed by the
 roadmap item named:
@@ -217,7 +219,6 @@ roadmap item named:
 |---|---|---|---|
 | optional commands have variants, but nothing in declaration produces one, so nothing is lowered and `Diagnostics` lists no lowerings | `Decoration` and `Element` carry gradients, shadows, blur, transforms and materials, each lowered for a renderer that does not declare it | `src/style.zig`, `src/emission.zig` | G1, G2, G3, G5 |
 | no `Config.Color`; colors are RGBA8 only | `zui.Color` or `zui.ExtendedColor`, clamped for a renderer without `zui_extended_color` | `src/context.zig`, `src/commands.zig` | G6 |
-| configs copied into the frame | config references, static styles | `src/context.zig`, `src/style.zig` | L8 |
 | `Widgets(Ui)` with a `Theme` struct | `Widgets(Ui, Skin)` | `zui_widgets/` | K5 |
 | `Frame` exposes its storage arrays and `rectOf` | `Frame.inspect(index)` | `src/context.zig` | V1 |
 | `Features` has every field and gates its API, but `Frame.semantics()` is always empty, `manipulation` always null, and `flex_wrap` and `safety_sweeps` change nothing | semantics, gestures, wrap and safety sweeps, each behind its field | `src/context.zig`, `src/layout.zig` | V2, I5, L7, V3 |

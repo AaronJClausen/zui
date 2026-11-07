@@ -81,6 +81,10 @@ Implemented so far:
   walking its words, and a whole-string cache makes a warm text one probe
   instead of one per word: 1,000 warm texts lay out in about 100 µs. The
   box tree of 4,096 boxes lays out and emits its commands in about 94 µs.
+  Static styles: `zui.static(zui.Style{ ... })` makes a style at
+  comptime, and `.style = toolbar_style` on an element references it
+  instead of copying it, so 4,096 styled boxes declare in about 35 µs
+  instead of 58.
 - **Stage 3:** the renderer contract (`zuiSubmit`, the surfaces
   it draws into, the optional commands it draws), checked at compile time
   by `zui.checkRenderer`, and a `RenderCommand` union generated with

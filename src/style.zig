@@ -243,6 +243,36 @@ pub const Decoration = struct {
     corner_radius: CornerRadius = .zero,
 };
 
+/// An element's layout and decoration together, made once at comptime with
+/// `zui.static` and referenced by every element that uses it.
+pub const Style = struct {
+    layout: Layout = .{},
+    decoration: Decoration = .{},
+};
+
+/// A value in read-only memory for the life of the program, which an
+/// element references instead of copying. Only `zui.static` makes one, at
+/// comptime, so it is safe under any number of frames in flight.
+pub fn Static(comptime T: type) type {
+    return struct {
+        value: *const T,
+    };
+}
+
+/// ```zig
+/// const toolbar_style = zui.static(zui.Style{
+///     .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(40) }, .padding = .all(4) },
+///     .decoration = .{ .background = .rgb(0x202020) },
+/// });
+/// ui.open(.{ .id = .of("toolbar"), .style = toolbar_style });
+/// ```
+pub fn static(comptime value: anytype) Static(@TypeOf(value)) {
+    const Holder = struct {
+        const held = value;
+    };
+    return .{ .value = &Holder.held };
+}
+
 /// Which axes of an element scroll. Scrolling also clips those axes, and
 /// needs an explicit id, because the offset lives in the state table.
 pub const Scroll = struct {

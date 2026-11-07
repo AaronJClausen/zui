@@ -50,6 +50,40 @@ pub const BoxTree = struct {
     }
 };
 
+/// The box tree with each element's layout and decoration in one of 32
+/// static styles, so declaration stores a reference and copies no config.
+pub const StaticBoxTree = struct {
+    pub const name = "4096 static-styled boxes";
+    pub const layout_target_ns: ?u64 = null;
+    pub const limits = BoxTree.limits;
+
+    const styles = blk: {
+        var by_sizing: [4][8]zui.Static(zui.Style) = undefined;
+        for (0..4) |sizing_case| for (0..8) |depth| {
+            const sizing: zui.Sizing2 = switch (sizing_case) {
+                0 => .{ .width = .grow, .height = .fit },
+                1 => .{ .width = .fit, .height = .fixed(2) },
+                2 => .{ .width = .percent(0.9), .height = .fit },
+                else => .{ .width = .{ .rule = .grow, .amount = 1, .min = 4, .max = 400 }, .height = .fit },
+            };
+            by_sizing[sizing_case][depth] = zui.static(zui.Style{
+                .layout = .{ .sizing = sizing, .padding = .all(1), .child_gap = 1, .direction = if (depth % 2 == 0) .left_to_right else .top_to_bottom },
+                .decoration = .{ .background = if (depth % 3 == 0) zui.Color.rgb(0x202030) else null },
+            });
+        };
+        break :blk by_sizing;
+    };
+    const root_style = zui.static(zui.Style{ .layout = .{ .direction = .top_to_bottom, .sizing = .grow_both, .child_gap = 1 } });
+
+    pub fn declare(_: *StaticBoxTree, ui: anytype, _: usize) void {
+        ui.open(.{ .style = root_style });
+        for (0..512) |row| {
+            for (0..8) |depth| ui.open(.{ .style = styles[(row + depth) % 4][depth] });
+            for (0..8) |_| ui.close();
+        }
+        ui.close();
+    }
+};
 const vocabulary = [_][]const u8{
     "layout", "frame",  "render", "measure", "text",   "zig",      "comptime", "element", "panel",  "button",
     "slider", "scroll", "focus",  "hover",   "click",  "window",   "widget",   "cache",   "word",   "line",
