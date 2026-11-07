@@ -225,11 +225,16 @@ pub fn Host(comptime Ui: type) type {
 
         fn waitUntil(self: *Self, deadline: ?Io.Clock.Timestamp) void {
             while (!self.signal.isSet()) {
-                if (deadline) |instant| {
-                    self.signal.waitTimeout(self.io, .{ .deadline = instant }) catch return;
-                } else {
+                const instant = deadline orelse {
                     self.signal.waitUncancelable(self.io);
-                }
+                    continue;
+                };
+                // A timed wait on Windows may end a little before its deadline.
+                if (self.localNanoseconds() >= instant.raw.nanoseconds) return;
+                self.signal.waitTimeout(self.io, .{ .deadline = instant }) catch |err| switch (err) {
+                    error.Timeout => {},
+                    error.Canceled => return,
+                };
             }
         }
 
