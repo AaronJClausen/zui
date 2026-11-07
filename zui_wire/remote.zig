@@ -43,9 +43,12 @@ pub fn Host(comptime Ui: type) type {
         /// in the stream's header so a client with other fonts refuses it.
         fingerprint: ?u64 = null,
         link: ?*Link = null,
-        /// Set by a record arriving, the connection ending and a wake;
-        /// cleared after a wait returns.
+        /// Set after each of `woken`, a record arriving and the connection
+        /// ending; a wait ends on it only once one of those holds, since a
+        /// record that set it may have been polled before the wait began.
         signal: Io.Event = .unset,
+        /// Sticky until a wait returns.
+        woken: std.atomic.Value(bool) = .init(false),
 
         const Link = struct {
             gpa: std.mem.Allocator,
@@ -67,6 +70,8 @@ pub fn Host(comptime Ui: type) type {
             /// The client's clock less this process's, as of the last record.
             remote_minus_local_ns: i128 = 0,
             last_polled_at: zui.Instant = .zero,
+            /// A record arrived since the last poll.
+            fresh: bool = false,
             closed: bool = false,
             failure: ?anyerror = null,
         };
@@ -178,6 +183,7 @@ pub fn Host(comptime Ui: type) type {
             record.dropped_events +|= inbox.dropped_events;
             record.dropped_text_bytes +|= inbox.dropped_text_bytes;
             inbox.begin(.{ .now = inbox.params.now, .viewport = inbox.params.viewport, .scale = inbox.params.scale });
+            link.fresh = false;
             return true;
         }
 
@@ -191,6 +197,7 @@ pub fn Host(comptime Ui: type) type {
                 .at => |instant| self.waitUntil(self.localDeadline(instant)),
                 .on_event => self.waitUntil(null),
             }
+            self.woken.store(false, .release);
             self.signal.reset();
         }
 
@@ -224,18 +231,27 @@ pub fn Host(comptime Ui: type) type {
         }
 
         fn waitUntil(self: *Self, deadline: ?Io.Clock.Timestamp) void {
-            while (!self.signal.isSet()) {
-                const instant = deadline orelse {
+            while (!self.hasNews()) {
+                if (deadline) |instant| {
+                    // A timed wait on Windows may end a little before its deadline.
+                    if (self.localNanoseconds() >= instant.raw.nanoseconds) return;
+                    self.signal.waitTimeout(self.io, .{ .deadline = instant }) catch |err| switch (err) {
+                        error.Timeout => {},
+                        error.Canceled => return,
+                    };
+                } else {
                     self.signal.waitUncancelable(self.io);
-                    continue;
-                };
-                // A timed wait on Windows may end a little before its deadline.
-                if (self.localNanoseconds() >= instant.raw.nanoseconds) return;
-                self.signal.waitTimeout(self.io, .{ .deadline = instant }) catch |err| switch (err) {
-                    error.Timeout => {},
-                    error.Canceled => return,
-                };
+                }
+                self.signal.reset();
             }
+        }
+
+        fn hasNews(self: *Self) bool {
+            if (self.woken.load(.acquire)) return true;
+            const link = self.link orelse return false;
+            link.mutex.lockUncancelable(self.io);
+            defer link.mutex.unlock(self.io);
+            return link.fresh or link.closed;
         }
 
         /// `instant`, in the client's clock, on this process's.
@@ -278,6 +294,7 @@ pub fn Host(comptime Ui: type) type {
                 link.inbox.params.scale = record.params.scale;
                 for (record.events) |event| appendCopy(&link.inbox, event);
                 link.remote_minus_local_ns = @as(i128, record.params.now.nanoseconds) - self.localNanoseconds();
+                link.fresh = true;
             }
             self.signal.set(self.io);
         }
@@ -294,6 +311,7 @@ pub fn Host(comptime Ui: type) type {
 
         fn wake(context: *anyopaque) void {
             const self: *Self = @ptrCast(@alignCast(context));
+            self.woken.store(true, .release);
             self.signal.set(self.io);
         }
     };
