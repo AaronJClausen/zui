@@ -102,7 +102,12 @@ reused (`ROADMAP.md` explains the letters).
 | `zig build fmt` | before committing; CI runs `fmt-check` |
 | `zig build bench -- --check-targets` | any change to a hot path |
 | `zig build bench-compare -- <base>` | any change claiming a speedup or risking a slowdown |
+| `zig build counts -- --compare <file>` | any change to a hot path; CI compares with the parent commit and fails on more than 2% growth |
 
+- Every command, test run and CI job has a hard limit of 10 minutes:
+  `timeout 600 zig build test`, `timeout-minutes` in CI. No test may wait
+  without a bound. Work that does not fit is restructured, never given a
+  longer limit.
 - This machine is Windows. Valgrind and Callgrind do not run on it, but
   Docker does, so instruction counts can be taken in a Linux container.
 - Wall-clock times are judged only on one machine with `bench-compare`,
