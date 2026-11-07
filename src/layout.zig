@@ -43,10 +43,10 @@ fn measureTexts(comptime Ui: type, ui: *Ui, frame: *Ui.Frame) void {
     for (frame.texts[0..frame.text_count], 0..) |*record, text_index| {
         if (Ui.measures_in_parallel and !switched_to_parallel and cache.measure_calls - calls_before >= Ui.limits.parallel_measure_threshold) {
             switched_to_parallel = true;
-            parallel_measure.prefetch(Ui, ui, frame.texts[text_index..frame.text_count], frame.text_bytes[0..frame.text_bytes_used], frame.zoom, Ui.limits.parallel_measure_threshold);
+            parallel_measure.prefetch(Ui, ui, frame.texts[text_index..frame.text_count], frame.text_bytes[0..frame.text_bytes_used], frame.params.zoom, Ui.limits.parallel_measure_threshold);
         }
         const content = frame.text_bytes[record.bytes_start..][0..record.bytes_len];
-        record.metrics = text.measureText(ui.measurer(record.style, frame.zoom), content, record.style.wrap, record.style.line_height, &ui.memory.run_widths, &run_count);
+        record.metrics = text.measureText(ui.measurer(record.style, frame.params.zoom), content, record.style.wrap, record.style.line_height, &ui.memory.run_widths, &run_count);
     }
 }
 
@@ -213,7 +213,7 @@ fn sizeFloatingChildren(comptime Ui: type, frame: *Ui.Frame, parent: Ui.Index, c
     while (children.next()) |child| {
         if (!frame.isFloating(child)) continue;
         const reference = switch (frame.floatingOf(child).attach_to) {
-            .root => frame.viewport[a],
+            .root => frame.params.viewport[a],
             .parent, .element => frame.size[parent][a],
         };
         const sizing = frame.sizingOf(child, axis);
@@ -331,7 +331,7 @@ fn wrapTexts(comptime Ui: type, ui: *Ui, frame: *Ui.Frame) void {
         const element = record.element;
         const content = frame.text_bytes[record.bytes_start..][0..record.bytes_len];
         if (record.metrics.run_widths_pending and !text.fitsOneLine(record.style.wrap, record.metrics, frame.size[element][0])) {
-            text.measurePendingRuns(ui.measurer(record.style, frame.zoom), content, record.style.wrap, record.metrics, &ui.memory.run_widths);
+            text.measurePendingRuns(ui.measurer(record.style, frame.params.zoom), content, record.style.wrap, record.metrics, &ui.memory.run_widths);
         }
         record.first_line = frame.line_count;
         const fitted = text.wrapLines(
@@ -407,7 +407,7 @@ fn placeFloating(comptime Ui: type, frame: *Ui.Frame, floating: Ui.Index) void {
         .parent => {},
         .root => {
             target_position = .{ 0, 0 };
-            target_size = frame.viewport;
+            target_size = frame.params.viewport;
         },
         .element => |target_id| if (frame.lookup(target_id.hash)) |target| if (target < floating) {
             target_position = frame.position[target];

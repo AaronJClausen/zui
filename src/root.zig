@@ -7,6 +7,9 @@ const input = @import("input.zig");
 const record = @import("record.zig");
 const trace = @import("trace.zig");
 const sources = @import("sources.zig");
+const commands = @import("commands.zig");
+const surface = @import("surface.zig");
+const contracts = @import("contracts.zig");
 
 pub const Context = context.Context;
 pub const Config = context.Config;
@@ -17,6 +20,28 @@ pub const Element = context.Element;
 pub const Diagnostics = context.Diagnostics;
 
 pub const TraceZone = trace.TraceZone;
+
+pub const OptionalCommand = commands.OptionalCommand;
+pub const CommandSet = commands.CommandSet;
+pub const Surface = surface.Surface;
+pub const SurfaceKind = surface.SurfaceKind;
+pub const SurfaceKinds = surface.SurfaceKinds;
+
+/// Fails to compile, with a message naming the declaration, unless
+/// `Renderer` implements the renderer contract: `zuiSubmit` and
+/// `zui_surfaces`, and optionally `zui_commands`, `zui_extended_color` and
+/// the payload types `ImageHandle`, `MaterialHandle`, `CustomData` and
+/// `FontId`.
+///
+/// ```zig
+/// pub fn config(overrides: zui.Config) zui.Config {
+///     comptime zui.checkRenderer(Renderer);
+///     var result = overrides;
+///     result.commands = Renderer.zui_commands;
+///     return result;
+/// }
+/// ```
+pub const checkRenderer = contracts.checkRenderer;
 
 pub const Waker = sources.Waker;
 pub const Wake = sources.Wake;
@@ -81,6 +106,7 @@ pub const ScrollState = interaction.ScrollState;
 
 test {
     std.testing.refAllDecls(@This());
+    _ = @import("commands.zig");
     _ = @import("text.zig");
     _ = @import("input.zig");
     _ = @import("state.zig");
@@ -95,4 +121,5 @@ test {
     _ = @import("tests/parallel.zig");
     _ = @import("tests/tracing.zig");
     _ = @import("tests/sources.zig");
+    _ = @import("tests/renderers.zig");
 }

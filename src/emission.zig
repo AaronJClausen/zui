@@ -34,7 +34,7 @@ pub fn run(comptime Ui: type, ui: *Ui, frame: *Ui.Frame) void {
     results.clear();
     var emitter: Emitter(Ui) = .{ .frame = frame, .results = results, .pixels_per_unit = frame.pixels_per_unit, .units_per_pixel = 1 / frame.pixels_per_unit };
 
-    const viewport: style.Rect = .{ .width = frame.viewport[0], .height = frame.viewport[1] };
+    const viewport: style.Rect = .{ .width = frame.params.viewport[0], .height = frame.params.viewport[1] };
     const levels = &ui.emit_levels;
     levels[0] = .{
         .element = Ui.root_index,
@@ -157,8 +157,8 @@ fn Emitter(comptime Ui: type) type {
 
             switch (frame.kindOf(element)) {
                 .none => {},
-                .image => if (drawn) self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = level.z, .payload = .{ .image = frame.images[frame.content_index[element]] } }),
-                .custom => if (drawn) self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = level.z, .payload = .{ .custom = frame.customs[frame.content_index[element]] } }),
+                .image => if (Ui.RenderCommand.has_image and drawn) self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = level.z, .payload = .{ .image = frame.images[frame.content_index[element]] } }),
+                .custom => if (Ui.RenderCommand.has_custom and drawn) self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = level.z, .payload = .{ .custom = frame.customs[frame.content_index[element]] } }),
                 .text => if (Ui.has_text) self.emitText(element, element_id, level),
             }
 

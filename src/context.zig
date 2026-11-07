@@ -32,12 +32,18 @@ pub const Config = struct {
     /// the source contract, swapped in field order at each `beginFrame`.
     /// `void` removes the `sources` parameter and `source` from the API.
     Sources: type = void,
+    /// The optional commands the renderer draws, its `zui_commands`; only
+    /// these are variants of `RenderCommand`'s payload.
+    commands: command_types.CommandSet = .initEmpty(),
 
-    /// The renderer's image, e.g. a texture id. `void` removes `image`.
+    /// The renderer's image, e.g. a texture id. `void` removes `image`,
+    /// from the API and from the commands.
     ImageHandle: type = void,
     /// What a self-drawn element carries, e.g. a 3D viewport's camera.
-    /// `void` removes `custom`.
+    /// `void` removes `custom`, from the API and from the commands.
     CustomData: type = void,
+    /// The renderer's shader or material, for the `material` command.
+    MaterialHandle: type = void,
     /// The renderer's font identifier, passed back in `MeasureKey`. An
     /// integer or enum type.
     FontId: type = u16,
@@ -215,10 +221,17 @@ pub fn Context(comptime config: Config) type {
         pub const FontId = config.FontId;
         pub const TextStyle = style.TextStyle(config.FontId);
         pub const MeasureKey = style.MeasureKey(config.FontId);
-        pub const Image = struct {
-            handle: config.ImageHandle,
-        };
-        pub const RenderCommand = command_types.RenderCommand(TextStyle, Image, config.CustomData);
+        /// Generated from `config.commands` and the payload types: a
+        /// renderer's exhaustive `switch` over `payload` covers exactly what
+        /// it draws.
+        pub const RenderCommand = command_types.RenderCommand(.{
+            .TextStyle = TextStyle,
+            .ImageHandle = config.ImageHandle,
+            .CustomData = config.CustomData,
+            .MaterialHandle = config.MaterialHandle,
+            .commands = config.commands,
+        });
+        pub const Image = RenderCommand.Image;
         /// Rounded up to a whole number of bytes: a `u13` is stored in 16
         /// bits anyway, and every load of one would be masked.
         pub const Index = std.meta.Int(.unsigned, std.math.ceilPowerOfTwoAssert(u16, @max(8, @bitSizeOf(std.math.IntFittingRange(0, limits.max_elements)))));
@@ -256,6 +269,9 @@ pub fn Context(comptime config: Config) type {
         pub const Frame = struct {
             /// Frames since `init`, from 0.
             number: u64,
+            /// The record's parameters: what a renderer needs to draw the
+            /// commands at the right size and scale.
+            params: record_types.FrameParams,
             diagnostics: Diagnostics,
             host_requests: HostRequests,
 
@@ -309,8 +325,6 @@ pub fn Context(comptime config: Config) type {
             command_count: u32,
 
             id_table: [id_table_slots]Index,
-            viewport: [2]f32,
-            zoom: f32,
             /// Physical pixels per layout unit: the record's scale times its zoom.
             pixels_per_unit: f32,
             held: std.atomic.Value(bool),
@@ -393,6 +407,7 @@ pub fn Context(comptime config: Config) type {
 
             fn reset(self: *Frame, number: u64, params: record_types.FrameParams) void {
                 self.number = number;
+                self.params = params;
                 self.element_count = 0;
                 self.layout_count = 0;
                 self.decoration_count = 0;
@@ -405,8 +420,6 @@ pub fn Context(comptime config: Config) type {
                 self.command_count = 0;
                 self.diagnostics = .{};
                 self.host_requests = .{};
-                self.viewport = params.viewport;
-                self.zoom = params.zoom;
                 self.pixels_per_unit = params.scale * params.zoom;
                 self.layouts[none_index] = .{};
                 @memset(&self.id_table, none_index);
@@ -760,13 +773,13 @@ pub fn Context(comptime config: Config) type {
         pub fn measureText(self: *Self, content: []const u8, text_style: TextStyle) [2]f32 {
             if (!has_text) @compileError("zui: measureText() needs Config.Text set to a text contract");
             const frame = self.current orelse @panic("zui: measureText() is only available between beginFrame() and endFrame()");
-            return self.measurer(text_style, frame.zoom).measure(content);
+            return self.measurer(text_style, frame.params.zoom).measure(content);
         }
 
         /// The current frame's viewport, from its record.
         pub fn viewport(self: *const Self) [2]f32 {
             const frame = self.current orelse @panic("zui: viewport() is only known between beginFrame() and endFrame()");
-            return frame.viewport;
+            return frame.params.viewport;
         }
 
         /// As the host last reported it through `environment` events.
@@ -1385,4 +1398,5 @@ fn validateConfig(comptime config: Config) void {
         .int, .@"enum" => {},
         else => @compileError("zui: FontId must be an integer or enum type, got " ++ @typeName(config.FontId)),
     }
+    if (config.commands.contains(.material) and config.MaterialHandle == void) @compileError("zui: commands includes .material but MaterialHandle is void");
 }

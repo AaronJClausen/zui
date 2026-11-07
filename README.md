@@ -61,21 +61,25 @@ Implemented so far:
   walking its words, and a whole-string cache makes a warm text one probe
   instead of one per word: 1,000 warm texts lay out in about 100 µs. The
   box tree of 4,096 boxes lays out and emits its commands in about 94 µs.
+- **Stage 3, in part:** the renderer contract (`zuiSubmit`, the surfaces
+  it draws into, the optional commands it draws), checked at compile time
+  by `zui.checkRenderer`, and a `RenderCommand` union generated with
+  exactly the variants a renderer draws, so its exhaustive `switch` names
+  nothing else. zui-raylib, zui-sokol and zui-terminal are renderers.
 
 The reference backend and demo application live in
 [zui-raylib](https://github.com/AaronJClausen/zui-raylib); the other
 backends are [zui-sokol](https://github.com/AaronJClausen/zui-sokol) and
 [zui-terminal](https://github.com/AaronJClausen/zui-terminal).
 
-Next, in the order of SPEC.md §21: the renderer and host contracts with
-`zui_app`, a native Windows host, the wire format, and from there text,
+Next, in the order of SPEC.md §21: the host contract with `zui_app`, a native Windows host, the wire format, and from there text,
 layout, gestures, effects, an inspector and accessibility, more hosts,
 motion and text editing. The box tree's layout budget (P4) comes early,
 as the text fast path and string cache did.
 [ROADMAP.md](ROADMAP.md) keeps the queue of work in order, and
 [ARCHITECTURE.md](ARCHITECTURE.md) shows how the pieces connect.
 
-Today's API, until stage 3 adds the host and renderer contracts of
+Today's API, until stage 3 adds the host contract and `zui_app` of
 SPEC.md §6.1:
 
 ```zig
@@ -88,7 +92,7 @@ ui.open(.{ .id = .of("toolbar"), .layout = .{ .sizing = .{ .width = .grow, .heig
 ui.text("Hello, zui", .{ .color = .white });
 ui.close();
 const frame = ui.endFrame();
-for (frame.commands()) |command| renderer.draw(command);
+try renderer.zuiSubmit(surface, frame); // e.g. zui_raylib.Renderer, with surface .library
 host.setCursor(frame.requests().cursor);
 ui.release(frame);
 waitFor(ui.nextFrame());

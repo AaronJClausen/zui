@@ -290,8 +290,7 @@ pub fn snapshot(writer: *std.Io.Writer, commands: anytype, names: anytype) std.I
                 try writeColor(writer, text.style.color);
                 try writer.print(" \"{s}\"", .{text.content});
             },
-            .image => |image| try writeHandle(writer, image.handle),
-            .clip_begin, .clip_end, .custom => {},
+            inline else => |payload, kind| if (comptime std.mem.eql(u8, @tagName(kind), "image")) try writeHandle(writer, payload.handle),
         }
         try writer.writeByte('\n');
     }

@@ -46,7 +46,7 @@ test "two frames can be held at once, and release recycles them" {
     harness.ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 200, 200 } } });
     const second = harness.ui.endFrame();
     try testing.expect(first != second);
-    try testing.expectEqual([2]f32{ 100, 100 }, first.viewport);
+    try testing.expectEqual([2]f32{ 100, 100 }, first.params.viewport);
 
     harness.ui.release(first);
     harness.ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 300, 300 } } });

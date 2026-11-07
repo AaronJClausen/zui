@@ -100,8 +100,6 @@ pub fn snapshot(frame: *const Ui.Frame, buffer: []u8) ![]const u8 {
                 if (text.style.letter_spacing != 0) try writer.print(" spacing={d}", .{text.style.letter_spacing});
                 try writer.writeByte('\n');
             },
-            .image => try writer.print("image {d} {d} {d} {d}\n", .{ bounds.x, bounds.y, bounds.width, bounds.height }),
-            .custom => try writer.print("custom {d} {d} {d} {d}\n", .{ bounds.x, bounds.y, bounds.width, bounds.height }),
             .clip_begin => |clip| try writer.print("clip {d} {d} {d} {d}\n", .{ clip.x, clip.y, clip.width, clip.height }),
             .clip_end => try writer.writeAll("clip_end\n"),
         }

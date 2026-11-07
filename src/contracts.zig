@@ -2,6 +2,8 @@ const std = @import("std");
 const style = @import("style.zig");
 const trace = @import("trace.zig");
 const sources = @import("sources.zig");
+const commands = @import("commands.zig");
+const surface = @import("surface.zig");
 
 /// Every `zui`-prefixed declaration of every contract. One that is not
 /// here belongs to no contract, which is almost always a misspelling.
@@ -32,6 +34,48 @@ pub fn checkText(comptime Text: type, comptime FontId: type) void {
     if (@hasDecl(Text, "zui_thread_safe") and @TypeOf(Text.zui_thread_safe) != bool) {
         @compileError("zui: " ++ @typeName(Text) ++ ".zui_thread_safe must be a bool, found " ++ @typeName(@TypeOf(Text.zui_thread_safe)));
     }
+}
+
+/// The renderer contract. A renderer is usually also the text contract,
+/// which `Context` checks when it is `Config.Text`.
+pub fn checkRenderer(comptime Renderer: type) void {
+    if (@typeInfo(Renderer) != .@"struct") @compileError("zui: a renderer must be a struct type, got " ++ @typeName(Renderer));
+    const name = @typeName(Renderer);
+    checkKnownDeclarations(Renderer);
+    for ([_][]const u8{ "zuiSubmit", "zui_surfaces" }) |required| {
+        if (!@hasDecl(Renderer, required)) @compileError("zui: " ++ name ++ " does not implement zui.Renderer: missing `" ++ required ++ "`");
+    }
+    expectDeclarationType(Renderer, "zui_surfaces", surface.SurfaceKinds, "zui.SurfaceKinds");
+    if (Renderer.zui_surfaces.count() == 0) @compileError("zui: " ++ name ++ ".zui_surfaces names no surface kind, so no host can give it one");
+    if (@hasDecl(Renderer, "zui_commands")) expectDeclarationType(Renderer, "zui_commands", commands.CommandSet, "zui.CommandSet");
+    if (@hasDecl(Renderer, "zui_extended_color")) expectDeclarationType(Renderer, "zui_extended_color", bool, "bool");
+    for ([_][]const u8{ "ImageHandle", "MaterialHandle", "CustomData", "FontId" }) |payload_type| {
+        if (@hasDecl(Renderer, payload_type)) expectDeclarationType(Renderer, payload_type, type, "type");
+    }
+    if (@hasDecl(Renderer, "zui_commands") and Renderer.zui_commands.contains(.material) and rendererType(Renderer, "MaterialHandle", void) == void) {
+        @compileError("zui: " ++ name ++ ".zui_commands includes .material but " ++ name ++ ".MaterialHandle is void");
+    }
+
+    const expected_submit = "fn (*" ++ name ++ ", zui.Surface, frame: anytype) !void";
+    const submits_a_frame = switch (@typeInfo(@TypeOf(Renderer.zuiSubmit))) {
+        .@"fn" => |function| function.params.len == 3 and
+            function.params[0].type == *Renderer and
+            function.params[1].type == surface.Surface and
+            function.params[2].type == null,
+        else => false,
+    };
+    // Not "found ...": a generic function's type name spells out its inferred error set in builtins.
+    if (!submits_a_frame) @compileError("zui: " ++ name ++ ".zuiSubmit must be " ++ expected_submit);
+}
+
+/// The renderer's declaration `declaration`, or `default` without one.
+fn rendererType(comptime Renderer: type, comptime declaration: []const u8, comptime default: type) type {
+    return if (@hasDecl(Renderer, declaration)) @field(Renderer, declaration) else default;
+}
+
+fn expectDeclarationType(comptime Implementer: type, comptime declaration: []const u8, comptime Expected: type, comptime expected_name: []const u8) void {
+    const Found = @TypeOf(@field(Implementer, declaration));
+    if (Found != Expected) @compileError("zui: " ++ @typeName(Implementer) ++ "." ++ declaration ++ " must be a " ++ expected_name ++ ", found " ++ @typeName(Found));
 }
 
 pub fn checkSources(comptime Sources: type) void {

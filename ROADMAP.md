@@ -24,6 +24,7 @@ Each item says:
 | 0.6, in part | `bench-compare` (R2), startup benchmarks (P1), task completions at `beginFrame` (A2), the async design (A1) | done; the rest of 0.6 became stage 1 |
 | stage 1 | instruction counts in CI (R1), the tracer contract and `zui_tracy` (P2) | done |
 | stage 2 | the code brought to the spec's shape: C5, S1, I4, C6, A5 and `nextFrame` (I2); letter spacing (T3); the environment and host requests (I6); sources in the core (A3); `zui_async` (A4); the backends on the new API, the demo's thumbnails on `KeyedLoads` (C8) | done; the demo idles at 0% CPU |
+| stage 3, in part | the renderer contract and the generated commands (C1) | done; the backends are renderers; lowering comes with stage 8's commands, and the renderer suite with C3 |
 | stage 6, early | the single-line fast path (T1), the whole-string cache (T2), the box tree's layout passes (P4, in part) | done; warm text and the box tree's layout and emission within their budgets; the box tree's declaration is not (P5) |
 
 No release is tagged; everything is on `main`. From here, work is
@@ -58,7 +59,6 @@ green, and its **Status** line below says which slice is next.
 |---|---|---|---|---|
 | P4. The box tree's layout and emission within budget | 6, early | `src/layout.zig`, `src/emission.zig` | | waiting on P5 |
 | P5. The box tree's declaration within budget | 6, early | `src/context.zig` | L8 | waiting on L8 |
-| C1. The renderer contract, generated commands, lowering | 3 | `src/commands.zig`, `src/emission.zig`, `src/contracts.zig` | | |
 | C2. The host contract and the surface | 3 | `src/contracts.zig`, a new `src/surface.zig` | C1 | |
 | C3. Conformance suites | 3 | `zui_testing/` | C1, C2 | |
 | C7. `Features` | 3 | `src/context.zig` | | |
@@ -130,6 +130,54 @@ Things to know:
 ---
 
 ## Done
+
+### C1. The renderer contract and the generated commands
+
+`zui.checkRenderer(Renderer)`: `zuiSubmit(self, surface: zui.Surface,
+frame: anytype) !void` and `zui_surfaces` required; `zui_commands`,
+`zui_extended_color` and the payload types `ImageHandle`,
+`MaterialHandle`, `CustomData` and `FontId` optional; each mistake a
+compile error with its message, pinned by six compile-error tests, and
+`.material` without a `MaterialHandle` one more, in the renderer and in
+`Config`. `Config.commands` (a `zui.CommandSet` of `zui.OptionalCommand`)
+and `Config.MaterialHandle`, and `RenderCommand` generated with `@Union`:
+the five base commands, `image` and `custom` only when their payload
+type is set, then each optional command declared (`gradient`, `shadow`,
+`backdrop_blur`, `transform_begin`/`transform_end`, `material`), so a
+renderer that declares nothing optional switches over five variants. The
+vocabulary of surfaces (`zui.Surface`, `SurfaceKind`, `SurfaceKinds`),
+which the renderer contract names, landed here rather than in C2. A frame
+carries its record's parameters (`Frame.params`), which a renderer needs
+to draw. `zig build check` instantiates a renderer that declares every
+optional command and payload type on every target.
+
+zui-raylib, zui-sokol and zui-terminal are renderers: each has a
+`Renderer` whose `config()` builds the `Config` from its declarations and
+whose `zuiSubmit` switches exhaustively over the commands. raylib and
+sokol draw into their library's own window (`.library`); the terminal
+into `.terminal`, by its size in cells, and its `switch` names only the
+five base commands. Run here on Windows: raylib's demo saves its
+screenshots as before (documents and thumbnail grid), sokol's draws 31
+frames from 1 declared, and the terminal's `--dump` prints the showcase.
+
+Against `04461bd`, `zig build counts` in a local Docker container:
+declaration unchanged (within 2 instructions in every scenario but new
+strings, +0.46%, and depth 64, −0.66%); `endFrame` −0.2% to −4.3% (box
+tree −1.7%, 4,000 children −4.3%, documents view −1.9%), from the
+`image` and `custom` variants a default config no longer has. Folding
+the frame's viewport and zoom into `params` kept declaration flat: a
+separate field cost an instruction an element there. `zig build
+bench-compare -- 04461bd` (4 rounds) called nothing slower; 4,000
+children −5.0% and the documents view's first frame −6.6% faster.
+
+What remains, and where it went:
+- **Lowering.** No declaration can yet produce an optional command, so
+  there is nothing to lower and `Diagnostics` lists no lowerings; each
+  lands, with its lowering test, with the stage-8 item that adds the
+  command's declaration (G1, G2, G3, G5, G6).
+- **The renderer suite.** "Each backend passes C3's renderer suite" is
+  C3's: its plan now includes running `expectRendererConforms` in the
+  three backends' CI.
 
 ### T2. The whole-string cache
 
@@ -622,23 +670,16 @@ pool.
 
 ## Stage 3: the contracts
 
-### C1. The renderer contract, the generated commands, lowering
-
-**Plan.** `zuiSubmit`, `zui_surfaces`, `zui_commands`,
-`zui_extended_color`; `Config.commands` generating `RenderCommand` with
-`@Union`; emission lowering what the renderer did not declare, listed in
-the diagnostics. zui-raylib, zui-sokol and zui-terminal become renderers.
-
-**Done when:** each backend passes C3's renderer suite, and a renderer
-that declares nothing optional compiles a `switch` over the base commands
-only.
-
-**Spec.** §13.1, §13.3, §16.2.
-
 ### C2. The host contract and the surface
 
+**Grounding.** `zui.Surface`, `SurfaceKind` and `SurfaceKinds` exist
+(`src/surface.zig`, from C1), because the renderer contract names them;
+nothing hands one out yet, and the renderers' `zui_surfaces` are checked
+against no host.
+
 **Plan.** `zuiPoll`, `zuiWaker`, `zuiWait`, `zuiSurface`, `zuiApply`;
-`zui.Surface`; `RecordBuilder`; sticky wakes.
+`RecordBuilder`; sticky wakes; a host and a renderer whose `zui_surfaces`
+share no kind are a compile error naming both.
 
 **Done when:** the raylib adapter (H1) passes C3's host suite.
 
@@ -647,7 +688,9 @@ only.
 ### C3. Conformance suites
 
 **Plan.** `expectRendererConforms` and `expectHostConforms`, and a CI
-recipe the backends copy.
+recipe the backends copy. zui-raylib, zui-sokol and zui-terminal run the
+renderer suite in their CI, which is what C1's *Done when* left to this
+item.
 
 **Done when:** every backend's CI runs them.
 
@@ -1006,6 +1049,10 @@ including out of a list that scrolls by dragging.
   for renderers without `zui_extended_color`; headroom from the
   environment; the output format negotiated through `Surface`.
 
+C1 generated the optional commands' variants; each item here adds the
+declaration that produces its command and the lowering for renderers that
+do not declare it, and the first adds `Diagnostics.lowered`.
+
 **Done when (each):** snapshot and lowering tests, and one renderer draws
 it; for G3, an interaction test clicks a rotated button; for G6, the
 Windows host shows HDR white brighter than SDR white.
@@ -1170,6 +1217,11 @@ Deliberate, and each a reason to choose zui:
 | Measuring idle CPU (C8) | by the demo itself (`--measure-idle`), between two frames it requests 10 s apart, so the run ends on its own and CI can repeat it |
 | What a cached string holds (T2) | its metrics and the widths of up to 16 runs, so a warm text that wraps probes nothing per word; a longer one keeps only its metrics and measures its runs only to wrap |
 | The string cache's key (T2) | the bytes, `MeasureKey`, zoom and wrap mode, so a hit returns exactly the layout units a miss computed |
+| `zuiSubmit`'s frame (C1) | `anytype`: a renderer is not generic over the `Context`; its exhaustive `switch` over the payload is the check that it draws what the frame holds |
+| Surfaces that are not native windows (C1) | `zui.Surface` gains `terminal` (cells) and `library` (a window a library such as raylib or sokol_app owns, which only its adapter host provides) |
+| Where the surface vocabulary lands (C1) | with the renderer contract, which names it; C2 adds the host side and the check that a host and a renderer share a kind |
+| A backend's `config()` (C1) | built from its `Renderer`'s declarations, overriding the application's `commands` and payload types, since the renderer draws only those; `zui_app.contextConfig` (C4) generalizes it |
+| Lowering before stage 8 (C1) | none: no declaration can produce an optional command until its stage-8 item adds one, which lands the lowering with it |
 | Warm benchmark scenes (T2) | sized to hold every string (`string_cache_entries = 2048` for 1,000 texts): 1,000 strings in 1,024 entries overflow eight-entry probe windows, and about a fifth of them missed every frame |
 
 ### Open

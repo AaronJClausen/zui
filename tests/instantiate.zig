@@ -148,6 +148,53 @@ export fn zuiCheckWithoutText() usize {
     return frame.commands().len;
 }
 
+const EveryCommandRenderer = struct {
+    pub const zui_commands: zui.CommandSet = .initFull();
+    pub const zui_surfaces: zui.SurfaceKinds = .initFull();
+    pub const zui_extended_color = false;
+    pub const ImageHandle = u32;
+    pub const MaterialHandle = u8;
+    pub const CustomData = u16;
+
+    drawn: usize = 0,
+
+    pub fn zuiSubmit(self: *EveryCommandRenderer, surface: zui.Surface, frame: anytype) !void {
+        if (surface != .offscreen) return error.UnsupportedSurface;
+        for (frame.commands()) |command| {
+            self.drawn += switch (command.payload) {
+                .rectangle, .border, .text, .clip_begin, .clip_end => 1,
+                .image, .custom => 2,
+                .gradient, .shadow, .backdrop_blur, .transform_begin, .transform_end, .material => 3,
+            };
+        }
+    }
+};
+
+const RendererUi = zui.Context(config: {
+    zui.checkRenderer(EveryCommandRenderer);
+    break :config .{
+        .limits = .{ .max_elements = 16 },
+        .commands = EveryCommandRenderer.zui_commands,
+        .ImageHandle = EveryCommandRenderer.ImageHandle,
+        .MaterialHandle = EveryCommandRenderer.MaterialHandle,
+        .CustomData = EveryCommandRenderer.CustomData,
+    };
+});
+
+var renderer_memory: [RendererUi.required_bytes]u8 align(RendererUi.buffer_alignment) = undefined;
+
+export fn zuiCheckRenderer() usize {
+    var ui = RendererUi.initBuffer(&renderer_memory, undefined) catch return 0;
+    ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 100, 100 } } });
+    ui.image(.{ .handle = 7 }, .{ .decoration = .{ .background = .black } });
+    ui.custom(3, .{});
+    const frame = ui.endFrame();
+    defer ui.release(frame);
+    var renderer: EveryCommandRenderer = .{};
+    renderer.zuiSubmit(.{ .offscreen = .{ .size = .{ 100, 100 } } }, frame) catch return 0;
+    return renderer.drawn;
+}
+
 const TestingUi = zui.Context(.{ .limits = .{ .max_elements = 32 }, .Text = zui_testing.FixedMetricsText(u16) });
 
 var testing_text: zui_testing.FixedMetricsText(u16) = .{};

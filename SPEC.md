@@ -435,6 +435,7 @@ pub const Frame = struct {
     pub fn elementCount(self: *const Frame) ElementIndex
     diagnostics: Diagnostics,
     number: u64,                // frames since `init`, from 0
+    params: FrameParams,        // the record's: what a renderer needs to draw at the right size and scale
 };
 ```
 
@@ -1441,10 +1442,16 @@ const SokolRenderer = struct {
     pub const MaterialHandle = void;
     pub const FontId = u16;
 
-    pub fn zuiSubmit(self: *SokolRenderer, surface: zui.Surface, frame: *const Ui.Frame) !void { ... }
+    pub fn zuiSubmit(self: *SokolRenderer, surface: zui.Surface, frame: anytype) !void { ... }   // frame: *const Ui.Frame
     pub fn zuiMeasure(self: *SokolRenderer, run: []const u8, key: zui.MeasureKey(FontId)) [2]f32 { ... }
 };
 ```
+
+`frame` is `anytype` because a renderer is not generic over the
+`Context` that made the frame. What checks that it draws what the frame
+holds is its exhaustive `switch` over each command's payload: a command
+the renderer did not declare is a compile error at that `switch`.
+`zui.checkRenderer(Renderer)` checks the rest of the contract.
 
 `zui_app.contextConfig(Renderer, .{ ... })` builds a `Config` from a
 renderer's declarations (commands, payload types, text), so the
@@ -1484,7 +1491,10 @@ const Win32Host = struct {
 ### 16.4 Surface
 
 `zui.Surface` is a tagged union of native handles: `win32`, `cocoa`,
-`wayland`, `x11`, `web`, `offscreen`. A host and renderer whose
+`wayland`, `x11`, `web`, `offscreen`; plus `terminal`, a character grid
+by its size in cells, and `library`, a window that a library such as
+raylib or sokol_app creates and draws into itself, which only that
+library's adapter host provides. A host and renderer whose
 `zui_surfaces` share no kind are a compile error naming both. Output
 formats (an FP16 swapchain for HDR) are negotiated through it, and fall
 back to SDR unless both sides support them.
