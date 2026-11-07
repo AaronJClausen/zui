@@ -550,25 +550,31 @@ The rules:
 
 ```zig
 pub const Environment = struct {
-    theme: enum { light, dark } = .light,
-    contrast: enum { normal, high } = .normal,
+    theme: Theme = .light,                          // enum { light, dark }
+    contrast: Contrast = .normal,                   // enum { normal, high }
     reduced_motion: bool = false,
     reduced_transparency: bool = false,
     text_scale: f32 = 1,            // the user's text size preference, e.g. 1.25; applied by skins, not by layout
-    locale: Locale = .default,      // e.g. "fr-CA"; zui only reports it
-    direction: Direction = .left_to_right,  // the language's reading direction, which `mirrored = null` follows
+    locale: Locale = .default,      // a BCP 47 tag of up to 23 bytes, e.g. "fr-CA"; zui only reports it
+    direction: ReadingDirection = .left_to_right,   // the language's, which `mirrored = null` follows
     hdr_headroom: f32 = 1,          // display peak over SDR white, e.g. 4; 1 is an SDR display
-    power: enum { plugged, battery, saver } = .plugged,
+    power: Power = .plugged,                        // enum { plugged, battery, saver }
     window_focused: bool = true,    // the OS window has keyboard focus, not an element
 };
+
+/// One field's new value: `.{ .environment = .{ .theme = .dark } }`.
+pub const EnvironmentChange = union(enum) { theme: Environment.Theme, contrast: Environment.Contrast, ... };
 
 pub fn environment(self: *const Self) *const Environment
 ```
 
 The environment is state the core keeps; `EnvironmentChange` events
-update it, so a record carries only what changed. Skins, motion and
-widgets read it, which is how a theme follows the system's dark mode and
-an animation honors reduced motion.
+update it, one field each, so a record carries only what changed, and the
+change applies before the declaration of the frame that carries it.
+Skins, motion and widgets read it, which is how a theme follows the
+system's dark mode and an animation honors reduced motion.
+`ReadingDirection` holds only left to right and right to left, so it is
+not `Layout`'s `Direction`, which also flows top to bottom.
 
 ### 7.3 Host requests
 
@@ -580,7 +586,22 @@ pub const HostRequests = struct {
     cursor: Cursor = .default,          // of the hot element
     text_input: ?TextInputArea = null,  // focused editable's caret rect: where the IME window goes
 };
+pub const Cursor = enum { default, pointer, text, crosshair, move, grab, grabbing, not_allowed, wait, progress, help,
+    resize_horizontal, resize_vertical, resize_nwse, resize_nesw };
+pub const TextInputArea = struct { caret: Rect };
+
+pub fn requestTextInput(self: *Self, editable: Id, caret: Id) void   // ui.requestTextInput(id, id.child("caret"))
 ```
+
+- **The cursor** is that of the innermost element under the hovering
+  pointer (the mouse or a pen) that sets `Element.cursor`, so a button
+  inside a draggable panel shows the button's. Only interactive elements
+  are hit-tested, so a cursor elsewhere has no effect. Touch never hovers
+  and never sets one.
+- **Text input** is requested by the editable each frame, naming the
+  element it draws as its caret; when `editable` is focused, the frame
+  carries that element's rectangle as laid out in this frame. A frame
+  without a request tells the host to hide its text input.
 
 ---
 

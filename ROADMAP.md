@@ -23,7 +23,7 @@ Each item says:
 | after 0.5 | declaration work: −42% to −56% | on `main` |
 | 0.6, in part | `bench-compare` (R2), startup benchmarks (P1), task completions at `beginFrame` (A2), the async design (A1) | done; the rest of 0.6 became stage 1 |
 | stage 1 | instruction counts in CI (R1), the tracer contract and `zui_tracy` (P2) | on `main`, but for a trace of the demo, which needs C8 |
-| stage 2, in part | the code brought to the spec's shape: C5, S1, I4, C6, A5 and `nextFrame` (I2); letter spacing (T3) | on `main`; the other repos still need the same change (C8) |
+| stage 2, in part | the code brought to the spec's shape: C5, S1, I4, C6, A5 and `nextFrame` (I2); letter spacing (T3); the environment and host requests (I6) | on `main`; the other repos still need the same change (C8) |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
@@ -47,7 +47,6 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
-| I6. The environment and host requests | 2 | `src/input.zig`, `src/context.zig`, `src/tests/interaction.zig`, `zui_widgets/` | | |
 | A3. Sources in the core | 2 | a new `src/sources.zig`, `src/context.zig`, `src/contracts.zig`, `tests/compile_errors/` | | |
 | A4. `zui_async` | 2 | a new `zui_async/` module; `expectSourceConforms` in `zui_testing/` | A3 | |
 | C8. The backends on the stage-2 API | 2 | `../zui-raylib`, `../zui-sokol`, `../zui-terminal` | A4 | |
@@ -125,6 +124,29 @@ Things to know:
 ---
 
 ## Done
+
+### I6. The environment and host requests
+
+`zui.Environment`, kept by the core and changed one field at a time by
+`environment` events, which apply before the declaration of the frame
+that carries them; `ui.environment()`. `Frame.requests()` returns
+`HostRequests`: the cursor of the innermost element under the hovering
+pointer that sets `Element.cursor`, and the caret rectangle an editable
+asks for with `ui.requestTextInput(editable, caret)` while it is focused.
+`zui_widgets` gains `dark_theme`, used while the environment is dark, and
+its controls ask for the pointer, or the I-beam over a text field, which
+also requests text input at its caret.
+
+Decided here: `EnvironmentChange` is a union with one variant per field,
+so applying one is an `inline else`; `Locale` is a BCP 47 tag of up to
+23 bytes held inline, so the event stays plain data; the reading
+direction is its own `ReadingDirection`, since `Layout.Direction` also
+flows top to bottom.
+
+`zig build counts` against `1447ed1`, in a local Docker container: every
+scenario within 1% (declaration of the box tree −0.07%, its `endFrame`
++0.06%), as an `Element.cursor` left null is compiled away at each
+declaration.
 
 ### T3. Letter spacing, through a measurement key
 
@@ -337,17 +359,6 @@ check becomes a counted input scenario that later changes must not grow. Every h
 frame even without a move, so hover follows a layout that moved under a
 still mouse. A lifted touch stays readable until the next frame, so the
 frame that sees a tap can ask where it was.
-
-### I6. The environment and host requests
-
-**Plan.** `Environment`, kept by the core and updated by
-`environment` events; `ui.environment()`. `HostRequests` in the frame:
-the hot element's cursor and the focused editable's IME area.
-
-**Done when:** a test changes the theme by event and a widget follows it;
-the cursor request follows hover.
-
-**Spec.** §7.2, §7.3.
 
 ### I2. `nextFrame()`
 

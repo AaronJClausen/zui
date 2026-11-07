@@ -179,7 +179,7 @@ What exists today is releases 0.1–0.5, the start of 0.6, stage 1
 `Config.limits` and the text contract, the frame record with `now`,
 scale and zoom, input as an ordered event log over a pointer table,
 `endFrame` that always returns a frame, `nextFrame()`, letter spacing
-through the measurement key, and `Element` with `decoration` and
+through the measurement key, the environment and host requests, and `Element` with `decoration` and
 `clip: Axes`. `TaskPool` is deleted.
 
 The code and the spec still differ in these places, each closed by the
@@ -188,7 +188,6 @@ roadmap item named:
 | Today | The spec | Where today | Item |
 |---|---|---|---|
 | no way to bring outside data into a frame; `TaskPool` is gone and nothing replaces it yet | sources, demand, the loader, `Waker`, `Status`, `zui_async` | `src/context.zig` | A3, A4 |
-| no environment; no host requests | `Environment` from `environment` events; `HostRequests` in the frame | `src/context.zig` | I6 |
 | one fixed `RenderCommand` union, `image` and `custom` present even when their payload is `void` | generated from `Config.commands` and the payload types | `src/commands.zig`, `src/emission.zig` | C1 |
 | configs copied into the frame | config references, static styles | `src/context.zig`, `src/style.zig` | L8 |
 | `Widgets(Ui)` with a `Theme` struct | `Widgets(Ui, Skin)` | `zui_widgets/` | K5 |

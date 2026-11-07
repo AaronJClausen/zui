@@ -367,6 +367,68 @@ test "widgets render valid commands" {
     try testing.expect(frame.diagnostics.ok());
 }
 
+const ThemedButton = struct {
+    const save: zui.Id = .of("save");
+    const light_idle: zui.Color = .rgb(0xdddddd);
+    const dark_idle: zui.Color = .rgb(0x222222);
+    const themed: Widgets = .{
+        .theme = .{ .control = .initFill(light_idle) },
+        .dark_theme = .{ .control = .initFill(dark_idle) },
+    };
+
+    fn declare(_: *ThemedButton, ui: *Ui) void {
+        _ = themed.button(ui, save, "Save", .{});
+    }
+
+    fn background(frame: *const Ui.Frame) !zui.Color {
+        for (frame.commands()) |command| {
+            if (command.id == save.hash and command.payload == .rectangle) return command.payload.rectangle.color;
+        }
+        return error.NoBackground;
+    }
+};
+
+test "widgets follow the environment's theme from the frame that changes it" {
+    var fixture: Fixture = .{};
+    try fixture.init();
+    defer fixture.deinit();
+    var app: ThemedButton = .{};
+    const driver = &fixture.driver;
+
+    try testing.expectEqual(ThemedButton.light_idle, try ThemedButton.background(try driver.frame(&app, ThemedButton.declare, &.{})));
+    const to_dark: zui.Event = .{ .environment = .{ .theme = .dark } };
+    try testing.expectEqual(ThemedButton.dark_idle, try ThemedButton.background(try driver.frame(&app, ThemedButton.declare, &.{to_dark})));
+    try testing.expectEqual(ThemedButton.dark_idle, try ThemedButton.background(try driver.frame(&app, ThemedButton.declare, &.{})));
+    const to_light: zui.Event = .{ .environment = .{ .theme = .light } };
+    try testing.expectEqual(ThemedButton.light_idle, try ThemedButton.background(try driver.frame(&app, ThemedButton.declare, &.{to_light})));
+}
+
+test "controls ask for a cursor while hovered" {
+    var fixture: Fixture = .{};
+    var form: Form = undefined;
+    try start(&fixture, &form, "");
+    defer fixture.deinit();
+    const driver = &fixture.driver;
+
+    try testing.expectEqual(zui.Cursor.pointer, (try driver.hover(&form, Form.declare, Form.ids.save)).requests().cursor);
+    try testing.expectEqual(zui.Cursor.text, (try driver.hover(&form, Form.declare, Form.ids.name)).requests().cursor);
+    try testing.expectEqual(zui.Cursor.default, (try driver.hover(&form, Form.declare, Form.ids.locked)).requests().cursor);
+}
+
+test "a focused text field asks for text input at its caret" {
+    var fixture: Fixture = .{};
+    var form: Form = undefined;
+    try start(&fixture, &form, "Ada");
+    defer fixture.deinit();
+    const driver = &fixture.driver;
+
+    try testing.expectEqual(@as(?zui.TextInputArea, null), (try driver.frame(&form, Form.declare, &.{})).requests().text_input);
+    const frame = try driver.focus(&form, Form.declare, Form.ids.name);
+    const area = frame.requests().text_input orelse return error.NoTextInputRequested;
+    try testing.expectEqual(frame.rectOf(Form.ids.name.child("caret")).?, area.caret);
+    try testing.expect(area.caret.x > frame.rectOf(Form.ids.name).?.x);
+}
+
 test "labels from identifiers" {
     try testing.expectEqualStrings("Max fps", zui_widgets.labelFromIdentifier("max_fps"));
     try testing.expectEqualStrings("X", zui_widgets.labelFromIdentifier("x"));

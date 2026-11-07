@@ -281,6 +281,14 @@ pub fn State(comptime max_contacts: u8, comptime max_chain: usize, comptime max_
             self.clicked_count += 1;
         }
 
+        /// The mouse or a pen over the surface, whose hover the cursor follows.
+        pub fn hoveringContact(self: *const Self) ?*const Slot {
+            for (&self.contacts) |*slot| {
+                if (slot.*) |*contact| if (contact.hovers()) return contact;
+            }
+            return null;
+        }
+
         /// The mouse or a pen while over the surface, or else the first
         /// touch still down.
         pub fn primaryPointer(self: *const Self) ?input.Pointer {

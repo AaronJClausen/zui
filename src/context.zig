@@ -18,6 +18,9 @@ const Id = id_module.Id;
 const Instant = record_types.Instant;
 const FrameRecord = record_types.FrameRecord;
 const NextFrame = record_types.NextFrame;
+const HostRequests = record_types.HostRequests;
+const Cursor = record_types.Cursor;
+const Environment = input.Environment;
 
 pub const Config = struct {
     limits: Limits = .{},
@@ -123,6 +126,10 @@ pub const Element = struct {
     /// Still hit-tested, so it blocks what is beneath it, but never pressed,
     /// clicked or focused, and its widget state is `.disabled`.
     disabled: bool = false,
+    /// The pointer's shape while this element is the innermost one under
+    /// the hovering pointer that sets a cursor. Only an interactive
+    /// element is hit-tested, so on any other this has no effect.
+    cursor: ?Cursor = null,
 };
 
 const ContentKind = enum(u8) { none, text, image, custom };
@@ -220,6 +227,7 @@ pub fn Context(comptime config: Config) type {
             /// Frames since `init`, from 0.
             number: u64,
             diagnostics: Diagnostics,
+            host_requests: HostRequests,
 
             element_count: u32,
             element_id: [max_elements]u64,
@@ -275,6 +283,12 @@ pub fn Context(comptime config: Config) type {
 
             pub fn commands(self: *const Frame) []const RenderCommand {
                 return self.render_commands[0..self.command_count];
+            }
+
+            /// What the host should apply with this frame: the cursor and
+            /// where text input goes.
+            pub fn requests(self: *const Frame) HostRequests {
+                return self.host_requests;
             }
 
             pub fn elementCount(self: *const Frame) Index {
@@ -359,6 +373,7 @@ pub fn Context(comptime config: Config) type {
                 self.line_count = 0;
                 self.command_count = 0;
                 self.diagnostics = .{};
+                self.host_requests = .{};
                 self.viewport = params.viewport;
                 self.zoom = params.zoom;
                 self.pixels_per_unit = params.scale * params.zoom;
@@ -411,6 +426,13 @@ pub fn Context(comptime config: Config) type {
         previous_instant: ?Instant = null,
         frame_requested: bool = false,
         requested_deadline: ?Instant = null,
+        current_environment: Environment = .{},
+        /// The hover-chain position of the element whose cursor the frame
+        /// requests; an element nearer the pointer replaces it.
+        cursor_chain_position: usize = no_cursor,
+        text_input_caret: ?u64 = null,
+
+        const no_cursor = std.math.maxInt(usize);
 
         /// `init(gpa, io, text)`, or `init(gpa, io)` when `Text` is `void`.
         pub const init = if (has_text) initWithText else initWithoutText;
@@ -497,6 +519,8 @@ pub fn Context(comptime config: Config) type {
             self.now_instant = record.params.now;
             self.frame_requested = false;
             self.requested_deadline = null;
+            self.cursor_chain_position = no_cursor;
+            self.text_input_caret = null;
             if (has_text) self.memory.cache.generation +%= 1;
             const evicting = Tracing.begin(.evict_state);
             self.memory.states.evict(self.stateGeneration(), limits.state_frames_until_eviction);
@@ -557,6 +581,9 @@ pub fn Context(comptime config: Config) type {
 
             layout.run(Self, self, frame);
             @call(.never_inline, emission.run, .{ Self, self, frame });
+            if (self.text_input_caret) |caret| if (frame.rectOf(.{ .hash = caret })) |rect| {
+                frame.host_requests.text_input = .{ .caret = rect };
+            };
 
             const results = &self.memory.results;
             results.has_frame = true;
@@ -633,6 +660,23 @@ pub fn Context(comptime config: Config) type {
         pub fn viewport(self: *const Self) [2]f32 {
             const frame = self.current orelse @panic("zui: viewport() is only known between beginFrame() and endFrame()");
             return frame.viewport;
+        }
+
+        /// As the host last reported it through `environment` events.
+        pub fn environment(self: *const Self) *const Environment {
+            return &self.current_environment;
+        }
+
+        /// Asks the host for text input at `caret`'s rectangle in this
+        /// frame, if `editable` is focused. An editable widget calls it
+        /// each frame, naming the element it draws as its caret:
+        ///
+        /// ```zig
+        /// ui.requestTextInput(id, id.child("caret"));
+        /// ```
+        pub fn requestTextInput(self: *Self, editable: Id, caret: Id) void {
+            _ = self.declaring();
+            if (self.focused(editable)) self.text_input_caret = caret.hash;
         }
 
         /// The current record's `now`.
@@ -802,6 +846,8 @@ pub fn Context(comptime config: Config) type {
             frame.content_index[index] = @intCast(record_index);
             frame.flags[index] = flagsFor(element_id, element);
 
+            if (element.cursor) |cursor| if (frame.flags[index].interactive) self.offerCursor(frame, hash, cursor);
+
             if (element.floating) |floating| {
                 frame.floating_index[index] = @intCast(frame.floating_count);
                 frame.floatings[frame.floating_count] = floating;
@@ -833,6 +879,14 @@ pub fn Context(comptime config: Config) type {
                 frame.flags[index].scroll_y = false;
             }
             return index;
+        }
+
+        fn offerCursor(self: *Self, frame: *Frame, hash: u64, cursor: Cursor) void {
+            const contact = self.memory.input.hoveringContact() orelse return;
+            const chain_position = std.mem.indexOfScalar(u64, contact.hover_chain[0..contact.hover_count], hash) orelse return;
+            if (chain_position >= self.cursor_chain_position) return;
+            self.cursor_chain_position = chain_position;
+            frame.host_requests.cursor = cursor;
         }
 
         fn flagsFor(element_id: Id, element: Element) ElementFlags {
@@ -965,6 +1019,7 @@ pub fn Context(comptime config: Config) type {
                     }
                 },
                 .key_up => {},
+                .environment => |change| self.current_environment.apply(change),
                 .text => |typed| {
                     const room = limits.max_text_input_bytes - input_state.text_len;
                     const copied: u16 = @intCast(@min(typed.len, room));

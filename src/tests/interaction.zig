@@ -537,3 +537,92 @@ test "events and contacts beyond their limits are dropped and reported" {
     try testing.expect(frame.diagnostics.exceeded.contains(.max_input_contacts));
     ui.release(frame);
 }
+
+/// A 200×40 `toolbar` with the `move` cursor, holding `a` (pointer) at
+/// (0,0) and `b` (no cursor of its own) at (100,0), each 100×40; and a
+/// `label` below, at (0,40), that sets `text` but is not interactive.
+fn cursorScene(ui: *Ui) void {
+    ui.open(.{ .id = .of("toolbar"), .interactive = true, .cursor = .move });
+    ui.box(.{ .id = a, .interactive = true, .cursor = .pointer, .layout = .{ .sizing = .{ .width = .fixed(100), .height = .fixed(40) } } });
+    ui.box(.{ .id = b, .interactive = true, .layout = .{ .sizing = .{ .width = .fixed(100), .height = .fixed(40) } } });
+    ui.close();
+    ui.box(.{ .id = .of("label"), .cursor = .text, .layout = .{ .sizing = .{ .width = .fixed(100), .height = .fixed(40) } } });
+}
+
+fn cursorAt(harness: *Harness, pointer: ?[2]f32) !zui.Cursor {
+    cursorScene(harness.beginWith(.{ .pointer = pointer }));
+    return (try harness.end()).requests().cursor;
+}
+
+test "the cursor request follows hover to the innermost element that sets one" {
+    var harness: Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    try testing.expectEqual(zui.Cursor.default, try cursorAt(&harness, .{ 10, 10 })); // nothing was on screen yet
+    try testing.expectEqual(zui.Cursor.pointer, try cursorAt(&harness, .{ 10, 10 }));
+    try testing.expectEqual(zui.Cursor.move, try cursorAt(&harness, .{ 150, 10 }));
+    try testing.expectEqual(zui.Cursor.default, try cursorAt(&harness, .{ 10, 50 }));
+    try testing.expectEqual(zui.Cursor.default, try cursorAt(&harness, null));
+}
+
+test "a touch never changes the cursor" {
+    var harness: Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    cursorScene(harness.begin());
+    _ = try harness.end();
+    const press: zui.Event = .{ .pointer_down = .{ .pointer = support.touch(1, .{ 10, 10 }) } };
+    cursorScene(harness.beginEvents(&.{press}));
+    try testing.expectEqual(zui.Cursor.default, (try harness.end()).requests().cursor);
+}
+
+test "environment events change only the settings they name, and the change lasts" {
+    var harness: Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    var ui = harness.begin();
+    try testing.expectEqual(zui.Environment{}, ui.environment().*);
+    _ = try harness.end();
+
+    ui = harness.beginEvents(&.{
+        .{ .environment = .{ .theme = .dark } },
+        .{ .environment = .{ .reduced_motion = true } },
+    });
+    try testing.expectEqual(zui.Environment.Theme.dark, ui.environment().theme);
+    _ = try harness.end();
+
+    ui = harness.begin();
+    try testing.expectEqual(zui.Environment{ .theme = .dark, .reduced_motion = true }, ui.environment().*);
+    _ = try harness.end();
+}
+
+/// A focusable 100×40 `field` at (0,0) whose 2×16 caret sits at (30,12).
+fn editable(ui: *Ui) void {
+    const field: zui.Id = .of("field");
+    ui.open(.{ .id = field, .focusable = true, .layout = .{ .sizing = .{ .width = .fixed(100), .height = .fixed(40) }, .padding = .{ .left = 30, .top = 12 } } });
+    ui.box(.{ .id = field.child("caret"), .layout = .{ .sizing = .{ .width = .fixed(2), .height = .fixed(16) } } });
+    ui.close();
+    ui.requestTextInput(field, field.child("caret"));
+}
+
+test "text input is requested at the caret only while its editable is focused" {
+    var harness: Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    editable(harness.begin());
+    try testing.expectEqual(@as(?zui.TextInputArea, null), (try harness.end()).requests().text_input);
+
+    editable(harness.beginWith(.{ .pointer = .{ 10, 10 }, .buttons = support.primaryDown() }));
+    const requested = (try harness.end()).requests().text_input orelse return error.NoTextInputRequested;
+    try testing.expectEqual(zui.Rect{ .x = 30, .y = 12, .width = 2, .height = 16 }, requested.caret);
+
+    editable(harness.beginWith(.{ .pointer = .{ 10, 10 } }));
+    try testing.expect((try harness.end()).requests().text_input != null);
+
+    editable(harness.beginWith(.{ .pointer = .{ 300, 300 }, .buttons = support.primaryDown() }));
+    try testing.expectEqual(@as(?zui.TextInputArea, null), (try harness.end()).requests().text_input);
+}

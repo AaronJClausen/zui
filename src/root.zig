@@ -21,6 +21,9 @@ pub const Instant = record.Instant;
 pub const FrameParams = record.FrameParams;
 pub const FrameRecord = record.FrameRecord;
 pub const NextFrame = record.NextFrame;
+pub const HostRequests = record.HostRequests;
+pub const Cursor = record.Cursor;
+pub const TextInputArea = record.TextInputArea;
 
 pub const Event = input.Event;
 pub const Pointer = input.Pointer;
@@ -35,6 +38,10 @@ pub const KeyEvent = input.KeyEvent;
 pub const Modifiers = input.Modifiers;
 pub const Chord = input.Chord;
 pub const InputSampler = input.InputSampler;
+pub const Environment = input.Environment;
+pub const EnvironmentChange = input.EnvironmentChange;
+pub const ReadingDirection = input.ReadingDirection;
+pub const Locale = input.Locale;
 
 pub const Id = id.Id;
 pub const ids = id.ids;
@@ -66,6 +73,7 @@ pub const ScrollState = interaction.ScrollState;
 test {
     std.testing.refAllDecls(@This());
     _ = @import("text.zig");
+    _ = @import("input.zig");
     _ = @import("state.zig");
     _ = @import("parallel_measure.zig");
     _ = @import("tests/golden.zig");

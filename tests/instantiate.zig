@@ -44,6 +44,8 @@ export fn zuiCheckFrame(width: f32, height: f32, pointer_x: f32, pointer_y: f32)
             .{ .key_up = .{ .key = .tab, .at = at } },
             .{ .key_down = .{ .key = .enter, .at = at } },
             .{ .text = "x" },
+            .{ .environment = .{ .theme = .dark } },
+            .{ .environment = .{ .locale = zui.Locale.parse("fr-CA") catch .default } },
         },
     });
     const save: zui.Id = .of("save");
@@ -52,7 +54,7 @@ export fn zuiCheckFrame(width: f32, height: f32, pointer_x: f32, pointer_y: f32)
     ui.text("check every pass", .{ .wrap = .words, .alignment = .center, .letter_spacing = 1 });
     ui.image(.{ .handle = 1 }, .{ .layout = .{ .sizing = .{ .width = .fixed(8), .height = .percent(0.5) } } });
     ui.custom(2, .{ .id = .indexed("cell", 3) });
-    ui.box(.{ .id = save, .focusable = true, .decoration = .{ .background = if (ui.widgetState(save) == .hovered) .black else .white }, .layout = .{ .sizing = .{ .width = .{ .rule = .grow, .amount = 1, .max = 40 } } } });
+    ui.box(.{ .id = save, .focusable = true, .cursor = if (ui.environment().theme == .dark) .pointer else null, .decoration = .{ .background = if (ui.widgetState(save) == .hovered) .black else .white }, .layout = .{ .sizing = .{ .width = .{ .rule = .grow, .amount = 1, .max = 40 } } } });
     ui.open(.{ .id = list, .scroll = .both, .focus_scope = true, .layout = .{ .sizing = .{ .width = .fixed(50), .height = .fixed(20) } } });
     ui.box(.{ .clip = .both, .disabled = ui.clicked(save) or ui.pressed(save) or ui.focused(save), .layout = .{ .sizing = .{ .width = .fixed(80), .height = .fixed(80) } } });
     ui.box(.{ .floating = .{ .attach_to = .{ .element = save }, .anchor = .center, .z = 2 }, .interactive = true });
@@ -61,6 +63,7 @@ export fn zuiCheckFrame(width: f32, height: f32, pointer_x: f32, pointer_y: f32)
     ui.state(save, Expanded).open = ui.keyPressed(.enter) and ui.chordPressed(.{ .key = .tab, .modifiers = .{ .shift = true } }) and ui.typedText().len == 1 and ui.keyEvents().len == 2;
     ui.setScrollOffset(list, ui.scrollOffset(list));
     ui.requestFocus(save);
+    ui.requestTextInput(save, list);
     ui.requestFrameAt(ui.now().addSeconds(ui.dt() + 0.5));
     _ = ui.pointerLocal(save);
     _ = ui.primaryPointer();
@@ -75,7 +78,9 @@ export fn zuiCheckFrame(width: f32, height: f32, pointer_x: f32, pointer_y: f32)
     zui_testing.snapshot(&snapshot_writer, frame.commands(), zui.ids(.{"save"})) catch {};
     const violation_count = @intFromBool(zui_testing.findViolation(frame.commands()) != null);
     const failed_check = @intFromBool(std.meta.isError(frame.diagnostics.check()));
-    return frame.commands().len + @intFromBool(ui.nextFrame() == .immediately) + violation_count + failed_check + frame.elementCount();
+    const requests = frame.requests();
+    const host_requests = @intFromEnum(requests.cursor) + @intFromBool(requests.text_input != null);
+    return frame.commands().len + @intFromBool(ui.nextFrame() == .immediately) + violation_count + failed_check + frame.elementCount() + host_requests;
 }
 
 const Settings = struct {
@@ -94,7 +99,7 @@ var name_bytes: [16]u8 = undefined;
 var settings: Settings = .{};
 
 fn declareWidgets(ui: *Ui) void {
-    const widgets: zui_widgets.Widgets(Ui) = .{};
+    const widgets: zui_widgets.Widgets(Ui) = .{ .dark_theme = .{} };
     var expanded = true;
     var choice: usize = 0;
     widgets.labeledRow(ui, "row");

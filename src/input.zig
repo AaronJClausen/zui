@@ -174,6 +174,83 @@ pub const Event = union(enum) {
     key_up: KeyEvent,
     /// Committed UTF-8.
     text: []const u8,
+    /// One setting of the environment changed; the others are kept.
+    environment: EnvironmentChange,
+};
+
+/// The language's reading direction.
+pub const ReadingDirection = enum(u8) { left_to_right, right_to_left };
+
+/// A BCP 47 language tag such as `"fr-CA"`. zui only reports it.
+pub const Locale = struct {
+    bytes: [capacity]u8 = @splat(0),
+    len: u8 = 0,
+
+    pub const capacity = 23;
+    /// The host has not reported a locale.
+    pub const default: Locale = .{};
+
+    pub fn parse(language_tag: []const u8) error{TagTooLong}!Locale {
+        if (language_tag.len > capacity) return error.TagTooLong;
+        var locale: Locale = .{ .len = @intCast(language_tag.len) };
+        @memcpy(locale.bytes[0..language_tag.len], language_tag);
+        return locale;
+    }
+
+    pub fn tag(self: *const Locale) []const u8 {
+        return self.bytes[0..self.len];
+    }
+
+    pub fn eql(self: Locale, other: Locale) bool {
+        return std.mem.eql(u8, self.tag(), other.tag());
+    }
+};
+
+/// The user's and the system's settings, as last reported by the host.
+/// Skins, motion and widgets read it through `ui.environment()`.
+pub const Environment = struct {
+    theme: Theme = .light,
+    contrast: Contrast = .normal,
+    reduced_motion: bool = false,
+    reduced_transparency: bool = false,
+    /// The user's text size preference, e.g. 1.25; applied by skins, not by layout.
+    text_scale: f32 = 1,
+    locale: Locale = .default,
+    direction: ReadingDirection = .left_to_right,
+    /// The display's peak over SDR white, e.g. 4; 1 is an SDR display.
+    hdr_headroom: f32 = 1,
+    power: Power = .plugged,
+    /// The OS window has keyboard focus, not an element.
+    window_focused: bool = true,
+
+    pub const Theme = enum(u8) { light, dark };
+    pub const Contrast = enum(u8) { normal, high };
+    pub const Power = enum(u8) { plugged, battery, saver };
+
+    pub fn apply(self: *Environment, change: EnvironmentChange) void {
+        switch (change) {
+            inline else => |value, setting| @field(self, @tagName(setting)) = value,
+        }
+    }
+};
+
+/// One `Environment` field's new value, so a record carries only what
+/// changed:
+///
+/// ```zig
+/// events.append(.{ .environment = .{ .theme = .dark } });
+/// ```
+pub const EnvironmentChange = union(enum) {
+    theme: Environment.Theme,
+    contrast: Environment.Contrast,
+    reduced_motion: bool,
+    reduced_transparency: bool,
+    text_scale: f32,
+    locale: Locale,
+    direction: ReadingDirection,
+    hdr_headroom: f32,
+    power: Environment.Power,
+    window_focused: bool,
 };
 
 /// Turns the state a library reports once per frame (where the mouse is,
@@ -265,4 +342,24 @@ test "the sampler reports what changed between samples" {
     events = sampler.sample(now, .{}, &buffer);
     try std.testing.expectEqual(@as(usize, 1), events.len);
     try std.testing.expectEqual(PointerId.mouse, events[0].pointer_leave);
+}
+
+test "an environment change sets one setting and keeps the others" {
+    var environment: Environment = .{ .reduced_motion = true };
+    environment.apply(.{ .theme = .dark });
+    environment.apply(.{ .locale = try .parse("fr-CA") });
+    try std.testing.expectEqual(Environment.Theme.dark, environment.theme);
+    try std.testing.expectEqualStrings("fr-CA", environment.locale.tag());
+    try std.testing.expect(environment.reduced_motion);
+    try std.testing.expectError(error.TagTooLong, Locale.parse("x" ** (Locale.capacity + 1)));
+}
+
+test "every environment setting has a change" {
+    const settings = @typeInfo(Environment).@"struct".fields;
+    const changes = @typeInfo(EnvironmentChange).@"union".fields;
+    try std.testing.expectEqual(settings.len, changes.len);
+    inline for (settings, changes) |setting, change| {
+        try std.testing.expectEqualStrings(setting.name, change.name);
+        try std.testing.expectEqual(setting.type, change.type);
+    }
 }

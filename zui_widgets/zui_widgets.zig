@@ -1,7 +1,7 @@
 //! Reference widgets, built only on zui's public API.
 //!
 //! ```zig
-//! const widgets: zui_widgets.Widgets(Ui) = .{}; // or .{ .theme = my_theme }
+//! const widgets: zui_widgets.Widgets(Ui) = .{}; // or .{ .theme = light, .dark_theme = dark }
 //!
 //! if (widgets.button(ui, .of("save"), "Save", .{})) save();
 //! _ = widgets.checkbox(ui, .of("autosave"), "Autosave", &settings.autosave, .{});
@@ -80,7 +80,11 @@ pub fn Widgets(comptime UiType: type) type {
         pub const Ui = UiType;
         pub const TextStyle = Ui.TextStyle;
 
+        /// The look while the environment's theme is light, and while it is
+        /// dark unless `dark_theme` is set.
         theme: Theme = .{},
+        /// The look while the environment's theme is dark.
+        dark_theme: ?Theme = null,
 
         pub const Theme = struct {
             text: TextStyle = .{ .color = .rgb(0xe8e8f0) },
@@ -121,11 +125,18 @@ pub fn Widgets(comptime UiType: type) type {
         };
 
         pub fn label(self: Self, ui: *Ui, content: []const u8) void {
-            ui.text(content, self.textStyle(.normal));
+            ui.text(content, textStyle(self.activeTheme(ui), .normal));
         }
 
         pub fn mutedLabel(self: Self, ui: *Ui, content: []const u8) void {
-            ui.text(content, self.textStyle(.muted));
+            ui.text(content, textStyle(self.activeTheme(ui), .muted));
+        }
+
+        /// `dark_theme` while the environment's theme is dark and it is set;
+        /// otherwise `theme`.
+        pub fn activeTheme(self: *const Self, ui: *const Ui) *const Theme {
+            if (ui.environment().theme == .dark) if (self.dark_theme) |*dark| return dark;
+            return &self.theme;
         }
 
         /// Opens a row with `content` in a column `theme.label_width` wide.
@@ -137,10 +148,10 @@ pub fn Widgets(comptime UiType: type) type {
         /// ui.close();
         /// ```
         pub fn labeledRow(self: Self, ui: *Ui, content: []const u8) void {
-            const theme = &self.theme;
+            const theme = self.activeTheme(ui);
             ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = theme.gap, .child_alignment = .{ .y = .center } } });
             ui.open(.{ .layout = .{ .sizing = .{ .width = .fixed(theme.label_width) } } });
-            ui.text(content, self.textStyle(.muted));
+            ui.text(content, textStyle(theme, .muted));
             ui.close();
         }
 
@@ -152,16 +163,17 @@ pub fn Widgets(comptime UiType: type) type {
         /// if (advanced_open) advancedSettings(ui);
         /// ```
         pub fn disclosure(self: Self, ui: *Ui, id: zui.Id, content: []const u8, expanded: *bool) bool {
-            const theme = &self.theme;
+            const theme = self.activeTheme(ui);
             const toggled = ui.clicked(id);
             if (toggled) expanded.* = !expanded.*;
             const state = ui.widgetState(id);
             ui.open(.{
                 .id = id,
                 .focusable = true,
+                .cursor = .pointer,
                 .decoration = .{
                     .background = if (state == .hovered or state == .pressed) theme.control.get(state) else null,
-                    .border = self.focusRingOr(ui, id, null),
+                    .border = focusRingOr(theme, ui, id, null),
                     .corner_radius = .all(theme.corner_radius),
                 },
                 .layout = .{
@@ -171,8 +183,8 @@ pub fn Widgets(comptime UiType: type) type {
                     .child_alignment = .{ .y = .center },
                 },
             });
-            ui.text(if (expanded.*) theme.expanded_indicator else theme.collapsed_indicator, self.textStyle(.muted));
-            ui.text(content, self.textStyle(.normal));
+            ui.text(if (expanded.*) theme.expanded_indicator else theme.collapsed_indicator, textStyle(theme, .muted));
+            ui.text(content, textStyle(theme, .normal));
             ui.close();
             return toggled;
         }
@@ -185,14 +197,15 @@ pub fn Widgets(comptime UiType: type) type {
         /// True in the frame the button is clicked, or activated with Enter
         /// or Space while focused.
         pub fn button(self: Self, ui: *Ui, id: zui.Id, content: []const u8, options: ButtonOptions) bool {
-            const theme = &self.theme;
+            const theme = self.activeTheme(ui);
             ui.open(.{
                 .id = id,
                 .focusable = true,
                 .disabled = options.disabled,
+                .cursor = if (options.disabled) null else .pointer,
                 .decoration = .{
                     .background = theme.control.get(ui.widgetState(id)),
-                    .border = self.focusRingOr(ui, id, null),
+                    .border = focusRingOr(theme, ui, id, null),
                     .corner_radius = .all(theme.corner_radius),
                 },
                 .layout = .{
@@ -201,7 +214,7 @@ pub fn Widgets(comptime UiType: type) type {
                     .child_alignment = .{ .x = .center, .y = .center },
                 },
             });
-            ui.text(content, self.textStyle(if (options.disabled) .disabled else .normal));
+            ui.text(content, textStyle(theme, if (options.disabled) .disabled else .normal));
             ui.close();
             return ui.clicked(id);
         }
@@ -213,7 +226,7 @@ pub fn Widgets(comptime UiType: type) type {
         /// Toggles `checked` when clicked; returns whether it did. An empty
         /// `content` draws the box alone.
         pub fn checkbox(self: Self, ui: *Ui, id: zui.Id, content: []const u8, checked: *bool, options: CheckboxOptions) bool {
-            const theme = &self.theme;
+            const theme = self.activeTheme(ui);
             const toggled = ui.clicked(id);
             if (toggled) checked.* = !checked.*;
 
@@ -222,13 +235,14 @@ pub fn Widgets(comptime UiType: type) type {
                 .id = id,
                 .focusable = true,
                 .disabled = options.disabled,
+                .cursor = if (options.disabled) null else .pointer,
                 .layout = .{ .sizing = .{ .height = .fixed(theme.control_height) }, .child_gap = theme.gap, .child_alignment = .{ .y = .center } },
             });
             const outline_color = if (state == .hovered or state == .pressed) theme.accent else theme.border_color;
             ui.open(.{
                 .decoration = .{
                     .background = if (checked.* and !options.disabled) theme.accent else theme.field_background,
-                    .border = self.focusRingOr(ui, id, .{ .color = outline_color, .widths = .all(1) }),
+                    .border = focusRingOr(theme, ui, id, .{ .color = outline_color, .widths = .all(1) }),
                     .corner_radius = .all(theme.corner_radius),
                 },
                 .layout = .{
@@ -247,7 +261,7 @@ pub fn Widgets(comptime UiType: type) type {
                 });
             }
             ui.close();
-            if (content.len != 0) ui.text(content, self.textStyle(if (options.disabled) .disabled else .normal));
+            if (content.len != 0) ui.text(content, textStyle(theme, if (options.disabled) .disabled else .normal));
             ui.close();
             return toggled;
         }
@@ -267,7 +281,7 @@ pub fn Widgets(comptime UiType: type) type {
         /// Returns whether the value changed.
         pub fn slider(self: Self, ui: *Ui, id: zui.Id, value: anytype, options: SliderOptions) bool {
             const Value = NumberPointee(@TypeOf(value), "slider");
-            const theme = &self.theme;
+            const theme = self.activeTheme(ui);
             const range = options.max - options.min;
             const previous: f64 = numberToFloat(value.*);
             var proposed = previous;
@@ -306,6 +320,7 @@ pub fn Widgets(comptime UiType: type) type {
                 .id = id,
                 .focusable = true,
                 .disabled = options.disabled,
+                .cursor = if (options.disabled) null else .pointer,
                 .layout = .{ .sizing = .{ .width = options.width, .height = .fixed(theme.control_height) }, .child_alignment = .{ .y = .center } },
             });
             // The grow weights split the track's free space at the value,
@@ -324,7 +339,7 @@ pub fn Widgets(comptime UiType: type) type {
                         .disabled => theme.disabled_text_color,
                         else => theme.thumb,
                     },
-                    .border = self.focusRingOr(ui, id, null),
+                    .border = focusRingOr(theme, ui, id, null),
                     .corner_radius = .all(theme.corner_radius),
                 },
                 .layout = .{ .sizing = .{ .width = .fixed(theme.slider_thumb_size[0]), .height = .fixed(theme.slider_thumb_size[1]) } },
@@ -370,8 +385,8 @@ pub fn Widgets(comptime UiType: type) type {
         /// and delete by character. Focusing with Tab puts the caret at
         /// the end.
         pub fn textField(self: Self, ui: *Ui, id: zui.Id, text: *EditableText, options: TextFieldOptions) TextFieldResult {
-            const theme = &self.theme;
-            const style = self.textStyle(if (options.disabled) .disabled else .normal);
+            const theme = self.activeTheme(ui);
+            const style = textStyle(theme, if (options.disabled) .disabled else .normal);
             const scroll_id = id.child("scroll");
             const caret = ui.state(id, Caret);
             const focused = ui.focused(id) and !options.disabled;
@@ -433,9 +448,10 @@ pub fn Widgets(comptime UiType: type) type {
                 .id = id,
                 .focusable = true,
                 .disabled = options.disabled,
+                .cursor = if (options.disabled) null else .text,
                 .decoration = .{
                     .background = theme.field_background,
-                    .border = self.focusRingOr(ui, id, .{ .color = theme.border_color, .widths = .all(1) }),
+                    .border = focusRingOr(theme, ui, id, .{ .color = theme.border_color, .widths = .all(1) }),
                     .corner_radius = .all(theme.corner_radius),
                 },
                 .layout = .{
@@ -450,7 +466,7 @@ pub fn Widgets(comptime UiType: type) type {
                 .layout = .{ .sizing = .{ .width = .grow }, .child_alignment = .{ .y = .center } },
             });
             if (text.len == 0 and !focused) {
-                if (options.placeholder.len != 0) ui.text(options.placeholder, self.textStyle(.muted));
+                if (options.placeholder.len != 0) ui.text(options.placeholder, textStyle(theme, .muted));
             } else {
                 if (before.len != 0) ui.text(before, style);
                 ui.box(.{
@@ -464,6 +480,7 @@ pub fn Widgets(comptime UiType: type) type {
             }
             ui.close();
             ui.close();
+            ui.requestTextInput(id, id.child("caret"));
             return result;
         }
 
@@ -498,7 +515,7 @@ pub fn Widgets(comptime UiType: type) type {
         /// true. With the list closed, Up and Down change the selection.
         /// Escape or a click outside closes the list.
         pub fn dropdown(self: Self, ui: *Ui, id: zui.Id, selected: *usize, labels: []const []const u8, options: DropdownOptions) bool {
-            const theme = &self.theme;
+            const theme = self.activeTheme(ui);
             const popup = ui.state(id, Popup);
             const backdrop_id = id.child("backdrop");
             var changed = false;
@@ -528,7 +545,7 @@ pub fn Widgets(comptime UiType: type) type {
                 changed = selected.* != previous;
             }
 
-            const style = self.textStyle(if (options.disabled) .disabled else .normal);
+            const style = textStyle(theme, if (options.disabled) .disabled else .normal);
             var width = options.width;
             if (width.rule == .fit) {
                 var widest_label: f32 = 0;
@@ -540,9 +557,10 @@ pub fn Widgets(comptime UiType: type) type {
                 .id = id,
                 .focusable = true,
                 .disabled = options.disabled,
+                .cursor = if (options.disabled) null else .pointer,
                 .decoration = .{
                     .background = theme.control.get(ui.widgetState(id)),
-                    .border = self.focusRingOr(ui, id, null),
+                    .border = focusRingOr(theme, ui, id, null),
                     .corner_radius = .all(theme.corner_radius),
                 },
                 .layout = .{
@@ -554,7 +572,7 @@ pub fn Widgets(comptime UiType: type) type {
             });
             ui.text(if (selected.* < labels.len) labels[selected.*] else "", style);
             ui.box(.{ .layout = .{ .sizing = .{ .width = .grow } } });
-            ui.text(theme.dropdown_indicator, self.textStyle(.muted));
+            ui.text(theme.dropdown_indicator, textStyle(theme, .muted));
             ui.close();
 
             if (popup.open) self.declarePopup(ui, id, backdrop_id, selected.*, labels);
@@ -562,7 +580,7 @@ pub fn Widgets(comptime UiType: type) type {
         }
 
         fn declarePopup(self: Self, ui: *Ui, id: zui.Id, backdrop_id: zui.Id, selected: usize, labels: []const []const u8) void {
-            const theme = &self.theme;
+            const theme = self.activeTheme(ui);
             const viewport = ui.viewport();
             ui.box(.{
                 .id = backdrop_id,
@@ -586,18 +604,19 @@ pub fn Widgets(comptime UiType: type) type {
                     .sizing = .{ .width = .fitBetween(button_width, std.math.inf(f32)) },
                 },
             });
-            const style = self.textStyle(.normal);
+            const style = textStyle(theme, .normal);
             for (labels, 0..) |option_label, index| {
                 const option_id = id.indexedChild("option", index);
                 ui.open(.{
                     .id = option_id,
                     .focusable = true,
+                    .cursor = .pointer,
                     .decoration = .{
                         .background = switch (ui.widgetState(option_id)) {
                             .hovered, .pressed => theme.option_highlight,
                             else => if (index == selected) theme.selected_option else null,
                         },
-                        .border = self.focusRingOr(ui, option_id, null),
+                        .border = focusRingOr(theme, ui, option_id, null),
                         .corner_radius = .all(theme.corner_radius),
                     },
                     .layout = .{
@@ -635,13 +654,13 @@ pub fn Widgets(comptime UiType: type) type {
 
         const TextTone = enum { normal, muted, disabled };
 
-        fn textStyle(self: Self, tone: TextTone) TextStyle {
-            var style = self.theme.text;
+        fn textStyle(theme: *const Theme, tone: TextTone) TextStyle {
+            var style = theme.text;
             style.wrap = .none;
             style.color = switch (tone) {
                 .normal => style.color,
-                .muted => self.theme.muted_text_color,
-                .disabled => self.theme.disabled_text_color,
+                .muted => theme.muted_text_color,
+                .disabled => theme.disabled_text_color,
             };
             return style;
         }
@@ -657,8 +676,8 @@ pub fn Widgets(comptime UiType: type) type {
             return local[0] >= 0 and local[1] >= 0 and local[0] < rect.width and local[1] < rect.height;
         }
 
-        fn focusRingOr(self: Self, ui: *const Ui, id: zui.Id, unfocused: ?zui.Border) ?zui.Border {
-            if (ui.focused(id)) return .{ .color = self.theme.focus_ring, .widths = .all(2) };
+        fn focusRingOr(theme: *const Theme, ui: *const Ui, id: zui.Id, unfocused: ?zui.Border) ?zui.Border {
+            if (ui.focused(id)) return .{ .color = theme.focus_ring, .widths = .all(2) };
             return unfocused;
         }
     };
