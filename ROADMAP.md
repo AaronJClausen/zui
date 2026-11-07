@@ -136,8 +136,8 @@ executable is always built for x86-64-v3 Linux without libc, so every
 machine runs the same instructions. CI counts the parent commit with its
 own scenarios, then this one, and fails on more than 2% growth.
 
-The counts repeated exactly between a local Docker container (i9-10900K)
-and two GitHub runners. Instructions per frame when they were added:
+At `cd534f4` the counts were identical in a local Docker container
+(i9-10900K) and in two runs of the CI job. Instructions per frame:
 
 | Scenario | Declaration | `endFrame` |
 |---|---|---|
@@ -146,10 +146,14 @@ and two GitHub runners. Instructions per frame when they were added:
 | 1,000 texts, cold cache | 137,326 | 2,344,117 |
 | depth 64 | 15,966 | 25,011 |
 | 4,000 children of one parent | 471,656 | 1,086,532 |
-| documents view | 38,322 | 97,371 |
+| documents view | 38,317 | 97,371 |
 
 Warm and cold text cost nearly the same in `endFrame` because the
 benchmark's glyph-table measurement costs about as much as a cache probe.
+A change anywhere in the executable can still move a count by a few
+instructions, by moving the constant data a scenario copies: the
+documents view's declaration moved by 5 when only the report's printing
+changed.
 
 ### R2. `zig build bench-compare -- <ref>`
 
