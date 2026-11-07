@@ -59,7 +59,8 @@ Implemented so far:
   ever waiting, and idles at 0% CPU.
 - **Stage 6, early:** a text that fits is laid out as one line without
   walking its words, and a whole-string cache makes a warm text one probe
-  instead of one per word: 1,000 warm texts lay out in about 100 µs.
+  instead of one per word: 1,000 warm texts lay out in about 100 µs. The
+  box tree of 4,096 boxes lays out and emits its commands in about 94 µs.
 
 The reference backend and demo application live in
 [zui-raylib](https://github.com/AaronJClausen/zui-raylib); the other

@@ -76,6 +76,13 @@ pub fn mix(seed: u64, value: u64) u64 {
     return combined ^ (combined >> 31);
 }
 
+/// The id of an element declared without one. Such ids are never looked
+/// up or stored, only reported in commands, so one multiply mixes enough.
+pub fn internal(parent_hash: u64, sibling_index: u64) u64 {
+    const product = (parent_hash +% sibling_index +% 1) *% 0x9e3779b97f4a7c15;
+    return product ^ (product >> 32);
+}
+
 /// Hash 0 means `Id.none`, so a real name never maps to it.
 fn nonZero(hash: u64) u64 {
     return if (hash == 0) 1 else hash;

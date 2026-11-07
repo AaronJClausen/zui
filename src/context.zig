@@ -182,8 +182,6 @@ pub const ElementFlags = packed struct(u16) {
     }
 };
 
-const default_layout: style.Layout = .{};
-
 fn nextPowerOfTwo(value: u32) u32 {
     return std.math.ceilPowerOfTwoAssert(u32, @max(value, 2));
 }
@@ -271,6 +269,8 @@ pub fn Context(comptime config: Config) type {
             layout_index: [max_elements]Index,
             decoration_index: [max_elements]Index,
             content_kind: [max_elements]ContentKind,
+            /// Index into the record of the element's `content_kind`; not
+            /// written for `.none`.
             content_index: [max_elements]Index,
             size: [max_elements][2]f32,
             min_size: [max_elements][2]f32,
@@ -286,7 +286,9 @@ pub fn Context(comptime config: Config) type {
             /// The extent of an element's children plus padding, for scrolling.
             content_size: [max_elements][2]f32,
 
-            layouts: [max_elements]style.Layout,
+            /// One more than can be declared: `layouts[none_index]` is the
+            /// default layout, so an element without one needs no branch.
+            layouts: [max_elements + 1]style.Layout,
             layout_count: u32,
             decorations: [max_elements]Decoration,
             decoration_count: u32,
@@ -368,15 +370,12 @@ pub fn Context(comptime config: Config) type {
             }
 
             pub fn layoutOf(self: *const Frame, index: Index) *const style.Layout {
-                const layout_index = self.layout_index[index];
-                return if (layout_index == none_index) &default_layout else &self.layouts[layout_index];
+                return &self.layouts[self.layout_index[index]];
             }
 
             /// Text elements never have a layout, so they are `.fit` here too.
             pub fn sizingOf(self: *const Frame, index: Index, comptime axis: style.Axis) style.Sizing {
-                const layout_index = self.layout_index[index];
-                if (layout_index == none_index) return .fit;
-                const sizing = &self.layouts[layout_index].sizing;
+                const sizing = &self.layoutOf(index).sizing;
                 return if (axis == .x) sizing.width else sizing.height;
             }
 
@@ -409,6 +408,7 @@ pub fn Context(comptime config: Config) type {
                 self.viewport = params.viewport;
                 self.zoom = params.zoom;
                 self.pixels_per_unit = params.scale * params.zoom;
+                self.layouts[none_index] = .{};
                 @memset(&self.id_table, none_index);
             }
         };
@@ -417,7 +417,6 @@ pub fn Context(comptime config: Config) type {
             frames: [config.frames_in_flight]Frame,
             cache: Cache,
             measure_batch: MeasureBatch,
-            child_placements: [limits.max_elements]layout.ChildPlacement,
             /// Scratch shared by every frame: the width of each word or
             /// paragraph measured in the current `endFrame`.
             run_widths: [run_width_capacity]f32,
@@ -599,7 +598,7 @@ pub fn Context(comptime config: Config) type {
                 .direction = .top_to_bottom,
                 .sizing = .{ .width = .fixed(record.params.viewport[0]), .height = .fixed(record.params.viewport[1]) },
             };
-            const root = self.appendElement(root_id, .{ .layout = root_layout }, .none, 0) orelse unreachable;
+            const root = self.appendElement(frame, true, root_id, .{ .layout = root_layout }, .none, 0) orelse unreachable;
             self.open_stack[0] = root;
             self.depth = 1;
             frame.diagnostics.needed.set(.max_depth, 1);
@@ -856,7 +855,7 @@ pub fn Context(comptime config: Config) type {
                 self.dropped_depth = 1;
                 return;
             }
-            const index = self.appendElement(element.id, element, .none, 0) orelse {
+            const index = self.appendElement(frame, false, element.id, element, .none, 0) orelse {
                 self.dropped_depth = 1;
                 return;
             };
@@ -899,7 +898,7 @@ pub fn Context(comptime config: Config) type {
                 return;
             }
             const record_index = frame.text_count;
-            const element_index = self.appendElement(.none, .{}, .text, record_index) orelse {
+            const element_index = self.appendElement(frame, false, .none, .{}, .text, record_index) orelse {
                 self.countDroppedTextBytes(frame, content.len);
                 return;
             };
@@ -945,7 +944,7 @@ pub fn Context(comptime config: Config) type {
                 self.countDropped(frame, .max_elements);
                 return false;
             }
-            const index = self.appendElement(element.id, element, kind, record_index) orelse return false;
+            const index = self.appendElement(frame, false, element.id, element, kind, record_index) orelse return false;
             frame.subtree_end[index] = index + 1;
             return true;
         }
@@ -958,21 +957,19 @@ pub fn Context(comptime config: Config) type {
         /// specialized to its element literal: the fields left at their
         /// defaults cost nothing, and the `Element` is never copied. Out of
         /// line, declaration was about 35% slower.
-        inline fn appendElement(self: *Self, element_id: Id, element: Element, kind: ContentKind, record_index: u32) ?Index {
-            const frame = self.current.?;
+        inline fn appendElement(self: *Self, frame: *Frame, comptime is_root: bool, element_id: Id, element: Element, kind: ContentKind, record_index: u32) ?Index {
             if (frame.element_count >= max_elements) {
                 self.countDropped(frame, .max_elements);
                 self.recordOverflow(frame, .max_elements, element_id.hash);
                 return null;
             }
             const index: Index = @intCast(frame.element_count);
-            const has_parent = frame.element_count != 0;
-            const parent: Index = if (has_parent) self.open_stack[self.depth - 1] else none_index;
+            const parent: Index = if (is_root) none_index else self.open_stack[self.depth - 1];
 
-            const hash = if (!element_id.isNone())
+            const hash = if (is_root or !element_id.isNone())
                 element_id.hash
             else
-                id_module.mix(frame.element_id[parent], frame.child_count[parent]);
+                id_module.internal(frame.element_id[parent], frame.child_count[parent]);
 
             frame.element_count += 1;
             frame.element_id[index] = hash;
@@ -983,7 +980,7 @@ pub fn Context(comptime config: Config) type {
             frame.min_size[index] = .{ 0, 0 };
             frame.flow_child_count[index] = 0;
             frame.content_kind[index] = kind;
-            frame.content_index[index] = @intCast(record_index);
+            if (kind != .none) frame.content_index[index] = @intCast(record_index);
             frame.flags[index] = flagsFor(element_id, element);
 
             if (element.cursor) |cursor| if (frame.flags[index].interactive) self.offerCursor(frame, hash, cursor);
@@ -1007,7 +1004,7 @@ pub fn Context(comptime config: Config) type {
                 frame.decoration_count += 1;
             } else frame.decoration_index[index] = none_index;
 
-            if (has_parent) {
+            if (!is_root) {
                 frame.child_count[parent] += 1;
                 if (element.floating == null) frame.flow_child_count[parent] += 1;
             }
@@ -1029,7 +1026,7 @@ pub fn Context(comptime config: Config) type {
             frame.host_requests.cursor = cursor;
         }
 
-        fn flagsFor(element_id: Id, element: Element) ElementFlags {
+        inline fn flagsFor(element_id: Id, element: Element) ElementFlags {
             var flags: ElementFlags = .{
                 .explicit_id = !element_id.isNone(),
                 .interactive = element.interactive or element.focusable,

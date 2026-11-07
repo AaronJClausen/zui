@@ -148,7 +148,9 @@ pub const Sizing = struct {
     min: f32 = 0,
     max: f32 = std.math.inf(f32),
 
-    pub const Rule = enum(u8) { fit, grow, fixed, percent };
+    /// Four bytes, so `Sizing` has no padding bytes for declaration to copy
+    /// into every layout.
+    pub const Rule = enum(u32) { fit, grow, fixed, percent };
 
     pub const fit: Sizing = .{};
     pub const grow: Sizing = .{ .rule = .grow, .amount = 1 };

@@ -629,7 +629,7 @@ pub const Layout = struct {
 };
 
 pub const Sizing = struct {
-    rule: enum(u8) { fit, grow, fixed, percent } = .fit,
+    rule: enum(u32) { fit, grow, fixed, percent } = .fit,   // four bytes: no padding to copy
     /// fixed: the size. percent: fraction of the parent's content box. grow: the weight.
     amount: f32 = 0,
     basis: enum(u8) { content, zero } = .content,   // grow only: start from the content's size, or from `min`

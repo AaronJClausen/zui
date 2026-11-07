@@ -131,8 +131,7 @@ fn contentSize(comptime Ui: type, frame: *const Ui.Frame, element: Ui.Index, com
         return .{ .preferred = height, .min = height };
     }
 
-    if (frame.layout_index[element] == Ui.none_index) return .{ .preferred = frame.size[element][a], .min = frame.min_size[element][a] };
-    const element_layout = frame.layouts[frame.layout_index[element]];
+    const element_layout = frame.layoutOf(element);
     const padding = element_layout.padding.total(axis);
     const gaps = if (element_layout.direction.axis() == axis) gapsFor(element_layout.child_gap, frame.flow_child_count[element]) else 0;
     return .{ .preferred = frame.size[element][a] + gaps + padding, .min = frame.min_size[element][a] + gaps + padding };
@@ -353,64 +352,50 @@ fn wrapTexts(comptime Ui: type, ui: *Ui, frame: *Ui.Frame) void {
     }
 }
 
-/// Where a parent's next flow child goes: prepared when the parent is
-/// placed, advanced by each child.
-pub const ChildPlacement = struct {
-    next_along: f32,
-    across_start: f32,
-    across_space: f32,
-    across_fraction: f32,
-    gap: f32,
-};
-
 /// Pass 6, one forward pass in declaration order. Parents come before
-/// their children, so each element is placed from its parent's
-/// `ChildPlacement` and then prepares its own. A floating element is
-/// placed against its target, which, being declared earlier, is already
-/// placed; a target declared later falls back to the parent.
+/// their children, so an element's position is final when it is reached,
+/// and it places its flow children then. A floating element is placed when
+/// it is reached, against its target, which, being declared earlier, is
+/// already placed; a target declared later falls back to the parent.
 fn position(comptime Ui: type, ui: *Ui, frame: *Ui.Frame) void {
-    const placements = &ui.memory.child_placements;
     frame.position[Ui.root_index] = .{ 0, 0 };
-    startChildren(Ui, ui, frame, Ui.root_index);
-    for (1..frame.element_count) |index| {
+    for (0..frame.element_count) |index| {
         const element: Ui.Index = @intCast(index);
-        if (frame.isFloating(element)) {
-            placeFloating(Ui, frame, element);
-        } else {
-            const parent = frame.parent[element];
-            const placement = &placements[parent];
-            const along: usize = @intFromBool(frame.flags[parent].top_to_bottom);
-            const across = 1 - along;
-            frame.position[element][along] = placement.next_along;
-            placement.next_along += frame.size[element][along] + placement.gap;
-            const free_across = placement.across_space - frame.size[element][across];
-            frame.position[element][across] = placement.across_start + if (free_across > 0) free_across * placement.across_fraction else 0;
+        if (frame.isFloating(element)) placeFloating(Ui, frame, element);
+        if (frame.child_count[element] == 0) continue;
+        switch (frame.flags[element].top_to_bottom) {
+            inline else => |top_to_bottom| placeChildren(Ui, ui, frame, element, if (top_to_bottom) .y else .x),
         }
-        if (frame.child_count[element] != 0) startChildren(Ui, ui, frame, element);
     }
 }
 
-inline fn startChildren(comptime Ui: type, ui: *Ui, frame: *Ui.Frame, parent: Ui.Index) void {
-    const parent_layout = frame.layoutOf(parent);
-    const top_to_bottom = frame.flags[parent].top_to_bottom;
-    const along: usize = @intFromBool(top_to_bottom);
+/// Specialized by the flow's axis, so no coordinate is indexed at run time.
+inline fn placeChildren(comptime Ui: type, ui: *Ui, frame: *Ui.Frame, parent: Ui.Index, comptime flow_axis: Axis) void {
+    const along = @intFromEnum(flow_axis);
     const across = 1 - along;
+    const parent_layout = frame.layoutOf(parent);
     const padding_start = [2]f32{ parent_layout.padding.left, parent_layout.padding.top };
-    const padding_total = [2]f32{ parent_layout.padding.total(.x), parent_layout.padding.total(.y) };
-    const alignment = if (top_to_bottom)
-        [2]f32{ parent_layout.child_alignment.y.fraction(), parent_layout.child_alignment.x.fraction() }
-    else
-        [2]f32{ parent_layout.child_alignment.x.fraction(), parent_layout.child_alignment.y.fraction() };
+    const across_axis: Axis = if (flow_axis == .x) .y else .x;
+    const along_fraction = parent_layout.child_alignment.axis(flow_axis).fraction();
+    const across_fraction = parent_layout.child_alignment.axis(across_axis).fraction();
+    const gap = parent_layout.child_gap;
 
     const offset = scrollOffset(Ui, ui, frame, parent);
     const free_along = frame.size[parent][along] - frame.content_size[parent][along];
-    ui.memory.child_placements[parent] = .{
-        .next_along = frame.position[parent][along] + padding_start[along] - offset[along] + if (free_along > 0) free_along * alignment[0] else 0,
-        .across_start = frame.position[parent][across] + padding_start[across] - offset[across],
-        .across_space = frame.size[parent][across] - padding_total[across],
-        .across_fraction = alignment[1],
-        .gap = parent_layout.child_gap,
-    };
+    var next_along = frame.position[parent][along] + padding_start[along] - offset[along] + if (free_along > 0) free_along * along_fraction else 0;
+    const across_start = frame.position[parent][across] + padding_start[across] - offset[across];
+    const across_space = frame.size[parent][across] - parent_layout.padding.total(across_axis);
+
+    var children = FlowChildren(Ui).init(frame, parent);
+    while (children.next()) |child| {
+        const size = frame.size[child];
+        const free_across = across_space - size[across];
+        var placed: [2]f32 = undefined;
+        placed[along] = next_along;
+        placed[across] = across_start + if (free_across > 0) free_across * across_fraction else 0;
+        frame.position[child] = placed;
+        next_along += size[along] + gap;
+    }
 }
 
 fn placeFloating(comptime Ui: type, frame: *Ui.Frame, floating: Ui.Index) void {

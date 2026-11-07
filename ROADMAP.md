@@ -24,7 +24,7 @@ Each item says:
 | 0.6, in part | `bench-compare` (R2), startup benchmarks (P1), task completions at `beginFrame` (A2), the async design (A1) | done; the rest of 0.6 became stage 1 |
 | stage 1 | instruction counts in CI (R1), the tracer contract and `zui_tracy` (P2) | done |
 | stage 2 | the code brought to the spec's shape: C5, S1, I4, C6, A5 and `nextFrame` (I2); letter spacing (T3); the environment and host requests (I6); sources in the core (A3); `zui_async` (A4); the backends on the new API, the demo's thumbnails on `KeyedLoads` (C8) | done; the demo idles at 0% CPU |
-| stage 6, early | the single-line fast path (T1), the whole-string cache (T2) | done; warm text within its budget |
+| stage 6, early | the single-line fast path (T1), the whole-string cache (T2), the box tree's layout passes (P4, in part) | done; warm text and the box tree's layout and emission within their budgets; the box tree's declaration is not (P5) |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
@@ -36,14 +36,16 @@ Measured on the reference machine (i9-10900K), the fastest frame, at
 
 | Scenario | Declaration | `endFrame` | Budget |
 |---|---|---|---|
-| 4,096 boxes, depth 8 | 52.2 µs | 101.2 µs | declaration < 55 µs (met); layout and emission < 100 µs (missed by 1.2 µs) |
-| 1,000 texts, warm caches, after T2 | 16.2 µs | 98.9 µs | < 120 µs (met; 184.2 µs at `a6d8e34`) |
+| 4,096 boxes, depth 8, after P4 | 58.6 µs | 93.4 µs | layout and emission < 100 µs (met; 101.2 µs at `a6d8e34`); declaration < 55 µs (missed; 52.2 µs at `a6d8e34`) |
+| 1,000 texts, warm caches, after P4 | 16.9 µs | 91.9 µs | < 120 µs (met; 184.2 µs at `a6d8e34`) |
 | 4,000 children of one parent | 52.9 µs | 65.8 µs | |
 
-The T2 row is the fastest of four runs of `zig build bench --
---check-targets`, whose fastest frames for warm text were 98.9 to
-103.1 µs; in the same runs the box tree's `endFrame` took 111 to 114 µs,
-so the machine ran about 10% slower than when `a6d8e34` was measured.
+The P4 rows are the fastest of four runs of `zig build bench --
+--check-targets`, whose fastest box-tree frames were 93.4 to 97.9 µs for
+layout and emission and 58.6 to 69.5 µs for declaration. The machine runs
+slower than when `a6d8e34` was measured: in the same session `afacf87`,
+before P4, took 111.0 µs and 68.5 µs (`bench-compare`), where `a6d8e34`
+had taken 101.2 µs and 52.2 µs.
 
 ## The queue
 
@@ -54,7 +56,8 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
-| P4. The box tree's layout and emission within budget | 6, early | `src/layout.zig`, `src/emission.zig` | | |
+| P4. The box tree's layout and emission within budget | 6, early | `src/layout.zig`, `src/emission.zig` | | waiting on P5 |
+| P5. The box tree's declaration within budget | 6, early | `src/context.zig` | L8 | waiting on L8 |
 | C1. The renderer contract, generated commands, lowering | 3 | `src/commands.zig`, `src/emission.zig`, `src/contracts.zig` | | |
 | C2. The host contract and the surface | 3 | `src/contracts.zig`, a new `src/surface.zig` | C1 | |
 | C3. Conformance suites | 3 | `zui_testing/` | C1, C2 | |
@@ -784,7 +787,84 @@ and `bench-compare`.
 budgets on the reference machine, and no other scenario is slower by
 `bench-compare`.
 
+**Status.** Layout and emission are within budget; declaration is not,
+and moved to P5. Measured first at `afacf87` on the reference machine:
+`endFrame` 111.0 µs and declaration 68.5 µs, the machine running slower
+than at `a6d8e34` (*Where we are*). Callgrind's profile of `endFrame` gave
+position 21% (82 instructions an element: its along and across
+coordinates were indexed at run time, so each parent spilled them to the
+stack), the two distribute passes 20%, the two fit passes 20% and emission
+12%. Landed:
+- **Position by parent.** Each parent places its flow children in one
+  loop specialized by the flow's axis; the per-parent placement records
+  are gone. Position went from 365,000 to 232,000 instructions a frame.
+- **A default layout at `layouts[none_index]`,** so `layoutOf` and
+  `sizingOf` never branch.
+- **Declaration:** an element without an id takes `id.internal`, one
+  multiply where `mix` took two, because such ids are never looked up;
+  `Sizing.Rule` is four bytes, so a layout has no padding bytes to copy;
+  `content_index` is not written for a plain box; `flagsFor` is inline;
+  the root is a comptime case of `appendElement`.
+
+Against `afacf87`, `zig build counts` in a local Docker container: the box
+tree's `endFrame` −14.3% (1,562,373 to 1,339,297) and declaration −23.2%
+(765,869 to 588,146); every other scenario fewer in both phases (text
+declarations −10% to −18%, `endFrame` −0.4% to −15%). `zig build
+bench-compare -- afacf87` (8 rounds): box tree `endFrame` −16.0% (111.0
+to 93.5 µs), declaration −9.6% (68.5 to 61.9 µs), warm text −5.8%,
+depth 64 −8.3%, documents view −3.8%; slower: the text walls' declaration
++3.7% (16.3 to 16.9 µs) and the wide tree's +4.4%, with 18% and 11% fewer
+instructions and the same simulated cache misses (Callgrind
+`--cache-sim`), which points at code placement rather than work.
+
+Tried and dropped:
+- zeroing `size` and `min_size` at the start of `endFrame` rather than
+  in declaration: declaration −8%, but `endFrame` +3% for the box and wide
+  trees, the cost of touching 128 KB, so it would only move the time;
+  `@memset` there was compiler_rt's, 90,000 instructions without libc,
+  and `rep stosb` was slower still;
+- one integer for `child_count` and `flow_child_count`: −4,000
+  instructions in declaration, +40,000 in `endFrame`;
+- layouts and decorations at the element's own index, with no counts:
+  −2% in declaration, but the first frame of 1,000 texts +5.7%, from the
+  pages the sparse layouts touch;
+- `sizingOf` returning `.fit` without a load: +86,000 instructions in the
+  box tree's `endFrame`; `.fit` tested before the switch in `distribute`:
+  no change;
+- computing the flags before the first store: no change (see P5).
+
 **Spec.** §8.2, §20.2.
+
+### P5. The box tree's declaration within budget
+
+**Grounding.** After P4 the box tree's declaration is 58.6 µs at best
+against 55 µs, and 588,146 instructions, 143 a box, of which the scene's
+own switch is about 35. What is left:
+- **Bytes written.** An `open` stores about 100 bytes into 15 arrays, 56
+  of them the layout copy in 12 stores, and timing follows the stores
+  more than the instructions: zeroing the two 8-byte sizes in declaration
+  costs 8% of it. One frame in flight instead of two changed nothing, so
+  it is the stores themselves, not the frames' cache footprint.
+- **The element's flags.** Zig writes the `Element`'s `bool` fields as
+  `i1` and reads them as `i8`, so LLVM cannot keep them in registers: every
+  `open` stores six bytes to the stack and reloads and masks them, about
+  30 instructions, even when every field is a default.
+- **The machine.** `afacf87` declared the box tree in 68.5 µs here, where
+  `a6d8e34` took 52.2 µs when the budget was last met; measure on a quiet
+  machine at a fixed frequency first.
+
+**Plan.** With L8's config references in place, pack the per-element
+fields declaration writes (parent, counts, kind, content index, flags,
+config references) into one record, so an `open` writes two or three
+streams instead of 15; then store the flags without reloading the
+element's fields, through a different `Element` shape if the compiler
+cannot be led to it, which SPEC.md §10.1 would record.
+
+**Done when:** `zig build bench -- --check-targets` meets the declaration
+budget on the reference machine, and no scenario is slower by
+`bench-compare`.
+
+**Spec.** §5.1, §10.1, §20.2.
 
 ### T4. Line-break segmentation
 
@@ -1031,9 +1111,6 @@ Only with a measured win or a demonstrated need:
   elements.
 - **Static subtrees:** pre-recorded element records copied in with one
   `@memcpy` and laid out normally.
-- **Packing the per-element fields declaration writes** into one record.
-  Since the `depth` fix, no instruction in the box tree's declaration has
-  more than 4% of its samples, so there is no hot spot for it yet.
 - **P3. SIMD candidates,** each measured by R1 and R2 before it ships.
 
 ## Not taken from Clay
