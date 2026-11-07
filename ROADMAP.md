@@ -26,6 +26,7 @@ Each item says:
 | stage 2 | the code brought to the spec's shape: C5, S1, I4, C6, A5 and `nextFrame` (I2); letter spacing (T3); the environment and host requests (I6); sources in the core (A3); `zui_async` (A4); the backends on the new API, the demo's thumbnails on `KeyedLoads` (C8) | done; the demo idles at 0% CPU |
 | stage 3 | the renderer contract and the generated commands (C1); the host contract and `RecordBuilder` (C2); the conformance suites (C3); `Features` (C7); `zui_app` (C4); the raylib adapter host (H1) | done; the backends are renderers and pass the renderer suite in CI, raylib's host passes the host suite, and the demo runs through `zui_app`, presenting its first frame 288 ms after the process starts; lowering comes with stage 8's commands |
 | stage 4 | the Windows host (H2), with dropped files and lifecycle events in the record; the system material (H8); `zui_app` with the application's own text contract (C9) | done; zui-sokol's tour runs on it unchanged, through `zui_app`, and idles at 0% CPU, and the same code shows Mica or a solid background |
+| stage 5, begun | relay (F2) | done; a relayed session replays to the same commands |
 | stage 6, early | the single-line fast path (T1), the whole-string cache (T2), the box tree's layout passes (P4, in part) | done; warm text and the box tree's layout and emission within their budgets; the box tree's declaration is not (P5) |
 
 No release is tagged; everything is on `main`. From here, work is
@@ -60,7 +61,6 @@ green, and its **Status** line below says which slice is next.
 |---|---|---|---|---|
 | P4. The box tree's layout and emission within budget | 6, early | `src/layout.zig`, `src/emission.zig` | | waiting on P5 |
 | P5. The box tree's declaration within budget | 6, early | `src/context.zig` | L8 | waiting on L8 |
-| F2. Relay | 5 | `src/context.zig` | | |
 | F3. `zui_wire` | 5 | a new `zui_wire/` module | F2 | |
 | F4. Replay in `zui_testing` | 5 | `zui_testing/` | F2 | |
 | F5. Rendering somewhere else | 5 | `zui_wire/`, a wire host and renderer | F3 | |
@@ -138,6 +138,46 @@ Things to know:
 ---
 
 ## Done
+
+### F2. Relay
+
+**Plan.** `relayTo(listener)`: each applied record, with deliveries from
+`zuiDelivery`, without allocating when no listener is attached, in a
+`relay` trace zone. **Done when:** a test relays a session into a buffer
+and gets back exactly the records applied. **Spec.** §6.8.
+
+`ui.relayTo(listener)` takes a `?Ui.Relay`, `zui.Relay(Ui.FrameRecord)`:
+a context pointer and a function, as `Waker` is. At the end of
+`beginFrame`, after the sources swap and inside the new `relay` zone, the
+listener gets the record as applied: its parameters, the events zui kept
+(the first `max_events_per_frame`), and the deliveries, which a live
+frame fills from each source's `zuiDelivery` into `relayed_deliveries`
+in the context's reservation, and a replayed one passes through.
+`relayTo(null)` detaches it.
+
+`src/tests/relay.zig` relays a four-frame session (a click with typed
+text, a published value, six events where four are kept) into a
+recorder, checks each record against what was applied, then feeds the
+recorded records with their deliveries to a fresh context and gets the
+same commands, typed text and clicks frame by frame, and the same
+deliveries relayed again. A context without sources relays records
+without deliveries; the tracer test sees the `relay` zone only with a
+listener; `zig build check` relays a source's delivery on every target.
+
+`zig build counts` against `1e16727`, in a local Docker container:
+declaration +2 instructions in every scenario (+3 with ten idle
+`zui_async` sources), `endFrame` unchanged; ten idle sources still cost
+what they did over none. The reservation grows by `Deliveries`' size,
+and not at all without sources. `bench --check-targets` misses only the
+declaration budget, as before (P5).
+
+Decided here:
+- **What is relayed** is the record as applied: the events zui kept, so
+  a replay of it applies exactly those, and a text event whole, since
+  zui cuts it the same way again.
+- **Where the relayed deliveries live:** in the reservation, as
+  SPEC.md §5 lists "the relay buffer", since a `Delivery` can hold a
+  stream's whole capacity and does not belong on the stack.
 
 ### C9. `zui_app` with a separate text contract
 
@@ -1083,17 +1123,7 @@ Done: H2 and H8 are in *Done*.
 ## Stage 5: the wire
 
 F1, feeds, is retired: sources (A3) are the mechanism for outside data.
-
-### F2. Relay
-
-**Plan.** `relayTo(listener)`: each applied record, with deliveries from
-`zuiDelivery`, without allocating when no listener is attached, in a
-`relay` trace zone.
-
-**Done when:** a test relays a session into a buffer and gets back
-exactly the records applied.
-
-**Spec.** §6.8.
+F2 is in *Done*.
 
 ### F3. `zui_wire`
 
@@ -1576,6 +1606,7 @@ Deliberate, and each a reason to choose zui:
 | A renderer over a system material (H8) | composes with alpha: zui-sokol draws a native window through a DirectComposition swapchain, since Windows ignores an OpenGL or window swapchain's alpha |
 | A terminate request (H2) | delivered in one record; the host's next `zuiPoll` returns false |
 | The clipboard service before H6 (H2) | `zuiClipboard`, a type with `read(host, buffer)` and `write(host, text)` |
+| What a relay listener gets (F2) | the record as applied: the events kept, and deliveries from `zuiDelivery`, filled in the reservation, or a replay's own |
 
 ### Open
 

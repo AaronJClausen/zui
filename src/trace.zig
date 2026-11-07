@@ -7,6 +7,8 @@ pub const TraceZone = enum {
     apply_events,
     /// Only for a `Context` whose `Sources` has a field.
     swap_sources,
+    /// Only while a relay listener is attached.
+    relay,
 
     end_frame,
     measure_text,

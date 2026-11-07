@@ -231,6 +231,8 @@ pub fn Context(comptime config: Config) type {
         pub const Deliveries = if (has_sources) sources_module.Deliveries(Sources) else void;
         /// What `beginFrame` takes: with `deliveries` when there are sources.
         pub const FrameRecord = if (has_sources) record_types.FrameRecordWith(Deliveries) else record_types.FrameRecord;
+        /// A listener for `relayTo`.
+        pub const Relay = record_types.Relay(FrameRecord);
 
         /// The read-only handle `source(field)` returns.
         pub fn SourceView(comptime field: SourceField) type {
@@ -465,6 +467,9 @@ pub fn Context(comptime config: Config) type {
             states: States,
             results: Results,
             input: InputState,
+            /// What each source delivered, filled from `zuiDelivery` for a
+            /// relay listener.
+            relayed_deliveries: Deliveries,
         };
 
         /// The bytes `initBuffer` needs; `init` makes one allocation of this size.
@@ -481,6 +486,7 @@ pub fn Context(comptime config: Config) type {
         io: std.Io,
 
         current: ?*Frame = null,
+        relay_listener: ?Relay = null,
         next_frame_slot: u8 = 0,
         frames_begun: u64 = 0,
         open_stack: [max_depth]Index = undefined,
@@ -632,6 +638,7 @@ pub fn Context(comptime config: Config) type {
             self.applyEvents(frame, record.events);
             applying.end();
             if (has_sources) self.swapSources(frame, record, sources);
+            if (self.relay_listener) |listener| self.relay(listener, record, sources);
             self.current = frame;
             self.dropped_depth = 0;
             self.depth = 0;
@@ -691,6 +698,25 @@ pub fn Context(comptime config: Config) type {
             }
         }
 
+        /// Hands `listener` the record as applied: the events kept, and the
+        /// deliveries a replay injected or each source reports it received.
+        fn relay(self: *Self, listener: Relay, record: *const FrameRecord, sources: SourcesPointer) void {
+            const relaying = Tracing.begin(.relay);
+            defer relaying.end();
+            var applied: FrameRecord = .{
+                .params = record.params,
+                .events = record.events[0..@min(record.events.len, limits.max_events_per_frame)],
+            };
+            if (has_sources) applied.deliveries = record.deliveries orelse delivered: {
+                const delivered = &self.memory.relayed_deliveries;
+                inline for (@typeInfo(Sources).@"struct".fields) |field| {
+                    @field(sources, field.name).zuiDelivery(&@field(delivered, field.name));
+                }
+                break :delivered delivered;
+            };
+            listener.relay(&applied);
+        }
+
         /// Lets each source settle its own demand, such as the keys this
         /// frame asked it for.
         fn settleSources(self: *Self, frame: *const Frame) void {
@@ -743,6 +769,14 @@ pub fn Context(comptime config: Config) type {
             for (self.open_stack[1..self.depth]) |still_open| frame.subtree_end[still_open] = @intCast(frame.element_count);
             self.depth = 1;
             self.dropped_depth = 0;
+        }
+
+        /// From the next `beginFrame`, hands `listener` each record as
+        /// applied, with what each source delivered, so a session can be
+        /// recorded, sent elsewhere or replayed; `null` detaches it. Without
+        /// a listener nothing is copied.
+        pub fn relayTo(self: *Self, listener: ?Relay) void {
+            self.relay_listener = listener;
         }
 
         /// Returns the frame's memory. Safe to call from any thread.

@@ -69,6 +69,26 @@ pub fn FrameRecordWith(comptime Deliveries: type) type {
     };
 }
 
+/// A listener `Context.relayTo` hands each applied record to, during
+/// `beginFrame`: its parameters, the events zui kept, and what each source
+/// delivered. The record and everything it points to are valid only during
+/// the call, so a listener copies what it keeps.
+///
+/// ```zig
+/// ui.relayTo(.{ .context = &recorder, .relayFn = Recorder.keep });
+/// ```
+pub fn Relay(comptime Record: type) type {
+    return struct {
+        /// The listener's own pointer, passed back to `relayFn`.
+        context: *anyopaque,
+        relayFn: *const fn (context: *anyopaque, record: *const Record) void,
+
+        pub fn relay(self: @This(), record: *const Record) void {
+            self.relayFn(self.context, record);
+        }
+    };
+}
+
 /// What a host fills in `zuiPoll`: the parameters it measures and the
 /// events since the last record, in memory the application reserved, so
 /// polling allocates nothing. The application keeps `params.zoom`.

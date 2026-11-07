@@ -486,9 +486,16 @@ var check_sources: CheckSources = .{};
 
 fn wakeNothing(_: *anyopaque) void {}
 
+var relayed_catalog: ?u64 = null;
+
+fn relayCatalog(_: *anyopaque, record: *const SourcedUi.FrameRecord) void {
+    relayed_catalog = record.deliveries.?.catalog;
+}
+
 export fn zuiCheckSources(published: u64) u64 {
     var ui = SourcedUi.initBuffer(&sourced_memory, undefined) catch return 0;
     var wake_target: u8 = 0;
+    ui.relayTo(.{ .context = &wake_target, .relayFn = relayCatalog });
     const waker: zui.Waker = .{ .context = &wake_target, .wakeFn = wakeNothing };
     check_sources.catalog.published = published;
     waker.wakeIf(.needed);
@@ -509,7 +516,7 @@ export fn zuiCheckSources(published: u64) u64 {
     const second = ui.endFrame();
     ui.release(second);
     const pending = @intFromBool(ui.nextFrame(&check_sources) == .immediately);
-    return shown +% ui.framesSinceRead(.catalog) +% ui.framesSinceRead(.prices) +% second.diagnostics.refused_publishes +% pending;
+    return shown +% ui.framesSinceRead(.catalog) +% ui.framesSinceRead(.prices) +% second.diagnostics.refused_publishes +% pending +% (relayed_catalog orelse 0);
 }
 
 const AsyncCatalog = zui_async.Task(error{Offline}!u32, .{ .Progress = f32 });

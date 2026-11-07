@@ -12,10 +12,13 @@ const TracedUi = zui.Context(.{
     .features = .{ .Tracer = Tracer },
 });
 
+fn ignoreRecord(_: *anyopaque, _: *const TracedUi.FrameRecord) void {}
+
 test "every step of beginFrame and endFrame is a zone, nested in its call" {
     var text_contract: support.FixedMetricsText = .{};
     var ui: TracedUi = try .init(testing.allocator, testing.io, &text_contract);
     defer ui.deinit(testing.allocator);
+    ui.relayTo(.{ .context = &text_contract, .relayFn = ignoreRecord });
 
     Tracer.clear();
     var sources: TracedUi.Sources = .{};
@@ -35,6 +38,8 @@ test "every step of beginFrame and endFrame is a zone, nested in its call" {
         .{ .zone = .apply_events, .edge = .end },
         .{ .zone = .swap_sources, .edge = .begin },
         .{ .zone = .swap_sources, .edge = .end },
+        .{ .zone = .relay, .edge = .begin },
+        .{ .zone = .relay, .edge = .end },
         .{ .zone = .begin_frame, .edge = .end },
         .{ .zone = .end_frame, .edge = .begin },
         .{ .zone = .measure_text, .edge = .begin },
@@ -65,7 +70,7 @@ test "every step of beginFrame and endFrame is a zone, nested in its call" {
     try testing.expectEqual(std.EnumSet(zui.TraceZone).initFull(), zones_seen);
 }
 
-test "tryBeginFrame traces the same steps as beginFrame" {
+test "tryBeginFrame traces the same steps as beginFrame, without a relay zone when no listener is attached" {
     var text_contract: support.FixedMetricsText = .{};
     var ui: TracedUi = try .init(testing.allocator, testing.io, &text_contract);
     defer ui.deinit(testing.allocator);

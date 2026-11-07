@@ -480,14 +480,21 @@ interaction before the element is declared.
 ### 6.8 Relay, replay and determinism
 
 ```zig
-pub fn relayTo(self: *Self, listener: ?zui.Relay(FrameRecord)) void
+pub fn relayTo(self: *Self, listener: ?Ui.Relay) void   // Ui.Relay is zui.Relay(Ui.FrameRecord); null detaches
+
+pub fn Relay(comptime Record: type) type {   // as `Waker`: the listener's pointer, passed back
+    return struct { context: *anyopaque, relayFn: *const fn (*anyopaque, *const Record) void };
+}
 ```
 
 - **Relay.** A listener receives each applied record during
-  `beginFrame`, including the deliveries each source reported through
-  `zuiDelivery`. The record is valid only during the call; a listener
-  copies what it keeps, and a slow listener buffers on its own side. With
-  no listener, nothing is copied.
+  `beginFrame`, after the sources swap: its parameters, the events zui
+  kept (at most `max_events_per_frame`), and the deliveries each source
+  reported through `zuiDelivery`, or, in a replay, the record's own. The
+  record is valid only during the call; a listener copies what it keeps,
+  and a slow listener buffers on its own side. With no listener, nothing
+  is copied; the deliveries are filled in the context's reservation, so
+  relaying allocates nothing either way.
 - **Replay.** Feeding recorded records back, with `deliveries` set,
   drives declaration to the same commands. No loader runs during replay,
   and declaration starts no work (§14.1), so replay does no real I/O.
@@ -1598,7 +1605,7 @@ build's instruction counts are unchanged.
 
 | Zone | Encloses |
 |---|---|
-| `begin_frame` | `wait_for_frame`, `evict_state`, `apply_events`, `swap_sources` when `Sources` has a field, `relay` (§6.3) |
+| `begin_frame` | `wait_for_frame`, `evict_state`, `apply_events`, `swap_sources` when `Sources` has a field, `relay` while a listener is attached (§6.3) |
 | `end_frame` | `measure_text`, `fit_widths`, `distribute_widths`, `wrap_text`, `fit_heights`, `distribute_heights`, `position` (§8.2), then `emit`, and `sort_layers` when a frame has floating layers |
 
 - **`zuiBegin` and `zuiEnd` are plain functions,** with no tracer value,

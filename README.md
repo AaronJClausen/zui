@@ -57,6 +57,10 @@ Implemented so far:
   on a single-threaded `Io`. The backends are on this API, and the
   demo's thumbnail grid loads through `KeyedLoads` without the UI thread
   ever waiting, and idles at 0% CPU.
+- **Stage 5, begun:** `ui.relayTo(listener)` hands a listener each
+  record as applied, with what each source delivered, during
+  `beginFrame`; fed back with its deliveries, a relayed session replays
+  to the same commands.
 - **Stage 6, early:** a text that fits is laid out as one line without
   walking its words, and a whole-string cache makes a warm text one probe
   instead of one per word: 1,000 warm texts lay out in about 100 µs. The

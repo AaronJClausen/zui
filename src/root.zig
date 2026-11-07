@@ -78,6 +78,7 @@ pub const Instant = record.Instant;
 pub const FrameParams = record.FrameParams;
 pub const FrameRecord = record.FrameRecord;
 pub const FrameRecordWith = record.FrameRecordWith;
+pub const Relay = record.Relay;
 pub const RecordBuilder = record.RecordBuilder;
 pub const NextFrame = record.NextFrame;
 pub const HostRequests = record.HostRequests;
@@ -153,4 +154,5 @@ test {
     _ = @import("tests/sources.zig");
     _ = @import("tests/renderers.zig");
     _ = @import("tests/hosts.zig");
+    _ = @import("tests/relay.zig");
 }
