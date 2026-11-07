@@ -24,7 +24,7 @@ Each item says:
 | 0.6, in part | `bench-compare` (R2), startup benchmarks (P1), task completions at `beginFrame` (A2), the async design (A1) | done; the rest of 0.6 became stage 1 |
 | stage 1 | instruction counts in CI (R1), the tracer contract and `zui_tracy` (P2) | done |
 | stage 2 | the code brought to the spec's shape: C5, S1, I4, C6, A5 and `nextFrame` (I2); letter spacing (T3); the environment and host requests (I6); sources in the core (A3); `zui_async` (A4); the backends on the new API, the demo's thumbnails on `KeyedLoads` (C8) | done; the demo idles at 0% CPU |
-| stage 3, in part | the renderer contract and the generated commands (C1); the host contract and `RecordBuilder` (C2); the conformance suites (C3); `Features` (C7) | done; the backends are renderers and pass the renderer suite in CI; lowering comes with stage 8's commands, and the first host, with the host suite, with H1 |
+| stage 3 | the renderer contract and the generated commands (C1); the host contract and `RecordBuilder` (C2); the conformance suites (C3); `Features` (C7); `zui_app` (C4); the raylib adapter host (H1) | done; the backends are renderers and pass the renderer suite in CI, raylib's host passes the host suite, and the demo runs through `zui_app`, presenting its first frame 288 ms after the process starts; lowering comes with stage 8's commands |
 | stage 6, early | the single-line fast path (T1), the whole-string cache (T2), the box tree's layout passes (P4, in part) | done; warm text and the box tree's layout and emission within their budgets; the box tree's declaration is not (P5) |
 
 No release is tagged; everything is on `main`. From here, work is
@@ -59,10 +59,11 @@ green, and its **Status** line below says which slice is next.
 |---|---|---|---|---|
 | P4. The box tree's layout and emission within budget | 6, early | `src/layout.zig`, `src/emission.zig` | | waiting on P5 |
 | P5. The box tree's declaration within budget | 6, early | `src/context.zig` | L8 | waiting on L8 |
-| C4. `zui_app` | 3 | a new `zui_app/` module | C3 | in progress: the demo waits on H1 |
-| H1. The raylib adapter host | 3 | `../zui-raylib` | C4 | |
 | H2. The Windows host | 4 | `../zui-host` | H1 | |
 | H8. The desktop showing through the window | 4 | `../zui-host` | H2 | |
+| F2. Relay | 5 | `src/context.zig` | | |
+| F3. `zui_wire` | 5 | a new `zui_wire/` module | F2 | |
+| F4. Replay in `zui_testing` | 5 | `zui_testing/` | F2 | |
 
 After the queue come stages 5 to 11 in the order of SPEC.md §21. They join the queue as it runs short.
 
@@ -128,6 +129,74 @@ Things to know:
 ---
 
 ## Done
+
+### H1. The raylib adapter host
+
+zui-raylib (`2fe41eb`, pinning zui at `cd3ddd6`) has `zui_raylib.Host`,
+zui's host contract on raylib's window, with one window and no system
+material:
+- `zuiPoll` samples raylib's state through `zui.InputSampler` and begins
+  drawing; `zuiWait` presents, then sleeps in GLFW (`glfwWaitEvents`,
+  `glfwWaitEventsTimeout`) until input, a wake, or the instant
+  `nextFrame` names, and `.immediately` waits out the monitor's refresh
+  interval. `FramePacer`'s timer tasks are gone.
+- The wake sets a flag that is cleared only after a wait, and posts an
+  empty GLFW event, so it is sticky and works from any thread. GLFW
+  callbacks put in front of raylib's tell a wait that input arrived, so
+  a spurious OS event does not end a wait early.
+- `zuiApply` sets the cursor (raylib places no IME window). Escape no
+  longer closes the window.
+- Beyond the contract: `drawOffscreen` and `saveScreenshot`, `script`
+  (input for one poll), `close`, `clear_color`, and `opened_at` and
+  `first_present` for the cold start.
+
+The renderer is now also the text contract, so
+`zui_app.contextConfig(Renderer, ...)` replaced `zui_raylib.config`.
+`src/conformance.zig` runs `expectHostConforms` beside the renderer
+suite; its harness's `post` scripts the state `InputSampler` reads. Both
+pass on Windows here and on Linux CI under Xvfb, where the demo's
+screenshots, its abandoned loads and its idle measurement (23.7 ms over
+10 s, 1 frame, 0 wakes) run as before.
+
+### C4. `zui_app`
+
+`zui_app.contextConfig(Renderer, overrides)`, and `run(App, init,
+options)` with `Runner(App)` to run it a frame at a time: the loop of
+SPEC.md §6.1 with the application's `zuiDeclare` and optional
+`zuiLoader`, `init` and `deinit`. A renderer that declares the new
+`zui_render_thread` submits on a task of the application's `Io`, fed by
+a queue of `frames_in_flight` frames; otherwise frames submit on the UI
+thread, and the start report says why (the renderer, one frame in
+flight, the options, or an `Io` without concurrency). `Options.notify`
+gets the start report (host, capabilities, submission, lowered commands,
+missing services) and then, once each, dropped input, every exceeded
+limit, refusals, duplicate ids and an unbalanced tree; the default logs
+them. Each mistake in the application is a compile error, pinned by six
+tests, and `zui_render_thread` that is not a bool by a seventh. Tests run
+the loop against an offscreen host and renderer, on threads and on a
+single-threaded `Io`; `zig build check` instantiates `run` and `Runner`
+on every target.
+
+The demo runs on it, through H1's host. Its application and loop went
+from 116 lines (`App` and `main`) to 106 (`App`, now with its lifecycle,
+and a three-line `main`), with a startup measurement added; the file
+went from 649 to 671 lines, the new `--measure-startup` taking about 30.
+
+Measured on the reference machine, six runs each, from the OS creating
+the process to the first frame presented (`--measure-startup`):
+
+| Build | Fastest | Median | After the window was open |
+|---|---|---|---|
+| ReleaseSafe | 287.5 ms | 316 ms | 4.3–5.1 ms |
+| ReleaseFast | 296.1 ms | 319 ms | 2.7–4.8 ms |
+
+raylib opening its window and OpenGL context is all but about 5 ms of
+it: `Context.init`, the first frame's layout and drawing, and presenting
+it take the rest. Idle in ReleaseSafe: documents 0.0–31.3 ms of CPU over
+10 s, thumbnails 31.3–46.9 ms, settings 15.6 ms, each 1 frame (the
+measurement's own, now drawn and presented) and 0 wakes.
+
+Nothing on a hot path changed, so there is nothing to count or compare.
 
 ### C7. `Features`
 
@@ -788,38 +857,10 @@ pool.
 
 ## Stage 3: the contracts
 
-### C4. `zui_app`
-
-**Plan.** `contextConfig(Renderer, overrides)` and `run(App, init,
-options)`: the loop of SPEC.md §6.1, a render thread when the renderer
-allows, host requests applied, pacing to `nextFrame`, capabilities and
-fallbacks reported, and the `RecordBuilder`'s dropped events and text
-logged once, as a limit is (SPEC.md §17.2).
-
-**Done when:** the demo runs on `zui_app` with less code than today, and
-its time from process start to its first presented frame is measured
-(from P1).
-
-**Status.** The module is done in this repository: `contextConfig`,
-`run` and `Runner(App)`, the render thread (a renderer's new
-`zui_render_thread`), pacing, `Options.notify` with the start report and
-each drop or limit once, the application's checks with six compile-error
-tests, and tests against an offscreen host and renderer, including on a
-single-threaded `Io`. The demo and its cold start wait for H1's host,
-which `zui_app` needs to run it.
-
-**Spec.** §6.1, §19.5.
-
-### H1. The raylib adapter host
-
-**Plan.** zui-raylib implements the host contract with one window and no
-system material, through `InputSampler`. Its `src/conformance.zig` gains
-a host harness, whose `post` sets the state `InputSampler` reads (raylib
-reports no events to inject), and its `conformance` step runs
-`expectHostConforms` beside the renderer suite, under Xvfb on Linux CI.
-
-**Done when:** it passes C3's host suite in CI, and the demo runs on it
-through `zui_app`.
+Done: C1, C2, C3, C7, C4 and H1 are in *Done*. Lowering comes with
+stage 8's commands; zui-sokol and zui-terminal remain renderers without
+a host of their own, and zui-sokol's renderer gains a native surface
+with H2.
 
 ---
 
@@ -1339,6 +1380,9 @@ Deliberate, and each a reason to choose zui:
 | When a renderer may submit on another thread (C4) | when it declares `zui_render_thread = true`; raylib and OpenGL-bound renderers leave it out, and `zui_app` reports why it submits on the UI thread |
 | How `zui_app` reports (C4) | `Options.notify`, a plain function given each notice once, logging through `std.log` by default; tests record them |
 | The application's text contract under `zui_app` (C4) | the renderer, through `contextConfig`; any other `Text` is a compile error |
+| How the raylib host waits (H1) | in GLFW, past raylib: `glfwWaitEventsTimeout` until an instant, `glfwWaitEvents` on event, and callbacks in front of raylib's to tell input from a spurious OS event; raylib's `EndDrawing` only presents and polls |
+| How a host harness posts events raylib cannot inject (H1) | `Host.script(sample)`, input for one poll instead of raylib's; the demo's screenshots use it too |
+| The raylib renderer's text contract (H1) | the renderer itself, as SPEC.md §16.1 expects of most renderers, so `zui_app.contextConfig` gives it to the context |
 
 ### Open
 

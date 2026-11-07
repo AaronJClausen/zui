@@ -61,7 +61,7 @@ Implemented so far:
   walking its words, and a whole-string cache makes a warm text one probe
   instead of one per word: 1,000 warm texts lay out in about 100 µs. The
   box tree of 4,096 boxes lays out and emits its commands in about 94 µs.
-- **Stage 3, in part:** the renderer contract (`zuiSubmit`, the surfaces
+- **Stage 3:** the renderer contract (`zuiSubmit`, the surfaces
   it draws into, the optional commands it draws), checked at compile time
   by `zui.checkRenderer`, and a `RenderCommand` union generated with
   exactly the variants a renderer draws, so its exhaustive `switch` names
@@ -80,14 +80,17 @@ Implemented so far:
   compile, naming the field to set. And `zui_app`, which runs the whole
   loop from one call, `zui_app.run(App, init, .{ .title = "demo" })`,
   submitting on a render thread when the renderer allows and reporting
-  its capabilities, fallbacks and every exceeded limit once.
+  its capabilities, fallbacks and every exceeded limit once. zui-raylib is
+  the first host: the demo runs through `zui_app` on it, and presents its
+  first frame about 290 ms after the process starts, all but 5 ms of it
+  raylib opening its window.
 
-The reference backend and demo application live in
+The reference backend, its adapter host and the demo application live in
 [zui-raylib](https://github.com/AaronJClausen/zui-raylib); the other
 backends are [zui-sokol](https://github.com/AaronJClausen/zui-sokol) and
 [zui-terminal](https://github.com/AaronJClausen/zui-terminal).
 
-Next, in the order of SPEC.md §21: the raylib adapter host, a native Windows host, the wire format, and from there text,
+Next, in the order of SPEC.md §21: a native Windows host, the wire format, and from there text,
 layout, gestures, effects, an inspector and accessibility, more hosts,
 motion and text editing. The box tree's layout budget (P4) comes early,
 as the text fast path and string cache did.

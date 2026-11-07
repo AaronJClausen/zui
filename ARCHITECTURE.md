@@ -189,13 +189,13 @@ deleted, and the three backends and the demo are on this API. From stage
 3, the renderer contract and the `RenderCommand` union generated from
 `Config.commands` and the payload types have landed, and the three
 backends are renderers; so has the host contract, with `RecordBuilder`
-and the check that a host and a renderer share a surface kind, proven so
-far by a test host (no backend is a host until H1); and the conformance
+and the check that a host and a renderer share a surface kind, proven by
+zui-raylib's adapter host (H1); and the conformance
 suites for renderers and hosts in `zui_testing`, whose renderer suite the
-three backends run in CI; and `Features`, whose fields gate their APIs
+three backends run in CI, and whose host suite raylib's host runs; and `Features`, whose fields gate their APIs
 with compile errors naming them; and `zui_app`, the loop of SPEC.md §6.1 as a
 library, with a render thread, pacing and its reports, tested against an
-offscreen host (no real host runs it until H1). From stage 6, the single-line fast path and the
+offscreen host, and running the demo on raylib's host. From stage 6, the single-line fast path and the
 whole-string cache have landed.
 
 The code and the spec still differ in these places, each closed by the
@@ -229,9 +229,10 @@ The renderer repositories pin zui by commit and moved to stage 2 with it
 `FrameRecord`, from events where its library reports them and through
 `zui.InputSampler` where it reports state (raylib), then waits as
 `nextFrame` says. Each is a renderer (C1): a `Renderer` type implementing
-the renderer contract, whose `config()` builds the `Config` from its
+the renderer contract, whose `config()` (zui-raylib's through
+`zui_app.contextConfig`) builds the `Config` from its
 declarations, so its `switch` over the commands names exactly what it
-draws (the terminal's names only the five base commands). Each loop still
-does a host's work by hand: zui-raylib's `FramePacer`, `InputReader` and
-`HostRequestApplier` become the raylib adapter host (H1), on the host
-contract C2 added.
+draws (the terminal's names only the five base commands). zui-raylib is
+also a host (H1): `zui_raylib.Host` waits in GLFW and samples raylib's
+input, and its demo runs through `zui_app`. zui-sokol's and
+zui-terminal's loops still do a host's work by hand.
