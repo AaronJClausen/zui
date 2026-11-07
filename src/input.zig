@@ -272,6 +272,12 @@ pub const Environment = struct {
     power: Power = .plugged,
     /// The OS window has keyboard focus, not an element.
     window_focused: bool = true,
+    /// The window shows the system's material (Mica, vibrancy) wherever
+    /// nothing is drawn, so a root without a background lets the desktop
+    /// show through. False where the OS has none, the user turned
+    /// transparency off, or the window did not ask for one: the root then
+    /// draws its own background.
+    system_material: bool = false,
 
     pub const Theme = enum(u8) { light, dark };
     pub const Contrast = enum(u8) { normal, high };
@@ -301,6 +307,7 @@ pub const EnvironmentChange = union(enum) {
     hdr_headroom: f32,
     power: Environment.Power,
     window_focused: bool,
+    system_material: bool,
 };
 
 /// Turns the state a library reports once per frame (where the mouse is,

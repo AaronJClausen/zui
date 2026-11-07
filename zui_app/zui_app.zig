@@ -48,6 +48,10 @@ pub const Options = struct {
     size: [2]u32 = .{ 1280, 720 },
     visible: bool = true,
     resizable: bool = true,
+    /// What shows behind the window where nothing is drawn, when the host
+    /// has a system material; `Environment.system_material` says whether
+    /// it does on this machine.
+    material: zui.SystemMaterial = .none,
     /// The application's zoom, multiplied into layout.
     zoom: f32 = 1,
     /// Submit on a thread of its own when the renderer declares
@@ -253,7 +257,7 @@ pub fn Runner(comptime App: type) type {
             self.render_error = .init(0);
             self.render_task = .init;
 
-            try self.host.init(setup.io, .{ .title = options.title, .size = options.size, .visible = options.visible, .resizable = options.resizable });
+            try self.host.init(setup.io, .{ .title = options.title, .size = options.size, .visible = options.visible, .resizable = options.resizable, .material = options.material });
             errdefer self.host.deinit();
             if (@hasDecl(Renderer, "init")) {
                 try self.renderer.init(self.host.zuiSurface(window));

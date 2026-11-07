@@ -60,7 +60,7 @@ green, and its **Status** line below says which slice is next.
 |---|---|---|---|---|
 | P4. The box tree's layout and emission within budget | 6, early | `src/layout.zig`, `src/emission.zig` | | waiting on P5 |
 | P5. The box tree's declaration within budget | 6, early | `src/context.zig` | L8 | waiting on L8 |
-| H8. The desktop showing through the window | 4 | `../zui-host` | H2 | |
+| H8. The desktop showing through the window | 4 | `../zui-host` | H2 | in progress |
 | F2. Relay | 5 | `src/context.zig` | | |
 | F3. `zui_wire` | 5 | a new `zui_wire/` module | F2 | |
 | F4. Replay in `zui_testing` | 5 | `zui_testing/` | F2 | |
@@ -965,6 +965,12 @@ it show; without one, the root draws the theme's solid background.
 
 **Done when:** the Windows host shows Mica on Windows 11 and the solid
 fallback on Windows 10, with the same application code.
+
+**Status.** Landed in zui: `WindowOptions.material` (`zui.SystemMaterial`:
+`none`, `window`, `transient`), passed through `zui_app.Options.material`,
+and `Environment.system_material`, by which the host says whether the
+material shows on this machine. Next: the Windows host asks DWM for it,
+and zui-sokol's renderer composes with alpha over it.
 
 ---
 

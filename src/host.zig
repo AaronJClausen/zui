@@ -26,4 +26,20 @@ pub const WindowOptions = struct {
     /// captures want.
     visible: bool = true,
     resizable: bool = true,
+    /// What shows behind the window's content where nothing is drawn, on a
+    /// host whose `zui_capabilities.system_material` is true. Whether it
+    /// shows on this machine arrives as `Environment.system_material`.
+    material: SystemMaterial = .none,
+};
+
+/// The system's backdrop for a window, by role; each host maps it to the
+/// closest its OS has.
+pub const SystemMaterial = enum {
+    /// The window draws its own background.
+    none,
+    /// A long-lived main window: Mica on Windows 11.
+    window,
+    /// A short-lived or floating window, more see-through: Acrylic on
+    /// Windows 11.
+    transient,
 };

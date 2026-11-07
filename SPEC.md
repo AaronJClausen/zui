@@ -591,6 +591,7 @@ pub const Environment = struct {
     hdr_headroom: f32 = 1,          // display peak over SDR white, e.g. 4; 1 is an SDR display
     power: Power = .plugged,                        // enum { plugged, battery, saver }
     window_focused: bool = true,    // the OS window has keyboard focus, not an element
+    system_material: bool = false,  // the window shows the system's material where nothing is drawn
 };
 
 /// One field's new value: `.{ .environment = .{ .theme = .dark } }`.
@@ -1519,7 +1520,9 @@ pub const HostCapabilities = struct {
     system_material: bool = false,
 };
 /// What a host opens a window with (`zui_app` passes it to the host's `init`).
-pub const WindowOptions = struct { title: [:0]const u8 = "zui", size: [2]u32 = .{ 1280, 720 }, visible: bool = true, resizable: bool = true };
+pub const WindowOptions = struct { title: [:0]const u8 = "zui", size: [2]u32 = .{ 1280, 720 }, visible: bool = true, resizable: bool = true, material: SystemMaterial = .none };
+/// The backdrop a window asks for, by role: Mica and Acrylic on Windows 11, vibrancy on macOS.
+pub const SystemMaterial = enum { none, window, transient };
 
 /// Filled by `zuiPoll`, in buffers the application reserved, so polling allocates nothing.
 pub const RecordBuilder = struct {
@@ -1554,6 +1557,13 @@ pub fn checkHostAndRenderer(comptime Host: type, comptime Renderer: type) void  
 - **Native hosts** own the window and loop, one per OS.
 - **Adapter hosts** wrap a library that insists on owning its window
   (raylib), with fewer capabilities, through `InputSampler`.
+- **System materials.** A host with `system_material` asks the OS for the
+  window's `material`, and reports whether it shows as
+  `Environment.system_material`: false on a system without one (Windows
+  10), with transparency turned off, or for `.none`. The renderer clears
+  to transparent and keeps the alpha it draws, and the application's root
+  leaves its background off while `system_material` is true, so the same
+  code shows the material or its own solid background.
 - **Signal handlers** only set an atomic flag and wake; the lifecycle
   event arrives in the next record. SIGKILL and SIGSTOP cannot be caught,
   so they are not values of `Lifecycle`.

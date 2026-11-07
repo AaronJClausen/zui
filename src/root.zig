@@ -48,6 +48,7 @@ pub const checkRenderer = contracts.checkRenderer;
 pub const WindowId = host.WindowId;
 pub const HostCapabilities = host.HostCapabilities;
 pub const WindowOptions = host.WindowOptions;
+pub const SystemMaterial = host.SystemMaterial;
 
 /// Fails to compile, with a message naming the declaration, unless `Host`
 /// implements the host contract: `zuiPoll`, `zuiWaker`, `zuiWait`,
