@@ -165,6 +165,7 @@ pub fn build(b: *std.Build) void {
         module_with_driven_tests.addImport("zui_testing", testing_module);
     }
     wire_module.addImport("zui_async", async_module);
+    wire_module.addImport("zui_app", app_module);
 
     for (compile_error_cases) |case| {
         const failing_object = b.addObject(.{

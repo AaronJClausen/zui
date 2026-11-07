@@ -642,3 +642,34 @@ export fn zuiCheckWire(published: u64) usize {
     };
     return decoded;
 }
+
+const has_network = @import("builtin").os.tag != .freestanding;
+
+/// The remote host, renderer and client, on every target with a network;
+/// they read and write their connection on a task of the `Io`'s own.
+export fn zuiCheckRemote(port: u16) usize {
+    if (!has_network) return 0;
+    const io = std.Io.failing;
+    var host: zui_wire.Host(WireUi) = .{};
+    host.init(io, .{}) catch return 0;
+    defer host.deinit();
+    var renderer: zui_wire.Renderer(WireUi) = .{};
+    renderer.init(host.zuiSurface(.main), &check_text) catch return 0;
+    var fixed: std.heap.FixedBufferAllocator = .init(&wire_memory);
+    const address: std.Io.net.IpAddress = .{ .ip4 = .loopback(port) };
+    const stream = address.connect(io, .{ .mode = .stream }) catch return 0;
+    host.attach(fixed.allocator(), stream) catch return 0;
+    var builder: zui.RecordBuilder = .init(&.{}, &.{});
+    if (!host.zuiPoll(.main, &builder)) return 0;
+    var ui = WireUi.initBuffer(&wire_ui_memory, undefined, &check_text) catch return 0;
+    ui.beginFrame(&builder.recordWith(WireUi.Deliveries), &wire_sources);
+    const frame = ui.endFrame();
+    renderer.zuiSubmit(host.zuiSurface(.main), frame) catch return 0;
+    ui.release(frame);
+    host.zuiWait(ui.nextFrame(&wire_sources));
+
+    var client: zui_wire.Client(WireUi) = undefined;
+    client.init(fixed.allocator(), io, address.connect(io, .{ .mode = .stream }) catch return 0, .{ .waker = host.zuiWaker() }) catch return 0;
+    defer client.deinit();
+    return @intFromBool(client.frame(&host, &renderer) catch return 0);
+}

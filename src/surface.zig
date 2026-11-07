@@ -13,6 +13,9 @@ pub const SurfaceKind = enum {
     /// or sokol_app's: only that library's adapter host provides one, and
     /// only a renderer on that library draws into it.
     library,
+    /// A connection to another process, which a `zui_wire` host made and
+    /// only a `zui_wire` renderer writes frames into.
+    wire,
 };
 
 /// `.initMany(&.{ .win32, .x11 })`
@@ -31,4 +34,5 @@ pub const Surface = union(SurfaceKind) {
     offscreen: struct { size: [2]u32 },
     terminal: struct { columns: u16, rows: u16 },
     library,
+    wire: struct { connection: *anyopaque },
 };

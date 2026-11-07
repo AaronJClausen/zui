@@ -61,7 +61,7 @@ green, and its **Status** line below says which slice is next.
 |---|---|---|---|---|
 | P4. The box tree's layout and emission within budget | 6, early | `src/layout.zig`, `src/emission.zig` | | waiting on P5 |
 | P5. The box tree's declaration within budget | 6, early | `src/context.zig` | L8 | waiting on L8 |
-| F5. Rendering somewhere else | 5 | `zui_wire/`, a wire host and renderer | F3 | |
+| F5. Rendering somewhere else | 5 | `zui_wire/`, a wire host and renderer; `../zui-host` for the demo | F3 | in progress |
 | F6. Watching files | 5 | `../zui-host` | H2 | |
 | L8. Static styles | 6 | `src/context.zig`, `src/style.zig` | | |
 | T4. Line-break segmentation | 6 | `src/text.zig` | | |
@@ -1255,6 +1255,14 @@ plus a renderer. The browser demo (V4) is the first client.
 
 **Done when:** the demo runs in one process and draws in another, with
 input going back.
+
+**Status.** `zui_wire.Host(Ui)`, `Renderer(Ui)` and `Client(Ui)` have
+landed, with a `wire` surface kind, over `std.Io.net` streams: the wire
+host passes zui's host suite over a loopback connection, and an
+application run by `zui_app` on them is drawn by a client in another
+thread, its clicks going back and its cursor coming back. Next: the
+tour in one process, drawn in another by zui-host's Windows host and
+zui-sokol's renderer, in `../zui-host`.
 
 ### F6. Watching files
 

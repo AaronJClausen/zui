@@ -1585,9 +1585,11 @@ pub fn checkHostAndRenderer(comptime Host: type, comptime Renderer: type) void  
 
 `zui.Surface` is a tagged union of native handles: `win32`, `cocoa`,
 `wayland`, `x11`, `web`, `offscreen`; plus `terminal`, a character grid
-by its size in cells, and `library`, a window that a library such as
+by its size in cells; `library`, a window that a library such as
 raylib or sokol_app creates and draws into itself, which only that
-library's adapter host provides. A host and renderer whose
+library's adapter host provides; and `wire`, a connection to another
+process that `zui_wire`'s host makes and only its renderer writes into
+(§19.6). A host and renderer whose
 `zui_surfaces` share no kind are a compile error naming both, from
 `checkHostAndRenderer` (§16.3). Output
 formats (an FP16 swapchain for HDR) are negotiated through it, and fall
@@ -1977,7 +1979,38 @@ pub fn Decoder(comptime Ui: type) type    // init(gpa, .of(Ui)); next(reader): .
   delta cannot be applied in part.
 
 A wire renderer and a wire host make a remote client nothing more than a
-host plus a renderer.
+host plus a renderer:
+
+```zig
+// Where the application runs: its host and renderer are the wire's.
+pub const Host = zui_wire.Host(Ui);         // records from the client; gives a .wire surface
+pub const Renderer = zui_wire.Renderer(Ui); // frames to the client, as changes
+try start.host.attach(start.gpa, try server.accept(io));   // in the application's init
+
+// Where it draws: any host and renderer, joined to it by a client.
+var client: zui_wire.Client(Ui) = undefined;
+try client.init(gpa, io, try address.connect(io, .{ .mode = .stream }), .{ .waker = host.zuiWaker(), .fingerprint = zui_wire.fingerprintOf(&fonts) });
+while (try client.frame(&host, &renderer)) {}
+```
+
+- **The wire host** reads each record on a task of the `Io`, and a poll
+  gives everything that arrived since the last one: the newest viewport
+  and scale, and every event in order. Time is the client's: between
+  records the host counts on from the last record's `now`, so an `.at`
+  wait and a record made after a wake keep the clock the client's events
+  carry. The connection ending is the window closing: the next poll
+  returns false. Host requests go back with the frame, for the client's
+  host to apply.
+- **The wire renderer** writes each frame as changes from the last, after
+  a header with the application's fonts' fingerprint, and declares the
+  commands `Ui` generates, so `zui_app` reports what the client's
+  renderer lowers. It may submit on a render thread.
+- **The client** polls its own host, sends a record when it holds events
+  or the viewport or scale changed (not for time passing alone), and
+  presents the newest frame that arrived with its own renderer, applying
+  its host requests; frames that arrive faster are skipped. Frames are
+  read on a task of the `Io`, which wakes the client's host. Closing the
+  client closes the application's window.
 
 ### 19.7 `zui_debug`
 

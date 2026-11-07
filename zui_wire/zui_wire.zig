@@ -1,6 +1,7 @@
 //! Both sides of the frame boundary as bytes: records in, frames out, each
 //! frame a delta from the one before, so a session can be saved, sent to
-//! another process and replayed there.
+//! another process and replayed there. `Host`, `Renderer` and `Client`
+//! run an application in one process and draw it in another.
 //!
 //! ```zig
 //! var encoder: zui_wire.Encoder(Ui) = try .init(gpa);
@@ -23,6 +24,11 @@
 
 const std = @import("std");
 const zui = @import("zui");
+const remote = @import("remote.zig");
+
+pub const Host = remote.Host;
+pub const Renderer = remote.Renderer;
+pub const Client = remote.Client;
 
 /// Written in every header; a reader rejects a stream of any other version.
 pub const version: u16 = 1;
@@ -874,4 +880,5 @@ fn deepEqual(a: anytype, b: @TypeOf(a)) bool {
 
 test {
     _ = @import("tests.zig");
+    _ = @import("remote_tests.zig");
 }
