@@ -824,6 +824,10 @@ may be reused at once.
   segment, and no pass makes an element narrower than its minimum, so an
   over-wide segment gets a line of its own and overflows, as in CSS.
 - **One command per line,** so renderers never wrap.
+- **Spaces before a break hang.** A line that breaks after a segment
+  leaves the spaces that end it past its right edge, so they neither
+  count toward its width nor push it onto another line; the last line of
+  a paragraph keeps them.
 
 ### 9.3 Caches
 
@@ -847,14 +851,29 @@ const Fonts = struct {
     /// Required. Size of `run` in layout units.
     pub fn zuiMeasure(self: *Fonts, run: []const u8, key: zui.MeasureKey(u16)) [2]f32 { ... }
 
-    /// Optional. Break opportunities in `text`; without it, ASCII spaces and newlines.
-    pub fn zuiSegment(self: *Fonts, text: []const u8, breaks: *zui.BreakSink) void { ... }
+    /// Optional. Break opportunities in one paragraph; without it, after ASCII spaces.
+    pub fn zuiSegment(self: *Fonts, paragraph: []const u8, breaks: *zui.BreakSink) void { ... }
     /// Optional. `zuiMeasure` may be called from several threads at once (§15.3).
     pub const zui_thread_safe = true;
     /// Optional. Identifies the fonts, so a frame measured elsewhere can be checked (§19.6).
     pub fn zuiFingerprint(self: *const Fonts) u64 { ... }
 };
 ```
+
+```zig
+pub const BreakSink = struct {
+    /// A line may break before byte `offset` of the paragraph. Offsets come
+    /// in increasing order; any other, or one not inside the paragraph, is ignored.
+    pub fn add(self: *BreakSink, offset: usize) void
+};
+```
+
+zui splits a text at newlines itself, so `zuiSegment` sees one paragraph
+at a time and never a newline. It is called on the thread that runs
+layout, for each paragraph of a text that wraps at words, when the text
+is measured and again when it does not fit on one line. Its breaks are
+held in a scratch buffer of `limits.max_text_bytes` offsets, reserved
+only for a contract that declares it, which no paragraph can overflow.
 
 **Measurement must be additive over segments:** measuring two adjacent
 segments separately must sum to measuring them together. zui caches

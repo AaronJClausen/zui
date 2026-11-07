@@ -27,7 +27,7 @@ Each item says:
 | stage 3 | the renderer contract and the generated commands (C1); the host contract and `RecordBuilder` (C2); the conformance suites (C3); `Features` (C7); `zui_app` (C4); the raylib adapter host (H1) | done; the backends are renderers and pass the renderer suite in CI, raylib's host passes the host suite, and the demo runs through `zui_app`, presenting its first frame 288 ms after the process starts; lowering comes with stage 8's commands |
 | stage 4 | the Windows host (H2), with dropped files and lifecycle events in the record; the system material (H8); `zui_app` with the application's own text contract (C9) | done; zui-sokol's tour runs on it unchanged, through `zui_app`, and idles at 0% CPU, and the same code shows Mica or a solid background |
 | stage 5 | relay (F2); `zui_wire` (F3); replay in `zui_testing` (F4); the wire host, renderer and client (F5); file watching as a source (F6) | done; editing a theme file restyles a running window on the Windows host within 4 ms; a recorded session of zui-sokol's tour replays to identical commands without starting any work, zui-sokol's tour goes over the wire at a hundredth of its frames' whole size, but for the screen that moves every box, and it runs in one process and draws in another on the Windows host, its keys going back |
-| stage 6, early | the single-line fast path (T1), the whole-string cache (T2), static styles (L8), the box tree's layout and emission (P4) and declaration (P5) | done; the box tree's and warm text's budgets met: the box tree declares in 48.9 µs and lays out and emits in 89.2 µs, warm text in 91.7 µs; a box tree of static styles declares in 28.0 µs |
+| stage 6, early | the single-line fast path (T1), the whole-string cache (T2), static styles (L8), the box tree's layout and emission (P4) and declaration (P5), line-break segmentation (T4) | done; the box tree's and warm text's budgets met: the box tree declares in 48.9 µs and lays out and emits in 89.2 µs, warm text in 91.7 µs; a box tree of static styles declares in 28.0 µs |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
@@ -60,7 +60,6 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
-| T4. Line-break segmentation | 6 | `src/text.zig` | | |
 | L1. A grow basis | 6 | `src/layout.zig` | | |
 | L2. Aspect ratio and natural sizes | 6 | `src/layout.zig` | | |
 | L3. Dividers and decorated images | 6 | `src/emission.zig` | | |
@@ -132,6 +131,53 @@ Things to know:
 ---
 
 ## Done
+
+### T4. Line-break segmentation
+
+**Plan.** The optional `zuiSegment` on the text contract, writing break
+opportunities into a `BreakSink`; ASCII spaces and newlines without it.
+**Done when:** a golden test wraps CJK text with a segmenting test
+contract, and texts without it are no slower. **Spec.** §9.2, §9.4.
+
+`zuiSegment(self, paragraph, breaks: *zui.BreakSink)`, checked by
+`checkText`, with a compile-error test for a wrong signature. zui splits
+a text at newlines itself and asks the contract for one paragraph at a
+time; the segments between its breaks are measured and wrapped as words
+are, each without the spaces that end it, which hang past the end of a
+line that breaks after it. The breaks go into a scratch buffer of
+`limits.max_text_bytes` offsets, in `Context` memory only when the
+contract declares `zuiSegment`. Without it, nothing changes: the
+segmenting path is chosen at compile time, its own functions
+(`measureSegments`, `wrapSegmentedLines`), so the default path's code is
+the code it was.
+
+Tests: CJK text wraps between characters at the width of whole
+characters; Latin words stay whole beside CJK, and the space before a
+break hangs; each paragraph is segmented on its own and the contract
+never sees a newline; a cached string past the 16 widths a cache entry
+keeps wraps as a fresh one, with no new measurements; a contract that
+breaks after every space reproduces the default's metrics and lines over
+2,000 random texts. `zig build check` declares a thread-safe segmenting
+contract, so the parallel path's run iterator is type-checked on every
+target.
+
+Fixed on the way: the first word of a paragraph after the first was
+given the width of a space before it, so the first line of every later
+paragraph came out a space wide too, and sooner wrapped.
+
+`zig build counts` against `c5b0401`, in a local Docker container: warm
+text's `endFrame` −2.6% (1,060,636 to 1,033,320), from the fix, and the
+other text scenarios −0.2% to −1.2%; every other scenario unchanged.
+`zig build bench-compare -- c5b0401` called no scenario slower over 10
+rounds, but put warm text's `endFrame` at +4.0% (+0.4% to +5.4%), and
+an earlier run of the same code at +6.8%. With the fix taken out, warm
+text ran the very same instructions as at `c5b0401`, with the same
+simulated cache misses and branch mispredictions, and still measured
++7.8%; and `c5b0401` with only `wrapLines` aligned to 64 bytes measured
+the new-strings scenario +2.8% slower. So on this machine where the code
+lands moves the text scenarios by several percent, and wall-clock
+comparisons of them below that are not meaningful; instruction counts
+are. Aligning `wrapLines` did not pin it down and was dropped.
 
 ### P5. The box tree's declaration within budget
 
@@ -1546,18 +1592,6 @@ Done: F2, F3, F4, F5 and F6 are in *Done*.
 
 ## Stage 6: text and layout
 
-### T4. Line-break segmentation
-
-**Grounding.** Breaking only at ASCII spaces cannot wrap CJK or Thai.
-
-**Plan.** The optional `zuiSegment` on the text contract, writing break
-opportunities into a `BreakSink`; ASCII spaces and newlines without it.
-
-**Done when:** a golden test wraps CJK text with a segmenting test
-contract, and texts without it are no slower.
-
-**Spec.** §9.2, §9.4.
-
 ### L1. A grow basis
 
 **Grounding.** Two `.grow` siblings holding "a" and "abcdefghijklmnop" in
@@ -1826,6 +1860,7 @@ Deliberate, and each a reason to choose zui:
 | Contract members | all `zui`-prefixed; unknown ones are compile errors |
 | Static styles | approved: pointers to comptime configs, measured against the declaration budget (L8) |
 | An element's switches | `?bool`, null meaning false, so that their defaults fold away; written as booleans (P5) |
+| Line-break segmentation | the text contract's `zuiSegment`, one paragraph at a time; spaces before a break hang (T4) |
 | Config references (L8) | pointers in element storage, the default layout one constant; an element's own `layout` or `decoration` replaces the style's whole |
 | Budgets | as in SPEC.md §20.2, including warm text < 120 µs and declaration < 55 µs |
 | Where the contracts live | in the `zui` repo |

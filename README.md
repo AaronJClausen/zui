@@ -84,7 +84,10 @@ Implemented so far:
   its commands in about 90 µs, both within their budgets. Static styles:
   `zui.static(zui.Style{ ... })` makes a style at comptime, and
   `.style = toolbar_style` on an element references it instead of
-  copying it, so 4,096 styled boxes declare in about 28 µs.
+  copying it, so 4,096 styled boxes declare in about 28 µs. A text
+  contract with `zuiSegment` reports where a paragraph may break into a
+  `zui.BreakSink`, so CJK and Thai wrap between characters; without it,
+  text breaks after spaces as before.
 - **Stage 3:** the renderer contract (`zuiSubmit`, the surfaces
   it draws into, the optional commands it draws), checked at compile time
   by `zui.checkRenderer`, and a `RenderCommand` union generated with

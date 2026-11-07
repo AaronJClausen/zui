@@ -92,7 +92,7 @@ pub fn prefetch(comptime Ui: type, ui: *Ui, texts: []const Ui.TextRecord, text_b
         const content = text_bytes[record.bytes_start..][0..record.bytes_len];
         const key = Ui.measureKeyOf(record.style, zoom);
         if (!addIfMissing(Ui, cache, batch, " ", key)) break :collect;
-        var runs: text.RunIterator = .init(content, record.style.wrap);
+        var runs: text.RunIterator(Ui.Segmenter) = .init(content, record.style.wrap, ui.segmenter());
         while (runs.next()) |run| {
             if (!addIfMissing(Ui, cache, batch, run, key)) break :collect;
         }

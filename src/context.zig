@@ -299,6 +299,10 @@ pub fn Context(comptime config: Config) type {
         const TextContract = if (has_text) config.Text else void;
         pub const Cache = if (has_text) text_layout.MeasureCache(config.FontId, limits.measure_cache_entries, limits.string_cache_entries, TextContract) else void;
         pub const measures_in_parallel = has_text and @hasDecl(TextContract, "zui_thread_safe") and TextContract.zui_thread_safe;
+        /// Whether the text contract reports break opportunities (`zuiSegment`).
+        pub const segments_text = has_text and text_layout.segments(TextContract);
+        /// What `segmenter` returns: empty unless `segments_text`.
+        pub const Segmenter = text_layout.Segmenter(TextContract);
         const MeasureBatch = if (measures_in_parallel) parallel_measure.MeasureBatch(MeasureKey, TextContract, limits.parallel_measure_capacity) else void;
         const run_width_capacity = if (has_text) text_layout.maxRuns(limits.max_text_bytes, limits.max_elements) else 0;
         pub const States = state_table.StateTable(limits.state_slots);
@@ -502,6 +506,8 @@ pub fn Context(comptime config: Config) type {
             /// Scratch shared by every frame: the width of each word or
             /// paragraph measured in the current `endFrame`.
             run_widths: [run_width_capacity]f32,
+            /// One paragraph's break opportunities, from `zuiSegment`.
+            breaks: [if (segments_text) limits.max_text_bytes else 0]u32,
             states: States,
             results: Results,
             input: InputState,
@@ -865,7 +871,12 @@ pub fn Context(comptime config: Config) type {
         }
 
         pub fn measurer(self: *Self, text_style: TextStyle, zoom: f32) text_layout.Measurer(Cache, TextContract) {
-            return .{ .cache = &self.memory.cache, .text_contract = self.text_contract, .key = measureKeyOf(text_style, zoom), .inverse_zoom = 1 / zoom };
+            return .{ .cache = &self.memory.cache, .text_contract = self.text_contract, .key = measureKeyOf(text_style, zoom), .inverse_zoom = 1 / zoom, .segmenter = self.segmenter() };
+        }
+
+        /// How the layout passes split a text that wraps at words.
+        pub fn segmenter(self: *Self) Segmenter {
+            return if (segments_text) .{ .text_contract = self.text_contract, .breaks = &self.memory.breaks } else .{};
         }
 
         /// The size of `content` in layout units, through the measurement

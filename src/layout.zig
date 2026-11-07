@@ -337,16 +337,10 @@ fn wrapTexts(comptime Ui: type, ui: *Ui, frame: *Ui.Frame) void {
             text.measurePendingRuns(ui.measurer(record.style, frame.params.zoom), content, record.style.wrap, record.metrics, &ui.memory.run_widths);
         }
         record.first_line = frame.line_count;
-        const fitted = text.wrapLines(
-            content,
-            record.bytes_start,
-            record.style.wrap,
-            record.metrics,
-            &ui.memory.run_widths,
-            frame.size[element][0],
-            &frame.lines,
-            &frame.line_count,
-        );
+        const fitted = if (Ui.segments_text)
+            text.wrapSegmentedLines(ui.segmenter(), content, record.bytes_start, record.style.wrap, record.metrics, &ui.memory.run_widths, frame.size[element][0], &frame.lines, &frame.line_count)
+        else
+            text.wrapLines(content, record.bytes_start, record.style.wrap, record.metrics, &ui.memory.run_widths, frame.size[element][0], &frame.lines, &frame.line_count);
         record.line_count = frame.line_count - record.first_line;
         if (!fitted) {
             frame.diagnostics.exceeded.insert(.max_render_commands);

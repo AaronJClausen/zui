@@ -49,6 +49,127 @@ pub const WordIterator = struct {
     }
 };
 
+/// Where a line may break inside one paragraph of a text, as a text
+/// contract's `zuiSegment` reports it. Without `zuiSegment`, a text breaks
+/// at ASCII spaces.
+///
+/// ```zig
+/// pub fn zuiSegment(self: *Fonts, paragraph: []const u8, breaks: *zui.BreakSink) void {
+///     var opportunities = self.line_breaker.iterate(paragraph);
+///     while (opportunities.next()) |offset| breaks.add(offset);
+/// }
+/// ```
+pub const BreakSink = struct {
+    offsets: []u32,
+    count: u32 = 0,
+    paragraph_len: u32,
+
+    /// A line may break before byte `offset` of the paragraph. A space
+    /// before the break stays with the text before it, and hangs past the
+    /// end of a line that breaks there. Offsets come in increasing order;
+    /// one that does not, or that is not inside the paragraph, is ignored.
+    pub fn add(self: *BreakSink, offset: usize) void {
+        if (offset == 0 or offset >= self.paragraph_len or self.count == self.offsets.len) return;
+        if (self.count > 0 and offset <= self.offsets[self.count - 1]) return;
+        self.offsets[self.count] = @intCast(offset);
+        self.count += 1;
+    }
+};
+
+/// Whether `Text` reports its own break opportunities.
+pub fn segments(comptime Text: type) bool {
+    return Text != void and @hasDecl(Text, "zuiSegment");
+}
+
+/// Splits a text that wraps at words into its words: at ASCII spaces and
+/// newlines, or, when the text contract has `zuiSegment`, at newlines and
+/// where it reports, through `breaks`, which holds one paragraph's breaks.
+pub fn Segmenter(comptime Text: type) type {
+    if (!segments(Text)) return struct {
+        pub const Words = WordIterator;
+
+        pub fn words(_: @This(), text: []const u8) Words {
+            return .{ .text = text };
+        }
+    };
+    return struct {
+        pub const Words = SegmentIterator(Text);
+
+        text_contract: *Text,
+        breaks: []u32,
+
+        pub fn words(self: @This(), text: []const u8) Words {
+            return .{ .text = text, .text_contract = self.text_contract, .breaks = self.breaks };
+        }
+    };
+}
+
+/// A word between a segmenting text contract's break opportunities.
+pub const Segment = struct {
+    start: u32,
+    /// Before the spaces that end the segment.
+    end: u32,
+    ends_paragraph: bool,
+    /// A line that breaks after the segment leaves them hanging past its end.
+    trailing_spaces: u32,
+};
+
+/// The segments between a text contract's break opportunities, one
+/// paragraph at a time.
+pub fn SegmentIterator(comptime Text: type) type {
+    return struct {
+        const Self = @This();
+
+        text: []const u8,
+        text_contract: *Text,
+        breaks: []u32,
+        paragraph_start: u32 = 0,
+        paragraph_end: u32 = 0,
+        break_count: u32 = 0,
+        next_break: u32 = 0,
+        position: u32 = 0,
+        paragraph_segmented: bool = false,
+        finished: bool = false,
+
+        pub fn next(self: *Self) ?Segment {
+            if (self.finished) return null;
+            if (!self.paragraph_segmented) self.segmentParagraph();
+            const start = self.position;
+            const last_in_paragraph = self.next_break == self.break_count;
+            const end = if (last_in_paragraph) self.paragraph_end else self.paragraph_start + self.breaks[self.next_break];
+            var word_end = end;
+            while (word_end > start and self.text[word_end - 1] == ' ') word_end -= 1;
+            const ends_paragraph = last_in_paragraph and self.paragraph_end < self.text.len;
+            if (!last_in_paragraph) {
+                self.next_break += 1;
+                self.position = end;
+            } else if (ends_paragraph) {
+                self.paragraph_start = end + 1;
+                self.position = self.paragraph_start;
+                self.paragraph_segmented = false;
+            } else {
+                self.finished = true;
+            }
+            return .{ .start = start, .end = word_end, .ends_paragraph = ends_paragraph, .trailing_spaces = end - word_end };
+        }
+
+        fn segmentParagraph(self: *Self) void {
+            const rest = self.text[self.paragraph_start..];
+            const paragraph = rest[0 .. std.mem.indexOfScalar(u8, rest, '\n') orelse rest.len];
+            self.paragraph_end = self.paragraph_start + @as(u32, @intCast(paragraph.len));
+            var sink: BreakSink = .{ .offsets = self.breaks, .paragraph_len = @intCast(paragraph.len) };
+            if (paragraph.len > 1) self.text_contract.zuiSegment(paragraph, &sink);
+            self.break_count = sink.count;
+            self.next_break = 0;
+            self.paragraph_segmented = true;
+        }
+    };
+}
+
+fn spacesWidth(count: u32, space_width: f32) f32 {
+    return @as(f32, @floatFromInt(count)) * space_width;
+}
+
 pub fn fontBits(font: anytype) u64 {
     return switch (@typeInfo(@TypeOf(font))) {
         .int => @intCast(font),
@@ -265,6 +386,7 @@ pub fn Measurer(comptime Cache: type, comptime Text: type) type {
         text_contract: *Text,
         key: Cache.Key,
         inverse_zoom: f32,
+        segmenter: Segmenter(Text),
 
         pub fn measure(self: Self, run: []const u8) [2]f32 {
             const measured = self.cache.measure(self.text_contract, run, self.key);
@@ -322,7 +444,7 @@ pub fn measurePendingRuns(measurer: anytype, text: []const u8, wrap: style.TextW
             while (paragraphs.next()) |paragraph| _ = runs.append(measurer.width(paragraph));
         },
         .words => {
-            var words: WordIterator = .{ .text = text };
+            var words = measurer.segmenter.words(text);
             while (words.next()) |word| _ = runs.append(measurer.width(text[word.start..word.end]));
         },
     }
@@ -366,7 +488,9 @@ pub fn measureMetrics(
             metrics.min_width = widest;
             metrics.has_paragraph_break = run_count.* - metrics.first_run > 1;
         },
-        .words => {
+        .words => if (comptime segments(@TypeOf(measurer.text_contract.*))) {
+            measureSegments(measurer, text, space[0], runs, &metrics);
+        } else {
             // Negative until a paragraph ends, so the loop carries no flag for it.
             var widest_ended_paragraph: f32 = -1;
             var widest_word: f32 = 0;
@@ -392,38 +516,66 @@ pub fn measureMetrics(
     return metrics;
 }
 
+/// `measureMetrics` for `.words` with a segmenting text contract. The
+/// spaces that end a paragraph count toward its width.
+fn measureSegments(measurer: anytype, text: []const u8, space_width: f32, runs: RunWriter, metrics: *Metrics) void {
+    var widest_ended_paragraph: f32 = -1;
+    var widest_word: f32 = 0;
+    var paragraph_width: f32 = 0;
+    var trailing_width: f32 = 0;
+    var segments_of_text = measurer.segmenter.words(text);
+    while (segments_of_text.next()) |segment| {
+        const word_width = runs.append(measurer.width(text[segment.start..segment.end]));
+        widest_word = @max(widest_word, word_width);
+        paragraph_width += word_width + trailing_width;
+        trailing_width = spacesWidth(segment.trailing_spaces, space_width);
+        if (segment.ends_paragraph) {
+            widest_ended_paragraph = @max(widest_ended_paragraph, paragraph_width + trailing_width);
+            paragraph_width = 0;
+            trailing_width = 0;
+        }
+    }
+    metrics.preferred_width = @max(widest_ended_paragraph, paragraph_width + trailing_width);
+    metrics.min_width = widest_word;
+    metrics.has_paragraph_break = widest_ended_paragraph >= 0;
+}
+
 /// The runs `measureMetrics` measures, other than the space: each
 /// non-empty word for `.words`, each non-empty paragraph for `.newlines`,
 /// the whole text for `.none`.
-pub const RunIterator = struct {
-    text: []const u8,
-    wrap: style.TextWrap,
-    words: WordIterator,
-    paragraphs: std.mem.SplitIterator(u8, .scalar),
-    whole_text_done: bool = false,
+pub fn RunIterator(comptime TextSegmenter: type) type {
+    return struct {
+        const Self = @This();
 
-    pub fn init(text: []const u8, wrap: style.TextWrap) RunIterator {
-        return .{ .text = text, .wrap = wrap, .words = .{ .text = text }, .paragraphs = std.mem.splitScalar(u8, text, '\n') };
-    }
+        text: []const u8,
+        wrap: style.TextWrap,
+        words: TextSegmenter.Words,
+        paragraphs: std.mem.SplitIterator(u8, .scalar),
+        whole_text_done: bool = false,
 
-    pub fn next(self: *RunIterator) ?[]const u8 {
-        if (self.text.len == 0) return null;
-        switch (self.wrap) {
-            .none => {
-                if (self.whole_text_done) return null;
-                self.whole_text_done = true;
-                return self.text;
-            },
-            .newlines => while (self.paragraphs.next()) |paragraph| {
-                if (paragraph.len != 0) return paragraph;
-            },
-            .words => while (self.words.next()) |word| {
-                if (word.end != word.start) return self.text[word.start..word.end];
-            },
+        pub fn init(text: []const u8, wrap: style.TextWrap, segmenter: TextSegmenter) Self {
+            return .{ .text = text, .wrap = wrap, .words = segmenter.words(text), .paragraphs = std.mem.splitScalar(u8, text, '\n') };
         }
-        return null;
-    }
-};
+
+        pub fn next(self: *Self) ?[]const u8 {
+            if (self.text.len == 0) return null;
+            switch (self.wrap) {
+                .none => {
+                    if (self.whole_text_done) return null;
+                    self.whole_text_done = true;
+                    return self.text;
+                },
+                .newlines => while (self.paragraphs.next()) |paragraph| {
+                    if (paragraph.len != 0) return paragraph;
+                },
+                .words => while (self.words.next()) |word| {
+                    if (word.end != word.start) return self.text[word.start..word.end];
+                },
+            }
+            return null;
+        }
+    };
+}
 
 const RunWriter = struct {
     widths: []f32,
@@ -474,6 +626,23 @@ pub fn wrapLines(
     }
 }
 
+/// `wrapLines` for a segmenting text contract, whose `.words` break where
+/// it reports.
+pub fn wrapSegmentedLines(
+    segmenter: anytype,
+    text: []const u8,
+    base: u32,
+    wrap: style.TextWrap,
+    metrics: Metrics,
+    run_widths: []const f32,
+    max_width: f32,
+    lines: []Line,
+    line_count: *u32,
+) bool {
+    if (wrap != .words or text.len == 0 or fitsOneLine(wrap, metrics, max_width)) return wrapLines(text, base, wrap, metrics, run_widths, max_width, lines, line_count);
+    return wrapSegments(segmenter.words(text), base, metrics, run_widths, max_width, .{ .lines = lines, .count = line_count });
+}
+
 /// Whether `wrapLines` emits the text as one line without reading its run widths.
 pub fn fitsOneLine(wrap: style.TextWrap, metrics: Metrics, max_width: f32) bool {
     return switch (wrap) {
@@ -486,7 +655,8 @@ pub fn fitsOneLine(wrap: style.TextWrap, metrics: Metrics, max_width: f32) bool 
 /// Greedy wrapping at spaces, with a line of its own after each newline.
 /// Words are never broken: layout never makes a text element narrower than
 /// its longest word, so a word wider than a line can only come from a
-/// parent too small for it, and it overflows, as in CSS by default.
+/// parent too small for it, and it overflows, as in CSS by default. Every
+/// paragraph has a word, if an empty one, so a newline closes the line.
 fn wrapWords(text: []const u8, base: u32, metrics: Metrics, run_widths: []const f32, max_width: f32, output: LineOutput) bool {
     const space_width = metrics.space_width;
     var next_run = metrics.first_run;
@@ -515,14 +685,54 @@ fn wrapWords(text: []const u8, base: u32, metrics: Metrics, run_widths: []const 
 
         if (word.ends_paragraph) {
             if (!output.emit(base + line_start, base + line_end, line_width)) return false;
-            line_start = word.end + 1;
-            line_end = line_start;
-            line_width = 0;
-            line_open = true;
+            line_open = false;
         }
     }
     if (line_open) return output.emit(base + line_start, base + line_end, line_width);
     return true;
+}
+
+/// Greedy wrapping between a segmenting contract's segments, as
+/// `wrapWords` wraps between words. The spaces after a line's last segment
+/// hang past its end, but for the last line of a paragraph, which keeps
+/// them.
+fn wrapSegments(text_segments: anytype, base: u32, metrics: Metrics, run_widths: []const f32, max_width: f32, output: LineOutput) bool {
+    var segments_of_text = text_segments;
+    const space_width = metrics.space_width;
+    var next_run = metrics.first_run;
+    var line_start: u32 = 0;
+    var line_end: u32 = 0;
+    var line_width: f32 = 0;
+    var line_open = false;
+    var trailing_spaces: u32 = 0;
+    var trailing_width: f32 = 0;
+
+    while (segments_of_text.next()) |segment| {
+        const word_width = run_widths[next_run];
+        next_run += 1;
+
+        if (line_open and line_width + trailing_width + word_width > max_width + tolerance) {
+            if (!output.emit(base + line_start, base + line_end, line_width)) return false;
+            line_open = false;
+        }
+        if (!line_open) {
+            line_start = segment.start;
+            line_width = word_width;
+            line_open = true;
+        } else {
+            line_width += trailing_width + word_width;
+        }
+        line_end = segment.end;
+        trailing_spaces = segment.trailing_spaces;
+        trailing_width = spacesWidth(trailing_spaces, space_width);
+
+        if (segment.ends_paragraph) {
+            if (!output.emit(base + line_start, base + line_end + trailing_spaces, line_width + trailing_width)) return false;
+            line_open = false;
+        }
+    }
+    if (!line_open) return true;
+    return output.emit(base + line_start, base + line_end + trailing_spaces, line_width + trailing_width);
 }
 
 /// Layout tolerance for comparisons between sums of measured widths.
@@ -555,7 +765,7 @@ fn testCache() TestCache {
 }
 
 fn testMeasurer(cache: *TestCache, text_contract: *FixedMetricsText, zoom: f32) Measurer(TestCache, FixedMetricsText) {
-    return .{ .cache = cache, .text_contract = text_contract, .key = .{ .font = 0, .size = 16 * zoom, .letter_spacing = 0 }, .inverse_zoom = 1 / zoom };
+    return .{ .cache = cache, .text_contract = text_contract, .key = .{ .font = 0, .size = 16 * zoom, .letter_spacing = 0 }, .inverse_zoom = 1 / zoom, .segmenter = .{} };
 }
 
 test "words split at spaces and newlines" {
@@ -658,4 +868,80 @@ test "the single-line path emits the line greedy wrapping would" {
         try std.testing.expect(wrapWords(text, 0, metrics, &run_widths, max_width, .{ .lines = &greedy, .count = &greedy_count }));
         try std.testing.expectEqualSlices(Line, greedy[0..greedy_count], fast[0..fast_count]);
     }
+}
+
+/// Breaks after every space, as the spaces alone would.
+const SpaceBreakingText = struct {
+    pub fn zuiMeasure(_: *SpaceBreakingText, text: []const u8, key: style.MeasureKey(u16)) [2]f32 {
+        return .{ @as(f32, @floatFromInt(text.len)) * key.size / 2, key.size };
+    }
+
+    pub fn zuiSegment(_: *SpaceBreakingText, paragraph: []const u8, breaks: *BreakSink) void {
+        for (paragraph, 0..) |byte, index| if (byte == ' ') breaks.add(index + 1);
+    }
+};
+
+test "a contract breaking after every space wraps as the spaces alone do" {
+    var prng: std.Random.DefaultPrng = .init(0x5e9);
+    const random = prng.random();
+    var cache = testCache();
+    var spaces_cache: MeasureCache(u16, 64, 16, SpaceBreakingText) = undefined;
+    spaces_cache.reset();
+    var text_contract: FixedMetricsText = .{};
+    var segmenting_contract: SpaceBreakingText = .{};
+    var breaks: [32]u32 = undefined;
+    const segmenter: Segmenter(SpaceBreakingText) = .{ .text_contract = &segmenting_contract, .breaks = &breaks };
+    const segmenting: Measurer(@TypeOf(spaces_cache), SpaceBreakingText) = .{ .cache = &spaces_cache, .text_contract = &segmenting_contract, .key = .{ .font = 0, .size = 16, .letter_spacing = 0 }, .inverse_zoom = 1, .segmenter = segmenter };
+    const alphabet = "ab  \n";
+    var compared: u32 = 0;
+    for (0..2000) |_| {
+        var bytes: [24]u8 = undefined;
+        const text = bytes[0..random.intRangeAtMost(usize, 1, bytes.len)];
+        for (text) |*byte| byte.* = alphabet[random.uintLessThan(usize, if (random.boolean()) 3 else alphabet.len)];
+        // A space that ends a paragraph hangs for a segmenting contract,
+        // where the default wraps an empty word after it.
+        if (std.mem.indexOf(u8, text, " \n") != null or text[text.len - 1] == ' ') continue;
+        compared += 1;
+        const max_width: f32 = @floatFromInt(random.uintLessThan(u32, 24 * 8));
+
+        var run_widths: [32]f32 = undefined;
+        var run_count: u32 = 0;
+        const metrics = measureMetrics(testMeasurer(&cache, &text_contract, 1), text, .words, 0, &run_widths, &run_count);
+        var segmented_widths: [32]f32 = undefined;
+        var segmented_count: u32 = 0;
+        const segmented_metrics = measureMetrics(segmenting, text, .words, 0, &segmented_widths, &segmented_count);
+        try std.testing.expectEqual(metrics.preferred_width, segmented_metrics.preferred_width);
+        try std.testing.expectEqual(metrics.min_width, segmented_metrics.min_width);
+        try std.testing.expectEqual(metrics.has_paragraph_break, segmented_metrics.has_paragraph_break);
+
+        var lines: [32]Line = undefined;
+        var line_count: u32 = 0;
+        var segmented_lines: [32]Line = undefined;
+        var segmented_line_count: u32 = 0;
+        try std.testing.expect(wrapLines(text, 0, .words, metrics, &run_widths, max_width, &lines, &line_count));
+        try std.testing.expect(wrapSegmentedLines(segmenter, text, 0, .words, segmented_metrics, &segmented_widths, max_width, &segmented_lines, &segmented_line_count));
+        try std.testing.expectEqualSlices(Line, lines[0..line_count], segmented_lines[0..segmented_line_count]);
+    }
+    try std.testing.expect(compared > 500);
+}
+
+test "a break sink keeps increasing offsets inside the paragraph" {
+    var offsets: [4]u32 = undefined;
+    var sink: BreakSink = .{ .offsets = &offsets, .paragraph_len = 10 };
+    for ([_]usize{ 0, 3, 3, 2, 7, 10, 12, 9 }) |offset| sink.add(offset);
+    try std.testing.expectEqualSlices(u32, &.{ 3, 7, 9 }, offsets[0..sink.count]);
+}
+
+test "a paragraph's first word adds no space before it" {
+    var cache = testCache();
+    var text_contract: FixedMetricsText = .{};
+    var lines: [16]Line = undefined;
+    var count: u32 = 0;
+    var run_widths: [16]f32 = undefined;
+    var run_count: u32 = 0;
+    const text = "one\nfour abcdefghij";
+    const metrics = measureMetrics(testMeasurer(&cache, &text_contract, 1), text, .words, 0, &run_widths, &run_count);
+    try std.testing.expect(wrapLines(text, 0, .words, metrics, &run_widths, 80, &lines, &count));
+    try std.testing.expectEqual(@as(u32, 3), count);
+    try std.testing.expectEqual(Line{ .start = 4, .end = 8, .width = 32 }, lines[1]);
 }

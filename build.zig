@@ -74,6 +74,7 @@ const compile_error_cases = [_]struct { name: []const u8, expected_error: []cons
     .{ .name = "wire_image_handle_holds_pointer", .expected_error = "zui_wire: ImageHandle holds a pointer (*const wire_image_handle_holds_pointer.Texture); declare zuiSerialize on it to send it" },
     .{ .name = "wire_serialize_without_deserialize", .expected_error = "zui_wire: wire_serialize_without_deserialize.Handle declares zuiSerialize but not zuiDeserialize" },
     .{ .name = "text_fingerprint_wrong_signature", .expected_error = "zui: text_fingerprint_wrong_signature.Text.zuiFingerprint must be fn (*const text_fingerprint_wrong_signature.Text) u64, found fn (*text_fingerprint_wrong_signature.Text) u32" },
+    .{ .name = "text_segment_wrong_signature", .expected_error = "zui: text_segment_wrong_signature.Text.zuiSegment must be fn (*text_segment_wrong_signature.Text, []const u8, *text.BreakSink) void, found fn (*text_segment_wrong_signature.Text, []const u8, []u32) void" },
 };
 
 pub fn build(b: *std.Build) void {

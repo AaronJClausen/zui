@@ -88,7 +88,7 @@ pub fn expectRect(frame: *const Ui.Frame, id: zui.Id, x: f32, y: f32, width: f32
 }
 
 /// One line per command: `kind x y w h [detail]`, in paint order.
-pub fn snapshot(frame: *const Ui.Frame, buffer: []u8) ![]const u8 {
+pub fn snapshot(frame: anytype, buffer: []u8) ![]const u8 {
     var writer: std.Io.Writer = .fixed(buffer);
     for (frame.commands()) |command| {
         const bounds = command.bounds;

@@ -130,6 +130,10 @@ const ThreadSafeText = struct {
     pub fn zuiMeasure(_: *ThreadSafeText, text: []const u8, key: zui.MeasureKey(u16)) [2]f32 {
         return .{ @as(f32, @floatFromInt(text.len)) * key.size / 2, key.size };
     }
+
+    pub fn zuiSegment(_: *ThreadSafeText, paragraph: []const u8, breaks: *zui.BreakSink) void {
+        for (paragraph, 0..) |byte, index| if (byte == ' ') breaks.add(index + 1);
+    }
 };
 
 const ParallelUi = zui.Context(.{ .limits = .{ .max_elements = 64, .parallel_measure_threshold = 1 }, .Text = ThreadSafeText });

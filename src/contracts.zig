@@ -1,5 +1,6 @@
 const std = @import("std");
 const style = @import("style.zig");
+const text = @import("text.zig");
 const trace = @import("trace.zig");
 const sources = @import("sources.zig");
 const commands = @import("commands.zig");
@@ -33,6 +34,10 @@ pub fn checkText(comptime Text: type, comptime FontId: type) void {
     }
     if (@hasDecl(Text, "zui_thread_safe") and @TypeOf(Text.zui_thread_safe) != bool) {
         @compileError("zui: " ++ @typeName(Text) ++ ".zui_thread_safe must be a bool, found " ++ @typeName(@TypeOf(Text.zui_thread_safe)));
+    }
+    const Segment = fn (*Text, []const u8, *text.BreakSink) void;
+    if (@hasDecl(Text, "zuiSegment") and @TypeOf(Text.zuiSegment) != Segment) {
+        @compileError("zui: " ++ @typeName(Text) ++ ".zuiSegment must be " ++ @typeName(Segment) ++ ", found " ++ @typeName(@TypeOf(Text.zuiSegment)));
     }
     if (@hasDecl(Text, "zuiFingerprint") and @TypeOf(Text.zuiFingerprint) != fn (*const Text) u64) {
         @compileError("zui: " ++ @typeName(Text) ++ ".zuiFingerprint must be " ++ @typeName(fn (*const Text) u64) ++ ", found " ++ @typeName(@TypeOf(Text.zuiFingerprint)));

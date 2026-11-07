@@ -1,6 +1,7 @@
 const std = @import("std");
 const context = @import("context.zig");
 const style = @import("style.zig");
+const text = @import("text.zig");
 const id = @import("id.zig");
 const interaction = @import("interaction.zig");
 const input = @import("input.zig");
@@ -134,6 +135,7 @@ pub const Alignment2 = style.Alignment2;
 pub const Layout = style.Layout;
 pub const TextWrap = style.TextWrap;
 pub const MeasureKey = style.MeasureKey;
+pub const BreakSink = text.BreakSink;
 pub const Scroll = style.Scroll;
 pub const Floating = style.Floating;
 pub const AttachTo = style.AttachTo;
@@ -163,4 +165,5 @@ test {
     _ = @import("tests/hosts.zig");
     _ = @import("tests/relay.zig");
     _ = @import("tests/styles.zig");
+    _ = @import("tests/segmentation.zig");
 }
