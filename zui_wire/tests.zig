@@ -156,6 +156,7 @@ const DeliveringSources = struct {
     export_job: zui_async.Task(LoadError!u64, .{ .Progress = f32 }) = .{},
     thumbnails: zui_async.KeyedLoads(u64, LoadError!u32, .{ .capacity = 4 }) = .{},
     catalog: CatalogSource = .{},
+    theme_files: zui_async.Stream(zui.FileChange, .{ .capacity = 2 }) = .{},
 };
 
 const DeliveringUi = zui.Context(.{ .limits = small_limits, .Text = Text, .Sources = DeliveringSources });
@@ -168,6 +169,7 @@ test "every kind of delivery round-trips, and one holding a pointer sends what i
         .export_job = .{ .running = 0.5 },
         .thumbnails = .init(&.{ .{ .key = 9, .result = 120 }, .{ .key = 10, .result = error.NotFound } }),
         .catalog = .{ .catalog = &Catalog.known[1] },
+        .theme_files = .init(&.{ .of(.modified, "theme.zon"), .of(.rescan, "") }),
     };
     const export_finished: DeliveringUi.Deliveries = .{
         .battery = null,
@@ -175,6 +177,7 @@ test "every kind of delivery round-trips, and one holding a pointer sends what i
         .export_job = .{ .failed = error.NotFound },
         .thumbnails = .empty,
         .catalog = .{ .catalog = null },
+        .theme_files = .empty,
     };
     const records = [_]DeliveringUi.FrameRecord{
         .{ .params = .{ .now = at(0), .viewport = .{ 100, 100 } }, .deliveries = &export_running },
@@ -203,12 +206,13 @@ test "every kind of delivery round-trips, and one holding a pointer sends what i
         try testing.expectEqualDeep(sent.export_job, received.export_job);
         try testing.expectEqualDeep(sent.thumbnails.slice(), received.thumbnails.slice());
         try testing.expectEqual(sent.catalog.catalog, received.catalog.catalog);
+        try testing.expectEqualDeep(sent.theme_files.slice(), received.theme_files.slice());
     }
 }
 
 test "a delivery's own decoding error means the stream is malformed" {
     const unknown_catalog: Catalog = .{ .number = 7, .title = "gloves" };
-    const deliveries: DeliveringUi.Deliveries = .{ .battery = null, .log = .empty, .export_job = null, .thumbnails = .empty, .catalog = .{ .catalog = &unknown_catalog } };
+    const deliveries: DeliveringUi.Deliveries = .{ .battery = null, .log = .empty, .export_job = null, .thumbnails = .empty, .catalog = .{ .catalog = &unknown_catalog }, .theme_files = .empty };
     var stream: Stream = .init();
     defer stream.deinit();
     var encoder: zui_wire.Encoder(DeliveringUi) = try .init(testing.allocator);

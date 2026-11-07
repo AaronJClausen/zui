@@ -602,6 +602,50 @@ export fn zuiCheckAsync(value: u32) u64 {
     return total +% @intFromBool(async_sources.catalog.isIdle()) +% @intFromBool(ui.nextFrame(&async_sources) == .immediately);
 }
 
+const FileWatchingHost = struct {
+    pub const zui_surfaces: zui.SurfaceKinds = .initOne(.offscreen);
+
+    sink: ?zui.FileChangeSink = null,
+
+    pub fn zuiPoll(_: *FileWatchingHost, _: zui.WindowId, _: *zui.RecordBuilder) bool {
+        return false;
+    }
+
+    pub fn zuiWaker(self: *FileWatchingHost) zui.Waker {
+        return .{ .context = self, .wakeFn = wakeNothing };
+    }
+
+    pub fn zuiWait(_: *FileWatchingHost, _: zui.NextFrame) void {}
+
+    pub fn zuiSurface(_: *FileWatchingHost, _: zui.WindowId) zui.Surface {
+        return .{ .offscreen = .{ .size = .{ 1, 1 } } };
+    }
+
+    pub fn zuiApply(_: *FileWatchingHost, _: zui.WindowId, _: zui.HostRequests) void {}
+
+    pub const zuiFileWatch = struct {
+        pub fn watch(host: *FileWatchingHost, directory: []const u8, sink: zui.FileChangeSink) zui.FileWatchError!void {
+            if (directory.len == 0) return error.DirectoryUnavailable;
+            host.sink = sink;
+        }
+    };
+};
+
+var file_changes: zui_async.Stream(zui.FileChange, .{ .capacity = 4, .producers = .one }) = .{};
+
+export fn zuiCheckFileWatch(path_len: usize) usize {
+    comptime zui.checkHost(FileWatchingHost);
+    var host: FileWatchingHost = .{};
+    FileWatchingHost.zuiFileWatch.watch(&host, "themes", .of(&file_changes)) catch return 0;
+    const path = "themes/dark.zon";
+    host.zuiWaker().wakeIf(host.sink.?.publish(.of(.modified, path[0..@min(path_len, path.len)])));
+    file_changes.zuiSwap();
+    var changes = file_changes.zuiView().items();
+    var total: usize = 0;
+    while (changes.next()) |change| total += change.pathBytes().len;
+    return total;
+}
+
 const WireSources = struct {
     catalog: CheckSource = .{},
     log: zui_async.Stream(u32, .{ .capacity = 4 }) = .{},

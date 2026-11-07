@@ -49,12 +49,16 @@ pub const WindowId = host.WindowId;
 pub const HostCapabilities = host.HostCapabilities;
 pub const WindowOptions = host.WindowOptions;
 pub const SystemMaterial = host.SystemMaterial;
+pub const FileChange = host.FileChange;
+pub const FileChangeSink = host.FileChangeSink;
+pub const FileWatchError = host.FileWatchError;
 
 /// Fails to compile, with a message naming the declaration, unless `Host`
 /// implements the host contract: `zuiPoll`, `zuiWaker`, `zuiWait`,
 /// `zuiSurface`, `zuiApply` and `zui_surfaces`, and optionally
 /// `zui_capabilities` and the services (`zuiClipboard`, `zuiFileDialogs`
-/// and the rest), each a type. A host's `zuiWaker` must be sticky: a wake
+/// and the rest), each a type. `zuiFileWatch` declares
+/// `watch(host, directory, sink) zui.FileWatchError!void`. A host's `zuiWaker` must be sticky: a wake
 /// that arrives while the loop is not waiting ends its next wait.
 pub const checkHost = contracts.checkHost;
 

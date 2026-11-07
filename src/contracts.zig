@@ -94,6 +94,16 @@ pub fn checkHost(comptime Host: type) void {
     expectHostCall(Host, "zuiWait", fn (*Host, record.NextFrame) void, "fn (" ++ host_pointer ++ ", zui.NextFrame) void");
     expectHostCall(Host, "zuiSurface", fn (*Host, host.WindowId) surface.Surface, "fn (" ++ host_pointer ++ ", zui.WindowId) zui.Surface");
     expectHostCall(Host, "zuiApply", fn (*Host, host.WindowId, record.HostRequests) void, "fn (" ++ host_pointer ++ ", zui.WindowId, zui.HostRequests) void");
+    if (@hasDecl(Host, "zuiFileWatch")) checkFileWatch(Host);
+}
+
+fn checkFileWatch(comptime Host: type) void {
+    const name = @typeName(Host) ++ ".zuiFileWatch";
+    const Watch = fn (*Host, []const u8, host.FileChangeSink) host.FileWatchError!void;
+    const expected = "fn (*" ++ @typeName(Host) ++ ", []const u8, zui.FileChangeSink) zui.FileWatchError!void";
+    if (!@hasDecl(Host.zuiFileWatch, "watch")) @compileError("zui: " ++ name ++ " is missing `watch`, which must be " ++ expected);
+    const Found = @TypeOf(Host.zuiFileWatch.watch);
+    if (Found != Watch) @compileError("zui: " ++ name ++ ".watch must be " ++ expected ++ ", found " ++ @typeName(Found));
 }
 
 /// `expected_name` spells zui's types as the application does: their own

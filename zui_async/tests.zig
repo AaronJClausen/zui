@@ -271,6 +271,29 @@ test "a full Stream refuses the newest item and reports it to the frame" {
     try testing.expectEqual(zui.NextFrame.immediately, ui.nextFrame(&sources));
 }
 
+test "a Stream of file changes takes a host's file watch, and its frame reads each change" {
+    const ThemeSources = struct { theme_files: zui_async.Stream(zui.FileChange, .{ .capacity = 2 }) = .{} };
+    const Ui = zui.Context(.{ .limits = .{ .max_elements = 8 }, .Sources = ThemeSources });
+    var ui: Ui = try .init(testing.allocator, testing.io);
+    defer ui.deinit(testing.allocator);
+    var sources: ThemeSources = .{};
+    const sink: zui.FileChangeSink = .of(&sources.theme_files);
+
+    try testing.expectEqual(zui.Wake.needed, sink.publish(.of(.modified, "theme.zon")));
+    try testing.expectEqual(zui.Wake.already_pending, sink.publish(.of(.renamed_to, "dark.zon")));
+    try testing.expectEqual(zui.Wake.already_pending, sink.publish(.of(.added, "refused.zon")));
+    try testing.expectEqual(zui.NextFrame.immediately, ui.nextFrame(&sources));
+
+    ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 10, 10 } } }, &sources);
+    var changes = ui.source(.theme_files).items();
+    try testing.expectEqualStrings("theme.zon", changes.next().?.pathBytes());
+    try testing.expectEqual(zui.FileChange.Kind.renamed_to, changes.next().?.kind);
+    try testing.expectEqual(null, changes.next());
+    const frame = ui.endFrame();
+    try testing.expectEqual(@as(u32, 1), frame.diagnostics.refused_publishes);
+    ui.release(frame);
+}
+
 const Catalog = struct { items: u32 };
 const FetchError = error{ Offline, Canceled };
 const CatalogTask = zui_async.Task(FetchError!*const Catalog, .{ .Progress = f32 });

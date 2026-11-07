@@ -1520,8 +1520,24 @@ const Win32Host = struct {
     pub const zuiFileDialogs = struct { ... };
     pub const zuiOpenUrl = struct { ... };
     pub const zuiMenus = struct { ... };
-    pub const zuiFileWatch = struct { ... };       // a source of file changes
+    pub const zuiFileWatch = struct { ... };       // watch(host, directory, sink): file changes into a source
 };
+```
+
+```zig
+/// One change in a watched directory; plain data, so it relays and replays.
+pub const FileChange = struct {
+    kind: Kind,                     // added, removed, modified, renamed_from, renamed_to, rescan
+    path: Path = .{},               // relative to the directory, `/`-separated, up to 255 bytes inline
+    pub fn of(kind: Kind, path: []const u8) FileChange   // `.rescan` when the path does not fit
+};
+/// Where a watch publishes: any source with `publish(change)`, as `Waker` is a pointer and a function.
+pub const FileChangeSink = struct {
+    context: *anyopaque,
+    publishFn: *const fn (*anyopaque, FileChange) Wake,
+    pub fn of(source: anytype) FileChangeSink   // .of(&app.sources.theme_files)
+};
+pub const FileWatchError = error{ TooManyWatches, DirectoryUnavailable };
 ```
 
 ```zig
@@ -1580,6 +1596,19 @@ pub fn checkHostAndRenderer(comptime Host: type, comptime Renderer: type) void  
   so they are not values of `Lifecycle`.
 - **Services** are optional nested declarations, reached through
   `zui_app` with `has_*` guards (§16.6).
+- **Watching files** is the service that is a source:
+  `zuiFileWatch.watch(host, directory, sink)` watches a directory and its
+  subdirectories until the host's `deinit`, and publishes each change into
+  `sink` from a thread of the host's, waking for the publish that made the
+  source fresh. The sink is usually a `zui_async.Stream(zui.FileChange,
+  ...)` in the application's `Sources`, so the changes are deliveries that
+  relay and replay, and a full stream refuses and is reported as any
+  source is (§14.7). Changes the OS lost, or a path that does not fit,
+  arrive as `.rescan`. Declaration sees which files changed; reading them
+  is the loader's, since declaration does no I/O (§14.1), and what it
+  reads reaches a frame through a source of its own, such as a
+  `Latest(Theme)`, so a replayed session restyles as the live one did.
+  `checkHost` checks `watch`'s signature.
 
 ### 16.4 Surface
 

@@ -31,6 +31,7 @@ const compile_error_cases = [_]struct { name: []const u8, expected_error: []cons
     .{ .name = "host_unknown_declaration", .expected_error = "zui: host_unknown_declaration.Host declares unknown `zuiWake`" },
     .{ .name = "host_without_surfaces", .expected_error = "zui: host_without_surfaces.Host.zui_surfaces names no surface kind, so no renderer can draw into it" },
     .{ .name = "host_capabilities_wrong_type", .expected_error = "zui: host_capabilities_wrong_type.Host.zui_capabilities must be a zui.HostCapabilities, found bool" },
+    .{ .name = "host_file_watch_wrong_signature", .expected_error = "zui: host_file_watch_wrong_signature.Host.zuiFileWatch.watch must be fn (*host_file_watch_wrong_signature.Host, []const u8, zui.FileChangeSink) zui.FileWatchError!void, found fn (*host_file_watch_wrong_signature.Host, []const u8) void" },
     .{ .name = "host_and_renderer_share_no_surface", .expected_error = "zui: host_and_renderer_share_no_surface.Host and host_and_renderer_share_no_surface.Renderer share no surface kind: the host gives .library, the renderer draws into .offscreen, .terminal" },
     .{ .name = "tracer_not_struct", .expected_error = "zui: Tracer must be a struct type, got u32" },
     .{ .name = "tracer_missing_end", .expected_error = "zui: tracer_missing_end.Tracer does not implement zui.Tracer: missing `zuiEnd`" },

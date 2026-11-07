@@ -61,7 +61,7 @@ green, and its **Status** line below says which slice is next.
 |---|---|---|---|---|
 | P4. The box tree's layout and emission within budget | 6, early | `src/layout.zig`, `src/emission.zig` | | waiting on P5 |
 | P5. The box tree's declaration within budget | 6, early | `src/context.zig` | L8 | waiting on L8 |
-| F6. Watching files | 5 | `../zui-host` | H2 | |
+| F6. Watching files | 5 | `../zui-host` | H2 | in progress |
 | L8. Static styles | 6 | `src/context.zig`, `src/style.zig` | | |
 | T4. Line-break segmentation | 6 | `src/text.zig` | | |
 | L1. A grow basis | 6 | `src/layout.zig` | | |
@@ -1309,6 +1309,15 @@ F2, F3, F4 and F5 are in *Done*.
 `zui_debug` uses to reload themes and assets.
 
 **Done when:** editing a theme file restyles the running demo.
+
+**Status.** The core's side has landed: `zui.FileChange`, plain data
+with its path inline; `zui.FileChangeSink`, which a host publishes into
+and `.of(&source)` makes from any source with `publish`; and
+`checkHost` checking `zuiFileWatch.watch`'s signature, with its
+compile-error test. Next: zui-host's Windows watch, through
+`ReadDirectoryChangesW`, and a demo whose theme file restyles it.
+
+**Spec.** §16.3.
 
 ---
 

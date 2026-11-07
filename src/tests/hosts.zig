@@ -17,6 +17,7 @@ const TestHost = struct {
     queued_text: []const u8 = "",
     window_open: bool = true,
     applied: zui.HostRequests = .{},
+    file_sink: ?zui.FileChangeSink = null,
 
     /// An `.on_event` wait gives up after this long, so a lost wake fails a
     /// test instead of hanging it.
@@ -67,6 +68,20 @@ const TestHost = struct {
     fn wake(context: *anyopaque) void {
         const self: *TestHost = @ptrCast(@alignCast(context));
         self.woken.set(self.io);
+    }
+
+    /// Watches one directory, named "themes"; the test reports its changes
+    /// as the OS would, with `fileChanged`.
+    pub const zuiFileWatch = struct {
+        pub fn watch(host: *TestHost, directory: []const u8, sink: zui.FileChangeSink) zui.FileWatchError!void {
+            if (host.file_sink != null) return error.TooManyWatches;
+            if (!std.mem.eql(u8, directory, "themes")) return error.DirectoryUnavailable;
+            host.file_sink = sink;
+        }
+    };
+
+    fn fileChanged(self: *TestHost, change: zui.FileChange) void {
+        self.zuiWaker().wakeIf(self.file_sink.?.publish(change));
     }
 
     fn queue(self: *TestHost, event: zui.Event) void {
@@ -149,6 +164,59 @@ test "the loop runs on a host: its record in, its surface drawn, its requests ap
     try testing.expectEqual(zui.Cursor.pointer, host.applied.cursor);
     try testing.expectEqual(@as(u32, 2), renderer.rectangles);
     try testing.expectEqual(TestHost.surface_size, renderer.surface_size);
+}
+
+/// Keeps up to two changes, refusing the rest, and reports `.needed` only
+/// for the first change since `take`.
+const TwoFileChanges = struct {
+    changes: [2]zui.FileChange = undefined,
+    len: usize = 0,
+    refused: u32 = 0,
+
+    pub fn publish(self: *TwoFileChanges, change: zui.FileChange) error{Full}!zui.Wake {
+        if (self.len == self.changes.len) {
+            self.refused += 1;
+            return error.Full;
+        }
+        self.changes[self.len] = change;
+        self.len += 1;
+        return if (self.len == 1) .needed else .already_pending;
+    }
+
+    fn take(self: *TwoFileChanges) []const zui.FileChange {
+        defer self.len = 0;
+        return self.changes[0..self.len];
+    }
+};
+
+test "a host's file watch publishes each change into a source, waking the host for the first" {
+    var host: TestHost = .{ .io = testing.io };
+    var changes: TwoFileChanges = .{};
+    try testing.expectError(error.DirectoryUnavailable, TestHost.zuiFileWatch.watch(&host, "assets", .of(&changes)));
+    try TestHost.zuiFileWatch.watch(&host, "themes", .of(&changes));
+    try testing.expectError(error.TooManyWatches, TestHost.zuiFileWatch.watch(&host, "themes", .of(&changes)));
+
+    host.fileChanged(.of(.modified, "dark/theme.zon"));
+    try testing.expect(host.woken.isSet());
+    host.woken.reset();
+    host.fileChanged(.of(.renamed_to, "light.zon"));
+    host.fileChanged(.of(.added, "refused.zon"));
+    try testing.expect(!host.woken.isSet());
+    try testing.expectEqual(@as(u32, 1), changes.refused);
+
+    const taken = changes.take();
+    try testing.expectEqual(@as(usize, 2), taken.len);
+    try testing.expectEqual(zui.FileChange.Kind.modified, taken[0].kind);
+    try testing.expectEqualStrings("dark/theme.zon", taken[0].pathBytes());
+    try testing.expectEqualStrings("light.zon", taken[1].pathBytes());
+}
+
+test "a file change whose path does not fit asks for a rescan rather than naming another file" {
+    const longest = "p" ** zui.FileChange.Path.capacity;
+    try testing.expectEqualStrings(longest, zui.FileChange.of(.added, longest).pathBytes());
+    const too_long = zui.FileChange.of(.added, longest ++ "q");
+    try testing.expectEqual(zui.FileChange.Kind.rescan, too_long.kind);
+    try testing.expectEqualStrings("", too_long.pathBytes());
 }
 
 test "a record builder keeps events in order and drops the newest that do not fit" {
