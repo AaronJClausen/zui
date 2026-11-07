@@ -82,7 +82,7 @@ pub fn touch(id: u32, position: [2]f32) zui.Pointer {
     return .{ .id = @enumFromInt(id), .kind = .touch, .position = position, .at = .zero };
 }
 
-pub fn expectRect(frame: *const Ui.Frame, id: zui.Id, x: f32, y: f32, width: f32, height: f32) !void {
+pub fn expectRect(frame: anytype, id: zui.Id, x: f32, y: f32, width: f32, height: f32) !void {
     const rect = frame.rectOf(id) orelse return error.ElementNotFound;
     try std.testing.expectEqual(zui.Rect{ .x = x, .y = y, .width = width, .height = height }, rect);
 }

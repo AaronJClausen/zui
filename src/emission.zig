@@ -154,7 +154,7 @@ fn Emitter(comptime Ui: type) type {
 
             switch (frame.kindOf(element)) {
                 .none => {},
-                .image => if (Ui.RenderCommand.has_image and drawn) self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = level.z, .payload = .{ .image = frame.images[frame.content_index[element]] } }),
+                .image => if (Ui.RenderCommand.has_image and drawn) self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = level.z, .payload = .{ .image = .{ .handle = frame.imageOf(element).handle } } }),
                 .custom => if (Ui.RenderCommand.has_custom and drawn) self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = level.z, .payload = .{ .custom = frame.customs[frame.content_index[element]] } }),
                 .text => if (Ui.has_text) self.emitText(element, element_id, level),
             }

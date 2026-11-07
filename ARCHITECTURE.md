@@ -212,7 +212,9 @@ fast path, the whole-string cache and static styles have landed: element
 storage holds config references, pointers into the frame arena or to a
 style made at comptime with `zui.static`; and so has line-break
 segmentation through the text contract's `zuiSegment`, and the grow
-basis: `grow` starts from the content, `grow_from_min` from `min`.
+basis: `grow` starts from the content, `grow_from_min` from `min`; and
+the `aspect_ratio` rule, a height from the settled width, and images'
+natural sizes.
 
 The code and the spec still differ in these places, each closed by the
 roadmap item named:

@@ -144,14 +144,16 @@ pub const Border = struct {
 pub const Sizing = struct {
     rule: Rule = .fit,
     /// fixed: the size. percent: the fraction of the parent's content box (0..1). grow, grow_from_min: the weight.
+    /// aspect_ratio: width / height.
     amount: f32 = 0,
     min: f32 = 0,
     max: f32 = std.math.inf(f32),
 
     /// Four bytes, so `Sizing` has no padding bytes for declaration to copy
-    /// into every layout. That is also why a grow basis is a rule rather
-    /// than a field of its own: two two-byte fields made the box tree's
-    /// declaration 3.8% more instructions.
+    /// into every layout. That is also why a grow basis and an aspect
+    /// ratio are rules rather than fields of their own: two two-byte fields
+    /// made the box tree's declaration 3.8% more instructions, and an
+    /// aspect ratio in `Layout` made it 6.6% slower.
     pub const Rule = enum(u32) {
         fit,
         /// Starts from the content's size and adds a share of the free space
@@ -162,6 +164,11 @@ pub const Sizing = struct {
         /// weight, as CSS `flex: 1`, never narrower than the content's
         /// minimum: the same two siblings come out 150 and 150.
         grow_from_min,
+        /// A height derived from the settled width, `width / amount`,
+        /// within `min` and `max`. Children do not stretch it; they
+        /// overflow. A width cannot follow the height, so on a width, or
+        /// with a ratio that is not positive, it takes its content's size.
+        aspect_ratio,
         fixed,
         percent,
 
@@ -190,6 +197,12 @@ pub const Sizing = struct {
 
     pub fn fitBetween(min: f32, max: f32) Sizing {
         return .{ .rule = .fit, .min = min, .max = max };
+    }
+
+    /// For a height: `.height = .aspectRatio(16.0 / 9.0)` is a 16:9 box at
+    /// whatever width its own rule gives it.
+    pub fn aspectRatio(width_over_height: f32) Sizing {
+        return .{ .rule = .aspect_ratio, .amount = width_over_height };
     }
 };
 
@@ -406,6 +419,7 @@ test "Sizing decl literals" {
     try std.testing.expectEqual(Sizing.Rule.grow, sizing.width.rule);
     try std.testing.expectEqual(@as(f32, 48), sizing.axis(.y).amount);
     try std.testing.expectEqual(Sizing.Rule.grow_from_min, (Sizing2{ .width = .grow_equal }).width.rule);
+    try std.testing.expectEqual(Sizing{ .rule = .aspect_ratio, .amount = 2 }, (Sizing2{ .height = .aspectRatio(2) }).height);
 }
 
 test "Sizing has no padding bytes" {

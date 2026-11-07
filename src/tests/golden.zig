@@ -335,6 +335,175 @@ test "across the axis, grow stretches and fixed stays" {
     try expectRect(frame, .of("fixed"), 20, 0, 20, 10);
 }
 
+fn ratioBox(ui: *support.Ui, id: zui.Id, width: zui.Sizing, height: zui.Sizing) void {
+    ui.box(.{ .id = id, .layout = .{ .sizing = .{ .width = width, .height = height } } });
+}
+
+test "an aspect ratio derives the height from a width under every rule" {
+    var harness: support.Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    const ui = harness.begin();
+    ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(400) } } });
+    ratioBox(ui, .of("fixed"), .fixed(160), .aspectRatio(2));
+    ratioBox(ui, .of("grow"), .grow, .aspectRatio(4));
+    ratioBox(ui, .of("grow_equal"), .grow_equal, .aspectRatio(8));
+    ratioBox(ui, .of("percent"), .percent(0.5), .aspectRatio(2));
+    ui.open(.{ .id = .of("fit"), .layout = .{ .sizing = .{ .height = .aspectRatio(2) } } });
+    fixedBox(ui, .of("content"), 60, 10);
+    ui.close();
+    ui.close();
+
+    const frame = try harness.end();
+    try expectRect(frame, .of("fixed"), 0, 0, 160, 80);
+    try expectRect(frame, .of("grow"), 0, 80, 400, 100);
+    try expectRect(frame, .of("grow_equal"), 0, 180, 400, 50);
+    try expectRect(frame, .of("percent"), 0, 230, 200, 100);
+    try expectRect(frame, .of("fit"), 0, 330, 60, 30);
+}
+
+test "an aspect ratio's height stays within min and max, and padding is inside it" {
+    var harness: support.Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    const ui = harness.begin();
+    ratioBox(ui, .of("capped"), .fixed(100), .{ .rule = .aspect_ratio, .amount = 1, .max = 30 });
+    ratioBox(ui, .of("floored"), .fixed(100), .{ .rule = .aspect_ratio, .amount = 4, .min = 40 });
+    ui.box(.{ .id = .of("padded"), .layout = .{ .sizing = .{ .width = .fixed(100), .height = .aspectRatio(2) }, .padding = .all(10) } });
+
+    const frame = try harness.end();
+    try expectRect(frame, .of("capped"), 0, 0, 100, 30);
+    try expectRect(frame, .of("floored"), 0, 30, 100, 40);
+    try expectRect(frame, .of("padded"), 0, 70, 100, 50);
+}
+
+test "an aspect ratio is neither stretched across a row nor grown down a column" {
+    var harness: support.Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    const ui = harness.begin();
+    ui.open(.{ .id = .of("row"), .layout = .{ .sizing = .{ .width = .fixed(300), .height = .fixed(200) } } });
+    ratioBox(ui, .of("in_row"), .fixed(100), .aspectRatio(2));
+    ratioBox(ui, .of("stretched"), .fixed(100), .grow);
+    ui.close();
+    ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(100), .height = .fixed(300) } } });
+    ratioBox(ui, .of("in_column"), .fixed(100), .aspectRatio(2));
+    ratioBox(ui, .of("rest"), .fixed(100), .grow);
+    ui.close();
+
+    const frame = try harness.end();
+    try expectRect(frame, .of("in_row"), 0, 0, 100, 50);
+    try expectRect(frame, .of("stretched"), 100, 0, 100, 200);
+    try expectRect(frame, .of("in_column"), 0, 200, 100, 50);
+    try expectRect(frame, .of("rest"), 0, 250, 100, 250);
+}
+
+test "a fit parent wraps an aspect ratio, and children overflow it" {
+    var harness: support.Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    const ui = harness.begin();
+    ui.open(.{ .id = .of("fit_parent"), .layout = .{ .padding = .all(10) } });
+    ratioBox(ui, .of("square"), .fixed(100), .aspectRatio(1));
+    ui.close();
+    ui.open(.{ .id = .of("ratio"), .layout = .{ .sizing = .{ .width = .fixed(100), .height = .aspectRatio(2) } } });
+    fixedBox(ui, .of("tall"), 10, 200);
+    ui.close();
+
+    const frame = try harness.end();
+    try expectRect(frame, .of("fit_parent"), 0, 0, 120, 120);
+    try expectRect(frame, .of("square"), 10, 10, 100, 100);
+    try expectRect(frame, .of("ratio"), 0, 120, 100, 50);
+    try expectRect(frame, .of("tall"), 0, 120, 10, 200);
+}
+
+test "an aspect ratio on a width, or one that is not positive, takes the content's size" {
+    var harness: support.Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    const ui = harness.begin();
+    ui.open(.{ .id = .of("zero"), .layout = .{ .sizing = .{ .width = .fixed(100), .height = .aspectRatio(0) } } });
+    fixedBox(ui, .of("short"), 10, 30);
+    ui.close();
+    ui.open(.{ .id = .of("on_width"), .layout = .{ .sizing = .{ .width = .aspectRatio(2), .height = .fixed(40) } } });
+    fixedBox(ui, .of("narrow"), 25, 10);
+    ui.close();
+
+    const frame = try harness.end();
+    try expectRect(frame, .of("zero"), 0, 0, 100, 30);
+    try expectRect(frame, .of("on_width"), 0, 30, 25, 40);
+}
+
+const ImageUi = zui.Context(.{ .limits = .{ .max_elements = 32 }, .ImageHandle = u32 });
+
+fn layOutImages(declare: *const fn (*ImageUi) void, check: *const fn (*const ImageUi.Frame) anyerror!void) !void {
+    var ui = try ImageUi.init(testing.allocator, testing.io);
+    defer ui.deinit(testing.allocator);
+    ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 800, 600 } } });
+    declare(&ui);
+    const frame = ui.endFrame();
+    defer ui.release(frame);
+    try check(frame);
+}
+
+test "a fit image takes its natural size, inside its padding" {
+    try layOutImages(struct {
+        fn declare(ui: *ImageUi) void {
+            ui.image(.{ .handle = 1, .natural_size = .{ 64, 32 } }, .{ .id = .of("natural") });
+            ui.image(.{ .handle = 2, .natural_size = .{ 64, 32 } }, .{ .id = .of("padded"), .layout = .{ .padding = .all(4) } });
+            ui.image(.{ .handle = 3 }, .{ .id = .of("unsized") });
+        }
+    }.declare, struct {
+        fn check(frame: *const ImageUi.Frame) !void {
+            try expectRect(frame, .of("natural"), 0, 0, 64, 32);
+            try expectRect(frame, .of("padded"), 0, 32, 72, 40);
+            try expectRect(frame, .of("unsized"), 0, 72, 0, 0);
+            try testing.expectEqual(zui.Rect{ .x = 0, .y = 0, .width = 64, .height = 32 }, frame.commands()[0].bounds);
+            try testing.expectEqual(@as(u32, 1), frame.commands()[0].payload.image.handle);
+        }
+    }.check);
+}
+
+test "an image keeps its natural proportions when its width grows or shrinks" {
+    try layOutImages(struct {
+        fn declare(ui: *ImageUi) void {
+            ui.open(.{ .id = .of("row"), .layout = .{ .sizing = .{ .width = .fixed(400) } } });
+            ui.image(.{ .handle = 1, .natural_size = .{ 100, 50 } }, .{ .id = .of("grown"), .layout = .{ .sizing = .{ .width = .grow } } });
+            ui.close();
+            ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(50) } } });
+            ui.image(.{ .handle = 2, .natural_size = .{ 100, 50 } }, .{ .id = .of("squeezed") });
+            ui.close();
+        }
+    }.declare, struct {
+        fn check(frame: *const ImageUi.Frame) !void {
+            try expectRect(frame, .of("grown"), 0, 0, 400, 200);
+            try expectRect(frame, .of("row"), 0, 0, 400, 200);
+            try expectRect(frame, .of("squeezed"), 0, 200, 50, 25);
+        }
+    }.check);
+}
+
+test "an image's sizing overrides its natural size and proportions" {
+    try layOutImages(struct {
+        fn declare(ui: *ImageUi) void {
+            ui.image(.{ .handle = 1, .natural_size = .{ 100, 50 } }, .{ .id = .of("square"), .layout = .{ .sizing = .{ .height = .aspectRatio(1) } } });
+            ui.image(.{ .handle = 2, .natural_size = .{ 100, 50 } }, .{ .id = .of("fixed"), .layout = .{ .sizing = .{ .width = .fixed(10), .height = .fixed(10) } } });
+            ui.image(.{ .handle = 3, .natural_size = .{ 0, 40 } }, .{ .id = .of("no_width"), .layout = .{ .sizing = .{ .width = .fixed(30) } } });
+        }
+    }.declare, struct {
+        fn check(frame: *const ImageUi.Frame) !void {
+            try expectRect(frame, .of("square"), 0, 0, 100, 100);
+            try expectRect(frame, .of("fixed"), 0, 100, 10, 10);
+            try expectRect(frame, .of("no_width"), 0, 110, 30, 40);
+        }
+    }.check);
+}
+
 test "child alignment along and across the axis" {
     var harness: support.Harness = .{};
     try harness.init();

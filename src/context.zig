@@ -266,7 +266,16 @@ pub fn Context(comptime config: Config) type {
             .MaterialHandle = config.MaterialHandle,
             .commands = config.commands,
         });
-        pub const Image = RenderCommand.Image;
+        pub const has_image = config.ImageHandle != void;
+        /// What `image` declares.
+        pub const Image = struct {
+            handle: config.ImageHandle,
+            /// In layout units. A `fit` image takes this size, and keeps its
+            /// proportions when another rule sets its width, unless its
+            /// height has a rule of its own: `aspectRatio`, `fixed` or
+            /// `percent`. Padding goes around it.
+            natural_size: ?[2]f32 = null,
+        };
         /// Rounded up to a whole number of bytes: a `u13` is stored in 16
         /// bits anyway, and every load of one would be masked.
         pub const Index = std.meta.Int(.unsigned, std.math.ceilPowerOfTwoAssert(u16, @max(8, @bitSizeOf(std.math.IntFittingRange(0, limits.max_elements)))));
@@ -370,7 +379,7 @@ pub fn Context(comptime config: Config) type {
             next_decoration: [*]Decoration,
             texts: [if (has_text) max_elements else 0]TextRecord,
             text_count: u32,
-            images: [max_elements]Image,
+            images: [if (has_image) max_elements else 0]Image,
             image_count: u32,
             customs: [max_elements]config.CustomData,
             custom_count: u32,
@@ -465,6 +474,11 @@ pub fn Context(comptime config: Config) type {
             pub fn sizingOf(self: *const Frame, index: Index, comptime axis: style.Axis) style.Sizing {
                 const sizing = &self.layoutOf(index).sizing;
                 return if (axis == .x) sizing.width else sizing.height;
+            }
+
+            /// What `image` declared, for an image element.
+            pub fn imageOf(self: *const Frame, index: Index) Image {
+                return self.images[self.content_index[index]];
             }
 
             pub fn kindOf(self: *const Frame, index: Index) ContentKind {

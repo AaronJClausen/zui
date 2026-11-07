@@ -661,14 +661,14 @@ pub const Layout = struct {
     padding: Edges = .{},                    // logical: start/end resolve by direction
     child_gap: f32 = 0,                      // between adjacent children, not around them
     child_alignment: Alignment2 = .{},       // where the children as a group sit, on each axis
-    aspect_ratio: ?f32 = null,               // width / height
     wrap: bool = false,                      // features.flex_wrap
     mirrored: ?bool = null,                  // null: follow the environment's direction
 };
 
 pub const Sizing = struct {
-    rule: enum(u32) { fit, grow, grow_from_min, fixed, percent } = .fit,   // four bytes: no padding to copy
+    rule: enum(u32) { fit, grow, grow_from_min, aspect_ratio, fixed, percent } = .fit,   // four bytes: no padding to copy
     /// fixed: the size. percent: fraction of the parent's content box. grow, grow_from_min: the weight.
+    /// aspect_ratio: width / height.
     amount: f32 = 0,
     min: f32 = 0,                                   // layout units, for every rule
     max: f32 = std.math.inf(f32),
@@ -680,6 +680,7 @@ pub const Sizing = struct {
     pub fn percent(fraction: f32) Sizing
     pub fn growWeighted(weight: f32) Sizing   // 2: twice the free space of a `.grow` sibling
     pub fn fitBetween(min: f32, max: f32) Sizing
+    pub fn aspectRatio(width_over_height: f32) Sizing   // a height: .height = .aspectRatio(16.0 / 9.0)
 };
 ```
 
@@ -702,8 +703,15 @@ The meanings, which follow CSS where CSS has an answer:
 - **Shrinking.** When children overflow, the largest shrinkable child
   shrinks first until it matches the next largest, never below its
   minimum. Percent children shrink like the others.
-- **Aspect ratio** derives height from the settled width. Deriving width
-  from height would need a second width pass and is not supported.
+- **`aspect_ratio`** is a height derived from the settled width, under
+  whichever rule set the width, clamped to `min` and `max`. Deriving
+  width from height would need a second width pass and is not supported,
+  so on a width, or with a ratio that is not positive, it takes the
+  content's size. Children do not stretch it; they overflow it, and a
+  parent neither stretches nor grows it. It is a rule rather than a
+  field of `Layout` for the reason the basis is: a field made every
+  `Layout` eight bytes larger, and the box tree's declaration 6.6%
+  slower.
 - **Direction** is logical. `right_to_left` mirrors rows, alignment,
   padding and floating anchors; `mirrored` applies it to a subtree.
   Bidirectional text inside a run is the text contract's (§9.4).
@@ -717,8 +725,8 @@ The meanings, which follow CSS where CSS has an answer:
 | 0 | measure text | each text | look up whole strings, then segments, through the caches (§9.3) |
 | 1 | fit widths | reverse | each `fit` width from its children, plus padding and gaps; each element adds itself into its parent, so no child list is walked |
 | 2 | distribute widths | forward | fixed and percent first, then free space by weight, then shrinking |
-| 3 | wrap text, apply aspect ratios | each text / each element | lines from the widths pass 0 recorded, looking up a long cached string's segments only if it wraps; heights from widths |
-| 4 | fit heights | reverse | as 1 |
+| 3 | wrap text | each text | lines from the widths pass 0 recorded, looking up a long cached string's segments only if it wraps |
+| 4 | fit heights | reverse | as 1; `aspect_ratio` heights, and images' natural heights, from the settled widths |
 | 5 | distribute heights | forward | as 2 |
 | 5½ | wrap rows | forward | only for `wrap` parents, compiled out without `features.flex_wrap` |
 | 6 | position | forward | a cursor per parent from its content box, alignment, direction and scroll offset; floating elements from their targets (§8.4) |
@@ -902,11 +910,17 @@ pub fn custom(self: *Self, data: config.CustomData, element: Element) void      
 
 pub const Image = struct {
     handle: config.ImageHandle,
-    natural_size: ?[2]f32 = null,       // a `fit` image takes this size
+    natural_size: ?[2]f32 = null,       // layout units: a `fit` image takes this size
     tint: config.Color = .white,        // multiplied into the pixels; white leaves them unchanged
     corner_radius: CornerRadius = .{},
 };
 ```
+
+An image's natural size is its content, inside its padding. Its width may
+shrink below the natural width, as any leaf does when its parent is
+narrower; its height then keeps the natural proportions, unless the
+height's rule is `aspect_ratio`, `fixed` or `percent`, which take
+precedence.
 
 ```zig
 pub const Element = struct {

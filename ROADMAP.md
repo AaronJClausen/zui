@@ -27,7 +27,7 @@ Each item says:
 | stage 3 | the renderer contract and the generated commands (C1); the host contract and `RecordBuilder` (C2); the conformance suites (C3); `Features` (C7); `zui_app` (C4); the raylib adapter host (H1) | done; the backends are renderers and pass the renderer suite in CI, raylib's host passes the host suite, and the demo runs through `zui_app`, presenting its first frame 288 ms after the process starts; lowering comes with stage 8's commands |
 | stage 4 | the Windows host (H2), with dropped files and lifecycle events in the record; the system material (H8); `zui_app` with the application's own text contract (C9) | done; zui-sokol's tour runs on it unchanged, through `zui_app`, and idles at 0% CPU, and the same code shows Mica or a solid background |
 | stage 5 | relay (F2); `zui_wire` (F3); replay in `zui_testing` (F4); the wire host, renderer and client (F5); file watching as a source (F6) | done; editing a theme file restyles a running window on the Windows host within 4 ms; a recorded session of zui-sokol's tour replays to identical commands without starting any work, zui-sokol's tour goes over the wire at a hundredth of its frames' whole size, but for the screen that moves every box, and it runs in one process and draws in another on the Windows host, its keys going back |
-| stage 6, early | the single-line fast path (T1), the whole-string cache (T2), static styles (L8), the box tree's layout and emission (P4) and declaration (P5), line-break segmentation (T4), the grow basis (L1) | done; the box tree's and warm text's budgets met: the box tree declares in 48.9 µs and lays out and emits in 89.2 µs, warm text in 91.7 µs; a box tree of static styles declares in 28.0 µs |
+| stage 6, early | the single-line fast path (T1), the whole-string cache (T2), static styles (L8), the box tree's layout and emission (P4) and declaration (P5), line-break segmentation (T4), the grow basis (L1), aspect ratio and natural sizes (L2) | done; the box tree's and warm text's budgets met: the box tree declares in 48.9 µs and lays out and emits in 89.2 µs, warm text in 91.7 µs; a box tree of static styles declares in 28.0 µs |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
@@ -60,7 +60,6 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
-| L2. Aspect ratio and natural sizes | 6 | `src/layout.zig` | | |
 | L3. Dividers and decorated images | 6 | `src/emission.zig` | | |
 | L4. Floating options | 6 | `src/layout.zig`, `src/emission.zig` | | |
 | L6. Right-to-left layout | 6 | `src/layout.zig` | | |
@@ -132,6 +131,60 @@ Things to know:
 ---
 
 ## Done
+
+### L2. Aspect ratio and natural sizes
+
+**Plan.** `Layout.aspect_ratio`, deriving height from the settled width;
+`Image.natural_size` for `fit` images. **Done when:** golden tests cover
+aspect ratio under every rule on the other axis, and a `fit` image takes
+its natural size. **Spec.** §8.1, §10.1.
+
+The aspect ratio is a height rule, `Sizing.Rule.aspect_ratio`, written
+`.height = .aspectRatio(16.0 / 9.0)`, rather than a `Layout` field, as
+the grow basis is a rule (L1): `aspect_ratio: ?f32` made every `Layout`
+eight bytes larger (56 to 64), and the box tree's declaration 0.94% more
+instructions and 6.6% slower on the wall clock (49.1 to 52.7 µs, of a
+55 µs budget); a plain `f32` made it 60 bytes, and the box tree's
+`endFrame` 6.7% slower. SPEC.md §8.1 now says so. The fit pass of the
+heights derives it from the settled width, `width / ratio` within `min`
+and `max`, so no pass is added; a parent neither stretches nor grows it,
+and children overflow it. On a width, or with a ratio that is not
+positive, it takes the content's size.
+
+`Ui.Image` is now the declaration's own type, `handle` and
+`natural_size`, apart from the `image` command, which keeps only the
+handle until L3 adds `tint` and `corner_radius`; image storage is
+reserved only when `ImageHandle` is not `void`. A natural size is the
+image's content, inside its padding; its width may shrink below it, as a
+leaf's does in a narrower parent, and its height then keeps the natural
+proportions unless its own rule is `aspect_ratio`, `fixed` or `percent`.
+The natural size is read only when `ImageHandle` is not `void`.
+
+Where the rule sits in the fit pass decided its cost. In an arm of its
+own, LLVM either summed the content before the `switch`, for `fixed`
+elements too (4,000 fixed-height children +4.2% instructions), or turned
+the `switch` into a jump table whose mispredictions doubled the box
+tree's indirect branches and made its `endFrame` 5.5% slower. It shares
+the content-based arm instead, as the fourth of one range of rules.
+
+Tests: golden layouts for an aspect ratio under every width rule
+(`fixed`, `grow`, `grow_equal`, `percent`, `fit`), within `min` and
+`max`, with padding inside it, neither stretched across a row nor grown
+down a column beside a `grow` sibling, wrapped by a `fit` parent,
+overflowed by a child, and on a width or with a zero ratio. Images: a
+natural size with and without padding and none at all, the command's
+bounds and handle; a growing and a squeezed image keeping their
+proportions; `aspectRatio`, fixed sizes and a zero natural width taking
+precedence.
+
+`zig build counts` against `075fbbd`, in a local Docker container: every
+declaration unchanged; the box tree's `endFrame` +1.36% (1,239,211 to
+1,256,115), depth 64's +1.65%, 4,000 children's +0.47%, every text
+scenario within +0.11%; branch mispredictions in the box tree's
+`endFrame` unchanged (137,390 to 137,270). `zig build bench-compare --
+075fbbd` (8 rounds) called no frame slower: the box tree's `endFrame`
++1.5% (0.0% to +1.7%), its declaration +1.0%; only the first frame of
+the documents view, a startup time, came out +4.4% (+3.1% to +6.0%).
 
 ### L1. A grow basis
 
@@ -1639,16 +1692,6 @@ Done: F2, F3, F4, F5 and F6 are in *Done*.
 
 ## Stage 6: text and layout
 
-### L2. Aspect ratio and natural sizes
-
-**Plan.** `Layout.aspect_ratio`, deriving height from the settled width;
-`Image.natural_size` for `fit` images.
-
-**Done when:** golden tests cover aspect ratio under every rule on the
-other axis, and a `fit` image takes its natural size.
-
-**Spec.** §8.1, §10.1.
-
 ### L3. Dividers and decorated images
 
 **Plan.** `Border.between_children`; image commands with `corner_radius`
@@ -1896,6 +1939,8 @@ Deliberate, and each a reason to choose zui:
 | Static styles | approved: pointers to comptime configs, measured against the declaration budget (L8) |
 | An element's switches | `?bool`, null meaning false, so that their defaults fold away; written as booleans (P5) |
 | Line-break segmentation | the text contract's `zuiSegment`, one paragraph at a time; spaces before a break hang (T4) |
+| Aspect ratio (L2) | a height rule, `.aspectRatio(r)`, not a `Layout` field, which made every layout eight bytes larger and declaration 6.6% slower; neither stretched nor grown by its parent; on a width, or not positive, the content's size |
+| Natural sizes (L2) | `Ui.Image` is the declaration's type, apart from the `image` command; a natural size is the content inside the padding, may shrink in a narrower parent, and gives the height its proportions unless the height has a rule of its own |
 | A grow basis (L1) | a rule, `grow_from_min`, not a `basis` field, which would cost declaration; never narrower than the content's minimum, the rest shared by weight |
 | Config references (L8) | pointers in element storage, the default layout one constant; an element's own `layout` or `decoration` replaces the style's whole |
 | Budgets | as in SPEC.md §20.2, including warm text < 120 µs and declaration < 55 µs |

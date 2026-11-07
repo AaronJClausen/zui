@@ -93,10 +93,16 @@ fn fit(comptime Ui: type, frame: *Ui.Frame, comptime axis: Axis) void {
         const content = contentSize(Ui, frame, element, axis);
         const sizing = content.sizing;
         switch (sizing.rule) {
-            .fit, .grow, .grow_from_min => {
-                frame.size[element][a] = clampSize(content.preferred, sizing.min, sizing.max);
-                frame.min_size[element][a] = clampSize(content.min, sizing.min, sizing.max);
-            },
+            // `aspect_ratio` shares the arm, and comes after `grow_from_min`
+            // so the four are one range of rules: in an arm of its own, the
+            // content's sum was made before the `switch`, for `fixed`
+            // elements too, or the `switch` became a jump table, and the
+            // box tree's `endFrame` was 5.5% slower.
+            .fit, .grow, .grow_from_min, .aspect_ratio => if (axis == .y and sizing.rule == .aspect_ratio and sizing.amount > 0) {
+                const height = clampSize(frame.size[element][0] / sizing.amount, sizing.min, sizing.max);
+                frame.size[element][a] = height;
+                frame.min_size[element][a] = height;
+            } else fitContent(Ui, frame, element, axis, content),
             .fixed => {
                 frame.size[element][a] = sizing.amount;
                 frame.min_size[element][a] = sizing.amount;
@@ -141,6 +147,31 @@ fn contentSize(comptime Ui: type, frame: *const Ui.Frame, element: Ui.Index, com
     return .{ .preferred = frame.size[element][a] + gaps + padding, .min = frame.min_size[element][a] + gaps + padding, .sizing = element_layout.sizing.axis(axis) };
 }
 
+inline fn fitContent(comptime Ui: type, frame: *Ui.Frame, element: Ui.Index, comptime axis: Axis, content: ContentSize) void {
+    const a = @intFromEnum(axis);
+    const sizing = content.sizing;
+    const basis = if (Ui.has_image) naturalImageSize(Ui, frame, element, axis) orelse content else content;
+    frame.size[element][a] = clampSize(basis.preferred, sizing.min, sizing.max);
+    frame.min_size[element][a] = clampSize(basis.min, sizing.min, sizing.max);
+}
+
+/// An image's width may shrink below its natural one, as a column narrower
+/// than the image squeezes it; its height then keeps the natural
+/// proportions.
+fn naturalImageSize(comptime Ui: type, frame: *const Ui.Frame, element: Ui.Index, comptime axis: Axis) ?ContentSize {
+    if (frame.kindOf(element) != .image) return null;
+    const natural = frame.imageOf(element).natural_size orelse return null;
+    const element_layout = frame.layoutOf(element);
+    const sizing = element_layout.sizing.axis(axis);
+    const padding = element_layout.padding.total(axis);
+    if (axis == .x) return .{ .preferred = natural[0] + padding, .min = padding, .sizing = sizing };
+    const height = if (natural[0] > 0)
+        larger(0, frame.size[element][0] - element_layout.padding.total(.x)) * natural[1] / natural[0]
+    else
+        natural[1];
+    return .{ .preferred = height + padding, .min = height + padding, .sizing = sizing };
+}
+
 /// Passes 2 and 5: each parent hands its content box to its children.
 fn distribute(comptime Ui: type, frame: *Ui.Frame, comptime axis: Axis) void {
     const a = @intFromEnum(axis);
@@ -160,7 +191,7 @@ fn distribute(comptime Ui: type, frame: *Ui.Frame, comptime axis: Axis) void {
             while (children.next()) |child| {
                 const sizing = frame.sizingOf(child, axis);
                 frame.size[child][a] = switch (sizing.rule) {
-                    .fixed => frame.size[child][a],
+                    .fixed, .aspect_ratio => frame.size[child][a],
                     .grow, .grow_from_min => larger(frame.min_size[child][a], clampSize(content_box, sizing.min, sizing.max)),
                     .percent => clampSize(content_box * sizing.amount, sizing.min, sizing.max),
                     .fit => if (!scrolls and frame.size[child][a] > content_box) larger(frame.min_size[child][a], content_box) else frame.size[child][a],
@@ -190,7 +221,7 @@ fn distribute(comptime Ui: type, frame: *Ui.Frame, comptime axis: Axis) void {
                     any_grow_from_min = true;
                     frame.size[child][a] = frame.min_size[child][a];
                 },
-                .fit, .fixed => {},
+                .fit, .fixed, .aspect_ratio => {},
             }
             used += frame.size[child][a];
         }
@@ -233,7 +264,7 @@ fn sizeFloatingChildren(comptime Ui: type, frame: *Ui.Frame, parent: Ui.Index, c
         switch (sizing.rule) {
             .grow, .grow_from_min => frame.size[child][a] = larger(frame.min_size[child][a], clampSize(reference, sizing.min, sizing.max)),
             .percent => frame.size[child][a] = clampSize(reference * sizing.amount, sizing.min, sizing.max),
-            .fit, .fixed => {},
+            .fit, .fixed, .aspect_ratio => {},
         }
     }
 }

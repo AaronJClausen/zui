@@ -90,7 +90,10 @@ Implemented so far:
   text breaks after spaces as before. `.width = .grow` starts from the
   content and adds a share of the free space, as CSS `flex: auto`;
   `.width = .grow_equal` shares the whole width, as `flex: 1`, so columns
-  come out equal whatever they hold.
+  come out equal whatever they hold. `.height = .aspectRatio(16.0 / 9.0)`
+  derives a height from the width, and an image declared with
+  `.natural_size` takes that size and keeps its proportions as its width
+  grows or shrinks.
 - **Stage 3:** the renderer contract (`zuiSubmit`, the surfaces
   it draws into, the optional commands it draws), checked at compile time
   by `zui.checkRenderer`, and a `RenderCommand` union generated with
