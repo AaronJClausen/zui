@@ -47,7 +47,7 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
-| T1. The single-line fast path | 6, early | `src/text.zig` | | |
+| T1. The single-line fast path | 6, early | `src/text.zig` | | in progress |
 | T2. The whole-string cache | 6, early | `src/text.zig`, `Limits.string_cache_entries` | T1 | |
 | P4. The box tree's layout and emission within budget | 6, early | `src/layout.zig`, `src/emission.zig` | | |
 | C1. The renderer contract, generated commands, lowering | 3 | `src/commands.zig`, `src/emission.zig`, `src/contracts.zig` | | |
@@ -700,7 +700,7 @@ input going back.
 
 ### T1. The single-line fast path
 
-**Grounding.** `text.wrapLines` (`src/text.zig:276`) walks every word of
+**Grounding.** `text.wrapLines` (`src/text.zig:294`) walks every word of
 every text, even a label whose unwrapped width already fits.
 
 **Plan.** Record whether a text has a paragraph break; with none, and an
@@ -708,6 +708,14 @@ unwrapped width that fits, emit one line.
 
 **Done when:** the golden and randomized tests pass unchanged, and warm
 text is faster by R1 and R2.
+
+**Status.** The benchmark has landed: the warm text wall wraps nearly
+every text in its 160-unit panels, so it cannot show this path, and a new
+scenario, `1000 single-line texts, warm`, lays the same sentences in
+panels 480 units wide, where every one fits. Its `Context` has limits of
+its own, because a second caller of the text wall's `Ui.text` made LLVM
+stop inlining it there (+29% in the wall's declaration). Next: the fast
+path, measured against that commit.
 
 **Spec.** §9.2.
 

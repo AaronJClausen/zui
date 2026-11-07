@@ -18,6 +18,7 @@ const text_limits = scenes.text_limits;
 const BoxTree = scenes.BoxTree;
 const TextWall = scenes.TextWall;
 const TextWallCold = scenes.TextWallCold;
+const SingleLineTexts = scenes.SingleLineTexts;
 const DeepTree = scenes.DeepTree;
 const WideTree = scenes.WideTree;
 const DocumentsView = scenes.DocumentsView;
@@ -349,7 +350,7 @@ fn microseconds(nanoseconds: u64) f64 {
 
 /// The scenarios a regression check compares: the single-threaded ones,
 /// whose times don't depend on what the machine's other cores are doing.
-const compared_count = 6;
+const compared_count = 7;
 const regression_tolerance = 1.10;
 
 /// One fastest time a regression check compares. The layout time keeps the
@@ -395,6 +396,7 @@ pub fn main(init: std.process.Init) !void {
         try Scenario(BoxTree.limits, GlyphTableText, BoxTree).run(io, gpa, 20, 400),
         try Scenario(text_limits, GlyphTableText, TextWall).run(io, gpa, 20, 400),
         try Scenario(text_limits, GlyphTableText, TextWallCold).run(io, gpa, 20, 400),
+        try Scenario(SingleLineTexts.limits, GlyphTableText, SingleLineTexts).run(io, gpa, 20, 400),
         try Scenario(DeepTree.limits, GlyphTableText, DeepTree).run(io, gpa, 20, 400),
         try Scenario(WideTree.limits, GlyphTableText, WideTree).run(io, gpa, 20, 400),
         try Scenario(DocumentsView.limits, GlyphTableText, DocumentsView).run(io, gpa, 20, 400),

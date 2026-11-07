@@ -138,6 +138,28 @@ pub const TextWallCold = struct {
     }
 };
 
+/// The warm text wall's sentences in panels 480 units wide, so every text
+/// fits on one line: the cost of labels. Its limits differ from
+/// `text_limits` so that its `Context` is a type of its own, and the text
+/// wall's declaration keeps its code.
+pub const SingleLineTexts = struct {
+    pub const name = "1000 single-line texts, warm";
+    pub const limits: zui.Limits = .{ .max_elements = 1200, .max_render_commands = 4096, .max_text_bytes = 64 * 1024 };
+    pub const layout_target_ns: ?u64 = null;
+    sentences: Sentences(false) = .{},
+
+    pub fn declare(self: *SingleLineTexts, ui: anytype, _: usize) void {
+        const sentences = self.sentences.get();
+        ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .grow_both } });
+        for (0..100) |panel| {
+            ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(480) }, .padding = .all(4), .child_gap = 2 } });
+            for (sentences[panel * 10 ..][0..10]) |sentence| ui.text(sentence, .{ .size = 16 });
+            ui.close();
+        }
+        ui.close();
+    }
+};
+
 pub const DeepTree = struct {
     pub const name = "depth 64";
     pub const layout_target_ns: ?u64 = null;
