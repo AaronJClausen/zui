@@ -102,6 +102,9 @@ pub const Environment = input.Environment;
 pub const EnvironmentChange = input.EnvironmentChange;
 pub const ReadingDirection = input.ReadingDirection;
 pub const Locale = input.Locale;
+pub const FilesDropped = input.FilesDropped;
+pub const Lifecycle = input.Lifecycle;
+pub const LifecycleSet = input.LifecycleSet;
 
 pub const Id = id.Id;
 pub const ids = id.ids;

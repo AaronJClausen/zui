@@ -59,7 +59,7 @@ green, and its **Status** line below says which slice is next.
 |---|---|---|---|---|
 | P4. The box tree's layout and emission within budget | 6, early | `src/layout.zig`, `src/emission.zig` | | waiting on P5 |
 | P5. The box tree's declaration within budget | 6, early | `src/context.zig` | L8 | waiting on L8 |
-| H2. The Windows host | 4 | `../zui-host` | H1 | |
+| H2. The Windows host | 4 | `../zui-host` | H1 | in progress |
 | H8. The desktop showing through the window | 4 | `../zui-host` | H2 | |
 | F2. Relay | 5 | `src/context.zig` | | |
 | F3. `zui_wire` | 5 | a new `zui_wire/` module | F2 | |
@@ -880,6 +880,17 @@ accepts its surface, through sokol_gfx without sokol_app.
 
 **Done when:** the demo runs on it unchanged from H1, it passes C3, and it
 idles at 0% CPU.
+
+**Status.** Landed in zui: the events a native host reports that the
+record could not carry, `Event.files_dropped` (`zui.FilesDropped`, its
+paths copied whole into the new `limits.max_dropped_path_bytes`, read with
+`ui.filesDropped()`, and copied by the host through
+`RecordBuilder.appendFilesDropped`) and `Event.lifecycle`
+(`zui.Lifecycle`, read with `ui.lifecycle()`); `zui_app`'s record builder
+holds dropped paths besides typed text. `zig build counts` against
+`638080d`, in a local Docker container: declaration +1 instruction in every
+scenario, `endFrame` unchanged. Next: `zui-host` with its Windows host,
+then zui-sokol's renderer on its `win32` surface.
 
 ### H8. The desktop showing through the window
 

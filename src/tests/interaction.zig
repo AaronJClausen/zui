@@ -599,6 +599,50 @@ test "environment events change only the settings they name, and the change last
     _ = try harness.end();
 }
 
+test "lifecycle events are reported for the frame that carries them" {
+    var harness: Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    var ui = harness.beginEvents(&.{ .{ .lifecycle = .@"suspend" }, .{ .lifecycle = .terminate_requested } });
+    try testing.expectEqual(zui.LifecycleSet.initMany(&.{ .@"suspend", .terminate_requested }), ui.lifecycle());
+    _ = try harness.end();
+
+    ui = harness.begin();
+    try testing.expectEqual(zui.LifecycleSet.initEmpty(), ui.lifecycle());
+    _ = try harness.end();
+}
+
+test "dropped files are copied for the frame, and paths beyond the limit are dropped whole and reported" {
+    const SmallDropUi = zui.Context(.{ .limits = .{ .max_elements = 16, .max_dropped_path_bytes = 8 } });
+    var ui = try SmallDropUi.init(testing.allocator, testing.io);
+    defer ui.deinit(testing.allocator);
+
+    var host_paths = "a.txt\x00b\x00".*;
+    ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 10, 10 } }, .events = &.{
+        .{ .files_dropped = .{ .position = .{ 1, 2 }, .path_list = &host_paths, .at = .zero } },
+        .{ .files_dropped = .{ .position = .{ 3, 4 }, .path_list = "toolong\x00", .at = .zero } },
+    } });
+    host_paths = @splat('x');
+    const drops = ui.filesDropped();
+    try testing.expectEqual(@as(usize, 1), drops.len);
+    try testing.expectEqual([2]f32{ 1, 2 }, drops[0].position);
+    var paths = drops[0].paths();
+    try testing.expectEqualStrings("a.txt", paths.next().?);
+    try testing.expectEqualStrings("b", paths.next().?);
+    try testing.expectEqual(@as(?[]const u8, null), paths.next());
+    var frame = ui.endFrame();
+    try testing.expect(frame.diagnostics.exceeded.contains(.max_dropped_path_bytes));
+    try testing.expectEqual(@as(u32, 16), frame.diagnostics.needed.get(.max_dropped_path_bytes));
+    ui.release(frame);
+
+    ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 10, 10 } } });
+    try testing.expectEqual(@as(usize, 0), ui.filesDropped().len);
+    frame = ui.endFrame();
+    try testing.expect(frame.diagnostics.ok());
+    ui.release(frame);
+}
+
 /// A focusable 100×40 `field` at (0,0) whose 2×16 caret sits at (30,12).
 fn editable(ui: *Ui) void {
     const field: zui.Id = .of("field");

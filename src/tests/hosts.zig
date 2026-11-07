@@ -195,6 +195,28 @@ test "a record builder copies text, and cuts what does not fit at a character bo
     try testing.expectEqual(@as(u32, 0), builder.dropped_events);
 }
 
+test "a record builder copies dropped paths, and drops whole the paths that do not fit" {
+    var event_buffer: [4]zui.Event = undefined;
+    var text_buffer: [16]u8 = undefined;
+    var builder: zui.RecordBuilder = .init(&event_buffer, &text_buffer);
+    builder.begin(.{ .now = .zero, .viewport = .{ 100, 100 } });
+
+    var host_paths = "C:\\a\x00C:\\long\\b\x00".*;
+    builder.appendFilesDropped(.{ .position = .{ 5, 6 }, .path_list = &host_paths, .at = .fromNanoseconds(3) });
+    host_paths = @splat('x');
+    builder.appendFilesDropped(.{ .position = .{ 7, 8 }, .path_list = "too long a path\x00", .at = .zero });
+
+    const events = builder.events();
+    try testing.expectEqual(@as(usize, 1), events.len);
+    const drop = events[0].files_dropped;
+    try testing.expectEqual([2]f32{ 5, 6 }, drop.position);
+    var paths = drop.paths();
+    try testing.expectEqualStrings("C:\\a", paths.next().?);
+    try testing.expectEqualStrings("C:\\long\\b", paths.next().?);
+    try testing.expectEqual(@as(?[]const u8, null), paths.next());
+    try testing.expectEqual(@as(u32, 16), builder.dropped_text_bytes);
+}
+
 test "a record builder makes the record of a context with sources" {
     const Deliveries = struct { count: ?u32 = null };
     var event_buffer: [1]zui.Event = undefined;

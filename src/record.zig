@@ -90,8 +90,8 @@ pub const RecordBuilder = struct {
     text_len: usize = 0,
     /// Events refused since `begin` because `event_buffer` was full.
     dropped_events: u32 = 0,
-    /// Bytes of text refused since `begin`, with their events or because
-    /// `text_buffer` was full.
+    /// Bytes of text and dropped paths refused since `begin`, with their
+    /// events or because `text_buffer` was full.
     dropped_text_bytes: u32 = 0,
 
     /// The parameters a host measures; zoom is the application's.
@@ -116,12 +116,17 @@ pub const RecordBuilder = struct {
     }
 
     /// Keeps `event` if there is room. When there is none the newest is
-    /// dropped, so what is kept stays in arrival order. A `.text` event
-    /// appended here borrows its bytes; `appendText` copies them.
+    /// dropped, so what is kept stays in arrival order. A `.text` or
+    /// `.files_dropped` event appended here borrows its bytes;
+    /// `appendText` and `appendFilesDropped` copy them.
     pub fn append(self: *RecordBuilder, event: input.Event) void {
         if (self.event_count == self.event_buffer.len) {
             self.dropped_events +|= 1;
-            if (event == .text) self.dropped_text_bytes +|= saturatingCount(event.text.len);
+            switch (event) {
+                .text => |text| self.dropped_text_bytes +|= saturatingCount(text.len),
+                .files_dropped => |drop| self.dropped_text_bytes +|= saturatingCount(drop.path_list.len),
+                else => {},
+            }
             return;
         }
         self.event_buffer[self.event_count] = event;
@@ -144,6 +149,28 @@ pub const RecordBuilder = struct {
         @memcpy(copy, text[0..kept]);
         self.text_len += kept;
         self.append(.{ .text = copy });
+    }
+
+    /// Copies the drop's paths into `text_buffer`, so the host may reuse its
+    /// own at once, and appends it. Paths that do not fit are dropped whole,
+    /// and a drop with none left is not appended.
+    pub fn appendFilesDropped(self: *RecordBuilder, drop: input.FilesDropped) void {
+        if (self.event_count == self.event_buffer.len) return self.append(.{ .files_dropped = drop });
+        const start = self.text_len;
+        var paths = drop.paths();
+        while (paths.next()) |path| {
+            if (path.len + 1 > self.text_buffer.len - self.text_len) {
+                self.dropped_text_bytes +|= saturatingCount(path.len + 1);
+                continue;
+            }
+            @memcpy(self.text_buffer[self.text_len..][0..path.len], path);
+            self.text_buffer[self.text_len + path.len] = 0;
+            self.text_len += path.len + 1;
+        }
+        if (self.text_len == start) return;
+        var copy = drop;
+        copy.path_list = self.text_buffer[start..self.text_len];
+        self.append(.{ .files_dropped = copy });
     }
 
     /// Valid until the next `begin`.

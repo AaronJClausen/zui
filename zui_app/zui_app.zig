@@ -62,8 +62,8 @@ pub const Options = struct {
 /// What `zui_app` tells the developer, each at most once a run.
 pub const Notice = union(enum) {
     started: Report,
-    /// The host's record had no room: raise `limits.max_events_per_frame`
-    /// or `limits.max_text_input_bytes`.
+    /// The host's record had no room: raise `limits.max_events_per_frame`,
+    /// `limits.max_text_input_bytes` or `limits.max_dropped_path_bytes`.
     input_dropped: struct { events: u32, text_bytes: u32 },
     limit_exceeded: struct { limit: zui.Limit, allowed: u32, needed: u32, first_dropped_id: u64 },
     /// A full source refused publishes; raise the capacity of `source`.
@@ -74,7 +74,7 @@ pub const Notice = union(enum) {
     pub fn format(self: Notice, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         switch (self) {
             .started => |report| try writer.print("{f}", .{report}),
-            .input_dropped => |dropped| try writer.print("the host dropped {d} events and {d} bytes of typed text that did not fit the record; raise limits.max_events_per_frame or limits.max_text_input_bytes", .{ dropped.events, dropped.text_bytes }),
+            .input_dropped => |dropped| try writer.print("the host dropped {d} events and {d} bytes of typed text or dropped paths that did not fit the record; raise limits.max_events_per_frame, limits.max_text_input_bytes or limits.max_dropped_path_bytes", .{ dropped.events, dropped.text_bytes }),
             .limit_exceeded => |exceeded| try writer.print("limits.{t} is {d}, but a frame needed {d}; what fit was drawn (first dropped id 0x{x})", .{ exceeded.limit, exceeded.allowed, exceeded.needed, exceeded.first_dropped_id }),
             .publishes_refused => |refused| try writer.print("the full source `{s}` refused {d} publishes; raise its capacity", .{ refused.source, refused.count }),
             .duplicate_ids => |count| try writer.print("{d} ids were declared twice in one frame; the second of each is not interactive", .{count}),
@@ -227,7 +227,7 @@ pub fn Runner(comptime App: type) type {
         notify: *const fn (Notice) void,
         report: Report,
         event_buffer: [Ui.limits.max_events_per_frame]zui.Event,
-        text_buffer: [Ui.limits.max_text_input_bytes]u8,
+        text_buffer: [Ui.limits.max_text_input_bytes + Ui.limits.max_dropped_path_bytes]u8,
         builder: zui.RecordBuilder,
         pending_buffer: [Ui.frames_in_flight]Pending,
         pending: std.Io.Queue(Pending),

@@ -221,6 +221,7 @@ pub const Limits = struct {
     max_input_contacts: u8 = 10,            // e.g. fingers, pens and mice touching or hovering at once
     max_events_per_frame: u16 = 256,        // input events kept from one record
     max_text_input_bytes: u16 = 256,        // typed and IME-committed text kept from one record
+    max_dropped_path_bytes: u32 = 4096,     // paths of dropped files kept from one record; 0 keeps none
     parallel_measure_threshold: u32 = 256,  // cache misses in one frame before measuring in parallel
     parallel_measure_capacity: u32 = 4096,  // distinct misses one cold frame can batch
     exit_ghost_commands: u32 = 0,           // commands kept for exit animations; 0 compiles them out
@@ -540,6 +541,19 @@ pub const KeyEvent = struct {
 };
 ```
 
+```zig
+pub const FilesDropped = struct {
+    position: [2]f32,               // layout units, from the surface's top-left
+    path_list: []const u8,          // each path in UTF-8 followed by a 0 byte
+    at: Instant,
+    pub fn paths(self: FilesDropped) std.mem.TokenIterator(u8, .scalar)
+};
+pub const Lifecycle = enum { @"suspend", @"resume", terminate_requested, low_memory };
+
+pub fn filesDropped(self: *const Self) []const FilesDropped   // this frame's, in order
+pub fn lifecycle(self: *const Self) std.EnumSet(Lifecycle)    // what the OS reported this frame
+```
+
 The rules:
 - **Events apply in order.** A press and release in one frame is a
   click; "release, then a new touch" is handled in that order.
@@ -554,6 +568,14 @@ The rules:
   it is ignored until a slot frees, as digitizers do.
 - **Sampled input** (a library that reports only current state) goes
   through `zui.InputSampler`, which turns successive states into events.
+- **Dropped files** are copied, whole paths only, into
+  `max_dropped_path_bytes`; a path that does not fit is dropped and
+  reported (§17.2). zui does not hit-test a drop: the application compares
+  its position with `rectOf`.
+- **A terminate request ends the window.** The host delivers
+  `.terminate_requested` in one record, so the application can save, and
+  its next `zuiPoll` returns false: the OS default, with one frame to
+  react.
 
 ### 7.2 Environment
 
@@ -1508,6 +1530,7 @@ pub const RecordBuilder = struct {
     pub fn begin(self: *RecordBuilder, host_params: HostParams) void   // .{ now, viewport, scale }; forgets the last record, keeps zoom
     pub fn append(self: *RecordBuilder, event: Event) void
     pub fn appendText(self: *RecordBuilder, text: []const u8) void     // copied; cut at a character boundary
+    pub fn appendFilesDropped(self: *RecordBuilder, drop: FilesDropped) void   // paths copied into the text buffer, whole
     pub fn record(self: *const RecordBuilder) FrameRecord              // valid until the next `begin`
     pub fn recordWith(self: *const RecordBuilder, comptime Deliveries: type) FrameRecordWith(Deliveries)
 };

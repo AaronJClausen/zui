@@ -95,6 +95,9 @@ pub const Limits = struct {
     max_events_per_frame: u16 = 256,
     /// Typed text kept from one record.
     max_text_input_bytes: u16 = 256,
+    /// Paths of dropped files kept from one record, each with a 0 byte
+    /// after it. 0 keeps no drops.
+    max_dropped_path_bytes: u32 = 4096,
     /// Calls to the text contract in one frame before the rest of its
     /// misses are measured in parallel. A warm frame never gets here, and
     /// for a few misses spawning tasks would cost more than it saves.
@@ -266,7 +269,7 @@ pub fn Context(comptime config: Config) type {
         const run_width_capacity = if (has_text) text_layout.maxRuns(limits.max_text_bytes, limits.max_elements) else 0;
         pub const States = state_table.StateTable(limits.state_slots);
         pub const Results = interaction.Results(limits.max_elements, id_table_slots);
-        const InputState = interaction.State(limits.max_input_contacts, limits.max_depth + 1, limits.max_events_per_frame, limits.max_text_input_bytes);
+        const InputState = interaction.State(limits.max_input_contacts, limits.max_depth + 1, limits.max_events_per_frame, limits.max_text_input_bytes, limits.max_dropped_path_bytes);
 
         pub const Decoration = style.Decoration;
 
@@ -1196,6 +1199,8 @@ pub fn Context(comptime config: Config) type {
                 },
                 .key_up => {},
                 .environment => |change| self.current_environment.apply(change),
+                .lifecycle => |change| input_state.lifecycle.insert(change),
+                .files_dropped => |drop| keepDrop(frame, input_state, drop),
                 .text => |typed| {
                     const room = limits.max_text_input_bytes - input_state.text_len;
                     const copied: u16 = @intCast(@min(typed.len, room));
@@ -1212,6 +1217,27 @@ pub fn Context(comptime config: Config) type {
                     _ = self.refreshHover(contact);
                 };
             }
+        }
+
+        /// Keeps the paths that fit whole, and the drop if any did.
+        fn keepDrop(frame: *Frame, input_state: *InputState, drop: input.FilesDropped) void {
+            const needed = &frame.diagnostics.needed;
+            needed.set(.max_dropped_path_bytes, needed.get(.max_dropped_path_bytes) +| std.math.lossyCast(u32, drop.path_list.len));
+            if (input_state.dropped_path_len + drop.path_list.len > limits.max_dropped_path_bytes) frame.diagnostics.exceeded.insert(.max_dropped_path_bytes);
+            if (comptime limits.max_dropped_path_bytes == 0) return;
+            const start = input_state.dropped_path_len;
+            var paths = drop.paths();
+            while (paths.next()) |path| {
+                if (path.len + 1 > limits.max_dropped_path_bytes - input_state.dropped_path_len) continue;
+                @memcpy(input_state.dropped_paths[input_state.dropped_path_len..][0..path.len], path);
+                input_state.dropped_paths[input_state.dropped_path_len + path.len] = 0;
+                input_state.dropped_path_len += @intCast(path.len + 1);
+            }
+            if (input_state.dropped_path_len == start) return;
+            var kept = drop;
+            kept.path_list = input_state.dropped_paths[start..input_state.dropped_path_len];
+            input_state.drops[input_state.drop_count] = kept;
+            input_state.drop_count += 1;
         }
 
         fn contactFor(self: *Self, frame: *Frame, pointer: input.Pointer) ?*InputState.Slot {
@@ -1372,6 +1398,23 @@ pub fn Context(comptime config: Config) type {
         pub fn typedText(self: *const Self) []const u8 {
             const input_state = &self.memory.input;
             return input_state.text[0..input_state.text_len];
+        }
+
+        /// Files dropped onto the surface this frame, in the order they
+        /// were dropped. Hit-test a drop's position with `rectOf` to find
+        /// the element it landed on.
+        pub fn filesDropped(self: *const Self) []const input.FilesDropped {
+            const input_state = &self.memory.input;
+            return input_state.drops[0..input_state.drop_count];
+        }
+
+        /// What the OS reported about the application's life this frame.
+        ///
+        /// ```zig
+        /// if (ui.lifecycle().contains(.terminate_requested)) app.saveDraft();
+        /// ```
+        pub fn lifecycle(self: *const Self) input.LifecycleSet {
+            return self.memory.input.lifecycle;
         }
 
         // =============================================================

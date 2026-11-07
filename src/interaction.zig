@@ -186,7 +186,7 @@ pub fn Contact(comptime max_chain: usize) type {
 
 /// The pointer table plus what this frame's events delivered, which the
 /// interaction queries read until the next `beginFrame`.
-pub fn State(comptime max_contacts: u8, comptime max_chain: usize, comptime max_events: u16, comptime max_text_bytes: u16) type {
+pub fn State(comptime max_contacts: u8, comptime max_chain: usize, comptime max_events: u16, comptime max_text_bytes: u16, comptime max_path_bytes: u32) type {
     return struct {
         const Self = @This();
         pub const Slot = Contact(max_chain);
@@ -200,6 +200,11 @@ pub fn State(comptime max_contacts: u8, comptime max_chain: usize, comptime max_
         text_len: u16,
         clicked: [max_events]u64,
         clicked_count: u16,
+        dropped_paths: [max_path_bytes]u8,
+        dropped_path_len: u32,
+        drops: [if (max_path_bytes == 0) 0 else max_events]input.FilesDropped,
+        drop_count: u16,
+        lifecycle: input.LifecycleSet,
 
         focus: u64,
         pending_focus: ?u64,
@@ -221,6 +226,9 @@ pub fn State(comptime max_contacts: u8, comptime max_chain: usize, comptime max_
             self.key_event_count = 0;
             self.text_len = 0;
             self.clicked_count = 0;
+            self.dropped_path_len = 0;
+            self.drop_count = 0;
+            self.lifecycle = .initEmpty();
         }
 
         pub fn find(self: *Self, id: input.PointerId) ?*Slot {

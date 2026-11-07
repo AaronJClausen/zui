@@ -188,7 +188,45 @@ pub const Event = union(enum) {
     text: []const u8,
     /// One setting of the environment changed; the others are kept.
     environment: EnvironmentChange,
+    files_dropped: FilesDropped,
+    lifecycle: Lifecycle,
 };
+
+/// Files the user dropped onto the surface.
+pub const FilesDropped = struct {
+    /// Where they were dropped, in layout units from the surface's top-left.
+    position: [2]f32,
+    /// Each path in UTF-8, followed by a 0 byte; `paths()` reads them.
+    path_list: []const u8,
+    at: Instant,
+
+    /// ```zig
+    /// for (ui.filesDropped()) |drop| {
+    ///     var paths = drop.paths();
+    ///     while (paths.next()) |path| open(path);
+    /// }
+    /// ```
+    pub fn paths(self: FilesDropped) std.mem.TokenIterator(u8, .scalar) {
+        return std.mem.tokenizeScalar(u8, self.path_list, 0);
+    }
+};
+
+/// What the OS tells an application about its life. A host reports each in
+/// the next record; one it cannot catch is not a value here.
+pub const Lifecycle = enum(u8) {
+    /// The system is about to sleep.
+    @"suspend",
+    /// The system woke from sleep.
+    @"resume",
+    /// The user or the system asked the application to end, as Ctrl+C, a
+    /// console closing or the session ending do. The host closes the window
+    /// after the record that carries it: `zuiPoll` returns false next.
+    terminate_requested,
+    /// The system is short of memory: release what can be rebuilt.
+    low_memory,
+};
+
+pub const LifecycleSet = std.EnumSet(Lifecycle);
 
 /// The language's reading direction.
 pub const ReadingDirection = enum(u8) { left_to_right, right_to_left };
