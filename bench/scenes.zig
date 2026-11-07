@@ -113,7 +113,8 @@ pub fn coldSize(frame_index: usize) f32 {
     return 14 + @as(f32, @floatFromInt(frame_index % 1024)) / 128;
 }
 
-pub const text_limits: zui.Limits = .{ .max_elements = 1200, .max_render_commands = 8192, .max_text_bytes = 64 * 1024 };
+/// Room in both caches for every string and word, so the warm scenes are warm.
+pub const text_limits: zui.Limits = .{ .max_elements = 1200, .max_render_commands = 8192, .max_text_bytes = 64 * 1024, .string_cache_entries = 2048 };
 
 /// 1,000 text elements averaging 40 characters, all measurements cached.
 pub const TextWall = struct {
@@ -144,7 +145,7 @@ pub const TextWallCold = struct {
 /// wall's declaration keeps its code.
 pub const SingleLineTexts = struct {
     pub const name = "1000 single-line texts, warm";
-    pub const limits: zui.Limits = .{ .max_elements = 1200, .max_render_commands = 4096, .max_text_bytes = 64 * 1024 };
+    pub const limits: zui.Limits = .{ .max_elements = 1200, .max_render_commands = 4096, .max_text_bytes = 64 * 1024, .string_cache_entries = 2048 };
     pub const layout_target_ns: ?u64 = null;
     sentences: Sentences(false) = .{},
 

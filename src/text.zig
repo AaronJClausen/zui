@@ -57,29 +57,129 @@ pub fn fontBits(font: anytype) u64 {
     };
 }
 
-/// Persistent, open-addressed cache of text measurements, keyed by the
-/// bytes and the `MeasureKey`. It outlives frames, which is why
-/// steady-state frames make almost no calls to the text contract.
-pub fn MeasureCache(comptime FontId: type, comptime entry_count: u32, comptime Text: type) type {
+/// An open-addressed table keyed by 64-bit hashes, 0 marking an empty
+/// entry. It outlives frames; a full probe window gives up its least
+/// recently used entry.
+fn LruTable(comptime Value: type, comptime entry_count: u32) type {
     return struct {
         const Self = @This();
         const probe_window = 8;
-        pub const Key = style.MeasureKey(FontId);
 
-        /// `key` hashes the bytes seeded with the `MeasureKey`; two
-        /// different texts share one with probability 2^-64.
         const Entry = struct {
             key: u64,
-            measured: [2]f32,
             last_used: u32,
+            value: Value,
         };
 
         entries: [entry_count]Entry,
+
+        fn clear(self: *Self) void {
+            for (&self.entries) |*entry| entry.key = 0;
+        }
+
+        /// Marks a hit as used in `generation`, so it is evicted last.
+        fn lookup(self: *Self, key: u64, generation: u32) ?*Value {
+            for (0..probe_window) |step| {
+                const entry = &self.entries[(@as(usize, @truncate(key)) +% step) & (entry_count - 1)];
+                if (entry.key == 0) return null;
+                if (entry.key == key) {
+                    entry.last_used = generation;
+                    return &entry.value;
+                }
+            }
+            return null;
+        }
+
+        const Found = struct { value: *Value, was_present: bool };
+
+        /// `lookup` and, on a miss, `claim`, in one walk of the probe window.
+        fn lookupOrClaim(self: *Self, key: u64, generation: u32) Found {
+            const home: usize = @truncate(key);
+            var replace_index: usize = home & (entry_count - 1);
+            var replace_age: u32 = 0;
+            for (0..probe_window) |step| {
+                const index = (home +% step) & (entry_count - 1);
+                const entry = &self.entries[index];
+                if (entry.key == key) {
+                    entry.last_used = generation;
+                    return .{ .value = &entry.value, .was_present = true };
+                }
+                if (entry.key == 0) {
+                    replace_index = index;
+                    break;
+                }
+                const age = generation -% entry.last_used;
+                if (age >= replace_age) {
+                    replace_age = age;
+                    replace_index = index;
+                }
+            }
+            const entry = &self.entries[replace_index];
+            entry.key = key;
+            entry.last_used = generation;
+            return .{ .value = &entry.value, .was_present = false };
+        }
+
+        /// For a key `lookup` just missed: the first empty entry in the
+        /// probe window, or else the least recently used one, for the
+        /// caller to fill.
+        fn claim(self: *Self, key: u64, generation: u32) *Value {
+            var replace_index: usize = @as(usize, @truncate(key)) & (entry_count - 1);
+            var replace_age: u32 = 0;
+            for (0..probe_window) |step| {
+                const index = (@as(usize, @truncate(key)) +% step) & (entry_count - 1);
+                const entry = &self.entries[index];
+                if (entry.key == 0) {
+                    replace_index = index;
+                    break;
+                }
+                const age = generation -% entry.last_used;
+                if (age >= replace_age) {
+                    replace_age = age;
+                    replace_index = index;
+                }
+            }
+            const entry = &self.entries[replace_index];
+            entry.key = key;
+            entry.last_used = generation;
+            return &entry.value;
+        }
+    };
+}
+
+/// Runs whose widths a string cache entry keeps. A text with more is
+/// cached by its metrics alone, and measures its runs only to wrap.
+pub const max_cached_runs = 16;
+
+/// A whole text's measurement, in layout units.
+pub const CachedString = struct {
+    /// `first_run` is meaningless here, and `line_height` is the font's.
+    metrics: Metrics,
+    run_count: u32,
+    /// The first `run_count` are valid when it is at most `max_cached_runs`.
+    run_widths: [max_cached_runs]f32,
+};
+
+/// The persistent measurement caches, keyed by hashes of the bytes seeded
+/// with the `MeasureKey`; two different texts share one with probability
+/// 2^-64. They outlive frames, which is why steady-state frames make
+/// almost no calls to the text contract:
+/// - segments: what the text contract measured for one word or paragraph;
+/// - strings: a whole text's metrics and run widths, so a warm text costs
+///   one probe instead of one per word.
+pub fn MeasureCache(comptime FontId: type, comptime segment_entries: u32, comptime string_entries: u32, comptime Text: type) type {
+    return struct {
+        const Self = @This();
+        pub const Key = style.MeasureKey(FontId);
+
+        segments: LruTable([2]f32, segment_entries),
+        strings: LruTable(CachedString, string_entries),
         generation: u32,
         measure_calls: u64,
 
         pub fn reset(self: *Self) void {
-            for (&self.entries) |*entry| entry.key = 0;
+            self.segments.clear();
+            self.strings.clear();
             self.generation = 1;
             self.measure_calls = 0;
         }
@@ -94,44 +194,36 @@ pub fn MeasureCache(comptime FontId: type, comptime entry_count: u32, comptime T
         }
 
         pub fn hashOf(text: []const u8, key: Key) u64 {
+            return nonZero(std.hash.Wyhash.hash(seedOf(key), text));
+        }
+
+        /// A string's metrics are in layout units and depend on how it
+        /// wraps, so its hash is seeded with the zoom and the wrap mode too.
+        pub fn stringHashOf(text: []const u8, key: Key, wrap: style.TextWrap, inverse_zoom: f32) u64 {
+            const zoom_bits: u32 = @bitCast(inverse_zoom);
+            const layout_bits = @as(u64, zoom_bits) << 2 | @intFromEnum(wrap);
+            return nonZero(std.hash.Wyhash.hash(seedOf(key) ^ (layout_bits *% 0xc2b2ae3d27d4eb4f), text));
+        }
+
+        fn seedOf(key: Key) u64 {
             const size_bits: u32 = @bitCast(key.size);
             const spacing_bits: u32 = @bitCast(key.letter_spacing);
-            const seed = (fontBits(key.font) << 32 | size_bits) ^ (@as(u64, spacing_bits) *% 0x9e3779b97f4a7c15);
-            return nonZero(std.hash.Wyhash.hash(seed, text));
+            return (fontBits(key.font) << 32 | size_bits) ^ (@as(u64, spacing_bits) *% 0x9e3779b97f4a7c15);
         }
 
-        /// Marks a hit as used this generation, so it is evicted last.
         pub fn lookup(self: *Self, key: u64) ?[2]f32 {
-            for (0..probe_window) |step| {
-                const entry = &self.entries[(@as(usize, @truncate(key)) +% step) & (entry_count - 1)];
-                if (entry.key == 0) return null;
-                if (entry.key == key) {
-                    entry.last_used = self.generation;
-                    return entry.measured;
-                }
-            }
-            return null;
+            const measured = self.segments.lookup(key, self.generation) orelse return null;
+            return measured.*;
         }
 
-        /// For a key `lookup` just missed: takes the first empty slot in the
-        /// probe window, or else the least recently used one.
+        /// For a key `lookup` just missed.
         pub fn insert(self: *Self, key: u64, measured: [2]f32) void {
-            var replace_index: usize = @as(usize, @truncate(key)) & (entry_count - 1);
-            var replace_age: u32 = 0;
-            for (0..probe_window) |step| {
-                const index = (@as(usize, @truncate(key)) +% step) & (entry_count - 1);
-                const entry = &self.entries[index];
-                if (entry.key == 0) {
-                    replace_index = index;
-                    break;
-                }
-                const age = self.generation -% entry.last_used;
-                if (age >= replace_age) {
-                    replace_age = age;
-                    replace_index = index;
-                }
-            }
-            self.entries[replace_index] = .{ .key = key, .measured = measured, .last_used = self.generation };
+            self.segments.claim(key, self.generation).* = measured;
+        }
+
+        /// The string's entry, or one claimed for it, which the caller fills.
+        pub fn findString(self: *Self, key: u64) LruTable(CachedString, string_entries).Found {
+            return self.strings.lookupOrClaim(key, self.generation);
         }
 
         fn nonZero(key: u64) u64 {
@@ -149,14 +241,18 @@ pub const Metrics = struct {
     space_width: f32,
     /// A newline divides the text, so it never takes the single-line path.
     has_paragraph_break: bool,
+    /// The run widths were not cached with the string: `measurePendingRuns`
+    /// measures them if the text has to wrap.
+    run_widths_pending: bool = false,
     /// Where this text's run widths start in the run width buffer.
     first_run: u32,
 };
 
 /// Run widths a frame can need: a text has at most one run more than it
-/// has bytes (consecutive spaces make empty words).
+/// has bytes (consecutive spaces make empty words), and a cached string's
+/// widths are copied whole, even past its last run.
 pub fn maxRuns(max_text_bytes: u32, max_texts: u32) u32 {
-    return max_text_bytes + max_texts;
+    return max_text_bytes + max_texts + max_cached_runs;
 }
 
 /// Measures through the cache with one text's key, which carries the
@@ -180,6 +276,56 @@ pub fn Measurer(comptime Cache: type, comptime Text: type) type {
             return self.measure(run)[0];
         }
     };
+}
+
+/// Measures `text` through the string cache, then appends its run widths
+/// to `run_widths` as `measureMetrics` does. A hit walks no words; for a
+/// text of more than `max_cached_runs` runs it reserves their places and
+/// leaves them pending.
+pub fn measureText(
+    measurer: anytype,
+    text: []const u8,
+    wrap: style.TextWrap,
+    line_height_override: f32,
+    run_widths: []f32,
+    run_count: *u32,
+) Metrics {
+    const cache = measurer.cache;
+    const hash = @TypeOf(cache.*).stringHashOf(text, measurer.key, wrap, measurer.inverse_zoom);
+    const first_run = run_count.*;
+    const cached_widths = run_widths[first_run..][0..max_cached_runs];
+    var metrics: Metrics = undefined;
+    const found = cache.findString(hash);
+    const cached = found.value;
+    if (found.was_present) {
+        metrics = cached.metrics;
+        metrics.first_run = first_run;
+        metrics.run_widths_pending = cached.run_count > max_cached_runs;
+        cached_widths.* = cached.run_widths;
+        run_count.* += cached.run_count;
+    } else {
+        metrics = measureMetrics(measurer, text, wrap, 0, run_widths, run_count);
+        cached.* = .{ .metrics = metrics, .run_count = run_count.* - first_run, .run_widths = cached_widths.* };
+    }
+    if (line_height_override > 0) metrics.line_height = line_height_override;
+    return metrics;
+}
+
+/// Writes the run widths `measureText` left pending, from `metrics.first_run`.
+pub fn measurePendingRuns(measurer: anytype, text: []const u8, wrap: style.TextWrap, metrics: Metrics, run_widths: []f32) void {
+    var count = metrics.first_run;
+    const runs: RunWriter = .{ .widths = run_widths, .count = &count };
+    switch (wrap) {
+        .none => _ = runs.append(measurer.measure(text)[0]),
+        .newlines => {
+            var paragraphs = std.mem.splitScalar(u8, text, '\n');
+            while (paragraphs.next()) |paragraph| _ = runs.append(measurer.width(paragraph));
+        },
+        .words => {
+            var words: WordIterator = .{ .text = text };
+            while (words.next()) |word| _ = runs.append(measurer.width(text[word.start..word.end]));
+        },
+    }
 }
 
 /// Measures `text` and appends the width of each of its runs to
@@ -308,12 +454,7 @@ pub fn wrapLines(
 ) bool {
     if (text.len == 0) return true;
     const output: LineOutput = .{ .lines = lines, .count = line_count };
-    const fits_one_line = switch (wrap) {
-        .none => true,
-        .newlines => !metrics.has_paragraph_break,
-        .words => !metrics.has_paragraph_break and metrics.preferred_width <= max_width + tolerance,
-    };
-    if (fits_one_line) return output.emit(base, base + @as(u32, @intCast(text.len)), metrics.preferred_width);
+    if (fitsOneLine(wrap, metrics, max_width)) return output.emit(base, base + @as(u32, @intCast(text.len)), metrics.preferred_width);
 
     switch (wrap) {
         .none => unreachable,
@@ -331,6 +472,15 @@ pub fn wrapLines(
         },
         .words => return wrapWords(text, base, metrics, run_widths, max_width, output),
     }
+}
+
+/// Whether `wrapLines` emits the text as one line without reading its run widths.
+pub fn fitsOneLine(wrap: style.TextWrap, metrics: Metrics, max_width: f32) bool {
+    return switch (wrap) {
+        .none => true,
+        .newlines => !metrics.has_paragraph_break,
+        .words => !metrics.has_paragraph_break and metrics.preferred_width <= max_width + tolerance,
+    };
 }
 
 /// Greedy wrapping at spaces, with a line of its own after each newline.
@@ -396,7 +546,7 @@ const FixedMetricsText = struct {
     }
 };
 
-const TestCache = MeasureCache(u16, 64, FixedMetricsText);
+const TestCache = MeasureCache(u16, 64, 16, FixedMetricsText);
 
 fn testCache() TestCache {
     var cache: TestCache = undefined;

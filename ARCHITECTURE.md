@@ -184,7 +184,8 @@ environment and host requests, sources in the core (the contract and its
 checks, swap and injection, demand, `Status` and `Waker`), the default
 sources in `zui_async` with `zui_testing`'s conformance suite for
 sources, and `Element` with `decoration` and `clip: Axes`. `TaskPool` is
-deleted, and the three backends and the demo are on this API.
+deleted, and the three backends and the demo are on this API. From stage
+6, the single-line fast path and the whole-string cache have landed.
 
 The code and the spec still differ in these places, each closed by the
 roadmap item named:
@@ -198,8 +199,8 @@ roadmap item named:
 | `Features` holds only `Tracer` | `semantics`, `gestures`, `flex_wrap` and `safety_sweeps` too | `src/context.zig` | C7 |
 
 Unchanged in shape: element storage in pre-order structure-of-arrays, the
-layout passes, the segment cache, ids, the state table, the frame arenas,
-parallel measurement and the module boundary.
+layout passes, the segment and string caches, ids, the state table, the
+frame arenas, parallel measurement and the module boundary.
 
 ## 8. Repositories
 

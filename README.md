@@ -57,6 +57,9 @@ Implemented so far:
   on a single-threaded `Io`. The backends are on this API, and the
   demo's thumbnail grid loads through `KeyedLoads` without the UI thread
   ever waiting, and idles at 0% CPU.
+- **Stage 6, early:** a text that fits is laid out as one line without
+  walking its words, and a whole-string cache makes a warm text one probe
+  instead of one per word: 1,000 warm texts lay out in about 100 µs.
 
 The reference backend and demo application live in
 [zui-raylib](https://github.com/AaronJClausen/zui-raylib); the other
@@ -66,10 +69,8 @@ backends are [zui-sokol](https://github.com/AaronJClausen/zui-sokol) and
 Next, in the order of SPEC.md §21: the renderer and host contracts with
 `zui_app`, a native Windows host, the wire format, and from there text,
 layout, gestures, effects, an inspector and accessibility, more hosts,
-motion and text editing. Some of stage 6 comes early, now that the demo
-can be traced: a label that fits is laid out as one line without walking
-its words (T1), and the string cache (T2) and the box tree's budget (P4)
-are next.
+motion and text editing. The box tree's layout budget (P4) comes early,
+as the text fast path and string cache did.
 [ROADMAP.md](ROADMAP.md) keeps the queue of work in order, and
 [ARCHITECTURE.md](ARCHITECTURE.md) shows how the pieces connect.
 

@@ -675,7 +675,7 @@ The meanings, which follow CSS where CSS has an answer:
 | 0 | measure text | each text | look up whole strings, then segments, through the caches (§9.3) |
 | 1 | fit widths | reverse | each `fit` width from its children, plus padding and gaps; each element adds itself into its parent, so no child list is walked |
 | 2 | distribute widths | forward | fixed and percent first, then free space by weight, then shrinking |
-| 3 | wrap text, apply aspect ratios | each text / each element | lines from the widths pass 0 recorded; heights from widths |
+| 3 | wrap text, apply aspect ratios | each text / each element | lines from the widths pass 0 recorded, looking up a long cached string's segments only if it wraps; heights from widths |
 | 4 | fit heights | reverse | as 1 |
 | 5 | distribute heights | forward | as 2 |
 | 5½ | wrap rows | forward | only for `wrap` parents, compiled out without `features.flex_wrap` |
@@ -791,13 +791,16 @@ may be reused at once.
 
 | Cache | Key | Holds | Why both |
 |---|---|---|---|
-| strings | `(hash(bytes), MeasureKey)` | the whole text's metrics: unwrapped width, widest segment, has break | a warm label costs one probe, not one per word |
+| strings | `(hash(bytes), MeasureKey, zoom, wrap)` | the whole text's metrics (unwrapped width, widest segment, has break) and the widths of up to 16 segments | a warm text costs one probe, not one per word, even when it wraps |
 | segments | `(hash(bytes), MeasureKey)` | one segment's size | text that changes every frame (`"Frame 1234"`) measures only its new segments |
 
 Both are open-addressed, sized by `Limits`, persistent across frames, and
 evict the least recently used entry in the probe window. Hashing is one
-wyhash of the bytes, seeded with the key. Steady-state frames make almost
-no calls to the text contract.
+wyhash of the bytes, seeded with the key; a string's key also holds the
+zoom and the wrap mode, because its metrics are in layout units and its
+segments depend on how it wraps. A string of more than 16 segments is
+cached by its metrics alone, and its segments are looked up only if it
+wraps. Steady-state frames make almost no calls to the text contract.
 
 ### 9.4 The text contract
 

@@ -5,6 +5,7 @@ const std = @import("std");
 /// complete message.
 const compile_error_cases = [_]struct { name: []const u8, expected_error: []const u8 }{
     .{ .name = "state_slots_not_power_of_two", .expected_error = "zui: limits.state_slots must be a power of two, got 1000" },
+    .{ .name = "string_cache_entries_not_power_of_two", .expected_error = "zui: limits.string_cache_entries must be a power of two, got 1000" },
     .{ .name = "font_id_not_integer", .expected_error = "zui: FontId must be an integer or enum type, got f32" },
     .{ .name = "text_missing_measure", .expected_error = "zui: text_missing_measure.Text does not implement zui.Text: missing `zuiMeasure`" },
     .{ .name = "text_measure_wrong_signature", .expected_error = "zui: text_measure_wrong_signature.Text.zuiMeasure must be fn (*text_measure_wrong_signature.Text, []const u8, style.MeasureKey(u16)) [2]f32, found fn (*text_measure_wrong_signature.Text, []const u8, u16, f32) [2]f32" },

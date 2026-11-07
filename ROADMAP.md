@@ -24,20 +24,26 @@ Each item says:
 | 0.6, in part | `bench-compare` (R2), startup benchmarks (P1), task completions at `beginFrame` (A2), the async design (A1) | done; the rest of 0.6 became stage 1 |
 | stage 1 | instruction counts in CI (R1), the tracer contract and `zui_tracy` (P2) | done |
 | stage 2 | the code brought to the spec's shape: C5, S1, I4, C6, A5 and `nextFrame` (I2); letter spacing (T3); the environment and host requests (I6); sources in the core (A3); `zui_async` (A4); the backends on the new API, the demo's thumbnails on `KeyedLoads` (C8) | done; the demo idles at 0% CPU |
-| stage 6, early | the single-line fast path (T1) | done |
+| stage 6, early | the single-line fast path (T1), the whole-string cache (T2) | done; warm text within its budget |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
 when it is done.
 
-Measured on the reference machine (i9-10900K) at `a6d8e34`, against the
-budgets of SPEC.md §20.2:
+Measured on the reference machine (i9-10900K), the fastest frame, at
+`a6d8e34` but where an item is named, against the budgets of SPEC.md
+§20.2:
 
 | Scenario | Declaration | `endFrame` | Budget |
 |---|---|---|---|
 | 4,096 boxes, depth 8 | 52.2 µs | 101.2 µs | declaration < 55 µs (met); layout and emission < 100 µs (missed by 1.2 µs) |
-| 1,000 texts, warm caches | 14.1 µs | 184.2 µs | < 120 µs (missed; T1 and T2 are the plan) |
+| 1,000 texts, warm caches, after T2 | 16.2 µs | 98.9 µs | < 120 µs (met; 184.2 µs at `a6d8e34`) |
 | 4,000 children of one parent | 52.9 µs | 65.8 µs | |
+
+The T2 row is the fastest of four runs of `zig build bench --
+--check-targets`, whose fastest frames for warm text were 98.9 to
+103.1 µs; in the same runs the box tree's `endFrame` took 111 to 114 µs,
+so the machine ran about 10% slower than when `a6d8e34` was measured.
 
 ## The queue
 
@@ -48,7 +54,6 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
-| T2. The whole-string cache | 6, early | `src/text.zig`, `Limits.string_cache_entries` | | in progress |
 | P4. The box tree's layout and emission within budget | 6, early | `src/layout.zig`, `src/emission.zig` | | |
 | C1. The renderer contract, generated commands, lowering | 3 | `src/commands.zig`, `src/emission.zig`, `src/contracts.zig` | | |
 | C2. The host contract and the surface | 3 | `src/contracts.zig`, a new `src/surface.zig` | C1 | |
@@ -122,6 +127,47 @@ Things to know:
 ---
 
 ## Done
+
+### T2. The whole-string cache
+
+`Limits.string_cache_entries` (1,024 by default, a power of two, with its
+compile-error test), and a second table in the measurement cache keyed by
+the whole string, its `MeasureKey`, the zoom and the wrap mode. An entry
+holds the text's metrics and the widths of up to 16 runs; a hit copies
+them into the frame and walks no words, so with T1's fast path a warm
+label does no per-word work, and a warm text that wraps reads its word
+widths without probing. A text of more than 16 runs is cached by its
+metrics alone, and `wrapTexts` measures its runs only when it does not
+fit on one line. A golden test lays out wrapping, single-line, long,
+newline-separated and zoomed texts in one context over five frames at two
+widths and two zooms, against a fresh context each frame, with the run
+widths moving between frames; it fails if pending runs are not measured
+or if the zoom is left out of the key.
+
+A Callgrind profile first confirmed the cost: at `b99fa79`, 60% of the
+warm text wall's `endFrame` was measuring through per-word probes
+(`measureMetrics` 27.0%, `Measurer.measure` 21.4%, wyhash 12.1%), and 20%
+`wrapLines`. Most of the wall's texts wrap, which is why an entry holds
+word widths, not only the metrics SPEC.md §9.3 first listed; the spec now
+says so. `1000 new strings, warm words` (its own commit, `77027e8`) is the
+frame that changes every string. Against `77027e8`:
+- `zig build counts`, in a local Docker container: warm text wall
+  `endFrame` −53.8% (2,361,336 to 1,090,886), single-line texts −67.6%,
+  documents view −25.9%; new strings +0.3% and the cold wall +1.2%, the
+  string hash and probe of a miss; nothing else moved by more than one
+  instruction;
+- `zig build bench-compare -- 77027e8` (10 rounds): warm text wall
+  −56.4% (225.3 to 98.5 µs), single-line texts −71.2%, documents view
+  −27.8%; new strings −3.9% and the cold wall −5.0%, faster, not slower;
+  first frame of 1,000 texts −6.4%; `init` +19.1% (110.7 to 134.8 µs) and
+  `initBuffer` +13.2% (9.5 to 10.8 µs), clearing the new table's 104 KB
+  (`init` allocates 4.75 MiB, from 4.61);
+- `zig build bench -- --check-targets`: warm text's fastest frame 98.9 µs
+  against the 120 µs budget (see *Where we are*).
+
+Laying the tables out as structure-of-arrays moved those page faults from
+`init` into the first frame (+76% for the documents view's) and grew the
+miss paths by 7% in counts, so the entries stay whole.
 
 ### T1. The single-line fast path
 
@@ -723,32 +769,6 @@ input going back.
 
 ## Stage 6: text and layout
 
-### T2. The whole-string cache
-
-**Grounding.** A warm text costs one probe per word per frame
-(`src/text.zig:173`): 1,000 texts take 184 µs against a 120 µs budget.
-The per-word cache stays, because text that changes every frame measures
-only its new words.
-
-**Plan.** A second table keyed by the whole string and `MeasureKey`,
-holding the metrics. A hit with T1's fast path does no per-word work.
-
-**Done when:** warm 1,000 texts meet §20.2's budget, and a frame that
-changes every string is no slower. A profile (P2) first confirms per-word
-probes are the main cost.
-
-**Status.** The profile confirms it: Callgrind's function-level counts of
-the warm text wall's `endFrame` at `b99fa79` put 60% of it in measuring
-through per-word probes (`measureMetrics` 27.0%, `Measurer.measure`
-21.4%, wyhash 12.1%), and 20% in `wrapLines`. Most of the wall's texts
-wrap, so the cache must hold their word widths too, or wrapping would
-probe each word again. The benchmark of a frame that changes every string
-has landed: `1000 new strings, warm words` is the warm wall with the
-frame's number after every sentence, so each string is new and each word
-but the number is cached. Next: the cache, measured against that commit.
-
-**Spec.** §9.3.
-
 ### P4. The box tree's layout and emission within budget
 
 **Grounding.** At `a6d8e34` the box tree's `endFrame` took 101.2 µs
@@ -1071,6 +1091,9 @@ Deliberate, and each a reason to choose zui:
 | The backends' text contract (C8) | each backend's `Text`, set by its `config()`, in place of `Platform` |
 | Waiting until an instant in raylib (C8) | `FramePacer`: raylib's event wait plus a task that posts an empty event once the instant has passed |
 | Measuring idle CPU (C8) | by the demo itself (`--measure-idle`), between two frames it requests 10 s apart, so the run ends on its own and CI can repeat it |
+| What a cached string holds (T2) | its metrics and the widths of up to 16 runs, so a warm text that wraps probes nothing per word; a longer one keeps only its metrics and measures its runs only to wrap |
+| The string cache's key (T2) | the bytes, `MeasureKey`, zoom and wrap mode, so a hit returns exactly the layout units a miss computed |
+| Warm benchmark scenes (T2) | sized to hold every string (`string_cache_entries = 2048` for 1,000 texts): 1,000 strings in 1,024 entries overflow eight-entry probe windows, and about a fifth of them missed every frame |
 
 ### Open
 

@@ -525,3 +525,49 @@ test "a steady frame measures nothing new" {
     _ = try harness.end();
     try testing.expectEqual(calls_after_three_frames, harness.ui.measureCalls());
 }
+
+/// `leading_words` moves where every later text's run widths go.
+fn declareStringCacheCases(ui: *support.Ui, width: f32, leading_words: usize) void {
+    ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(width) } } });
+    ui.text("w w w w w w w w w w"[0 .. 2 * leading_words + 1], .{});
+    ui.text("one two three", .{});
+    ui.text("one", .{});
+    ui.text("a b c d e f g h i j k l m n o p q r s t", .{});
+    ui.text("a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl\nm\nn\no\np\nq", .{ .wrap = .newlines });
+    ui.text("one two three", .{ .wrap = .none });
+    ui.text("one two three", .{ .size = 32 });
+    ui.close();
+}
+
+test "a cached string lays out as a freshly measured one, at any width and zoom" {
+    var cached: support.Harness = .{};
+    try cached.init();
+    defer cached.deinit();
+
+    const frames = [_]struct { width: f32, zoom: f32 }{
+        .{ .width = 64, .zoom = 1 },
+        .{ .width = 64, .zoom = 1 },
+        .{ .width = 200, .zoom = 1 },
+        .{ .width = 64, .zoom = 2 },
+        .{ .width = 64, .zoom = 1 },
+    };
+    var calls_after_first_frame: u64 = 0;
+    for (frames, 0..) |frame_params, index| {
+        var fresh: support.Harness = .{};
+        try fresh.init();
+        defer fresh.deinit();
+
+        var expected_buffer: [2048]u8 = undefined;
+        var actual_buffer: [2048]u8 = undefined;
+        const record: zui.FrameRecord = .{ .params = .{ .now = .zero, .viewport = .{ 800, 600 }, .zoom = frame_params.zoom } };
+        fresh.ui.beginFrame(&record);
+        declareStringCacheCases(&fresh.ui, frame_params.width, index);
+        const expected = try support.snapshot(try fresh.end(), &expected_buffer);
+        cached.ui.beginFrame(&record);
+        declareStringCacheCases(&cached.ui, frame_params.width, index);
+        try testing.expectEqualStrings(expected, try support.snapshot(try cached.end(), &actual_buffer));
+
+        if (index == 0) calls_after_first_frame = cached.ui.measureCalls();
+        if (index == 1 or index == 2) try testing.expectEqual(calls_after_first_frame, cached.ui.measureCalls());
+    }
+}

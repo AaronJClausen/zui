@@ -46,7 +46,7 @@ fn measureTexts(comptime Ui: type, ui: *Ui, frame: *Ui.Frame) void {
             parallel_measure.prefetch(Ui, ui, frame.texts[text_index..frame.text_count], frame.text_bytes[0..frame.text_bytes_used], frame.zoom, Ui.limits.parallel_measure_threshold);
         }
         const content = frame.text_bytes[record.bytes_start..][0..record.bytes_len];
-        record.metrics = text.measureMetrics(ui.measurer(record.style, frame.zoom), content, record.style.wrap, record.style.line_height, &ui.memory.run_widths, &run_count);
+        record.metrics = text.measureText(ui.measurer(record.style, frame.zoom), content, record.style.wrap, record.style.line_height, &ui.memory.run_widths, &run_count);
     }
 }
 
@@ -331,6 +331,9 @@ fn wrapTexts(comptime Ui: type, ui: *Ui, frame: *Ui.Frame) void {
     for (frame.texts[0..frame.text_count]) |*record| {
         const element = record.element;
         const content = frame.text_bytes[record.bytes_start..][0..record.bytes_len];
+        if (record.metrics.run_widths_pending and !text.fitsOneLine(record.style.wrap, record.metrics, frame.size[element][0])) {
+            text.measurePendingRuns(ui.measurer(record.style, frame.zoom), content, record.style.wrap, record.metrics, &ui.memory.run_widths);
+        }
         record.first_line = frame.line_count;
         const fitted = text.wrapLines(
             content,

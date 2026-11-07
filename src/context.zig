@@ -69,6 +69,8 @@ pub const Limits = struct {
     state_frames_until_eviction: u8 = 2,
     /// The segment cache. A power of two.
     measure_cache_entries: u32 = 4096,
+    /// The whole-string cache. A power of two.
+    string_cache_entries: u32 = 1024,
     /// Fingers, pens and mice touching or hovering at once.
     max_input_contacts: u8 = 10,
     /// Input events kept from one record.
@@ -230,7 +232,7 @@ pub fn Context(comptime config: Config) type {
         const id_table_slots = nextPowerOfTwo(limits.max_elements * 2);
 
         const TextContract = if (has_text) config.Text else void;
-        pub const Cache = if (has_text) text_layout.MeasureCache(config.FontId, limits.measure_cache_entries, TextContract) else void;
+        pub const Cache = if (has_text) text_layout.MeasureCache(config.FontId, limits.measure_cache_entries, limits.string_cache_entries, TextContract) else void;
         pub const measures_in_parallel = has_text and @hasDecl(TextContract, "zui_thread_safe") and TextContract.zui_thread_safe;
         const MeasureBatch = if (measures_in_parallel) parallel_measure.MeasureBatch(MeasureKey, TextContract, limits.parallel_measure_capacity) else void;
         const run_width_capacity = if (has_text) text_layout.maxRuns(limits.max_text_bytes, limits.max_elements) else 0;
@@ -1374,7 +1376,7 @@ pub fn Context(comptime config: Config) type {
 
 fn validateConfig(comptime config: Config) void {
     const limits = config.limits;
-    for ([_]Limit{ .state_slots, .measure_cache_entries }) |limit| {
+    for ([_]Limit{ .state_slots, .measure_cache_entries, .string_cache_entries }) |limit| {
         const value = @field(limits, @tagName(limit));
         if (!std.math.isPowerOfTwo(value)) @compileError(std.fmt.comptimePrint("zui: limits.{t} must be a power of two, got {d}", .{ limit, value }));
     }
