@@ -13,10 +13,10 @@ const state_table = @import("state.zig");
 const parallel_measure = @import("parallel_measure.zig");
 const contracts = @import("contracts.zig");
 const trace = @import("trace.zig");
+const sources_module = @import("sources.zig");
 
 const Id = id_module.Id;
 const Instant = record_types.Instant;
-const FrameRecord = record_types.FrameRecord;
 const NextFrame = record_types.NextFrame;
 const HostRequests = record_types.HostRequests;
 const Cursor = record_types.Cursor;
@@ -28,6 +28,10 @@ pub const Config = struct {
     /// The text contract: a type with `zuiMeasure`. `void` removes `text`
     /// from the API.
     Text: type = void,
+    /// The application's sources: a struct whose every field implements
+    /// the source contract, swapped in field order at each `beginFrame`.
+    /// `void` removes the `sources` parameter and `source` from the API.
+    Sources: type = void,
 
     /// The renderer's image, e.g. a texture id. `void` removes `image`.
     ImageHandle: type = void,
@@ -91,9 +95,15 @@ pub const Diagnostics = struct {
     first_dropped_id: u64 = 0,
     duplicate_ids: u32 = 0,
     unbalanced: bool = false,
+    /// Publishes that full sources refused since their previous swap,
+    /// summed over every source. Each refused item stayed its producer's.
+    refused_publishes: u32 = 0,
+    /// The `Sources` field that refused first, e.g. "quotes": the one
+    /// whose capacity to raise. Empty when none refused.
+    first_refusing_source: []const u8 = "",
 
     pub fn ok(self: Diagnostics) bool {
-        return self.exceeded.count() == 0 and self.duplicate_ids == 0 and !self.unbalanced;
+        return self.exceeded.count() == 0 and self.duplicate_ids == 0 and !self.unbalanced and self.refused_publishes == 0;
     }
 
     /// For applications that would rather stop than draw what fit.
@@ -103,8 +113,13 @@ pub const Diagnostics = struct {
     /// try frame.diagnostics.check();
     /// ```
     pub fn check(self: Diagnostics) error{ CapacityExceeded, UnbalancedTree }!void {
-        if (self.exceeded.count() != 0) return error.CapacityExceeded;
+        if (self.exceeded.count() != 0 or self.refused_publishes != 0) return error.CapacityExceeded;
         if (self.unbalanced) return error.UnbalancedTree;
+    }
+
+    fn addRefusals(self: *Diagnostics, source_name: []const u8, refused: u32) void {
+        if (self.refused_publishes == 0) self.first_refusing_source = source_name;
+        self.refused_publishes +|= refused;
     }
 };
 
@@ -175,11 +190,26 @@ pub fn Context(comptime config: Config) type {
     comptime validateConfig(config);
     if (config.Text != void) comptime contracts.checkText(config.Text, config.FontId);
     if (config.features.Tracer != void) comptime contracts.checkTracer(config.features.Tracer);
+    if (config.Sources != void) comptime contracts.checkSources(config.Sources);
 
     return struct {
         const Self = @This();
 
         pub const limits = config.limits;
+        pub const has_sources = config.Sources != void;
+        pub const Sources = config.Sources;
+        /// Names a source in `source` and `framesSinceRead`: `.quotes`.
+        pub const SourceField = if (has_sources) std.meta.FieldEnum(Sources) else enum {};
+        const source_count = @typeInfo(SourceField).@"enum".fields.len;
+        /// What each source received at one `beginFrame`, for replay.
+        pub const Deliveries = if (has_sources) sources_module.Deliveries(Sources) else void;
+        /// What `beginFrame` takes: with `deliveries` when there are sources.
+        pub const FrameRecord = if (has_sources) record_types.FrameRecordWith(Deliveries) else record_types.FrameRecord;
+
+        /// The read-only handle `source(field)` returns.
+        pub fn SourceView(comptime field: SourceField) type {
+            return @FieldType(Sources, @tagName(field)).View;
+        }
         pub const Tracing = trace.Tracing(config.features.Tracer);
         pub const has_text = config.Text != void;
         pub const FontId = config.FontId;
@@ -432,6 +462,12 @@ pub fn Context(comptime config: Config) type {
         cursor_chain_position: usize = no_cursor,
         text_input_caret: ?u64 = null,
 
+        /// Held from `beginFrame` to `endFrame` only: between frames the
+        /// sources are the application's alone.
+        sources_in_frame: if (has_sources) ?*Sources else void = if (has_sources) null else {},
+        /// `frames_begun` when each source was last read; 0 for one never read.
+        frames_begun_at_last_read: [source_count]u64 = @splat(0),
+
         const no_cursor = std.math.maxInt(usize);
 
         /// `init(gpa, io, text)`, or `init(gpa, io)` when `Text` is `void`.
@@ -490,29 +526,53 @@ pub fn Context(comptime config: Config) type {
         // Frame lifecycle
         // =============================================================
 
-        /// Waits for a free frame if a renderer holds all of them.
-        pub fn beginFrame(self: *Self, record: *const FrameRecord) void {
+        /// `beginFrame(record, sources)`, or `beginFrame(record)` when
+        /// `Sources` is `void`. Applies the record, then swaps each source in
+        /// field order, or injects `record.deliveries` when it is set. Waits
+        /// for a free frame if a renderer holds all of them.
+        pub const beginFrame = if (has_sources) beginFrameWithSources else beginFrameWithoutSources;
+        /// `beginFrame` for hosts that cannot block.
+        pub const tryBeginFrame = if (has_sources) tryBeginFrameWithSources else tryBeginFrameWithoutSources;
+
+        fn beginFrameWithSources(self: *Self, record: *const FrameRecord, sources: *Sources) void {
+            self.beginWaiting(record, sources);
+        }
+
+        fn beginFrameWithoutSources(self: *Self, record: *const FrameRecord) void {
+            self.beginWaiting(record, {});
+        }
+
+        fn tryBeginFrameWithSources(self: *Self, record: *const FrameRecord, sources: *Sources) error{NoFreeFrame}!void {
+            return self.tryBegin(record, sources);
+        }
+
+        fn tryBeginFrameWithoutSources(self: *Self, record: *const FrameRecord) error{NoFreeFrame}!void {
+            return self.tryBegin(record, {});
+        }
+
+        const SourcesPointer = if (has_sources) *Sources else void;
+
+        fn beginWaiting(self: *Self, record: *const FrameRecord, sources: SourcesPointer) void {
             if (self.current != null) @panic("zui: beginFrame() called again before endFrame()");
             const zone = Tracing.begin(.begin_frame);
             defer zone.end();
             const waiting = Tracing.begin(.wait_for_frame);
             const frame = self.waitForFreeFrame();
             waiting.end();
-            self.begin(frame, record);
+            self.begin(frame, record, sources);
         }
 
-        /// For hosts that cannot block.
-        pub fn tryBeginFrame(self: *Self, record: *const FrameRecord) error{NoFreeFrame}!void {
+        fn tryBegin(self: *Self, record: *const FrameRecord, sources: SourcesPointer) error{NoFreeFrame}!void {
             if (self.current != null) @panic("zui: beginFrame() called again before endFrame()");
             const zone = Tracing.begin(.begin_frame);
             defer zone.end();
             const waiting = Tracing.begin(.wait_for_frame);
             const free_frame = self.takeFreeFrame();
             waiting.end();
-            self.begin(free_frame orelse return error.NoFreeFrame, record);
+            self.begin(free_frame orelse return error.NoFreeFrame, record, sources);
         }
 
-        fn begin(self: *Self, frame: *Frame, record: *const FrameRecord) void {
+        fn begin(self: *Self, frame: *Frame, record: *const FrameRecord, sources: SourcesPointer) void {
             frame.reset(self.frames_begun, record.params);
             self.frames_begun += 1;
             self.previous_instant = if (self.frames_begun > 1) self.now_instant else null;
@@ -528,6 +588,7 @@ pub fn Context(comptime config: Config) type {
             const applying = Tracing.begin(.apply_events);
             self.applyEvents(frame, record.events);
             applying.end();
+            if (has_sources) self.swapSources(frame, record, sources);
             self.current = frame;
             self.dropped_depth = 0;
             self.depth = 0;
@@ -566,6 +627,38 @@ pub fn Context(comptime config: Config) type {
             return null;
         }
 
+        fn swapSources(self: *Self, frame: *Frame, record: *const FrameRecord, sources: *Sources) void {
+            self.sources_in_frame = sources;
+            if (source_count == 0) return;
+            const swapping = Tracing.begin(.swap_sources);
+            defer swapping.end();
+            if (record.deliveries) |deliveries| {
+                inline for (@typeInfo(Sources).@"struct".fields) |field| {
+                    @field(sources, field.name).zuiInject(&@field(deliveries, field.name));
+                }
+                return;
+            }
+            inline for (@typeInfo(Sources).@"struct".fields) |field| {
+                const source_value = &@field(sources, field.name);
+                source_value.zuiSwap();
+                if (@hasDecl(field.type, "zuiRefusedCount")) {
+                    const refused = source_value.zuiRefusedCount();
+                    if (refused != 0) frame.diagnostics.addRefusals(field.name, refused);
+                }
+            }
+        }
+
+        /// Lets each source settle its own demand, such as the keys this
+        /// frame asked it for.
+        fn settleSources(self: *Self, frame: *const Frame) void {
+            const sources = self.sources_in_frame.?;
+            self.sources_in_frame = null;
+            const info: sources_module.EndFrameInfo = .{ .frame_number = frame.number, .frames_in_flight = config.frames_in_flight };
+            inline for (@typeInfo(Sources).@"struct".fields) |field| {
+                if (@hasDecl(field.type, "zuiEndFrame")) @field(sources, field.name).zuiEndFrame(info);
+            }
+        }
+
         /// Always returns a frame to draw. If a limit was exceeded, the
         /// part that fit was laid out, and `frame.diagnostics` says which
         /// limit to raise.
@@ -589,6 +682,7 @@ pub fn Context(comptime config: Config) type {
             results.has_frame = true;
             const focus = &self.memory.input.focus;
             if (focus.* != 0 and !results.isFocusable(focus.*)) focus.* = 0;
+            if (has_sources) self.settleSources(frame);
 
             frame.held.store(true, .release);
             self.current = null;
@@ -616,9 +710,21 @@ pub fn Context(comptime config: Config) type {
         }
 
         /// When the host should run the next frame: at once if one was
-        /// requested, at the earliest `requestFrameAt`, or else when input
-        /// arrives. An idle UI therefore uses no CPU.
-        pub fn nextFrame(self: *const Self) NextFrame {
+        /// requested or a source has something not yet swapped, at the
+        /// earliest `requestFrameAt`, or else when input arrives. An idle UI
+        /// therefore uses no CPU. `nextFrame(sources)`, or `nextFrame()`
+        /// when `Sources` is `void`; called after the loader, so what it
+        /// published counts.
+        pub const nextFrame = if (has_sources) nextFrameWithSources else nextFrameWithoutSources;
+
+        fn nextFrameWithSources(self: *const Self, sources: *const Sources) NextFrame {
+            inline for (@typeInfo(Sources).@"struct".fields) |field| {
+                if (@hasDecl(field.type, "zuiPending") and @field(sources, field.name).zuiPending()) return .immediately;
+            }
+            return self.nextFrameWithoutSources();
+        }
+
+        fn nextFrameWithoutSources(self: *const Self) NextFrame {
             if (self.frame_requested) return .immediately;
             if (self.requested_deadline) |deadline| return .{ .at = deadline };
             return .on_event;
@@ -665,6 +771,38 @@ pub fn Context(comptime config: Config) type {
         /// As the host last reported it through `environment` events.
         pub fn environment(self: *const Self) *const Environment {
             return &self.current_environment;
+        }
+
+        /// The read-only view of one source, as this frame's swap left it:
+        /// `ui.source(.quotes).items()`. Reading it is the frame's demand
+        /// for it, which `framesSinceRead` reports to the loader.
+        pub const source = if (has_sources) sourceOf else sourceWithoutSources;
+
+        fn sourceOf(self: *Self, comptime field: SourceField) SourceView(field) {
+            const sources = self.sources_in_frame orelse @panic("zui: source() is only available between beginFrame() and endFrame()");
+            self.frames_begun_at_last_read[@intFromEnum(field)] = self.frames_begun;
+            return @field(sources, @tagName(field)).zuiView();
+        }
+
+        fn sourceWithoutSources(_: *Self, comptime _: @EnumLiteral()) void {
+            @compileError("zui: source() needs Config.Sources set to a struct of sources");
+        }
+
+        /// 0 when the last frame to end read the source (or the frame being
+        /// declared has), 1 when the frame before it did, and `maxInt(u64)`
+        /// when none has. It counts frames, not time, so a sleeping UI never
+        /// looks as if no one were watching.
+        pub const framesSinceRead = if (has_sources) framesSinceReadOf else framesSinceReadWithoutSources;
+
+        fn framesSinceReadOf(self: *const Self, comptime field: SourceField) u64 {
+            const frames_begun_at_read = self.frames_begun_at_last_read[@intFromEnum(field)];
+            if (frames_begun_at_read == 0) return std.math.maxInt(u64);
+            const frames_ended = self.frames_begun - @intFromBool(self.current != null);
+            return frames_ended -| frames_begun_at_read;
+        }
+
+        fn framesSinceReadWithoutSources(_: *const Self, comptime _: @EnumLiteral()) u64 {
+            @compileError("zui: framesSinceRead() needs Config.Sources set to a struct of sources");
         }
 
         /// Asks the host for text input at `caret`'s rectangle in this

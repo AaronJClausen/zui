@@ -49,12 +49,25 @@ pub const FrameParams = struct {
 };
 
 /// Everything inbound for one frame. It is borrowed: zui copies what it
-/// keeps before `beginFrame` returns.
+/// keeps before `beginFrame` returns. A `Context` with sources takes
+/// `FrameRecordWith(Ui.Deliveries)` instead, as `Ui.FrameRecord`.
 pub const FrameRecord = struct {
     params: FrameParams,
     /// In arrival order.
     events: []const input.Event = &.{},
 };
+
+/// `FrameRecord` with recorded deliveries, for a `Context` with sources.
+pub fn FrameRecordWith(comptime Deliveries: type) type {
+    return struct {
+        params: FrameParams,
+        /// In arrival order.
+        events: []const input.Event = &.{},
+        /// Set to replay: each source takes its recorded delivery instead
+        /// of swapping.
+        deliveries: ?*const Deliveries = null,
+    };
+}
 
 /// The pointer's shape. Hosts map each to the closest their OS has.
 pub const Cursor = enum(u8) {

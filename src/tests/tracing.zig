@@ -8,6 +8,7 @@ const Tracer = support.RecordingTracer;
 const TracedUi = zui.Context(.{
     .limits = .{ .max_elements = 16, .max_text_bytes = 256, .max_render_commands = 32, .measure_cache_entries = 16 },
     .Text = support.FixedMetricsText,
+    .Sources = struct { idle: support.IdleSource = .{} },
     .features = .{ .Tracer = Tracer },
 });
 
@@ -17,7 +18,8 @@ test "every step of beginFrame and endFrame is a zone, nested in its call" {
     defer ui.deinit(testing.allocator);
 
     Tracer.clear();
-    ui.beginFrame(&support.record(.zero, &.{}));
+    var sources: TracedUi.Sources = .{};
+    ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 800, 600 } } }, &sources);
     ui.text("traced", .{});
     ui.box(.{ .floating = .{ .z = 1 }, .decoration = .{ .background = .black } });
     ui.release(ui.endFrame());
@@ -31,6 +33,8 @@ test "every step of beginFrame and endFrame is a zone, nested in its call" {
         .{ .zone = .evict_state, .edge = .end },
         .{ .zone = .apply_events, .edge = .begin },
         .{ .zone = .apply_events, .edge = .end },
+        .{ .zone = .swap_sources, .edge = .begin },
+        .{ .zone = .swap_sources, .edge = .end },
         .{ .zone = .begin_frame, .edge = .end },
         .{ .zone = .end_frame, .edge = .begin },
         .{ .zone = .measure_text, .edge = .begin },
@@ -67,14 +71,26 @@ test "tryBeginFrame traces the same steps as beginFrame" {
     defer ui.deinit(testing.allocator);
 
     Tracer.clear();
-    try ui.tryBeginFrame(&support.record(.zero, &.{}));
+    var sources: TracedUi.Sources = .{};
+    try ui.tryBeginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 800, 600 } } }, &sources);
     const recorded = try Tracer.recorded();
-    try testing.expectEqual(@as(usize, 8), recorded.len);
-    try testing.expectEqual(Tracer.Mark{ .zone = .begin_frame, .edge = .end }, recorded[7]);
+    try testing.expectEqual(@as(usize, 10), recorded.len);
+    try testing.expectEqual(Tracer.Mark{ .zone = .begin_frame, .edge = .end }, recorded[9]);
     ui.release(ui.endFrame());
 }
 
 test "without a tracer, a zone is zero-sized" {
     try testing.expectEqual(0, @sizeOf(support.Ui.Tracing.Zone));
     try testing.expect(!support.Ui.Tracing.enabled);
+}
+
+test "a context without sources has no swap_sources zone" {
+    const UntracedSourcesUi = zui.Context(.{ .limits = .{ .max_elements = 8 }, .features = .{ .Tracer = Tracer } });
+    var ui: UntracedSourcesUi = try .init(testing.allocator, testing.io);
+    defer ui.deinit(testing.allocator);
+
+    Tracer.clear();
+    ui.beginFrame(&support.record(.zero, &.{}));
+    for (try Tracer.recorded()) |mark| try testing.expect(mark.zone != .swap_sources);
+    ui.release(ui.endFrame());
 }

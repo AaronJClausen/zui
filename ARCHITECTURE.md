@@ -56,7 +56,7 @@ Frame = endFrame(declare(beginFrame(state, FrameRecord, Sources)))
 | source deliveries: each field of `Sources` swapped, or injected from a recorded record | semantics |
 | | host requests: cursor, IME area |
 | | diagnostics: limits, refusals, lowerings |
-| | after the frame: demand (`framesSinceRead`, keys asked) and `nextFrame()` |
+| | after the frame: demand (`framesSinceRead`, keys asked) and `nextFrame(sources)` |
 
 Nothing crosses in between. That is what makes relay, replay, testing and
 remote rendering the same mechanism: each is a producer or consumer of
@@ -179,7 +179,9 @@ What exists today is releases 0.1–0.5, the start of 0.6, stage 1
 `Config.limits` and the text contract, the frame record with `now`,
 scale and zoom, input as an ordered event log over a pointer table,
 `endFrame` that always returns a frame, `nextFrame()`, letter spacing
-through the measurement key, the environment and host requests, and `Element` with `decoration` and
+through the measurement key, the environment and host requests, sources
+in the core (the contract and its checks, swap and injection, demand,
+`Status` and `Waker`), and `Element` with `decoration` and
 `clip: Axes`. `TaskPool` is deleted.
 
 The code and the spec still differ in these places, each closed by the
@@ -187,7 +189,7 @@ roadmap item named:
 
 | Today | The spec | Where today | Item |
 |---|---|---|---|
-| no way to bring outside data into a frame; `TaskPool` is gone and nothing replaces it yet | sources, demand, the loader, `Waker`, `Status`, `zui_async` | `src/context.zig` | A3, A4 |
+| no default sources: an application writes its own against the contract, and `zui_testing.Driver` cannot drive a context with sources | `zui_async`'s `Latest`, `Stream`, `Task` and `KeyedLoads`; `expectSourceConforms`; `Driver.frameDelivering` | `zui_testing/`; `zui_async/` does not exist yet | A4 |
 | one fixed `RenderCommand` union, `image` and `custom` present even when their payload is `void` | generated from `Config.commands` and the payload types | `src/commands.zig`, `src/emission.zig` | C1 |
 | configs copied into the frame | config references, static styles | `src/context.zig`, `src/style.zig` | L8 |
 | `Widgets(Ui)` with a `Theme` struct | `Widgets(Ui, Skin)` | `zui_widgets/` | K5 |

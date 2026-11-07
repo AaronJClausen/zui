@@ -145,3 +145,14 @@ pub const RecordingTracer = struct {
         return marks[0..mark_count];
     }
 };
+
+/// A source that never receives anything: the cost of a source alone.
+pub const IdleSource = struct {
+    pub const Delivery = void;
+    pub const View = void;
+
+    pub fn zuiSwap(_: *IdleSource) void {}
+    pub fn zuiView(_: *IdleSource) View {}
+    pub fn zuiDelivery(_: *const IdleSource, _: *Delivery) void {}
+    pub fn zuiInject(_: *IdleSource, _: *const Delivery) void {}
+};

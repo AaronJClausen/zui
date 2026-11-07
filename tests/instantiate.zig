@@ -198,3 +198,78 @@ export fn zuiCheckTracer() u32 {
     zui_tracy.frameMark();
     return CheckTracer.open_zones + @intFromBool(zui.Context(.{ .features = .{ .Tracer = zui_tracy.Tracer } }).Tracing.enabled);
 }
+
+const CheckSource = struct {
+    pub const Delivery = ?u64;
+    pub const View = zui.StatusWithProgress(error{Timeout}!u64, f32);
+
+    published: ?u64 = null,
+    status: View = .idle,
+    received: ?u64 = null,
+    refused: u32 = 0,
+
+    pub fn zuiSwap(self: *CheckSource) void {
+        self.received = self.published;
+        if (self.published) |value| self.status = .{ .ready = value };
+        self.published = null;
+    }
+
+    pub fn zuiView(self: *CheckSource) View {
+        return self.status;
+    }
+
+    pub fn zuiDelivery(self: *const CheckSource, delivery: *Delivery) void {
+        delivery.* = self.received;
+    }
+
+    pub fn zuiInject(self: *CheckSource, delivery: *const Delivery) void {
+        if (delivery.*) |value| self.status = .fromResult(value);
+    }
+
+    pub fn zuiPending(self: *const CheckSource) bool {
+        return self.published != null;
+    }
+
+    pub fn zuiEndFrame(_: *CheckSource, _: zui.EndFrameInfo) void {}
+
+    pub fn zuiRefusedCount(self: *CheckSource) u32 {
+        defer self.refused = 0;
+        return self.refused;
+    }
+};
+
+const CheckSources = struct {
+    catalog: CheckSource = .{},
+    prices: CheckSource = .{},
+};
+
+const SourcedUi = zui.Context(.{ .limits = .{ .max_elements = 8 }, .Sources = CheckSources, .features = .{ .Tracer = CheckTracer } });
+
+var sourced_memory: [SourcedUi.required_bytes]u8 align(SourcedUi.buffer_alignment) = undefined;
+var check_sources: CheckSources = .{};
+
+fn wakeNothing(_: *anyopaque) void {}
+
+export fn zuiCheckSources(published: u64) u64 {
+    var ui = SourcedUi.initBuffer(&sourced_memory, undefined) catch return 0;
+    var wake_target: u8 = 0;
+    const waker: zui.Waker = .{ .context = &wake_target, .wakeFn = wakeNothing };
+    check_sources.catalog.published = published;
+    waker.wakeIf(.needed);
+    ui.tryBeginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 100, 100 } } }, &check_sources) catch return 0;
+    const shown: u64 = switch (ui.source(.catalog)) {
+        .idle, .canceled => 0,
+        .running => |fraction| @intFromFloat(fraction),
+        .ready => |value| value,
+        .failed => 1,
+    };
+    const first = ui.endFrame();
+    ui.release(first);
+    const recorded: SourcedUi.Deliveries = .{ .catalog = published, .prices = null };
+    ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 100, 100 } }, .deliveries = &recorded }, &check_sources);
+    _ = ui.source(.prices);
+    const second = ui.endFrame();
+    ui.release(second);
+    const pending = @intFromBool(ui.nextFrame(&check_sources) == .immediately);
+    return shown +% ui.framesSinceRead(.catalog) +% ui.framesSinceRead(.prices) +% second.diagnostics.refused_publishes +% pending;
+}

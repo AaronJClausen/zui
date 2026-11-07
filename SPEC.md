@@ -343,7 +343,7 @@ while (host.zuiPoll(window, &record)) {
     try renderer.zuiSubmit(surface, frame);
     ui.release(frame);              // or from the render thread
     app.load(&ui, io);              // the loader: demand → work
-    host.zuiWait(ui.nextFrame());
+    host.zuiWait(ui.nextFrame(&app.sources));
 }
 ```
 
@@ -353,7 +353,7 @@ declared, and before the wait, so work it starts can wake the next one.
 ### 6.2 The frame record
 
 ```zig
-pub const FrameRecord = struct {
+pub const FrameRecord = struct {   // a Context's is `Ui.FrameRecord`; `zui.FrameRecord` when Sources is void
     params: FrameParams,
     /// In arrival order. Valid until beginFrame returns.
     events: []const Event = &.{},
@@ -449,7 +449,7 @@ pub const NextFrame = union(enum) {
     at: Instant,
     on_event,      // sleep until input or a `Waker` wakes the host
 };
-pub fn nextFrame(self: *const Self) NextFrame
+pub fn nextFrame(self: *const Self, sources: *const config.Sources) NextFrame   // `sources` absent when Sources is void
 pub fn requestFrame(self: *Self) void
 pub fn requestFrameAt(self: *Self, instant: Instant) void   // e.g. the caret's next blink
 ```
@@ -459,6 +459,10 @@ swapped (§14.4) or a frame was requested; otherwise `.at` the earliest of
 every `requestFrameAt`, running momentum, and pending long-press and
 double-tap timers; otherwise `.on_event`. The host sleeps accordingly, so
 an idle UI uses no CPU and a blinking caret costs one frame per blink.
+
+`nextFrame` takes the sources, as `beginFrame` does, because zui holds
+no pointer into them between frames (§14.1), and it is called after the
+loader, whose publishes must count.
 
 ### 6.7 One frame of latency
 
@@ -1225,9 +1229,13 @@ pub fn source(self: *Self, comptime field: SourceField) SourceView(field)       
 pub fn framesSinceRead(self: *const Self, comptime field: SourceField) u64       // frames, not time (§14.5)
 ```
 
-- **`source`** sets the field's demand bit and returns its `View`. Every
-  read in a frame sees what the swap made readable. Outside a frame, it
-  panics in safe builds.
+- **`source`** records the frame's demand for the field and returns its
+  `View`. Every read in a frame sees what the swap made readable. Outside
+  a frame it panics, in every build: zui holds the sources only from
+  `beginFrame` to `endFrame`, so there is no view to read.
+- **Without sources** (`Sources = void`), `source` and `framesSinceRead`
+  are compile errors naming the field to set, and `beginFrame`,
+  `tryBeginFrame` and `nextFrame` take no `sources` parameter.
 - **`Deliveries`** is a struct built with `@Struct`, one field per
   source, named as in `Sources`, typed as that source's `Delivery`.
 - **Replay** sets `FrameRecord.deliveries`, and `beginFrame` calls
@@ -1241,6 +1249,7 @@ pub const Waker = struct {
     context: *anyopaque,                     // the host's own pointer, passed back to `wakeFn`
     wakeFn: *const fn (*anyopaque) void,
     pub fn wake(self: Waker) void
+    pub fn wakeIf(self: Waker, wake_needed: Wake) void   // wakes only for `.needed`: `waker.wakeIf(source.publish(value))`
 };
 pub const Wake = enum {
     needed,             // this publish made the source fresh: call `wake`
@@ -1262,9 +1271,11 @@ the wait is lost. The host conformance suite checks it (§19.4).
 ### 14.5 Demand
 
 - **Per source:** `framesSinceRead(.field)` is 0 when the last completed
-  frame read it, 1 when the one before did, and `maxInt(u64)` when none
-  has. It counts frames, not time, so a sleeping UI never looks as if no
-  one were watching.
+  frame read it (or the frame being declared has), 1 when the one before
+  did, and `maxInt(u64)` when none has. It counts frames, not time, so a
+  sleeping UI never looks as if no one were watching. A read costs one
+  store, of the frame's number into a per-source counter, so a frame
+  settles nothing for sources it did not read.
 - **Per key:** keyed sources record the keys their view was asked for,
   and settle them in `zuiEndFrame`.
 - **Abandoning.** Keyed and task sources carry an atomic abandon flag the
@@ -1286,19 +1297,25 @@ pub fn StatusWithProgress(comptime Result: type, comptime Progress: type) type
 | `.idle` | none | nothing started |
 | `.running` | `Progress` | started, not finished |
 | `.ready` | the payload of `Result` | finished with a value |
-| `.failed` | the error set of `Result`, without `Canceled` | **only when `Result` is an error union** |
+| `.failed` | the error set of `Result` | **only when `Result` is an error union with an error other than `Canceled`** |
 | `.canceled` | none | the producer gave up with `error.Canceled` |
 
 `Status` is plain core data, so a widget can take one without knowing
 where it came from, and an infallible result has no `.failed` prong to
-handle.
+handle. `Status(R).fromResult(result)` makes `.ready`, `.failed` or
+`.canceled` from what the work returned, and always turns
+`error.Canceled` into `.canceled`. The `.failed` payload still has
+`Canceled` in its type, because Zig cannot build an error set at
+comptime, but `fromResult` never puts it there.
 
 ### 14.7 Refusals
 
 A full source refuses the newest publish; the item stays the producer's,
-so nothing leaks. After each swap, refusals are added to the frame's
-diagnostics with the field's name:
-``"zui: source `quotes` refused 12 items; raise its capacity"``.
+so nothing leaks. After each swap, the count from `zuiRefusedCount` is
+added to the frame's diagnostics: `refused_publishes` sums every
+source's, and `first_refusing_source` names the field whose capacity to
+raise (`"quotes"`). A refusal makes `diagnostics.check()` return
+`error.CapacityExceeded`, as any exceeded limit does (§17.2).
 Drop-oldest is not offered: it would have the producer advance the
 reader's tail, which races with the read.
 
@@ -1307,7 +1324,9 @@ reader's tail, which races with the read.
 - **A source outlives its producers.** The application joins its work on
   its own `Io` (an `Io.Group`) before freeing its sources.
 - **One reader.** A source is swapped by one `Context`; safe builds
-  assert it.
+  assert it in the source, since the core keeps nothing in the source
+  to tell two contexts apart. `zui_async`'s sources assert that the
+  frame numbers `zuiEndFrame` sees only increase.
 - **Large data travels by handle.** A publish copies its value once, so
   a catalog or decoded image is published as a handle to immutable data,
   and handed back for release by the source.
@@ -1327,7 +1346,7 @@ reader's tail, which races with the read.
 | reading a source not in `Sources` | impossible: `field` is a `FieldEnum` |
 | a source never swapped | impossible: every field is swapped |
 | a missing `Status` prong, or `.failed` on an infallible result | compile error from the exhaustive switch |
-| two contexts swapping one source; two producers on a single-producer source; a run finished twice | safe-build assertion |
+| two contexts swapping one source; two producers on a single-producer source; a run finished twice | safe-build assertion in `zui_async`'s sources |
 | a full source; a forgotten release | diagnostics naming the field |
 
 ---
@@ -1482,7 +1501,7 @@ build's instruction counts are unchanged.
 
 | Zone | Encloses |
 |---|---|
-| `begin_frame` | `wait_for_frame`, `evict_state`, `apply_events`, `swap_sources`, `relay` (§6.3) |
+| `begin_frame` | `wait_for_frame`, `evict_state`, `apply_events`, `swap_sources` when `Sources` has a field, `relay` (§6.3) |
 | `end_frame` | `measure_text`, `fit_widths`, `distribute_widths`, `wrap_text`, `fit_heights`, `distribute_heights`, `position` (§8.2), then `emit`, and `sort_layers` when a frame has floating layers |
 
 - **`zuiBegin` and `zuiEnd` are plain functions,** with no tracer value,
@@ -1521,7 +1540,7 @@ frame, with full context.
 | `close` without `open` | panic | ignored; reported |
 | duplicate id in a frame | panic naming both declarations | the second is non-interactive; reported |
 | `scroll` or `focusable` without an id | panic | clips without scrolling / not focusable; reported |
-| `ui.source` outside a frame | panic | reads the last frame's view; the demand is not recorded |
+| `ui.source` outside a frame | panic | panic: zui holds no sources between frames (§14.3) |
 
 With `-Dzui-debug`, ids keep their names, so messages read
 `zui: duplicate id "save" (0x…) in one frame`.

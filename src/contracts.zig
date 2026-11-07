@@ -1,6 +1,7 @@
 const std = @import("std");
 const style = @import("style.zig");
 const trace = @import("trace.zig");
+const sources = @import("sources.zig");
 
 /// Every `zui`-prefixed declaration of every contract. One that is not
 /// here belongs to no contract, which is almost always a misspelling.
@@ -33,6 +34,37 @@ pub fn checkText(comptime Text: type, comptime FontId: type) void {
     }
 }
 
+pub fn checkSources(comptime Sources: type) void {
+    if (@typeInfo(Sources) != .@"struct") @compileError("zui: Sources must be a struct type, got " ++ @typeName(Sources));
+    for (@typeInfo(Sources).@"struct".fields) |field| checkSource(field.type, @typeName(Sources) ++ "." ++ field.name);
+}
+
+/// `name` is the field holding the source, e.g. `AppSources.quotes`, which
+/// says more than the source's own type when one type serves many fields.
+fn checkSource(comptime Source: type, comptime name: []const u8) void {
+    if (@typeInfo(Source) != .@"struct") @compileError("zui: " ++ name ++ " must be a struct type implementing zui.Source, got " ++ @typeName(Source));
+    checkKnownDeclarationsAs(Source, name);
+    for ([_][]const u8{ "Delivery", "View", "zuiSwap", "zuiView", "zuiDelivery", "zuiInject" }) |required| {
+        if (!@hasDecl(Source, required)) @compileError("zui: " ++ name ++ " does not implement zui.Source: missing `" ++ required ++ "`");
+    }
+    for ([_][]const u8{ "Delivery", "View" }) |type_name| {
+        const Declared = @TypeOf(@field(Source, type_name));
+        if (Declared != type) @compileError("zui: " ++ name ++ "." ++ type_name ++ " must be a type, found " ++ @typeName(Declared));
+    }
+    expectSignature(Source, name, "zuiSwap", fn (*Source) void);
+    expectSignature(Source, name, "zuiView", fn (*Source) Source.View);
+    expectSignature(Source, name, "zuiDelivery", fn (*const Source, *Source.Delivery) void);
+    expectSignature(Source, name, "zuiInject", fn (*Source, *const Source.Delivery) void);
+    if (@hasDecl(Source, "zuiPending")) expectSignature(Source, name, "zuiPending", fn (*const Source) bool);
+    if (@hasDecl(Source, "zuiEndFrame")) expectSignature(Source, name, "zuiEndFrame", fn (*Source, sources.EndFrameInfo) void);
+    if (@hasDecl(Source, "zuiRefusedCount")) expectSignature(Source, name, "zuiRefusedCount", fn (*Source) u32);
+}
+
+fn expectSignature(comptime Implementer: type, comptime name: []const u8, comptime declaration: []const u8, comptime Expected: type) void {
+    const Found = @TypeOf(@field(Implementer, declaration));
+    if (Found != Expected) @compileError("zui: " ++ name ++ "." ++ declaration ++ " must be " ++ @typeName(Expected) ++ ", found " ++ @typeName(Found));
+}
+
 pub fn checkTracer(comptime Tracer: type) void {
     if (@typeInfo(Tracer) != .@"struct") @compileError("zui: Tracer must be a struct type, got " ++ @typeName(Tracer));
     checkKnownDeclarations(Tracer);
@@ -54,11 +86,15 @@ pub fn checkTracer(comptime Tracer: type) void {
 }
 
 fn checkKnownDeclarations(comptime Implementer: type) void {
+    checkKnownDeclarationsAs(Implementer, @typeName(Implementer));
+}
+
+fn checkKnownDeclarationsAs(comptime Implementer: type, comptime name: []const u8) void {
     @setEvalBranchQuota(10 * known_declarations.len * @typeInfo(Implementer).@"struct".decls.len + 1000);
     for (@typeInfo(Implementer).@"struct".decls) |declaration| {
         if (!std.mem.startsWith(u8, declaration.name, "zui")) continue;
         for (known_declarations) |known| {
             if (std.mem.eql(u8, declaration.name, known)) break;
-        } else @compileError("zui: " ++ @typeName(Implementer) ++ " declares unknown `" ++ declaration.name ++ "`");
+        } else @compileError("zui: " ++ name ++ " declares unknown `" ++ declaration.name ++ "`");
     }
 }

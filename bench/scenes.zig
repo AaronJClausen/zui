@@ -270,3 +270,70 @@ pub const DocumentsView = struct {
         ui.close();
     }
 };
+
+/// A source whose producer has published nothing: its swap is one atomic
+/// load, as `zui_async.Latest`'s is.
+pub const IdleSource = struct {
+    pub const Delivery = ?u64;
+    pub const View = ?u64;
+
+    fresh: std.atomic.Value(bool) = .init(false),
+    published: u64 = 0,
+    front: ?u64 = null,
+    received: ?u64 = null,
+
+    pub fn zuiSwap(self: *IdleSource) void {
+        self.received = null;
+        if (!self.fresh.load(.acquire)) return;
+        self.front = self.published;
+        self.received = self.published;
+        self.fresh.store(false, .release);
+    }
+
+    pub fn zuiView(self: *IdleSource) View {
+        return self.front;
+    }
+
+    pub fn zuiDelivery(self: *const IdleSource, delivery: *Delivery) void {
+        delivery.* = self.received;
+    }
+
+    pub fn zuiInject(self: *IdleSource, delivery: *const Delivery) void {
+        if (delivery.*) |value| self.front = value;
+    }
+
+    pub fn zuiPending(self: *const IdleSource) bool {
+        return self.fresh.load(.acquire);
+    }
+};
+
+/// `DeepTree`, reading ten sources that receive nothing: what sources cost
+/// a frame when no data arrives, against `DeepTree` alone. A scene without
+/// formatting, so instantiating it twice changes no other scene's code.
+pub const DeepTreeWithIdleSources = struct {
+    pub const name = "depth 64, 10 idle sources";
+    pub const layout_target_ns: ?u64 = null;
+    pub const limits = DeepTree.limits;
+    pub const Sources = struct {
+        battery: IdleSource = .{},
+        network: IdleSource = .{},
+        sync_state: IdleSource = .{},
+        unread_count: IdleSource = .{},
+        clock: IdleSource = .{},
+        download_progress: IdleSource = .{},
+        search_results: IdleSource = .{},
+        notifications: IdleSource = .{},
+        presence: IdleSource = .{},
+        quotes: IdleSource = .{},
+    };
+
+    tree: DeepTree = .{},
+
+    pub fn declare(self: *DeepTreeWithIdleSources, ui: anytype, frame_index: usize) void {
+        const SourceField = @TypeOf(ui.*).SourceField;
+        inline for (std.meta.fields(Sources)) |field| {
+            if (ui.source(@field(SourceField, field.name)) != null) ui.requestFrame();
+        }
+        self.tree.declare(ui, frame_index);
+    }
+};

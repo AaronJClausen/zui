@@ -17,7 +17,7 @@ const warmup_frames = 4;
 const counted_frames = 10;
 const growth_tolerance = 1.02;
 
-const Scenarios = .{ scenes.BoxTree, scenes.TextWall, scenes.TextWallCold, scenes.DeepTree, scenes.WideTree, scenes.DocumentsView };
+const Scenarios = .{ scenes.BoxTree, scenes.TextWall, scenes.TextWallCold, scenes.DeepTree, scenes.WideTree, scenes.DocumentsView, scenes.DeepTreeWithIdleSources };
 
 const Phase = enum {
     /// `beginFrame` and the scene's declaration.
@@ -29,12 +29,13 @@ const Phase = enum {
 /// Runs one scenario in a fresh `Context`, with Callgrind collecting only
 /// while `phase` runs in the counted frames.
 fn runCounted(comptime Scene: type, io: Io, gpa: std.mem.Allocator, phase: Phase) !void {
-    const Ui = zui.Context(.{ .limits = Scene.limits, .Text = scenes.GlyphTableText });
+    const Ui = zui.Context(.{ .limits = Scene.limits, .Text = scenes.GlyphTableText, .Sources = if (@hasDecl(Scene, "Sources")) Scene.Sources else void });
     var text: scenes.GlyphTableText = .{};
     var ui = try Ui.init(gpa, io, &text);
     defer ui.deinit(gpa);
 
     var scene: Scene = .{};
+    var sources: Ui.Sources = if (Ui.has_sources) .{} else {};
     if (@hasField(Scene, "sentences")) _ = scene.sentences.get();
     for (0..warmup_frames + counted_frames) |frame_index| {
         const counted = frame_index >= warmup_frames;
@@ -42,7 +43,8 @@ fn runCounted(comptime Scene: type, io: Io, gpa: std.mem.Allocator, phase: Phase
         const counting_end_frame = counted and phase == .endFrame;
 
         if (counting_declare) callgrind.toggleCollect();
-        ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 1600, 1200 } } });
+        const record: Ui.FrameRecord = .{ .params = .{ .now = .zero, .viewport = .{ 1600, 1200 } } };
+        if (Ui.has_sources) ui.beginFrame(&record, &sources) else ui.beginFrame(&record);
         scene.declare(&ui, frame_index);
         if (counting_declare) callgrind.toggleCollect();
 

@@ -5,6 +5,8 @@ pub const TraceZone = enum {
     wait_for_frame,
     evict_state,
     apply_events,
+    /// Only for a `Context` whose `Sources` has a field.
+    swap_sources,
 
     end_frame,
     measure_text,

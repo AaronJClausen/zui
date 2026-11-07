@@ -6,6 +6,7 @@ const interaction = @import("interaction.zig");
 const input = @import("input.zig");
 const record = @import("record.zig");
 const trace = @import("trace.zig");
+const sources = @import("sources.zig");
 
 pub const Context = context.Context;
 pub const Config = context.Config;
@@ -17,9 +18,17 @@ pub const Diagnostics = context.Diagnostics;
 
 pub const TraceZone = trace.TraceZone;
 
+pub const Waker = sources.Waker;
+pub const Wake = sources.Wake;
+pub const EndFrameInfo = sources.EndFrameInfo;
+pub const Status = sources.Status;
+pub const StatusWithProgress = sources.StatusWithProgress;
+pub const Deliveries = sources.Deliveries;
+
 pub const Instant = record.Instant;
 pub const FrameParams = record.FrameParams;
 pub const FrameRecord = record.FrameRecord;
+pub const FrameRecordWith = record.FrameRecordWith;
 pub const NextFrame = record.NextFrame;
 pub const HostRequests = record.HostRequests;
 pub const Cursor = record.Cursor;
@@ -76,6 +85,7 @@ test {
     _ = @import("input.zig");
     _ = @import("state.zig");
     _ = @import("parallel_measure.zig");
+    _ = @import("sources.zig");
     _ = @import("tests/golden.zig");
     _ = @import("tests/invariants.zig");
     _ = @import("tests/memory.zig");
@@ -84,4 +94,5 @@ test {
     _ = @import("tests/frames.zig");
     _ = @import("tests/parallel.zig");
     _ = @import("tests/tracing.zig");
+    _ = @import("tests/sources.zig");
 }

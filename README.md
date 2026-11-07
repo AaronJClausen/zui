@@ -46,14 +46,17 @@ Implemented so far:
   a frame; `nextFrame()`; letter spacing, measured through the text
   contract's key; and the environment (theme, contrast, reduced motion,
   locale and more) with the cursor and text-input requests a frame makes
-  of its host.
+  of its host; and sources: application memory that producers publish
+  into from any thread, swapped into each frame at `beginFrame`, read
+  with `ui.source(.field)`, and reporting what the frame read so the
+  application's loader knows what to start or release.
 
 The reference backend and demo application live in
 [zui-raylib](https://github.com/AaronJClausen/zui-raylib). It and the
 other backends still use the API from before stage 2.
 
-Next, in the order of SPEC.md §21: the rest of stage 2: sources with
-`zui_async`, and the backends moved to the new API. After that come
+Next, in the order of SPEC.md §21: the rest of stage 2: the default
+sources in `zui_async`, and the backends moved to the new API. After that come
 the renderer and host contracts with `zui_app`, a native Windows host, the
 wire format, and from there text, layout, gestures, effects, an
 inspector and accessibility, more hosts, motion and text editing.
@@ -78,6 +81,10 @@ host.setCursor(frame.requests().cursor);
 ui.release(frame);
 waitFor(ui.nextFrame());
 ```
+
+With `.Sources = AppSources` in the `Config`, a struct whose fields are
+sources (SPEC.md §14), `beginFrame` and `nextFrame` also take
+`&app.sources`, and declaration reads them with `ui.source(.quotes)`.
 
 ## Requirements
 

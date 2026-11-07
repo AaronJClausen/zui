@@ -23,7 +23,7 @@ Each item says:
 | after 0.5 | declaration work: −42% to −56% | on `main` |
 | 0.6, in part | `bench-compare` (R2), startup benchmarks (P1), task completions at `beginFrame` (A2), the async design (A1) | done; the rest of 0.6 became stage 1 |
 | stage 1 | instruction counts in CI (R1), the tracer contract and `zui_tracy` (P2) | on `main`, but for a trace of the demo, which needs C8 |
-| stage 2, in part | the code brought to the spec's shape: C5, S1, I4, C6, A5 and `nextFrame` (I2); letter spacing (T3); the environment and host requests (I6) | on `main`; the other repos still need the same change (C8) |
+| stage 2, in part | the code brought to the spec's shape: C5, S1, I4, C6, A5 and `nextFrame` (I2); letter spacing (T3); the environment and host requests (I6); sources in the core (A3) | on `main`; the other repos still need the same change (C8) |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
@@ -47,8 +47,7 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
-| A3. Sources in the core | 2 | a new `src/sources.zig`, `src/context.zig`, `src/contracts.zig`, `tests/compile_errors/` | | |
-| A4. `zui_async` | 2 | a new `zui_async/` module; `expectSourceConforms` in `zui_testing/` | A3 | |
+| A4. `zui_async` | 2 | a new `zui_async/` module; `expectSourceConforms` and the driver's sources in `zui_testing/` | | |
 | C8. The backends on the stage-2 API | 2 | `../zui-raylib`, `../zui-sokol`, `../zui-terminal` | A4 | |
 | P2. The tracer contract: a trace of the demo | 1 | `../zui-raylib`'s demo with `zui_tracy` | C8 | waiting on C8; the rest is done |
 | T1. The single-line fast path | 6, early | `src/text.zig` | | |
@@ -81,8 +80,9 @@ Things to know:
   same commit, with the reason.
 - **The code has the spec's shape where the feature exists.** What is
   still missing is listed in ARCHITECTURE.md §7 with the item that adds
-  it. With `TaskPool` deleted, nothing brings outside data into a frame
-  until A3 and A4.
+  it. With `TaskPool` deleted, outside data reaches a frame only through
+  sources an application writes against the contract (A3) until A4
+  ships the defaults.
 - **Stage 2 ends in the other repos.** Its *Done when* in SPEC.md §21
   (the demo's thumbnail grid on `KeyedLoads`, idling at 0% CPU) can only
   be met in zui-raylib, which is C8.
@@ -124,6 +124,52 @@ Things to know:
 ---
 
 ## Done
+
+### A3. Sources in the core
+
+`Config.Sources`, checked at instantiation: a struct whose every field
+implements the source contract, with each missing or misspelled
+declaration and each wrong signature a compile error naming the field
+(`AppSources.quotes`). `beginFrame(record, sources)` swaps each field in
+order, or injects `record.deliveries`, in a `swap_sources` zone, and adds
+each source's `zuiRefusedCount` to the diagnostics
+(`refused_publishes`, `first_refusing_source`). `ui.source(.field)`
+returns the field's `View` and records the frame's demand, which
+`framesSinceRead` reports; `endFrame` calls each `zuiEndFrame`;
+`nextFrame(sources)` is immediate while a source's `zuiPending` is true.
+`Ui.FrameRecord`, `Ui.Deliveries` and `Ui.SourceField` are derived from
+`Sources`; with `Sources = void` none of this exists and no parameter
+changes. The vocabulary is core: `zui.Status`, `StatusWithProgress` (with
+`fromResult`), `Waker` (with `wakeIf`), `Wake` and `EndFrameInfo`.
+Eleven compile-error tests pin the messages of SPEC.md §14.9.
+
+Decided here, and written into SPEC.md:
+- **`nextFrame` takes the sources,** as `beginFrame` does, because zui
+  keeps no pointer into them between frames and the loader's publishes,
+  made after `endFrame`, must count.
+- **`ui.source` outside a frame panics in every build,** for the same
+  reason: there is no last view to read.
+- **A read is one store** of the frame's number into a per-source
+  counter, so `endFrame` settles nothing for the core's own demand.
+- **`.failed` carries `Result`'s whole error set:** Zig 0.16 cannot build
+  an error set without `Canceled` at comptime. It exists only when there
+  is an error besides `Canceled`, and `fromResult` never puts `Canceled`
+  in it.
+- **"Two contexts swapping one source" is asserted by the source,** as
+  the core keeps nothing in it; that assertion and the producer-side ones
+  are A4's.
+
+`zig build counts` against `66f4ca7`, in a local Docker container, with a
+new scenario, depth 64 reading ten sources that receive nothing: its
+declaration takes 80 instructions more than depth 64 alone (16,083
+against 16,003), about 8 per source, almost all the test source's own
+swap and the reads; its `endFrame` takes 1 more (24,882 against 24,881).
+Scenarios without sources moved by 6 instructions in declaration (+0.04%
+at most), from the two diagnostics fields `beginFrame` resets. That is
+how SPEC.md §20.2's "no more instructions than with none" is met: what
+remains is each source's own swap. The scenario is deliberately depth 64:
+a second instantiation of the documents view made LLVM outline its label
+formatting, which raised that scenario's declaration by 5.8%.
 
 ### I6. The environment and host requests
 
@@ -372,8 +418,8 @@ gesture timers. `needsFrame` goes.
 **Done when:** a test's caret blinks with frames only at its instants,
 and an idle context reports `.on_event`.
 
-**Status.** `requestFrame` and `requestFrameAt` are done; pending sources,
-momentum and gesture timers join it with A3 and I5.
+**Status.** `requestFrame`, `requestFrameAt` and pending sources (A3) are
+done; momentum and gesture timers join it with I5.
 
 **Spec.** §6.6.
 
@@ -391,24 +437,20 @@ over every limit still draws what fit.
 
 **Spec.** §6.3, §6.5, §17.
 
-### A3. Sources in the core
-
-**Plan.** `Config.Sources`; the contract checked at instantiation;
-`beginFrame` swapping each field in order or injecting
-`record.deliveries`, in a `swap_sources` trace zone; `ui.source(.field)` recording demand;
-`framesSinceRead`; refusals in diagnostics; `zui.Status`,
-`StatusWithProgress`, `Waker`, `Wake`.
-
-**Done when:** a frame with ten idle sources costs no more instructions
-than one with none; every check of SPEC.md §14.9 has its compile-error or
-safety test.
-
-**Spec.** §14.
-
 ### A4. `zui_async`
 
+**Grounding.** The core's side is done (A3): `Config.Sources` and its
+checks, the swap and injection in `beginFrame` (`src/context.zig`,
+`swapSources`), demand through `ui.source`, and `Status`, `Waker` and
+`EndFrameInfo` in `src/sources.zig`. `zui_testing.Driver` still calls
+`beginFrame(record)`, so it cannot drive a context with sources.
+
 **Plan.** `Latest`, `Stream`, `Task` and `KeyedLoads` as SPEC.md §19.1,
-and `expectSourceConforms` in `zui_testing`, run against each.
+and `expectSourceConforms` in `zui_testing`, run against each. The
+safe-build assertions of SPEC.md §14.9 live in these sources: one reader
+(the frame numbers `zuiEndFrame` sees only increase), one producer where
+declared, and a run finished once. `zui_testing.Driver` takes the
+application's sources and gains `frameDelivering` (SPEC.md §19.4).
 
 **Done when:** each passes the conformance suite under ThreadSanitizer
 and on a single-threaded `Io`; the demo's thumbnail grid runs on
@@ -947,6 +989,9 @@ Deliberate, and each a reason to choose zui:
 | Instruction counts | Callgrind on a fixed CPU model and fixed frames, in a fresh process per scenario and phase; CI fails on 2% growth over the parent (R1) |
 | Where the Tracy binding lives (P2) | a `zui_tracy` module in this repository, with Tracy as a lazy dependency, so every backend's demo can trace and applications that do not import it never fetch it |
 | Turning Tracy on (P2) | a build option, `-Dzui-tracy`; without it `zui_tracy.Tracer` is `void`, so code that names it compiles tracing out and fetches nothing |
+| Sources between frames (A3) | zui holds them only from `beginFrame` to `endFrame`; `nextFrame` takes them as a parameter, and `ui.source` outside a frame panics in every build |
+| `Status.failed` (A3) | `Result`'s whole error set, since Zig cannot subtract one at comptime; `fromResult` maps `Canceled` to `.canceled` |
+| One reader per source (A3) | asserted by the source from `zuiEndFrame`'s frame numbers, not by the core (A4) |
 | The tracer's shape (P2) | plain functions with the zone at comptime, no tracer value: profilers keep per-thread state, and Tracy needs a static location per zone |
 
 ### Open
