@@ -77,21 +77,24 @@ Implemented so far:
   and cross-thread wakes, and waits. All three backends pass the renderer
   suite in CI. `Config.features` turns semantics, gestures, wrapping and
   safety sweeps on or off; calling an API whose feature is off fails to
-  compile, naming the field to set.
+  compile, naming the field to set. And `zui_app`, which runs the whole
+  loop from one call, `zui_app.run(App, init, .{ .title = "demo" })`,
+  submitting on a render thread when the renderer allows and reporting
+  its capabilities, fallbacks and every exceeded limit once.
 
 The reference backend and demo application live in
 [zui-raylib](https://github.com/AaronJClausen/zui-raylib); the other
 backends are [zui-sokol](https://github.com/AaronJClausen/zui-sokol) and
 [zui-terminal](https://github.com/AaronJClausen/zui-terminal).
 
-Next, in the order of SPEC.md §21: `zui_app` and the raylib adapter host, a native Windows host, the wire format, and from there text,
+Next, in the order of SPEC.md §21: the raylib adapter host, a native Windows host, the wire format, and from there text,
 layout, gestures, effects, an inspector and accessibility, more hosts,
 motion and text editing. The box tree's layout budget (P4) comes early,
 as the text fast path and string cache did.
 [ROADMAP.md](ROADMAP.md) keeps the queue of work in order, and
 [ARCHITECTURE.md](ARCHITECTURE.md) shows how the pieces connect.
 
-Today's API, until stage 3 adds `zui_app`, which runs this loop for
+The loop by hand, which `zui_app.run` runs for
 you (SPEC.md §6.1):
 
 ```zig
@@ -248,6 +251,7 @@ exe.root_module.addImport("zui", zui.module("zui"));
 exe.root_module.addImport("zui_async", zui.module("zui_async"));
 exe.root_module.addImport("zui_widgets", zui.module("zui_widgets"));
 exe.root_module.addImport("zui_reflect", zui.module("zui_reflect"));
+exe.root_module.addImport("zui_app", zui.module("zui_app"));
 tests.root_module.addImport("zui_testing", zui.module("zui_testing"));
 // Tracing into Tracy; `.@"zui-tracy" = true` in the options above links it.
 exe.root_module.addImport("zui_tracy", zui.module("zui_tracy"));

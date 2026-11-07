@@ -21,6 +21,7 @@
         "zui_widgets",
         "zui_reflect",
         "zui_tracy",
+        "zui_app",
         "LICENSE",
         "README.md",
         "SPEC.md",

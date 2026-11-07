@@ -9,6 +9,13 @@ const zui_async = @import("zui_async");
 const zui_widgets = @import("zui_widgets");
 const zui_reflect = @import("zui_reflect");
 const zui_tracy = @import("zui_tracy");
+const zui_app = @import("zui_app");
+
+/// A freestanding target has no default log output, so an application there
+/// brings its own, as this one does.
+pub const std_options: std.Options = .{ .logFn = discardLog };
+
+fn discardLog(comptime _: std.log.Level, comptime _: @EnumLiteral(), comptime _: []const u8, _: anytype) void {}
 
 const CheckText = struct {
     pub fn zuiMeasure(_: *CheckText, text: []const u8, key: zui.MeasureKey(u16)) [2]f32 {
@@ -153,6 +160,7 @@ const EveryCommandRenderer = struct {
     pub const zui_commands: zui.CommandSet = .initFull();
     pub const zui_surfaces: zui.SurfaceKinds = .initFull();
     pub const zui_extended_color = false;
+    pub const zui_render_thread = true;
     pub const ImageHandle = u32;
     pub const MaterialHandle = u8;
     pub const CustomData = u16;
@@ -204,6 +212,12 @@ const OffscreenHost = struct {
     polls: u32 = 0,
     applied: zui.HostRequests = .{},
 
+    pub fn init(self: *OffscreenHost, _: std.Io, _: zui.WindowOptions) !void {
+        self.* = .{};
+    }
+
+    pub fn deinit(_: *OffscreenHost) void {}
+
     pub fn zuiPoll(self: *OffscreenHost, _: zui.WindowId, record: *zui.RecordBuilder) bool {
         self.polls += 1;
         record.begin(.{ .now = .fromNanoseconds(self.polls), .viewport = .{ 100, 100 } });
@@ -246,6 +260,41 @@ export fn zuiCheckHost() usize {
     host.zuiWaker().wake();
     return renderer.drawn;
 }
+
+const CheckApp = struct {
+    pub const Host = OffscreenHost;
+    pub const Renderer = EveryCommandRenderer;
+    const AppUi = zui.Context(zui_app.contextConfig(EveryCommandRenderer, .{ .limits = .{ .max_elements = 16 } }));
+
+    frames: u32 = 0,
+
+    pub fn zuiDeclare(app: *CheckApp, ui: *AppUi) void {
+        app.frames += 1;
+        ui.box(.{ .decoration = .{ .background = .black } });
+    }
+
+    pub fn zuiLoader(app: *CheckApp, _: *const AppUi, _: std.Io) void {
+        app.frames += 1;
+    }
+};
+
+var app_runner: zui_app.Runner(CheckApp) = undefined;
+var app_memory: [CheckApp.AppUi.required_bytes + 4096]u8 = undefined;
+
+export fn zuiCheckApp(io: *const std.Io) usize {
+    var fixed: std.heap.FixedBufferAllocator = .init(&app_memory);
+    app_runner.start(.{ .gpa = fixed.allocator(), .io = io.* }, .{ .title = "check", .notify = ignoreNotice }) catch return 0;
+    defer app_runner.stop();
+    while (app_runner.frame() catch return 0) {}
+    return app_runner.app.frames;
+}
+
+export fn zuiCheckRun(init: *const std.process.Init) usize {
+    zui_app.run(CheckApp, init.*, .{}) catch return 0;
+    return 1;
+}
+
+fn ignoreNotice(_: zui_app.Notice) void {}
 
 const EveryCommandHarness = struct {
     pub const config: zui.Config = every_command_config;

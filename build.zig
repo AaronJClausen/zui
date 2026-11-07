@@ -24,6 +24,7 @@ const compile_error_cases = [_]struct { name: []const u8, expected_error: []cons
     .{ .name = "renderer_unknown_declaration", .expected_error = "zui: renderer_unknown_declaration.Renderer declares unknown `zui_command`" },
     .{ .name = "renderer_without_surfaces", .expected_error = "zui: renderer_without_surfaces.Renderer.zui_surfaces names no surface kind, so no host can give it one" },
     .{ .name = "renderer_material_without_handle", .expected_error = "zui: renderer_material_without_handle.Renderer.zui_commands includes .material but renderer_material_without_handle.Renderer.MaterialHandle is void" },
+    .{ .name = "renderer_render_thread_not_bool", .expected_error = "zui: renderer_render_thread_not_bool.Renderer.zui_render_thread must be a bool, found comptime_int" },
     .{ .name = "renderer_commands_wrong_type", .expected_error = "zui: renderer_commands_wrong_type.Renderer.zui_commands must be a zui.CommandSet, found struct { comptime @EnumLiteral() = .gradient, comptime @EnumLiteral() = .shadow }" },
     .{ .name = "host_missing_poll", .expected_error = "zui: host_missing_poll.Host does not implement zui.Host: missing `zuiPoll`" },
     .{ .name = "host_wait_wrong_signature", .expected_error = "zui: host_wait_wrong_signature.Host.zuiWait must be fn (*host_wait_wrong_signature.Host, zui.NextFrame) void, found fn (*host_wait_wrong_signature.Host, u32) void" },
@@ -58,6 +59,12 @@ const compile_error_cases = [_]struct { name: []const u8, expected_error: []cons
     .{ .name = "reflect_unsupported_field", .expected_error = "zui_reflect: reflect_unsupported_field.Settings.on_change is *const fn () void, which the inspector cannot edit; hide it with `.fields.on_change = .{ .hidden = true }`" },
     .{ .name = "reflect_range_on_bool", .expected_error = "zui_reflect: reflect_range_on_bool.Settings.fullscreen is bool; min, max and step only apply to numbers" },
     .{ .name = "reflect_min_above_max", .expected_error = "zui_reflect: reflect_min_above_max.Settings.max_fps has min 240 above max 30" },
+    .{ .name = "app_missing_declare", .expected_error = "zui_app: app_missing_declare.App does not implement zui_app's application: missing `zuiDeclare`" },
+    .{ .name = "app_declare_wrong_signature", .expected_error = "zui_app: app_declare_wrong_signature.App.zuiDeclare must be fn (*app_declare_wrong_signature.App, *Ui) void, where Ui is a zui.Context" },
+    .{ .name = "app_unknown_declaration", .expected_error = "zui_app: app_unknown_declaration.App declares unknown `zuiLoder`" },
+    .{ .name = "app_field_without_default", .expected_error = "zui_app: app_field_without_default.App has no `init`, so every field needs a default; `window_count` has none" },
+    .{ .name = "app_without_sources_field", .expected_error = "zui_app: app_without_sources_field.App needs a field `sources: app_without_sources_field.AppSources`, the Config's Sources, for zui_app to swap" },
+    .{ .name = "app_host_without_init", .expected_error = "zui_app: app_host_without_init.OffscreenHost must declare `pub fn init(self: *app_host_without_init.OffscreenHost, io: std.Io, window: zui.WindowOptions) !void`, which opens its window" },
 };
 
 pub fn build(b: *std.Build) void {
@@ -124,8 +131,16 @@ pub fn build(b: *std.Build) void {
         },
     });
 
+    const app_module = b.addModule("zui_app", .{
+        .root_source_file = b.path("zui_app/zui_app.zig"),
+        .target = target,
+        .optimize = optimize,
+        .sanitize_thread = if (sanitize_thread) true else null,
+        .imports = &.{.{ .name = "zui", .module = zui_module }},
+    });
+
     const test_step = b.step("test", "Run the unit tests and the compile-error tests");
-    const tested_modules = [_]*std.Build.Module{ zui_module, testing_module, async_module, widgets_module, reflect_module, tracy_module };
+    const tested_modules = [_]*std.Build.Module{ zui_module, testing_module, async_module, widgets_module, reflect_module, tracy_module, app_module };
     for (tested_modules) |tested_module| {
         const module_tests = b.addTest(.{ .root_module = tested_module, .use_llvm = if (sanitize_thread) true else null });
         test_step.dependOn(&b.addRunArtifact(module_tests).step);
@@ -146,6 +161,7 @@ pub fn build(b: *std.Build) void {
                     .{ .name = "zui_async", .module = async_module },
                     .{ .name = "zui_widgets", .module = widgets_module },
                     .{ .name = "zui_reflect", .module = reflect_module },
+                    .{ .name = "zui_app", .module = app_module },
                 },
             }),
         });
@@ -179,6 +195,7 @@ pub fn build(b: *std.Build) void {
                 .{ .name = "zui_async", .module = async_module },
                 .{ .name = "zui_widgets", .module = widgets_module },
                 .{ .name = "zui_reflect", .module = reflect_module },
+                .{ .name = "zui_app", .module = app_module },
                 .{ .name = "zui_tracy", .module = tracy_module },
             },
         }),
@@ -242,7 +259,7 @@ pub fn build(b: *std.Build) void {
     b.step("bench-compare", "Alternate the benchmarks of two commits: -- <base> [<head>] [--rounds <count>]").dependOn(&run_bench_compare.step);
     test_step.dependOn(&bench_compare_executable.step);
 
-    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "tests", "bench", "zui_testing", "zui_async", "zui_widgets", "zui_reflect", "zui_tracy" };
+    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "tests", "bench", "zui_testing", "zui_async", "zui_widgets", "zui_reflect", "zui_tracy", "zui_app" };
     b.step("fmt", "Format all Zig sources").dependOn(&b.addFmt(.{ .paths = formatted_paths }).step);
     b.step("fmt-check", "Fail if any Zig source is not formatted").dependOn(&b.addFmt(.{ .paths = formatted_paths, .check = true }).step);
 }

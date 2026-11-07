@@ -14,3 +14,16 @@ pub const HostCapabilities = struct {
 
     pub const Windows = enum { one, many };
 };
+
+/// What a host opens a window with: `zui_app` passes it to the host's
+/// `init`, and a host with many windows will open each one with it.
+pub const WindowOptions = struct {
+    /// UTF-8.
+    title: [:0]const u8 = "zui",
+    /// The window's content area, in layout units at a scale of 1.
+    size: [2]u32 = .{ 1280, 720 },
+    /// False for a window that never shows, as tests and offscreen
+    /// captures want.
+    visible: bool = true,
+    resizable: bool = true,
+};

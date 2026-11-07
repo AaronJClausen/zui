@@ -215,6 +215,10 @@ pub fn Context(comptime config: Config) type {
 
         pub const limits = config.limits;
         pub const features = config.features;
+        /// Frames alive at once; a render thread can hold all but one.
+        pub const frames_in_flight = config.frames_in_flight;
+        /// The text contract, or `void`.
+        pub const Text = config.Text;
         pub const has_sources = config.Sources != void;
         pub const Sources = config.Sources;
         /// Names a source in `source` and `framesSinceRead`: `.quotes`.

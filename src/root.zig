@@ -30,8 +30,9 @@ pub const SurfaceKinds = surface.SurfaceKinds;
 
 /// Fails to compile, with a message naming the declaration, unless
 /// `Renderer` implements the renderer contract: `zuiSubmit` and
-/// `zui_surfaces`, and optionally `zui_commands`, `zui_extended_color` and
-/// the payload types `ImageHandle`, `MaterialHandle`, `CustomData` and
+/// `zui_surfaces`, and optionally `zui_commands`, `zui_extended_color`,
+/// `zui_render_thread` (`zuiSubmit` may run on a thread other than the
+/// one that made the renderer) and the payload types `ImageHandle`, `MaterialHandle`, `CustomData` and
 /// `FontId`.
 ///
 /// ```zig
@@ -46,6 +47,7 @@ pub const checkRenderer = contracts.checkRenderer;
 
 pub const WindowId = host.WindowId;
 pub const HostCapabilities = host.HostCapabilities;
+pub const WindowOptions = host.WindowOptions;
 
 /// Fails to compile, with a message naming the declaration, unless `Host`
 /// implements the host contract: `zuiPoll`, `zuiWaker`, `zuiWait`,

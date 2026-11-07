@@ -108,9 +108,10 @@ only plain names are types the application uses directly: a source's
 |---|---|---|---|---|
 | Text | a renderer or a font library | `zuiMeasure` | `zuiSegment`, `zui_thread_safe`, `zuiFingerprint` | §9.4 |
 | Source | `zui_async` or the application | `Delivery`, `View`, `zuiSwap`, `zuiView`, `zuiDelivery`, `zuiInject` | `zuiPending`, `zuiEndFrame`, `zuiRefusedCount` | §14.2 |
-| Renderer | a renderer | `zuiSubmit`, `zui_surfaces` | `zui_commands`, `zui_extended_color`, payload types | §16.2 |
+| Renderer | a renderer | `zuiSubmit`, `zui_surfaces` | `zui_commands`, `zui_extended_color`, `zui_render_thread`, payload types | §16.2 |
 | Host | a host | `zuiPoll`, `zuiWaker`, `zuiWait`, `zuiSurface`, `zuiApply`, `zui_surfaces` | `zui_capabilities`, services (`zuiClipboard`, `zuiFileDialogs`, …) | §16.3 |
 | Tracer | a profiler binding | `zuiBegin`, `zuiEnd` | | §16.5 |
+| Application | the application, run by `zui_app` | `Host`, `Renderer`, `zuiDeclare` | `zuiLoader`, `init`, `deinit` | §19.5 |
 | Skin | a theme pack or the application | `zuiStyle` | | §19.2 |
 | Wire payload | an application type with pointers | `zuiSerialize`, `zuiDeserialize` | | §19.6 |
 
@@ -192,7 +193,9 @@ and the check that a host and a renderer share a surface kind, proven so
 far by a test host (no backend is a host until H1); and the conformance
 suites for renderers and hosts in `zui_testing`, whose renderer suite the
 three backends run in CI; and `Features`, whose fields gate their APIs
-with compile errors naming them. From stage 6, the single-line fast path and the
+with compile errors naming them; and `zui_app`, the loop of SPEC.md §6.1 as a
+library, with a render thread, pacing and its reports, tested against an
+offscreen host (no real host runs it until H1). From stage 6, the single-line fast path and the
 whole-string cache have landed.
 
 The code and the spec still differ in these places, each closed by the

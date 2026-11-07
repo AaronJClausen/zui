@@ -1419,6 +1419,7 @@ the contract's:
 |---|---|---|
 | Source | `Delivery`, `View` | the application writes `Source.View`; the wire format names `Delivery` |
 | Renderer | `ImageHandle`, `MaterialHandle`, `CustomData`, `FontId` | they are the renderer's real types, which `contextConfig` copies into `Config` |
+| Application (`zui_app`) | `Host`, `Renderer` | the composition root names its host and renderer; `zui_app` reads them to open the window and draw |
 
 These are the only plain names a contract reads. They are checked like
 the prefixed ones: a missing required one is a compile error, and an
@@ -1442,6 +1443,7 @@ const SokolRenderer = struct {
     pub const zui_commands: zui.CommandSet = .initMany(&.{ .gradient, .shadow });              // optional commands it draws
     pub const zui_surfaces: zui.SurfaceKinds = .initMany(&.{ .win32, .cocoa, .wayland, .x11 }); // native windows it can draw into
     pub const zui_extended_color = false;                                                      // accepts HDR colors
+    pub const zui_render_thread = true;                                                        // zuiSubmit may run on zui_app's render thread
     pub const ImageHandle = Texture;
     pub const MaterialHandle = void;
     pub const FontId = u16;
@@ -1456,6 +1458,11 @@ const SokolRenderer = struct {
 holds is its exhaustive `switch` over each command's payload: a command
 the renderer did not declare is a compile error at that `switch`.
 `zui.checkRenderer(Renderer)` checks the rest of the contract.
+
+`zui_render_thread` (default `false`) says that `zuiSubmit` may be called
+on a thread other than the one that made the renderer and its surface,
+so `zui_app` may submit from a render thread of its own. A renderer bound
+to its thread's graphics context, as raylib's is, leaves it out.
 
 `zui_app.contextConfig(Renderer, .{ ... })` builds a `Config` from a
 renderer's declarations (commands, payload types, text), so the
@@ -1489,6 +1496,8 @@ pub const HostCapabilities = struct {
     windows: enum { one, many } = .one,
     system_material: bool = false,
 };
+/// What a host opens a window with (`zui_app` passes it to the host's `init`).
+pub const WindowOptions = struct { title: [:0]const u8 = "zui", size: [2]u32 = .{ 1280, 720 }, visible: bool = true, resizable: bool = true };
 
 /// Filled by `zuiPoll`, in buffers the application reserved, so polling allocates nothing.
 pub const RecordBuilder = struct {
@@ -1824,6 +1833,45 @@ application's `zuiDeclare` and optional `zuiLoader`, moves submission to
 a render thread when the renderer allows, applies host requests, paces
 to `nextFrame`, and reports capabilities and fallbacks. An application
 that wants its own loop writes the six lines of §6.1 instead.
+
+```zig
+const App = struct {
+    pub const Host = zui_raylib.Host;
+    pub const Renderer = zui_raylib.Renderer;
+    pub const Ui = zui.Context(zui_app.contextConfig(Renderer, .{ .Sources = AppSources }));
+
+    sources: AppSources = .{},
+
+    pub fn init(app: *App, start: zui_app.Start(App)) !void { ... }   // optional; else every field has a default
+    pub fn zuiDeclare(app: *App, ui: *Ui) void { ... }
+    pub fn zuiLoader(app: *App, ui: *const Ui, io: std.Io) void { ... } // optional
+    pub fn deinit(app: *App) void { ... }                              // optional
+};
+```
+
+- **What it builds.** `contextConfig` takes the renderer's commands and
+  payload types, and the renderer itself as `Text` when it declares
+  `zuiMeasure`, so `zui_app` hands the context the renderer to measure
+  with. `Ui` is read from `zuiDeclare`'s parameter.
+- **What it opens.** The host declares `init(self, io, window:
+  zui.WindowOptions) !void` (title, size, visible, resizable) and
+  `deinit`; the renderer may declare `init(self, surface) !void` and
+  `deinit`. `Start(App)` gives the application the allocator, the `Io`,
+  the process, its host and the host's `Waker`.
+- **The render thread.** With `zui_render_thread` and more than one frame
+  in flight, frames go through a queue of `frames_in_flight` entries to a
+  task on the application's `Io` that submits and releases them; the UI
+  thread applies host requests before handing a frame over. An error
+  there is returned by a later `frame()`.
+- **What it reports,** once each, through `Options.notify` (by default
+  `std.log`): at start, the host, its capabilities, where frames are
+  submitted and why, the optional commands lowered and the services the
+  host lacks; then the first time input is dropped by the record
+  builder, each limit is exceeded, a source refuses, ids repeat or the
+  tree is unbalanced.
+- **`Runner(App)`** is `run` one frame at a time, for tests and hosts
+  that drive the loop. Each mistake in `App` is a compile error naming
+  it: ``"zui_app: demo.App declares unknown `zuiLoder`"``.
 
 ### 19.6 `zui_wire`
 

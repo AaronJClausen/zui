@@ -59,7 +59,7 @@ green, and its **Status** line below says which slice is next.
 |---|---|---|---|---|
 | P4. The box tree's layout and emission within budget | 6, early | `src/layout.zig`, `src/emission.zig` | | waiting on P5 |
 | P5. The box tree's declaration within budget | 6, early | `src/context.zig` | L8 | waiting on L8 |
-| C4. `zui_app` | 3 | a new `zui_app/` module | C3 | |
+| C4. `zui_app` | 3 | a new `zui_app/` module | C3 | in progress: the demo waits on H1 |
 | H1. The raylib adapter host | 3 | `../zui-raylib` | C4 | |
 | H2. The Windows host | 4 | `../zui-host` | H1 | |
 | H8. The desktop showing through the window | 4 | `../zui-host` | H2 | |
@@ -800,6 +800,14 @@ logged once, as a limit is (SPEC.md §17.2).
 its time from process start to its first presented frame is measured
 (from P1).
 
+**Status.** The module is done in this repository: `contextConfig`,
+`run` and `Runner(App)`, the render thread (a renderer's new
+`zui_render_thread`), pacing, `Options.notify` with the start report and
+each drop or limit once, the application's checks with six compile-error
+tests, and tests against an offscreen host and renderer, including on a
+single-threaded `Io`. The demo and its cold start wait for H1's host,
+which `zui_app` needs to run it.
+
 **Spec.** §6.1, §19.5.
 
 ### H1. The raylib adapter host
@@ -1326,6 +1334,11 @@ Deliberate, and each a reason to choose zui:
 | Reading pixels back (C3) | optional: without `pixel` the renderer suite checks only that each frame draws without an error; every backend today reads back, zui-sokol through OpenGL's `glReadPixels`, so its suite renders with OpenGL on every system |
 | A lost wake in the host suite (C3) | bounded: after `lost_wake_ns` the suite wakes the host every 50 ms until the wait ends, and fails |
 | Warm benchmark scenes (T2) | sized to hold every string (`string_cache_entries = 2048` for 1,000 texts): 1,000 strings in 1,024 entries overflow eight-entry probe windows, and about a fifth of them missed every frame |
+| How `zui_app` knows the host and renderer (C4) | the application declares `pub const Host` and `pub const Renderer`, plain names like a renderer's payload types; `Ui` is read from `zuiDeclare`'s parameter |
+| How `zui_app` opens them (C4) | the host's `init(self, io, zui.WindowOptions) !void` and `deinit`; the renderer's optional `init(self, surface) !void`; `zui.WindowOptions` is core vocabulary, since every host opens windows with it and H9 will open many |
+| When a renderer may submit on another thread (C4) | when it declares `zui_render_thread = true`; raylib and OpenGL-bound renderers leave it out, and `zui_app` reports why it submits on the UI thread |
+| How `zui_app` reports (C4) | `Options.notify`, a plain function given each notice once, logging through `std.log` by default; tests record them |
+| The application's text contract under `zui_app` (C4) | the renderer, through `contextConfig`; any other `Text` is a compile error |
 
 ### Open
 

@@ -199,13 +199,13 @@ pub const TextInputArea = struct {
     caret: Rect,
 };
 
-/// What a frame asks of the host rather than the renderer.
 /// One accessible element, as `Frame.semantics()` lists it.
 pub const SemanticNode = struct {
     id: u64,
     bounds: Rect,
 };
 
+/// What a frame asks of the host rather than the renderer.
 pub const HostRequests = struct {
     /// The shape for the hot element under the hovering pointer.
     cursor: Cursor = .default,
