@@ -86,6 +86,11 @@ In every item's commit:
 - [ ] **README.md:** the status list when a stage or user-visible feature
       ships; the API example whenever the API it shows changes; the
       *Development* table when a build step changes.
+- [ ] **docs/feature-tour.html and docs/feature-tour.md:** when a
+      user-visible feature ships or its API changes, add or update its
+      entry in both, with an example in a consumer's own code; move a
+      feature out of *Declared but not working yet* once it works. The two
+      files carry the same content and change together.
 - [ ] **Doc comments** on every new or changed `pub` declaration.
 
 New items take the next number in their series, and numbers are never

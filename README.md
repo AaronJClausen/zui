@@ -141,6 +141,10 @@ backends are [zui-sokol](https://github.com/AaronJClausen/zui-sokol) and
 [zui-terminal](https://github.com/AaronJClausen/zui-terminal); native
 hosts live in [zui-host](https://github.com/AaronJClausen/zui-host).
 
+[docs/feature-tour.html](docs/feature-tour.html) walks through every
+shipped feature in the code a consumer writes, with semantic highlighting;
+open it in a browser, or read [docs/feature-tour.md](docs/feature-tour.md).
+
 Next, in the order of SPEC.md §21: text,
 layout, gestures, effects, an inspector and accessibility, more hosts,
 motion and text editing.

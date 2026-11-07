@@ -1,0 +1,2031 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>zui Feature Tour</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:ital,wght@0,400;0,600;1,400&display=swap">
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #14161b;
+  --panel: #1b1e25;
+  --code-bg: #181b21;
+  --code-gutter: #4b5263;
+  --line-hover: #20242c;
+  --fg: #d7dae0;
+  --muted: #8d95a5;
+  --border: #2a2f39;
+  --accent: #f0a63c;
+  --accent-soft: rgba(240, 166, 60, .14);
+  --ok: #7fc28a;
+  --ok-soft: rgba(127, 194, 138, .14);
+  --warn: #e0a45a;
+  --warn-soft: rgba(224, 164, 90, .14);
+
+  --t-default: #abb2bf;
+  --t-keyword: #c678dd;
+  --t-control: #c678dd;
+  --t-type: #e5c07b;
+  --t-namespace: #f0f2f5;
+  --t-function: #61afef;
+  --t-method: #61afef;
+  --t-property: #e06c75;
+  --t-enumMember: #56b6c2;
+  --t-variable: #d7dae0;
+  --t-parameter: #f0b17a;
+  --t-constant: #d19a66;
+  --t-number: #d19a66;
+  --t-string: #98c379;
+  --t-builtin: #ff8fc6;
+  --t-comment: #7f848e;
+
+  --font-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --font-code: "JetBrains Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg: #f5f6f8; --panel: #ffffff; --code-bg: #fbfbfc; --code-gutter: #a7adb9; --line-hover: #f0f2f6;
+    --fg: #23262d; --muted: #5b6270; --border: #dfe2e8;
+    --accent: #a95f00; --accent-soft: rgba(169, 95, 0, .1);
+    --ok: #2f7d3e; --ok-soft: rgba(47, 125, 62, .1); --warn: #9a5a00; --warn-soft: rgba(154, 90, 0, .1);
+    --t-default: #4b4f58; --t-keyword: #a626a4; --t-control: #a626a4; --t-type: #946200; --t-namespace: #16181d;
+    --t-function: #3168e0; --t-method: #3168e0; --t-property: #c9373a; --t-enumMember: #0b7ea8; --t-variable: #23262d;
+    --t-parameter: #a64f12; --t-constant: #b35a00; --t-number: #b35a00; --t-string: #3f8b3e; --t-builtin: #c42a74; --t-comment: #8a8f99;
+  }
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f5f6f8; --panel: #ffffff; --code-bg: #fbfbfc; --code-gutter: #a7adb9; --line-hover: #f0f2f6;
+  --fg: #23262d; --muted: #5b6270; --border: #dfe2e8;
+  --accent: #a95f00; --accent-soft: rgba(169, 95, 0, .1);
+  --ok: #2f7d3e; --ok-soft: rgba(47, 125, 62, .1); --warn: #9a5a00; --warn-soft: rgba(154, 90, 0, .1);
+  --t-default: #4b4f58; --t-keyword: #a626a4; --t-control: #a626a4; --t-type: #946200; --t-namespace: #16181d;
+  --t-function: #3168e0; --t-method: #3168e0; --t-property: #c9373a; --t-enumMember: #0b7ea8; --t-variable: #23262d;
+  --t-parameter: #a64f12; --t-constant: #b35a00; --t-number: #b35a00; --t-string: #3f8b3e; --t-builtin: #c42a74; --t-comment: #8a8f99;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-body);
+  font-size: 15.5px;
+  line-height: 1.62;
+}
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+
+.shell {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 40px;
+  max-width: 1320px;
+  margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 28px 80px;
+}
+
+/* ---------- explorer ---------- */
+.explorer {
+  position: sticky;
+  top: calc(env(safe-area-inset-top, 0px) + 20px);
+  align-self: start;
+  max-height: calc(100vh - 40px);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+.explorer-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 14px 12px;
+  min-height: 0;
+}
+.toc-panel { overflow-y: auto; flex: 1 1 auto; }
+.panel-label {
+  font-family: var(--font-code);
+  font-size: 11px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 8px;
+}
+.toc { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.toc > li > a {
+  display: block;
+  font-weight: 600;
+  font-size: 13.5px;
+  padding: 4px 8px;
+  border-radius: 5px;
+  text-decoration: none;
+}
+.toc ul { list-style: none; margin: 0 0 6px; padding: 0 0 0 10px; border-left: 1px solid var(--border); margin-left: 12px; }
+.toc ul a {
+  display: block;
+  font-size: 13px;
+  color: var(--muted);
+  padding: 2px 8px;
+  border-radius: 4px;
+  text-decoration: none;
+}
+.toc a:hover { background: var(--line-hover); color: var(--fg); }
+.toc a.active { color: var(--accent); background: var(--accent-soft); }
+
+.legend { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 3px 6px; }
+.legend button {
+  all: unset;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 3px 6px;
+  border-radius: 4px;
+  font-family: var(--font-code);
+  font-size: 12px;
+  cursor: pointer;
+}
+.legend button:hover { background: var(--line-hover); }
+.legend button[aria-pressed="true"] { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+.legend button:focus-visible { outline: 2px solid var(--accent); }
+.swatch { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+.legend-hint { font-size: 12px; color: var(--muted); margin: 8px 0 0; line-height: 1.45; }
+
+/* ---------- main column ---------- */
+main { min-width: 0; max-width: 900px; }
+.masthead { padding-bottom: 28px; border-bottom: 1px solid var(--border); margin-bottom: 8px; }
+.crumbs { font-family: var(--font-code); font-size: 12.5px; color: var(--muted); margin: 0 0 12px; }
+.crumbs b { color: var(--accent); font-weight: 600; }
+h1 {
+  font-size: clamp(30px, 4.4vw, 44px);
+  line-height: 1.1;
+  letter-spacing: -.02em;
+  margin: 0 0 14px;
+  text-wrap: balance;
+}
+.lede { font-size: 17px; color: var(--fg); max-width: 66ch; margin: 0 0 18px; }
+.facts { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 18px; padding: 0; list-style: none; }
+.facts li {
+  font-family: var(--font-code);
+  font-size: 12.5px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+}
+.facts li b { color: var(--accent); font-weight: 600; }
+.callout {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  border-radius: 8px;
+  padding: 12px 16px;
+  font-size: 14px;
+  color: var(--muted);
+  max-width: 72ch;
+}
+.callout strong { color: var(--fg); }
+
+section.group { padding-top: 44px; }
+.group-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 6px; }
+.group-index { font-family: var(--font-code); font-size: 13px; color: var(--accent); }
+h2 { font-size: 27px; letter-spacing: -.01em; margin: 0; line-height: 1.2; text-wrap: balance; }
+.group-intro { color: var(--muted); max-width: 68ch; margin: 6px 0 4px; }
+
+article.feature { padding-top: 30px; scroll-margin-top: 16px; }
+.feature-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+h3 { font-size: 19.5px; margin: 0; line-height: 1.3; text-wrap: balance; }
+.pill {
+  font-family: var(--font-code);
+  font-size: 11px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 600;
+}
+.pill.shipped { color: var(--ok); background: var(--ok-soft); }
+.pill.partial { color: var(--warn); background: var(--warn-soft); }
+.feature p, .feature li { max-width: 70ch; }
+.feature p { margin: 8px 0; }
+.feature ul.points { margin: 8px 0; padding-left: 20px; }
+.feature ul.points li { margin: 3px 0; }
+
+.api { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 4px; padding: 0; list-style: none; }
+.api li code { display: inline-block; padding: 2px 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--code-bg); font-size: 12.5px; }
+
+code { font-family: var(--font-code); font-size: .87em; }
+p code, li code, td code { background: var(--code-bg); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+.api li code { padding: 2px 8px; }
+
+table.ref { border-collapse: collapse; font-size: 14px; margin: 12px 0; min-width: 520px; }
+.table-wrap { overflow-x: auto; max-width: 100%; }
+table.ref th, table.ref td { text-align: left; border-bottom: 1px solid var(--border); padding: 7px 14px 7px 0; vertical-align: top; }
+table.ref th { font-family: var(--font-code); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+
+/* ---------- code "editor" ---------- */
+figure.code {
+  margin: 16px 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--code-bg);
+  overflow: hidden;
+}
+.code-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 6px 0 14px;
+  height: 36px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+.code-file { font-family: var(--font-code); font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.code-file b { color: var(--fg); font-weight: 600; }
+.copy {
+  font-family: var(--font-code);
+  font-size: 11.5px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 3px 10px;
+  cursor: pointer;
+  flex: none;
+}
+.copy:hover { color: var(--fg); border-color: var(--muted); }
+figure.code pre {
+  margin: 0;
+  padding: 12px 0;
+  overflow-x: auto;
+  font-family: var(--font-code);
+  font-size: 13px;
+  line-height: 1.62;
+  tab-size: 4;
+  counter-reset: line;
+  color: var(--t-default);
+}
+figure.code pre code { font-size: inherit; display: block; min-width: max-content; }
+.line { display: block; padding: 0 18px 0 0; }
+.line:hover { background: var(--line-hover); }
+.line::before {
+  counter-increment: line;
+  content: counter(line);
+  display: inline-block;
+  width: 3.4em;
+  padding-right: 1.2em;
+  text-align: right;
+  color: var(--code-gutter);
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+}
+figcaption { font-size: 13.5px; color: var(--muted); padding: 10px 14px; border-top: 1px solid var(--border); }
+
+.tok { transition: opacity .15s ease; }
+.t-keyword { color: var(--t-keyword); }
+.t-control { color: var(--t-control); font-style: italic; }
+.t-type { color: var(--t-type); }
+.t-namespace { color: var(--t-namespace); font-weight: 600; }
+.t-function { color: var(--t-function); }
+.t-method { color: var(--t-method); }
+.t-property { color: var(--t-property); }
+.t-enumMember { color: var(--t-enumMember); }
+.t-variable { color: var(--t-variable); }
+.t-parameter { color: var(--t-parameter); font-style: italic; }
+.t-constant { color: var(--t-constant); }
+.t-number { color: var(--t-number); }
+.t-string { color: var(--t-string); }
+.t-builtin { color: var(--t-builtin); }
+.t-comment { color: var(--t-comment); font-style: italic; }
+.decl { font-weight: 600; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; text-decoration-color: color-mix(in srgb, currentColor 45%, transparent); }
+
+[data-spot] .tok:not(.spot) { opacity: .28; }
+
+pre.plain { margin: 0; padding: 12px 18px; overflow-x: auto; font-family: var(--font-code); font-size: 12.5px; line-height: 1.6; color: var(--t-default); }
+
+.errors { list-style: none; padding: 0; margin: 12px 0; display: grid; gap: 6px; }
+.errors li {
+  font-family: var(--font-code);
+  font-size: 12.5px;
+  line-height: 1.5;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--t-property);
+  overflow-wrap: anywhere;
+  max-width: none;
+}
+.errors li span { color: var(--t-property); font-weight: 600; }
+
+.gap-list { display: grid; gap: 10px; margin: 14px 0; padding: 0; list-style: none; }
+.gap-list li { padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); max-width: none; }
+.gap-list li b { display: block; margin-bottom: 2px; }
+.gap-list li span { color: var(--muted); font-size: 14px; }
+
+.verdict { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 14px; }
+.verdict > div { border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 14px 18px; }
+.verdict h4 { margin: 0 0 6px; font-size: 13px; font-family: var(--font-code); letter-spacing: .06em; text-transform: uppercase; }
+.verdict .good h4 { color: var(--ok); }
+.verdict .rough h4 { color: var(--warn); }
+.verdict ul { margin: 0; padding-left: 18px; font-size: 14.5px; }
+.verdict li { margin: 6px 0; }
+
+.mobile-toggle { display: none; }
+
+@media (max-width: 980px) {
+  .shell { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .explorer { position: static; max-height: none; margin-bottom: 8px; }
+  .toc-panel { display: none; }
+  .toc-panel.open { display: block; }
+  .mobile-toggle {
+    display: block;
+    font: 600 13px var(--font-body);
+    color: var(--fg);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .verdict { grid-template-columns: minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: reduce) { .tok { transition: none; } html { scroll-behavior: auto; } }
+html { scroll-behavior: smooth; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside class="explorer" aria-label="Contents and colour legend">
+    <button class="mobile-toggle" id="toc-toggle" aria-expanded="false" aria-controls="toc-panel">Contents</button>
+    <nav class="explorer-panel toc-panel" id="toc-panel" aria-label="Contents">
+      <p class="panel-label">Explorer</p>
+      <ul class="toc" id="toc"></ul>
+    </nav>
+    <div class="explorer-panel">
+      <p class="panel-label">Semantic tokens</p>
+      <ul class="legend" id="legend"></ul>
+      <p class="legend-hint">Click a kind to spotlight it in every snippet. Hover any token to see its kind. Underlined tokens are declarations.</p>
+    </div>
+  </aside>
+
+  <main>
+    <header class="masthead">
+      <p class="crumbs">AaronJClausen/zui · <b>main</b> @ 075fbbd · Zig 0.16</p>
+      <h1>zui Feature Tour</h1>
+      <p class="lede">Everything a zui consumer can build with today, one feature at a time, each shown in the code you would write. The examples follow one running application: <strong>Darkroom</strong>, a photo library with albums, a thumbnail grid, a viewer and a settings panel.</p>
+      <ul class="facts">
+        <li><b>7</b> modules beside core</li>
+        <li><b>3</b> renderers + 1 native host</li>
+        <li><b>0</b> allocations after init</li>
+        <li>4,096 boxes: ~50 µs declare, ~90 µs layout</li>
+      </ul>
+      <div class="callout"><strong>How to read the snippets.</strong> Every zui name and signature is checked against the source at this commit. Application names (<code class="z">App</code>, <code class="z">Photo</code>, <code class="z">Fonts</code>, <code class="z">decodeThumbnail</code> and so on) are made up for the example, and the snippets were not compiled as a whole program.</div>
+    </header>
+
+    <section class="group" id="core" data-title="Declaring UI">
+      <div class="group-head"><span class="group-index">01</span><h2>Declaring UI</h2></div>
+      <p class="group-intro">The core: a context sized at compile time, elements declared as nested calls each frame, layout, text, and a flat list of render commands out.</p>
+
+      <article class="feature" id="context" data-title="Configuring a context">
+        <div class="feature-head"><h3>Configuring a context</h3><span class="pill shipped">Shipped</span></div>
+        <p>A <code class="z">zui.Context</code> is a type built from a <code class="z">Config</code>. Everything that varies between applications goes in the <code class="z">Config</code>: the text contract, the payload types the renderer understands, the sources, and every limit. All memory is reserved in <code class="z">init</code>, and nothing allocates after it.</p>
+        <p>Payload types that stay <code class="z">void</code> remove their API. If <code class="z">ImageHandle</code> is <code class="z">void</code>, then <code class="z">ui.image</code> doesn't exist and the render command union has no <code class="z">image</code> variant. <code class="z">initBuffer</code> runs the same context in memory you provide, with no allocator.</p>
+        <ul class="api"><li><code class="z">zui.Context(config)</code></li><li><code class="z">Config.limits</code></li><li><code class="z">Ui.init</code></li><li><code class="z">Ui.initBuffer</code></li><li><code class="z">frames_in_flight</code></li></ul>
+<script type="text/x-zig" data-file="src/main.zig">
+const std = @import("std");
+const zui = @import("zui");
+const Fonts = @import("fonts.zig").Fonts;
+const Texture = @import("gpu.zig").Texture;
+const AppSources = @import("sources.zig").AppSources;
+
+pub const Ui = zui.Context(.{
+    .Text = Fonts,
+    .Sources = AppSources,
+    .ImageHandle = Texture,
+    .FontId = Fonts.Face,
+    .limits = .{
+        .max_elements = 8192,
+        .max_render_commands = 16384,
+        .max_text_bytes = 128 * 1024,
+        .state_slots = 2048,
+    },
+    .frames_in_flight = 2,
+});
+
+pub fn main(init: std.process.Init) !void {
+    var fonts: Fonts = try .load(init.gpa, init.io, "assets/fonts");
+    defer fonts.deinit(init.gpa);
+
+    var ui: Ui = try .init(init.gpa, init.io, &fonts);
+    defer ui.deinit(init.gpa);
+
+    try runLoop(&ui);
+}
+</script>
+        <p>Limits are validated at compile time. For example, <code class="z">state_slots</code> must be a power of two, and the message says so (see <a href="#compile-errors">compile errors</a>).</p>
+      </article>
+
+      <article class="feature" id="elements" data-title="Elements, layout, decoration">
+        <div class="feature-head"><h3>Elements, layout and decoration</h3><span class="pill shipped">Shipped</span></div>
+        <p>Each frame you declare a tree. <code class="z">open</code> and <code class="z">close</code> bracket a container, <code class="z">box</code> is a leaf, and <code class="z">text</code> is a leaf with content. An element is a struct literal: <code class="z">layout</code> sets direction, sizing, padding, gap and alignment, and <code class="z">decoration</code> sets background, border and corner radius. Because <code class="z">defer ui.close()</code> keeps the tree balanced, a helper function reads like markup.</p>
+<script type="text/x-zig" data-file="src/ui/shell.zig">
+const zui = @import("zui");
+const Ui = @import("../main.zig").Ui;
+const App = @import("../app.zig").App;
+
+pub fn declareShell(app: *App, ui: *Ui) void {
+    ui.open(.{
+        .id = .of("window"),
+        .layout = .{ .direction = .top_to_bottom, .sizing = .grow_both },
+        .decoration = .{ .background = .rgb(0x15161b) },
+    });
+    defer ui.close();
+
+    toolbar(app, ui);
+
+    ui.open(.{ .layout = .{ .sizing = .grow_both } });
+    defer ui.close();
+    albumSidebar(app, ui);
+    photoGrid(app, ui);
+}
+
+fn toolbar(app: *App, ui: *Ui) void {
+    ui.open(.{
+        .id = .of("toolbar"),
+        .layout = .{
+            .direction = .left_to_right,
+            .sizing = .{ .width = .grow, .height = .fixed(44) },
+            .padding = .symmetric(12, 6),
+            .child_gap = 8,
+            .child_alignment = .{ .y = .center },
+        },
+        .decoration = .{
+            .background = .rgb(0x202028),
+            .border = .{ .color = .rgb(0x2c2c38), .widths = .{ .bottom = 1 } },
+        },
+    });
+    defer ui.close();
+
+    ui.text("Darkroom", .{ .size = 15, .color = .white });
+    ui.text(app.currentAlbum().name, .{ .size = 13, .color = .rgb(0x9a9aae) });
+    ui.box(.{ .layout = .{ .sizing = .{ .width = .grow } } });
+    importButton(app, ui);
+}
+</script>
+        <p>Elements without an <code class="z">id</code> get an internal one. Give an element an id when you want to query it, keep state on it, scroll it, or focus it.</p>
+      </article>
+
+      <article class="feature" id="sizing" data-title="Sizing rules">
+        <div class="feature-head"><h3>Sizing rules</h3><span class="pill shipped">Shipped</span></div>
+        <p>Each axis takes one <code class="z">Sizing</code> rule, with optional <code class="z">min</code> and <code class="z">max</code>. The grow basis landed in L1: <code class="z">grow</code> starts from the content and adds a share of the free space, and <code class="z">grow_equal</code> shares the whole width, so columns come out equal whatever they hold.</p>
+        <div class="table-wrap"><table class="ref">
+          <thead><tr><th>Rule</th><th>Behaves like</th><th>Use it for</th></tr></thead>
+          <tbody>
+            <tr><td><code class="z">.fit</code></td><td>shrink-wrap</td><td>buttons, labels, the default</td></tr>
+            <tr><td><code class="z">.fixed(44)</code></td><td>a fixed length</td><td>toolbars, icons, thumbnails</td></tr>
+            <tr><td><code class="z">.percent(0.3)</code></td><td>a share of the parent</td><td>split panes</td></tr>
+            <tr><td><code class="z">.grow</code></td><td>CSS <code>flex: auto</code></td><td>spacers, a content area</td></tr>
+            <tr><td><code class="z">.grow_equal</code></td><td>CSS <code>flex: 1</code></td><td>equal columns</td></tr>
+            <tr><td><code class="z">.growWeighted(3)</code></td><td><code>flex-grow: 3</code></td><td>uneven splits</td></tr>
+            <tr><td><code class="z">.fitBetween(180, 320)</code></td><td>fit, clamped</td><td>a sidebar that respects its content</td></tr>
+          </tbody>
+        </table></div>
+<script type="text/x-zig" data-file="src/ui/library.zig">
+fn albumSidebar(app: *App, ui: *Ui) void {
+    ui.open(.{
+        .id = .of("albums"),
+        .layout = .{
+            .direction = .top_to_bottom,
+            .sizing = .{ .width = .fitBetween(180, 320), .height = .grow },
+            .padding = .all(8),
+            .child_gap = 2,
+        },
+    });
+    defer ui.close();
+    for (app.albums.items, 0..) |album, index| albumRow(app, ui, album, index);
+}
+
+fn photoInfoColumns(ui: *Ui, photo: *const Photo) void {
+    ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 16 } });
+    defer ui.close();
+
+    const columns = [_][]const u8{ photo.camera, photo.lens, photo.exposure };
+    for (columns, 0..) |value, column| {
+        ui.open(.{ .id = .indexed("info_column", column), .layout = .{ .sizing = .{ .width = .grow_equal } } });
+        ui.text(value, .{ .size = 13 });
+        ui.close();
+    }
+}
+</script>
+      </article>
+
+      <article class="feature" id="static-styles" data-title="Static styles">
+        <div class="feature-head"><h3>Static styles</h3><span class="pill shipped">Shipped</span></div>
+        <p><code class="z">zui.static</code> builds a <code class="z">Style</code> at comptime and stores it in read-only memory. Elements reference it instead of copying it, so it costs one pointer per element. A <code class="z">layout</code> or <code class="z">decoration</code> set beside <code class="z">style</code> replaces the style's. This is what brought 4,096 styled boxes down to about 28 µs to declare.</p>
+<script type="text/x-zig" data-file="src/ui/styles.zig">
+const zui = @import("zui");
+
+pub const card = zui.static(zui.Style{
+    .layout = .{ .direction = .top_to_bottom, .padding = .all(10), .child_gap = 6 },
+    .decoration = .{ .background = .rgb(0x23232d), .corner_radius = .all(8) },
+});
+
+pub const selected_card = zui.static(zui.Style{
+    .layout = .{ .direction = .top_to_bottom, .padding = .all(10), .child_gap = 6 },
+    .decoration = .{
+        .background = .rgb(0x2b3350),
+        .border = .{ .color = .rgb(0x5b8cff), .widths = .all(2) },
+        .corner_radius = .all(8),
+    },
+});
+
+fn photoCard(app: *App, ui: *Ui, photo: *const Photo, index: usize) void {
+    const id: zui.Id = .indexed("photo", index);
+    ui.open(.{
+        .id = id,
+        .interactive = true,
+        .style = if (app.selection.contains(index)) selected_card else card,
+    });
+    defer ui.close();
+    thumbnail(app, ui, photo);
+    ui.text(photo.file_name, .{ .size = 12, .wrap = .none });
+}
+</script>
+      </article>
+
+      <article class="feature" id="ids" data-title="Ids">
+        <div class="feature-head"><h3>Ids</h3><span class="pill shipped">Shipped</span></div>
+        <p>Ids are hashes, built at comptime where they can be. <code class="z">.of</code> names one element, <code class="z">.indexed</code> names one per list item, <code class="z">child</code> and <code class="z">indexedChild</code> scope ids under a parent so two dropdowns' options never collide, and <code class="z">.dynamic</code> hashes a runtime string. <code class="z">zui.ids</code> builds a struct of ids and fails to compile on a repeated name or a hash collision. Build with <code class="z">-Dzui-debug=true</code> and duplicate-id panics name the element.</p>
+<script type="text/x-zig" data-file="src/ui/ids.zig">
+pub const ids = zui.ids(.{ "window", "toolbar", "albums", "grid", "viewer", "import" });
+
+fn albumRow(app: *App, ui: *Ui, album: Album, index: usize) void {
+    const row: zui.Id = .indexed("album", index);
+    ui.open(.{ .id = row, .interactive = true, .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 6 } });
+    defer ui.close();
+    ui.text(album.name, .{});
+    ui.box(.{ .layout = .{ .sizing = .{ .width = .grow } } });
+    ui.box(.{ .id = row.child("pin"), .interactive = true, .layout = .{ .sizing = .{ .width = .fixed(16), .height = .fixed(16) } } });
+
+    if (ui.clicked(row.child("pin"))) app.togglePinned(index);
+    if (ui.clicked(row)) app.openAlbum(index);
+}
+
+fn tagChip(ui: *Ui, tag: []const u8) void {
+    ui.open(.{ .id = .dynamic(tag), .interactive = true });
+    ui.text(tag, .{ .size = 12 });
+    ui.close();
+}
+</script>
+      </article>
+
+      <article class="feature" id="text" data-title="Text">
+        <div class="feature-head"><h3>Text</h3><span class="pill shipped">Shipped</span></div>
+        <p><code class="z">ui.text</code> copies its bytes into the frame, so the caller's buffer can be reused immediately. A <code class="z">TextStyle</code> carries font, size, letter spacing, line height, color, wrap mode and alignment. Measurements go through two caches, one per segment and one per whole string, so warm text costs one lookup. Text that fits on one line is laid out without walking its words. With a thread-safe text contract, a cold frame with many misses measures them in parallel, which is 4.3× as fast on 10 cores.</p>
+        <ul class="api"><li><code class="z">ui.text</code></li><li><code class="z">Ui.TextStyle</code></li><li><code class="z">TextWrap</code></li><li><code class="z">ui.measureText</code></li><li><code class="z">ui.measureCalls</code></li></ul>
+<script type="text/x-zig" data-file="src/ui/viewer.zig">
+const caption_style: Ui.TextStyle = .{ .font = .serif, .size = 15, .line_height = 22, .color = .rgb(0xdcdce4) };
+const label_style: Ui.TextStyle = .{ .font = .sans, .size = 11, .letter_spacing = 1.2, .color = .rgb(0x8a8a9c) };
+
+fn photoDetails(ui: *Ui, photo: *const Photo) void {
+    ui.open(.{
+        .id = .of("details"),
+        .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(320) }, .padding = .all(16), .child_gap = 8 },
+    });
+    defer ui.close();
+
+    ui.text("CAPTION", label_style);
+    ui.text(photo.caption, caption_style);
+
+    ui.text("FILE", label_style);
+    ui.text(photo.path, .{ .size = 12, .wrap = .none, .color = .rgb(0x9a9aae) });
+
+    var buffer: [64]u8 = undefined;
+    const dimensions = std.fmt.bufPrint(&buffer, "{d} × {d}", .{ photo.width, photo.height }) catch "";
+    ui.text(dimensions, .{ .size = 12, .alignment = .end });
+}
+
+fn truncatedWidth(ui: *Ui, name: []const u8) f32 {
+    return ui.measureText(name, .{ .size = 12 })[0];
+}
+</script>
+        <p>In a test, <code class="z">ui.measureCalls()</code> confirms that a steady-state frame never reaches the text contract.</p>
+      </article>
+
+      <article class="feature" id="text-contract" data-title="The text contract">
+        <div class="feature-head"><h3>The text contract you implement</h3><span class="pill shipped">Shipped</span></div>
+        <p>zui never touches fonts. You give it a type with <code class="z">zuiMeasure</code>, and optionally <code class="z">zui_thread_safe</code> to allow parallel measurement and <code class="z">zuiSegment</code> to report where a paragraph may break. Without <code class="z">zuiSegment</code>, text breaks after spaces. With it, CJK and Thai wrap between characters. A misspelled declaration such as <code class="z">zui_threadsafe</code> is a compile error rather than silently ignored.</p>
+<script type="text/x-zig" data-file="src/fonts.zig">
+const std = @import("std");
+const zui = @import("zui");
+
+pub const Fonts = struct {
+    pub const Face = enum(u8) { sans, serif, mono };
+    pub const zui_thread_safe = true;
+
+    faces: std.EnumArray(Face, Atlas),
+    breaker: LineBreaker,
+
+    pub fn zuiMeasure(self: *Fonts, text: []const u8, key: zui.MeasureKey(Face)) [2]f32 {
+        const atlas = self.faces.getPtr(key.font);
+        const advance = atlas.advance(text, key.size) + key.letter_spacing * @as(f32, @floatFromInt(text.len));
+        return .{ advance, atlas.lineHeight(key.size) };
+    }
+
+    pub fn zuiSegment(self: *Fonts, paragraph: []const u8, sink: *zui.BreakSink) void {
+        var opportunities = self.breaker.iterate(paragraph);
+        while (opportunities.next()) |offset| sink.add(offset);
+    }
+};
+</script>
+      </article>
+
+      <article class="feature" id="images" data-title="Images and custom elements">
+        <div class="feature-head"><h3>Images and self-drawn elements</h3><span class="pill shipped">Shipped</span></div>
+        <p><code class="z">ui.image</code> places the renderer's own image handle. <code class="z">ui.custom</code> places a payload your renderer draws itself, such as a 3D viewport or a histogram. Both are leaves that take an <code class="z">Element</code>, so they size, clip and hit-test like any box.</p>
+<script type="text/x-zig" data-file="src/ui/viewer.zig">
+const HistogramPayload = struct { photo_id: u64, channel: Channel };
+
+pub const Ui = zui.Context(.{ .Text = Fonts, .ImageHandle = Texture, .CustomData = HistogramPayload });
+
+fn viewer(app: *App, ui: *Ui, photo: *const Photo, texture: Texture) void {
+    ui.open(.{ .id = .of("viewer"), .layout = .{ .direction = .top_to_bottom, .sizing = .grow_both, .child_alignment = .{ .x = .center } } });
+    defer ui.close();
+
+    ui.image(.{ .handle = texture }, .{
+        .id = .of("full_image"),
+        .layout = .{ .sizing = .{ .width = .grow, .height = .grow } },
+    });
+    ui.custom(.{ .photo_id = photo.id, .channel = app.histogram_channel }, .{
+        .id = .of("histogram"),
+        .layout = .{ .sizing = .{ .width = .fixed(256), .height = .fixed(80) } },
+    });
+}
+</script>
+      </article>
+    </section>
+
+    <section class="group" id="input" data-title="Input and state">
+      <div class="group-head"><span class="group-index">02</span><h2>Input, interaction and state</h2></div>
+      <p class="group-intro">Pointer, keyboard, focus, scrolling, floating layers and per-element memory, all queried by id during declaration.</p>
+
+      <article class="feature" id="interaction" data-title="Hover, press, click">
+        <div class="feature-head"><h3>Hover, press, click, disabled and cursor</h3><span class="pill shipped">Shipped</span></div>
+        <p>An element with <code class="z">interactive</code> or <code class="z">focusable</code> is hit-tested. Querying by id answers for the frame being declared: <code class="z">clicked</code>, <code class="z">hovered</code>, <code class="z">pressed</code>, <code class="z">focused</code>, and <code class="z">widgetState</code>, which folds them into one enum for styling. A disabled element still blocks what is beneath it but is never pressed, clicked or focused. <code class="z">cursor</code> picks the pointer shape while the element is hot.</p>
+        <p>Without the widgets module, this is the whole recipe for a button:</p>
+<script type="text/x-zig" data-file="src/ui/controls.zig">
+const tool_colors = std.EnumArray(zui.WidgetState, zui.Color).init(.{
+    .idle = .rgb(0x2c2c3c),
+    .hovered = .rgb(0x3a3a50),
+    .pressed = .rgb(0x4a6ad0),
+    .focused = .rgb(0x2c2c3c),
+    .disabled = .rgb(0x24242e),
+});
+
+fn toolButton(ui: *Ui, id: zui.Id, label: []const u8, enabled: bool) bool {
+    const state = ui.widgetState(id);
+    ui.open(.{
+        .id = id,
+        .focusable = true,
+        .disabled = !enabled,
+        .cursor = if (enabled) .pointer else .not_allowed,
+        .layout = .{ .padding = .symmetric(12, 6), .child_alignment = .{ .y = .center } },
+        .decoration = .{
+            .background = tool_colors.get(state),
+            .border = if (ui.focused(id)) .{ .color = .rgb(0xffc65c), .widths = .all(2) } else null,
+            .corner_radius = .all(5),
+        },
+    });
+    ui.text(label, .{ .size = 13, .color = if (enabled) .white else .rgb(0x5c5c6e) });
+    ui.close();
+    return ui.clicked(id);
+}
+
+fn importButton(app: *App, ui: *Ui) void {
+    if (toolButton(ui, .of("import"), "Import…", !app.importing)) app.startImport();
+}
+</script>
+        <p>There's no built-in keyboard activation here. <a href="#widgets">zui_widgets</a> adds Enter and Space activation on top of this.</p>
+      </article>
+
+      <article class="feature" id="focus" data-title="Focus and focus scopes">
+        <div class="feature-head"><h3>Focus, tab order and focus scopes</h3><span class="pill shipped">Shipped</span></div>
+        <p><code class="z">focusable</code> puts an element in the tab order, which follows declaration order. <code class="z">focus_scope</code> keeps Tab cycling inside a subtree, as a dialog needs. <code class="z">requestFocus</code> moves focus programmatically.</p>
+<script type="text/x-zig" data-file="src/ui/rename_dialog.zig">
+fn renameDialog(app: *App, ui: *Ui) void {
+    if (!app.rename.open) return;
+    const dialog = ui.state(.of("rename_dialog"), struct { focused_once: bool });
+    if (!dialog.focused_once) {
+        ui.requestFocus(.of("rename_field"));
+        dialog.focused_once = true;
+    }
+
+    ui.open(.{
+        .id = .of("rename_dialog"),
+        .focus_scope = true,
+        .floating = .{ .attach_to = .root, .anchor = .center, .attach_point = .center, .z = 200 },
+        .layout = .{ .direction = .top_to_bottom, .padding = .all(16), .child_gap = 10, .sizing = .{ .width = .fixed(360) } },
+        .decoration = .{ .background = .rgb(0x262634), .corner_radius = .all(10) },
+    });
+    defer ui.close();
+
+    ui.text("Rename photo", .{ .size = 15 });
+    _ = widgets.textField(ui, .of("rename_field"), &app.rename.text, .{});
+    if (toolButton(ui, .of("rename_ok"), "Rename", app.rename.text.slice().len > 0)) app.commitRename();
+    if (toolButton(ui, .of("rename_cancel"), "Cancel", true) or ui.keyPressed(.escape)) app.rename.open = false;
+}
+</script>
+      </article>
+
+      <article class="feature" id="keyboard" data-title="Keyboard and typed text">
+        <div class="feature-head"><h3>Keyboard and typed text</h3><span class="pill shipped">Shipped</span></div>
+        <p>Input arrives as an ordered event log in each frame record. You can ask about a key, about a chord (a key with exactly those modifiers), for the raw key events with repeat flags and scancodes, or for the committed UTF-8 typed this frame.</p>
+<script type="text/x-zig" data-file="src/ui/shortcuts.zig">
+fn shortcuts(app: *App, ui: *Ui) void {
+    if (ui.chordPressed(.{ .key = .i, .modifiers = .{ .control = true } })) app.startImport();
+    if (ui.chordPressed(.{ .key = .a, .modifiers = .{ .control = true } })) app.selection.selectAll();
+    if (ui.chordPressed(.{ .key = .z, .modifiers = .{ .control = true, .shift = true } })) app.history.redo();
+    if (ui.keyPressed(.delete) and !app.selection.isEmpty()) app.confirmDelete();
+
+    for (ui.keyEvents()) |event| switch (event.key) {
+        .left => app.viewer.previous(),
+        .right => app.viewer.next(),
+        else => {},
+    };
+
+    if (ui.focused(.of("search"))) app.search.appendSlice(ui.typedText());
+}
+</script>
+      </article>
+
+      <article class="feature" id="scroll" data-title="Scrolling and clipping">
+        <div class="feature-head"><h3>Clipping, culling and wheel scrolling</h3><span class="pill shipped">Shipped</span></div>
+        <p><code class="z">scroll</code> makes a container scroll with the wheel on the axes it names and clips them. <code class="z">clip</code> clips without scrolling. Content outside a clip is culled, so it emits no render commands. The offset lives in the state table under the container's id, so you can read it and set it.</p>
+<script type="text/x-zig" data-file="src/ui/library.zig">
+fn photoGrid(app: *App, ui: *Ui) void {
+    const grid = ids.grid;
+    if (app.jump_to_top) {
+        ui.setScrollOffset(grid, .{ 0, 0 });
+        app.jump_to_top = false;
+    }
+
+    ui.open(.{
+        .id = grid,
+        .scroll = .{ .vertical = true },
+        .layout = .{ .direction = .top_to_bottom, .sizing = .grow_both, .padding = .all(12), .child_gap = 12 },
+    });
+    defer ui.close();
+
+    const photos = app.currentAlbum().photos;
+    var row_start: usize = 0;
+    while (row_start < photos.len) : (row_start += app.columns) {
+        ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 12 } });
+        defer ui.close();
+        const row_end = @min(row_start + app.columns, photos.len);
+        for (photos[row_start..row_end], row_start..) |*photo, index| photoCard(app, ui, photo, index);
+    }
+
+    app.scrolled_past_header = ui.scrollOffset(grid)[1] > 48;
+}
+</script>
+      </article>
+
+      <article class="feature" id="floating" data-title="Floating elements">
+        <div class="feature-head"><h3>Floating elements in paint layers</h3><span class="pill shipped">Shipped</span></div>
+        <p>A floating element takes no space in its parent's flow. It attaches to its parent, the viewport, or any element declared earlier in the frame, by matching an anchor point on itself to a point on the target, plus an offset. It paints in layer <code class="z">z</code>, escaping its parent's clip. Tooltips, popups, menus and dialogs are all built this way.</p>
+<script type="text/x-zig" data-file="src/ui/tooltips.zig">
+fn tooltipFor(ui: *Ui, target: zui.Id, content: []const u8) void {
+    if (!ui.hovered(target)) return;
+    ui.open(.{
+        .floating = .{
+            .attach_to = .{ .element = target },
+            .anchor = .top_center,
+            .attach_point = .bottom_center,
+            .offset = .{ 0, 6 },
+            .z = 50,
+        },
+        .layout = .{ .padding = .symmetric(8, 4) },
+        .decoration = .{ .background = .rgb(0x0f0f14), .corner_radius = .all(4) },
+    });
+    ui.text(content, .{ .size = 12, .color = .white });
+    ui.close();
+}
+
+fn contextMenu(app: *App, ui: *Ui) void {
+    const menu = app.context_menu orelse return;
+    ui.open(.{
+        .id = .of("context_menu"),
+        .floating = .{ .attach_to = .root, .offset = menu.position, .z = 120 },
+        .layout = .{ .direction = .top_to_bottom, .padding = .all(4) },
+        .decoration = .{ .background = .rgb(0x262634), .corner_radius = .all(6) },
+    });
+    defer ui.close();
+    if (toolButton(ui, .of("menu_rename"), "Rename", true)) app.beginRename(menu.photo);
+    if (toolButton(ui, .of("menu_reveal"), "Show in folder", true)) app.reveal(menu.photo);
+}
+
+// after declaring the import button:
+tooltipFor(ui, .of("import"), "Import photos (Ctrl+I)");
+</script>
+      </article>
+
+      <article class="feature" id="state" data-title="Per-element state">
+        <div class="feature-head"><h3>Per-element state across frames</h3><span class="pill shipped">Shipped</span></div>
+        <p><code class="z">ui.state(id, T)</code> returns a zeroed <code class="z">*T</code> keyed by id and type that persists while the element keeps being declared. It is evicted a couple of frames after the element stops being declared. A slot holds at most 64 bytes, and a larger type is a compile error that tells you to store an index instead. When the table is full you get scratch memory and a diagnostic. Nothing is corrupted.</p>
+<script type="text/x-zig" data-file="src/ui/album_header.zig">
+const HeaderState = struct {
+    expanded: bool,
+    hover_started_at: zui.Instant,
+};
+
+fn albumHeader(app: *App, ui: *Ui, album: *const Album) void {
+    const id: zui.Id = .of("album_header");
+    const header = ui.state(id, HeaderState);
+    if (ui.clicked(id)) header.expanded = !header.expanded;
+
+    ui.open(.{ .id = id, .interactive = true, .layout = .{ .direction = .top_to_bottom, .padding = .all(12) } });
+    defer ui.close();
+    ui.text(album.name, .{ .size = 20 });
+    if (header.expanded) ui.text(album.description, .{ .size = 13, .color = .rgb(0x9a9aae) });
+    _ = app;
+}
+
+fn wasEverOpened(ui: *Ui) bool {
+    const header = ui.stateIfPresent(.of("album_header"), HeaderState) orelse return false;
+    return header.expanded;
+}
+</script>
+      </article>
+
+      <article class="feature" id="environment" data-title="Environment">
+        <div class="feature-head"><h3>The environment</h3><span class="pill shipped">Shipped</span></div>
+        <p>The host reports the user's settings as events, and <code class="z">ui.environment()</code> holds the current values: theme, contrast, reduced motion and transparency, text scale, locale, reading direction, HDR headroom, power, window focus, and whether the system material (Mica) shows behind the window.</p>
+<script type="text/x-zig" data-file="src/ui/palette.zig">
+const Palette = struct { window: ?zui.Color, panel: zui.Color, text: zui.Color, accent: zui.Color };
+
+fn paletteFor(ui: *const Ui) Palette {
+    const environment = ui.environment();
+    const dark = environment.theme == .dark;
+    const high_contrast = environment.contrast == .high;
+    return .{
+        .window = if (environment.system_material) null else if (dark) .rgb(0x15161b) else .rgb(0xf4f4f7),
+        .panel = if (dark) .rgba(0x20202880) else .rgba(0xffffffcc),
+        .text = if (high_contrast) (if (dark) .white else .black) else if (dark) .rgb(0xe0e0ea) else .rgb(0x23232b),
+        .accent = .rgb(0x5b8cff),
+    };
+}
+
+fn shouldAnimate(ui: *const Ui) bool {
+    const environment = ui.environment();
+    return !environment.reduced_motion and environment.power != .saver and environment.window_focused;
+}
+</script>
+      </article>
+
+      <article class="feature" id="drops" data-title="Dropped files and lifecycle">
+        <div class="feature-head"><h3>Dropped files and lifecycle events</h3><span class="pill shipped">Shipped</span></div>
+        <p>Files dropped onto the window arrive with their drop position and paths. Lifecycle events cover suspend, resume, a termination request (Ctrl+C, a closing console, the session ending) and low memory. zui-host's Windows host reports all of them.</p>
+<script type="text/x-zig" data-file="src/ui/system.zig">
+fn handleSystemEvents(app: *App, ui: *Ui) void {
+    for (ui.filesDropped()) |drop| {
+        const onto_album = app.albumAt(drop.position);
+        var paths = drop.paths();
+        while (paths.next()) |path| app.queueImport(path, onto_album);
+    }
+
+    const lifecycle = ui.lifecycle();
+    if (lifecycle.contains(.low_memory)) app.thumbnail_cache.shrinkTo(64);
+    if (lifecycle.contains(.@"suspend")) app.pauseBackgroundIndexing();
+    if (lifecycle.contains(.@"resume")) app.resumeBackgroundIndexing();
+    if (lifecycle.contains(.terminate_requested)) app.saveSession();
+}
+</script>
+      </article>
+
+      <article class="feature" id="host-requests" data-title="Requests to the host">
+        <div class="feature-head"><h3>Requests to the host: cursor and text input</h3><span class="pill shipped">Shipped</span></div>
+        <p>A frame asks the host for things the renderer doesn't handle. The pointer shape comes from the hot element's <code class="z">cursor</code>. The text-input area comes from <code class="z">requestTextInput</code>, which an editable calls each frame with the element it draws as its caret, so the host can place the IME window and show an on-screen keyboard. The host reads them with <code class="z">frame.requests()</code>.</p>
+<script type="text/x-zig" data-file="src/ui/search.zig">
+fn searchField(app: *App, ui: *Ui) void {
+    const field: zui.Id = .of("search");
+    ui.requestTextInput(field, field.child("caret"));
+
+    ui.open(.{ .id = field, .focusable = true, .cursor = .text, .layout = .{ .padding = .symmetric(8, 4), .sizing = .{ .width = .fixed(220) } } });
+    defer ui.close();
+    ui.text(app.search.slice(), .{ .size = 13 });
+    if (ui.focused(field)) ui.box(.{ .id = field.child("caret"), .layout = .{ .sizing = .{ .width = .fixed(2), .height = .fixed(16) } }, .decoration = .{ .background = .white } });
+}
+
+// in the loop:
+const frame = ui.endFrame();
+const requests = frame.requests();
+host.zuiApply(.main, requests);
+</script>
+      </article>
+    </section>
+
+    <section class="group" id="loop" data-title="The frame loop">
+      <div class="group-head"><span class="group-index">03</span><h2>The frame loop, timing and diagnostics</h2></div>
+      <p class="group-intro">How a frame starts and ends, how an idle app sleeps, and how limits and mistakes are reported.</p>
+
+      <article class="feature" id="loop-by-hand" data-title="The loop by hand">
+        <div class="feature-head"><h3>The loop by hand</h3><span class="pill shipped">Shipped</span></div>
+        <p>The host fills a <code class="z">RecordBuilder</code> with the time, viewport, scale and events. <code class="z">beginFrame</code> applies the record and swaps in the sources. You declare, <code class="z">endFrame</code> lays out and always returns a frame, the renderer draws it, and the host applies its requests. <code class="z">release</code> hands the frame back, which lets a render thread hold one while the next is declared. Finally <code class="z">nextFrame</code> tells the host whether to draw immediately, at a time, or only on the next event. <a href="#zui-app">zui_app</a> runs all of this for you.</p>
+<script type="text/x-zig" data-file="src/loop.zig">
+pub fn runLoop(app: *App, ui: *Ui, host: *Host, renderer: *Renderer) !void {
+    comptime zui.checkHostAndRenderer(Host, Renderer);
+
+    var events: [256]zui.Event = undefined;
+    var text: [1024]u8 = undefined;
+    var builder: zui.RecordBuilder = .init(&events, &text);
+
+    while (host.zuiPoll(.main, &builder)) {
+        const record = builder.recordWith(Ui.Deliveries);
+        ui.beginFrame(&record, &app.sources);
+
+        declareShell(app, ui);
+        renameDialog(app, ui);
+        shortcuts(app, ui);
+
+        const frame = ui.endFrame();
+        try renderer.zuiSubmit(host.zuiSurface(.main), frame);
+        host.zuiApply(.main, frame.requests());
+        ui.release(frame);
+
+        runLoader(app, ui, host.zuiWaker());
+        host.zuiWait(ui.nextFrame(&app.sources));
+    }
+}
+</script>
+        <p>Without sources, the record is <code class="z">builder.record()</code>, and <code class="z">beginFrame</code> and <code class="z">nextFrame</code> drop the sources argument. A host that can't block uses <code class="z">tryBeginFrame</code>.</p>
+      </article>
+
+      <article class="feature" id="timing" data-title="Timing and idling">
+        <div class="feature-head"><h3>Timing, animation and idling at 0% CPU</h3><span class="pill shipped">Shipped</span></div>
+        <p>Each record carries a timestamp, so <code class="z">ui.now()</code> and <code class="z">ui.dt()</code> are deterministic and replay identically. An app animates by asking for frames. <code class="z">requestFrame</code> asks for the next one immediately, and <code class="z">requestFrameAt</code> schedules a wake-up. When nothing asks, <code class="z">nextFrame</code> returns <code class="z">.on_event</code> and the host sleeps until input arrives or a source publishes.</p>
+<script type="text/x-zig" data-file="src/ui/import_progress.zig">
+const Fade = struct { opacity: f32 };
+
+fn importToast(app: *App, ui: *Ui) void {
+    const fade = ui.state(.of("import_toast"), Fade);
+    const target: f32 = if (app.importing) 1 else 0;
+    if (fade.opacity != target) {
+        const step = ui.dt() * 4;
+        fade.opacity = if (target > fade.opacity) @min(target, fade.opacity + step) else @max(target, fade.opacity - step);
+        ui.requestFrame();
+    }
+    if (fade.opacity == 0) return;
+
+    const alpha: u8 = @intFromFloat(fade.opacity * 255);
+    ui.open(.{
+        .floating = .{ .attach_to = .root, .anchor = .bottom_right, .attach_point = .bottom_right, .offset = .{ -16, -16 }, .z = 80 },
+        .layout = .{ .padding = .all(10) },
+        .decoration = .{ .background = .{ .r = 0x26, .g = 0x26, .b = 0x34, .a = alpha }, .corner_radius = .all(6) },
+    });
+    ui.text("Importing…", .{ .size = 13, .color = .{ .r = 255, .g = 255, .b = 255, .a = alpha } });
+    ui.close();
+}
+
+fn blinkCaret(ui: *Ui, app: *App) bool {
+    ui.requestFrameAt(app.next_caret_blink);
+    return app.caret_visible;
+}
+</script>
+      </article>
+
+      <article class="feature" id="diagnostics" data-title="Diagnostics">
+        <div class="feature-head"><h3>Limits that fail softly: diagnostics</h3><span class="pill shipped">Shipped</span></div>
+        <p>Every limit fails the same way. zui keeps and draws what fits, and records in <code class="z">frame.diagnostics</code> which limit was exceeded, how much the frame needed, and the first element dropped. Duplicate ids, unbalanced trees and publishes refused by full sources are reported here too. Apps that would rather stop call <code class="z">check()</code>.</p>
+<script type="text/x-zig" data-file="src/loop.zig">
+const log = std.log.scoped(.darkroom);
+
+fn reportDiagnostics(frame: *const Ui.Frame) void {
+    const diagnostics = frame.diagnostics;
+    if (diagnostics.ok()) return;
+
+    var exceeded = diagnostics.exceeded.iterator();
+    while (exceeded.next()) |limit| {
+        log.warn("limits.{t} was too small: this frame needed {d}", .{ limit, diagnostics.needed.get(limit) });
+    }
+    if (diagnostics.duplicate_ids > 0) log.warn("{d} duplicate ids", .{diagnostics.duplicate_ids});
+    if (diagnostics.refused_publishes > 0) log.warn("source `{s}` is full", .{diagnostics.first_refusing_source});
+}
+
+fn strictFrame(ui: *Ui) !*const Ui.Frame {
+    const frame = ui.endFrame();
+    try frame.diagnostics.check();
+    return frame;
+}
+</script>
+      </article>
+
+      <article class="feature" id="queries" data-title="Frame queries">
+        <div class="feature-head"><h3>Frame queries</h3><span class="pill shipped">Shipped</span></div>
+        <p>Layout results from the previous frame are available while you declare: an element's rectangle, the pointer in an element's local coordinates, the viewport, and the primary pointer. This is how a canvas maps clicks to cells or a widget sizes a popup.</p>
+<script type="text/x-zig" data-file="src/ui/viewer.zig">
+fn cropOverlay(app: *App, ui: *Ui) void {
+    const image_rect = ui.rectOf(.of("full_image")) orelse return;
+    if (ui.pointerLocal(.of("full_image"))) |local| {
+        app.crop.hover = .{ local[0] / image_rect.width, local[1] / image_rect.height };
+    }
+
+    const viewport = ui.viewport();
+    app.columns = @max(2, @as(usize, @intFromFloat(viewport[0] / 220)));
+}
+</script>
+        <p>After <code class="z">endFrame</code>, the frame has its own <code class="z">rectOf</code>, <code class="z">commands()</code> and <code class="z">elementCount()</code>.</p>
+      </article>
+
+      <article class="feature" id="compile-errors" data-title="Features and compile errors">
+        <div class="feature-head"><h3>Features and compile errors</h3><span class="pill shipped">Shipped</span></div>
+        <p><code class="z">Config.features</code> turns capabilities on or off. A feature that is off generates no code and no memory, and calling its API fails to compile with a message naming the field to set. The same discipline runs through every contract. Each message below is pinned by a compile-error test.</p>
+<script type="text/x-zig" data-file="src/main.zig">
+const zui_tracy = @import("zui_tracy");
+
+pub const Ui = zui.Context(.{
+    .Text = Fonts,
+    .features = .{
+        .gestures = false,
+        .safety_sweeps = false,
+        .Tracer = zui_tracy.Tracer,
+    },
+});
+</script>
+        <p>Some of the messages you'll see:</p>
+        <ul class="errors">
+          <li><span>error:</span> zui: manipulation() needs Config.features.gestures = true</li>
+          <li><span>error:</span> zui: limits.state_slots must be a power of two, got 1000</li>
+          <li><span>error:</span> zui: text_unknown_declaration.Text declares unknown `zui_threadsafe`</li>
+          <li><span>error:</span> zui: state type state_type_too_large.History is 80 bytes, but a state slot holds at most 64; store an index into your own storage instead</li>
+          <li><span>error:</span> zui: host_and_renderer_share_no_surface.Host and host_and_renderer_share_no_surface.Renderer share no surface kind: the host gives .library, the renderer draws into .offscreen, .terminal</li>
+          <li><span>error:</span> zui: sources_unknown_declaration.AppSources.quotes declares unknown `zuiPendng`</li>
+          <li><span>error:</span> zui_async: Stream capacity must be a power of two, got 100</li>
+          <li><span>error:</span> zui_widgets: slider needs a pointer to an integer or float, got *bool</li>
+          <li><span>error:</span> no field named 'volum' in struct 'zui_reflect.FieldOptionsOf(reflect_misspelled_option.Settings)'</li>
+        </ul>
+      </article>
+    </section>
+
+    <section class="group" id="async" data-title="Async data">
+      <div class="group-head"><span class="group-index">04</span><h2>Sources and <code>zui_async</code></h2></div>
+      <p class="group-intro">Getting data from other threads into an immediate-mode UI without locks in declaration. Producers publish from any thread, <code class="z">beginFrame</code> swaps each source once, declaration reads a stable view, and a loader starts work for what the UI asked for. Every source is checked under ThreadSanitizer by <code class="z">expectSourceConforms</code>.</p>
+
+      <article class="feature" id="sources" data-title="Declaring sources">
+        <div class="feature-head"><h3>Declaring sources</h3><span class="pill shipped">Shipped</span></div>
+        <p><code class="z">Config.Sources</code> is a struct whose fields are sources. Each is named by field in <code class="z">ui.source(.field)</code>, and that field name also appears in diagnostics when a source fills up. <code class="z">framesSinceRead</code> tells a loader whether anyone is still watching. It counts frames rather than time, so a sleeping UI never looks abandoned.</p>
+<script type="text/x-zig" data-file="src/sources.zig">
+const zui_async = @import("zui_async");
+
+pub const AppSources = struct {
+    battery: zui_async.Latest(f32) = .{},
+    import_log: zui_async.Stream(ImportEvent, .{ .capacity = 256, .producers = .many }) = .{},
+    library_scan: LibraryScan = .{},
+    thumbnails: Thumbnails = .{},
+    theme_files: zui_async.Stream(zui.FileChange, .{ .capacity = 32 }) = .{},
+};
+
+pub const LibraryScan = zui_async.Task(ScanError!*const Library, .{ .Progress = f32 });
+pub const Thumbnails = zui_async.KeyedLoads(u64, DecodeError!Texture, .{
+    .capacity = 256,
+    .owns_resources = true,
+    .unread_frames_before_release = 120,
+});
+</script>
+      </article>
+
+      <article class="feature" id="latest" data-title="Latest">
+        <div class="feature-head"><h3><code>Latest</code>: the newest value only</h3><span class="pill shipped">Shipped</span></div>
+        <p>A triple buffer for state where only the newest value matters, such as battery level, sync state or a download rate. A publish never waits. <code class="z">publish</code> returns whether the host needs waking, so a hundred publishes between frames cost one wake.</p>
+<script type="text/x-zig" data-file="src/power_monitor.zig">
+fn powerMonitor(sources: *AppSources, waker: zui.Waker, io: std.Io) void {
+    while (true) {
+        const level = readBatteryLevel() catch continue;
+        waker.wakeIf(sources.battery.publish(level));
+        sleepSeconds(io, 30) catch return;
+    }
+}
+
+fn batteryIndicator(ui: *Ui) void {
+    const battery = ui.source(.battery);
+    const level = battery.get() orelse return;
+    var buffer: [8]u8 = undefined;
+    ui.text(std.fmt.bufPrint(&buffer, "{d:.0}%", .{level * 100}) catch "", .{
+        .size = 12,
+        .color = if (level < 0.15) .rgb(0xff6b6b) else .rgb(0x9a9aae),
+    });
+    if (battery.changed()) ui.requestFrame();
+}
+</script>
+      </article>
+
+      <article class="feature" id="stream" data-title="Stream">
+        <div class="feature-head"><h3><code>Stream</code>: every item, in order</h3><span class="pill shipped">Shipped</span></div>
+        <p>A bounded ring for messages and log lines. Each frame sees the items published since the last swap, read in place. When it's full, <code class="z">publish</code> refuses with <code class="z">error.Full</code> rather than waiting, the item stays with its producer, and the refusal shows up in diagnostics.</p>
+<script type="text/x-zig" data-file="src/importer.zig">
+fn importWorker(sources: *AppSources, waker: zui.Waker, paths: []const []const u8) void {
+    for (paths) |path| {
+        const event: ImportEvent = if (importOne(path)) |photo| .{ .imported = photo.id } else |err| .{ .failed = .{ .path = path, .reason = err } };
+        waker.wakeIf(sources.import_log.publish(event) catch .already_pending);
+    }
+}
+
+fn importLog(app: *App, ui: *Ui) void {
+    var events = ui.source(.import_log).items();
+    while (events.next()) |event| switch (event.*) {
+        .imported => |photo_id| app.recent_imports.append(photo_id),
+        .failed => |failure| app.import_errors.append(failure),
+    };
+}
+</script>
+      </article>
+
+      <article class="feature" id="task" data-title="Task">
+        <div class="feature-head"><h3><code>Task</code>: one piece of work with a status</h3><span class="pill shipped">Shipped</span></div>
+        <p>One run at a time, with optional progress. The UI switches on a <code class="z">Status</code> union: <code class="z">idle</code>, <code class="z">running</code> (carrying the progress value), <code class="z">ready</code>, <code class="z">failed</code> and <code class="z">canceled</code>. <code class="z">failed</code> exists only when the result can fail with something other than <code class="z">Canceled</code>, so an infallible task has no prong to handle. <code class="z">publishing</code> adapts a plain function into a producer for <code class="z">Io.Group.async</code>.</p>
+<script type="text/x-zig" data-file="src/library.zig">
+fn scanLibrary(io: std.Io, root: []const u8) ScanError!*const Library {
+    return Library.scan(io, root);
+}
+
+fn startScanIfNeeded(app: *App, io: std.Io) void {
+    if (!app.wants_rescan) return;
+    if (app.sources.library_scan.begin(app.waker)) |run| {
+        app.work.async(io, LibraryScan.publishing(scanLibrary), .{ run, .{ io, app.library_root } });
+        app.wants_rescan = false;
+    } else |_| {}
+}
+
+fn libraryStatus(app: *App, ui: *Ui) void {
+    switch (ui.source(.library_scan).status()) {
+        .idle => {},
+        .running => |fraction| progressBar(ui, fraction, "Scanning library…"),
+        .ready => |library| app.library = library,
+        .failed => |err| errorBanner(ui, "Couldn't scan the library", @errorName(err)),
+        .canceled => {},
+    }
+}
+</script>
+      </article>
+
+      <article class="feature" id="keyed-loads" data-title="KeyedLoads and the loader">
+        <div class="feature-head"><h3><code>KeyedLoads</code> and the loader</h3><span class="pill shipped">Shipped</span></div>
+        <p>This source handles many loads driven by what the UI asks for. Declaration calls <code class="z">get(key)</code>, which records demand and returns a status, and starts nothing. After <code class="z">endFrame</code>, the loader takes the wanted keys from <code class="z">toStart</code> and starts their work. Keys that stop being read are abandoned, and with <code class="z">owns_resources</code> their results come back through <code class="z">toRelease</code> to free. Scroll a grid of 10,000 photos and only the visible thumbnails load. The UI thread never waits.</p>
+<script type="text/x-zig" data-file="src/thumbnails.zig">
+fn thumbnail(app: *App, ui: *Ui, photo: *const Photo) void {
+    const element: zui.Element = .{ .layout = .{ .sizing = .{ .width = .fixed(200), .height = .fixed(150) } } };
+    switch (ui.source(.thumbnails).get(photo.id)) {
+        .ready => |texture| ui.image(.{ .handle = texture }, element),
+        .failed => ui.box(.{ .layout = element.layout, .decoration = .{ .background = .rgb(0x3a2020) } }),
+        .idle, .running, .canceled => ui.box(.{ .layout = element.layout, .decoration = .{ .background = .rgb(0x23232d) } }),
+    }
+    _ = app;
+}
+
+fn decodeThumbnail(load: Thumbnails.Load, io: std.Io, library: *const Library) void {
+    if (load.abandoned()) return load.finish(error.Canceled);
+    load.finish(library.decodeThumbnail(io, load.key, .{ 200, 150 }));
+}
+
+pub fn runLoader(app: *App, ui: *const Ui, io: std.Io) void {
+    var to_start = app.sources.thumbnails.toStart(app.waker);
+    while (to_start.next()) |load| app.work.async(io, decodeThumbnail, .{ load, io, app.library });
+
+    var to_release = app.sources.thumbnails.toRelease();
+    while (to_release.next()) |released| if (released) |texture| texture.unload() else |_| {};
+
+    if (ui.framesSinceRead(.library_scan) > 600) app.sources.library_scan.abandon();
+}
+</script>
+        <p>zui-raylib's demo loads its thumbnail grid this way and idles at 0% CPU.</p>
+      </article>
+
+      <article class="feature" id="file-watch" data-title="Watching files">
+        <div class="feature-head"><h3>Watching files</h3><span class="pill shipped">Shipped</span></div>
+        <p>File watching is a host service. A host that offers it declares <code class="z">zuiFileWatch</code>, and you point it at any source that takes <code class="z">zui.FileChange</code>. zui-host's <code class="z">zig build theme</code> restyles its window a few milliseconds after the theme file is saved.</p>
+<script type="text/x-zig" data-file="src/theme.zig">
+pub fn init(app: *App, start: zui_app.Start(App)) !void {
+    if (@hasDecl(App.Host, "zuiFileWatch")) {
+        try App.Host.zuiFileWatch.watch(start.host, "themes", .of(&app.sources.theme_files));
+    }
+}
+
+fn reloadThemeOnSave(app: *App, ui: *Ui) void {
+    var changes = ui.source(.theme_files).items();
+    while (changes.next()) |change| switch (change.kind) {
+        .modified, .added, .renamed_to => if (std.mem.endsWith(u8, change.path.slice(), ".theme")) app.reloadTheme(change.path.slice()),
+        .rescan => app.reloadTheme(app.theme_path),
+        else => {},
+    };
+}
+</script>
+      </article>
+    </section>
+
+    <section class="group" id="modules" data-title="Modules for apps">
+      <div class="group-head"><span class="group-index">05</span><h2>Widgets, the inspector and <code>zui_app</code></h2></div>
+      <p class="group-intro">Optional modules built only on the public API. Each one is a separate import.</p>
+
+      <article class="feature" id="widgets" data-title="zui_widgets">
+        <div class="feature-head"><h3><code>zui_widgets</code></h3><span class="pill shipped">Shipped</span></div>
+        <p>Button, checkbox, slider (for any integer or float, with step snapping and keyboard control), single-line text field with caret and IME support, dropdown (from a list of labels or straight from an enum), disclosure, labeled row and labels. Each takes the context and an id and returns what changed this frame.</p>
+<script type="text/x-zig" data-file="src/ui/settings.zig">
+const zui_widgets = @import("zui_widgets");
+
+pub const widgets: zui_widgets.Widgets(Ui) = .{};
+
+pub const Settings = struct {
+    grid_columns: u8 = 5,
+    thumbnail_quality: Quality = .balanced,
+    show_hidden: bool = false,
+    export_scale: f32 = 1,
+    library_name: zui_widgets.EditableText,
+    library_name_buffer: [64]u8 = undefined,
+
+    pub const Quality = enum { fast, balanced, sharp };
+};
+
+fn settingsPanel(app: *App, ui: *Ui) void {
+    const settings = &app.settings;
+    ui.open(.{ .id = .of("settings"), .layout = .{ .direction = .top_to_bottom, .padding = .all(16), .child_gap = 10, .sizing = .{ .width = .fixed(420) } } });
+    defer ui.close();
+
+    widgets.labeledRow(ui, "Library name");
+    const name = widgets.textField(ui, .of("library_name"), &settings.library_name, .{ .placeholder = "My photos" });
+    ui.close();
+    if (name.submitted) app.renameLibrary(settings.library_name.slice());
+
+    widgets.labeledRow(ui, "Columns");
+    if (widgets.slider(ui, .of("columns"), &settings.grid_columns, .{ .min = 2, .max = 10 })) app.columns = settings.grid_columns;
+    ui.close();
+
+    widgets.labeledRow(ui, "Thumbnails");
+    if (widgets.dropdownEnum(ui, .of("quality"), &settings.thumbnail_quality, .{})) app.invalidateThumbnails();
+    ui.close();
+
+    _ = widgets.checkbox(ui, .of("show_hidden"), "Show hidden files", &settings.show_hidden, .{});
+
+    if (widgets.disclosure(ui, .of("export_section"), "Export", &app.export_open)) {}
+    if (app.export_open) {
+        widgets.labeledRow(ui, "Scale");
+        _ = widgets.slider(ui, .of("export_scale"), &settings.export_scale, .{ .min = 0.25, .max = 4, .step = 0.25 });
+        ui.close();
+    }
+
+    if (widgets.button(ui, .of("save_settings"), "Save", .{ .disabled = !app.settings_dirty })) app.saveSettings();
+}
+</script>
+        <p><code class="z">labeledRow</code> opens a row that you close yourself after declaring the control. That's flexible, but it's an easy thing to forget, and an unbalanced tree is caught only at the end of the frame.</p>
+      </article>
+
+      <article class="feature" id="widget-theme" data-title="Theming widgets">
+        <div class="feature-head"><h3>Theming widgets</h3><span class="pill shipped">Shipped</span></div>
+        <p>A widget set carries a <code class="z">Theme</code> and an optional <code class="z">dark_theme</code>, chosen from the environment each frame. The theme sets colors per <code class="z">WidgetState</code>, metrics, popup layer and indicator glyphs.</p>
+<script type="text/x-zig" data-file="src/ui/settings.zig">
+const Widgets = zui_widgets.Widgets(Ui);
+
+const light: Widgets.Theme = .{
+    .text = .{ .color = .rgb(0x23232b) },
+    .muted_text_color = .rgb(0x6a6a7a),
+    .control = .init(.{
+        .idle = .rgb(0xe8e8ee),
+        .hovered = .rgb(0xdcdce6),
+        .pressed = .rgb(0x4a6ad0),
+        .focused = .rgb(0xe8e8ee),
+        .disabled = .rgb(0xf0f0f3),
+    }),
+    .field_background = .white,
+    .border_color = .rgb(0xc8c8d4),
+    .popup_background = .white,
+    .corner_radius = 6,
+    .control_height = 32,
+    .label_width = 120,
+};
+
+pub const widgets: Widgets = .{ .theme = light, .dark_theme = .{} };
+</script>
+        <p>Skins (<code class="z">Widgets(Ui, Skin)</code>) are planned to replace this struct (item K5).</p>
+      </article>
+
+      <article class="feature" id="reflect" data-title="zui_reflect">
+        <div class="feature-head"><h3><code>zui_reflect</code>: an editor from any struct</h3><span class="pill shipped">Shipped</span></div>
+        <p><code class="z">inspector</code> walks a struct with <code class="z">@typeInfo</code> and declares an editor per field. A <code class="z">bool</code> gets a checkbox, a number with min and max gets a slider, other numbers get − and + buttons, an enum gets a dropdown, <code class="z">EditableText</code> gets a text field, a string is shown read-only, and a nested struct gets a collapsible section. Options live beside the type in <code class="z">zui_inspector</code>, and a misspelled field name there fails to compile.</p>
+<script type="text/x-zig" data-file="src/debug_panel.zig">
+const zui_reflect = @import("zui_reflect");
+
+const RenderTuning = struct {
+    exposure: f32 = 0,
+    contrast: f32 = 1,
+    tone_map: enum { linear, reinhard, aces } = .aces,
+    show_clipping: bool = false,
+    preview_size: u16 = 1024,
+    cache: CacheTuning = .{},
+    frames_rendered: u64 = 0,
+
+    pub const zui_inspector: zui_reflect.Options(@This()) = .{ .fields = .{
+        .exposure = .{ .min = -4, .max = 4, .step = 0.1 },
+        .contrast = .{ .min = 0.5, .max = 2 },
+        .preview_size = .{ .label = "Preview edge (px)", .step = 256 },
+        .frames_rendered = .{ .hidden = true },
+    } };
+};
+
+const CacheTuning = struct {
+    max_thumbnails: u32 = 256,
+    evict_after_frames: u32 = 120,
+};
+
+fn debugPanel(app: *App, ui: *Ui) void {
+    if (zui_reflect.inspector(widgets, ui, .of("render_tuning"), &app.render_tuning)) {
+        app.renderer_settings_changed = true;
+    }
+}
+</script>
+      </article>
+
+      <article class="feature" id="zui-app" data-title="zui_app">
+        <div class="feature-head"><h3><code>zui_app</code>: the whole loop from one call</h3><span class="pill shipped">Shipped</span></div>
+        <p>You name a host and a renderer and write <code class="z">zuiDeclare</code>, and <code class="z">zui_app.run</code> does the rest. It opens the window, builds records, submits on a render thread when the renderer allows it, paces frames, sleeps when idle, and reports once what it's running with and each limit exceeded. The optional hooks are <code class="z">init</code>, <code class="z">deinit</code>, <code class="z">zuiLoader</code> after each frame and <code class="z">zuiRecord</code> for your own zoom and synthetic events. <code class="z">contextConfig</code> derives the <code class="z">Config</code> from the renderer's declarations.</p>
+<script type="text/x-zig" data-file="src/app.zig">
+const std = @import("std");
+const zui = @import("zui");
+const zui_app = @import("zui_app");
+const zui_sokol = @import("zui_sokol");
+const zui_host = @import("zui_host");
+
+pub const App = struct {
+    pub const Host = zui_host.Host;
+    pub const Renderer = zui_sokol.Renderer;
+    pub const Text = Fonts;
+    pub const Ui = zui.Context(zui_app.contextConfig(Renderer, .{ .Text = Fonts, .Sources = AppSources }));
+
+    sources: AppSources = .{},
+    waker: zui.Waker = undefined,
+    work: std.Io.Group = .init,
+    settings: Settings = .{},
+    zoom: f32 = 1,
+
+    pub fn init(app: *App, start: zui_app.Start(App)) !void {
+        app.waker = start.waker;
+        try App.Host.zuiFileWatch.watch(start.host, "themes", .of(&app.sources.theme_files));
+    }
+
+    pub fn zuiDeclare(app: *App, ui: *Ui) void {
+        declareShell(app, ui);
+        renameDialog(app, ui);
+        shortcuts(app, ui);
+        handleSystemEvents(app, ui);
+    }
+
+    pub fn zuiLoader(app: *App, ui: *const Ui, io: std.Io) void {
+        runLoader(app, ui, io);
+    }
+
+    pub fn zuiRecord(app: *App, record: *zui.RecordBuilder) void {
+        record.params.zoom = app.zoom;
+    }
+};
+
+pub fn main(init: std.process.Init) !void {
+    try zui_app.run(App, init, .{
+        .title = "Darkroom",
+        .size = .{ 1440, 900 },
+        .material = .window,
+        .notify = zui_app.logNotice,
+    });
+}
+</script>
+        <p>Some of the notices it logs: <em>"limits.max_elements is 4096, but a frame needed 5210; what fit was drawn"</em>, and <em>"the full source `import_log` refused 12 publishes; raise its capacity"</em>. On raylib, the first frame appears about 290 ms after the process starts, and all but 5 ms of that is raylib opening its window.</p>
+      </article>
+    </section>
+
+    <section class="group" id="contracts" data-title="Backend contracts">
+      <div class="group-head"><span class="group-index">06</span><h2>The backend contracts</h2></div>
+      <p class="group-intro">zui draws nothing and opens no windows itself. Renderers and hosts are plain types checked at compile time, with conformance suites they run in their own CI. Today there are zui-raylib (a renderer and adapter host), zui-sokol, zui-terminal, and zui-host's Windows host (message loop on its own thread, per-monitor DPI, Mica, IME, clipboard, dropped files, file watching).</p>
+
+      <article class="feature" id="renderer" data-title="Writing a renderer">
+        <div class="feature-head"><h3>Writing a renderer</h3><span class="pill shipped">Shipped</span></div>
+        <p>A renderer declares <code class="z">zuiSubmit</code>, the surface kinds it draws into, and optionally the extra commands it supports and its payload types. <code class="z">RenderCommand</code> is generated from exactly those declarations, so an exhaustive <code class="z">switch</code> names only what this renderer draws. A terminal renderer handles five variants. A renderer declaring <code class="z">zui_render_thread</code> is submitted from a thread of its own by zui_app.</p>
+<script type="text/x-zig" data-file="zui-d3d11/src/renderer.zig">
+const zui = @import("zui");
+
+pub const Renderer = struct {
+    pub const zui_surfaces: zui.SurfaceKinds = .initOne(.win32);
+    pub const zui_render_thread = true;
+    pub const ImageHandle = TextureId;
+
+    device: Device,
+    batch: QuadBatch,
+    scissors: ScissorStack,
+
+    pub fn init(self: *Renderer, surface: zui.Surface) !void {
+        self.device = try .create(surface.win32.hwnd);
+    }
+
+    pub fn zuiSubmit(self: *Renderer, surface: zui.Surface, frame: anytype) !void {
+        _ = surface;
+        self.batch.begin(&self.device);
+        for (frame.commands()) |command| switch (command.payload) {
+            .rectangle => |rectangle| self.batch.roundedRect(command.bounds, rectangle.color, rectangle.corner_radius),
+            .border => |border| self.batch.roundedOutline(command.bounds, border.color, border.widths, border.corner_radius),
+            .text => |text| self.batch.glyphs(command.bounds, text.content, text.style),
+            .image => |image| self.batch.texturedQuad(command.bounds, image.handle),
+            .clip_begin => |rect| self.batch.pushScissor(self.scissors.push(rect)),
+            .clip_end => self.batch.pushScissor(self.scissors.pop()),
+        };
+        try self.batch.present();
+    }
+};
+
+pub fn config(overrides: zui.Config) zui.Config {
+    comptime zui.checkRenderer(Renderer);
+    var result = overrides;
+    result.ImageHandle = Renderer.ImageHandle;
+    return result;
+}
+</script>
+        <p>Declaring <code class="z">pub const zui_commands: zui.CommandSet = .initMany(&.{ .gradient, .shadow })</code> adds <code class="z">gradient</code> and <code class="z">shadow</code> arms to that switch. Nothing in declaration produces them yet, though (see <a href="#gaps">what isn't working yet</a>).</p>
+      </article>
+
+      <article class="feature" id="host" data-title="Writing a host">
+        <div class="feature-head"><h3>Writing a host</h3><span class="pill shipped">Shipped</span></div>
+        <p>A host polls the OS into a <code class="z">RecordBuilder</code>, gives a waker that producers call from any thread, waits as <code class="z">NextFrame</code> says, hands out a surface, and applies a frame's requests. A library that reports input as state rather than events, as raylib does, uses <code class="z">InputSampler</code> to turn snapshots into the event log. <code class="z">checkHostAndRenderer</code> fails to compile when a host and renderer share no surface kind.</p>
+<script type="text/x-zig" data-file="zui-glfw/src/host.zig">
+pub const Host = struct {
+    pub const zui_surfaces: zui.SurfaceKinds = .initOne(.library);
+    pub const zui_capabilities: zui.HostCapabilities = .{ .windows = .one };
+
+    window: *glfw.Window,
+    sampler: zui.InputSampler = .{},
+    sampled: [128]zui.Event = undefined,
+    clock: Clock,
+
+    pub fn init(self: *Host, io: std.Io, window: zui.WindowOptions) !void {
+        self.window = try glfw.createWindow(window.size, window.title);
+        self.clock = .start(io);
+    }
+
+    pub fn deinit(self: *Host) void {
+        self.window.destroy();
+    }
+
+    pub fn zuiPoll(self: *Host, window: zui.WindowId, record: *zui.RecordBuilder) bool {
+        _ = window;
+        glfw.pollEvents();
+        if (self.window.shouldClose()) return false;
+
+        const now = self.clock.now();
+        record.begin(.{ .now = now, .viewport = self.window.logicalSize(), .scale = self.window.contentScale() });
+        const sample: zui.InputSampler.Sample = .{
+            .pointer = self.window.cursorPosition(),
+            .buttons = self.window.pressedButtons(),
+            .wheel = self.window.takeScroll(),
+            .keys_pressed = self.window.takeKeysPressed(),
+            .modifiers = self.window.modifiers(),
+            .text = self.window.takeTypedText(),
+        };
+        for (self.sampler.sample(now, sample, &self.sampled)) |event| record.append(event);
+        return true;
+    }
+
+    pub fn zuiWaker(self: *Host) zui.Waker {
+        return .{ .context = self, .wakeFn = postEmptyEvent };
+    }
+
+    pub fn zuiWait(self: *Host, next: zui.NextFrame) void {
+        switch (next) {
+            .immediately => {},
+            .at => |instant| glfw.waitEventsTimeout(self.clock.secondsUntil(instant)),
+            .on_event => glfw.waitEvents(),
+        }
+    }
+
+    pub fn zuiSurface(_: *Host, _: zui.WindowId) zui.Surface {
+        return .library;
+    }
+
+    pub fn zuiApply(self: *Host, _: zui.WindowId, requests: zui.HostRequests) void {
+        self.window.setCursor(requests.cursor);
+        if (requests.text_input) |area| self.window.setImePosition(area.caret);
+    }
+
+    fn postEmptyEvent(_: *anyopaque) void {
+        glfw.postEmptyEvent();
+    }
+};
+</script>
+      </article>
+
+      <article class="feature" id="conformance" data-title="Conformance suites">
+        <div class="feature-head"><h3>Conformance suites</h3><span class="pill shipped">Shipped</span></div>
+        <p>A backend proves its contract by running zui's suite in its own CI, through a harness that does what only the backend knows how to do. The renderer suite draws a reference scene, deep clips and out-of-bounds commands, then reads the pixels back. The host suite checks event order, sticky and cross-thread wakes, and waits. All three renderers pass. <code class="z">findRendererViolation</code> and <code class="z">findHostViolation</code> return the first violation instead of failing.</p>
+<script type="text/x-zig" data-file="zui-d3d11/src/conformance.zig">
+const std = @import("std");
+const zui = @import("zui");
+const zui_testing = @import("zui_testing");
+const Renderer = @import("renderer.zig").Renderer;
+
+const Harness = struct {
+    pub const config = Renderer.config;
+    renderer: Renderer,
+    target: OffscreenTarget,
+
+    pub fn beginDraw(self: *Harness) zui.Surface { return self.target.surface(); }
+    pub fn pixel(self: *Harness, point: [2]u32) zui.Color { return self.target.readPixel(point); }
+};
+
+test "the D3D11 renderer passes zui's renderer suite" {
+    var harness: Harness = undefined;
+    harness.init();
+    defer harness.deinit();
+    try zui_testing.expectRendererConforms(Renderer, &harness, .{ .gpa = std.testing.allocator, .io = std.testing.io });
+}
+</script>
+        <p>The harness method signatures above are simplified. The exact set of declarations a harness needs is listed in the doc comments of <code class="z">expectRendererConforms</code> and <code class="z">expectHostConforms</code>. zui-raylib, zui-sokol and zui-terminal each have a <code>src/conformance.zig</code> you can copy.</p>
+      </article>
+    </section>
+
+    <section class="group" id="tooling" data-title="Testing, remote, profiling">
+      <div class="group-head"><span class="group-index">07</span><h2>Testing, remote rendering and profiling</h2></div>
+      <p class="group-intro">The strongest part of the developer experience today. UIs are tested by id and independent of fonts, sessions record and replay, frames travel over a socket, and every step of a frame shows up in Tracy.</p>
+
+      <article class="feature" id="driver" data-title="Driver tests">
+        <div class="feature-head"><h3>Driver tests by element id</h3><span class="pill shipped">Shipped</span></div>
+        <p><code class="z">FixedMetricsText</code> makes every character 8×16 at size 16, so layout assertions hold on any machine. <code class="z">Driver</code> runs frames of your declare function and synthesizes input aimed at elements by id: <code class="z">click</code>, <code class="z">clickAt</code>, <code class="z">tap</code>, <code class="z">hover</code>, <code class="z">drag</code>, multi-finger <code class="z">dragFingers</code>, <code class="z">pressKeys</code>, <code class="z">typeText</code>, <code class="z">focus</code>, and <code class="z">frameDelivering</code> to inject source deliveries.</p>
+<script type="text/x-zig" data-file="tests/rename.zig">
+const std = @import("std");
+const zui = @import("zui");
+const zui_testing = @import("zui_testing");
+
+const TestUi = zui.Context(.{ .Text = zui_testing.FixedMetricsText(u16) });
+
+test "renaming a photo from the context menu" {
+    var text: zui_testing.FixedMetricsText(u16) = .{};
+    var ui: TestUi = try .init(std.testing.allocator, std.testing.io, &text);
+    defer ui.deinit(std.testing.allocator);
+    var driver: zui_testing.Driver(TestUi) = .{ .ui = &ui };
+
+    var app: TestApp = try .withPhotos(std.testing.allocator, &.{ "IMG_0001.jpg", "IMG_0002.jpg" });
+    defer app.deinit();
+
+    _ = try driver.frame(&app, TestApp.declare, &.{});
+    app.context_menu = .{ .photo = 1, .position = .{ 100, 100 } };
+    _ = try driver.click(&app, TestApp.declare, .of("menu_rename"));
+    _ = try driver.typeText(&app, TestApp.declare, "Harbour at dusk");
+    const frame = try driver.pressKeys(&app, TestApp.declare, &.{.enter});
+
+    try std.testing.expectEqualStrings("Harbour at dusk", app.photos[1].file_name);
+    try std.testing.expect(frame.rectOf(.of("rename_dialog")) == null);
+}
+
+test "the column slider snaps to whole columns" {
+    var text: zui_testing.FixedMetricsText(u16) = .{};
+    var ui: TestUi = try .init(std.testing.allocator, std.testing.io, &text);
+    defer ui.deinit(std.testing.allocator);
+    var driver: zui_testing.Driver(TestUi) = .{ .ui = &ui };
+    var app: TestApp = .{};
+
+    _ = try driver.frame(&app, TestApp.declare, &.{});
+    _ = try driver.drag(&app, TestApp.declare, .of("columns"), .{ 0, 0.5 }, .{ 1, 0.5 });
+    try std.testing.expectEqual(@as(u8, 10), app.settings.grid_columns);
+}
+</script>
+      </article>
+
+      <article class="feature" id="snapshots" data-title="Snapshots and command checks">
+        <div class="feature-head"><h3>Golden snapshots and command checks</h3><span class="pill shipped">Shipped</span></div>
+        <p><code class="z">expectSnapshot</code> renders a frame's commands to one line each, naming only the elements in the id set you pass, so unrelated internal ids never break the golden output. <code class="z">checkCommands</code> asserts structural invariants: bounds are valid, z never decreases, and clips are balanced.</p>
+<script type="text/x-zig" data-file="tests/toolbar.zig">
+test "the toolbar's layout" {
+    var text: zui_testing.FixedMetricsText(u16) = .{};
+    var ui: TestUi = try .init(std.testing.allocator, std.testing.io, &text);
+    defer ui.deinit(std.testing.allocator);
+    var driver: zui_testing.Driver(TestUi) = .{ .ui = &ui };
+    var app: TestApp = .{ .album_name = "Iceland" };
+
+    const frame = try driver.frame(&app, TestApp.declareToolbar, &.{});
+    try zui_testing.checkCommands(frame.commands());
+    try zui_testing.expectSnapshot(frame.commands(), zui.ids(.{ "toolbar", "import" }),
+        \\rectangle id=toolbar x=0 y=0 w=800 h=44 color=#202028
+        \\border id=toolbar x=0 y=0 w=800 h=44 color=#2c2c38
+        \\text x=12 y=14 w=60 h=15 size=15 color=#ffffff "Darkroom"
+        \\text x=80 y=15 w=42 h=13 size=13 color=#9a9aae "Iceland"
+        \\rectangle id=import x=693 y=6 w=95 h=32 color=#2c2c3c
+        \\text x=705 y=15 w=52 h=13 size=13 color=#ffffff "Import…"
+        \\
+    );
+}
+</script>
+        <p>The golden text above is illustrative. The format, one line per command in paint order, matches what <code class="z">snapshot</code> writes.</p>
+      </article>
+
+      <article class="feature" id="replay" data-title="Record and replay">
+        <div class="feature-head"><h3>Record and replay</h3><span class="pill shipped">Shipped</span></div>
+        <p><code class="z">ui.relayTo(listener)</code> hands a listener each record as it is applied, together with what each source delivered. <code class="z">Recording</code> keeps them, and <code class="z">driver.replay</code> runs them again with no loader. A recorded session of zui-sokol's tour replays to identical commands without starting any work. This makes a bug report a file you can step through.</p>
+<script type="text/x-zig" data-file="tests/replay.zig">
+test "a recorded import session replays to the same frames" {
+    const gpa = std.testing.allocator;
+    var recording: zui_testing.Recording(TestUi) = try .init(gpa, .{ .records = 600 });
+    defer recording.deinit(gpa);
+
+    var text: zui_testing.FixedMetricsText(u16) = .{};
+    var live_ui: TestUi = try .init(gpa, std.testing.io, &text);
+    defer live_ui.deinit(gpa);
+    live_ui.relayTo(recording.listener());
+    var live: zui_testing.Driver(TestUi) = .{ .ui = &live_ui };
+    var live_app: TestApp = .{};
+    _ = try live.click(&live_app, TestApp.declare, .of("import"));
+    const last_live = try live.typeText(&live_app, TestApp.declare, "~/Pictures/Iceland");
+    const expected_count = last_live.commands().len;
+
+    var replay_ui: TestUi = try .init(gpa, std.testing.io, &text);
+    defer replay_ui.deinit(gpa);
+    var replay: zui_testing.Driver(TestUi) = .{ .ui = &replay_ui };
+    var replay_app: TestApp = .{};
+    var last_replayed: *const TestUi.Frame = undefined;
+    for (recording.records()) |*record| last_replayed = try replay.replay(&replay_app, TestApp.declare, record);
+
+    try std.testing.expectEqual(expected_count, last_replayed.commands().len);
+}
+</script>
+      </article>
+
+      <article class="feature" id="wire" data-title="zui_wire">
+        <div class="feature-head"><h3><code>zui_wire</code>: sessions as bytes</h3><span class="pill shipped">Shipped</span></div>
+        <p><code class="z">zui_wire</code> writes records in and frames out as bytes, with each frame encoded as the changes from the one before. zui-sokol's tour averages 240 bytes a frame against 24 KB for full frames. The header carries a fingerprint of the fonts, so a reader that measures with other fonts refuses the stream instead of drawing misplaced text.</p>
+<script type="text/x-zig" data-file="src/session_recorder.zig">
+const zui_wire = @import("zui_wire");
+
+const SessionRecorder = struct {
+    encoder: zui_wire.Encoder(Ui),
+    file_writer: *std.Io.Writer,
+
+    fn start(self: *SessionRecorder, gpa: std.mem.Allocator, fonts: *const Fonts) !void {
+        self.encoder = try .init(gpa);
+        try zui_wire.writeHeader(self.file_writer, zui_wire.fingerprintOf(fonts));
+    }
+
+    fn onRecord(self: *SessionRecorder, record: *const Ui.FrameRecord) void {
+        self.encoder.writeRecord(self.file_writer, record) catch {};
+    }
+
+    fn onFrame(self: *SessionRecorder, frame: *const Ui.Frame) void {
+        self.encoder.writeFrame(self.file_writer, frame) catch {};
+    }
+};
+
+fn playBack(gpa: std.mem.Allocator, reader: *std.Io.Reader, renderer: *Renderer, surface: zui.Surface) !void {
+    var decoder: zui_wire.Decoder(Ui) = try .init(gpa, .of(Ui));
+    defer decoder.deinit(gpa);
+    try zui_wire.readHeader(reader, zui_wire.fingerprintOf(renderer));
+    while (try decoder.next(reader)) |message| switch (message) {
+        .record => {},
+        .frame => |frame| try renderer.zuiSubmit(surface, frame),
+    };
+}
+</script>
+      </article>
+
+      <article class="feature" id="remote" data-title="Remote rendering">
+        <div class="feature-head"><h3>Running in one process, drawing in another</h3><span class="pill shipped">Shipped</span></div>
+        <p><code class="z">zui_wire.Host(Ui)</code> is a host whose surface is a socket, and <code class="z">zui_wire.Renderer(Ui)</code> writes frames into it. On the other end, <code class="z">zui_wire.Client(Ui)</code> joins any real host and renderer to the socket, sending input one way and drawing frames that come back. zui-host's <code class="z">zig build remote</code> runs zui-sokol's tour this way. The wire host passes the host conformance suite.</p>
+<script type="text/x-zig" data-file="tools/remote_viewer.zig">
+pub fn main(init: std.process.Init) !void {
+    var host: NativeHost = undefined;
+    try host.init(init.io, .{ .title = "Darkroom (remote)", .size = .{ 1440, 900 } });
+    defer host.deinit();
+    var renderer: Renderer = undefined;
+    try renderer.init(host.zuiSurface(.main));
+    defer renderer.deinit();
+
+    const stream = try connectTo(init.io, "127.0.0.1:7420");
+    var client: zui_wire.Client(Ui) = undefined;
+    try client.init(init.gpa, init.io, stream, .{
+        .waker = host.zuiWaker(),
+        .fingerprint = zui_wire.fingerprintOf(&renderer),
+    });
+    defer client.deinit();
+
+    while (try client.frame(&host, &renderer)) {}
+}
+
+// On the application side, zui_app runs it unchanged:
+const RemoteApp = struct {
+    pub const Host = zui_wire.Host(Ui);
+    pub const Renderer = zui_wire.Renderer(Ui);
+    // ...the same zuiDeclare as App
+};
+</script>
+      </article>
+
+      <article class="feature" id="tracy" data-title="Profiling with Tracy">
+        <div class="feature-head"><h3>Profiling with Tracy</h3><span class="pill shipped">Shipped</span></div>
+        <p>A tracer is a type with <code class="z">zuiBegin</code> and <code class="z">zuiEnd</code> that sees every step of <code class="z">beginFrame</code> and <code class="z">endFrame</code> as a zone. <code class="z">zui_tracy.Tracer</code> sends them to Tracy. Without a tracer, zones are zero-sized and compile to nothing. Behind it, CI counts instructions per benchmark under Callgrind and fails on more than 2% growth over the parent commit.</p>
+<script type="text/x-zig" data-file="src/main.zig">
+const zui_tracy = @import("zui_tracy");
+
+pub const Ui = zui.Context(.{
+    .Text = Fonts,
+    .features = .{ .Tracer = zui_tracy.Tracer },
+});
+
+fn present(renderer: *Renderer, surface: zui.Surface, frame: *const Ui.Frame) !void {
+    try renderer.zuiSubmit(surface, frame);
+    zui_tracy.frameMark();
+}
+</script>
+        <p>Build with <code>-Dzui-tracy=true</code> to link Tracy's client, then connect profiler 0.14.1.</p>
+      </article>
+    </section>
+
+    <section class="group" id="gaps" data-title="Not working yet">
+      <div class="group-head"><span class="group-index">08</span><h2>Declared but not working yet</h2></div>
+      <p class="group-intro">These names compile, but they don't do anything yet. This list is from <code>ARCHITECTURE.md</code> §7 and the roadmap.</p>
+      <ul class="gap-list">
+        <li><b>Gradients, shadows, backdrop blur, transforms, materials <span class="pill partial">Declared only</span></b><span>The variants exist in <code class="z">RenderCommand</code> when a renderer declares them, but <code class="z">Decoration</code> has no field that produces them, so nothing is emitted or lowered. Items G1–G6, stage 8.</span></li>
+        <li><b><code class="z">features.semantics</code> and <code class="z">features.gestures</code> <span class="pill partial">Declared only</span></b><span><code class="z">Frame.semantics()</code> is always empty and <code class="z">ui.manipulation</code> always returns null. Accessibility is V2; gestures (arbitration, momentum, custom recognizers) are I5.</span></li>
+        <li><b><code class="z">features.flex_wrap</code> and <code class="z">features.safety_sweeps</code> <span class="pill partial">Declared only</span></b><span>The flags exist and gate their API, but they don't change behaviour yet. Wrap is L7; sweeps are V3.</span></li>
+        <li><b>Extended color</b><span>Colors are RGBA8 only. <code class="z">zui.ExtendedColor</code> for HDR is G6.</span></li>
+        <li><b>Still to come</b><span>Aspect ratio and natural sizes (L2), dividers (L3), more floating options (L4), right-to-left layout (L6), drag and drop between elements (I1), a visual inspector <code>zui_debug</code> (V1), motion, multi-line text editing, skins, and more hosts (macOS, Linux, web).</span></li>
+      </ul>
+    </section>
+
+    <section class="group" id="dx" data-title="DX verdict">
+      <div class="group-head"><span class="group-index">09</span><h2>How the DX is coming along</h2></div>
+      <div class="verdict">
+        <div class="good">
+          <h4>Working well</h4>
+          <ul>
+            <li>The declaration API is small: four calls and struct literals cover most layouts, and <code class="z">defer ui.close()</code> keeps helpers tidy.</li>
+            <li>Mistakes surface at compile time with exact, actionable messages, down to a misspelled inspector option.</li>
+            <li>No surprises at run time: no allocation after init, limits that draw what fits and say which number to raise, and zui_app reports each one once.</li>
+            <li>Sources are a clean answer to async data in immediate mode. Reading records demand, the loader starts work, and nobody blocks.</li>
+            <li>Testing is unusually strong: tests by id that don't depend on fonts, golden snapshots, record and replay, and conformance suites for backends.</li>
+          </ul>
+        </div>
+        <div class="rough">
+          <h4>Rough edges</h4>
+          <ul>
+            <li>Writing UI by hand in core is verbose. Nested <code class="z">.layout = .{ .sizing = .{ .width = ... } }</code> literals pile up, and static styles are the main relief today.</li>
+            <li>Interactive elements take three steps: declare, query by id, then pick colors from the state yourself. Widgets hide it, but there is nothing in between.</li>
+            <li><code class="z">labeledRow</code> leaves you to close the row, an asymmetry that's easy to get wrong.</li>
+            <li>The visuals are flat until the effects stage lands: rectangles, borders, text and images only.</li>
+            <li>There's no examples repository or template yet. The best references are zui-sokol's tour and zui-raylib's demo.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+(function () {
+  const KINDS = [
+    ["keyword", "keyword"], ["control", "control flow"], ["type", "type"], ["namespace", "namespace"],
+    ["function", "function"], ["method", "method"], ["property", "field"], ["enumMember", "enum / decl literal"],
+    ["variable", "variable"], ["parameter", "parameter"], ["constant", "constant"], ["number", "number"],
+    ["string", "string"], ["builtin", "builtin"], ["comment", "comment"]
+  ];
+  const KIND_LABEL = Object.fromEntries(KINDS);
+
+  const KW_DECL = new Set(["const", "var", "fn", "pub", "struct", "union", "enum", "error", "test", "comptime", "inline", "extern", "export", "packed", "opaque", "threadlocal", "align", "callconv", "usingnamespace", "anytype", "noalias", "linksection", "allowzero", "volatile"]);
+  const KW_CTRL = new Set(["if", "else", "for", "while", "switch", "return", "try", "catch", "orelse", "defer", "errdefer", "break", "continue", "unreachable", "and", "or", "suspend", "resume", "await", "async", "nosuspend"]);
+  const CONSTANTS = new Set(["true", "false", "null", "undefined"]);
+  const PRIMITIVE = /^(?:[iu]\d+|f16|f32|f64|f80|f128|usize|isize|bool|void|type|anyerror|anyopaque|noreturn|comptime_int|comptime_float|c_int|c_uint)$/;
+  const NAMESPACE = /^(?:std|zui|zui_[a-z0-9_]+|builtin|glfw)$/;
+  const CAPTURE_OPENERS = new Set([")", "else", "catch", "=>"]);
+
+  const PATTERNS = [
+    ["ws", /\s+/y],
+    ["comment", /\/\/[^\n]*/y],
+    ["string", /\\\\[^\n]*/y],
+    ["string", /"(?:[^"\\\n]|\\.)*"/y],
+    ["string", /'(?:[^'\\\n]|\\.)*'/y],
+    ["qident", /\.?@"(?:[^"\\\n]|\\.)*"/y],
+    ["builtin", /@[A-Za-z_]\w*/y],
+    ["number", /0x[0-9a-fA-F_]+|0b[01_]+|0o[0-7_]+|\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d+)?/y],
+    ["ident", /[A-Za-z_]\w*/y],
+    ["punct", /\.\{|\.\*|\.\.\.?|=>|==|!=|<=|>=|\+\+|\|\||<<|>>|[-+*\/%=<>!&|^~?:;,.(){}\[\]]/y]
+  ];
+
+  function lex(source) {
+    const tokens = [];
+    let position = 0;
+    while (position < source.length) {
+      let matched = false;
+      for (const [type, pattern] of PATTERNS) {
+        pattern.lastIndex = position;
+        const match = pattern.exec(source);
+        if (match && match[0].length) {
+          tokens.push({ type, value: match[0], start: position, end: position + match[0].length, kind: null, decl: false });
+          position += match[0].length;
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) {
+        tokens.push({ type: "punct", value: source[position], start: position, end: position + 1, kind: null, decl: false });
+        position += 1;
+      }
+    }
+    return tokens;
+  }
+
+  function startsLine(source, token) {
+    let index = token.start - 1;
+    while (index >= 0 && (source[index] === " " || source[index] === "\t")) index -= 1;
+    return index < 0 || source[index] === "\n";
+  }
+
+  function classify(source, tokens) {
+    const significant = tokens.filter(t => t.type !== "ws" && t.type !== "comment");
+    const parameters = new Set();
+    let awaitingParameters = false;
+    let parameterDepth = 0;
+    let inCapture = false;
+
+    significant.forEach((token, k) => {
+      const previous = significant[k - 1];
+      const next = significant[k + 1];
+
+      if (token.type === "punct") {
+        if (token.value === "(" && awaitingParameters) { parameterDepth = 1; awaitingParameters = false; }
+        else if (parameterDepth > 0 && token.value === "(") parameterDepth += 1;
+        else if (parameterDepth > 0 && token.value === ")") parameterDepth -= 1;
+        if (token.value === "|") {
+          if (inCapture) inCapture = false;
+          else if (previous && CAPTURE_OPENERS.has(previous.value)) inCapture = true;
+        }
+        return;
+      }
+      if (token.type === "string" || token.type === "number" || token.type === "builtin") { token.kind = token.type; return; }
+      if (token.type === "qident") {
+        token.kind = token.value.startsWith(".") ? "enumMember" : "variable";
+        return;
+      }
+
+      const name = token.value;
+      const calls = next && next.value === "(";
+      const isPascal = /^[A-Z]/.test(name) && /[a-z]/.test(name);
+      const dotted = previous && previous.value === "." && previous.end === token.start;
+
+      if (dotted) {
+        const before = significant[k - 2];
+        const isMember = before && before.end === previous.start &&
+          (before.type === "ident" || before.type === "builtin" || before.type === "qident" || [")", "]", "?", "*"].includes(before.value)) &&
+          !(before.type === "ident" && (KW_DECL.has(before.value) || KW_CTRL.has(before.value)));
+        if (before && before.value === "error") token.kind = "enumMember";
+        else if (isMember) {
+          if (isPascal) token.kind = "type";
+          else if (calls) token.kind = "method";
+          else if (before.kind === "namespace" && next && next.value === ".") token.kind = "namespace";
+          else token.kind = "property";
+        } else {
+          if (next && next.value === "=") token.kind = "property";
+          else if (isPascal) token.kind = "type";
+          else if (calls) token.kind = "function";
+          else token.kind = "enumMember";
+        }
+        return;
+      }
+
+      if (KW_DECL.has(name)) {
+        token.kind = "keyword";
+        if (name === "fn") { awaitingParameters = true; parameters.clear(); }
+        return;
+      }
+      if (KW_CTRL.has(name)) { token.kind = "control"; return; }
+      if (CONSTANTS.has(name)) { token.kind = "constant"; return; }
+      if (PRIMITIVE.test(name)) { token.kind = "type"; return; }
+
+      const declaredBy = previous && previous.type === "ident" ? previous.value : null;
+      if (declaredBy === "fn") { token.kind = isPascal ? "type" : "function"; token.decl = true; return; }
+      if (declaredBy === "const" || declaredBy === "var") token.decl = true;
+
+      if (NAMESPACE.test(name)) token.kind = "namespace";
+      else if (isPascal) token.kind = "type";
+      else if (calls) token.kind = "function";
+      else if (inCapture) { token.kind = "parameter"; token.decl = true; parameters.add(name); }
+      else if (parameterDepth > 0 && next && next.value === ":") { token.kind = "parameter"; token.decl = true; parameters.add(name); }
+      else if (next && next.value === ":" && startsLine(source, token) && !token.decl) { token.kind = "property"; token.decl = true; }
+      else if (parameters.has(name) && !token.decl) token.kind = "parameter";
+      else token.kind = "variable";
+    });
+
+    tokens.forEach(t => { if (t.type === "comment") t.kind = "comment"; });
+  }
+
+  function escapeHtml(text) {
+    return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  function highlight(source) {
+    const tokens = lex(source);
+    classify(source, tokens);
+    return tokens.map(t => {
+      const text = escapeHtml(t.value);
+      if (!t.kind) return text;
+      const label = KIND_LABEL[t.kind] + (t.decl ? " · declaration" : "");
+      return `<span class="tok t-${t.kind}${t.decl ? " decl" : ""}" data-kind="${t.kind}" title="${label}">${text}</span>`;
+    }).join("");
+  }
+
+  document.querySelectorAll('script[type="text/x-zig"]').forEach(block => {
+    const source = block.textContent.replace(/^\n/, "").replace(/\s+$/, "");
+    const file = block.dataset.file || "snippet.zig";
+    const slash = file.lastIndexOf("/");
+    const figure = document.createElement("figure");
+    figure.className = "code";
+    const lines = highlight(source).split("\n").map(line => `<span class="line">${line || " "}</span>`).join("");
+    figure.innerHTML =
+      `<div class="code-bar"><span class="code-file">${escapeHtml(file.slice(0, slash + 1))}<b>${escapeHtml(file.slice(slash + 1))}</b></span>` +
+      `<button class="copy" type="button">Copy</button></div><pre><code>${lines}</code></pre>`;
+    figure.querySelector(".copy").addEventListener("click", event => {
+      const button = event.currentTarget;
+      const done = () => { button.textContent = "Copied"; setTimeout(() => { button.textContent = "Copy"; }, 1400); };
+      try {
+        navigator.clipboard.writeText(source).then(done, () => selectCode(figure));
+      } catch (_) { selectCode(figure); }
+    });
+    block.replaceWith(figure);
+  });
+
+  function selectCode(figure) {
+    const range = document.createRange();
+    range.selectNodeContents(figure.querySelector("code"));
+    const selection = getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  document.querySelectorAll("code.z").forEach(inline => {
+    inline.innerHTML = highlight(inline.textContent);
+  });
+
+  const legend = document.getElementById("legend");
+  KINDS.forEach(([kind, label]) => {
+    const item = document.createElement("li");
+    item.innerHTML = `<button type="button" aria-pressed="false" data-kind="${kind}"><span class="swatch" style="background: var(--t-${kind})"></span><span class="t-${kind}">${label}</span></button>`;
+    legend.appendChild(item);
+  });
+
+  let spotlighted = null;
+  legend.addEventListener("click", event => {
+    const button = event.target.closest("button");
+    if (!button) return;
+    const kind = button.dataset.kind;
+    spotlighted = spotlighted === kind ? null : kind;
+    legend.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.kind === spotlighted)));
+    document.querySelectorAll(".tok.spot").forEach(t => t.classList.remove("spot"));
+    if (spotlighted) {
+      document.body.dataset.spot = spotlighted;
+      document.querySelectorAll(`.tok[data-kind="${spotlighted}"]`).forEach(t => t.classList.add("spot"));
+    } else {
+      delete document.body.dataset.spot;
+    }
+  });
+
+  const toc = document.getElementById("toc");
+  document.querySelectorAll("section.group").forEach(group => {
+    const item = document.createElement("li");
+    const features = [...group.querySelectorAll("article.feature")];
+    item.innerHTML = `<a href="#${group.id}">${escapeHtml(group.dataset.title)}</a>` +
+      (features.length ? `<ul>${features.map(f => `<li><a href="#${f.id}">${escapeHtml(f.dataset.title)}</a></li>`).join("")}</ul>` : "");
+    toc.appendChild(item);
+  });
+
+  const links = new Map([...toc.querySelectorAll("a")].map(a => [a.getAttribute("href").slice(1), a]));
+  const observer = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+      if (!entry.isIntersecting) return;
+      links.forEach(a => a.classList.remove("active"));
+      const link = links.get(entry.target.id);
+      if (link) {
+        link.classList.add("active");
+        const panel = document.getElementById("toc-panel");
+        const top = link.offsetTop - panel.offsetTop;
+        if (top < panel.scrollTop || top > panel.scrollTop + panel.clientHeight - 40) panel.scrollTop = top - 80;
+      }
+    });
+  }, { rootMargin: "-10% 0px -80% 0px" });
+  document.querySelectorAll("article.feature, section.group").forEach(el => observer.observe(el));
+
+  const toggle = document.getElementById("toc-toggle");
+  toggle.addEventListener("click", () => {
+    const panel = document.getElementById("toc-panel");
+    const open = panel.classList.toggle("open");
+    toggle.setAttribute("aria-expanded", String(open));
+    toggle.textContent = open ? "Hide contents" : "Contents";
+  });
+})();
+</script>
+</body>
+</html>
