@@ -40,7 +40,7 @@ Implemented so far:
   every step of a frame as a zone, with `zui_tracy` sending them to the
   [Tracy](https://github.com/wolfpld/tracy) profiler. Without a tracer,
   tracing compiles to nothing.
-- **Stage 2, in part:** `Context(config)` with the text contract and
+- **Stage 2:** `Context(config)` with the text contract and
   `Config.limits`; a frame record with time, scale, zoom and input as an
   ordered event log over a pointer table; `endFrame` that always returns
   a frame; `nextFrame()`; letter spacing, measured through the text
@@ -54,17 +54,20 @@ Implemented so far:
   item in order, `Task` for one piece of work with its status, and
   `KeyedLoads` for many loads driven by what the UI asks for, each
   checked by `zui_testing.expectSourceConforms` under ThreadSanitizer and
-  on a single-threaded `Io`.
+  on a single-threaded `Io`. The backends are on this API, and the
+  demo's thumbnail grid loads through `KeyedLoads` without the UI thread
+  ever waiting, and idles at 0% CPU.
 
 The reference backend and demo application live in
-[zui-raylib](https://github.com/AaronJClausen/zui-raylib). It and the
-other backends still use the API from before stage 2.
+[zui-raylib](https://github.com/AaronJClausen/zui-raylib); the other
+backends are [zui-sokol](https://github.com/AaronJClausen/zui-sokol) and
+[zui-terminal](https://github.com/AaronJClausen/zui-terminal).
 
-Next, in the order of SPEC.md §21: the rest of stage 2, the backends
-moved to the new API. After that come
-the renderer and host contracts with `zui_app`, a native Windows host, the
-wire format, and from there text, layout, gestures, effects, an
-inspector and accessibility, more hosts, motion and text editing.
+Next, in the order of SPEC.md §21: the renderer and host contracts with
+`zui_app`, a native Windows host, the wire format, and from there text,
+layout, gestures, effects, an inspector and accessibility, more hosts,
+motion and text editing. The text fast path and string cache (T1, T2) and
+the box tree's budget (P4) come early, now that the demo can be traced.
 [ROADMAP.md](ROADMAP.md) keeps the queue of work in order, and
 [ARCHITECTURE.md](ARCHITECTURE.md) shows how the pieces connect.
 
@@ -156,6 +159,11 @@ Set `.features = .{ .Tracer = zui_tracy.Tracer }` in the `Config`, call
 `zui_tracy.frameMark()` after each presented frame, build with
 `-Dzui-tracy=true`, and connect Tracy's profiler of the same version
 (0.14.1). Every step of `beginFrame` and `endFrame` is a zone.
+zui-raylib's demo does all of this with `zig build demo
+-Dzui-tracy=true`. Without the profiler's window, Tracy's
+`tracy-capture -o demo.tracy` saves a trace (run the demo with
+`TRACY_NO_EXIT=1` so it waits for the capture to finish) and
+`tracy-csvexport demo.tracy` lists its zones.
 
 To keep noise out of a profile or a timing:
 - pin the process to one core (`taskset -c 2` on Linux, `start /affinity 4`

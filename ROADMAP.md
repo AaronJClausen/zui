@@ -22,8 +22,8 @@ Each item says:
 | 0.5 | layout performance, parallel measurement, benchmarks | shipped |
 | after 0.5 | declaration work: −42% to −56% | on `main` |
 | 0.6, in part | `bench-compare` (R2), startup benchmarks (P1), task completions at `beginFrame` (A2), the async design (A1) | done; the rest of 0.6 became stage 1 |
-| stage 1 | instruction counts in CI (R1), the tracer contract and `zui_tracy` (P2) | on `main`, but for a trace of the demo, which needs C8 |
-| stage 2, in part | the code brought to the spec's shape: C5, S1, I4, C6, A5 and `nextFrame` (I2); letter spacing (T3); the environment and host requests (I6); sources in the core (A3); `zui_async` (A4) | on `main`; the other repos still need the same change (C8) |
+| stage 1 | instruction counts in CI (R1), the tracer contract and `zui_tracy` (P2) | done |
+| stage 2 | the code brought to the spec's shape: C5, S1, I4, C6, A5 and `nextFrame` (I2); letter spacing (T3); the environment and host requests (I6); sources in the core (A3); `zui_async` (A4); the backends on the new API, the demo's thumbnails on `KeyedLoads` (C8) | done; the demo idles at 0% CPU |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
@@ -47,12 +47,10 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
-| C8. The backends on the stage-2 API | 2 | `../zui-raylib`, `../zui-sokol`, `../zui-terminal` | | |
-| P2. The tracer contract: a trace of the demo | 1 | `../zui-raylib`'s demo with `zui_tracy` | C8 | waiting on C8; the rest is done |
 | T1. The single-line fast path | 6, early | `src/text.zig` | | |
 | T2. The whole-string cache | 6, early | `src/text.zig`, `Limits.string_cache_entries` | T1 | |
 | P4. The box tree's layout and emission within budget | 6, early | `src/layout.zig`, `src/emission.zig` | | |
-| C1. The renderer contract, generated commands, lowering | 3 | `src/commands.zig`, `src/emission.zig`, `src/contracts.zig` | C8 | |
+| C1. The renderer contract, generated commands, lowering | 3 | `src/commands.zig`, `src/emission.zig`, `src/contracts.zig` | | |
 | C2. The host contract and the surface | 3 | `src/contracts.zig`, a new `src/surface.zig` | C1 | |
 | C3. Conformance suites | 3 | `zui_testing/` | C1, C2 | |
 | C7. `Features` | 3 | `src/context.zig` | | |
@@ -81,9 +79,11 @@ Things to know:
   still missing is listed in ARCHITECTURE.md §7 with the item that adds
   it. With `TaskPool` deleted, outside data reaches a frame only through
   sources: `zui_async`'s (A4) or the application's own (A3).
-- **Stage 2 ends in the other repos.** Its *Done when* in SPEC.md §21
-  (the demo's thumbnail grid on `KeyedLoads`, idling at 0% CPU) can only
-  be met in zui-raylib, which is C8.
+- **A core change reaches the backends by a pin.** zui-raylib,
+  zui-sokol and zui-terminal pin zui by commit; develop them against this
+  checkout with `--fork=../zui`, push zui, then move each pin with
+  `zig fetch --save=zui`. The demo's `--measure-idle` and
+  `-Dzui-tracy=true` check the idle budget and the trace there.
 - **`bench --check-targets` checks §20.2's budgets,** including
   declaration for the box tree. Times vary by machine; instruction counts
   (`zig build counts`, R1) do not, and CI fails on more than 2% growth
@@ -122,6 +122,77 @@ Things to know:
 ---
 
 ## Done
+
+### C8. The backends on the stage-2 API
+
+zui-raylib (`67d1cc1`), zui-sokol (`cb9d03e`) and zui-terminal
+(`039b7fe`) pin zui at `2df48f7` and build without `--fork`; each
+one's CI passes on Linux, Windows and macOS. In each:
+- `Platform` is `Text`, the text contract, set by the backend's
+  `config()`: `zuiMeasure` with a `MeasureKey`, counting the letter
+  spacing after every glyph, and text commands drawn with their spacing
+  (per glyph in sokol_debugtext, to the nearest cell in a terminal);
+- the loop builds a `FrameRecord`, takes `endFrame()`'s frame, and waits
+  as `nextFrame` says;
+- the frame's cursor request is applied where the library has cursors
+  (raylib, sokol_app), and focus changes are `window_focused` events.
+
+The demo's thumbnails are a `zui_async.KeyedLoads` source: declaration
+asks for the keys of the rows near the visible area, the loader starts
+each load as its own task on the application's `Io` after `endFrame`, and
+keys unread for 30 frames are abandoned (34 of 98 in a scripted fast
+scroll). Measured in zui-raylib:
+- **0% CPU idle.** `--measure-idle` has the demo read its own CPU time
+  at two frames it requests 10 s apart. On Windows (i9-10900K,
+  ReleaseSafe): 0.0 ms in the thumbnail grid and the settings view,
+  31–47 ms in the documents view, with 1 frame (the measurement's own)
+  and 0 wakes in each window; Windows counts CPU in 15.6 ms ticks. On
+  CI's Linux runner, under Xvfb: 24.0 ms for the grid, 1 frame, 0 wakes.
+- **One wake for 100 loads.** A test in `examples/thumbnails.zig` asks
+  for 100 thumbnails in one frame, finishes them on 100 tasks before the
+  next, and counts 1 wake; the next frame shows all 100 and `nextFrame`
+  is `.on_event` again.
+
+Decided here:
+- **Backends that see events send events.** sokol_app and the terminal
+  report events, so their collectors emit them in order and a click
+  inside one frame is kept; only raylib, which reports state, goes
+  through `zui.InputSampler`.
+- **A deadline wakes raylib through a timer.** raylib's `EndDrawing`
+  can wait for events but not for a time, so `FramePacer` turns `.at`
+  into event waiting plus a task that posts an empty event at the
+  instant, sleeping until the instant has truly passed: a wake just
+  before it asked for the same instant again and slept for good.
+- **sokol_app cannot sleep,** since it presents at every refresh, so its
+  demo declares a zui frame only when `nextFrame` or input calls for one
+  and redraws the frame it holds otherwise: 2 zui frames in 121 drawn.
+- **Idle is measured by the process itself,** between two frames it asks
+  for with `requestFrameAt`, so a run ends on its own and the same check
+  runs in CI.
+
+### P2. The tracer contract
+
+`Features.Tracer`: a zone per layout pass, per emission step and per
+`beginFrame` step, through `zuiBegin` and `zuiEnd`, and nothing analyzed
+when it is `void`; `zui.TraceZone` and five compile-error tests; a
+recording tracer in `src/tests/support.zig`, and a test that one frame
+produces every zone, each nested in `begin_frame` or `end_frame`;
+`zui_tracy`, with Tracy as a lazy dependency linked by
+`-Dzui-tracy=true`, tested with Tracy's client on all three systems (in a
+MinGW build Tracy's callstacks are off: with them the process exits with
+code 9 after Tracy shuts down); the profiling guide, in README.md's
+*Profiling*.
+
+`zig build counts` without a tracer was identical to the instruction in
+every scenario, against `994a631`, in a local Docker container.
+
+The trace of the demo was captured headlessly: zui-raylib's demo built
+with `-Dzui-tracy=true` and run with `TRACY_NO_EXIT=1`, Tracy 0.14.1's
+`tracy-capture` saving the trace and `tracy-csvexport` listing its
+zones. In the thumbnail grid's 36 frames, each of the 14 zones other than
+`sort_layers` appears 36 times; in the documents view, whose tooltip floats,
+`sort_layers` appears in the 2 frames that showed it. Every zone of
+`zui.TraceZone` appears.
 
 ### A4. `zui_async`
 
@@ -191,8 +262,8 @@ against 16,003 for depth 64 alone (about 34 per source: the swaps, a
 slots only once a key could have gone unread long enough; before that
 change the scenario's `endFrame` took 25,955.
 
-Left to C8: the demo's thumbnail grid on `KeyedLoads`, idling at 0% CPU,
-and its 100 loads causing one wake, all in zui-raylib.
+The demo's thumbnail grid on `KeyedLoads`, idling at 0% CPU, and its 100
+loads causing one wake, were done in zui-raylib by C8.
 
 ### A3. Sources in the core
 
@@ -274,7 +345,7 @@ SPEC.md §9.4 asks of every contract, so golden tests lay out spaced text:
 it widens every character including the last, wraps sooner, is aligned
 by its spaced width, and lays out identically at zooms of 0.5, 1 and 2.
 Nothing on a hot path changed, so there is nothing to measure. Drawing
-the spacing belongs to the renderers, which C8 moves to the stage-2 API.
+the spacing belongs to the renderers, which C8 did.
 
 ### R1. Instruction counts in CI
 
@@ -348,53 +419,10 @@ the sources: completions belong to the frame record, and with an inline
 
 ---
 
-## Stage 1: measure
-
-### P2. The tracer contract
-
-**Grounding.** The profiles of the declaration work needed hand-matched
-`perf` samples and temporary `never_inline` calls to see per-function
-costs.
-
-**Plan.** `Features.Tracer`: a zone per layout pass, per emission step
-and per `beginFrame` step, through `zuiBegin` and `zuiEnd`, and nothing
-analyzed when it is `void`. A Tracy binding as the first tracer, and a
-short guide to profiling with minimal noise: pinned cores, fixed
-frequency, alternating runs.
-
-**Done when:** a trace of the demo shows every pass, and a build without a
-tracer has unchanged `zig build counts`.
-
-**Slices.** `Features` exists only as this item adds it, with `Tracer`
-alone (C7 adds the rest). First the contract, its compile-error tests and
-a test tracer that records zones, so a test asserts every pass is a zone;
-then the Tracy binding; then the trace of the demo, which needs C8.
-
-**Status.** Done but for the trace of the demo, which waits for C8 to move
-zui-raylib's demo onto the stage-2 API, and is then checked by eye in
-Tracy's profiler (0.14.1). Landed:
-- `Features.Tracer`, `zui.TraceZone` and the contract's checks, with five
-  compile-error tests;
-- a recording tracer in `src/tests/support.zig`, and a test that one frame
-  produces every zone, each nested in `begin_frame` or `end_frame`;
-- `zui_tracy`, with Tracy as a lazy dependency linked by
-  `-Dzui-tracy=true`, tested with Tracy's client on Windows (in a MinGW
-  build Tracy's callstacks are off: with them the process exits with
-  code 9 after Tracy shuts down) and on Linux, and in CI on all three
-  systems;
-- the profiling guide, in README.md's *Profiling*.
-
-`zig build counts` without a tracer was identical to the instruction in
-every scenario, against `994a631`, in a local Docker container.
-
-**Spec.** §4, §16.5.
-
----
-
 ## Stage 2: the frame record
 
-The breaking change, made once. Everything in this stage lands before
-stage 3 adds the host and renderer contracts.
+The breaking change, made once, and done (C8 is in *Done*). What remains
+of an item here waits for a later stage, as its **Status** says.
 
 ### C5. `Context(config)` and the text contract
 
@@ -514,36 +542,7 @@ demo's loads move to A4's sources.
 **Done when:** nothing in this repository or the backends names a task
 pool.
 
-**Status.** Done in this repository; the demo's loads and the backends
-wait for C8.
-
-### C8. The backends on the stage-2 API
-
-**Grounding.** zui-raylib, zui-sokol and zui-terminal pin zui at
-`c41b571`, before stage 2. `zui_async` (A4) holds the sources the demo's
-loads move to. They still declare a `Platform` with
-`measureText(text, font, size)`, `scale` and `wake`
-(`../zui-raylib/src/root.zig:31`), read `zui.Input`, and zui-raylib's
-demo loads through `TaskPool` (`../zui-raylib/examples/demo.zig`).
-
-**Plan.** In each repository, on top of the zui commit that finishes A4:
-- `Platform` becomes a text contract: `zuiMeasure` with a `MeasureKey`,
-  counting letter spacing after every glyph, and text commands drawn with
-  their spacing (T3);
-- the loop builds a `FrameRecord` through `zui.InputSampler`, takes
-  `endFrame() *const Frame`, and sleeps on `nextFrame()`;
-- zui-raylib's demo moves its loads to `zui_async`, with the thumbnail
-  grid on `KeyedLoads`.
-
-Develop against this checkout with `zig build test --fork=../zui`; the
-pin moves once the zui commit is pushed.
-
-**Done when:** each backend's tests and demo build on zui's `main`, and
-stage 2's own test (SPEC.md §21) holds in zui-raylib's demo: the
-thumbnail grid runs on `KeyedLoads` with no wait on the UI thread, idles
-at 0% CPU, and 100 loads finishing between two frames cause one wake.
-
-**Spec.** §9.4, §6, §19.1, §21.
+**Status.** Done; the backends and the demo's loads moved off it in C8.
 
 ---
 
@@ -1046,6 +1045,10 @@ Deliberate, and each a reason to choose zui:
 | `Task.publishing` (A4) | declared on the `Task` type, taking the function's arguments as one tuple |
 | `KeyedLoads`' `Progress` (A4) | at most a `usize`, so every target stores it with one atomic |
 | Sources in tests (A4) | `Driver` takes `.sources`; `frameDelivering` gives sources it does not name `null` or `Delivery.empty`; `expectSourceConforms` publishes through a harness |
+| Input from backends (C8) | events where the library reports events (sokol_app, the terminal), so a click inside one frame is kept; `zui.InputSampler` only where it reports state (raylib) |
+| The backends' text contract (C8) | each backend's `Text`, set by its `config()`, in place of `Platform` |
+| Waiting until an instant in raylib (C8) | `FramePacer`: raylib's event wait plus a task that posts an empty event once the instant has passed |
+| Measuring idle CPU (C8) | by the demo itself (`--measure-idle`), between two frames it requests 10 s apart, so the run ends on its own and CI can repeat it |
 
 ### Open
 

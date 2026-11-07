@@ -175,15 +175,16 @@ The stage is the one in SPEC.md §21 that builds it.
 ## 7. From today's code to the spec
 
 What exists today is releases 0.1–0.5, the start of 0.6, stage 1
-(instruction counts in CI, the tracer contract and `zui_tracy`), and the part of stage 2 that reshaped what already existed: `Context(config)` with
-`Config.limits` and the text contract, the frame record with `now`,
-scale and zoom, input as an ordered event log over a pointer table,
-`endFrame` that always returns a frame, `nextFrame()`, letter spacing
-through the measurement key, the environment and host requests, sources
-in the core (the contract and its checks, swap and injection, demand,
-`Status` and `Waker`), the default sources in `zui_async` with
-`zui_testing`'s conformance suite for sources, and `Element` with
-`decoration` and `clip: Axes`. `TaskPool` is deleted.
+(instruction counts in CI, the tracer contract and `zui_tracy`), and
+stage 2: `Context(config)` with `Config.limits` and the text contract,
+the frame record with `now`, scale and zoom, input as an ordered event
+log over a pointer table, `endFrame` that always returns a frame,
+`nextFrame()`, letter spacing through the measurement key, the
+environment and host requests, sources in the core (the contract and its
+checks, swap and injection, demand, `Status` and `Waker`), the default
+sources in `zui_async` with `zui_testing`'s conformance suite for
+sources, and `Element` with `decoration` and `clip: Axes`. `TaskPool` is
+deleted, and the three backends and the demo are on this API.
 
 The code and the spec still differ in these places, each closed by the
 roadmap item named:
@@ -210,7 +211,11 @@ parallel measurement and the module boundary.
 | `zui-themes` | skins for OS design languages |
 | `zui-examples` | samples and the template project |
 
-The renderer repositories change in the same week as the core (C8): their
-`Platform` becomes a text contract (`zuiMeasure`) now that `Context`
-takes one, their loops build a `FrameRecord` through `zui.InputSampler`,
-and they become renderers when stage 3 adds the contracts.
+The renderer repositories pin zui by commit and moved to stage 2 with it
+(C8): each declares `Text`, a text contract, and its loop builds a
+`FrameRecord`, from events where its library reports them and through
+`zui.InputSampler` where it reports state (raylib), then waits as
+`nextFrame` says. Each loop also does a host's work by hand: zui-raylib's
+`FramePacer`, `InputReader` and `HostRequestApplier` become the raylib
+adapter host (H1), and the backends become renderers, when stage 3 adds
+the contracts.
