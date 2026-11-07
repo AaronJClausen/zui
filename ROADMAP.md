@@ -25,7 +25,7 @@ Each item says:
 | stage 1 | instruction counts in CI (R1), the tracer contract and `zui_tracy` (P2) | done |
 | stage 2 | the code brought to the spec's shape: C5, S1, I4, C6, A5 and `nextFrame` (I2); letter spacing (T3); the environment and host requests (I6); sources in the core (A3); `zui_async` (A4); the backends on the new API, the demo's thumbnails on `KeyedLoads` (C8) | done; the demo idles at 0% CPU |
 | stage 3 | the renderer contract and the generated commands (C1); the host contract and `RecordBuilder` (C2); the conformance suites (C3); `Features` (C7); `zui_app` (C4); the raylib adapter host (H1) | done; the backends are renderers and pass the renderer suite in CI, raylib's host passes the host suite, and the demo runs through `zui_app`, presenting its first frame 288 ms after the process starts; lowering comes with stage 8's commands |
-| stage 4, in part | the Windows host (H2), with dropped files and lifecycle events in the record | done; zui-sokol's tour runs on it unchanged and idles at 0% CPU; the system material (H8) remains |
+| stage 4 | the Windows host (H2), with dropped files and lifecycle events in the record; the system material (H8) | done; zui-sokol's tour runs on it unchanged and idles at 0% CPU, and the same code shows Mica or a solid background |
 | stage 6, early | the single-line fast path (T1), the whole-string cache (T2), the box tree's layout passes (P4, in part) | done; warm text and the box tree's layout and emission within their budgets; the box tree's declaration is not (P5) |
 
 No release is tagged; everything is on `main`. From here, work is
@@ -60,14 +60,21 @@ green, and its **Status** line below says which slice is next.
 |---|---|---|---|---|
 | P4. The box tree's layout and emission within budget | 6, early | `src/layout.zig`, `src/emission.zig` | | waiting on P5 |
 | P5. The box tree's declaration within budget | 6, early | `src/context.zig` | L8 | waiting on L8 |
-| H8. The desktop showing through the window | 4 | `../zui-host` | H2 | in progress |
 | F2. Relay | 5 | `src/context.zig` | | |
 | F3. `zui_wire` | 5 | a new `zui_wire/` module | F2 | |
 | F4. Replay in `zui_testing` | 5 | `zui_testing/` | F2 | |
 | F5. Rendering somewhere else | 5 | `zui_wire/`, a wire host and renderer | F3 | |
 | F6. Watching files | 5 | `../zui-host` | H2 | |
+| L8. Static styles | 6 | `src/context.zig`, `src/style.zig` | | |
+| T4. Line-break segmentation | 6 | `src/text.zig` | | |
+| L1. A grow basis | 6 | `src/layout.zig` | | |
+| L2. Aspect ratio and natural sizes | 6 | `src/layout.zig` | | |
+| L3. Dividers and decorated images | 6 | `src/emission.zig` | | |
+| L4. Floating options | 6 | `src/layout.zig`, `src/emission.zig` | | |
+| L6. Right-to-left layout | 6 | `src/layout.zig` | | |
+| L7. Wrap | 6 | `src/layout.zig` | | |
 
-After the queue come stages 5 to 11 in the order of SPEC.md §21. They join the queue as it runs short.
+After the queue come stages 7 to 11 in the order of SPEC.md §21. They join the queue as it runs short.
 
 Statuses: `next` (the first open row), `in progress` (a slice has
 landed), `waiting on <what>` (blocked by something the next session cannot
@@ -131,6 +138,56 @@ Things to know:
 ---
 
 ## Done
+
+### H8. The desktop showing through the window
+
+`zui.SystemMaterial` (`none`, `window`, `transient`) in
+`WindowOptions.material`, passed by `zui_app.Options.material`, and
+`Environment.system_material`, the host's answer on this machine, an
+environment change like every other (`50430d8`). zui-host's Windows host
+(`5c33514`) declares `system_material`: it asks DWM for the backdrop
+(`DWMWA_SYSTEMBACKDROP_TYPE`, Mica or Acrylic), extends the frame over the
+client area and paints it black, which is transparent there, and reports
+`system_material` (the backdrop taken and transparency effects on) and
+`reduced_transparency`, again when the settings change.
+`Host.system_material_unavailable` makes it behave as Windows 10, which
+refuses the attribute.
+
+The renderer clears to transparent and must keep its alpha. Windows
+ignores the alpha of an OpenGL window and of a Direct3D swapchain made for
+a window: over Acrylic's #545454, an opaque #2d2d2d card showed #818181,
+the backdrop added under every pixel. So zui-sokol's renderer (`b138784`)
+now draws into a `win32` window with D3D11, its default backend, through a
+swapchain DirectComposition composes into the window with premultiplied
+alpha, and its sokol_gl pipeline writes alpha, which sokol_gl does not by
+default. sokol_debugtext writes 0 between a glyph's strokes, which let the
+backdrop through each glyph's cell over a card, so when the surface
+composes alpha every rectangle and border is drawn again into the alpha
+channel after the text, with MAX blending.
+
+`zig build material` in zui-host declares a root without a background
+while `system_material` is true and with the theme's otherwise. Read back
+from the screen on the reference machine (Windows 11): Mica shows #202020
+where nothing is drawn (black without it), Acrylic #545454, and a #2d2d2d
+card at 69% alpha blends over each as drawn (#292929, #393939); with the
+material forced unavailable, the root's own #202020 and the same card.
+The tour draws through the same D3D11 path and idles at 0.0 ms of CPU over
+10 s in three runs of four (62.5 ms, 2 frames, in the fourth), ReleaseSafe.
+
+Decided here:
+- **Whether the material shows is an environment setting,** not a
+  status a host call returns, so it is in the record, replays, and the
+  application reads it where it reads the theme.
+- **A native window's renderer composes with alpha** through
+  DirectComposition on Windows; zui-sokol's OpenGL path stays for
+  `-Dgl=true` and its renderer suite, and does not show the material.
+
+What remains, and where it went:
+- **Windows 10 was not seen:** the fallback there is the path forced by
+  `system_material_unavailable`, where the attribute's refusal is the only
+  difference; this machine is Windows 11.
+- **A light theme and a second monitor** were not seen either; the
+  machine is in dark mode.
 
 ### H2. The Windows host
 
@@ -953,24 +1010,7 @@ with H2.
 
 ## Stage 4: a native host
 
-### H8. The desktop showing through the window
-
-**Grounding.** Windows offers Mica and Acrylic (`DwmSetWindowAttribute`),
-macOS vibrancy (`NSVisualEffectView`), KDE a blur protocol; GNOME and
-browsers offer nothing comparable.
-
-**Plan.** `HostCapabilities.system_material` and a material per window.
-The renderer clears to transparent, and elements without a background let
-it show; without one, the root draws the theme's solid background.
-
-**Done when:** the Windows host shows Mica on Windows 11 and the solid
-fallback on Windows 10, with the same application code.
-
-**Status.** Landed in zui: `WindowOptions.material` (`zui.SystemMaterial`:
-`none`, `window`, `transient`), passed through `zui_app.Options.material`,
-and `Environment.system_material`, by which the host says whether the
-material shows on this machine. Next: the Windows host asks DWM for it,
-and zui-sokol's renderer composes with alpha over it.
+Done: H2 and H8 are in *Done*.
 
 ---
 
@@ -1464,6 +1504,8 @@ Deliberate, and each a reason to choose zui:
 | The first renderer on a native surface (H2) | sokol_gfx, with OpenGL through WGL: zui-sokol's renderer makes the window's context itself, without sokol_app |
 | The demo on a native host (H2) | zui-sokol's tour, unchanged, under a loop written by hand; raylib cannot draw into a window it does not own |
 | A native host's loop (H2) | the Windows host runs its message loop on a thread of its own, so modal move and resize loops never stop frames |
+| Whether a system material shows (H8) | `Environment.system_material`, reported by the host, so it is in the record and replays |
+| A renderer over a system material (H8) | composes with alpha: zui-sokol draws a native window through a DirectComposition swapchain, since Windows ignores an OpenGL or window swapchain's alpha |
 | A terminate request (H2) | delivered in one record; the host's next `zuiPoll` returns false |
 | The clipboard service before H6 (H2) | `zuiClipboard`, a type with `read(host, buffer)` and `write(host, text)` |
 

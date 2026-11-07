@@ -197,8 +197,9 @@ with compile errors naming them; and `zui_app`, the loop of SPEC.md §6.1 as a
 library, with a render thread, pacing and its reports, tested against an
 offscreen host, and running the demo on raylib's host. From stage 4, the
 Windows host in `zui-host`, with dropped files and lifecycle events in
-the record, has landed, and zui-sokol's renderer draws into its `win32`
-window. From stage 6, the single-line fast path and the
+the record and the system material reported in the environment, has
+landed, and zui-sokol's renderer draws into its `win32` window, composed
+with alpha. From stage 6, the single-line fast path and the
 whole-string cache have landed.
 
 The code and the spec still differ in these places, each closed by the
@@ -239,7 +240,8 @@ draws (the terminal's names only the five base commands). zui-raylib is
 also a host (H1): `zui_raylib.Host` waits in GLFW and samples raylib's
 input, and its demo runs through `zui_app`. zui-sokol's and
 zui-terminal's loops still do a host's work by hand, but zui-sokol's
-renderer, built with OpenGL, also draws into a native host's `win32`
-window without sokol_app, and zui-host runs zui-sokol's tour that way
-(H2). zui-host pins zui and zui-sokol by commit, as the renderers pin
+renderer also draws into a native host's `win32` window without
+sokol_app, with D3D11 through a DirectComposition swapchain that keeps
+alpha so a system material shows (H8), and zui-host runs zui-sokol's tour
+that way (H2). zui-host pins zui and zui-sokol by commit, as the renderers pin
 zui; its Windows host runs its message loop on a thread of its own.

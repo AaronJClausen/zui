@@ -85,14 +85,18 @@ Implemented so far:
   first frame about 290 ms after the process starts, all but 5 ms of it
   raylib opening its window.
 
-- **Stage 4, in part:** the first native host, for Windows, in
+- **Stage 4:** the first native host, for Windows, in
   [zui-host](https://github.com/AaronJClausen/zui-host): its own message
   loop on a thread of its own, per-monitor scale, the environment
   (dark mode, high contrast, animations, power), lifecycle events
   (Ctrl+C and the session ending as a terminate request, sleep, low
   memory), dropped files, the cursor, the IME window and the clipboard,
-  passing zui's host suite. zui-sokol's tour runs on it unchanged, drawn
-  by zui-sokol's renderer into the native window, and idles at 0% CPU.
+  passing zui's host suite; and the system's material (Mica) behind the
+  window where nothing is drawn, reported as
+  `Environment.system_material`, so the same code draws its own
+  background where there is none. zui-sokol's tour runs on it unchanged,
+  drawn by zui-sokol's renderer into the native window, and idles at 0%
+  CPU.
   The record carries the new events: `ui.filesDropped()` and
   `ui.lifecycle()`.
 
@@ -102,8 +106,7 @@ backends are [zui-sokol](https://github.com/AaronJClausen/zui-sokol) and
 [zui-terminal](https://github.com/AaronJClausen/zui-terminal); native
 hosts live in [zui-host](https://github.com/AaronJClausen/zui-host).
 
-Next, in the order of SPEC.md §21: the desktop showing through the
-Windows host's window, the wire format, and from there text,
+Next, in the order of SPEC.md §21: the wire format, and from there text,
 layout, gestures, effects, an inspector and accessibility, more hosts,
 motion and text editing. The box tree's layout budget (P4) comes early,
 as the text fast path and string cache did.
