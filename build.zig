@@ -63,7 +63,11 @@ const compile_error_cases = [_]struct { name: []const u8, expected_error: []cons
     .{ .name = "app_declare_wrong_signature", .expected_error = "zui_app: app_declare_wrong_signature.App.zuiDeclare must be fn (*app_declare_wrong_signature.App, *Ui) void, where Ui is a zui.Context" },
     .{ .name = "app_unknown_declaration", .expected_error = "zui_app: app_unknown_declaration.App declares unknown `zuiLoder`" },
     .{ .name = "app_field_without_default", .expected_error = "zui_app: app_field_without_default.App has no `init`, so every field needs a default; `window_count` has none" },
-    .{ .name = "app_without_sources_field", .expected_error = "zui_app: app_without_sources_field.App needs a field `sources: app_without_sources_field.AppSources`, the Config's Sources, for zui_app to swap" },
+    .{ .name = "app_without_sources_field", .expected_error = "zui_app: app_without_sources_field.App needs a field `sources: app_without_sources_field.AppSources`, the Config's Sources or a pointer to them, for zui_app to swap" },
+    .{ .name = "app_text_not_declared", .expected_error = "zui_app: app_text_not_declared.App's Ui measures text with app_text_not_declared.Fonts, which zui_app makes only when app_text_not_declared.App declares `pub const Text = app_text_not_declared.Fonts`" },
+    .{ .name = "app_text_mismatch", .expected_error = "zui_app: app_text_mismatch.App.Text is app_text_mismatch.OtherFonts, but its Ui measures text with app_text_mismatch.Fonts" },
+    .{ .name = "app_renderer_init_wrong_text", .expected_error = "zui_app: app_renderer_init_wrong_text.FontsRenderer.init must be fn (*app_renderer_init_wrong_text.FontsRenderer, zui.Surface, *const app_renderer_init_wrong_text.Fonts) !void, found fn (*app_renderer_init_wrong_text.FontsRenderer, surface.Surface, *const u8) error{OutOfMemory}!void" },
+    .{ .name = "app_record_wrong_signature", .expected_error = "zui_app: app_record_wrong_signature.App.zuiRecord must be fn (*app_record_wrong_signature.App, *zui.RecordBuilder) void, found fn (*app_record_wrong_signature.App, *const record.RecordBuilder) void" },
     .{ .name = "app_host_without_init", .expected_error = "zui_app: app_host_without_init.OffscreenHost must declare `pub fn init(self: *app_host_without_init.OffscreenHost, io: std.Io, window: zui.WindowOptions) !void`, which opens its window" },
 };
 

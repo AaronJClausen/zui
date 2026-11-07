@@ -21,10 +21,13 @@ const zui = @import("zui");
 
 /// A `zui.Config` for `Renderer`: its optional commands, its payload
 /// types, and the renderer itself as the text contract when it declares
-/// `zuiMeasure`. Every other field comes from `overrides`.
+/// `zuiMeasure` and `overrides` names no `Text`. Every other field comes
+/// from `overrides`.
 ///
 /// ```zig
 /// const Ui = zui.Context(zui_app.contextConfig(zui_raylib.Renderer, .{ .Sources = AppSources }));
+/// // Fonts that are not the renderer, which the application also names as `pub const Text`:
+/// const Ui = zui.Context(zui_app.contextConfig(MyRenderer, .{ .Text = MyFonts }));
 /// ```
 pub fn contextConfig(comptime Renderer: type, comptime overrides: zui.Config) zui.Config {
     comptime zui.checkRenderer(Renderer);
@@ -34,7 +37,7 @@ pub fn contextConfig(comptime Renderer: type, comptime overrides: zui.Config) zu
     result.CustomData = rendererType(Renderer, "CustomData", void);
     result.MaterialHandle = rendererType(Renderer, "MaterialHandle", void);
     result.FontId = rendererType(Renderer, "FontId", u16);
-    if (@hasDecl(Renderer, "zuiMeasure")) result.Text = Renderer;
+    if (overrides.Text == void and @hasDecl(Renderer, "zuiMeasure")) result.Text = Renderer;
     return result;
 }
 
@@ -172,6 +175,9 @@ pub fn Start(comptime App: type) type {
         /// Null when a test starts the `Runner` itself.
         process: ?std.process.Init,
         host: *App.Host,
+        /// For the renderer's own settings. While frames are submitted on a
+        /// render thread, that thread uses it too.
+        renderer: *App.Renderer,
         /// For the application's producers, as a source's publish asks.
         waker: zui.Waker,
     };
@@ -189,9 +195,16 @@ pub const Setup = struct {
 /// - `pub const Host` and `pub const Renderer`, which share a surface kind;
 /// - `pub fn zuiDeclare(app: *App, ui: *Ui) void`, where `Ui` is a
 ///   `zui.Context` built with `contextConfig(Renderer, ...)`;
+/// - `pub const Text` when the `Config`'s text contract is not the
+///   renderer: `zui_app` makes one and gives the context and the renderer
+///   a pointer to it;
+/// - optionally `pub fn zuiRecord(app: *App, record: *zui.RecordBuilder) void`,
+///   run after the host's poll, for the application's zoom and the events
+///   it makes itself, after the host's;
 /// - optionally `pub fn zuiLoader(app: *App, ui: *const Ui, io: std.Io) void`,
 ///   run after each frame and before the wait;
-/// - a field `sources` when the `Config` has `Sources`;
+/// - a field `sources` when the `Config` has `Sources`, holding them or
+///   pointing to them;
 /// - optionally `pub fn init(app: *App, start: zui_app.Start(App)) !void`
 ///   and `pub fn deinit(app: *App) void`; without `init`, every field
 ///   needs a default.
@@ -199,8 +212,12 @@ pub const Setup = struct {
 /// The host declares `pub fn init(self: *Host, io: std.Io, window:
 /// zui.WindowOptions) !void` and `pub fn deinit(self: *Host) void`. The
 /// renderer may declare `pub fn init(self: *Renderer, surface:
-/// zui.Surface) !void` and `pub fn deinit(self: *Renderer) void`; without
-/// `init`, every field needs a default.
+/// zui.Surface) !void`, or with `App.Text` `pub fn init(self: *Renderer,
+/// surface: zui.Surface, text: *const Text) !void`, and `pub fn
+/// deinit(self: *Renderer) void`. `App.Text` may declare `pub fn init(self:
+/// *Text) !void` and `pub fn deinit(self: *Text) void`. Without `init`,
+/// every field needs a default; with it, the fields that have a default
+/// hold it when `init` is called.
 pub fn run(comptime App: type, init: std.process.Init, options: Options) !void {
     const runner = try init.gpa.create(Runner(App));
     defer init.gpa.destroy(runner);
@@ -218,12 +235,16 @@ pub fn Runner(comptime App: type) type {
         pub const Ui = UiOf(App);
         pub const Host = App.Host;
         pub const Renderer = App.Renderer;
+        /// The text contract `zui_app` makes; `void` when the renderer
+        /// measures, or nothing does.
+        pub const Text = SeparateText(App);
 
         const window: zui.WindowId = .main;
         const Pending = struct { frame: *const Ui.Frame, surface: zui.Surface };
 
         app: App,
         host: Host,
+        text: Text,
         renderer: Renderer,
         ui: Ui,
         gpa: std.mem.Allocator,
@@ -257,18 +278,38 @@ pub fn Runner(comptime App: type) type {
             self.render_error = .init(0);
             self.render_task = .init;
 
+            setFieldDefaults(Host, &self.host);
             try self.host.init(setup.io, .{ .title = options.title, .size = options.size, .visible = options.visible, .resizable = options.resizable, .material = options.material });
             errdefer self.host.deinit();
+            if (Text != void) {
+                if (@hasDecl(Text, "init")) {
+                    setFieldDefaults(Text, &self.text);
+                    try self.text.init();
+                } else {
+                    self.text = .{};
+                }
+            }
+            errdefer if (Text != void and @hasDecl(Text, "deinit")) self.text.deinit();
             if (@hasDecl(Renderer, "init")) {
-                try self.renderer.init(self.host.zuiSurface(window));
+                setFieldDefaults(Renderer, &self.renderer);
+                if (comptime rendererInitTakesText(App)) {
+                    try self.renderer.init(self.host.zuiSurface(window), &self.text);
+                } else {
+                    try self.renderer.init(self.host.zuiSurface(window));
+                }
             } else {
                 self.renderer = .{};
             }
             errdefer if (@hasDecl(Renderer, "deinit")) self.renderer.deinit();
-            self.ui = if (Ui.has_text) try Ui.init(setup.gpa, setup.io, &self.renderer) else try Ui.init(setup.gpa, setup.io);
+            self.ui = if (!Ui.has_text)
+                try Ui.init(setup.gpa, setup.io)
+            else if (Text != void)
+                try Ui.init(setup.gpa, setup.io, &self.text)
+            else
+                try Ui.init(setup.gpa, setup.io, &self.renderer);
             errdefer self.ui.deinit(setup.gpa);
             if (@hasDecl(App, "init")) {
-                try self.app.init(.{ .gpa = setup.gpa, .io = setup.io, .process = setup.process, .host = &self.host, .waker = self.host.zuiWaker() });
+                try self.app.init(.{ .gpa = setup.gpa, .io = setup.io, .process = setup.process, .host = &self.host, .renderer = &self.renderer, .waker = self.host.zuiWaker() });
             } else {
                 self.app = .{};
             }
@@ -311,10 +352,11 @@ pub fn Runner(comptime App: type) type {
             const render_error = self.render_error.load(.acquire);
             if (render_error != 0) return @errorFromInt(render_error);
             if (!self.host.zuiPoll(window, &self.builder)) return false;
+            if (@hasDecl(App, "zuiRecord")) self.app.zuiRecord(&self.builder);
             self.noticeDroppedInput();
 
             if (Ui.has_sources) {
-                self.ui.beginFrame(&self.builder.recordWith(Ui.Deliveries), &self.app.sources);
+                self.ui.beginFrame(&self.builder.recordWith(Ui.Deliveries), self.sources());
             } else {
                 self.ui.beginFrame(&self.builder.record());
             }
@@ -336,8 +378,12 @@ pub fn Runner(comptime App: type) type {
             }
 
             if (@hasDecl(App, "zuiLoader")) self.app.zuiLoader(&self.ui, self.io);
-            self.host.zuiWait(if (Ui.has_sources) self.ui.nextFrame(&self.app.sources) else self.ui.nextFrame());
+            self.host.zuiWait(if (Ui.has_sources) self.ui.nextFrame(self.sources()) else self.ui.nextFrame());
             return true;
+        }
+
+        fn sources(self: *Self) *Ui.Sources {
+            return if (@FieldType(App, "sources") == Ui.Sources) &self.app.sources else self.app.sources;
         }
 
         /// Submits what is left on the render thread, then frees everything
@@ -351,6 +397,7 @@ pub fn Runner(comptime App: type) type {
             if (@hasDecl(App, "deinit")) self.app.deinit();
             self.ui.deinit(self.gpa);
             if (@hasDecl(Renderer, "deinit")) self.renderer.deinit();
+            if (Text != void and @hasDecl(Text, "deinit")) self.text.deinit();
             self.host.deinit();
         }
 
@@ -402,6 +449,27 @@ fn UiOf(comptime App: type) type {
     return @typeInfo(@typeInfo(@TypeOf(App.zuiDeclare)).@"fn".params[1].type.?).pointer.child;
 }
 
+fn SeparateText(comptime App: type) type {
+    return if (@hasDecl(App, "Text") and App.Text != App.Renderer) App.Text else void;
+}
+
+fn rendererInitTakesText(comptime App: type) bool {
+    if (SeparateText(App) == void or !@hasDecl(App.Renderer, "init")) return false;
+    const init = @typeInfo(@TypeOf(App.Renderer.init));
+    return init == .@"fn" and init.@"fn".params.len == 3;
+}
+
+/// Leaves the fields without a default undefined, for `init` to set.
+fn setFieldDefaults(comptime T: type, value: *T) void {
+    inline for (@typeInfo(T).@"struct".fields) |field| {
+        if (field.is_comptime) continue;
+        if (field.default_value_ptr) |pointer| {
+            const default: *const field.type = @ptrCast(@alignCast(pointer));
+            @field(value, field.name) = default.*;
+        }
+    }
+}
+
 /// `zui_app`'s part of the composition root: what `Runner(App)` needs of
 /// `App`, its host and its renderer, each mistake a compile error.
 pub fn checkApp(comptime App: type) void {
@@ -409,7 +477,10 @@ pub fn checkApp(comptime App: type) void {
     if (@typeInfo(App) != .@"struct") @compileError("zui_app: an application must be a struct type, got " ++ name);
     for (@typeInfo(App).@"struct".decls) |declaration| {
         if (!std.mem.startsWith(u8, declaration.name, "zui")) continue;
-        if (!std.mem.eql(u8, declaration.name, "zuiDeclare") and !std.mem.eql(u8, declaration.name, "zuiLoader")) {
+        const known = for ([_][]const u8{ "zuiDeclare", "zuiLoader", "zuiRecord" }) |known_name| {
+            if (std.mem.eql(u8, declaration.name, known_name)) break true;
+        } else false;
+        if (!known) {
             @compileError("zui_app: " ++ name ++ " declares unknown `" ++ declaration.name ++ "`");
         }
     }
@@ -431,11 +502,27 @@ pub fn checkApp(comptime App: type) void {
     if (@hasDecl(App, "zuiLoader") and @TypeOf(App.zuiLoader) != fn (*App, *const Ui, std.Io) void) {
         @compileError("zui_app: " ++ name ++ ".zuiLoader must be fn (*" ++ name ++ ", *const Ui, std.Io) void, found " ++ @typeName(@TypeOf(App.zuiLoader)));
     }
-    if (Ui.Text != void and Ui.Text != App.Renderer) {
-        @compileError("zui_app: " ++ name ++ "'s Ui measures text with " ++ @typeName(Ui.Text) ++ ", but zui_app gives it the renderer; build its Config with zui_app.contextConfig(" ++ @typeName(App.Renderer) ++ ", ...)");
+    if (@hasDecl(App, "zuiRecord") and @TypeOf(App.zuiRecord) != fn (*App, *zui.RecordBuilder) void) {
+        @compileError("zui_app: " ++ name ++ ".zuiRecord must be fn (*" ++ name ++ ", *zui.RecordBuilder) void, found " ++ @typeName(@TypeOf(App.zuiRecord)));
     }
-    if (Ui.has_sources and !(@hasField(App, "sources") and @FieldType(App, "sources") == Ui.Sources)) {
-        @compileError("zui_app: " ++ name ++ " needs a field `sources: " ++ @typeName(Ui.Sources) ++ "`, the Config's Sources, for zui_app to swap");
+    if (@hasDecl(App, "Text")) {
+        if (Ui.Text != App.Text) @compileError("zui_app: " ++ name ++ ".Text is " ++ @typeName(App.Text) ++ ", but its Ui measures text with " ++ @typeName(Ui.Text));
+    } else if (Ui.Text != void and Ui.Text != App.Renderer) {
+        @compileError("zui_app: " ++ name ++ "'s Ui measures text with " ++ @typeName(Ui.Text) ++ ", which zui_app makes only when " ++ name ++ " declares `pub const Text = " ++ @typeName(Ui.Text) ++ "`");
+    }
+    const Text = SeparateText(App);
+    if (Text != void) {
+        const text_name = @typeName(Text);
+        if (@hasDecl(Text, "init")) {
+            expectFunction(Text, "init", fn (*Text) anyerror!void, "fn (*" ++ text_name ++ ") !void");
+        } else for (@typeInfo(Text).@"struct".fields) |field| {
+            if (field.default_value_ptr == null) @compileError("zui_app: " ++ text_name ++ " has no `init`, so every field needs a default; `" ++ field.name ++ "` has none");
+        }
+        if (@hasDecl(Text, "deinit")) expectFunction(Text, "deinit", fn (*Text) void, "fn (*" ++ text_name ++ ") void");
+    }
+    const holds_sources = @hasField(App, "sources") and (@FieldType(App, "sources") == Ui.Sources or @FieldType(App, "sources") == *Ui.Sources);
+    if (Ui.has_sources and !holds_sources) {
+        @compileError("zui_app: " ++ name ++ " needs a field `sources: " ++ @typeName(Ui.Sources) ++ "`, the Config's Sources or a pointer to them, for zui_app to swap");
     }
     if (@hasDecl(App, "init")) {
         expectFunction(App, "init", fn (*App, Start(App)) anyerror!void, "fn (*" ++ name ++ ", zui_app.Start(" ++ name ++ ")) !void");
@@ -451,7 +538,14 @@ pub fn checkApp(comptime App: type) void {
     expectFunction(App.Host, "deinit", fn (*App.Host) void, "fn (*" ++ host_name ++ ") void");
 
     const renderer_name = @typeName(App.Renderer);
-    if (@hasDecl(App.Renderer, "init")) {
+    if (rendererInitTakesText(App)) {
+        const expected_name = "fn (*" ++ renderer_name ++ ", zui.Surface, *const " ++ @typeName(Text) ++ ") !void";
+        if (@typeInfo(@TypeOf(App.Renderer.init)).@"fn".params[2].type == *Text) {
+            expectFunction(App.Renderer, "init", fn (*App.Renderer, zui.Surface, *Text) anyerror!void, expected_name);
+        } else {
+            expectFunction(App.Renderer, "init", fn (*App.Renderer, zui.Surface, *const Text) anyerror!void, expected_name);
+        }
+    } else if (@hasDecl(App.Renderer, "init")) {
         expectFunction(App.Renderer, "init", fn (*App.Renderer, zui.Surface) anyerror!void, "fn (*" ++ renderer_name ++ ", zui.Surface) !void");
     } else for (@typeInfo(App.Renderer).@"struct".fields) |field| {
         if (field.default_value_ptr == null) @compileError("zui_app: " ++ renderer_name ++ " has no `init`, so every field needs a default; `" ++ field.name ++ "` has none");

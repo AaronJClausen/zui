@@ -13,6 +13,8 @@ const TestHost = struct {
     pub const zuiClipboard = struct {};
 
     window: zui.WindowOptions,
+    /// A setting made on the type, which `init` keeps.
+    scale: f32 = 2,
     closes_after_polls: u32 = 1,
     script: []const []const zui.Event = &.{},
     /// Events appended to every record, beyond what it can hold.
@@ -24,7 +26,7 @@ const TestHost = struct {
     closed: bool = false,
 
     pub fn init(self: *TestHost, _: std.Io, window: zui.WindowOptions) !void {
-        self.* = .{ .window = window };
+        self.* = .{ .window = window, .scale = self.scale };
     }
 
     pub fn deinit(self: *TestHost) void {
@@ -33,7 +35,7 @@ const TestHost = struct {
 
     pub fn zuiPoll(self: *TestHost, _: zui.WindowId, record: *zui.RecordBuilder) bool {
         if (self.polls == self.closes_after_polls) return false;
-        record.begin(.{ .now = self.now(), .viewport = .{ 400, 300 }, .scale = 2 });
+        record.begin(.{ .now = self.now(), .viewport = .{ 400, 300 }, .scale = self.scale });
         if (self.polls < self.script.len) for (self.script[self.polls]) |event| switch (event) {
             .text => |text| record.appendText(text),
             else => record.append(event),
@@ -397,4 +399,114 @@ test "contextConfig takes the renderer's commands, payload types and text contra
     try testing.expect(config.ImageHandle == u32 and config.MaterialHandle == u8 and config.CustomData == void);
     try testing.expect(config.FontId == Renderer.FontId and config.Text == Renderer);
     try testing.expectEqual(@as(u32, 32), config.limits.max_elements);
+}
+
+/// Fonts that are not the renderer, at 6 by 12 units a byte.
+const Fonts = struct {
+    var deinitializations: u32 = 0;
+
+    initialized: bool = false,
+    measured: u32 = 0,
+
+    pub fn init(self: *Fonts) !void {
+        self.initialized = true;
+    }
+
+    pub fn deinit(self: *Fonts) void {
+        _ = self;
+        deinitializations += 1;
+    }
+
+    pub fn zuiMeasure(self: *Fonts, run: []const u8, key: zui.MeasureKey(u16)) [2]f32 {
+        self.measured += 1;
+        return .{ @as(f32, @floatFromInt(run.len)) * key.size / 2, key.size };
+    }
+};
+
+/// Draws with the application's fonts, as a renderer whose text contract
+/// is a separate type does.
+const FontsRenderer = struct {
+    pub const zui_surfaces: zui.SurfaceKinds = .initOne(.offscreen);
+
+    fonts: *const Fonts,
+    submitted: u32 = 0,
+    zoom: f32 = 0,
+    clear_color: zui.Color = .black,
+
+    pub fn init(self: *FontsRenderer, _: zui.Surface, fonts: *const Fonts) !void {
+        self.fonts = fonts;
+    }
+
+    pub fn zuiSubmit(self: *FontsRenderer, _: zui.Surface, frame: anytype) !void {
+        self.submitted += 1;
+        self.zoom = frame.params.zoom;
+    }
+};
+
+const FontsApp = struct {
+    pub const Host = TestHost;
+    pub const Renderer = FontsRenderer;
+    pub const Text = Fonts;
+    pub const Ui = zui.Context(zui_app.contextConfig(Renderer, .{ .limits = .{ .max_elements = 8 }, .Text = Fonts, .Sources = Sources }));
+    const Sources = struct { counter: Counter = .{} };
+
+    owned_sources: Sources = .{},
+    sources: *Sources,
+    renderer: *FontsRenderer,
+    zoom: f32 = 1.25,
+    themes_seen: [3]zui.Environment.Theme = undefined,
+    frames: u32 = 0,
+
+    pub fn init(app: *FontsApp, start: zui_app.Start(FontsApp)) !void {
+        app.* = .{ .sources = &app.owned_sources, .renderer = start.renderer };
+        start.host.closes_after_polls = 3;
+        start.renderer.clear_color = .white;
+    }
+
+    pub fn zuiRecord(app: *FontsApp, record: *zui.RecordBuilder) void {
+        record.params.zoom = app.zoom;
+        if (app.frames == 1) record.append(.{ .environment = .{ .theme = .dark } });
+    }
+
+    pub fn zuiDeclare(app: *FontsApp, ui: *Ui) void {
+        app.themes_seen[app.frames] = ui.environment().theme;
+        if (app.frames == 0) app.sources.counter.published = 5;
+        if (ui.source(.counter)) |value| app.zoom = @floatFromInt(value);
+        ui.text("fonts", .{});
+        app.frames += 1;
+    }
+};
+
+test "an application whose text contract is not the renderer has zui_app make it, for the context and the renderer" {
+    var runner: zui_app.Runner(FontsApp) = undefined;
+    runner.host.scale = 3;
+    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+    try testing.expect(FontsApp.Ui.Text == Fonts and zui_app.Runner(FontsApp).Text == Fonts);
+    try testing.expect(runner.text.initialized);
+    try testing.expectEqual(@as(*const Fonts, &runner.text), runner.renderer.fonts);
+    try testing.expectEqual(&runner.renderer, runner.app.renderer);
+    try testing.expectEqual(zui.Color.white, runner.renderer.clear_color);
+    try testing.expectEqual(@as(f32, 2), runner.host.scale);
+
+    try testing.expectEqual(@as(u32, 3), try runToClose(&runner));
+    try testing.expect(runner.text.measured > 0);
+    try testing.expectEqual(@as(u32, 3), runner.renderer.submitted);
+    const deinitializations_before = Fonts.deinitializations;
+    runner.stop();
+    try testing.expectEqual(deinitializations_before + 1, Fonts.deinitializations);
+}
+
+test "zuiRecord adds the application's zoom and events to the record, after the host's" {
+    var runner: zui_app.Runner(FontsApp) = undefined;
+    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .zoom = 1, .notify = Notices.record });
+    defer runner.stop();
+    try testing.expectEqual(@as(u32, 3), try runToClose(&runner));
+
+    try testing.expectEqualSlices(zui.Environment.Theme, &.{ .light, .dark, .dark }, &runner.app.themes_seen);
+    try testing.expectEqual(@as(f32, 5), runner.renderer.zoom);
+}
+
+test "contextConfig keeps a text contract the overrides name, even from a renderer that measures" {
+    const config = zui_app.contextConfig(TestRenderer(false), .{ .Text = Fonts });
+    try testing.expect(config.Text == Fonts);
 }

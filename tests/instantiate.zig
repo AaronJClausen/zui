@@ -296,6 +296,49 @@ export fn zuiCheckRun(init: *const std.process.Init) usize {
 
 fn ignoreNotice(_: zui_app.Notice) void {}
 
+const TextDrawingRenderer = struct {
+    pub const zui_surfaces: zui.SurfaceKinds = .initOne(.offscreen);
+
+    text: *const CheckText,
+    drawn: usize = 0,
+
+    pub fn init(self: *TextDrawingRenderer, _: zui.Surface, text: *const CheckText) !void {
+        self.* = .{ .text = text };
+    }
+
+    pub fn zuiSubmit(self: *TextDrawingRenderer, _: zui.Surface, frame: anytype) !void {
+        self.drawn += frame.commands().len;
+    }
+};
+
+const CheckTextApp = struct {
+    pub const Host = OffscreenHost;
+    pub const Renderer = TextDrawingRenderer;
+    pub const Text = CheckText;
+    const AppUi = zui.Context(zui_app.contextConfig(TextDrawingRenderer, .{ .limits = .{ .max_elements = 16 }, .Text = CheckText }));
+
+    zoom: f32 = 2,
+
+    pub fn zuiRecord(app: *CheckTextApp, record: *zui.RecordBuilder) void {
+        record.params.zoom = app.zoom;
+    }
+
+    pub fn zuiDeclare(_: *CheckTextApp, ui: *AppUi) void {
+        ui.text("check", .{});
+    }
+};
+
+var text_app_runner: zui_app.Runner(CheckTextApp) = undefined;
+var text_app_memory: [CheckTextApp.AppUi.required_bytes + 4096]u8 = undefined;
+
+export fn zuiCheckAppWithText(io: *const std.Io) usize {
+    var fixed: std.heap.FixedBufferAllocator = .init(&text_app_memory);
+    text_app_runner.start(.{ .gpa = fixed.allocator(), .io = io.* }, .{ .notify = ignoreNotice }) catch return 0;
+    defer text_app_runner.stop();
+    while (text_app_runner.frame() catch return 0) {}
+    return text_app_runner.renderer.drawn;
+}
+
 const EveryCommandHarness = struct {
     pub const config: zui.Config = every_command_config;
 

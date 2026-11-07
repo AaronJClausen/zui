@@ -95,8 +95,10 @@ Implemented so far:
   window where nothing is drawn, reported as
   `Environment.system_material`, so the same code draws its own
   background where there is none. zui-sokol's tour runs on it unchanged,
-  drawn by zui-sokol's renderer into the native window, and idles at 0%
-  CPU.
+  through `zui_app.run`, drawn by zui-sokol's renderer into the native
+  window, and idles at 0% CPU. `zui_app` makes an application's own text
+  contract when the renderer does not measure (`pub const Text`), and
+  lets it set its zoom and add events to each record (`zuiRecord`).
   The record carries the new events: `ui.filesDropped()` and
   `ui.lifecycle()`.
 

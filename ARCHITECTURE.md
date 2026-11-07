@@ -111,7 +111,7 @@ only plain names are types the application uses directly: a source's
 | Renderer | a renderer | `zuiSubmit`, `zui_surfaces` | `zui_commands`, `zui_extended_color`, `zui_render_thread`, payload types | §16.2 |
 | Host | a host | `zuiPoll`, `zuiWaker`, `zuiWait`, `zuiSurface`, `zuiApply`, `zui_surfaces` | `zui_capabilities`, services (`zuiClipboard`, `zuiFileDialogs`, …) | §16.3 |
 | Tracer | a profiler binding | `zuiBegin`, `zuiEnd` | | §16.5 |
-| Application | the application, run by `zui_app` | `Host`, `Renderer`, `zuiDeclare` | `zuiLoader`, `init`, `deinit` | §19.5 |
+| Application | the application, run by `zui_app` | `Host`, `Renderer`, `zuiDeclare` | `Text`, `zuiRecord`, `zuiLoader`, `init`, `deinit` | §19.5 |
 | Skin | a theme pack or the application | `zuiStyle` | | §19.2 |
 | Wire payload | an application type with pointers | `zuiSerialize`, `zuiDeserialize` | | §19.6 |
 
@@ -243,5 +243,5 @@ zui-terminal's loops still do a host's work by hand, but zui-sokol's
 renderer also draws into a native host's `win32` window without
 sokol_app, with D3D11 through a DirectComposition swapchain that keeps
 alpha so a system material shows (H8), and zui-host runs zui-sokol's tour
-that way (H2). zui-host pins zui and zui-sokol by commit, as the renderers pin
+that way (H2), through `zui_app` with the tour's own text contract (C9). zui-host pins zui and zui-sokol by commit, as the renderers pin
 zui; its Windows host runs its message loop on a thread of its own.

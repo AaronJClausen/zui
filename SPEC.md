@@ -1442,7 +1442,7 @@ the contract's:
 |---|---|---|
 | Source | `Delivery`, `View` | the application writes `Source.View`; the wire format names `Delivery` |
 | Renderer | `ImageHandle`, `MaterialHandle`, `CustomData`, `FontId` | they are the renderer's real types, which `contextConfig` copies into `Config` |
-| Application (`zui_app`) | `Host`, `Renderer` | the composition root names its host and renderer; `zui_app` reads them to open the window and draw |
+| Application (`zui_app`) | `Host`, `Renderer`, `Text` | the composition root names its host, its renderer and, when the renderer does not measure, its text contract; `zui_app` reads them to open the window, measure and draw |
 
 These are the only plain names a contract reads. They are checked like
 the prefixed ones: a missing required one is a compile error, and an
@@ -1488,8 +1488,9 @@ so `zui_app` may submit from a render thread of its own. A renderer bound
 to its thread's graphics context, as raylib's is, leaves it out.
 
 `zui_app.contextConfig(Renderer, .{ ... })` builds a `Config` from a
-renderer's declarations (commands, payload types, text), so the
-renderer's vocabulary and the core's never disagree.
+renderer's declarations (commands, payload types, and text unless the
+overrides name a `Text`), so the renderer's vocabulary and the core's
+never disagree.
 
 ### 16.3 Host
 
@@ -1876,6 +1877,7 @@ const App = struct {
     sources: AppSources = .{},
 
     pub fn init(app: *App, start: zui_app.Start(App)) !void { ... }   // optional; else every field has a default
+    pub fn zuiRecord(app: *App, record: *zui.RecordBuilder) void { ... } // optional
     pub fn zuiDeclare(app: *App, ui: *Ui) void { ... }
     pub fn zuiLoader(app: *App, ui: *const Ui, io: std.Io) void { ... } // optional
     pub fn deinit(app: *App) void { ... }                              // optional
@@ -1886,11 +1888,25 @@ const App = struct {
   payload types, and the renderer itself as `Text` when it declares
   `zuiMeasure`, so `zui_app` hands the context the renderer to measure
   with. `Ui` is read from `zuiDeclare`'s parameter.
+- **A text contract of its own.** When the renderer does not measure, the
+  application builds its `Config` with `.Text = Fonts` and declares
+  `pub const Text = Fonts`: `zui_app` makes one (with `init(self) !void`
+  and `deinit` if it declares them) and gives the context and the
+  renderer a pointer to it. A `Ui` whose `Text` is neither the renderer
+  nor `App.Text` is a compile error.
 - **What it opens.** The host declares `init(self, io, window:
   zui.WindowOptions) !void` (title, size, visible, resizable) and
-  `deinit`; the renderer may declare `init(self, surface) !void` and
-  `deinit`. `Start(App)` gives the application the allocator, the `Io`,
-  the process, its host and the host's `Waker`.
+  `deinit`; the renderer may declare `init(self, surface) !void`, or
+  `init(self, surface, text: *const Text) !void` beside `App.Text`, and
+  `deinit`. Each field with a default holds it when `init` is called, so
+  a setting made on the type survives. `Start(App)` gives the application
+  the allocator, the `Io`, the process, its host, its renderer and the
+  host's `Waker`.
+- **The application's part of the record.** `zuiRecord` runs after the
+  host's poll and before `beginFrame`: the application sets its zoom
+  there and appends events it makes itself, after the host's. Its
+  `sources` field holds the `Config`'s `Sources` or points to them, so an
+  application that wraps another can use the sources it already has.
 - **The render thread.** With `zui_render_thread` and more than one frame
   in flight, frames go through a queue of `frames_in_flight` entries to a
   task on the application's `Io` that submits and releases them; the UI

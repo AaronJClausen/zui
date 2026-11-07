@@ -25,7 +25,7 @@ Each item says:
 | stage 1 | instruction counts in CI (R1), the tracer contract and `zui_tracy` (P2) | done |
 | stage 2 | the code brought to the spec's shape: C5, S1, I4, C6, A5 and `nextFrame` (I2); letter spacing (T3); the environment and host requests (I6); sources in the core (A3); `zui_async` (A4); the backends on the new API, the demo's thumbnails on `KeyedLoads` (C8) | done; the demo idles at 0% CPU |
 | stage 3 | the renderer contract and the generated commands (C1); the host contract and `RecordBuilder` (C2); the conformance suites (C3); `Features` (C7); `zui_app` (C4); the raylib adapter host (H1) | done; the backends are renderers and pass the renderer suite in CI, raylib's host passes the host suite, and the demo runs through `zui_app`, presenting its first frame 288 ms after the process starts; lowering comes with stage 8's commands |
-| stage 4 | the Windows host (H2), with dropped files and lifecycle events in the record; the system material (H8) | done; zui-sokol's tour runs on it unchanged and idles at 0% CPU, and the same code shows Mica or a solid background |
+| stage 4 | the Windows host (H2), with dropped files and lifecycle events in the record; the system material (H8); `zui_app` with the application's own text contract (C9) | done; zui-sokol's tour runs on it unchanged, through `zui_app`, and idles at 0% CPU, and the same code shows Mica or a solid background |
 | stage 6, early | the single-line fast path (T1), the whole-string cache (T2), the box tree's layout passes (P4, in part) | done; warm text and the box tree's layout and emission within their budgets; the box tree's declaration is not (P5) |
 
 No release is tagged; everything is on `main`. From here, work is
@@ -138,6 +138,70 @@ Things to know:
 ---
 
 ## Done
+
+### C9. `zui_app` with a separate text contract
+
+Taken ahead of the queue, since stage 10's "the demo runs unchanged on
+each host" needs one loop for every application.
+
+**Grounding.** `zui_app.checkApp` made any `Text` but the renderer a
+compile error (C4), and `contextConfig` replaced an override's `Text`
+with a renderer that measures. zui-sokol's tour measures with
+`zui_sokol.Text`, a separate type its renderer holds a pointer to, so
+H2 ran it on zui-host under a hand-written loop.
+
+**Plan.** Let the application name its text contract, keeping "the
+renderer measures" as the default, with exact, pinned compile errors.
+
+**Done when:** zui-host's `tour` step runs zui-sokol's tour through
+`zui_app.run`, `zui_app`'s tests cover both cases, and zui-raylib's demo
+builds unchanged.
+
+What landed:
+- **`App.Text`.** An application whose `Config` names `.Text = Fonts`
+  declares `pub const Text = Fonts`; `zui_app` makes one (its `init(self)
+  !void` and `deinit` if it declares them, else its defaults), gives the
+  context a pointer, and gives it to a renderer whose `init` takes
+  `(self, surface, text: *const Text)`. `contextConfig` keeps an
+  override's `Text`. Four new compile errors are pinned: a `Ui` measuring
+  with a type the application does not declare, an `App.Text` that is
+  not the `Ui`'s, a renderer `init` taking the wrong text, and a
+  `zuiRecord` of the wrong signature.
+- **What running the tour unchanged needed besides:** `zuiRecord(app,
+  record)`, after the host's poll, where the application sets its zoom
+  (which `zui_app` could only set once, from `Options.zoom`) and appends
+  events it makes itself (the tour's theme switch); `Start.renderer`;
+  `sources` as a field holding the `Sources` or pointing to them, so a
+  wrapper uses the sources of the application it wraps; and each field
+  of the host, the renderer and the text that has a default holding it
+  when their `init` is called. zui-host's `Host.init` reads
+  `forced_scale` and `system_material_unavailable` from itself, which
+  under `zui_app` had been undefined.
+
+zui-host's `examples/tour.zig` is now `zui_app.run(TourOnHost, ...)`:
+`TourOnHost` names the host, the renderer and `zui_sokol.Text`, and
+passes each step to the tour's own `App`; a small `SokolRenderer`
+opens zui-sokol's renderer with `initForSurface` and times each submit
+for the tour's strip, since zui-sokol's `Renderer.init` predates
+`zui_app` and its working tree is being changed by another session. The
+tour visits every screen (`--frames 300 --cycle 30`, diagnostics ok), its
+screenshot shows the dark theme `zuiRecord` applied, and in ReleaseSafe
+on the reference machine Layout Lab idles at 0.0, 31.3, 15.6 and 0.0 ms
+of CPU over 10 s with 0 frames and 0 wakes; Welcome at 0.0 ms with its
+11 heartbeat frames. zui-raylib's demo, tests and suites build and pass
+against this commit unchanged. Nothing in the core changed, so there is
+nothing to count.
+
+Decided here:
+- **The text contract under `zui_app`** is the renderer by default, or
+  the application's `pub const Text`, which `zui_app` owns.
+- **The application's part of the record** is `zuiRecord`, after the
+  host's poll: the zoom is the application's (SPEC.md §16.3), and the
+  host converted this poll's events at the zoom then on screen.
+
+What remains: zui-sokol's `Renderer` could take `zui_app`'s
+`init(self, surface, text)` itself, which would retire zui-host's
+`SokolRenderer`; that waits for zui-sokol's working tree to settle.
 
 ### H8. The desktop showing through the window
 
@@ -1497,12 +1561,14 @@ Deliberate, and each a reason to choose zui:
 | How `zui_app` opens them (C4) | the host's `init(self, io, zui.WindowOptions) !void` and `deinit`; the renderer's optional `init(self, surface) !void`; `zui.WindowOptions` is core vocabulary, since every host opens windows with it and H9 will open many |
 | When a renderer may submit on another thread (C4) | when it declares `zui_render_thread = true`; raylib and OpenGL-bound renderers leave it out, and `zui_app` reports why it submits on the UI thread |
 | How `zui_app` reports (C4) | `Options.notify`, a plain function given each notice once, logging through `std.log` by default; tests record them |
-| The application's text contract under `zui_app` (C4) | the renderer, through `contextConfig`; any other `Text` is a compile error |
+| The application's text contract under `zui_app` (C4, C9) | the renderer, through `contextConfig`, or the application's `pub const Text`, which `zui_app` makes and passes to the context and the renderer's `init`; any other `Text` is a compile error |
+| The application's part of the record (C9) | `zuiRecord(app, record)`, after the host's poll and before `beginFrame`: the zoom, and events the application makes itself |
+| What `init` finds under `zui_app` (C9) | each field with a default holds it, so a host's settings made on its type (`forced_scale`) survive; the rest is undefined |
 | How the raylib host waits (H1) | in GLFW, past raylib: `glfwWaitEventsTimeout` until an instant, `glfwWaitEvents` on event, and callbacks in front of raylib's to tell input from a spurious OS event; raylib's `EndDrawing` only presents and polls |
 | How a host harness posts events raylib cannot inject (H1) | `Host.script(sample)`, input for one poll instead of raylib's; the demo's screenshots use it too |
 | The raylib renderer's text contract (H1) | the renderer itself, as SPEC.md §16.1 expects of most renderers, so `zui_app.contextConfig` gives it to the context |
 | The first renderer on a native surface (H2) | sokol_gfx, with OpenGL through WGL: zui-sokol's renderer makes the window's context itself, without sokol_app |
-| The demo on a native host (H2) | zui-sokol's tour, unchanged, under a loop written by hand; raylib cannot draw into a window it does not own |
+| The demo on a native host (H2) | zui-sokol's tour, unchanged, through `zui_app` since C9; raylib cannot draw into a window it does not own |
 | A native host's loop (H2) | the Windows host runs its message loop on a thread of its own, so modal move and resize loops never stop frames |
 | Whether a system material shows (H8) | `Environment.system_material`, reported by the host, so it is in the record and replays |
 | A renderer over a system material (H8) | composes with alpha: zui-sokol draws a native window through a DirectComposition swapchain, since Windows ignores an OpenGL or window swapchain's alpha |
