@@ -136,6 +136,34 @@ pub fn build(b: *std.Build) void {
     if (b.args) |arguments| run_bench.addArgs(arguments);
     b.step("bench", "Run the benchmarks in ReleaseFast").dependOn(&run_bench.step);
 
+    // A fixed CPU model and no libc, so every runner executes the same
+    // instructions; Valgrind supports every extension of x86-64-v3.
+    const counts_target = b.resolveTargetQuery(.{
+        .cpu_arch = .x86_64,
+        .os_tag = .linux,
+        .abi = .none,
+        .cpu_model = .{ .explicit = &std.Target.x86.cpu.x86_64_v3 },
+    });
+    const counts_executable = b.addExecutable(.{
+        .name = "zui-counts",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("bench/counts.zig"),
+            .target = counts_target,
+            .optimize = .ReleaseFast,
+            .valgrind = true,
+            .imports = &.{.{ .name = "zui", .module = b.createModule(.{
+                .root_source_file = b.path("src/root.zig"),
+                .target = counts_target,
+                .optimize = .ReleaseFast,
+                .imports = &.{.{ .name = "zui_options", .module = build_options.createModule() }},
+            }) }},
+        }),
+    });
+    const run_counts = b.addRunArtifact(counts_executable);
+    if (b.args) |arguments| run_counts.addArgs(arguments);
+    b.step("counts", "Count each scenario's instructions per frame under Callgrind (x86_64 Linux with Valgrind)").dependOn(&run_counts.step);
+    test_step.dependOn(&counts_executable.step);
+
     const bench_compare_executable = b.addExecutable(.{
         .name = "zui-bench-compare",
         .root_module = b.createModule(.{

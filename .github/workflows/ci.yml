@@ -36,7 +36,7 @@ jobs:
   test:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -53,7 +53,7 @@ jobs:
   test-32-bit:
     name: Test (32-bit x86 Linux)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
@@ -86,7 +86,7 @@ jobs:
   bench:
     name: Benchmarks
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
@@ -102,3 +102,32 @@ jobs:
           set -o pipefail
           zig build bench | tee bench.txt
           { echo '```'; cat bench.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+  counts:
+    name: Instruction counts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends valgrind
+      # Each commit is counted by its own scenarios. A parent from before
+      # `counts` existed has nothing to compare against.
+      - name: Count the parent commit
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/parent" HEAD^
+          cd "$RUNNER_TEMP/parent"
+          if zig build -l | grep -q '^  counts '; then
+            zig build counts -- --json "$RUNNER_TEMP/parent.json"
+          fi
+      - name: Count this commit, failing on more than 2% growth
+        run: |
+          set -o pipefail
+          compare=()
+          if [ -f "$RUNNER_TEMP/parent.json" ]; then compare=(--compare "$RUNNER_TEMP/parent.json"); fi
+          zig build counts -- --json counts.json "${compare[@]}" | tee counts.txt
+          { echo '```'; cat counts.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

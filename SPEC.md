@@ -1767,8 +1767,10 @@ On one 2020-era desktop core (the reference is an i9-10900K):
 - **`zig build bench-compare -- <base> [<head>]`** alternates two commits
   on one machine and reports the median ratio with its middle half,
   calling a change only when that whole range is beyond 2%.
-- **Instruction counts in CI**, under Callgrind with a fixed `-Dcpu` and a
-  fixed number of frames, failing on more than 2% growth over the parent
+- **`zig build counts`**, instruction counts under Callgrind for the
+  single-threaded scenarios, from an executable always built for one CPU
+  model without libc, over a fixed number of frames, so they are the same
+  on every machine. CI fails on more than 2% growth over the parent
   commit. Wall-clock times on shared runners are reported, never
   compared.
 - **Every feature that claims a speedup ships with its measurement,** and

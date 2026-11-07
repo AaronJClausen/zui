@@ -22,6 +22,7 @@ Each item says:
 | 0.5 | layout performance, parallel measurement, benchmarks | shipped |
 | after 0.5 | declaration work: −42% to −56% | on `main` |
 | 0.6, in part | `bench-compare` (R2), startup benchmarks (P1), task completions at `beginFrame` (A2), the async design (A1) | done; the rest of 0.6 became stage 1 |
+| stage 1, in part | instruction counts in CI (R1) | on `main` |
 | stage 2, in part | the code brought to the spec's shape: C5, S1, I4, C6, A5 and `nextFrame` (I2) | on `main`; the other repos still need the same change (C8) |
 
 No release is tagged; everything is on `main`. From here, work is
@@ -46,16 +47,15 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
-| R1. Instruction counts in CI | 1 | `bench/`, `.github/workflows/ci.yml`, `build.zig` | | next |
-| P2. The tracer contract | 1 | `src/` (`Features.Tracer`), a recording test tracer; the Tracy binding per open decision 7 | R1 | |
+| P2. The tracer contract | 1 | `src/` (`Features.Tracer`), a recording test tracer; the Tracy binding in a `zui_tracy` module | | next |
 | T3. Letter spacing: the golden test | 2 | `src/tests/golden.zig` with a spacing test contract | | in progress: key, style and cache done |
 | I6. The environment and host requests | 2 | `src/input.zig`, `src/context.zig`, `src/tests/interaction.zig`, `zui_widgets/` | | |
-| A3. Sources in the core | 2 | a new `src/sources.zig`, `src/context.zig`, `src/contracts.zig`, `tests/compile_errors/` | R1 | |
+| A3. Sources in the core | 2 | a new `src/sources.zig`, `src/context.zig`, `src/contracts.zig`, `tests/compile_errors/` | | |
 | A4. `zui_async` | 2 | a new `zui_async/` module; `expectSourceConforms` in `zui_testing/` | A3 | |
 | C8. The backends on the stage-2 API | 2 | `../zui-raylib`, `../zui-sokol`, `../zui-terminal` | A4, T3 | |
-| T1. The single-line fast path | 6, early | `src/text.zig` | R1 | |
+| T1. The single-line fast path | 6, early | `src/text.zig` | | |
 | T2. The whole-string cache | 6, early | `src/text.zig`, `Limits.string_cache_entries` | T1, P2 | |
-| P4. The box tree's layout and emission within budget | 6, early | `src/layout.zig`, `src/emission.zig` | R1, P2 | |
+| P4. The box tree's layout and emission within budget | 6, early | `src/layout.zig`, `src/emission.zig` | P2 | |
 | C1. The renderer contract, generated commands, lowering | 3 | `src/commands.zig`, `src/emission.zig`, `src/contracts.zig` | C8 | |
 | C2. The host contract and the surface | 3 | `src/contracts.zig`, a new `src/surface.zig` | C1 | |
 | C3. Conformance suites | 3 | `zui_testing/` | C1, C2 | |
@@ -89,7 +89,10 @@ Things to know:
   (the demo's thumbnail grid on `KeyedLoads`, idling at 0% CPU) can only
   be met in zui-raylib, which is C8.
 - **`bench --check-targets` checks §20.2's budgets,** including
-  declaration for the box tree. R1 still has to make the counts repeat.
+  declaration for the box tree. Times vary by machine; instruction counts
+  (`zig build counts`, R1) do not, and CI fails on more than 2% growth
+  over the parent commit. They need Valgrind, so on Windows take them in
+  a Linux container.
 - **Item IDs are stable.** A letter names a series (R regression checks,
   A async, P profiling, C contracts, T text, S scale, H hosts, F the frame
   record and the wire, L layout, I interaction, G graphics, V visibility,
@@ -123,6 +126,30 @@ Things to know:
 ---
 
 ## Done
+
+### R1. Instruction counts in CI
+
+`zig build counts` runs each single-threaded scenario of `bench/` in a
+fresh process under Callgrind, collecting only `beginFrame` with
+declaration, or only `endFrame`, over 10 frames after 4 of warm-up. The
+executable is always built for x86-64-v3 Linux without libc, so every
+machine runs the same instructions. CI counts the parent commit with its
+own scenarios, then this one, and fails on more than 2% growth.
+
+The counts repeated exactly between a local Docker container (i9-10900K)
+and two GitHub runners. Instructions per frame when they were added:
+
+| Scenario | Declaration | `endFrame` |
+|---|---|---|
+| 4,096 boxes, depth 8 | 766,377 | 1,561,476 |
+| 1,000 texts, warm cache | 137,324 | 2,350,337 |
+| 1,000 texts, cold cache | 137,326 | 2,344,117 |
+| depth 64 | 15,966 | 25,011 |
+| 4,000 children of one parent | 471,656 | 1,086,532 |
+| documents view | 38,322 | 97,371 |
+
+Warm and cold text cost nearly the same in `endFrame` because the
+benchmark's glyph-table measurement costs about as much as a cache probe.
 
 ### R2. `zig build bench-compare -- <ref>`
 
@@ -170,21 +197,6 @@ the sources: completions belong to the frame record, and with an inline
 
 ## Stage 1: measure
 
-### R1. Instruction counts in CI
-
-**Plan.** Callgrind with a fixed `-Dcpu` and a fixed number of frames per
-scenario; fail on more than 2% growth over the parent commit. Update
-`--check-targets` to §20.2's budgets.
-
-**Done when:** the counts repeat exactly between runners.
-
-**Grounding.** Valgrind does not run on Windows, where the owner works;
-counts can be taken locally in a Linux container (Docker is installed).
-Repeating between runners can only be shown by CI, so the last step of
-this item is `waiting on CI` until two runs are compared.
-
-**Spec.** §20.3.
-
 ### P2. The tracer contract
 
 **Grounding.** The profiles of the declaration work needed hand-matched
@@ -198,7 +210,7 @@ short guide to profiling with minimal noise: pinned cores, fixed
 frequency, alternating runs.
 
 **Done when:** a trace of the demo shows every pass, and a build without a
-tracer has R1 counts unchanged.
+tracer has unchanged `zig build counts`.
 
 **Slices.** `Features` exists only as this item adds it, with `Tracer`
 alone (C7 adds the rest). First the contract, its compile-error tests and
@@ -305,7 +317,9 @@ multi-pointer `drag`. First rebuild `resolveInput` over the log with
 - R1's counts on the mouse-only scenarios are no higher than before.
 
 **Status.** Done but for `pinch`, which waits for gestures (I5), and R1's
-counts, which wait for R1. Every hovering pointer is hit-tested once a
+counts: `zig build counts` has no scenario with input yet, and commits
+from before I4 cannot be counted by today's scenarios, so the mouse-only
+check becomes a counted input scenario that later changes must not grow. Every hovering pointer is hit-tested once a
 frame even without a move, so hover follows a layout that moved under a
 still mouse. A lifted touch stays readable until the next frame, so the
 frame that sees a tap can ask where it was.
@@ -904,6 +918,8 @@ Deliberate, and each a reason to choose zui:
 | The inspector | a module over `Frame.inspect` (V1) |
 | Animation | not in the core; `zui_motion` (M1) |
 | Safety checks | built, as `features.safety_sweeps` (V3) |
+| Instruction counts | Callgrind on a fixed CPU model and fixed frames, in a fresh process per scenario and phase; CI fails on 2% growth over the parent (R1) |
+| Where the Tracy binding lives (P2) | a `zui_tracy` module in this repository, with Tracy as a lazy dependency, so every backend's demo can trace and applications that do not import it never fetch it |
 
 ### Open
 
@@ -919,8 +935,3 @@ the spec.
    wire client first, since F5 builds it anyway.
 6. **H2, sokol_gfx as the first renderer on a native surface?** Planned:
    yes; it already backs zui-sokol.
-7. **Where the Tracy binding lives (P2).** A `zui_tracy` module in this
-   repository, with Tracy as a lazy dependency so that applications that
-   do not import it never fetch it, or a binding in the demo's
-   repository? Planned: the module, so that every backend's demo can
-   trace. Ask before adding the dependency.

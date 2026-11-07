@@ -174,8 +174,8 @@ The stage is the one in SPEC.md §21 that builds it.
 
 ## 7. From today's code to the spec
 
-What exists today is releases 0.1–0.5, the start of 0.6, and the part of
-stage 2 that reshaped what already existed: `Context(config)` with
+What exists today is releases 0.1–0.5, the start of 0.6, instruction
+counts in CI, and the part of stage 2 that reshaped what already existed: `Context(config)` with
 `Config.limits` and the text contract, the frame record with `now`,
 scale and zoom, input as an ordered event log over a pointer table,
 `endFrame` that always returns a frame, `nextFrame()`, and `Element`
