@@ -53,7 +53,19 @@ pub const Config = struct {
     frames_in_flight: u8 = 2,
 };
 
+/// What a context can do beyond layout and input. A feature that is off
+/// generates no code and no memory, and calling its API is a compile error
+/// naming the field to set.
 pub const Features = struct {
+    /// The accessibility tree, `Frame.semantics()`.
+    semantics: bool = false,
+    /// Recognizing what pointers do to an element, `manipulation`.
+    gestures: bool = true,
+    /// Moving a row's children that overflow it onto new lines.
+    flex_wrap: bool = false,
+    /// The invariant checks that read only a `Frame`, at the end of every
+    /// `endFrame`, in any build.
+    safety_sweeps: bool = std.debug.runtime_safety,
     /// The tracer contract: a type with `zuiBegin` and `zuiEnd`, which
     /// sees each step of `beginFrame` and `endFrame` as a zone. `void`
     /// compiles tracing out.
@@ -202,6 +214,7 @@ pub fn Context(comptime config: Config) type {
         const Self = @This();
 
         pub const limits = config.limits;
+        pub const features = config.features;
         pub const has_sources = config.Sources != void;
         pub const Sources = config.Sources;
         /// Names a source in `source` and `framesSinceRead`: `.quotes`.
@@ -331,6 +344,15 @@ pub fn Context(comptime config: Config) type {
 
             pub fn commands(self: *const Frame) []const RenderCommand {
                 return self.render_commands[0..self.command_count];
+            }
+
+            /// The accessible elements, in tree order, for a host to bridge
+            /// to the platform's accessibility API. No element declares
+            /// semantics yet, so it is empty.
+            pub fn semantics(self: *const Frame) []const record_types.SemanticNode {
+                comptime requireFeature(.semantics, "semantics()");
+                _ = self;
+                return &.{};
             }
 
             /// What the host should apply with this frame: the cursor and
@@ -1265,6 +1287,20 @@ pub fn Context(comptime config: Config) type {
         }
 
         /// A pointer whose press began on this element is still down.
+        /// What pointers did to `element_id` this frame, by dragging,
+        /// pinching or rotating it, summed. No gesture is recognized yet,
+        /// so it is null.
+        pub fn manipulation(self: *const Self, element_id: Id) ?input.Manipulation {
+            comptime requireFeature(.gestures, "manipulation()");
+            _ = self;
+            _ = element_id;
+            return null;
+        }
+
+        fn requireFeature(comptime feature: std.meta.FieldEnum(Features), comptime api: []const u8) void {
+            if (!@field(features, @tagName(feature))) @compileError("zui: " ++ api ++ " needs Config.features." ++ @tagName(feature) ++ " = true");
+        }
+
         pub fn pressed(self: *const Self, element_id: Id) bool {
             return !element_id.isNone() and self.memory.input.isPressed(element_id.hash);
         }

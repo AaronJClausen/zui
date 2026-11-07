@@ -80,6 +80,7 @@ pub const NextFrame = record.NextFrame;
 pub const HostRequests = record.HostRequests;
 pub const Cursor = record.Cursor;
 pub const TextInputArea = record.TextInputArea;
+pub const SemanticNode = record.SemanticNode;
 
 pub const Event = input.Event;
 pub const Pointer = input.Pointer;
@@ -89,6 +90,7 @@ pub const PointerButton = input.PointerButton;
 pub const PointerMove = input.PointerMove;
 pub const Button = input.Button;
 pub const Wheel = input.Wheel;
+pub const Manipulation = input.Manipulation;
 pub const Key = input.Key;
 pub const KeyEvent = input.KeyEvent;
 pub const Modifiers = input.Modifiers;

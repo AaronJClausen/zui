@@ -33,6 +33,18 @@ pub const PointerMove = struct {
     pointer: Pointer,
 };
 
+/// A transformation the user applied to an element, summed over a frame.
+pub const Manipulation = struct {
+    /// Layout units.
+    translation: [2]f32 = .{ 0, 0 },
+    /// 1 leaves the size unchanged.
+    scale: f32 = 1,
+    /// Radians, clockwise.
+    rotation: f32 = 0,
+    /// The point the scale and rotation are about, in layout units.
+    pivot: [2]f32 = .{ 0, 0 },
+};
+
 pub const Wheel = struct {
     /// Where the pointer was, in layout units.
     position: [2]f32,

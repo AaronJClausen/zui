@@ -16,7 +16,7 @@ const CheckText = struct {
     }
 };
 
-const Ui = zui.Context(.{ .limits = .{ .max_elements = 64 }, .Text = CheckText, .CustomData = u32, .ImageHandle = u32 });
+const Ui = zui.Context(.{ .limits = .{ .max_elements = 64 }, .Text = CheckText, .CustomData = u32, .ImageHandle = u32, .features = .{ .semantics = true } });
 
 var check_text: CheckText = .{};
 var memory: [Ui.required_bytes]u8 align(Ui.buffer_alignment) = undefined;
@@ -71,6 +71,7 @@ export fn zuiCheckFrame(width: f32, height: f32, pointer_x: f32, pointer_y: f32)
     _ = ui.measureText("measured", .{});
     _ = ui.rectOf(list);
     _ = ui.stateIfPresent(list, Expanded);
+    _ = ui.manipulation(list);
     declareWidgets(&ui);
     const frame = ui.endFrame();
     defer ui.release(frame);
@@ -81,7 +82,7 @@ export fn zuiCheckFrame(width: f32, height: f32, pointer_x: f32, pointer_y: f32)
     const failed_check = @intFromBool(std.meta.isError(frame.diagnostics.check()));
     const requests = frame.requests();
     const host_requests = @intFromEnum(requests.cursor) + @intFromBool(requests.text_input != null);
-    return frame.commands().len + @intFromBool(ui.nextFrame() == .immediately) + violation_count + failed_check + frame.elementCount() + host_requests;
+    return frame.commands().len + @intFromBool(ui.nextFrame() == .immediately) + violation_count + failed_check + frame.elementCount() + host_requests + frame.semantics().len;
 }
 
 const Settings = struct {

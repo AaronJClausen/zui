@@ -24,7 +24,7 @@ Each item says:
 | 0.6, in part | `bench-compare` (R2), startup benchmarks (P1), task completions at `beginFrame` (A2), the async design (A1) | done; the rest of 0.6 became stage 1 |
 | stage 1 | instruction counts in CI (R1), the tracer contract and `zui_tracy` (P2) | done |
 | stage 2 | the code brought to the spec's shape: C5, S1, I4, C6, A5 and `nextFrame` (I2); letter spacing (T3); the environment and host requests (I6); sources in the core (A3); `zui_async` (A4); the backends on the new API, the demo's thumbnails on `KeyedLoads` (C8) | done; the demo idles at 0% CPU |
-| stage 3, in part | the renderer contract and the generated commands (C1); the host contract and `RecordBuilder` (C2); the conformance suites (C3) | done; the backends are renderers and pass the renderer suite in CI; lowering comes with stage 8's commands, and the first host, with the host suite, with H1 |
+| stage 3, in part | the renderer contract and the generated commands (C1); the host contract and `RecordBuilder` (C2); the conformance suites (C3); `Features` (C7) | done; the backends are renderers and pass the renderer suite in CI; lowering comes with stage 8's commands, and the first host, with the host suite, with H1 |
 | stage 6, early | the single-line fast path (T1), the whole-string cache (T2), the box tree's layout passes (P4, in part) | done; warm text and the box tree's layout and emission within their budgets; the box tree's declaration is not (P5) |
 
 No release is tagged; everything is on `main`. From here, work is
@@ -59,7 +59,6 @@ green, and its **Status** line below says which slice is next.
 |---|---|---|---|---|
 | P4. The box tree's layout and emission within budget | 6, early | `src/layout.zig`, `src/emission.zig` | | waiting on P5 |
 | P5. The box tree's declaration within budget | 6, early | `src/context.zig` | L8 | waiting on L8 |
-| C7. `Features` | 3 | `src/context.zig` | | |
 | C4. `zui_app` | 3 | a new `zui_app/` module | C3 | |
 | H1. The raylib adapter host | 3 | `../zui-raylib` | C4 | |
 | H2. The Windows host | 4 | `../zui-host` | H1 | |
@@ -129,6 +128,32 @@ Things to know:
 ---
 
 ## Done
+
+### C7. `Features`
+
+`Features.semantics` (off), `gestures` (on), `flex_wrap` (off) and
+`safety_sweeps` (on in safe builds), as SPEC.md §4 gives them, and the
+machinery that makes calling an API whose feature is off a compile error
+naming the field: each gated API calls `requireFeature(.field, "api()")`
+at comptime, and the field comes from `std.meta.FieldEnum(Features)`, so
+a message can never name a field that does not exist. Two gated entry
+points pin it, each with its compile-error test:
+- `Frame.semantics()`, a `[]const zui.SemanticNode` that is empty until
+  V2 declares semantics: "zui: semantics() needs Config.features.semantics = true";
+- `ui.manipulation(id)`, a `?zui.Manipulation` that is null until I5
+  recognizes gestures: "zui: manipulation() needs Config.features.gestures = true".
+
+`flex_wrap` and `safety_sweeps` gate nothing yet: their code comes with
+L7 and V3. `zig build check` instantiates both stubs with their features on.
+
+Against `0268dbd`, `zig build counts` in a local Docker container: every
+scenario identical to the instruction, with today's defaults and with
+every feature off (`counts.zig`'s `Config` given `.features` all false
+for the run). No feature adds memory to the reservation.
+
+Decided here: C7 is the mechanism, and each feature's item gates its
+real code behind its field; V2, I5, L7 and V3 now say so, and each one's
+*Done when* includes R1 counts unchanged with its feature off.
 
 ### C3. Conformance suites
 
@@ -777,17 +802,6 @@ its time from process start to its first presented frame is measured
 
 **Spec.** §6.1, §19.5.
 
-### C7. `Features`
-
-**Plan.** `Features.semantics`, `gestures`, `flex_wrap` and
-`safety_sweeps`, each removing its code, memory and API when off; calling
-an API whose feature is off is a compile error naming the field.
-
-**Done when:** R1 shows a build with every feature off is no larger or
-slower than today's.
-
-**Spec.** §4, §4.1.
-
 ### H1. The raylib adapter host
 
 **Plan.** zui-raylib implements the host contract with one window and no
@@ -1049,11 +1063,14 @@ padding, alignment and anchors, following the environment's direction.
 ### L7. Wrap
 
 **Plan.** A wrap pass between distribution and positioning, for parents
-that opt in, compiled out without `features.flex_wrap`. Breakpoints are
-plain code over `ui.viewport()` or `rectOf`.
+that opt in, compiled out without `features.flex_wrap`, which C7 added.
+Breakpoints are plain code over `ui.viewport()` or `rectOf`. Setting
+`Layout.wrap` with the feature off must fail as a gated API does, naming
+the field; a field's value is not always known at compile time, so this
+item decides how (SPEC.md §8.1 records it).
 
-**Done when:** golden tests for wrapping under each alignment, and no
-change to the budget scenarios with the feature off.
+**Done when:** golden tests for wrapping under each alignment, and with
+the feature off, R1 counts are unchanged.
 
 **Spec.** §8.1, §8.2.
 
@@ -1086,13 +1103,16 @@ config (R1).
 **Plan.** As SPEC.md §11.3–§11.4: accepted gestures in hit regions, one
 rule by motion component, opt-in delays, intents, momentum in the state
 table, and custom recognizers over `pointerEvents`, `claim` and
-`decline`.
+`decline`. All of it behind `features.gestures`, which C7 added with
+`manipulation`, gated and null until this item fills it; each new query
+and `Element.gestures` are gated the same way.
 
 **Done when:** interaction tests cover a button in a list in a zoomable
 map, a carousel in a vertical list, a pinch that starts on the list, a
 slider in a drag-scrolled list, a long press, a double tap next to a
 single tap, a flick within one frame, and a lasso written as a module
-function against the map's pan.
+function against the map's pan; and with the feature off, R1 counts are
+unchanged.
 
 **Spec.** §11.3, §11.4.
 
@@ -1148,21 +1168,24 @@ demo toggles it with a key.
 
 ### V2. Semantics and accessibility actions
 
-**Plan.** `Frame.semantics()` with `features.semantics`; actions arrive as
-events and answer through the intent queries.
+**Plan.** `Element.semantics`, and `Frame.semantics()` filled with each
+node's role, label, value, state and actions, behind
+`features.semantics`, which C7 added with `semantics()` gated and empty;
+actions arrive as events and answer through the intent queries.
 
-**Done when:** a widget test checks the list for each control, and the
-Windows host bridges it to UI Automation.
+**Done when:** a widget test checks the list for each control, the
+Windows host bridges it to UI Automation, and with the feature off, R1
+counts are unchanged.
 
 **Spec.** §13.5.
 
 ### V3. Safety sweeps
 
-**Plan.** `features.safety_sweeps`: the invariant checks that read only a
-`Frame`, at the end of `endFrame`.
+**Plan.** The invariant checks that read only a `Frame`, at the end of
+`endFrame`, behind `features.safety_sweeps`, which C7 added.
 
-**Done when:** the randomized tests run through it, and a debug demo runs
-with it on.
+**Done when:** the randomized tests run through it, a debug demo runs
+with it on, and with the feature off, R1 counts are unchanged.
 
 **Spec.** §20.1.
 
@@ -1298,6 +1321,7 @@ Deliberate, and each a reason to choose zui:
 | When a sticky wake is cleared (C2) | after the wait returns, never before it: a wake between `nextFrame` and the wait then ends the wait, and one cleared after it belongs to a publish the next swap sees |
 | A backend's `config()` (C1) | built from its `Renderer`'s declarations, overriding the application's `commands` and payload types, since the renderer draws only those; `zui_app.contextConfig` (C4) generalizes it |
 | Lowering before stage 8 (C1) | none: no declaration can produce an optional command until its stage-8 item adds one, which lands the lowering with it |
+| `Features` (C7) | the mechanism first: the four fields with SPEC.md's defaults, and a gated API's compile error naming its field, pinned on `Frame.semantics()` and `manipulation`; each feature's item (V2, I5, L7, V3) gates its own code, with R1 counts unchanged when it is off |
 | What a conformance suite takes (C3) | a harness, as `expectSourceConforms` does: the implementation makes the drawing target and reads it back, or makes the OS report an event; the suite owns the frames, the waits and the checks |
 | Reading pixels back (C3) | optional: without `pixel` the renderer suite checks only that each frame draws without an error; every backend today reads back, zui-sokol through OpenGL's `glReadPixels`, so its suite renders with OpenGL on every system |
 | A lost wake in the host suite (C3) | bounded: after `lost_wake_ns` the suite wakes the host every 50 ms until the wait ends, and fails |

@@ -14,6 +14,8 @@ const compile_error_cases = [_]struct { name: []const u8, expected_error: []cons
     .{ .name = "text_without_text_contract", .expected_error = "zui: text() needs Config.Text set to a text contract" },
     .{ .name = "image_without_image_handle", .expected_error = "zui: image() needs Config.ImageHandle set to your image type" },
     .{ .name = "ids_repeated_name", .expected_error = "zui.ids: \"save\" appears more than once" },
+    .{ .name = "semantics_without_feature", .expected_error = "zui: semantics() needs Config.features.semantics = true" },
+    .{ .name = "manipulation_without_gestures", .expected_error = "zui: manipulation() needs Config.features.gestures = true" },
     .{ .name = "custom_without_custom_data", .expected_error = "zui: custom() needs Config.CustomData set to your payload type" },
     .{ .name = "state_type_too_large", .expected_error = "zui: state type state_type_too_large.History is 80 bytes, but a state slot holds at most 64; store an index into your own storage instead" },
     .{ .name = "config_material_without_handle", .expected_error = "zui: commands includes .material but MaterialHandle is void" },

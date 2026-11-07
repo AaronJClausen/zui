@@ -125,3 +125,21 @@ test "beginFrame waits until a render thread releases a frame" {
 
     try testing.expect(waited.toMilliseconds() >= 20);
 }
+
+test "features default as the spec says, and an on feature's API answers" {
+    const defaults: zui.Features = .{};
+    try testing.expect(!defaults.semantics);
+    try testing.expect(defaults.gestures);
+    try testing.expect(!defaults.flex_wrap);
+    try testing.expectEqual(std.debug.runtime_safety, defaults.safety_sweeps);
+
+    const Ui = zui.Context(.{ .limits = .{ .max_elements = 8 }, .features = .{ .semantics = true } });
+    var ui: Ui = try .init(testing.allocator, testing.io);
+    defer ui.deinit(testing.allocator);
+    ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 100, 100 } } });
+    ui.box(.{ .id = .of("map") });
+    try testing.expectEqual(@as(?zui.Manipulation, null), ui.manipulation(.of("map")));
+    const frame = ui.endFrame();
+    defer ui.release(frame);
+    try testing.expectEqual(@as(usize, 0), frame.semantics().len);
+}

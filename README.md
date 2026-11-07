@@ -75,14 +75,16 @@ Implemented so far:
   clips and out-of-bounds commands and reads the pixels back, and
   `zui_testing.expectHostConforms` checks a host's event order, sticky
   and cross-thread wakes, and waits. All three backends pass the renderer
-  suite in CI.
+  suite in CI. `Config.features` turns semantics, gestures, wrapping and
+  safety sweeps on or off; calling an API whose feature is off fails to
+  compile, naming the field to set.
 
 The reference backend and demo application live in
 [zui-raylib](https://github.com/AaronJClausen/zui-raylib); the other
 backends are [zui-sokol](https://github.com/AaronJClausen/zui-sokol) and
 [zui-terminal](https://github.com/AaronJClausen/zui-terminal).
 
-Next, in the order of SPEC.md §21: `Features`, `zui_app` and the raylib adapter host, a native Windows host, the wire format, and from there text,
+Next, in the order of SPEC.md §21: `zui_app` and the raylib adapter host, a native Windows host, the wire format, and from there text,
 layout, gestures, effects, an inspector and accessibility, more hosts,
 motion and text editing. The box tree's layout budget (P4) comes early,
 as the text fast path and string cache did.

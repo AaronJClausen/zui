@@ -256,6 +256,9 @@ compile-error test:
 - `"zui: frames_in_flight must be at least 1"`;
 - `"zui: Color must be zui.Color or zui.ExtendedColor, got [4]u8"`;
 - `"zui: commands includes .material but MaterialHandle is void"`;
+- each API whose feature is off, naming the field to set:
+  `"zui: semantics() needs Config.features.semantics = true"`,
+  `"zui: manipulation() needs Config.features.gestures = true"`;
 - every contract violation, in the form of §16.1.
 
 Limit names in diagnostics come from `std.meta.FieldEnum(Limits)`, so a
