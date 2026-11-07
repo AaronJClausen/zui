@@ -48,7 +48,7 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
-| T2. The whole-string cache | 6, early | `src/text.zig`, `Limits.string_cache_entries` | | |
+| T2. The whole-string cache | 6, early | `src/text.zig`, `Limits.string_cache_entries` | | in progress |
 | P4. The box tree's layout and emission within budget | 6, early | `src/layout.zig`, `src/emission.zig` | | |
 | C1. The renderer contract, generated commands, lowering | 3 | `src/commands.zig`, `src/emission.zig`, `src/contracts.zig` | | |
 | C2. The host contract and the surface | 3 | `src/contracts.zig`, a new `src/surface.zig` | C1 | |
@@ -726,7 +726,7 @@ input going back.
 ### T2. The whole-string cache
 
 **Grounding.** A warm text costs one probe per word per frame
-(`src/text.zig:161`): 1,000 texts take 184 µs against a 120 µs budget.
+(`src/text.zig:173`): 1,000 texts take 184 µs against a 120 µs budget.
 The per-word cache stays, because text that changes every frame measures
 only its new words.
 
@@ -736,6 +736,16 @@ holding the metrics. A hit with T1's fast path does no per-word work.
 **Done when:** warm 1,000 texts meet §20.2's budget, and a frame that
 changes every string is no slower. A profile (P2) first confirms per-word
 probes are the main cost.
+
+**Status.** The profile confirms it: Callgrind's function-level counts of
+the warm text wall's `endFrame` at `b99fa79` put 60% of it in measuring
+through per-word probes (`measureMetrics` 27.0%, `Measurer.measure`
+21.4%, wyhash 12.1%), and 20% in `wrapLines`. Most of the wall's texts
+wrap, so the cache must hold their word widths too, or wrapping would
+probe each word again. The benchmark of a frame that changes every string
+has landed: `1000 new strings, warm words` is the warm wall with the
+frame's number after every sentence, so each string is new and each word
+but the number is cached. Next: the cache, measured against that commit.
 
 **Spec.** §9.3.
 

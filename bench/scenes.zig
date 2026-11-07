@@ -160,6 +160,31 @@ pub const SingleLineTexts = struct {
     }
 };
 
+/// The warm text wall with the frame's number after every sentence, as in
+/// "Frame 1234": every string is new each frame, and every word but the
+/// number is cached. Its limits differ from `text_limits` for the same
+/// reason as `SingleLineTexts`'.
+pub const ChangingTexts = struct {
+    pub const name = "1000 new strings, warm words";
+    pub const limits: zui.Limits = .{ .max_elements = 1200, .max_render_commands = 8192, .max_text_bytes = 80 * 1024 };
+    pub const layout_target_ns: ?u64 = null;
+    sentences: Sentences(false) = .{},
+    numbered: [1000][64]u8 = undefined,
+
+    pub fn declare(self: *ChangingTexts, ui: anytype, frame_index: usize) void {
+        const sentences = self.sentences.get();
+        ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .grow_both } });
+        for (0..100) |panel| {
+            ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(160) }, .padding = .all(4), .child_gap = 2 } });
+            for (sentences[panel * 10 ..][0..10], self.numbered[panel * 10 ..][0..10]) |sentence, *buffer| {
+                ui.text(std.fmt.bufPrint(buffer, "{s} {d}", .{ sentence, frame_index }) catch unreachable, .{ .size = 16 });
+            }
+            ui.close();
+        }
+        ui.close();
+    }
+};
+
 pub const DeepTree = struct {
     pub const name = "depth 64";
     pub const layout_target_ns: ?u64 = null;

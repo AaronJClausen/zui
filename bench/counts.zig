@@ -17,7 +17,7 @@ const warmup_frames = 4;
 const counted_frames = 10;
 const growth_tolerance = 1.02;
 
-const Scenarios = .{ scenes.BoxTree, scenes.TextWall, scenes.TextWallCold, scenes.SingleLineTexts, scenes.DeepTree, scenes.WideTree, scenes.DocumentsView, scenes.DeepTreeWithIdleSources, scenes.DeepTreeWithIdleAsyncSources };
+const Scenarios = .{ scenes.BoxTree, scenes.TextWall, scenes.TextWallCold, scenes.SingleLineTexts, scenes.ChangingTexts, scenes.DeepTree, scenes.WideTree, scenes.DocumentsView, scenes.DeepTreeWithIdleSources, scenes.DeepTreeWithIdleAsyncSources };
 
 const Phase = enum {
     /// `beginFrame` and the scene's declaration.
