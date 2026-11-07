@@ -178,7 +178,9 @@ What landed:
   `forced_scale` and `system_material_unavailable` from itself, which
   under `zui_app` had been undefined.
 
-zui-host's `examples/tour.zig` is now `zui_app.run(TourOnHost, ...)`:
+zui-host (`34ce8cb`, pinning zui at `b2b3574` and zui-sokol at
+`ed00845`, which moved only its zui pin so the two agree) runs the tour
+with `examples/tour.zig` now `zui_app.run(TourOnHost, ...)`:
 `TourOnHost` names the host, the renderer and `zui_sokol.Text`, and
 passes each step to the tour's own `App`; a small `SokolRenderer`
 opens zui-sokol's renderer with `initForSurface` and times each submit
