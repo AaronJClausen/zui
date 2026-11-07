@@ -13,7 +13,7 @@ const ThreadSafeText = struct {
 
     pub fn zuiMeasure(self: *ThreadSafeText, text: []const u8, key: zui.MeasureKey(u16)) [2]f32 {
         _ = self.calls.fetchAdd(1, .monotonic);
-        return .{ @as(f32, @floatFromInt(text.len)) * key.size / 2, key.size };
+        return .{ @as(f32, @floatFromInt(text.len)) * (key.size / 2 + key.letter_spacing), key.size };
     }
 };
 

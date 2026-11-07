@@ -1,5 +1,6 @@
-//! Hand-computed layouts. Characters are 8×16 (see support.FixedMetricsText),
-//! the viewport is 800×600, and zui's root stacks children top to bottom.
+//! Hand-computed layouts. An unspaced character is 8×16, letter spacing
+//! adds its width after every character, the viewport is 800×600, and
+//! zui's root stacks children top to bottom.
 
 const std = @import("std");
 const zui = @import("../root.zig");
@@ -458,7 +459,49 @@ test "letter spacing is part of the measurement key" {
     // "abc" and the space, once per key.
     try testing.expectEqual(@as(u64, 4), harness.ui.measureCalls());
     try expectRect(frame, .of("plain"), 0, 0, 24, 16);
-    try expectRect(frame, .of("spaced"), 0, 16, 24, 16);
+    try expectRect(frame, .of("spaced"), 0, 16, 30, 16);
+}
+
+test "letter spacing widens every character, including the last, and wraps sooner" {
+    var harness: support.Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    // Unspaced, "ab cd ef" is exactly 64 wide and fits on one line; with a
+    // spacing of 2 each character is 10 wide and the text needs 80.
+    for ([_]f32{ 0.5, 1, 2 }) |zoom| {
+        harness.ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 800, 600 }, .zoom = zoom } });
+        harness.ui.open(.{ .id = .of("block"), .layout = .{ .sizing = .{ .width = .fixed(64) } } });
+        harness.ui.text("ab cd ef", .{ .letter_spacing = 2 });
+        harness.ui.close();
+        const frame = try harness.end();
+
+        var buffer: [256]u8 = undefined;
+        try testing.expectEqualStrings(
+            \\text 0 0 50 16 "ab cd" spacing=2
+            \\text 0 16 20 16 "ef" spacing=2
+            \\
+        , try support.snapshot(frame, &buffer));
+        try expectRect(frame, .of("block"), 0, 0, 64, 32);
+    }
+}
+
+test "centered spaced lines are centered by their spaced width" {
+    var harness: support.Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    const ui = harness.begin();
+    ui.open(.{ .layout = .{ .sizing = .{ .width = .fixed(48) } } });
+    ui.text("abc de", .{ .letter_spacing = 4, .alignment = .center });
+    ui.close();
+
+    var buffer: [256]u8 = undefined;
+    try testing.expectEqualStrings(
+        \\text 6 0 36 16 "abc" spacing=4
+        \\text 12 16 24 16 "de" spacing=4
+        \\
+    , try support.snapshot(try harness.end(), &buffer));
 }
 
 test "a steady frame measures nothing new" {

@@ -23,7 +23,7 @@ Each item says:
 | after 0.5 | declaration work: −42% to −56% | on `main` |
 | 0.6, in part | `bench-compare` (R2), startup benchmarks (P1), task completions at `beginFrame` (A2), the async design (A1) | done; the rest of 0.6 became stage 1 |
 | stage 1 | instruction counts in CI (R1), the tracer contract and `zui_tracy` (P2) | on `main`, but for a trace of the demo, which needs C8 |
-| stage 2, in part | the code brought to the spec's shape: C5, S1, I4, C6, A5 and `nextFrame` (I2) | on `main`; the other repos still need the same change (C8) |
+| stage 2, in part | the code brought to the spec's shape: C5, S1, I4, C6, A5 and `nextFrame` (I2); letter spacing (T3) | on `main`; the other repos still need the same change (C8) |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
@@ -47,11 +47,10 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
-| T3. Letter spacing: the golden test | 2 | `src/tests/golden.zig` with a spacing test contract | | in progress: key, style and cache done |
 | I6. The environment and host requests | 2 | `src/input.zig`, `src/context.zig`, `src/tests/interaction.zig`, `zui_widgets/` | | |
 | A3. Sources in the core | 2 | a new `src/sources.zig`, `src/context.zig`, `src/contracts.zig`, `tests/compile_errors/` | | |
 | A4. `zui_async` | 2 | a new `zui_async/` module; `expectSourceConforms` in `zui_testing/` | A3 | |
-| C8. The backends on the stage-2 API | 2 | `../zui-raylib`, `../zui-sokol`, `../zui-terminal` | A4, T3 | |
+| C8. The backends on the stage-2 API | 2 | `../zui-raylib`, `../zui-sokol`, `../zui-terminal` | A4 | |
 | P2. The tracer contract: a trace of the demo | 1 | `../zui-raylib`'s demo with `zui_tracy` | C8 | waiting on C8; the rest is done |
 | T1. The single-line fast path | 6, early | `src/text.zig` | | |
 | T2. The whole-string cache | 6, early | `src/text.zig`, `Limits.string_cache_entries` | T1 | |
@@ -126,6 +125,19 @@ Things to know:
 ---
 
 ## Done
+
+### T3. Letter spacing, through a measurement key
+
+`TextStyle.letter_spacing`, and `MeasureKey { font, size, letter_spacing }`
+passed to `zuiMeasure` and used as both the cache key and the hash seed,
+with size and spacing multiplied by zoom. Text commands carry the
+spacing in their style. Both `FixedMetricsText` contracts (the core's
+test one and `zui_testing`'s) now add the spacing after every byte, as
+SPEC.md §9.4 asks of every contract, so golden tests lay out spaced text:
+it widens every character including the last, wraps sooner, is aligned
+by its spaced width, and lays out identically at zooms of 0.5, 1 and 2.
+Nothing on a hot path changed, so there is nothing to measure. Drawing
+the spacing belongs to the renderers, which C8 moves to the stage-2 API.
 
 ### R1. Instruction counts in CI
 
@@ -268,25 +280,6 @@ compile-error tests pin each contract message.
 **Status.** Done in this repository.
 
 **Spec.** §4, §5, §9.4, §16.1.
-
-### T3. Letter spacing, through a measurement key
-
-**Grounding.** `measureText(text, font, size)` cannot express letter
-spacing per text, and the additive-measurement rule means a backend
-cannot add it afterwards.
-
-**Plan.** `TextStyle.letter_spacing`, and `MeasureKey { font, size,
-letter_spacing }` passed to `zuiMeasure` and used as the cache key, with
-`size` already multiplied by zoom. Text commands carry the spacing.
-
-**Done when:** a golden test lays out spaced text, and every renderer
-draws it.
-
-**Status.** The key, the style field and the cache are done; the golden
-test needs a test contract that applies spacing, and the renderers draw
-nothing yet (C8).
-
-**Spec.** §9.1, §9.4.
 
 ### S1. The frame record's parameters: time, scale and zoom
 

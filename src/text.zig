@@ -375,7 +375,7 @@ const LineOutput = struct {
 
 const FixedMetricsText = struct {
     pub fn zuiMeasure(_: *FixedMetricsText, text: []const u8, key: style.MeasureKey(u16)) [2]f32 {
-        return .{ @as(f32, @floatFromInt(text.len)) * key.size / 2, key.size };
+        return .{ @as(f32, @floatFromInt(text.len)) * (key.size / 2 + key.letter_spacing), key.size };
     }
 };
 

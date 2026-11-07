@@ -1,11 +1,12 @@
 const std = @import("std");
 const zui = @import("../root.zig");
 
-/// Deterministic metrics: every byte is `size / 2` wide and `size` tall,
-/// so at the default size of 16 a character is 8×16.
+/// Deterministic metrics: every byte is `size / 2` wide plus the letter
+/// spacing after it, and `size` tall, so at the default size of 16 an
+/// unspaced character is 8×16.
 pub const FixedMetricsText = struct {
     pub fn zuiMeasure(_: *FixedMetricsText, text: []const u8, key: zui.MeasureKey(u16)) [2]f32 {
-        return .{ @as(f32, @floatFromInt(text.len)) * key.size / 2, key.size };
+        return .{ @as(f32, @floatFromInt(text.len)) * (key.size / 2 + key.letter_spacing), key.size };
     }
 };
 
@@ -94,7 +95,11 @@ pub fn snapshot(frame: *const Ui.Frame, buffer: []u8) ![]const u8 {
         switch (command.payload) {
             .rectangle => |rectangle| try writer.print("rect {d} {d} {d} {d} #{x:0>2}{x:0>2}{x:0>2}\n", .{ bounds.x, bounds.y, bounds.width, bounds.height, rectangle.color.r, rectangle.color.g, rectangle.color.b }),
             .border => |border| try writer.print("border {d} {d} {d} {d} #{x:0>2}{x:0>2}{x:0>2}\n", .{ bounds.x, bounds.y, bounds.width, bounds.height, border.color.r, border.color.g, border.color.b }),
-            .text => |text| try writer.print("text {d} {d} {d} {d} \"{s}\"\n", .{ bounds.x, bounds.y, bounds.width, bounds.height, text.content }),
+            .text => |text| {
+                try writer.print("text {d} {d} {d} {d} \"{s}\"", .{ bounds.x, bounds.y, bounds.width, bounds.height, text.content });
+                if (text.style.letter_spacing != 0) try writer.print(" spacing={d}", .{text.style.letter_spacing});
+                try writer.writeByte('\n');
+            },
             .image => try writer.print("image {d} {d} {d} {d}\n", .{ bounds.x, bounds.y, bounds.width, bounds.height }),
             .custom => try writer.print("custom {d} {d} {d} {d}\n", .{ bounds.x, bounds.y, bounds.width, bounds.height }),
             .clip_begin => |clip| try writer.print("clip {d} {d} {d} {d}\n", .{ clip.x, clip.y, clip.width, clip.height }),

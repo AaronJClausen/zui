@@ -178,8 +178,9 @@ What exists today is releases 0.1–0.5, the start of 0.6, stage 1
 (instruction counts in CI, the tracer contract and `zui_tracy`), and the part of stage 2 that reshaped what already existed: `Context(config)` with
 `Config.limits` and the text contract, the frame record with `now`,
 scale and zoom, input as an ordered event log over a pointer table,
-`endFrame` that always returns a frame, `nextFrame()`, and `Element`
-with `decoration` and `clip: Axes`. `TaskPool` is deleted.
+`endFrame` that always returns a frame, `nextFrame()`, letter spacing
+through the measurement key, and `Element` with `decoration` and
+`clip: Axes`. `TaskPool` is deleted.
 
 The code and the spec still differ in these places, each closed by the
 roadmap item named:

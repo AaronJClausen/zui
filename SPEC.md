@@ -1675,7 +1675,7 @@ edit (the message quotes the `.hidden = true` line that fixes it).
 ### 19.4 `zui_testing`
 
 - **`FixedMetricsText`**: deterministic metrics (each byte `size / 2`
-  wide), so tests never depend on fonts.
+  wide plus its letter spacing), so tests never depend on fonts.
 - **`Driver(Ui)`**: runs complete frames from events, by element id, with
   points as fractions of the element's previous rectangle: `click`,
   `tap`, `drag`, `pinch`, multi-pointer drags, `typeText`, `pressKeys`,

@@ -18,14 +18,14 @@ const std = @import("std");
 const zui = @import("zui");
 
 /// A text contract whose metrics don't depend on fonts: each byte is
-/// `size / 2` wide and `size` tall, so at the default size of 16 a
-/// character is 8×16.
+/// `size / 2` wide plus the letter spacing after it, and `size` tall, so
+/// at the default size of 16 an unspaced character is 8×16.
 pub fn FixedMetricsText(comptime FontId: type) type {
     return struct {
         const Self = @This();
 
         pub fn zuiMeasure(_: *Self, text: []const u8, key: zui.MeasureKey(FontId)) [2]f32 {
-            return .{ @as(f32, @floatFromInt(text.len)) * key.size / 2, key.size };
+            return .{ @as(f32, @floatFromInt(text.len)) * (key.size / 2 + key.letter_spacing), key.size };
         }
     };
 }
