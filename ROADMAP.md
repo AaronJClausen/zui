@@ -27,28 +27,29 @@ Each item says:
 | stage 3 | the renderer contract and the generated commands (C1); the host contract and `RecordBuilder` (C2); the conformance suites (C3); `Features` (C7); `zui_app` (C4); the raylib adapter host (H1) | done; the backends are renderers and pass the renderer suite in CI, raylib's host passes the host suite, and the demo runs through `zui_app`, presenting its first frame 288 ms after the process starts; lowering comes with stage 8's commands |
 | stage 4 | the Windows host (H2), with dropped files and lifecycle events in the record; the system material (H8); `zui_app` with the application's own text contract (C9) | done; zui-sokol's tour runs on it unchanged, through `zui_app`, and idles at 0% CPU, and the same code shows Mica or a solid background |
 | stage 5 | relay (F2); `zui_wire` (F3); replay in `zui_testing` (F4); the wire host, renderer and client (F5); file watching as a source (F6) | done; editing a theme file restyles a running window on the Windows host within 4 ms; a recorded session of zui-sokol's tour replays to identical commands without starting any work, zui-sokol's tour goes over the wire at a hundredth of its frames' whole size, but for the screen that moves every box, and it runs in one process and draws in another on the Windows host, its keys going back |
-| stage 6, early | the single-line fast path (T1), the whole-string cache (T2), the box tree's layout passes (P4, in part), static styles (L8) | done; a box tree of static styles declares in 34.5 µs; warm text and the box tree's layout and emission within their budgets; the box tree's declaration is not (P5) |
+| stage 6, early | the single-line fast path (T1), the whole-string cache (T2), static styles (L8), the box tree's layout and emission (P4) and declaration (P5) | done; the box tree's and warm text's budgets met: the box tree declares in 48.9 µs and lays out and emits in 89.2 µs, warm text in 91.7 µs; a box tree of static styles declares in 28.0 µs |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
 when it is done.
 
-Measured on the reference machine (i9-10900K), the fastest frame, at
-`a6d8e34` but where an item is named, against the budgets of SPEC.md
-§20.2:
+Measured on the reference machine (i9-10900K), the fastest frame after
+P5, against the budgets of SPEC.md §20.2:
 
 | Scenario | Declaration | `endFrame` | Budget |
 |---|---|---|---|
-| 4,096 boxes, depth 8, after P4 | 58.6 µs | 93.4 µs | layout and emission < 100 µs (met; 101.2 µs at `a6d8e34`); declaration < 55 µs (missed; 52.2 µs at `a6d8e34`) |
-| 1,000 texts, warm caches, after P4 | 16.9 µs | 91.9 µs | < 120 µs (met; 184.2 µs at `a6d8e34`) |
-| 4,000 children of one parent | 52.9 µs | 65.8 µs | |
+| 4,096 boxes, depth 8 | 48.9 µs | 89.2 µs | layout and emission < 100 µs, declaration < 55 µs: both met |
+| 1,000 texts, warm caches | 16.0 µs | 91.7 µs | < 120 µs: met |
+| 4,096 boxes of static styles | 28.0 µs | 88.2 µs | |
+| 4,000 children of one parent | 54.0 µs | 65.8 µs | |
 
-The P4 rows are the fastest of four runs of `zig build bench --
---check-targets`, whose fastest box-tree frames were 93.4 to 97.9 µs for
-layout and emission and 58.6 to 69.5 µs for declaration. The machine runs
-slower than when `a6d8e34` was measured: in the same session `afacf87`,
-before P4, took 111.0 µs and 68.5 µs (`bench-compare`), where `a6d8e34`
-had taken 101.2 µs and 52.2 µs.
+These are the fastest of five settled runs of `zig build bench --
+--check-targets`, whose fastest box-tree frames were 48.9 to 50.2 µs for
+declaration and 89.2 to 93.5 µs for layout and emission. The first run
+after a build is often slower here (68.6 µs once), so judge by a run that
+is not the first. The machine runs slower than when `a6d8e34` was
+measured at 101.2 µs and 52.2 µs: `afacf87`, before P4, took 111.0 µs
+and 68.5 µs here.
 
 ## The queue
 
@@ -59,8 +60,6 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
-| P4. The box tree's layout and emission within budget | 6, early | `src/layout.zig`, `src/emission.zig` | | waiting on P5 |
-| P5. The box tree's declaration within budget | 6, early | `src/context.zig` | L8 | |
 | T4. Line-break segmentation | 6 | `src/text.zig` | | |
 | L1. A grow basis | 6 | `src/layout.zig` | | |
 | L2. Aspect ratio and natural sizes | 6 | `src/layout.zig` | | |
@@ -134,6 +133,130 @@ Things to know:
 
 ## Done
 
+### P5. The box tree's declaration within budget
+
+**Plan.** With L8's config references in place, cut the per-element
+stores of `open`, and store the flags without reloading the element's
+fields, through a different `Element` shape if the compiler cannot be
+led to it. **Done when:** `zig build bench -- --check-targets` meets the
+declaration budget on the reference machine, and no scenario is slower
+by `bench-compare`. **Spec.** §5.1, §10.1, §20.2.
+
+The box tree declares in 48.9 to 50.2 µs at best over five runs of
+`zig build bench -- --check-targets`, against 55 µs, and lays out and
+emits in 89.2 to 93.5 µs. Callgrind's profile of an `open` after L8 put
+most of what was left in two places that were not the stores of element
+storage:
+- **The element's switches.** Zig writes a `bool` field of a struct
+  literal as one bit and reads it as a byte, and LLVM cannot forward a
+  store to a wider load, so the scene's `Element` stayed on the stack:
+  every `open` stored `interactive`, `focusable`, `focus_scope` and
+  `disabled` and loaded and masked them back, about 25 instructions. An
+  optional is stored and loaded as bytes, and its defaults fold, so the
+  four are `?bool`, null meaning false. They are written as before, and
+  SPEC.md §10.1 records why. A switch set at run time still costs a store
+  and a load, half of what a `bool` did. `Axes` was a two-bit enum with
+  the same problem, so it is a byte.
+- **Reloads through the frame.** The copied layout and decoration take
+  their slot in a local before the copy, so the cursor is not loaded
+  again after it.
+
+And in element storage, `child_count` and `flow_child_count` are one
+array of pairs, `child_counts`, so declaration zeroes both in one store
+and counts a flow child in one addition; the passes read each half as
+before. `fit` takes each element's sizing from `contentSize`, which
+already read its layout, and a text element's from the default layout
+without reading its reference.
+
+`zig build counts` against `beb36f5`, in a local Docker container: the
+box tree's declaration −24.1% (574,326 to 436,050) and its `endFrame`
+−1.1%; the static-styled tree's declaration −31.2%, the wide tree's
+−35.0% and depth 64's −15.0%; the texts' declarations −3.1% to −6.9%;
+every scenario fewer in both phases. `zig build bench-compare --
+beb36f5` (6 rounds): the box tree's declaration −15.6% (58.3 to
+49.6 µs), the static-styled tree's −20.8%, the wide tree's −11.9%, depth
+64's −13.3%; warm text's `endFrame` −6.6% (97.9 to 91.5 µs), the box
+tree's −2.6%; none slower. Against `342b04a`, before L8 (8 rounds), warm
+text's `endFrame` is +1.4%, within noise, where L8 had left it +7.0%.
+
+Tried and dropped:
+- **The content kind in the flags,** saving one store an element:
+  declaration −1%, but `endFrame` +1%, from masking the kind out of the
+  flags in every pass;
+- **`sizingOf` answering a text element without its reference,**
+  everywhere: warm text's `endFrame` −0.4% and its read misses −1.2%,
+  but the box tree's `endFrame` +2.5%;
+- **the pair of child counts as a packed struct:** the same declaration,
+  but the box tree's `endFrame` +2.9%, from extracting each half.
+
+### P4. The box tree's layout and emission within budget
+
+**Grounding.** At `a6d8e34` the box tree's `endFrame` took 101.2 µs
+against a 100 µs budget, and no item was aimed at it. Stage 2 has changed
+emission since (scale and zoom snapping, the frame's diagnostics), so the
+first step is to measure it again.
+
+**Plan.** Re-measure on the reference machine. If it is still over, take
+a P2 trace of the passes and work on the costliest, judged by R1's counts
+and `bench-compare`.
+
+**Done when:** `zig build bench -- --check-targets` meets both box-tree
+budgets on the reference machine, and no other scenario is slower by
+`bench-compare`.
+
+Done with P5, which brought the declaration within budget. After P5,
+`zig build bench-compare -- afacf87` (8 rounds) calls no scenario
+slower: the box tree's `endFrame` −19.0% and declaration −27.4%, warm
+text −6.1%, the wide tree −7.6% and −7.9%, the documents view −9.3%,
+everything else within noise.
+
+Measured first at `afacf87` on the reference machine:
+`endFrame` 111.0 µs and declaration 68.5 µs, the machine running slower
+than at `a6d8e34` (*Where we are*). Callgrind's profile of `endFrame` gave
+position 21% (82 instructions an element: its along and across
+coordinates were indexed at run time, so each parent spilled them to the
+stack), the two distribute passes 20%, the two fit passes 20% and emission
+12%. Landed:
+- **Position by parent.** Each parent places its flow children in one
+  loop specialized by the flow's axis; the per-parent placement records
+  are gone. Position went from 365,000 to 232,000 instructions a frame.
+- **A default layout at `layouts[none_index]`,** so `layoutOf` and
+  `sizingOf` never branch.
+- **Declaration:** an element without an id takes `id.internal`, one
+  multiply where `mix` took two, because such ids are never looked up;
+  `Sizing.Rule` is four bytes, so a layout has no padding bytes to copy;
+  `content_index` is not written for a plain box; `flagsFor` is inline;
+  the root is a comptime case of `appendElement`.
+
+Against `afacf87`, `zig build counts` in a local Docker container: the box
+tree's `endFrame` −14.3% (1,562,373 to 1,339,297) and declaration −23.2%
+(765,869 to 588,146); every other scenario fewer in both phases (text
+declarations −10% to −18%, `endFrame` −0.4% to −15%). `zig build
+bench-compare -- afacf87` (8 rounds): box tree `endFrame` −16.0% (111.0
+to 93.5 µs), declaration −9.6% (68.5 to 61.9 µs), warm text −5.8%,
+depth 64 −8.3%, documents view −3.8%; slower: the text walls' declaration
++3.7% (16.3 to 16.9 µs) and the wide tree's +4.4%, with 18% and 11% fewer
+instructions and the same simulated cache misses (Callgrind
+`--cache-sim`), which points at code placement rather than work.
+
+Tried and dropped:
+- zeroing `size` and `min_size` at the start of `endFrame` rather than
+  in declaration: declaration −8%, but `endFrame` +3% for the box and wide
+  trees, the cost of touching 128 KB, so it would only move the time;
+  `@memset` there was compiler_rt's, 90,000 instructions without libc,
+  and `rep stosb` was slower still;
+- one integer for `child_count` and `flow_child_count`: −4,000
+  instructions in declaration, +40,000 in `endFrame`;
+- layouts and decorations at the element's own index, with no counts:
+  −2% in declaration, but the first frame of 1,000 texts +5.7%, from the
+  pages the sparse layouts touch;
+- `sizingOf` returning `.fit` without a load: +86,000 instructions in the
+  box tree's `endFrame`; `.fit` tested before the switch in `distribute`:
+  no change;
+- computing the flags before the first store: no change (see P5).
+
+**Spec.** §8.2, §20.2.
+
 ### L8. Static styles
 
 **Plan.** `zui.static` and `Static(T)`; config references in element
@@ -196,7 +319,7 @@ Decided here:
   layout whole, as does its `decoration`, so a reference is never
   merged into a copy.
 
-What remains: the copying box tree's declaration budget is P5's.
+The copying box tree's declaration budget was met by P5.
 
 ### F6. Watching files
 
@@ -1423,104 +1546,6 @@ Done: F2, F3, F4, F5 and F6 are in *Done*.
 
 ## Stage 6: text and layout
 
-### P4. The box tree's layout and emission within budget
-
-**Grounding.** At `a6d8e34` the box tree's `endFrame` took 101.2 µs
-against a 100 µs budget, and no item was aimed at it. Stage 2 has changed
-emission since (scale and zoom snapping, the frame's diagnostics), so the
-first step is to measure it again.
-
-**Plan.** Re-measure on the reference machine. If it is still over, take
-a P2 trace of the passes and work on the costliest, judged by R1's counts
-and `bench-compare`.
-
-**Done when:** `zig build bench -- --check-targets` meets both box-tree
-budgets on the reference machine, and no other scenario is slower by
-`bench-compare`.
-
-**Status.** Layout and emission are within budget; declaration is not,
-and moved to P5. Measured first at `afacf87` on the reference machine:
-`endFrame` 111.0 µs and declaration 68.5 µs, the machine running slower
-than at `a6d8e34` (*Where we are*). Callgrind's profile of `endFrame` gave
-position 21% (82 instructions an element: its along and across
-coordinates were indexed at run time, so each parent spilled them to the
-stack), the two distribute passes 20%, the two fit passes 20% and emission
-12%. Landed:
-- **Position by parent.** Each parent places its flow children in one
-  loop specialized by the flow's axis; the per-parent placement records
-  are gone. Position went from 365,000 to 232,000 instructions a frame.
-- **A default layout at `layouts[none_index]`,** so `layoutOf` and
-  `sizingOf` never branch.
-- **Declaration:** an element without an id takes `id.internal`, one
-  multiply where `mix` took two, because such ids are never looked up;
-  `Sizing.Rule` is four bytes, so a layout has no padding bytes to copy;
-  `content_index` is not written for a plain box; `flagsFor` is inline;
-  the root is a comptime case of `appendElement`.
-
-Against `afacf87`, `zig build counts` in a local Docker container: the box
-tree's `endFrame` −14.3% (1,562,373 to 1,339,297) and declaration −23.2%
-(765,869 to 588,146); every other scenario fewer in both phases (text
-declarations −10% to −18%, `endFrame` −0.4% to −15%). `zig build
-bench-compare -- afacf87` (8 rounds): box tree `endFrame` −16.0% (111.0
-to 93.5 µs), declaration −9.6% (68.5 to 61.9 µs), warm text −5.8%,
-depth 64 −8.3%, documents view −3.8%; slower: the text walls' declaration
-+3.7% (16.3 to 16.9 µs) and the wide tree's +4.4%, with 18% and 11% fewer
-instructions and the same simulated cache misses (Callgrind
-`--cache-sim`), which points at code placement rather than work.
-
-Tried and dropped:
-- zeroing `size` and `min_size` at the start of `endFrame` rather than
-  in declaration: declaration −8%, but `endFrame` +3% for the box and wide
-  trees, the cost of touching 128 KB, so it would only move the time;
-  `@memset` there was compiler_rt's, 90,000 instructions without libc,
-  and `rep stosb` was slower still;
-- one integer for `child_count` and `flow_child_count`: −4,000
-  instructions in declaration, +40,000 in `endFrame`;
-- layouts and decorations at the element's own index, with no counts:
-  −2% in declaration, but the first frame of 1,000 texts +5.7%, from the
-  pages the sparse layouts touch;
-- `sizingOf` returning `.fit` without a load: +86,000 instructions in the
-  box tree's `endFrame`; `.fit` tested before the switch in `distribute`:
-  no change;
-- computing the flags before the first store: no change (see P5).
-
-**Spec.** §8.2, §20.2.
-
-### P5. The box tree's declaration within budget
-
-**Grounding.** After P4 the box tree's declaration is 58.6 µs at best
-against 55 µs, and 588,146 instructions, 143 a box, of which the scene's
-own switch is about 35. What is left:
-- **Bytes written.** An `open` stores about 100 bytes into 15 arrays, 56
-  of them the layout copy in 12 stores, and timing follows the stores
-  more than the instructions: zeroing the two 8-byte sizes in declaration
-  costs 8% of it. One frame in flight instead of two changed nothing, so
-  it is the stores themselves, not the frames' cache footprint.
-- **The element's flags.** Zig writes the `Element`'s `bool` fields as
-  `i1` and reads them as `i8`, so LLVM cannot keep them in registers: every
-  `open` stores six bytes to the stack and reloads and masks them, about
-  30 instructions, even when every field is a default.
-- **The machine.** `afacf87` declared the box tree in 68.5 µs here, where
-  `a6d8e34` took 52.2 µs when the budget was last met; measure on a quiet
-  machine at a fixed frequency first.
-- **After L8** the box tree's declaration is 574,326 instructions and
-  57.7 µs at best; the same tree with static styles declares in 445,291
-  and 34.5 µs, so what is left is the per-element stores, not the copy
-  of each layout. The two config references are now 8 bytes each.
-
-**Plan.** With L8's config references in place, pack the per-element
-fields declaration writes (parent, counts, kind, content index, flags,
-config references) into one record, so an `open` writes two or three
-streams instead of 15; then store the flags without reloading the
-element's fields, through a different `Element` shape if the compiler
-cannot be led to it, which SPEC.md §10.1 would record.
-
-**Done when:** `zig build bench -- --check-targets` meets the declaration
-budget on the reference machine, and no scenario is slower by
-`bench-compare`.
-
-**Spec.** §5.1, §10.1, §20.2.
-
 ### T4. Line-break segmentation
 
 **Grounding.** Breaking only at ASCII spaces cannot wrap CJK or Thai.
@@ -1800,6 +1825,7 @@ Deliberate, and each a reason to choose zui:
 | Render commands | generated from what the renderer declares; the rest lowered (C1) |
 | Contract members | all `zui`-prefixed; unknown ones are compile errors |
 | Static styles | approved: pointers to comptime configs, measured against the declaration budget (L8) |
+| An element's switches | `?bool`, null meaning false, so that their defaults fold away; written as booleans (P5) |
 | Config references (L8) | pointers in element storage, the default layout one constant; an element's own `layout` or `decoration` replaces the style's whole |
 | Budgets | as in SPEC.md §20.2, including warm text < 120 µs and declaration < 55 µs |
 | Where the contracts live | in the `zui` repo |

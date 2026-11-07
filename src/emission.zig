@@ -203,7 +203,7 @@ fn Emitter(comptime Ui: type) type {
                     .scroll_y = flags.scroll_y,
                 },
                 // `content_size` is only computed for elements with children.
-                .max_scroll = if (frame.child_count[element] == 0) .{ 0, 0 } else .{
+                .max_scroll = if (frame.child_counts[element].all == 0) .{ 0, 0 } else .{
                     style.larger(0, frame.content_size[element][0] - frame.size[element][0]),
                     style.larger(0, frame.content_size[element][1] - frame.size[element][1]),
                 },

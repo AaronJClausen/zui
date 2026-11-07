@@ -103,7 +103,7 @@ fn checkInvariants(frame: *const Frame) !void {
             try std.testing.expect(frame.size[element][a] >= -tolerance);
         }
         try checkChildren(frame, element);
-        if (frame.child_count[element] != 0) try checkParent(frame, element);
+        if (frame.child_counts[element].all != 0) try checkParent(frame, element);
     }
     try checkCommands(frame);
 }
@@ -142,8 +142,8 @@ fn checkChildren(frame: *const Frame, parent: Ui.Index) !void {
         count += 1;
         if (!frame.isFloating(child)) flow_count += 1;
     }
-    try std.testing.expectEqual(@as(u32, frame.child_count[parent]), count);
-    try std.testing.expectEqual(@as(u32, frame.flow_child_count[parent]), flow_count);
+    try std.testing.expectEqual(@as(u32, frame.child_counts[parent].all), count);
+    try std.testing.expectEqual(@as(u32, frame.child_counts[parent].in_flow), flow_count);
 }
 
 fn flowCount(frame: *const Frame, parent: Ui.Index) u32 {

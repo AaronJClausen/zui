@@ -79,12 +79,12 @@ Implemented so far:
   its window a few milliseconds after its theme file is saved.
 - **Stage 6, early:** a text that fits is laid out as one line without
   walking its words, and a whole-string cache makes a warm text one probe
-  instead of one per word: 1,000 warm texts lay out in about 100 µs. The
-  box tree of 4,096 boxes lays out and emits its commands in about 94 µs.
-  Static styles: `zui.static(zui.Style{ ... })` makes a style at
-  comptime, and `.style = toolbar_style` on an element references it
-  instead of copying it, so 4,096 styled boxes declare in about 35 µs
-  instead of 58.
+  instead of one per word: 1,000 warm texts lay out in about 92 µs. The
+  box tree of 4,096 boxes declares in about 50 µs and lays out and emits
+  its commands in about 90 µs, both within their budgets. Static styles:
+  `zui.static(zui.Style{ ... })` makes a style at comptime, and
+  `.style = toolbar_style` on an element references it instead of
+  copying it, so 4,096 styled boxes declare in about 28 µs.
 - **Stage 3:** the renderer contract (`zuiSubmit`, the surfaces
   it draws into, the optional commands it draws), checked at compile time
   by `zui.checkRenderer`, and a `RenderCommand` union generated with
@@ -134,8 +134,7 @@ hosts live in [zui-host](https://github.com/AaronJClausen/zui-host).
 
 Next, in the order of SPEC.md §21: text,
 layout, gestures, effects, an inspector and accessibility, more hosts,
-motion and text editing. The box tree's layout budget (P4) comes early,
-as the text fast path and string cache did.
+motion and text editing.
 [ROADMAP.md](ROADMAP.md) keeps the queue of work in order, and
 [ARCHITECTURE.md](ARCHITECTURE.md) shows how the pieces connect.
 

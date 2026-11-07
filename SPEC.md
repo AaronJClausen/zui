@@ -304,7 +304,7 @@ needs no child or sibling links:
 | `id` | `u64` | interaction, state, duplicate detection |
 | `parent` | `ElementIndex` | every pass |
 | `subtree_end` | `ElementIndex` | walking children, emission |
-| `flow_child_count` | `ElementIndex` | sizing |
+| `child_counts` | two `ElementIndex`: all children and those in the flow, side by side so declaration zeroes and counts them in one store | sizing, ids |
 | `layout`, `decoration` | config reference (§10.3) | sizing, positioning, emission |
 | `content` | tagged reference: none, text, image, custom | text, emission |
 | `flags` | `packed struct(u16)` | every pass |
@@ -894,16 +894,22 @@ pub const Element = struct {
     clip: Axes = .none,                 // the axes on which descendants are cut off, e.g. .vertical
     scroll: ?Scroll = null,
     floating: ?Floating = null,
-    interactive: bool = false,          // takes hover, press and click, and blocks them below it
-    focusable: bool = false,            // implies interactive
-    focus_scope: bool = false,          // Tab cycles inside this subtree, as in a dialog
-    disabled: bool = false,             // no hover, press or focus; queries report `.disabled`
+    interactive: ?bool = null,          // takes hover, press and click, and blocks them below it
+    focusable: ?bool = null,            // implies interactive
+    focus_scope: ?bool = null,          // Tab cycles inside this subtree, as in a dialog
+    disabled: ?bool = null,             // no hover, press or focus; queries report `.disabled`
     gestures: Gestures = .{},           // features.gestures (§11.4)
     cursor: ?Cursor = null,             // the pointer's shape while this element is hot
     semantics: ?Semantics = null,       // features.semantics (§13.5)
     exit_seconds: f32 = 0,              // limits.exit_ghost_commands (§19.9)
 };
 ```
+
+The four switches are written as booleans, `.focusable = true`, and null
+means false. They are optional because Zig stores a `bool` field as one
+bit and loads it as a byte, which LLVM cannot fold: with `bool`, every
+`open` stored its four defaults to the stack and loaded them back, 14% of
+the box tree's declaration (§20.2). `Axes` is a byte for the same reason.
 
 Only the config kinds that are set are stored. Nesting follows the code,
 with `defer`:

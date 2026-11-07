@@ -159,14 +159,24 @@ pub const Element = struct {
     scroll: ?style.Scroll = null,
     floating: ?style.Floating = null,
     /// Takes hover, press and click, and blocks them below it.
-    interactive: bool = false,
+    ///
+    /// This and the three switches after it are `?bool`, null meaning
+    /// false, because Zig stores a `bool` field as one bit and loads it as
+    /// a byte: LLVM cannot see through that, so every `open` stored and
+    /// reloaded the four defaults. An optional's defaults fold away. They
+    /// are written as booleans:
+    ///
+    /// ```zig
+    /// ui.open(.{ .id = .of("save"), .focusable = true, .disabled = !app.dirty });
+    /// ```
+    interactive: ?bool = null,
     /// Reachable with Tab; implies `interactive`.
-    focusable: bool = false,
+    focusable: ?bool = null,
     /// Tab cycles inside this subtree, as in a dialog.
-    focus_scope: bool = false,
+    focus_scope: ?bool = null,
     /// Still hit-tested, so it blocks what is beneath it, but never pressed,
     /// clicked or focused, and its widget state is `.disabled`.
-    disabled: bool = false,
+    disabled: ?bool = null,
     /// The pointer's shape while this element is the innermost one under
     /// the hovering pointer that sets a cursor. Only an interactive
     /// element is hit-tested, so on any other this has no effect.
@@ -262,6 +272,25 @@ pub fn Context(comptime config: Config) type {
         pub const Index = std.meta.Int(.unsigned, std.math.ceilPowerOfTwoAssert(u16, @max(8, @bitSizeOf(std.math.IntFittingRange(0, limits.max_elements)))));
         pub const none_index: Index = limits.max_elements;
         pub const root_index: Index = 0;
+        /// Side by side, so declaration zeroes both in one store and counts
+        /// a flow child in one addition.
+        pub const ChildCounts = extern struct {
+            all: Index align(@sizeOf(BothCounts)),
+            /// Children that take part in the flow: `all` minus floating ones.
+            in_flow: Index,
+
+            const BothCounts = std.meta.Int(.unsigned, 2 * @bitSizeOf(Index));
+            const none: ChildCounts = .{ .all = 0, .in_flow = 0 };
+
+            inline fn count(self: *ChildCounts, comptime floating: bool) void {
+                if (floating) {
+                    self.all += 1;
+                } else {
+                    const both: *BothCounts = @ptrCast(self);
+                    both.* += 1 << @bitSizeOf(Index) | 1;
+                }
+            }
+        };
         pub const root_id: Id = .of("zui.root");
         pub const max_elements = limits.max_elements;
         pub const max_depth = limits.max_depth;
@@ -305,9 +334,7 @@ pub fn Context(comptime config: Config) type {
             element_id: [max_elements]u64,
             element_name: [max_elements]id_module.DebugName,
             parent: [max_elements]Index,
-            child_count: [max_elements]Index,
-            /// Children that take part in the flow: `child_count` minus floating ones.
-            flow_child_count: [max_elements]Index,
+            child_counts: [max_elements]ChildCounts,
             /// The element's layout: the default, one copied into `layouts`, or
             /// a static style's.
             layout: [max_elements]*const style.Layout,
@@ -1056,16 +1083,15 @@ pub fn Context(comptime config: Config) type {
             const hash = if (is_root or !element_id.isNone())
                 element_id.hash
             else
-                id_module.internal(frame.element_id[parent], frame.child_count[parent]);
+                id_module.internal(frame.element_id[parent], frame.child_counts[parent].all);
 
             frame.element_count += 1;
             frame.element_id[index] = hash;
             frame.element_name[index] = element_id.debug_name;
             frame.parent[index] = parent;
-            frame.child_count[index] = 0;
+            frame.child_counts[index] = .none;
             frame.size[index] = .{ 0, 0 };
             frame.min_size[index] = .{ 0, 0 };
-            frame.flow_child_count[index] = 0;
             frame.content_kind[index] = kind;
             if (kind != .none) frame.content_index[index] = @intCast(record_index);
             frame.flags[index] = flagsFor(element_id, element);
@@ -1079,22 +1105,23 @@ pub fn Context(comptime config: Config) type {
             }
 
             if (element.layout) |element_layout| {
-                frame.next_layout[0] = element_layout;
-                frame.layout[index] = &frame.next_layout[0];
-                frame.next_layout += 1;
+                const copied_layout = frame.next_layout;
+                frame.next_layout = copied_layout + 1;
+                copied_layout[0] = element_layout;
+                frame.layout[index] = &copied_layout[0];
             } else frame.layout[index] = if (element.style) |static_style| &static_style.value.layout else &default_layout;
 
             if (element.decoration) |decoration| {
                 if (decoration.background != null or decoration.border != null) {
-                    frame.next_decoration[0] = decoration;
-                    frame.decoration[index] = &frame.next_decoration[0];
-                    frame.next_decoration += 1;
+                    const copied_decoration = frame.next_decoration;
+                    frame.next_decoration = copied_decoration + 1;
+                    copied_decoration[0] = decoration;
+                    frame.decoration[index] = &copied_decoration[0];
                 } else frame.decoration[index] = null;
             } else frame.decoration[index] = if (element.style) |static_style| drawnDecoration(&static_style.value.decoration) else null;
 
             if (!is_root) {
-                frame.child_count[parent] += 1;
-                if (element.floating == null) frame.flow_child_count[parent] += 1;
+                if (element.floating == null) frame.child_counts[parent].count(false) else frame.child_counts[parent].count(true);
             }
 
             if (!element_id.isNone() and !registerId(frame, index)) {
@@ -1129,10 +1156,10 @@ pub fn Context(comptime config: Config) type {
         inline fn flagsFor(element_id: Id, element: Element) ElementFlags {
             var flags: ElementFlags = .{
                 .explicit_id = !element_id.isNone(),
-                .interactive = element.interactive or element.focusable,
-                .focusable = element.focusable,
-                .focus_scope = element.focus_scope,
-                .disabled = element.disabled,
+                .interactive = (element.interactive orelse false) or (element.focusable orelse false),
+                .focusable = element.focusable orelse false,
+                .focus_scope = element.focus_scope orelse false,
+                .disabled = element.disabled orelse false,
                 .clip_x = element.clip.includes(.x),
                 .clip_y = element.clip.includes(.y),
                 .top_to_bottom = directionOf(element) == .top_to_bottom,

@@ -59,7 +59,7 @@ fn FlowChildren(comptime Ui: type) type {
         fn init(frame: *const Ui.Frame, parent: Ui.Index) @This() {
             return .{
                 .all_children = frame.children(parent),
-                .has_floating = frame.flow_child_count[parent] != frame.child_count[parent],
+                .has_floating = frame.child_counts[parent].in_flow != frame.child_counts[parent].all,
             };
         }
 
@@ -76,7 +76,7 @@ fn gapsFor(child_gap: f32, flow_count: u32) f32 {
     return if (flow_count == 0) 0 else child_gap * @as(f32, @floatFromInt(flow_count - 1));
 }
 
-const ContentSize = struct { preferred: f32, min: f32 };
+const ContentSize = struct { preferred: f32, min: f32, sizing: style.Sizing };
 
 /// Passes 1 and 4: each element's size from its content. Running
 /// backward, each element adds its size into its parent's, which
@@ -90,7 +90,7 @@ fn fit(comptime Ui: type, frame: *Ui.Frame, comptime axis: Axis) void {
         index -= 1;
         const element: Ui.Index = @intCast(index);
         const content = contentSize(Ui, frame, element, axis);
-        const sizing = frame.sizingOf(element, axis);
+        const sizing = content.sizing;
         switch (sizing.rule) {
             .fit, .grow => {
                 frame.size[element][a] = clampSize(content.preferred, sizing.min, sizing.max);
@@ -122,19 +122,22 @@ fn fit(comptime Ui: type, frame: *Ui.Frame, comptime axis: Axis) void {
     }
 }
 
+/// With the element's sizing, read here once: a text element's is the
+/// default layout's, as it never has a layout of its own.
 fn contentSize(comptime Ui: type, frame: *const Ui.Frame, element: Ui.Index, comptime axis: Axis) ContentSize {
     const a = @intFromEnum(axis);
     if (Ui.has_text and frame.kindOf(element) == .text) {
+        const text_sizing = comptime (style.Layout{}).sizing.axis(axis);
         const record = frame.texts[frame.content_index[element]];
-        if (axis == .x) return .{ .preferred = record.metrics.preferred_width, .min = record.metrics.min_width };
+        if (axis == .x) return .{ .preferred = record.metrics.preferred_width, .min = record.metrics.min_width, .sizing = text_sizing };
         const height = @as(f32, @floatFromInt(record.line_count)) * record.metrics.line_height;
-        return .{ .preferred = height, .min = height };
+        return .{ .preferred = height, .min = height, .sizing = text_sizing };
     }
 
     const element_layout = frame.layoutOf(element);
     const padding = element_layout.padding.total(axis);
-    const gaps = if (element_layout.direction.axis() == axis) gapsFor(element_layout.child_gap, frame.flow_child_count[element]) else 0;
-    return .{ .preferred = frame.size[element][a] + gaps + padding, .min = frame.min_size[element][a] + gaps + padding };
+    const gaps = if (element_layout.direction.axis() == axis) gapsFor(element_layout.child_gap, frame.child_counts[element].in_flow) else 0;
+    return .{ .preferred = frame.size[element][a] + gaps + padding, .min = frame.min_size[element][a] + gaps + padding, .sizing = element_layout.sizing.axis(axis) };
 }
 
 /// Passes 2 and 5: each parent hands its content box to its children.
@@ -142,13 +145,13 @@ fn distribute(comptime Ui: type, frame: *Ui.Frame, comptime axis: Axis) void {
     const a = @intFromEnum(axis);
     for (0..frame.element_count) |index| {
         const parent: Ui.Index = @intCast(index);
-        if (frame.child_count[parent] == 0) continue;
+        if (frame.child_counts[parent].all == 0) continue;
         const parent_layout = frame.layoutOf(parent);
         const padding = parent_layout.padding.total(axis);
         const content_box = larger(0, frame.size[parent][a] - padding);
         const scrolls = frame.flags[parent].scrolls(axis);
 
-        if (frame.flow_child_count[parent] != frame.child_count[parent]) @call(.never_inline, sizeFloatingChildren, .{ Ui, frame, parent, axis });
+        if (frame.child_counts[parent].in_flow != frame.child_counts[parent].all) @call(.never_inline, sizeFloatingChildren, .{ Ui, frame, parent, axis });
 
         if (parent_layout.direction.axis() != axis) {
             var widest: f32 = 0;
@@ -167,7 +170,7 @@ fn distribute(comptime Ui: type, frame: *Ui.Frame, comptime axis: Axis) void {
             continue;
         }
 
-        var used = gapsFor(parent_layout.child_gap, frame.flow_child_count[parent]);
+        var used = gapsFor(parent_layout.child_gap, frame.child_counts[parent].in_flow);
         var grow_weight: f32 = 0;
         var any_grow_max = false;
         var children = FlowChildren(Ui).init(frame, parent);
@@ -277,7 +280,7 @@ fn shrink(comptime Ui: type, frame: *Ui.Frame, parent: Ui.Index, comptime axis: 
     const a = @intFromEnum(axis);
     var deficit = overflow;
     var rounds: usize = 0;
-    const max_rounds = 2 * @as(usize, frame.child_count[parent]) + 2;
+    const max_rounds = 2 * @as(usize, frame.child_counts[parent].all) + 2;
     while (deficit > tolerance and rounds < max_rounds) : (rounds += 1) {
         var largest: f32 = 0;
         var largest_count: f32 = 0;
@@ -362,7 +365,7 @@ fn position(comptime Ui: type, ui: *Ui, frame: *Ui.Frame) void {
     for (0..frame.element_count) |index| {
         const element: Ui.Index = @intCast(index);
         if (frame.isFloating(element)) placeFloating(Ui, frame, element);
-        if (frame.child_count[element] == 0) continue;
+        if (frame.child_counts[element].all == 0) continue;
         switch (frame.flags[element].top_to_bottom) {
             inline else => |top_to_bottom| placeChildren(Ui, ui, frame, element, if (top_to_bottom) .y else .x),
         }

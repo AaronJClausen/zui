@@ -224,7 +224,10 @@ pub const Layout = struct {
     child_alignment: Alignment2 = .{},
 };
 
-pub const Axes = enum(u2) {
+/// A byte rather than two bits: Zig stores a two-bit enum field as two bits
+/// and loads it as a byte, and LLVM then cannot fold an element's default
+/// `clip`.
+pub const Axes = enum(u8) {
     none,
     horizontal,
     vertical,
