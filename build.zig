@@ -69,6 +69,10 @@ const compile_error_cases = [_]struct { name: []const u8, expected_error: []cons
     .{ .name = "app_renderer_init_wrong_text", .expected_error = "zui_app: app_renderer_init_wrong_text.FontsRenderer.init must be fn (*app_renderer_init_wrong_text.FontsRenderer, zui.Surface, *const app_renderer_init_wrong_text.Fonts) !void, found fn (*app_renderer_init_wrong_text.FontsRenderer, surface.Surface, *const u8) error{OutOfMemory}!void" },
     .{ .name = "app_record_wrong_signature", .expected_error = "zui_app: app_record_wrong_signature.App.zuiRecord must be fn (*app_record_wrong_signature.App, *zui.RecordBuilder) void, found fn (*app_record_wrong_signature.App, *const record.RecordBuilder) void" },
     .{ .name = "app_host_without_init", .expected_error = "zui_app: app_host_without_init.OffscreenHost must declare `pub fn init(self: *app_host_without_init.OffscreenHost, io: std.Io, window: zui.WindowOptions) !void`, which opens its window" },
+    .{ .name = "wire_delivery_holds_pointer", .expected_error = "zui_wire: delivery of source `catalog` holds a pointer (*const wire_delivery_holds_pointer.Catalog); declare zuiSerialize on it to send it" },
+    .{ .name = "wire_image_handle_holds_pointer", .expected_error = "zui_wire: ImageHandle holds a pointer (*const wire_image_handle_holds_pointer.Texture); declare zuiSerialize on it to send it" },
+    .{ .name = "wire_serialize_without_deserialize", .expected_error = "zui_wire: wire_serialize_without_deserialize.Handle declares zuiSerialize but not zuiDeserialize" },
+    .{ .name = "text_fingerprint_wrong_signature", .expected_error = "zui: text_fingerprint_wrong_signature.Text.zuiFingerprint must be fn (*const text_fingerprint_wrong_signature.Text) u64, found fn (*text_fingerprint_wrong_signature.Text) u32" },
 };
 
 pub fn build(b: *std.Build) void {
@@ -143,15 +147,24 @@ pub fn build(b: *std.Build) void {
         .imports = &.{.{ .name = "zui", .module = zui_module }},
     });
 
+    const wire_module = b.addModule("zui_wire", .{
+        .root_source_file = b.path("zui_wire/zui_wire.zig"),
+        .target = target,
+        .optimize = optimize,
+        .sanitize_thread = if (sanitize_thread) true else null,
+        .imports = &.{.{ .name = "zui", .module = zui_module }},
+    });
+
     const test_step = b.step("test", "Run the unit tests and the compile-error tests");
-    const tested_modules = [_]*std.Build.Module{ zui_module, testing_module, async_module, widgets_module, reflect_module, tracy_module, app_module };
+    const tested_modules = [_]*std.Build.Module{ zui_module, testing_module, async_module, widgets_module, reflect_module, tracy_module, app_module, wire_module };
     for (tested_modules) |tested_module| {
         const module_tests = b.addTest(.{ .root_module = tested_module, .use_llvm = if (sanitize_thread) true else null });
         test_step.dependOn(&b.addRunArtifact(module_tests).step);
     }
-    for ([_]*std.Build.Module{ async_module, widgets_module, reflect_module, tracy_module }) |module_with_driven_tests| {
+    for ([_]*std.Build.Module{ async_module, widgets_module, reflect_module, tracy_module, wire_module }) |module_with_driven_tests| {
         module_with_driven_tests.addImport("zui_testing", testing_module);
     }
+    wire_module.addImport("zui_async", async_module);
 
     for (compile_error_cases) |case| {
         const failing_object = b.addObject(.{
@@ -166,6 +179,7 @@ pub fn build(b: *std.Build) void {
                     .{ .name = "zui_widgets", .module = widgets_module },
                     .{ .name = "zui_reflect", .module = reflect_module },
                     .{ .name = "zui_app", .module = app_module },
+                    .{ .name = "zui_wire", .module = wire_module },
                 },
             }),
         });
@@ -201,6 +215,7 @@ pub fn build(b: *std.Build) void {
                 .{ .name = "zui_reflect", .module = reflect_module },
                 .{ .name = "zui_app", .module = app_module },
                 .{ .name = "zui_tracy", .module = tracy_module },
+                .{ .name = "zui_wire", .module = wire_module },
             },
         }),
     });
@@ -263,7 +278,7 @@ pub fn build(b: *std.Build) void {
     b.step("bench-compare", "Alternate the benchmarks of two commits: -- <base> [<head>] [--rounds <count>]").dependOn(&run_bench_compare.step);
     test_step.dependOn(&bench_compare_executable.step);
 
-    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "tests", "bench", "zui_testing", "zui_async", "zui_widgets", "zui_reflect", "zui_tracy", "zui_app" };
+    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "tests", "bench", "zui_testing", "zui_async", "zui_widgets", "zui_reflect", "zui_tracy", "zui_app", "zui_wire" };
     b.step("fmt", "Format all Zig sources").dependOn(&b.addFmt(.{ .paths = formatted_paths }).step);
     b.step("fmt-check", "Fail if any Zig source is not formatted").dependOn(&b.addFmt(.{ .paths = formatted_paths, .check = true }).step);
 }

@@ -26,7 +26,7 @@ Each item says:
 | stage 2 | the code brought to the spec's shape: C5, S1, I4, C6, A5 and `nextFrame` (I2); letter spacing (T3); the environment and host requests (I6); sources in the core (A3); `zui_async` (A4); the backends on the new API, the demo's thumbnails on `KeyedLoads` (C8) | done; the demo idles at 0% CPU |
 | stage 3 | the renderer contract and the generated commands (C1); the host contract and `RecordBuilder` (C2); the conformance suites (C3); `Features` (C7); `zui_app` (C4); the raylib adapter host (H1) | done; the backends are renderers and pass the renderer suite in CI, raylib's host passes the host suite, and the demo runs through `zui_app`, presenting its first frame 288 ms after the process starts; lowering comes with stage 8's commands |
 | stage 4 | the Windows host (H2), with dropped files and lifecycle events in the record; the system material (H8); `zui_app` with the application's own text contract (C9) | done; zui-sokol's tour runs on it unchanged, through `zui_app`, and idles at 0% CPU, and the same code shows Mica or a solid background |
-| stage 5, begun | relay (F2) | done; a relayed session replays to the same commands |
+| stage 5, begun | relay (F2); `zui_wire` (F3) | done; a relayed session replays to the same commands, and zui-sokol's tour goes over the wire at a hundredth of its frames' whole size, but for the screen that moves every box |
 | stage 6, early | the single-line fast path (T1), the whole-string cache (T2), the box tree's layout passes (P4, in part) | done; warm text and the box tree's layout and emission within their budgets; the box tree's declaration is not (P5) |
 
 No release is tagged; everything is on `main`. From here, work is
@@ -61,7 +61,6 @@ green, and its **Status** line below says which slice is next.
 |---|---|---|---|---|
 | P4. The box tree's layout and emission within budget | 6, early | `src/layout.zig`, `src/emission.zig` | | waiting on P5 |
 | P5. The box tree's declaration within budget | 6, early | `src/context.zig` | L8 | waiting on L8 |
-| F3. `zui_wire` | 5 | a new `zui_wire/` module | F2 | |
 | F4. Replay in `zui_testing` | 5 | `zui_testing/` | F2 | |
 | F5. Rendering somewhere else | 5 | `zui_wire/`, a wire host and renderer | F3 | |
 | F6. Watching files | 5 | `../zui-host` | H2 | |
@@ -138,6 +137,81 @@ Things to know:
 ---
 
 ## Done
+
+### F3. `zui_wire`
+
+**Plan.** A versioned encoding of records and frames, as deltas; payloads
+serialized when plain data and otherwise through `zuiSerialize`; the text
+contract's fingerprint. **Done when:** round trips are tested for every
+event, delivery and command kind, and a delta stream of the demo is
+measured against full frames. **Spec.** §19.6.
+
+A new module, `zui_wire`: `writeHeader` and `readHeader` (magic, version,
+the fonts' fingerprint), `Encoder(Ui)` with `writeRecord`, `writeFrame`
+and `writeKeyFrame`, and `Decoder(Ui)`, whose `next` gives a record that
+`beginFrame` takes or a frame a renderer takes. Values are written by one
+comptime codec: integers as LEB128, floats by their bits, unions by tag,
+slices by length, errors by name, and a type with `zuiSerialize` by
+itself. A record's parameters are written as changes from the last
+record's; a frame's commands as runs kept, skipped, inserted or changed
+in the fields that differ, against the last frame written, resynchronized
+by element id and kind within 32 commands. `zui_async`'s `Stream` and
+`KeyedLoads` deliveries serialize only the items taken. The text
+contract's `zuiFingerprint` is checked for its signature
+(`fn (*const Text) u64`).
+
+`zui_wire/tests.zig` round-trips every `Event` and `EnvironmentChange`
+kind, every delivery of `zui_async` and one holding a pointer that sends
+a number instead, and every command kind whole and as changes; checks
+that a key frame lets a reader join, that a message beyond the decoder's
+capacity fails, that other fonts and other versions are rejected; and
+encodes a live session whose decoded frames are the frames drawn and
+whose decoded records replay to the same commands. Compile-error tests
+pin a delivery and an `ImageHandle` holding a pointer, `zuiSerialize`
+without `zuiDeserialize`, and a wrong `zuiFingerprint`; `zig build check`
+encodes and decodes a record and a frame on every target.
+
+Measured on zui-sokol's tour at `ed00845`, declared headlessly as its
+`test-tour` does, with real fonts: 120 frames on each of its ten screens
+at 1440×900, the mouse crossing each screen, every frame written whole
+by one encoder and as changes by another, and each decoded frame
+checked equal to the one drawn:
+
+| Screen | Commands | Whole frame | Changes, mean |
+|---|---|---|---|
+| welcome | 306 | 16,406 B | 206 B |
+| layout_lab | 364 | 18,605 B | 147 B |
+| box_storm | 4,359 | 201,585 B | 91,408 B |
+| gallery | 578 | 28,982 B | 278 B |
+| mission_control | 428 | 21,085 B | 254 B |
+| window_manager | 388 | 19,272 B | 151 B |
+| robot_workshop | 375 | 18,868 B | 177 B |
+| pixel_pad | 1,425 | 66,919 B | 695 B |
+| typography | 318 | 16,626 B | 139 B |
+| classic | 273 | 13,857 B | 107 B |
+
+Over all 1,200 frames: 42,221 bytes a frame whole, 9,356 as changes
+(median 20, largest 198,951, the first frame of a screen); without
+`box_storm`, whose thousands of boxes all move every frame, 24,514
+against 240, a hundredth. The records, relayed from the same session,
+took 40 bytes a frame. The core's code is unchanged but for a comptime
+check, so instruction counts and budgets are as they were.
+
+Decided here:
+- **What a frame on the wire holds:** what a renderer and a host need
+  (number, parameters, host requests, commands). Hit regions and
+  semantics stay with the context; the inspector over the wire (V1) adds
+  what it needs then.
+- **A message that does not fit the decoder** fails with
+  `error.CapacityExceeded` rather than keeping what fits, since a delta
+  applied in part would corrupt every frame after it.
+- **How `zuiSerialize` is reached:** `serializer.write(value)` and
+  `deserializer.read(T)`, taken as `anytype`, so a source that declares
+  them, as `zui_async`'s do, never imports `zui_wire`. Slices are allowed
+  inside it, and in zui's own vocabulary (typed text, dropped paths,
+  command text), but not in a payload that serializes automatically,
+  since a decoded slice lives only until the next message.
+- **The fingerprint** is checked only when both sides declare one.
 
 ### F2. Relay
 
@@ -1123,19 +1197,7 @@ Done: H2 and H8 are in *Done*.
 ## Stage 5: the wire
 
 F1, feeds, is retired: sources (A3) are the mechanism for outside data.
-F2 is in *Done*.
-
-### F3. `zui_wire`
-
-**Plan.** A versioned encoding of records and frames, as deltas; payloads
-serialized when plain data and otherwise through `zuiSerialize`; the text
-contract's fingerprint.
-
-**Done when:** round trips are tested for every event, delivery and
-command kind, and a delta stream of the demo is measured against full
-frames.
-
-**Spec.** §19.6.
+F2 and F3 are in *Done*.
 
 ### F4. Replay in `zui_testing`
 
@@ -1607,6 +1669,9 @@ Deliberate, and each a reason to choose zui:
 | A terminate request (H2) | delivered in one record; the host's next `zuiPoll` returns false |
 | The clipboard service before H6 (H2) | `zuiClipboard`, a type with `read(host, buffer)` and `write(host, text)` |
 | What a relay listener gets (F2) | the record as applied: the events kept, and deliveries from `zuiDelivery`, filled in the reservation, or a replay's own |
+| A frame on the wire (F3) | number, parameters, host requests and commands, as changes from the last frame written; hit regions and semantics stay with the context |
+| A wire message beyond the decoder's capacity (F3) | `error.CapacityExceeded`, since a delta cannot be applied in part |
+| Serializing a payload with pointers (F3) | `zuiSerialize(self, serializer)` and `zuiDeserialize(deserializer)`, taking the wire's types as `anytype`, so a source never imports `zui_wire` |
 
 ### Open
 

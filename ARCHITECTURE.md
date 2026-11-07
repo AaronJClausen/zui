@@ -200,7 +200,9 @@ Windows host in `zui-host`, with dropped files and lifecycle events in
 the record and the system material reported in the environment, has
 landed, and zui-sokol's renderer draws into its `win32` window, composed
 with alpha. From stage 5, relay has landed: `relayTo` hands a listener
-each applied record with its deliveries. From stage 6, the single-line
+each applied record with its deliveries; and so has `zui_wire`, which
+writes records and frames, each frame as changes from the last, and reads
+them back. From stage 6, the single-line
 fast path and the whole-string cache have landed.
 
 The code and the spec still differ in these places, each closed by the

@@ -1932,15 +1932,44 @@ const App = struct {
 ### 19.6 `zui_wire`
 
 A versioned, little-endian encoding of both sides of the frame boundary:
-records in, frames out, as deltas from the previous frame. Payloads
-(`ImageHandle`, `CustomData`, deliveries) serialize automatically when
-they are plain data, and otherwise must declare `zuiSerialize` and
-`zuiDeserialize`, checked at comptime:
-``"zui_wire: delivery of source `catalog` holds a pointer (*const Catalog); declare zuiSerialize on it to send it"``.
-A stream carries the text contract's fingerprint, and a renderer whose
-fonts differ rejects it rather than drawing overflowing text. A wire
-renderer and a wire host make a remote client nothing more than a host
-plus a renderer.
+records in, frames out, as deltas from the previous frame.
+
+```zig
+pub fn writeHeader(writer: *std.Io.Writer, fingerprint: ?u64) !void   // fingerprintOf(&fonts)
+pub fn readHeader(reader: *std.Io.Reader, fingerprint: ?u64) !void    // error.FontsDiffer, UnsupportedVersion
+pub fn Encoder(comptime Ui: type) type    // writeRecord(writer, record), writeFrame(writer, frame), writeKeyFrame
+pub fn Decoder(comptime Ui: type) type    // init(gpa, .of(Ui)); next(reader): .record or .frame, null at the end
+```
+
+- **A record** is its parameters as changes from the last record's (a
+  mask, the time since, the fields that changed), its events, and its
+  deliveries when it has them, so a decoded record replays.
+- **A frame** is what a renderer and a host take: its number,
+  parameters, host requests and commands. Hit regions and semantics stay
+  with the context that made them. Commands are written against the last
+  frame's: runs kept, skipped, inserted, or changed in the fields that
+  differ, so a frame that did not change costs a few bytes.
+  `writeKeyFrame` writes one whole, for a reader joining the stream.
+- **Payloads** (`ImageHandle`, `CustomData`, `MaterialHandle`,
+  deliveries) serialize automatically when they are plain data, and
+  otherwise must declare `zuiSerialize` and `zuiDeserialize`, checked at
+  comptime:
+  ``"zui_wire: delivery of source `catalog` holds a pointer (*const Catalog); declare zuiSerialize on it to send it"``.
+  `zuiSerialize(self, serializer)` writes with `serializer.write(value)`,
+  and `zuiDeserialize(deserializer)` reads with `deserializer.read(T)`;
+  both take the wire's own type as `anytype`, so a source that is not
+  sent never imports `zui_wire`.
+- **The fonts.** A stream's header carries the text contract's
+  fingerprint, and a renderer whose fonts differ rejects it rather than
+  drawing overflowing text. When either side has no `zuiFingerprint`,
+  nothing is checked.
+- **Limits.** Encoding allocates only in `init`; the decoder reserves
+  what `Capacity` says (by default what the context's limits allow) and
+  fails a message that does not fit with `error.CapacityExceeded`, since a
+  delta cannot be applied in part.
+
+A wire renderer and a wire host make a remote client nothing more than a
+host plus a renderer.
 
 ### 19.7 `zui_debug`
 

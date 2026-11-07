@@ -10,6 +10,7 @@ const zui_widgets = @import("zui_widgets");
 const zui_reflect = @import("zui_reflect");
 const zui_tracy = @import("zui_tracy");
 const zui_app = @import("zui_app");
+const zui_wire = @import("zui_wire");
 
 /// A freestanding target has no default log output, so an application there
 /// brings its own, as this one does.
@@ -579,4 +580,45 @@ export fn zuiCheckAsync(value: u32) u64 {
     if (async_sources.catalog.clear()) |_| total +%= 1;
     async_sources.catalog.abandon();
     return total +% @intFromBool(async_sources.catalog.isIdle()) +% @intFromBool(ui.nextFrame(&async_sources) == .immediately);
+}
+
+const WireSources = struct {
+    catalog: CheckSource = .{},
+    log: zui_async.Stream(u32, .{ .capacity = 4 }) = .{},
+    thumbnails: zui_async.KeyedLoads(u64, error{Missing}!u32, .{ .capacity = 2 }) = .{},
+};
+
+const WireUi = zui.Context(.{ .limits = .{ .max_elements = 8, .max_render_commands = 16, .max_text_bytes = 64 }, .Text = CheckText, .ImageHandle = u32, .Sources = WireSources });
+
+var wire_ui_memory: [WireUi.required_bytes]u8 align(WireUi.buffer_alignment) = undefined;
+var wire_sources: WireSources = .{};
+var wire_memory: [16 * 1024]u8 = undefined;
+var wire_bytes: [1024]u8 = undefined;
+
+export fn zuiCheckWire(published: u64) usize {
+    var fixed: std.heap.FixedBufferAllocator = .init(&wire_memory);
+    var encoder = zui_wire.Encoder(WireUi).init(fixed.allocator()) catch return 0;
+    var decoder = zui_wire.Decoder(WireUi).init(fixed.allocator(), .of(WireUi)) catch return 0;
+    var ui = WireUi.initBuffer(&wire_ui_memory, undefined, &check_text) catch return 0;
+    var writer: std.Io.Writer = .fixed(&wire_bytes);
+    zui_wire.writeHeader(&writer, zui_wire.fingerprintOf(&check_text)) catch return 0;
+    const deliveries: WireUi.Deliveries = .{ .catalog = published, .log = .init(&.{ 1, 2 }), .thumbnails = .init(&.{.{ .key = published, .result = error.Missing }}) };
+    const record: WireUi.FrameRecord = .{ .params = .{ .now = .zero, .viewport = .{ 100, 100 } }, .events = &.{.{ .text = "x" }}, .deliveries = &deliveries };
+    encoder.writeRecord(&writer, &record) catch return 0;
+    ui.beginFrame(&record, &wire_sources);
+    ui.text("on the wire", .{});
+    ui.image(.{ .handle = 3 }, .{});
+    const frame = ui.endFrame();
+    encoder.writeFrame(&writer, frame) catch return 0;
+    encoder.writeKeyFrame(&writer, frame) catch return 0;
+    ui.release(frame);
+
+    var reader: std.Io.Reader = .fixed(writer.buffered());
+    zui_wire.readHeader(&reader, null) catch return 0;
+    var decoded: usize = 0;
+    while (decoder.next(&reader) catch return 0) |message| decoded += switch (message) {
+        .record => |received| received.events.len + received.deliveries.?.log.slice().len,
+        .frame => |received| received.commands().len,
+    };
+    return decoded;
 }

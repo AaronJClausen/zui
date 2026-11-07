@@ -194,6 +194,17 @@ pub fn Stream(comptime T: type, comptime options: StreamOptions) type {
             pub fn slice(self: *const Delivery) []const T {
                 return self.items[0..self.len];
             }
+
+            /// Writes only the items taken, for `zui_wire`.
+            pub fn zuiSerialize(self: *const Delivery, serializer: anytype) !void {
+                try serializer.write(self.slice());
+            }
+
+            pub fn zuiDeserialize(deserializer: anytype) !Delivery {
+                const items = try deserializer.read([]const T);
+                if (items.len > capacity) return error.Malformed;
+                return .init(items);
+            }
         };
 
         pub const View = struct {
@@ -605,6 +616,17 @@ pub fn KeyedLoads(comptime Key: type, comptime Result: type, comptime options: K
 
             pub fn slice(self: *const Delivery) []const Completion {
                 return self.completions[0..self.len];
+            }
+
+            /// Writes only the completions taken, for `zui_wire`.
+            pub fn zuiSerialize(self: *const Delivery, serializer: anytype) !void {
+                try serializer.write(self.slice());
+            }
+
+            pub fn zuiDeserialize(deserializer: anytype) !Delivery {
+                const completions = try deserializer.read([]const Completion);
+                if (completions.len > capacity) return error.Malformed;
+                return .init(completions);
             }
         };
 

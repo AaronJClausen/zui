@@ -34,6 +34,9 @@ pub fn checkText(comptime Text: type, comptime FontId: type) void {
     if (@hasDecl(Text, "zui_thread_safe") and @TypeOf(Text.zui_thread_safe) != bool) {
         @compileError("zui: " ++ @typeName(Text) ++ ".zui_thread_safe must be a bool, found " ++ @typeName(@TypeOf(Text.zui_thread_safe)));
     }
+    if (@hasDecl(Text, "zuiFingerprint") and @TypeOf(Text.zuiFingerprint) != fn (*const Text) u64) {
+        @compileError("zui: " ++ @typeName(Text) ++ ".zuiFingerprint must be " ++ @typeName(fn (*const Text) u64) ++ ", found " ++ @typeName(@TypeOf(Text.zuiFingerprint)));
+    }
 }
 
 /// The renderer contract. A renderer is usually also the text contract,

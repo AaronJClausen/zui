@@ -22,6 +22,7 @@
         "zui_reflect",
         "zui_tracy",
         "zui_app",
+        "zui_wire",
         "LICENSE",
         "README.md",
         "SPEC.md",

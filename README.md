@@ -60,7 +60,12 @@ Implemented so far:
 - **Stage 5, begun:** `ui.relayTo(listener)` hands a listener each
   record as applied, with what each source delivered, during
   `beginFrame`; fed back with its deliveries, a relayed session replays
-  to the same commands.
+  to the same commands. `zui_wire` writes those records and the frames
+  that come out as bytes, each frame as the changes from the one before,
+  and reads them back in another process: zui-sokol's tour averages 240
+  bytes a frame instead of 24 KB on all but its stress screen, and a
+  stream carries its fonts' fingerprint so a reader with other fonts
+  refuses it.
 - **Stage 6, early:** a text that fits is laid out as one line without
   walking its words, and a whole-string cache makes a warm text one probe
   instead of one per word: 1,000 warm texts lay out in about 100 µs. The
@@ -277,6 +282,7 @@ exe.root_module.addImport("zui_async", zui.module("zui_async"));
 exe.root_module.addImport("zui_widgets", zui.module("zui_widgets"));
 exe.root_module.addImport("zui_reflect", zui.module("zui_reflect"));
 exe.root_module.addImport("zui_app", zui.module("zui_app"));
+exe.root_module.addImport("zui_wire", zui.module("zui_wire"));
 tests.root_module.addImport("zui_testing", zui.module("zui_testing"));
 // Tracing into Tracy; `.@"zui-tracy" = true` in the options above links it.
 exe.root_module.addImport("zui_tracy", zui.module("zui_tracy"));
