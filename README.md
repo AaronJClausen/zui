@@ -66,8 +66,10 @@ backends are [zui-sokol](https://github.com/AaronJClausen/zui-sokol) and
 Next, in the order of SPEC.md §21: the renderer and host contracts with
 `zui_app`, a native Windows host, the wire format, and from there text,
 layout, gestures, effects, an inspector and accessibility, more hosts,
-motion and text editing. The text fast path and string cache (T1, T2) and
-the box tree's budget (P4) come early, now that the demo can be traced.
+motion and text editing. Some of stage 6 comes early, now that the demo
+can be traced: a label that fits is laid out as one line without walking
+its words (T1), and the string cache (T2) and the box tree's budget (P4)
+are next.
 [ROADMAP.md](ROADMAP.md) keeps the queue of work in order, and
 [ARCHITECTURE.md](ARCHITECTURE.md) shows how the pieces connect.
 

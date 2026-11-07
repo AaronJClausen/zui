@@ -147,6 +147,8 @@ pub const Metrics = struct {
     min_width: f32,
     line_height: f32,
     space_width: f32,
+    /// A newline divides the text, so it never takes the single-line path.
+    has_paragraph_break: bool,
     /// Where this text's run widths start in the run width buffer.
     first_run: u32,
 };
@@ -198,6 +200,7 @@ pub fn measureMetrics(
         .min_width = 0,
         .line_height = if (line_height_override > 0) line_height_override else space[1],
         .space_width = space[0],
+        .has_paragraph_break = false,
         .first_run = run_count.*,
     };
     if (text.len == 0) return metrics;
@@ -215,9 +218,11 @@ pub fn measureMetrics(
             while (paragraphs.next()) |paragraph| widest = @max(widest, runs.append(measurer.width(paragraph)));
             metrics.preferred_width = widest;
             metrics.min_width = widest;
+            metrics.has_paragraph_break = run_count.* - metrics.first_run > 1;
         },
         .words => {
-            var widest_paragraph: f32 = 0;
+            // Negative until a paragraph ends, so the loop carries no flag for it.
+            var widest_ended_paragraph: f32 = -1;
             var widest_word: f32 = 0;
             var paragraph_width: f32 = 0;
             var paragraph_has_word = false;
@@ -228,13 +233,14 @@ pub fn measureMetrics(
                 paragraph_width += word_width + if (paragraph_has_word) space[0] else 0;
                 paragraph_has_word = true;
                 if (word.ends_paragraph) {
-                    widest_paragraph = @max(widest_paragraph, paragraph_width);
+                    widest_ended_paragraph = @max(widest_ended_paragraph, paragraph_width);
                     paragraph_width = 0;
                     paragraph_has_word = false;
                 }
             }
-            metrics.preferred_width = @max(widest_paragraph, paragraph_width);
+            metrics.preferred_width = @max(widest_ended_paragraph, paragraph_width);
             metrics.min_width = widest_word;
+            metrics.has_paragraph_break = widest_ended_paragraph >= 0;
         },
     }
     return metrics;
@@ -287,9 +293,8 @@ const RunWriter = struct {
 /// Appends the lines of `text` laid out within `max_width`, from the run
 /// widths `measureMetrics` recorded. `base` is the offset of `text` in the
 /// frame's text buffer, so lines index that buffer.
-/// Words are never broken: layout never makes a text element narrower than
-/// its longest word, so a word wider than a line can only come from a
-/// parent too small for it, and it overflows, as in CSS by default.
+/// A text without a paragraph break that fits is one line, emitted without
+/// walking its words: the line greedy wrapping would produce.
 /// Returns false if `lines` ran out of room; the lines that fit are kept.
 pub fn wrapLines(
     text: []const u8,
@@ -302,12 +307,18 @@ pub fn wrapLines(
     line_count: *u32,
 ) bool {
     if (text.len == 0) return true;
-    var output: LineOutput = .{ .lines = lines, .count = line_count };
-    var next_run = metrics.first_run;
+    const output: LineOutput = .{ .lines = lines, .count = line_count };
+    const fits_one_line = switch (wrap) {
+        .none => true,
+        .newlines => !metrics.has_paragraph_break,
+        .words => !metrics.has_paragraph_break and metrics.preferred_width <= max_width + tolerance,
+    };
+    if (fits_one_line) return output.emit(base, base + @as(u32, @intCast(text.len)), metrics.preferred_width);
 
     switch (wrap) {
-        .none => return output.emit(base, base + @as(u32, @intCast(text.len)), run_widths[next_run]),
+        .none => unreachable,
         .newlines => {
+            var next_run = metrics.first_run;
             var start: u32 = 0;
             var paragraphs = std.mem.splitScalar(u8, text, '\n');
             while (paragraphs.next()) |paragraph| {
@@ -318,44 +329,50 @@ pub fn wrapLines(
             }
             return true;
         },
-        .words => {
-            const space_width = metrics.space_width;
-            var line_start: u32 = 0;
-            var line_end: u32 = 0;
-            var line_width: f32 = 0;
-            var line_open = false;
-
-            var words: WordIterator = .{ .text = text };
-            while (words.next()) |word| {
-                const word_width = run_widths[next_run];
-                next_run += 1;
-
-                if (line_open and line_width + space_width + word_width > max_width + tolerance) {
-                    if (!output.emit(base + line_start, base + line_end, line_width)) return false;
-                    line_open = false;
-                }
-                if (!line_open) {
-                    line_start = word.start;
-                    line_width = word_width;
-                    line_open = true;
-                } else {
-                    line_width += space_width + word_width;
-                }
-                line_end = word.end;
-
-                if (word.ends_paragraph) {
-                    if (!output.emit(base + line_start, base + line_end, line_width)) return false;
-                    line_open = false;
-                    line_start = word.end + 1;
-                    line_end = line_start;
-                    line_width = 0;
-                    line_open = true;
-                }
-            }
-            if (line_open) return output.emit(base + line_start, base + line_end, line_width);
-            return true;
-        },
+        .words => return wrapWords(text, base, metrics, run_widths, max_width, output),
     }
+}
+
+/// Greedy wrapping at spaces, with a line of its own after each newline.
+/// Words are never broken: layout never makes a text element narrower than
+/// its longest word, so a word wider than a line can only come from a
+/// parent too small for it, and it overflows, as in CSS by default.
+fn wrapWords(text: []const u8, base: u32, metrics: Metrics, run_widths: []const f32, max_width: f32, output: LineOutput) bool {
+    const space_width = metrics.space_width;
+    var next_run = metrics.first_run;
+    var line_start: u32 = 0;
+    var line_end: u32 = 0;
+    var line_width: f32 = 0;
+    var line_open = false;
+
+    var words: WordIterator = .{ .text = text };
+    while (words.next()) |word| {
+        const word_width = run_widths[next_run];
+        next_run += 1;
+
+        if (line_open and line_width + space_width + word_width > max_width + tolerance) {
+            if (!output.emit(base + line_start, base + line_end, line_width)) return false;
+            line_open = false;
+        }
+        if (!line_open) {
+            line_start = word.start;
+            line_width = word_width;
+            line_open = true;
+        } else {
+            line_width += space_width + word_width;
+        }
+        line_end = word.end;
+
+        if (word.ends_paragraph) {
+            if (!output.emit(base + line_start, base + line_end, line_width)) return false;
+            line_start = word.end + 1;
+            line_end = line_start;
+            line_width = 0;
+            line_open = true;
+        }
+    }
+    if (line_open) return output.emit(base + line_start, base + line_end, line_width);
+    return true;
 }
 
 /// Layout tolerance for comparisons between sums of measured widths.
@@ -446,4 +463,49 @@ test "wrapping: greedy, paragraphs, and whole words" {
         try std.testing.expectEqualStrings(expected_line, text[line.start - 100 .. line.end - 100]);
     }
     try std.testing.expectEqual(@as(f32, 7 * 8), lines[0].width);
+}
+
+test "a text that fits is one line; one with a newline is not" {
+    var cache = testCache();
+    var text_contract: FixedMetricsText = .{};
+    var lines: [16]Line = undefined;
+    var count: u32 = 0;
+    var run_widths: [16]f32 = undefined;
+    var run_count: u32 = 0;
+    const fitting = measureMetrics(testMeasurer(&cache, &text_contract, 1), "one two", .words, 0, &run_widths, &run_count);
+    try std.testing.expect(!fitting.has_paragraph_break);
+    try std.testing.expect(wrapLines("one two", 0, .words, fitting, &run_widths, 56, &lines, &count));
+    try std.testing.expectEqual(@as(u32, 1), count);
+    try std.testing.expectEqual(Line{ .start = 0, .end = 7, .width = 56 }, lines[0]);
+
+    count = 0;
+    const broken = measureMetrics(testMeasurer(&cache, &text_contract, 1), "one\ntwo", .words, 0, &run_widths, &run_count);
+    try std.testing.expect(broken.has_paragraph_break);
+    try std.testing.expect(wrapLines("one\ntwo", 0, .words, broken, &run_widths, 1000, &lines, &count));
+    try std.testing.expectEqual(@as(u32, 2), count);
+}
+
+test "the single-line path emits the line greedy wrapping would" {
+    var prng: std.Random.DefaultPrng = .init(0x7e47);
+    const random = prng.random();
+    var cache = testCache();
+    var text_contract: FixedMetricsText = .{};
+    const alphabet = "ab  \n";
+    for (0..2000) |_| {
+        var bytes: [24]u8 = undefined;
+        const text = bytes[0..random.intRangeAtMost(usize, 1, bytes.len)];
+        for (text) |*byte| byte.* = alphabet[random.uintLessThan(usize, if (random.boolean()) 3 else alphabet.len)];
+        const max_width: f32 = @floatFromInt(random.uintLessThan(u32, 24 * 8));
+
+        var run_widths: [32]f32 = undefined;
+        var run_count: u32 = 0;
+        const metrics = measureMetrics(testMeasurer(&cache, &text_contract, 1), text, .words, 0, &run_widths, &run_count);
+        var fast: [32]Line = undefined;
+        var fast_count: u32 = 0;
+        var greedy: [32]Line = undefined;
+        var greedy_count: u32 = 0;
+        try std.testing.expect(wrapLines(text, 0, .words, metrics, &run_widths, max_width, &fast, &fast_count));
+        try std.testing.expect(wrapWords(text, 0, metrics, &run_widths, max_width, .{ .lines = &greedy, .count = &greedy_count }));
+        try std.testing.expectEqualSlices(Line, greedy[0..greedy_count], fast[0..fast_count]);
+    }
 }

@@ -24,6 +24,7 @@ Each item says:
 | 0.6, in part | `bench-compare` (R2), startup benchmarks (P1), task completions at `beginFrame` (A2), the async design (A1) | done; the rest of 0.6 became stage 1 |
 | stage 1 | instruction counts in CI (R1), the tracer contract and `zui_tracy` (P2) | done |
 | stage 2 | the code brought to the spec's shape: C5, S1, I4, C6, A5 and `nextFrame` (I2); letter spacing (T3); the environment and host requests (I6); sources in the core (A3); `zui_async` (A4); the backends on the new API, the demo's thumbnails on `KeyedLoads` (C8) | done; the demo idles at 0% CPU |
+| stage 6, early | the single-line fast path (T1) | done |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
@@ -47,8 +48,7 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
-| T1. The single-line fast path | 6, early | `src/text.zig` | | in progress |
-| T2. The whole-string cache | 6, early | `src/text.zig`, `Limits.string_cache_entries` | T1 | |
+| T2. The whole-string cache | 6, early | `src/text.zig`, `Limits.string_cache_entries` | | |
 | P4. The box tree's layout and emission within budget | 6, early | `src/layout.zig`, `src/emission.zig` | | |
 | C1. The renderer contract, generated commands, lowering | 3 | `src/commands.zig`, `src/emission.zig`, `src/contracts.zig` | | |
 | C2. The host contract and the surface | 3 | `src/contracts.zig`, a new `src/surface.zig` | C1 | |
@@ -122,6 +122,31 @@ Things to know:
 ---
 
 ## Done
+
+### T1. The single-line fast path
+
+`Metrics.has_paragraph_break`, and `wrapLines` emitting a text without one
+whose unwrapped width fits as one line, with that width, without walking
+its words; a text with `.newlines` and no newline, too. `measureMetrics`
+learns of a break from a widest-ended-paragraph width that starts
+negative, because a flag carried through its word loop cost about 4
+instructions a word. A randomized test checks that the fast path emits
+exactly the line greedy wrapping does, over 2,000 texts of spaces,
+newlines and letters at random widths; the golden and randomized layout
+tests pass unchanged.
+
+The warm text wall wraps nearly every text in its 160-unit panels, so a
+new scenario, `1000 single-line texts, warm`, lays the same sentences in
+panels 480 units wide (its own commit, `bf807b9`, so each side of a
+comparison has it). Against `bf807b9`:
+- `zig build counts`, in a local Docker container: the single-line
+  scenario's `endFrame` −17.8% (2,287,233 to 1,879,297 instructions), the
+  documents view's −7.8% (97,370 to 89,782); the text walls' `endFrame`
+  +0.3%, and text declarations +0.8% (one instruction a text, from the
+  larger record);
+- `zig build bench-compare -- bf807b9` (10 rounds, i9-10900K): the
+  single-line scenario −26.2% (216.0 to 159.9 µs, middle half −26.6% to
+  −25.7%), the documents view −2.7%; nothing slower.
 
 ### C8. The backends on the stage-2 API
 
@@ -697,27 +722,6 @@ input going back.
 ---
 
 ## Stage 6: text and layout
-
-### T1. The single-line fast path
-
-**Grounding.** `text.wrapLines` (`src/text.zig:294`) walks every word of
-every text, even a label whose unwrapped width already fits.
-
-**Plan.** Record whether a text has a paragraph break; with none, and an
-unwrapped width that fits, emit one line.
-
-**Done when:** the golden and randomized tests pass unchanged, and warm
-text is faster by R1 and R2.
-
-**Status.** The benchmark has landed: the warm text wall wraps nearly
-every text in its 160-unit panels, so it cannot show this path, and a new
-scenario, `1000 single-line texts, warm`, lays the same sentences in
-panels 480 units wide, where every one fits. Its `Context` has limits of
-its own, because a second caller of the text wall's `Ui.text` made LLVM
-stop inlining it there (+29% in the wall's declaration). Next: the fast
-path, measured against that commit.
-
-**Spec.** §9.2.
 
 ### T2. The whole-string cache
 
