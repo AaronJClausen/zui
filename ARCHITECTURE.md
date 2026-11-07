@@ -205,7 +205,9 @@ writes records and frames, each frame as changes from the last, and reads
 them back; and its wire host, wire renderer and client, which run an
 application in one process and draw it in another, over a `.wire`
 surface. `zui_testing` records a session's records and replays them
-(`Recording`, `Driver.replay`). From stage 6, the single-line
+(`Recording`, `Driver.replay`); and so has file watching, a host service
+that publishes `zui.FileChange`s into a source the application chooses,
+which zui-host's Windows host implements. From stage 6, the single-line
 fast path and the whole-string cache have landed.
 
 The code and the spec still differ in these places, each closed by the
@@ -253,4 +255,6 @@ that way (H2), through `zui_app` with the tour's own text contract (C9). zui-hos
 zui; its Windows host runs its message loop on a thread of its own. Its
 `remote` example runs zui-sokol's tour on `zui_wire`'s host and renderer
 in one process, and draws it in another, through a `zui_wire.Client` over
-the Windows host and zui-sokol's renderer (F5).
+the Windows host and zui-sokol's renderer (F5), and its `theme` example
+restyles a window when its theme file changes, through the host's file
+watch (F6).

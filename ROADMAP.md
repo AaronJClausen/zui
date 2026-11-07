@@ -26,7 +26,7 @@ Each item says:
 | stage 2 | the code brought to the spec's shape: C5, S1, I4, C6, A5 and `nextFrame` (I2); letter spacing (T3); the environment and host requests (I6); sources in the core (A3); `zui_async` (A4); the backends on the new API, the demo's thumbnails on `KeyedLoads` (C8) | done; the demo idles at 0% CPU |
 | stage 3 | the renderer contract and the generated commands (C1); the host contract and `RecordBuilder` (C2); the conformance suites (C3); `Features` (C7); `zui_app` (C4); the raylib adapter host (H1) | done; the backends are renderers and pass the renderer suite in CI, raylib's host passes the host suite, and the demo runs through `zui_app`, presenting its first frame 288 ms after the process starts; lowering comes with stage 8's commands |
 | stage 4 | the Windows host (H2), with dropped files and lifecycle events in the record; the system material (H8); `zui_app` with the application's own text contract (C9) | done; zui-sokol's tour runs on it unchanged, through `zui_app`, and idles at 0% CPU, and the same code shows Mica or a solid background |
-| stage 5, begun | relay (F2); `zui_wire` (F3); replay in `zui_testing` (F4); the wire host, renderer and client (F5) | done; a recorded session of zui-sokol's tour replays to identical commands without starting any work, zui-sokol's tour goes over the wire at a hundredth of its frames' whole size, but for the screen that moves every box, and it runs in one process and draws in another on the Windows host, its keys going back |
+| stage 5 | relay (F2); `zui_wire` (F3); replay in `zui_testing` (F4); the wire host, renderer and client (F5); file watching as a source (F6) | done; editing a theme file restyles a running window on the Windows host within 4 ms; a recorded session of zui-sokol's tour replays to identical commands without starting any work, zui-sokol's tour goes over the wire at a hundredth of its frames' whole size, but for the screen that moves every box, and it runs in one process and draws in another on the Windows host, its keys going back |
 | stage 6, early | the single-line fast path (T1), the whole-string cache (T2), the box tree's layout passes (P4, in part) | done; warm text and the box tree's layout and emission within their budgets; the box tree's declaration is not (P5) |
 
 No release is tagged; everything is on `main`. From here, work is
@@ -61,7 +61,6 @@ green, and its **Status** line below says which slice is next.
 |---|---|---|---|---|
 | P4. The box tree's layout and emission within budget | 6, early | `src/layout.zig`, `src/emission.zig` | | waiting on P5 |
 | P5. The box tree's declaration within budget | 6, early | `src/context.zig` | L8 | waiting on L8 |
-| F6. Watching files | 5 | `../zui-host` | H2 | in progress |
 | L8. Static styles | 6 | `src/context.zig`, `src/style.zig` | | |
 | T4. Line-break segmentation | 6 | `src/text.zig` | | |
 | L1. A grow basis | 6 | `src/layout.zig` | | |
@@ -135,6 +134,60 @@ Things to know:
 ---
 
 ## Done
+
+### F6. Watching files
+
+**Plan.** A source of file changes from the host (`zuiFileWatch`), which
+`zui_debug` uses to reload themes and assets. **Done when:** editing a
+theme file restyles the running demo. **Spec.** §16.3.
+
+zui (`ad90c3a`) gained the vocabulary: `zui.FileChange`, plain data with
+its path inline (255 bytes, relative, `/`-separated), so a source of them
+relays, replays and goes over the wire; `.rescan` for changes the OS lost
+or a path that does not fit; `zui.FileChangeSink`, a pointer and a
+function as `Waker` is, which `.of(&source)` makes from any source whose
+`publish` returns `Wake` or `error{Full}!Wake`; and `zui.FileWatchError`.
+`checkHost` checks `zuiFileWatch.watch(host, directory, sink)
+zui.FileWatchError!void`, pinned by a compile-error test. Tests: a test
+host's watch publishes into a source and wakes once; a too-long path is a
+`.rescan`; a `zui_async.Stream` of changes reaches a frame and reports a
+refusal; a delivery of changes round-trips through `zui_wire`; `zig build
+check` watches on every target. Nothing on a hot path changed.
+
+zui-host (`39e3971`, pinning zui at `ad90c3a` and zui-sokol at
+`68b29d1`, which moved only its zui pin) watches up to four directories
+with their subdirectories: a thread per directory issues each overlapped
+`ReadDirectoryChangesW` and publishes each change, waking the window for
+the first since the last frame; `watch` returns once the first read is
+pending, so no change after it is missed. Tests against a hidden window
+see files added, written, renamed, added in a new subdirectory and
+removed, each within 2 s, and a missing directory and a fifth watch
+fail.
+
+The demo is zui-host's `zig build theme`: a window in the colors of a
+ZON theme, whose application declares a `Stream(zui.FileChange)` and a
+`Latest(Theme)` among its sources; declaration sees the theme's file
+among the changes, and the loader reads and parses it into the `Latest`,
+so a replay restyles as the live run did. `-- --check` writes a dark
+theme, waits for a frame drawing it, writes a light one over it, and
+fails unless a frame draws the light background within 10 s. In three
+runs on the reference machine each restyled in the second frame after
+the first, 2.4 to 3.6 ms after the write.
+
+Decided here:
+- **The service's shape:** `watch(host, directory, sink)` until the
+  host's `deinit`, subdirectories included, with no `unwatch` until an
+  application needs one; a host holds a fixed number of watches.
+- **A watch publishes, a source holds:** the host never names the
+  source's type; the application chooses it, usually a `Stream`, so a
+  full one refuses and is reported like any other source.
+- **Who reads the file:** the loader, between frames, into a source of
+  its own, since declaration does no I/O; declaration only sees which
+  files changed.
+
+What remains: `zui_debug` (V1) reloads its own themes and assets this
+way; the demo is a zui-host example rather than zui-sokol's tour, whose
+working tree another session is changing.
 
 ### F5. Rendering somewhere else
 
@@ -1301,23 +1354,7 @@ Done: H2 and H8 are in *Done*.
 ## Stage 5: the wire
 
 F1, feeds, is retired: sources (A3) are the mechanism for outside data.
-F2, F3, F4 and F5 are in *Done*.
-
-### F6. Watching files
-
-**Plan.** A source of file changes from the host (`zuiFileWatch`), which
-`zui_debug` uses to reload themes and assets.
-
-**Done when:** editing a theme file restyles the running demo.
-
-**Status.** The core's side has landed: `zui.FileChange`, plain data
-with its path inline; `zui.FileChangeSink`, which a host publishes into
-and `.of(&source)` makes from any source with `publish`; and
-`checkHost` checking `zuiFileWatch.watch`'s signature, with its
-compile-error test. Next: zui-host's Windows watch, through
-`ReadDirectoryChangesW`, and a demo whose theme file restyles it.
-
-**Spec.** §16.3.
+Done: F2, F3, F4, F5 and F6 are in *Done*.
 
 ---
 
@@ -1582,7 +1619,10 @@ Windows host shows HDR white brighter than SDR white.
 
 **Plan.** An inspector over `Frame.inspect`: the element tree, the
 hovered element and its configs, diagnostics, lowerings and fallbacks,
-and a performance overlay from the tracer.
+and a performance overlay from the tracer. Its themes and assets reload
+when their files change, through the host's file watch (F6): a
+`Stream(zui.FileChange)` among its sources, read by the loader into a
+source of the parsed theme, as zui-host's `theme` example does.
 
 **Done when:** `zui_testing` drives it over the Documents view, and the
 demo toggles it with a key.
@@ -1774,6 +1814,7 @@ Deliberate, and each a reason to choose zui:
 | What the loader changes between frames (F4) | delivered by the source when relayed, so a replay without a loader shows it: `KeyedLoads` relays the keys loading and the abandoned loads that finished |
 | How a remote client joins (F5) | `zui_wire.Host` and `Renderer` where the application runs, over a stream the application attaches; `zui_wire.Client` over any host and renderer where it draws; a `wire` surface kind between the two halves |
 | Time on the wire (F5) | the client's host's clock, counted on by the wire host between records, so records are sent only for events or a new viewport or scale |
+| Watching files (F6) | `zuiFileWatch.watch(host, directory, sink)` until `deinit`, subdirectories included; the host publishes `zui.FileChange`s into a `zui.FileChangeSink` made from a source the application chooses, and the loader reads the files |
 
 ### Open
 

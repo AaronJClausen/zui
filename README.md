@@ -57,7 +57,7 @@ Implemented so far:
   on a single-threaded `Io`. The backends are on this API, and the
   demo's thumbnail grid loads through `KeyedLoads` without the UI thread
   ever waiting, and idles at 0% CPU.
-- **Stage 5, begun:** `ui.relayTo(listener)` hands a listener each
+- **Stage 5:** `ui.relayTo(listener)` hands a listener each
   record as applied, with what each source delivered, during
   `beginFrame`; fed back with its deliveries, a relayed session replays
   to the same commands. `zui_wire` writes those records and the frames
@@ -73,7 +73,10 @@ Implemented so far:
   other. In tests, `zui_testing.Recording` keeps a session's records
   and `driver.replay` runs them again, with no loader: a recorded session
   of the tour replays to identical commands without starting any work,
-  but for the counts its gallery keeps outside its sources.
+  but for the counts its gallery keeps outside its sources. And a host
+  can watch directories (`zuiFileWatch`), publishing each
+  `zui.FileChange` into a source: zui-host's `zig build theme` restyles
+  its window a few milliseconds after its theme file is saved.
 - **Stage 6, early:** a text that fits is laid out as one line without
   walking its words, and a whole-string cache makes a warm text one probe
   instead of one per word: 1,000 warm texts lay out in about 100 µs. The
@@ -125,7 +128,7 @@ backends are [zui-sokol](https://github.com/AaronJClausen/zui-sokol) and
 [zui-terminal](https://github.com/AaronJClausen/zui-terminal); native
 hosts live in [zui-host](https://github.com/AaronJClausen/zui-host).
 
-Next, in the order of SPEC.md §21: file watching, and from there text,
+Next, in the order of SPEC.md §21: text,
 layout, gestures, effects, an inspector and accessibility, more hosts,
 motion and text editing. The box tree's layout budget (P4) comes early,
 as the text fast path and string cache did.
