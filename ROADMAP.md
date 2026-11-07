@@ -27,7 +27,7 @@ Each item says:
 | stage 3 | the renderer contract and the generated commands (C1); the host contract and `RecordBuilder` (C2); the conformance suites (C3); `Features` (C7); `zui_app` (C4); the raylib adapter host (H1) | done; the backends are renderers and pass the renderer suite in CI, raylib's host passes the host suite, and the demo runs through `zui_app`, presenting its first frame 288 ms after the process starts; lowering comes with stage 8's commands |
 | stage 4 | the Windows host (H2), with dropped files and lifecycle events in the record; the system material (H8); `zui_app` with the application's own text contract (C9) | done; zui-sokol's tour runs on it unchanged, through `zui_app`, and idles at 0% CPU, and the same code shows Mica or a solid background |
 | stage 5 | relay (F2); `zui_wire` (F3); replay in `zui_testing` (F4); the wire host, renderer and client (F5); file watching as a source (F6) | done; editing a theme file restyles a running window on the Windows host within 4 ms; a recorded session of zui-sokol's tour replays to identical commands without starting any work, zui-sokol's tour goes over the wire at a hundredth of its frames' whole size, but for the screen that moves every box, and it runs in one process and draws in another on the Windows host, its keys going back |
-| stage 6, early | the single-line fast path (T1), the whole-string cache (T2), static styles (L8), the box tree's layout and emission (P4) and declaration (P5), line-break segmentation (T4) | done; the box tree's and warm text's budgets met: the box tree declares in 48.9 µs and lays out and emits in 89.2 µs, warm text in 91.7 µs; a box tree of static styles declares in 28.0 µs |
+| stage 6, early | the single-line fast path (T1), the whole-string cache (T2), static styles (L8), the box tree's layout and emission (P4) and declaration (P5), line-break segmentation (T4), the grow basis (L1) | done; the box tree's and warm text's budgets met: the box tree declares in 48.9 µs and lays out and emits in 89.2 µs, warm text in 91.7 µs; a box tree of static styles declares in 28.0 µs |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
@@ -60,14 +60,15 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
-| L1. A grow basis | 6 | `src/layout.zig` | | |
 | L2. Aspect ratio and natural sizes | 6 | `src/layout.zig` | | |
 | L3. Dividers and decorated images | 6 | `src/emission.zig` | | |
 | L4. Floating options | 6 | `src/layout.zig`, `src/emission.zig` | | |
 | L6. Right-to-left layout | 6 | `src/layout.zig` | | |
 | L7. Wrap | 6 | `src/layout.zig` | | |
+| I5. Gestures | 7 | `src/interaction.zig`, `src/input.zig`, `zui_testing/` | | |
+| I1. Drag and drop between elements | 7 | `src/interaction.zig`, `src/state.zig`, `zui_testing/` | I5 | |
 
-After the queue come stages 7 to 11 in the order of SPEC.md §21. They join the queue as it runs short.
+After the queue come the rest of stage 7 and stages 8 to 11 in the order of SPEC.md §21. They join the queue as it runs short.
 
 Statuses: `next` (the first open row), `in progress` (a slice has
 landed), `waiting on <what>` (blocked by something the next session cannot
@@ -131,6 +132,52 @@ Things to know:
 ---
 
 ## Done
+
+### L1. A grow basis
+
+**Grounding.** Two `.grow` siblings holding "a" and "abcdefghijklmnop" in
+300 px came out 90 / 210, as with CSS `flex-basis: auto`, and there was no
+way to ask for equal columns. **Plan.** `Sizing.basis`, and
+`Sizing.grow_equal`. **Done when:** golden tests for both bases, with the
+weight invariant. **Spec.** §8.1.
+
+The zero basis is a rule, `Sizing.Rule.grow_from_min`, rather than a
+`basis` field: `Sizing` had no room for one without padding, and two
+two-byte fields (`rule` and `basis`) made the box tree's declaration 3.8%
+more instructions (436,050 to 452,435) with no change to layout.
+`Sizing.grow_equal` is `.{ .rule = .grow_from_min, .amount = 1 }`, and
+SPEC.md §8.1 records why. It comes after `grow` in the enum, so that
+`fit`, `grow` and `grow_from_min` are one range: after `percent`, the
+`switch`es over the rule cost the box tree's `endFrame` 2.6% more
+instructions.
+
+A `grow_from_min` child starts at its `min` and shares the parent's
+content box by weight, as CSS `flex: 1`, but is never narrower than its
+content's minimum, so a word never overflows a column: the others share
+what it leaves, still by weight. Distribution holds it at that minimum,
+and when a parent has one, `growFromMin` raises every growing child to
+`clamp(start + share × weight, floor, max)` with one `share`, found by
+walking up through the points where a child leaves its floor or reaches
+its max. Parents without one keep `grow` as it was: the same walk for
+the box tree's capped children cost 0.9% more instructions but ran 6.8%
+slower on the wall clock, from its divisions.
+
+Tests: golden layouts for a content basis (90 / 210) and a zero basis
+(150 / 150), weights over the whole box, a child held at its content's
+minimum with the rest shared 1 : 2, a max, a content and a zero basis
+side by side, a zero weight, a `fit` parent, overflow, and rows down a
+column. The randomized trees declare `grow_equal` and weighted
+`grow_from_min` with mins and maxes, and check the weight invariant:
+`grow_from_min` siblings that are neither at their floor nor at their max
+have grown from `min` by one share of their weights.
+
+`zig build counts` against `9b506be`, in a local Docker container: every
+scenario within −0.51% to +0.02% (the box tree's `endFrame` 1,239,720 to
+1,239,211, warm text's 1,033,320 to 1,030,421). `zig build bench-compare
+-- 9b506be` (8 rounds) calls nothing slower beyond the 0.1 µs resolution
+of depth 64 and the documents view; the box tree's `endFrame` +1.6%
+(−1.3% to +3.3%, fastest 90.9 µs), the static-styled tree's +2.6%, warm
+text's −5.7%, with the same instructions: code placement, as T4 found.
 
 ### T4. Line-break segmentation
 
@@ -1592,18 +1639,6 @@ Done: F2, F3, F4, F5 and F6 are in *Done*.
 
 ## Stage 6: text and layout
 
-### L1. A grow basis
-
-**Grounding.** Two `.grow` siblings holding "a" and "abcdefghijklmnop" in
-300 px come out 90 / 210, as with CSS `flex-basis: auto`. There is no way
-to ask for equal columns.
-
-**Plan.** `Sizing.basis`, and `Sizing.grow_equal`.
-
-**Done when:** golden tests for both bases, with the weight invariant.
-
-**Spec.** §8.1.
-
 ### L2. Aspect ratio and natural sizes
 
 **Plan.** `Layout.aspect_ratio`, deriving height from the settled width;
@@ -1861,6 +1896,7 @@ Deliberate, and each a reason to choose zui:
 | Static styles | approved: pointers to comptime configs, measured against the declaration budget (L8) |
 | An element's switches | `?bool`, null meaning false, so that their defaults fold away; written as booleans (P5) |
 | Line-break segmentation | the text contract's `zuiSegment`, one paragraph at a time; spaces before a break hang (T4) |
+| A grow basis (L1) | a rule, `grow_from_min`, not a `basis` field, which would cost declaration; never narrower than the content's minimum, the rest shared by weight |
 | Config references (L8) | pointers in element storage, the default layout one constant; an element's own `layout` or `decoration` replaces the style's whole |
 | Budgets | as in SPEC.md §20.2, including warm text < 120 µs and declaration < 55 µs |
 | Where the contracts live | in the `zui` repo |

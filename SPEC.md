@@ -667,16 +667,15 @@ pub const Layout = struct {
 };
 
 pub const Sizing = struct {
-    rule: enum(u32) { fit, grow, fixed, percent } = .fit,   // four bytes: no padding to copy
-    /// fixed: the size. percent: fraction of the parent's content box. grow: the weight.
+    rule: enum(u32) { fit, grow, grow_from_min, fixed, percent } = .fit,   // four bytes: no padding to copy
+    /// fixed: the size. percent: fraction of the parent's content box. grow, grow_from_min: the weight.
     amount: f32 = 0,
-    basis: enum(u8) { content, zero } = .content,   // grow only: start from the content's size, or from `min`
     min: f32 = 0,                                   // layout units, for every rule
     max: f32 = std.math.inf(f32),
 
     pub const fit: Sizing = .{};
-    pub const grow: Sizing = .{ .rule = .grow, .amount = 1 };
-    pub const grow_equal: Sizing = .{ .rule = .grow, .amount = 1, .basis = .zero };
+    pub const grow: Sizing = .{ .rule = .grow, .amount = 1 };                   // a content basis
+    pub const grow_equal: Sizing = .{ .rule = .grow_from_min, .amount = 1 };    // a zero basis
     pub fn fixed(size: f32) Sizing
     pub fn percent(fraction: f32) Sizing
     pub fn growWeighted(weight: f32) Sizing   // 2: twice the free space of a `.grow` sibling
@@ -689,9 +688,14 @@ literals stay short: `.sizing = .{ .width = .grow, .height = .fixed(48) }`.
 
 The meanings, which follow CSS where CSS has an answer:
 - **`fit`** is the size of the content, clamped to `min` and `max`.
-- **`grow`** with a content basis starts from its content and shares free
-  space by weight, as `flex-basis: auto`. With a zero basis it starts
-  from its minimum, which gives equal columns while keeping weights.
+- **`grow`** has a content basis: it starts from its content and shares
+  free space by weight, as `flex: auto`. **`grow_from_min`** has a zero
+  basis: it starts from `min` and shares the content box by weight, as
+  `flex: 1`, which gives equal columns while keeping weights; it is never
+  narrower than its content's minimum, and the others share what that
+  leaves. The basis is a rule rather than a field of its own because
+  `Sizing` has no room for one without padding: two two-byte fields made
+  the box tree's declaration 3.8% more instructions.
 - **`percent`** is a fraction of the parent's content box, not counting
   gaps. It contributes nothing to a `fit` parent, whose size would
   otherwise depend on it in a cycle.

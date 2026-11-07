@@ -98,6 +98,144 @@ test "grow adds free space on top of content size" {
     try expectRect(frame, .of("empty"), 125, 0, 75, 0);
 }
 
+/// "a" is 8 wide and "abcdefghijklmnop" 128, and neither can wrap.
+fn growingTexts(ui: *support.Ui, row_width: zui.Sizing, sizings: []const zui.Sizing, contents: []const []const u8) void {
+    ui.open(.{ .id = .of("row"), .layout = .{ .sizing = .{ .width = row_width } } });
+    for (sizings, contents, 0..) |sizing, content, index| {
+        ui.open(.{ .id = .indexed("cell", index), .layout = .{ .sizing = .{ .width = sizing } } });
+        ui.text(content, .{});
+        ui.close();
+    }
+    ui.close();
+}
+
+test "a content basis grows from the content, as flex-basis: auto" {
+    var harness: support.Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    growingTexts(harness.begin(), .fixed(300), &.{ .grow, .grow }, &.{ "a", "abcdefghijklmnop" });
+    const frame = try harness.end();
+    try expectRect(frame, .indexed("cell", 0), 0, 0, 90, 16);
+    try expectRect(frame, .indexed("cell", 1), 90, 0, 210, 16);
+}
+
+test "a zero basis makes equal columns whatever their content" {
+    var harness: support.Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    growingTexts(harness.begin(), .fixed(300), &.{ .grow_equal, .grow_equal }, &.{ "a", "abcdefghijklmnop" });
+    const frame = try harness.end();
+    try expectRect(frame, .indexed("cell", 0), 0, 0, 150, 16);
+    try expectRect(frame, .indexed("cell", 1), 150, 0, 150, 16);
+}
+
+test "a zero basis shares the whole content box by weight" {
+    var harness: support.Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    const thirds: zui.Sizing = .{ .rule = .grow_from_min, .amount = 1 };
+    const two_thirds: zui.Sizing = .{ .rule = .grow_from_min, .amount = 2 };
+    growingTexts(harness.begin(), .fixed(300), &.{ thirds, two_thirds }, &.{ "abcdefghij", "a" });
+    const frame = try harness.end();
+    try expectRect(frame, .indexed("cell", 0), 0, 0, 100, 16);
+    try expectRect(frame, .indexed("cell", 1), 100, 0, 200, 16);
+}
+
+test "a zero basis never goes below the content's minimum, and the rest keep their weights" {
+    var harness: support.Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    const double: zui.Sizing = .{ .rule = .grow_from_min, .amount = 2 };
+    growingTexts(harness.begin(), .fixed(200), &.{ .grow_equal, .grow_equal, double }, &.{ "a", "abcdefghijklmnop", "a" });
+    // Equal shares would give the long word 50; it keeps 128, and the
+    // other 72 goes 1 : 2.
+    const frame = try harness.end();
+    try expectRect(frame, .indexed("cell", 0), 0, 0, 24, 16);
+    try expectRect(frame, .indexed("cell", 1), 24, 0, 128, 16);
+    try expectRect(frame, .indexed("cell", 2), 152, 0, 48, 16);
+}
+
+test "a zero basis stops at max and the rest goes to the others" {
+    var harness: support.Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    const capped: zui.Sizing = .{ .rule = .grow_from_min, .amount = 1, .max = 50 };
+    growingTexts(harness.begin(), .fixed(300), &.{ capped, .grow_equal }, &.{ "a", "abcdefghijklmnop" });
+    const frame = try harness.end();
+    try expectRect(frame, .indexed("cell", 0), 0, 0, 50, 16);
+    try expectRect(frame, .indexed("cell", 1), 50, 0, 250, 16);
+}
+
+test "beside a zero basis, a content basis keeps its content and both share by weight" {
+    var harness: support.Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    growingTexts(harness.begin(), .fixed(300), &.{ .grow, .grow_equal }, &.{ "abcdefghijklmnop", "a" });
+    // Each takes 86: 128 + 86 and 0 + 86.
+    const frame = try harness.end();
+    try expectRect(frame, .indexed("cell", 0), 0, 0, 214, 16);
+    try expectRect(frame, .indexed("cell", 1), 214, 0, 86, 16);
+}
+
+test "a zero basis without weight stays at its minimum" {
+    var harness: support.Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    const weightless: zui.Sizing = .{ .rule = .grow_from_min, .amount = 0 };
+    growingTexts(harness.begin(), .fixed(300), &.{ weightless, .grow_equal }, &.{ "abc", "a" });
+    const frame = try harness.end();
+    try expectRect(frame, .indexed("cell", 0), 0, 0, 24, 16);
+    try expectRect(frame, .indexed("cell", 1), 24, 0, 276, 16);
+}
+
+test "a fit parent of zero-basis children is as wide as their content" {
+    var harness: support.Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    growingTexts(harness.begin(), .fit, &.{ .grow_equal, .grow_equal }, &.{ "a", "abcdefghijklmnop" });
+    const frame = try harness.end();
+    try expectRect(frame, .of("row"), 0, 0, 136, 16);
+    try expectRect(frame, .indexed("cell", 0), 0, 0, 8, 16);
+    try expectRect(frame, .indexed("cell", 1), 8, 0, 128, 16);
+}
+
+test "zero-basis children overflow at their minimums, as content-basis ones do" {
+    var harness: support.Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    growingTexts(harness.begin(), .fixed(200), &.{ .grow_equal, .grow_equal }, &.{ "abcdefghijklmnop", "abcdefghijklmnop" });
+    const frame = try harness.end();
+    try expectRect(frame, .indexed("cell", 0), 0, 0, 128, 16);
+    try expectRect(frame, .indexed("cell", 1), 128, 0, 128, 16);
+}
+
+test "a zero basis makes equal rows down a column" {
+    var harness: support.Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    const ui = harness.begin();
+    ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(100), .height = .fixed(300) } } });
+    ui.open(.{ .id = .of("tall"), .layout = .{ .sizing = .{ .height = .grow_equal } } });
+    fixedBox(ui, .of("content"), 10, 100);
+    ui.close();
+    ui.box(.{ .id = .of("empty"), .layout = .{ .sizing = .{ .height = .grow_equal } } });
+    ui.close();
+
+    const frame = try harness.end();
+    try expectRect(frame, .of("tall"), 0, 0, 10, 150);
+    try expectRect(frame, .of("empty"), 0, 150, 0, 150);
+}
+
 test "percent is a fraction of the parent's content box" {
     var harness: support.Harness = .{};
     try harness.init();

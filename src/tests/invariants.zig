@@ -17,11 +17,18 @@ const Generator = struct {
     text_buffer: [64]u8 = undefined,
 
     fn sizing(self: *Generator) zui.Sizing {
-        return switch (self.random.uintLessThan(u8, 6)) {
+        return switch (self.random.uintLessThan(u8, 8)) {
             0, 1 => .fit,
             2 => .growWeighted(@floatFromInt(self.random.intRangeAtMost(u8, 1, 3))),
             3 => .{ .rule = .grow, .amount = 1, .max = @floatFromInt(self.random.intRangeAtMost(u16, 10, 300)) },
             4 => .fixed(@floatFromInt(self.random.intRangeAtMost(u16, 0, 250))),
+            5 => .grow_equal,
+            6 => .{
+                .rule = .grow_from_min,
+                .amount = @floatFromInt(self.random.uintAtMost(u8, 3)),
+                .min = @floatFromInt(self.random.uintAtMost(u8, 40)),
+                .max = if (self.random.boolean()) std.math.inf(f32) else @floatFromInt(self.random.intRangeAtMost(u16, 40, 300)),
+            },
             else => .percent(@as(f32, @floatFromInt(self.random.intRangeAtMost(u8, 0, 100))) / 100),
         };
     }
@@ -173,6 +180,7 @@ fn checkParent(frame: *const Frame, parent: Ui.Index) !void {
     while (children.next()) |child| {
         if (!frame.isFloating(child)) used += frame.size[child][a];
     }
+    if (used <= content_along + tolerance) try checkGrowFromMinWeights(frame, parent, along);
 
     children = frame.children(parent);
     while (children.next()) |child| {
@@ -184,11 +192,11 @@ fn checkParent(frame: *const Frame, parent: Ui.Index) !void {
             try std.testing.expect(frame.size[child][a] <= frame.min_size[child][a] + tolerance);
         }
         // Free space is only left over once every growable child is at its max.
-        if (used < content_along - tolerance and sizing.rule == .grow and sizing.amount > 0) {
+        if (used < content_along - tolerance and sizing.rule.grows() and sizing.amount > 0) {
             try std.testing.expect(frame.size[child][a] >= sizing.max - tolerance);
         }
         const across_sizing = sizingAlong(frame, child, along.other());
-        if (across_sizing.rule == .grow) {
+        if (across_sizing.rule.grows()) {
             const expected = @max(frame.min_size[child][b], std.math.clamp(content_across, across_sizing.min, across_sizing.max));
             try std.testing.expectApproxEqAbs(expected, frame.size[child][b], tolerance);
         }
@@ -196,6 +204,26 @@ fn checkParent(frame: *const Frame, parent: Ui.Index) !void {
         // scroll, so every offset is zero.
         try std.testing.expect(frame.position[child][0] >= content_start[0] - tolerance);
         try std.testing.expect(frame.position[child][1] >= content_start[1] - tolerance);
+    }
+}
+
+/// `grow_from_min` siblings that are neither at their floor nor at their max
+/// have grown from their `min` by the same share of their weights.
+fn checkGrowFromMinWeights(frame: *const Frame, parent: Ui.Index, along: zui.Axis) !void {
+    const a = @intFromEnum(along);
+    var share: ?f32 = null;
+    var children = frame.children(parent);
+    while (children.next()) |child| {
+        if (frame.isFloating(child)) continue;
+        const sizing = sizingAlong(frame, child, along);
+        if (sizing.rule != .grow_from_min or sizing.amount == 0) continue;
+        const size = frame.size[child][a];
+        try std.testing.expect(size >= frame.min_size[child][a] - tolerance);
+        if (size <= frame.min_size[child][a] + tolerance or size >= sizing.max - tolerance) continue;
+        const child_share = (size - sizing.min) / sizing.amount;
+        if (share) |expected| {
+            try std.testing.expectApproxEqAbs(expected, child_share, tolerance);
+        } else share = child_share;
     }
 }
 

@@ -143,17 +143,37 @@ pub const Border = struct {
 /// `.width = .grow`, `.height = .fixed(48)`.
 pub const Sizing = struct {
     rule: Rule = .fit,
-    /// fixed: the size. percent: the fraction of the parent's content box (0..1). grow: the weight.
+    /// fixed: the size. percent: the fraction of the parent's content box (0..1). grow, grow_from_min: the weight.
     amount: f32 = 0,
     min: f32 = 0,
     max: f32 = std.math.inf(f32),
 
     /// Four bytes, so `Sizing` has no padding bytes for declaration to copy
-    /// into every layout.
-    pub const Rule = enum(u32) { fit, grow, fixed, percent };
+    /// into every layout. That is also why a grow basis is a rule rather
+    /// than a field of its own: two two-byte fields made the box tree's
+    /// declaration 3.8% more instructions.
+    pub const Rule = enum(u32) {
+        fit,
+        /// Starts from the content's size and adds a share of the free space
+        /// by weight, as CSS `flex: auto`: two `.grow` siblings holding "a"
+        /// and "abcdefghijklmnop" in 300 come out 90 and 210.
+        grow,
+        /// Starts from `min`, a zero basis, and shares the content box by
+        /// weight, as CSS `flex: 1`, never narrower than the content's
+        /// minimum: the same two siblings come out 150 and 150.
+        grow_from_min,
+        fixed,
+        percent,
+
+        pub fn grows(self: Rule) bool {
+            return self == .grow or self == .grow_from_min;
+        }
+    };
 
     pub const fit: Sizing = .{};
     pub const grow: Sizing = .{ .rule = .grow, .amount = 1 };
+    /// Columns or rows of one size, whatever their content.
+    pub const grow_equal: Sizing = .{ .rule = .grow_from_min, .amount = 1 };
 
     pub fn fixed(size: f32) Sizing {
         return .{ .rule = .fixed, .amount = size, .min = size, .max = size };
@@ -163,6 +183,7 @@ pub const Sizing = struct {
         return .{ .rule = .percent, .amount = fraction };
     }
 
+    /// A weight of 2 takes twice the free space of a `.grow` sibling.
     pub fn growWeighted(weight: f32) Sizing {
         return .{ .rule = .grow, .amount = weight };
     }
@@ -384,4 +405,9 @@ test "Sizing decl literals" {
     const sizing: Sizing2 = .{ .width = .grow, .height = .fixed(48) };
     try std.testing.expectEqual(Sizing.Rule.grow, sizing.width.rule);
     try std.testing.expectEqual(@as(f32, 48), sizing.axis(.y).amount);
+    try std.testing.expectEqual(Sizing.Rule.grow_from_min, (Sizing2{ .width = .grow_equal }).width.rule);
+}
+
+test "Sizing has no padding bytes" {
+    try std.testing.expectEqual(3 * @sizeOf(f32) + @sizeOf(Sizing.Rule), @sizeOf(Sizing));
 }

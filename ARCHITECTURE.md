@@ -211,7 +211,8 @@ which zui-host's Windows host implements. From stage 6, the single-line
 fast path, the whole-string cache and static styles have landed: element
 storage holds config references, pointers into the frame arena or to a
 style made at comptime with `zui.static`; and so has line-break
-segmentation through the text contract's `zuiSegment`.
+segmentation through the text contract's `zuiSegment`, and the grow
+basis: `grow` starts from the content, `grow_from_min` from `min`.
 
 The code and the spec still differ in these places, each closed by the
 roadmap item named:

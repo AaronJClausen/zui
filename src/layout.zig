@@ -8,6 +8,7 @@ const TraceZone = @import("trace.zig").TraceZone;
 const Axis = style.Axis;
 const tolerance = text.tolerance;
 const larger = style.larger;
+const smaller = style.smaller;
 const clampSize = style.clampSize;
 
 /// Each pass stays a function of its own. Inlined into one body, they ran
@@ -92,7 +93,7 @@ fn fit(comptime Ui: type, frame: *Ui.Frame, comptime axis: Axis) void {
         const content = contentSize(Ui, frame, element, axis);
         const sizing = content.sizing;
         switch (sizing.rule) {
-            .fit, .grow => {
+            .fit, .grow, .grow_from_min => {
                 frame.size[element][a] = clampSize(content.preferred, sizing.min, sizing.max);
                 frame.min_size[element][a] = clampSize(content.min, sizing.min, sizing.max);
             },
@@ -160,7 +161,7 @@ fn distribute(comptime Ui: type, frame: *Ui.Frame, comptime axis: Axis) void {
                 const sizing = frame.sizingOf(child, axis);
                 frame.size[child][a] = switch (sizing.rule) {
                     .fixed => frame.size[child][a],
-                    .grow => larger(frame.min_size[child][a], clampSize(content_box, sizing.min, sizing.max)),
+                    .grow, .grow_from_min => larger(frame.min_size[child][a], clampSize(content_box, sizing.min, sizing.max)),
                     .percent => clampSize(content_box * sizing.amount, sizing.min, sizing.max),
                     .fit => if (!scrolls and frame.size[child][a] > content_box) larger(frame.min_size[child][a], content_box) else frame.size[child][a],
                 };
@@ -173,6 +174,7 @@ fn distribute(comptime Ui: type, frame: *Ui.Frame, comptime axis: Axis) void {
         var used = gapsFor(parent_layout.child_gap, frame.child_counts[parent].in_flow);
         var grow_weight: f32 = 0;
         var any_grow_max = false;
+        var any_grow_from_min = false;
         var children = FlowChildren(Ui).init(frame, parent);
         while (children.next()) |child| {
             const sizing = frame.sizingOf(child, axis);
@@ -182,6 +184,12 @@ fn distribute(comptime Ui: type, frame: *Ui.Frame, comptime axis: Axis) void {
                     grow_weight += sizing.amount;
                     any_grow_max = any_grow_max or sizing.max != std.math.inf(f32);
                 },
+                // Held at its minimum, the floor it grows past from `min`.
+                .grow_from_min => {
+                    grow_weight += sizing.amount;
+                    any_grow_from_min = true;
+                    frame.size[child][a] = frame.min_size[child][a];
+                },
                 .fit, .fixed => {},
             }
             used += frame.size[child][a];
@@ -189,7 +197,9 @@ fn distribute(comptime Ui: type, frame: *Ui.Frame, comptime axis: Axis) void {
 
         const remaining = content_box - used;
         if (remaining > tolerance and grow_weight > 0) {
-            if (any_grow_max) {
+            if (any_grow_from_min) {
+                used += @call(.never_inline, growFromMin, .{ Ui, frame, parent, axis, remaining });
+            } else if (any_grow_max) {
                 used += grow(Ui, frame, parent, axis, remaining);
             } else {
                 // No child can reach a max, so the space divides in one go.
@@ -221,7 +231,7 @@ fn sizeFloatingChildren(comptime Ui: type, frame: *Ui.Frame, parent: Ui.Index, c
         };
         const sizing = frame.sizingOf(child, axis);
         switch (sizing.rule) {
-            .grow => frame.size[child][a] = larger(frame.min_size[child][a], clampSize(reference, sizing.min, sizing.max)),
+            .grow, .grow_from_min => frame.size[child][a] = larger(frame.min_size[child][a], clampSize(reference, sizing.min, sizing.max)),
             .percent => frame.size[child][a] = clampSize(reference * sizing.amount, sizing.min, sizing.max),
             .fit, .fixed => {},
         }
@@ -270,6 +280,67 @@ fn grow(comptime Ui: type, frame: *Ui.Frame, parent: Ui.Index, comptime axis: Ax
 fn canGrow(comptime Ui: type, frame: *const Ui.Frame, child: Ui.Index, comptime axis: Axis) bool {
     const sizing = frame.sizingOf(child, axis);
     return sizing.rule == .grow and sizing.amount > 0 and frame.size[child][@intFromEnum(axis)] < sizing.max - tolerance;
+}
+
+/// With a `.grow_from_min` child among them, free space goes to growing
+/// children by weight, one `share` for all: each ends at
+/// `clamp(start + share × weight, floor, max)`. A `.grow` child
+/// starts at its content's size, which is also its floor; a
+/// `.grow_from_min` child starts at its `min` and is held at its floor, the
+/// content's minimum, until the share passes it. `share` rises from 0
+/// through each point where a child leaves its floor or reaches its max,
+/// until the free space is filled, so each child bends at most twice and
+/// this ends. Returns the space handed out.
+fn growFromMin(comptime Ui: type, frame: *Ui.Frame, parent: Ui.Index, comptime axis: Axis, free_space: f32) f32 {
+    const a = @intFromEnum(axis);
+    var share: f32 = 0;
+    var bends_left = 2 * @as(usize, frame.child_counts[parent].in_flow) + 1;
+    while (bends_left > 0) : (bends_left -= 1) {
+        var handed_out: f32 = 0;
+        var growing_weight: f32 = 0;
+        var next_bend = std.math.inf(f32);
+        var children = FlowChildren(Ui).init(frame, parent);
+        while (children.next()) |child| {
+            const sizing = frame.sizingOf(child, axis);
+            if (!sizing.rule.grows() or sizing.amount <= 0) continue;
+            const floor = frame.size[child][a];
+            const start = growStart(sizing, floor);
+            const unclamped = start + share * sizing.amount;
+            if (unclamped < floor - tolerance) {
+                next_bend = smaller(next_bend, (floor - start) / sizing.amount);
+            } else if (unclamped >= sizing.max - tolerance) {
+                handed_out += sizing.max - floor;
+            } else {
+                handed_out += unclamped - floor;
+                growing_weight += sizing.amount;
+                next_bend = smaller(next_bend, (sizing.max - start) / sizing.amount);
+            }
+        }
+        const missing = free_space - handed_out;
+        if (missing <= tolerance) break;
+        if (growing_weight > 0 and share + missing / growing_weight <= next_bend) {
+            share += missing / growing_weight;
+            break;
+        }
+        if (next_bend == std.math.inf(f32)) break;
+        share = next_bend;
+    }
+
+    var handed_out: f32 = 0;
+    var children = FlowChildren(Ui).init(frame, parent);
+    while (children.next()) |child| {
+        const sizing = frame.sizingOf(child, axis);
+        if (!sizing.rule.grows() or sizing.amount <= 0) continue;
+        const floor = frame.size[child][a];
+        const grown = clampSize(growStart(sizing, floor) + share * sizing.amount, floor, sizing.max);
+        handed_out += grown - floor;
+        frame.size[child][a] = grown;
+    }
+    return handed_out;
+}
+
+inline fn growStart(sizing: style.Sizing, floor: f32) f32 {
+    return if (sizing.rule == .grow_from_min) sizing.min else floor;
 }
 
 /// Overflow is taken from the largest shrinkable children first, levelling
