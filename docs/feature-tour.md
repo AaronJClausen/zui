@@ -137,6 +137,7 @@ Each axis takes one `Sizing` rule, with optional `min` and `max`. The grow basis
 | `.grow_equal` | CSS `flex: 1` | equal columns |
 | `.growWeighted(3)` | `flex-grow: 3` | uneven splits |
 | `.fitBetween(180, 320)` | fit, clamped | a sidebar that respects its content |
+| `.aspectRatio(16.0 / 9.0)` | CSS `aspect-ratio`, on the height | a video frame at whatever width it gets |
 
 `src/ui/library.zig`
 
@@ -315,7 +316,7 @@ pub const Fonts = struct {
 
 ### Images and self-drawn elements · *shipped*
 
-`ui.image` places the renderer's own image handle. `ui.custom` places a payload your renderer draws itself, such as a 3D viewport or a histogram. Both are leaves that take an `Element`, so they size, clip and hit-test like any box.
+`ui.image` places the renderer's own image handle. `ui.custom` places a payload your renderer draws itself, such as a 3D viewport or a histogram. Both are leaves that take an `Element`, so they size, clip and hit-test like any box. Give an image its `natural_size` and a `fit` image takes it, keeping its proportions when its width grows or is squeezed.
 
 `src/ui/viewer.zig`
 
@@ -328,9 +329,9 @@ fn viewer(app: *App, ui: *Ui, photo: *const Photo, texture: Texture) void {
     ui.open(.{ .id = .of("viewer"), .layout = .{ .direction = .top_to_bottom, .sizing = .grow_both, .child_alignment = .{ .x = .center } } });
     defer ui.close();
 
-    ui.image(.{ .handle = texture }, .{
+    ui.image(.{ .handle = texture, .natural_size = .{ photo.width, photo.height } }, .{
         .id = .of("full_image"),
-        .layout = .{ .sizing = .{ .width = .grow, .height = .grow } },
+        .layout = .{ .sizing = .{ .width = .grow } },
     });
     ui.custom(.{ .photo_id = photo.id, .channel = app.histogram_channel }, .{
         .id = .of("histogram"),
@@ -1573,7 +1574,7 @@ These names compile, but they don't do anything yet. This list is from `ARCHITEC
 - **`features.semantics` and `features.gestures`** *(declared only)*: `Frame.semantics()` is always empty and `ui.manipulation` always returns null. Accessibility is V2; gestures (arbitration, momentum, custom recognizers) are I5.
 - **`features.flex_wrap` and `features.safety_sweeps`** *(declared only)*: The flags exist and gate their API, but they don't change behaviour yet. Wrap is L7; sweeps are V3.
 - **Extended color**: Colors are RGBA8 only. `zui.ExtendedColor` for HDR is G6.
-- **Still to come**: Aspect ratio and natural sizes (L2), dividers (L3), more floating options (L4), right-to-left layout (L6), drag and drop between elements (I1), a visual inspector `zui_debug` (V1), motion, multi-line text editing, skins, and more hosts (macOS, Linux, web).
+- **Still to come**: Dividers (L3), more floating options (L4), right-to-left layout (L6), drag and drop between elements (I1), a visual inspector `zui_debug` (V1), motion, multi-line text editing, skins, and more hosts (macOS, Linux, web).
 
 <a id="dx"></a>
 

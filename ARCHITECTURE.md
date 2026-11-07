@@ -237,9 +237,13 @@ frame arenas, parallel measurement and the module boundary.
 |---|---|
 | `zui` | the core, the contracts, and the modules: async, widgets, reflect, testing, tracy, app, wire, debug, motion, color, icons |
 | `zui-host` | native hosts, one directory per OS, chosen by target: `windows/` today (H2) |
-| `zui-raylib`, `zui-sokol`, `zui-terminal`, later `zui-web` | renderers; `zui-raylib` also ships the raylib adapter host |
-| `zui-themes` | skins for OS design languages |
-| `zui-examples` | samples and the template project |
+| `zui-raylib`, `zui-sokol`, `zui-terminal` | renderers; `zui-raylib` also ships the raylib adapter host |
+| `zui-web` | the browser: a thin client over `zui_wire` (V4), then a web host (H5); a skeleton today |
+| `zui-themes` | skins for OS design languages (K4); a skeleton today |
+| `zui-examples` | samples and the template project (D1, D2); a skeleton today |
+
+`zui-web`, `zui-themes` and `zui-examples` were created ahead of their
+items: each has its build, CI and an agent guide, and pins zui by commit.
 
 The renderer repositories pin zui by commit and moved to stage 2 with it
 (C8): each declares `Text`, a text contract, and its loop builds a

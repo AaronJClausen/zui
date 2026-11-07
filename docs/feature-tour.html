@@ -497,6 +497,7 @@ fn toolbar(app: *App, ui: *Ui) void {
             <tr><td><code class="z">.grow_equal</code></td><td>CSS <code>flex: 1</code></td><td>equal columns</td></tr>
             <tr><td><code class="z">.growWeighted(3)</code></td><td><code>flex-grow: 3</code></td><td>uneven splits</td></tr>
             <tr><td><code class="z">.fitBetween(180, 320)</code></td><td>fit, clamped</td><td>a sidebar that respects its content</td></tr>
+            <tr><td><code class="z">.aspectRatio(16.0 / 9.0)</code></td><td>CSS <code>aspect-ratio</code>, on the height</td><td>a video frame at whatever width it gets</td></tr>
           </tbody>
         </table></div>
 <script type="text/x-zig" data-file="src/ui/library.zig">
@@ -651,7 +652,7 @@ pub const Fonts = struct {
 
       <article class="feature" id="images" data-title="Images and custom elements">
         <div class="feature-head"><h3>Images and self-drawn elements</h3><span class="pill shipped">Shipped</span></div>
-        <p><code class="z">ui.image</code> places the renderer's own image handle. <code class="z">ui.custom</code> places a payload your renderer draws itself, such as a 3D viewport or a histogram. Both are leaves that take an <code class="z">Element</code>, so they size, clip and hit-test like any box.</p>
+        <p><code class="z">ui.image</code> places the renderer's own image handle. <code class="z">ui.custom</code> places a payload your renderer draws itself, such as a 3D viewport or a histogram. Both are leaves that take an <code class="z">Element</code>, so they size, clip and hit-test like any box. Give an image its <code class="z">natural_size</code> and a <code class="z">fit</code> image takes it, keeping its proportions when its width grows or is squeezed.</p>
 <script type="text/x-zig" data-file="src/ui/viewer.zig">
 const HistogramPayload = struct { photo_id: u64, channel: Channel };
 
@@ -661,9 +662,9 @@ fn viewer(app: *App, ui: *Ui, photo: *const Photo, texture: Texture) void {
     ui.open(.{ .id = .of("viewer"), .layout = .{ .direction = .top_to_bottom, .sizing = .grow_both, .child_alignment = .{ .x = .center } } });
     defer ui.close();
 
-    ui.image(.{ .handle = texture }, .{
+    ui.image(.{ .handle = texture, .natural_size = .{ photo.width, photo.height } }, .{
         .id = .of("full_image"),
-        .layout = .{ .sizing = .{ .width = .grow, .height = .grow } },
+        .layout = .{ .sizing = .{ .width = .grow } },
     });
     ui.custom(.{ .photo_id = photo.id, .channel = app.histogram_channel }, .{
         .id = .of("histogram"),
@@ -1754,7 +1755,7 @@ fn present(renderer: *Renderer, surface: zui.Surface, frame: *const Ui.Frame) !v
         <li><b><code class="z">features.semantics</code> and <code class="z">features.gestures</code> <span class="pill partial">Declared only</span></b><span><code class="z">Frame.semantics()</code> is always empty and <code class="z">ui.manipulation</code> always returns null. Accessibility is V2; gestures (arbitration, momentum, custom recognizers) are I5.</span></li>
         <li><b><code class="z">features.flex_wrap</code> and <code class="z">features.safety_sweeps</code> <span class="pill partial">Declared only</span></b><span>The flags exist and gate their API, but they don't change behaviour yet. Wrap is L7; sweeps are V3.</span></li>
         <li><b>Extended color</b><span>Colors are RGBA8 only. <code class="z">zui.ExtendedColor</code> for HDR is G6.</span></li>
-        <li><b>Still to come</b><span>Aspect ratio and natural sizes (L2), dividers (L3), more floating options (L4), right-to-left layout (L6), drag and drop between elements (I1), a visual inspector <code>zui_debug</code> (V1), motion, multi-line text editing, skins, and more hosts (macOS, Linux, web).</span></li>
+        <li><b>Still to come</b><span>Dividers (L3), more floating options (L4), right-to-left layout (L6), drag and drop between elements (I1), a visual inspector <code>zui_debug</code> (V1), motion, multi-line text editing, skins, and more hosts (macOS, Linux, web).</span></li>
       </ul>
     </section>
 
