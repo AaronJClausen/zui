@@ -3,7 +3,13 @@
     .version = "0.5.0",
     .fingerprint = 0xc00160dbaadffbc5, // Changing this has security and trust implications.
     .minimum_zig_version = "0.16.0",
-    .dependencies = .{},
+    .dependencies = .{
+        .tracy = .{
+            .url = "https://github.com/wolfpld/tracy/archive/refs/tags/v0.14.1.tar.gz",
+            .hash = "N-V-__8AAAZPdAGoNF3-tqKYHjTOa5QQ02rEWNvkDr-Vpl0C",
+            .lazy = true,
+        },
+    },
     .paths = .{
         "build.zig",
         "build.zig.zon",
@@ -13,6 +19,7 @@
         "zui_testing",
         "zui_widgets",
         "zui_reflect",
+        "zui_tracy",
         "LICENSE",
         "README.md",
         "SPEC.md",

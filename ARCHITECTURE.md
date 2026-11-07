@@ -10,7 +10,7 @@ ROADMAP.md says when each part is built.
 | Layer | Holds | Rule that keeps it in bounds |
 |---|---|---|
 | **Core** (`zui`) | layout, interaction, state, the frame boundary, sources and demand, the vocabulary, every contract and its checks | no OS calls, no drawing, no threads but the `Io` it is given; the same behavior on every target |
-| **Modules** (`zui_*`, this repo) | default sources, widgets, reflection, testing, the app runner, wire, debug, motion, color, icons | the public API only, enforced by the module boundary (SPEC.md §3.3) |
+| **Modules** (`zui_*`, this repo) | default sources, widgets, reflection, testing, tracing, the app runner, wire, debug, motion, color, icons | the public API only, enforced by the module boundary (SPEC.md §3.3) |
 | **Renderers** | drawing, fonts, text measurement, images, materials | implement the renderer and text contracts; never import a host |
 | **Hosts** | windows, the event loop, OS events and services, frame pacing | implement the host contract; never import a renderer |
 | **Theme packs** | OS design languages | skins: data only |
@@ -145,7 +145,7 @@ The stage is the one in SPEC.md §21 that builds it.
 
 | Feature | Lives in | Stage |
 |---|---|---|
-| instruction counts, trace zones | CI; the tracer contract in the core | 1 |
+| instruction counts, trace zones | CI; the tracer contract in the core; the Tracy binding in `zui_tracy` | 1 |
 | frame record, time as an instant, scale and zoom | core | 2 |
 | input as events, many pointers, environment | host reports; core applies | 2 |
 | outside data, demand, `Status`, `Waker` | core contract; default sources in `zui_async` | 2 |
@@ -174,8 +174,8 @@ The stage is the one in SPEC.md §21 that builds it.
 
 ## 7. From today's code to the spec
 
-What exists today is releases 0.1–0.5, the start of 0.6, instruction
-counts in CI, and the part of stage 2 that reshaped what already existed: `Context(config)` with
+What exists today is releases 0.1–0.5, the start of 0.6, stage 1
+(instruction counts in CI, the tracer contract and `zui_tracy`), and the part of stage 2 that reshaped what already existed: `Context(config)` with
 `Config.limits` and the text contract, the frame record with `now`,
 scale and zoom, input as an ordered event log over a pointer table,
 `endFrame` that always returns a frame, `nextFrame()`, and `Element`
@@ -192,6 +192,7 @@ roadmap item named:
 | configs copied into the frame | config references, static styles | `src/context.zig`, `src/style.zig` | L8 |
 | `Widgets(Ui)` with a `Theme` struct | `Widgets(Ui, Skin)` | `zui_widgets/` | K5 |
 | `Frame` exposes its storage arrays and `rectOf` | `Frame.inspect(index)` | `src/context.zig` | V1 |
+| `Features` holds only `Tracer` | `semantics`, `gestures`, `flex_wrap` and `safety_sweeps` too | `src/context.zig` | C7 |
 
 Unchanged in shape: element storage in pre-order structure-of-arrays, the
 layout passes, the segment cache, ids, the state table, the frame arenas,
@@ -201,7 +202,7 @@ parallel measurement and the module boundary.
 
 | Repository | Holds |
 |---|---|
-| `zui` | the core, the contracts, and the modules: async, widgets, reflect, testing, app, wire, debug, motion, color, icons |
+| `zui` | the core, the contracts, and the modules: async, widgets, reflect, testing, tracy, app, wire, debug, motion, color, icons |
 | `zui-host` | native hosts, one directory per OS, chosen by target (created in stage 4) |
 | `zui-raylib`, `zui-sokol`, `zui-terminal`, later `zui-web` | renderers; `zui-raylib` also ships the raylib adapter host |
 | `zui-themes` | skins for OS design languages |

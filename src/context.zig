@@ -12,6 +12,7 @@ const record_types = @import("record.zig");
 const state_table = @import("state.zig");
 const parallel_measure = @import("parallel_measure.zig");
 const contracts = @import("contracts.zig");
+const trace = @import("trace.zig");
 
 const Id = id_module.Id;
 const Instant = record_types.Instant;
@@ -34,8 +35,16 @@ pub const Config = struct {
     /// integer or enum type.
     FontId: type = u16,
 
+    features: Features = .{},
     /// Frames alive at once: one being declared plus those a renderer holds.
     frames_in_flight: u8 = 2,
+};
+
+pub const Features = struct {
+    /// The tracer contract: a type with `zuiBegin` and `zuiEnd`, which
+    /// sees each step of `beginFrame` and `endFrame` as a zone. `void`
+    /// compiles tracing out.
+    Tracer: type = void,
 };
 
 pub const Limits = struct {
@@ -158,11 +167,13 @@ fn nextPowerOfTwo(value: u32) u32 {
 pub fn Context(comptime config: Config) type {
     comptime validateConfig(config);
     if (config.Text != void) comptime contracts.checkText(config.Text, config.FontId);
+    if (config.features.Tracer != void) comptime contracts.checkTracer(config.features.Tracer);
 
     return struct {
         const Self = @This();
 
         pub const limits = config.limits;
+        pub const Tracing = trace.Tracing(config.features.Tracer);
         pub const has_text = config.Text != void;
         pub const FontId = config.FontId;
         pub const TextStyle = style.TextStyle(config.FontId);
@@ -460,13 +471,23 @@ pub fn Context(comptime config: Config) type {
         /// Waits for a free frame if a renderer holds all of them.
         pub fn beginFrame(self: *Self, record: *const FrameRecord) void {
             if (self.current != null) @panic("zui: beginFrame() called again before endFrame()");
-            self.begin(self.waitForFreeFrame(), record);
+            const zone = Tracing.begin(.begin_frame);
+            defer zone.end();
+            const waiting = Tracing.begin(.wait_for_frame);
+            const frame = self.waitForFreeFrame();
+            waiting.end();
+            self.begin(frame, record);
         }
 
         /// For hosts that cannot block.
         pub fn tryBeginFrame(self: *Self, record: *const FrameRecord) error{NoFreeFrame}!void {
             if (self.current != null) @panic("zui: beginFrame() called again before endFrame()");
-            self.begin(self.takeFreeFrame() orelse return error.NoFreeFrame, record);
+            const zone = Tracing.begin(.begin_frame);
+            defer zone.end();
+            const waiting = Tracing.begin(.wait_for_frame);
+            const free_frame = self.takeFreeFrame();
+            waiting.end();
+            self.begin(free_frame orelse return error.NoFreeFrame, record);
         }
 
         fn begin(self: *Self, frame: *Frame, record: *const FrameRecord) void {
@@ -477,8 +498,12 @@ pub fn Context(comptime config: Config) type {
             self.frame_requested = false;
             self.requested_deadline = null;
             if (has_text) self.memory.cache.generation +%= 1;
+            const evicting = Tracing.begin(.evict_state);
             self.memory.states.evict(self.stateGeneration(), limits.state_frames_until_eviction);
+            evicting.end();
+            const applying = Tracing.begin(.apply_events);
             self.applyEvents(frame, record.events);
+            applying.end();
             self.current = frame;
             self.dropped_depth = 0;
             self.depth = 0;
@@ -522,6 +547,8 @@ pub fn Context(comptime config: Config) type {
         /// limit to raise.
         pub fn endFrame(self: *Self) *const Frame {
             const frame = self.current orelse @panic("zui: endFrame() called without beginFrame()");
+            const zone = Tracing.begin(.end_frame);
+            defer zone.end();
             if (self.depth != 1 or self.dropped_depth != 0) self.reportUnbalanced(frame);
             frame.subtree_end[root_index] = @intCast(frame.element_count);
             const needed = &frame.diagnostics.needed;

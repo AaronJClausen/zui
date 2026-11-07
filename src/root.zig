@@ -5,13 +5,17 @@ const id = @import("id.zig");
 const interaction = @import("interaction.zig");
 const input = @import("input.zig");
 const record = @import("record.zig");
+const trace = @import("trace.zig");
 
 pub const Context = context.Context;
 pub const Config = context.Config;
 pub const Limits = context.Limits;
+pub const Features = context.Features;
 pub const Limit = context.Limit;
 pub const Element = context.Element;
 pub const Diagnostics = context.Diagnostics;
+
+pub const TraceZone = trace.TraceZone;
 
 pub const Instant = record.Instant;
 pub const FrameParams = record.FrameParams;
@@ -71,4 +75,5 @@ test {
     _ = @import("tests/layers.zig");
     _ = @import("tests/frames.zig");
     _ = @import("tests/parallel.zig");
+    _ = @import("tests/tracing.zig");
 }

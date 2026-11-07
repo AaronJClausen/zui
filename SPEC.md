@@ -113,7 +113,7 @@ repositories.
 | Layer | Holds | Bound |
 |---|---|---|
 | **Core** (`zui`) | layout, interaction, state, the frame boundary, sources and demand, the shared vocabulary, every contract and its checks | no OS calls, no drawing, no threads of its own beyond `Io` it is given; identical behavior on every target |
-| **Modules** (`zui_*`, this repo) | defaults built on the public API: async sources, widgets, reflection, testing, the app runner, wire, debug, motion, color, icons | the public API only, enforced by the module boundary (§3.3) |
+| **Modules** (`zui_*`, this repo) | defaults built on the public API: async sources, widgets, reflection, testing, tracing, the app runner, wire, debug, motion, color, icons | the public API only, enforced by the module boundary (§3.3) |
 | **Renderers** | drawing, fonts, text measurement, images, materials | implement the renderer and text contracts; never import a host |
 | **Hosts** | windows, the event loop, OS events and services, frame pacing | implement the host contract; never import a renderer |
 | **Theme packs** | design languages as skins | data only |
@@ -1457,6 +1457,20 @@ With `Features.Tracer` set, every pass, emission step and `beginFrame`
 step is a zone. With `void`, no tracing code is analyzed, so an off
 build's instruction counts are unchanged.
 
+| Zone | Encloses |
+|---|---|
+| `begin_frame` | `wait_for_frame`, `evict_state`, `apply_events`, `swap_sources`, `relay` (§6.3) |
+| `end_frame` | `measure_text`, `fit_widths`, `distribute_widths`, `wrap_text`, `fit_heights`, `distribute_heights`, `position` (§8.2), then `emit`, and `sort_layers` when a frame has floating layers |
+
+- **`zuiBegin` and `zuiEnd` are plain functions,** with no tracer value,
+  because profilers keep their state per thread. Both are called on the
+  thread running the frame, and zones nest.
+- **`zuiBegin` takes the zone at comptime,** so a binding can make one
+  static source location per zone, as Tracy requires.
+- **`Span`** is whatever `zuiBegin` returns; `zuiEnd` takes exactly that
+  type.
+- **`zui_tracy`** is the Tracy binding (§19.10).
+
 ### 16.6 When something is missing
 
 | Case | Absence is | Examples |
@@ -1719,6 +1733,15 @@ while they move and finish instantly under `reduced_motion`. Exit
 animations use the core's ghost buffer: an element with `exit_seconds`
 keeps emitting its last commands, taking no space and receiving no hits,
 from `limits.exit_ghost_commands` (0 compiles it out).
+
+### 19.10 `zui_tracy`
+
+`zui_tracy.Tracer` traces into the Tracy profiler, and
+`zui_tracy.frameMark()` ends a frame in its frame graph. Tracy is a lazy
+dependency, fetched and linked only by a build with `-Dzui-tracy=true`.
+Without it, `Tracer` is `void`, so an application keeps
+`.features = .{ .Tracer = zui_tracy.Tracer }` in its `Config` and pays
+nothing until it builds with Tracy.
 
 ---
 

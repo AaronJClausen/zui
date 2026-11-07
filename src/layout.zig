@@ -3,6 +3,7 @@ const style = @import("style.zig");
 const text = @import("text.zig");
 const interaction = @import("interaction.zig");
 const parallel_measure = @import("parallel_measure.zig");
+const TraceZone = @import("trace.zig").TraceZone;
 
 const Axis = style.Axis;
 const tolerance = text.tolerance;
@@ -14,13 +15,19 @@ const clampSize = style.clampSize;
 /// about 17% slower: register pressure costs more than the calls and the
 /// extra loops.
 pub fn run(comptime Ui: type, ui: *Ui, frame: *Ui.Frame) void {
-    @call(.never_inline, measureTexts, .{ Ui, ui, frame });
-    @call(.never_inline, fit, .{ Ui, frame, .x });
-    @call(.never_inline, distribute, .{ Ui, frame, .x });
-    @call(.never_inline, wrapTexts, .{ Ui, ui, frame });
-    @call(.never_inline, fit, .{ Ui, frame, .y });
-    @call(.never_inline, distribute, .{ Ui, frame, .y });
-    @call(.never_inline, position, .{ Ui, ui, frame });
+    runPass(Ui, .measure_text, measureTexts, .{ Ui, ui, frame });
+    runPass(Ui, .fit_widths, fit, .{ Ui, frame, .x });
+    runPass(Ui, .distribute_widths, distribute, .{ Ui, frame, .x });
+    runPass(Ui, .wrap_text, wrapTexts, .{ Ui, ui, frame });
+    runPass(Ui, .fit_heights, fit, .{ Ui, frame, .y });
+    runPass(Ui, .distribute_heights, distribute, .{ Ui, frame, .y });
+    runPass(Ui, .position, position, .{ Ui, ui, frame });
+}
+
+inline fn runPass(comptime Ui: type, comptime zone: TraceZone, comptime pass: anytype, arguments: anytype) void {
+    const traced = Ui.Tracing.begin(zone);
+    defer traced.end();
+    @call(.never_inline, pass, arguments);
 }
 
 /// Measures inline until the frame has made `parallel_measure_threshold`

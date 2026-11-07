@@ -34,9 +34,12 @@ Implemented so far:
   benchmarks alternately and reports each change with its spread;
   startup benchmarks for `init`, `initBuffer` and first frames; and the
   design of sources, demand and the loader that replace task pools.
-- **Stage 1, in part:** instruction counts of every single-threaded
-  benchmark under Callgrind, identical on every machine, with CI failing
-  on more than 2% growth over the parent commit.
+- **Stage 1:** instruction counts of every single-threaded benchmark
+  under Callgrind, identical on every machine, with CI failing on more
+  than 2% growth over the parent commit; and a tracer contract that sees
+  every step of a frame as a zone, with `zui_tracy` sending them to the
+  [Tracy](https://github.com/wolfpld/tracy) profiler. Without a tracer,
+  tracing compiles to nothing.
 - **Stage 2, in part:** `Context(config)` with the text contract and
   `Config.limits`; a frame record with time, scale, zoom and input as an
   ordered event log over a pointer table; `endFrame` that always returns
@@ -46,7 +49,7 @@ The reference backend and demo application live in
 [zui-raylib](https://github.com/AaronJClausen/zui-raylib). It and the
 other backends still use the API from before stage 2.
 
-Next, in the order of SPEC.md §21: a tracer contract (stage 1); then the rest of stage 2: the environment, sources
+Next, in the order of SPEC.md §21: the rest of stage 2: letter spacing's golden test, the environment, sources
 with `zui_async`, and the backends moved to the new API. After that come
 the renderer and host contracts with `zui_app`, a native Windows host, the
 wire format, and from there text, layout, gestures, effects, an
@@ -83,6 +86,7 @@ waitFor(ui.nextFrame());
 | `zig build test` | run the unit, golden, randomized-invariant, widget and compile-error tests (add `-Doptimize=ReleaseSafe` or `ReleaseFast` to test other modes) |
 | `zig build check` | compile one full frame, every widget and the test driver without producing output; add `-Dtarget=wasm32-freestanding` to check another target |
 | `zig build test -Dzui-debug=true` | keep id names, so duplicate-id and unbalanced-tree panics name the element |
+| `zig build test -Dzui-tracy=true` | fetch Tracy and test `zui_tracy` with its client linked |
 | `zig build bench` | run the benchmarks in ReleaseFast; add `-- --check-targets` to fail on a missed performance target, or `-- --compare old.json` after `-- --json old.json` to check for regressions |
 | `zig build counts` | count each benchmark's instructions per frame under Callgrind, on x86_64 Linux with Valgrind (on Windows, in a Linux container); add `-- --json counts.json` to save them and `-- --compare counts.json` to fail on more than 2% growth |
 | `zig build bench-compare -- main` | run the benchmarks of `main` and of the working tree alternately, and report each time's median change and its spread; `-- <base> <head>` compares two commits (SPEC.md §20.3) |
@@ -101,11 +105,28 @@ CI runs:
   runners vary too much. Check for slowdowns on your own machine with
   `zig build bench-compare`;
 - instruction counts of this commit and its parent, failing on more than
-  2% growth.
+  2% growth;
+- `zui_tracy` with Tracy's client, on Linux, Windows and macOS.
 
 Those targets exist to catch assumptions about the host machine early:
 the first 32-bit build found two places that used a 64-bit hash as an
 index.
+
+### Profiling
+
+Set `.features = .{ .Tracer = zui_tracy.Tracer }` in the `Config`, call
+`zui_tracy.frameMark()` after each presented frame, build with
+`-Dzui-tracy=true`, and connect Tracy's profiler of the same version
+(0.14.1). Every step of `beginFrame` and `endFrame` is a zone.
+
+To keep noise out of a profile or a timing:
+- pin the process to one core (`taskset -c 2` on Linux, `start /affinity 4`
+  on Windows) and keep other work off it;
+- fix the CPU frequency: turn off turbo and use a performance power plan,
+  or `cpupower frequency-set -g performance`;
+- compare two builds by alternating them, never one after the other, as
+  `zig build bench-compare` does; and prefer `zig build counts`, which no
+  machine's noise can move.
 
 The repository uses LF line endings everywhere (see `.gitattributes`),
 whatever your `core.autocrlf` setting.
@@ -124,6 +145,8 @@ exe.root_module.addImport("zui", zui.module("zui"));
 exe.root_module.addImport("zui_widgets", zui.module("zui_widgets"));
 exe.root_module.addImport("zui_reflect", zui.module("zui_reflect"));
 tests.root_module.addImport("zui_testing", zui.module("zui_testing"));
+// Tracing into Tracy; `.@"zui-tracy" = true` in the options above links it.
+exe.root_module.addImport("zui_tracy", zui.module("zui_tracy"));
 ```
 
 ```zig

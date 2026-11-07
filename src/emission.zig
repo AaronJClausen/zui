@@ -29,6 +29,7 @@ pub fn EmitLevel(comptime Index: type) type {
 /// paints over the element's children. Elements entirely outside the clip
 /// are not drawn.
 pub fn run(comptime Ui: type, ui: *Ui, frame: *Ui.Frame) void {
+    const emitting = Ui.Tracing.begin(.emit);
     const results = &ui.memory.results;
     results.clear();
     var emitter: Emitter(Ui) = .{ .frame = frame, .results = results, .pixels_per_unit = frame.pixels_per_unit, .units_per_pixel = 1 / frame.pixels_per_unit };
@@ -61,8 +62,11 @@ pub fn run(comptime Ui: type, ui: *Ui, frame: *Ui.Frame) void {
         if (depth == 0) break;
     }
     frame.diagnostics.needed.set(.max_render_commands, emitter.attempted_commands);
+    emitting.end();
 
     if (frame.floating_count != 0) {
+        const sorting = Ui.Tracing.begin(.sort_layers);
+        defer sorting.end();
         std.sort.block(Ui.RenderCommand, frame.render_commands[0..frame.command_count], {}, lowerLayer(Ui));
     }
 }

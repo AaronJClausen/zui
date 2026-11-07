@@ -22,7 +22,7 @@ Each item says:
 | 0.5 | layout performance, parallel measurement, benchmarks | shipped |
 | after 0.5 | declaration work: −42% to −56% | on `main` |
 | 0.6, in part | `bench-compare` (R2), startup benchmarks (P1), task completions at `beginFrame` (A2), the async design (A1) | done; the rest of 0.6 became stage 1 |
-| stage 1, in part | instruction counts in CI (R1) | on `main` |
+| stage 1 | instruction counts in CI (R1), the tracer contract and `zui_tracy` (P2) | on `main`, but for a trace of the demo, which needs C8 |
 | stage 2, in part | the code brought to the spec's shape: C5, S1, I4, C6, A5 and `nextFrame` (I2) | on `main`; the other repos still need the same change (C8) |
 
 No release is tagged; everything is on `main`. From here, work is
@@ -47,19 +47,19 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
-| P2. The tracer contract | 1 | `src/` (`Features.Tracer`), a recording test tracer; the Tracy binding in a `zui_tracy` module | | next |
 | T3. Letter spacing: the golden test | 2 | `src/tests/golden.zig` with a spacing test contract | | in progress: key, style and cache done |
 | I6. The environment and host requests | 2 | `src/input.zig`, `src/context.zig`, `src/tests/interaction.zig`, `zui_widgets/` | | |
 | A3. Sources in the core | 2 | a new `src/sources.zig`, `src/context.zig`, `src/contracts.zig`, `tests/compile_errors/` | | |
 | A4. `zui_async` | 2 | a new `zui_async/` module; `expectSourceConforms` in `zui_testing/` | A3 | |
 | C8. The backends on the stage-2 API | 2 | `../zui-raylib`, `../zui-sokol`, `../zui-terminal` | A4, T3 | |
+| P2. The tracer contract: a trace of the demo | 1 | `../zui-raylib`'s demo with `zui_tracy` | C8 | waiting on C8; the rest is done |
 | T1. The single-line fast path | 6, early | `src/text.zig` | | |
-| T2. The whole-string cache | 6, early | `src/text.zig`, `Limits.string_cache_entries` | T1, P2 | |
-| P4. The box tree's layout and emission within budget | 6, early | `src/layout.zig`, `src/emission.zig` | P2 | |
+| T2. The whole-string cache | 6, early | `src/text.zig`, `Limits.string_cache_entries` | T1 | |
+| P4. The box tree's layout and emission within budget | 6, early | `src/layout.zig`, `src/emission.zig` | | |
 | C1. The renderer contract, generated commands, lowering | 3 | `src/commands.zig`, `src/emission.zig`, `src/contracts.zig` | C8 | |
 | C2. The host contract and the surface | 3 | `src/contracts.zig`, a new `src/surface.zig` | C1 | |
 | C3. Conformance suites | 3 | `zui_testing/` | C1, C2 | |
-| C7. `Features` | 3 | `src/context.zig` | P2 | |
+| C7. `Features` | 3 | `src/context.zig` | | |
 | C4. `zui_app` | 3 | a new `zui_app/` module | C3 | |
 | H1. The raylib adapter host | 3 | `../zui-raylib` | C4 | |
 
@@ -221,6 +221,23 @@ alone (C7 adds the rest). First the contract, its compile-error tests and
 a test tracer that records zones, so a test asserts every pass is a zone;
 then the Tracy binding; then the trace of the demo, which needs C8.
 
+**Status.** Done but for the trace of the demo, which waits for C8 to move
+zui-raylib's demo onto the stage-2 API, and is then checked by eye in
+Tracy's profiler (0.14.1). Landed:
+- `Features.Tracer`, `zui.TraceZone` and the contract's checks, with five
+  compile-error tests;
+- a recording tracer in `src/tests/support.zig`, and a test that one frame
+  produces every zone, each nested in `begin_frame` or `end_frame`;
+- `zui_tracy`, with Tracy as a lazy dependency linked by
+  `-Dzui-tracy=true`, tested with Tracy's client on Windows (in a MinGW
+  build Tracy's callstacks are off: with them the process exits with
+  code 9 after Tracy shuts down) and on Linux, and in CI on all three
+  systems;
+- the profiling guide, in README.md's *Profiling*.
+
+`zig build counts` without a tracer was identical to the instruction in
+every scenario, against `994a631`, in a local Docker container.
+
 **Spec.** §4, §16.5.
 
 ---
@@ -374,7 +391,7 @@ over every limit still draws what fit.
 
 **Plan.** `Config.Sources`; the contract checked at instantiation;
 `beginFrame` swapping each field in order or injecting
-`record.deliveries`; `ui.source(.field)` recording demand;
+`record.deliveries`, in a `swap_sources` trace zone; `ui.source(.field)` recording demand;
 `framesSinceRead`; refusals in diagnostics; `zui.Status`,
 `StatusWithProgress`, `Waker`, `Wake`.
 
@@ -542,7 +559,8 @@ F1, feeds, is retired: sources (A3) are the mechanism for outside data.
 ### F2. Relay
 
 **Plan.** `relayTo(listener)`: each applied record, with deliveries from
-`zuiDelivery`, without allocating when no listener is attached.
+`zuiDelivery`, without allocating when no listener is attached, in a
+`relay` trace zone.
 
 **Done when:** a test relays a session into a buffer and gets back
 exactly the records applied.
@@ -924,6 +942,8 @@ Deliberate, and each a reason to choose zui:
 | Safety checks | built, as `features.safety_sweeps` (V3) |
 | Instruction counts | Callgrind on a fixed CPU model and fixed frames, in a fresh process per scenario and phase; CI fails on 2% growth over the parent (R1) |
 | Where the Tracy binding lives (P2) | a `zui_tracy` module in this repository, with Tracy as a lazy dependency, so every backend's demo can trace and applications that do not import it never fetch it |
+| Turning Tracy on (P2) | a build option, `-Dzui-tracy`; without it `zui_tracy.Tracer` is `void`, so code that names it compiles tracing out and fetches nothing |
+| The tracer's shape (P2) | plain functions with the zone at comptime, no tracer value: profilers keep per-thread state, and Tracy needs a static location per zone |
 
 ### Open
 

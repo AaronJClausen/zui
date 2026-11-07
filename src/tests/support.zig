@@ -103,3 +103,40 @@ pub fn snapshot(frame: *const Ui.Frame, buffer: []u8) ![]const u8 {
     }
     return writer.buffered();
 }
+
+/// A tracer that records each zone's beginning and end, in order.
+pub const RecordingTracer = struct {
+    pub const Mark = struct { zone: zui.TraceZone, edge: enum { begin, end } };
+
+    var marks: [64]Mark = undefined;
+    var mark_count: usize = 0;
+    var overflowed = false;
+
+    pub fn zuiBegin(comptime zone: zui.TraceZone) zui.TraceZone {
+        add(.{ .zone = zone, .edge = .begin });
+        return zone;
+    }
+
+    pub fn zuiEnd(zone: zui.TraceZone) void {
+        add(.{ .zone = zone, .edge = .end });
+    }
+
+    fn add(mark: Mark) void {
+        if (mark_count == marks.len) {
+            overflowed = true;
+            return;
+        }
+        marks[mark_count] = mark;
+        mark_count += 1;
+    }
+
+    pub fn clear() void {
+        mark_count = 0;
+        overflowed = false;
+    }
+
+    pub fn recorded() error{TooManyMarks}![]const Mark {
+        if (overflowed) return error.TooManyMarks;
+        return marks[0..mark_count];
+    }
+};

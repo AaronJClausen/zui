@@ -7,6 +7,7 @@ const zui = @import("zui");
 const zui_testing = @import("zui_testing");
 const zui_widgets = @import("zui_widgets");
 const zui_reflect = @import("zui_reflect");
+const zui_tracy = @import("zui_tracy");
 
 const CheckText = struct {
     pub fn zuiMeasure(_: *CheckText, text: []const u8, key: zui.MeasureKey(u16)) [2]f32 {
@@ -165,4 +166,30 @@ export fn zuiCheckDriver() u32 {
     _ = driver.pressKeys(&clicks, declareButton, &.{.enter}) catch return 0;
     _ = driver.typeText(&clicks, declareButton, "typed") catch return 0;
     return clicks;
+}
+
+const CheckTracer = struct {
+    var open_zones: u32 = 0;
+
+    pub fn zuiBegin(comptime zone: zui.TraceZone) zui.TraceZone {
+        open_zones += 1;
+        return zone;
+    }
+
+    pub fn zuiEnd(_: zui.TraceZone) void {
+        open_zones -= 1;
+    }
+};
+
+const TracedUi = zui.Context(.{ .limits = .{ .max_elements = 8 }, .features = .{ .Tracer = CheckTracer } });
+
+var traced_memory: [TracedUi.required_bytes]u8 align(TracedUi.buffer_alignment) = undefined;
+
+export fn zuiCheckTracer() u32 {
+    var ui = TracedUi.initBuffer(&traced_memory, undefined) catch return 0;
+    ui.tryBeginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 100, 100 } } }) catch return 0;
+    ui.box(.{ .floating = .{ .z = 1 }, .decoration = .{ .background = .black } });
+    ui.release(ui.endFrame());
+    zui_tracy.frameMark();
+    return CheckTracer.open_zones + @intFromBool(zui.Context(.{ .features = .{ .Tracer = zui_tracy.Tracer } }).Tracing.enabled);
 }

@@ -15,6 +15,11 @@ const compile_error_cases = [_]struct { name: []const u8, expected_error: []cons
     .{ .name = "ids_repeated_name", .expected_error = "zui.ids: \"save\" appears more than once" },
     .{ .name = "custom_without_custom_data", .expected_error = "zui: custom() needs Config.CustomData set to your payload type" },
     .{ .name = "state_type_too_large", .expected_error = "zui: state type state_type_too_large.History is 80 bytes, but a state slot holds at most 64; store an index into your own storage instead" },
+    .{ .name = "tracer_not_struct", .expected_error = "zui: Tracer must be a struct type, got u32" },
+    .{ .name = "tracer_missing_end", .expected_error = "zui: tracer_missing_end.Tracer does not implement zui.Tracer: missing `zuiEnd`" },
+    .{ .name = "tracer_begin_not_comptime", .expected_error = "zui: tracer_begin_not_comptime.Tracer.zuiBegin must be fn (comptime zone: zui.TraceZone) Span, found fn (trace.TraceZone) u32" },
+    .{ .name = "tracer_end_wrong_signature", .expected_error = "zui: tracer_end_wrong_signature.Tracer.zuiEnd must be fn (u32) void, the span zuiBegin returns, found fn (u64) void" },
+    .{ .name = "tracer_unknown_declaration", .expected_error = "zui: tracer_unknown_declaration.Tracer declares unknown `zuiFrameMark`" },
     .{ .name = "widgets_slider_on_bool", .expected_error = "zui_widgets: slider needs a pointer to an integer or float, got *bool" },
     .{ .name = "reflect_misspelled_option", .expected_error = "no field named 'volum' in struct 'zui_reflect.FieldOptionsOf(reflect_misspelled_option.Settings)'" },
     .{ .name = "reflect_untyped_options", .expected_error = "; declare it as `pub const zui_inspector: zui_reflect.Options(@This())` so misspelled options fail to compile" },
@@ -51,6 +56,19 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{.{ .name = "zui", .module = zui_module }},
     });
+    const tracy_enabled = b.option(bool, "zui-tracy", "Link Tracy's client, so zui_tracy.Tracer traces into the Tracy profiler") orelse false;
+    const tracy_options = b.addOptions();
+    tracy_options.addOption(bool, "enabled", tracy_enabled);
+    const tracy_module = b.addModule("zui_tracy", .{
+        .root_source_file = b.path("zui_tracy/zui_tracy.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zui", .module = zui_module },
+            .{ .name = "zui_tracy_options", .module = tracy_options.createModule() },
+        },
+    });
+    if (tracy_enabled) linkTracy(b, tracy_module);
     const reflect_module = b.addModule("zui_reflect", .{
         .root_source_file = b.path("zui_reflect/zui_reflect.zig"),
         .target = target,
@@ -62,13 +80,13 @@ pub fn build(b: *std.Build) void {
     });
 
     const test_step = b.step("test", "Run the unit tests and the compile-error tests");
-    const tested_modules = [_]*std.Build.Module{ zui_module, testing_module, widgets_module, reflect_module };
+    const tested_modules = [_]*std.Build.Module{ zui_module, testing_module, widgets_module, reflect_module, tracy_module };
     for (tested_modules) |tested_module| {
         const module_tests = b.addTest(.{ .root_module = tested_module });
         test_step.dependOn(&b.addRunArtifact(module_tests).step);
     }
-    for ([_]*std.Build.Module{ widgets_module, reflect_module }) |module_with_widget_tests| {
-        module_with_widget_tests.addImport("zui_testing", testing_module);
+    for ([_]*std.Build.Module{ widgets_module, reflect_module, tracy_module }) |module_with_driven_tests| {
+        module_with_driven_tests.addImport("zui_testing", testing_module);
     }
 
     for (compile_error_cases) |case| {
@@ -113,6 +131,7 @@ pub fn build(b: *std.Build) void {
                 .{ .name = "zui_testing", .module = testing_module },
                 .{ .name = "zui_widgets", .module = widgets_module },
                 .{ .name = "zui_reflect", .module = reflect_module },
+                .{ .name = "zui_tracy", .module = tracy_module },
             },
         }),
     });
@@ -177,7 +196,24 @@ pub fn build(b: *std.Build) void {
     b.step("bench-compare", "Alternate the benchmarks of two commits: -- <base> [<head>] [--rounds <count>]").dependOn(&run_bench_compare.step);
     test_step.dependOn(&bench_compare_executable.step);
 
-    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "tests", "bench", "zui_testing", "zui_widgets", "zui_reflect" };
+    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "tests", "bench", "zui_testing", "zui_widgets", "zui_reflect", "zui_tracy" };
     b.step("fmt", "Format all Zig sources").dependOn(&b.addFmt(.{ .paths = formatted_paths }).step);
     b.step("fmt-check", "Fail if any Zig source is not formatted").dependOn(&b.addFmt(.{ .paths = formatted_paths, .check = true }).step);
+}
+
+/// Tracy is a lazy dependency, fetched only by a build that asks for it.
+fn linkTracy(b: *std.Build, tracy_module: *std.Build.Module) void {
+    const tracy = b.lazyDependency("tracy", .{}) orelse return;
+    const windows = tracy_module.resolved_target.?.result.os.tag == .windows;
+    // With callstacks, a MinGW build's process exits with code 9 after
+    // Tracy shuts down. zui's zones collect no callstacks.
+    const flags: []const []const u8 = if (windows)
+        &.{ "-DTRACY_ENABLE", "-DTRACY_NO_CALLSTACK" }
+    else
+        &.{"-DTRACY_ENABLE"};
+    tracy_module.addCSourceFile(.{ .file = tracy.path("public/TracyClient.cpp"), .flags = flags });
+    tracy_module.link_libcpp = true;
+    if (windows) {
+        for ([_][]const u8{ "ws2_32", "dbghelp", "advapi32", "user32", "secur32" }) |library| tracy_module.linkSystemLibrary(library, .{});
+    }
 }

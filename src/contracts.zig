@@ -1,5 +1,6 @@
 const std = @import("std");
 const style = @import("style.zig");
+const trace = @import("trace.zig");
 
 /// Every `zui`-prefixed declaration of every contract. One that is not
 /// here belongs to no contract, which is almost always a misspelling.
@@ -29,6 +30,26 @@ pub fn checkText(comptime Text: type, comptime FontId: type) void {
     }
     if (@hasDecl(Text, "zui_thread_safe") and @TypeOf(Text.zui_thread_safe) != bool) {
         @compileError("zui: " ++ @typeName(Text) ++ ".zui_thread_safe must be a bool, found " ++ @typeName(@TypeOf(Text.zui_thread_safe)));
+    }
+}
+
+pub fn checkTracer(comptime Tracer: type) void {
+    if (@typeInfo(Tracer) != .@"struct") @compileError("zui: Tracer must be a struct type, got " ++ @typeName(Tracer));
+    checkKnownDeclarations(Tracer);
+    for ([_][]const u8{ "zuiBegin", "zuiEnd" }) |required| {
+        if (!@hasDecl(Tracer, required)) @compileError("zui: " ++ @typeName(Tracer) ++ " does not implement zui.Tracer: missing `" ++ required ++ "`");
+    }
+    const Begin = @TypeOf(Tracer.zuiBegin);
+    const begins_with_comptime_zone = switch (@typeInfo(Begin)) {
+        .@"fn" => |function| function.is_generic and function.params.len == 1 and function.params[0].type == trace.TraceZone,
+        else => false,
+    };
+    if (!begins_with_comptime_zone) {
+        @compileError("zui: " ++ @typeName(Tracer) ++ ".zuiBegin must be fn (comptime zone: zui.TraceZone) Span, found " ++ @typeName(Begin));
+    }
+    const End = fn (@TypeOf(Tracer.zuiBegin(trace.TraceZone.begin_frame))) void;
+    if (@TypeOf(Tracer.zuiEnd) != End) {
+        @compileError("zui: " ++ @typeName(Tracer) ++ ".zuiEnd must be " ++ @typeName(End) ++ ", the span zuiBegin returns, found " ++ @typeName(@TypeOf(Tracer.zuiEnd)));
     }
 }
 
