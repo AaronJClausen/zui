@@ -65,7 +65,10 @@ Implemented so far:
   and reads them back in another process: zui-sokol's tour averages 240
   bytes a frame instead of 24 KB on all but its stress screen, and a
   stream carries its fonts' fingerprint so a reader with other fonts
-  refuses it.
+  refuses it. In tests, `zui_testing.Recording` keeps a session's records
+  and `driver.replay` runs them again, with no loader: a recorded session
+  of the tour replays to identical commands without starting any work,
+  but for the counts its gallery keeps outside its sources.
 - **Stage 6, early:** a text that fits is laid out as one line without
   walking its words, and a whole-string cache makes a warm text one probe
   instead of one per word: 1,000 warm texts lay out in about 100 µs. The

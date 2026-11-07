@@ -26,7 +26,7 @@ Each item says:
 | stage 2 | the code brought to the spec's shape: C5, S1, I4, C6, A5 and `nextFrame` (I2); letter spacing (T3); the environment and host requests (I6); sources in the core (A3); `zui_async` (A4); the backends on the new API, the demo's thumbnails on `KeyedLoads` (C8) | done; the demo idles at 0% CPU |
 | stage 3 | the renderer contract and the generated commands (C1); the host contract and `RecordBuilder` (C2); the conformance suites (C3); `Features` (C7); `zui_app` (C4); the raylib adapter host (H1) | done; the backends are renderers and pass the renderer suite in CI, raylib's host passes the host suite, and the demo runs through `zui_app`, presenting its first frame 288 ms after the process starts; lowering comes with stage 8's commands |
 | stage 4 | the Windows host (H2), with dropped files and lifecycle events in the record; the system material (H8); `zui_app` with the application's own text contract (C9) | done; zui-sokol's tour runs on it unchanged, through `zui_app`, and idles at 0% CPU, and the same code shows Mica or a solid background |
-| stage 5, begun | relay (F2); `zui_wire` (F3) | done; a relayed session replays to the same commands, and zui-sokol's tour goes over the wire at a hundredth of its frames' whole size, but for the screen that moves every box |
+| stage 5, begun | relay (F2); `zui_wire` (F3); replay in `zui_testing` (F4) | done; a recorded session of zui-sokol's tour replays to identical commands without starting any work, and zui-sokol's tour goes over the wire at a hundredth of its frames' whole size, but for the screen that moves every box |
 | stage 6, early | the single-line fast path (T1), the whole-string cache (T2), the box tree's layout passes (P4, in part) | done; warm text and the box tree's layout and emission within their budgets; the box tree's declaration is not (P5) |
 
 No release is tagged; everything is on `main`. From here, work is
@@ -61,7 +61,6 @@ green, and its **Status** line below says which slice is next.
 |---|---|---|---|---|
 | P4. The box tree's layout and emission within budget | 6, early | `src/layout.zig`, `src/emission.zig` | | waiting on P5 |
 | P5. The box tree's declaration within budget | 6, early | `src/context.zig` | L8 | waiting on L8 |
-| F4. Replay in `zui_testing` | 5 | `zui_testing/` | F2 | |
 | F5. Rendering somewhere else | 5 | `zui_wire/`, a wire host and renderer | F3 | |
 | F6. Watching files | 5 | `../zui-host` | H2 | |
 | L8. Static styles | 6 | `src/context.zig`, `src/style.zig` | | |
@@ -137,6 +136,56 @@ Things to know:
 ---
 
 ## Done
+
+### F4. Replay in `zui_testing`
+
+**Done when:** a recorded demo session replays to identical commands
+without starting any work. **Spec.** §6.8, §19.4.
+
+`zui_testing.Recording(Ui)` is a relay listener that keeps each applied
+record, its typed text, dropped paths and deliveries copied into memory
+reserved by `init`; a record that does not fit is dropped whole and
+counted. `Driver.replay(app, declare, record)` runs one frame from a
+record, as `beginFrame` replays it, with no loader between frames.
+
+Replaying the tour showed that `KeyedLoads` did not replay exactly: its
+delivery held only the loads completed at a swap, but a key's
+`.running` status and progress come from the loader's `toStart` and the
+producers between frames, so a replay showed loading tiles as idle. Its
+delivery now also carries, when relayed, the keys loading with the
+progress the frame saw and the abandoned loads that finished; its
+`zuiInject` starts those loads, hands back the abandoned ones, and frees
+what the live loader released through `toRelease` before the frame. The
+live swap pays one store per abandoned load that finishes; the rest is
+in `zuiDelivery`, which runs only with a listener.
+
+Tests: `zui_testing` records three frames of two sources and typed text
+and replays them in a fresh context whose sources hold other values;
+a recording drops a record too large for it whole; and `zui_async`'s
+gallery session, a grid of tiles loaded by key with loads that finish a
+frame later, a battery level and a log, replays to the same commands
+with no load started.
+
+The demo: in zui-sokol's tour at `ed00845`, declared headlessly with
+real fonts and its real loaders (tiles loaded on threads, telemetry), 30
+frames on each of its ten screens recorded with `Recording`, then
+replayed into a fresh context and a fresh application whose loaders
+never run: 300 of 300 frames identical, compared through
+`zui_wire.writeKeyFrame`'s bytes, with no wake during the replay, once
+the gallery's legend is left out. That legend shows counts its loads
+keep in atomics outside its sources (`started`, `completed`, `glitched`,
+`abandoned`), which no record carries, so with it 29 gallery frames
+differ in those numbers: the application's side of §6.8, which SPEC.md
+now names. The tour's relayed records grew from 40 to 79 bytes a frame
+on the wire with the keys loading.
+
+Decided here:
+- **Replay is a `Driver` method** taking one record, so a test can
+  inspect each replayed frame, and `Recording` is the listener that keeps
+  them; the spec's `replay(records)` is that loop.
+- **A source delivers what its loader changes between frames,** when
+  relayed, since a replay runs no loader; `KeyedLoads` is the one default
+  source whose view the loader changes.
 
 ### F3. `zui_wire`
 
@@ -1197,14 +1246,7 @@ Done: H2 and H8 are in *Done*.
 ## Stage 5: the wire
 
 F1, feeds, is retired: sources (A3) are the mechanism for outside data.
-F2 and F3 are in *Done*.
-
-### F4. Replay in `zui_testing`
-
-**Done when:** a recorded demo session replays to identical commands
-without starting any work.
-
-**Spec.** §6.8, §19.4.
+F2, F3 and F4 are in *Done*.
 
 ### F5. Rendering somewhere else
 
@@ -1672,6 +1714,8 @@ Deliberate, and each a reason to choose zui:
 | A frame on the wire (F3) | number, parameters, host requests and commands, as changes from the last frame written; hit regions and semantics stay with the context |
 | A wire message beyond the decoder's capacity (F3) | `error.CapacityExceeded`, since a delta cannot be applied in part |
 | Serializing a payload with pointers (F3) | `zuiSerialize(self, serializer)` and `zuiDeserialize(deserializer)`, taking the wire's types as `anytype`, so a source never imports `zui_wire` |
+| Replay in tests (F4) | `Recording(Ui)`, a relay listener, and `Driver.replay(app, declare, record)`, one frame per record |
+| What the loader changes between frames (F4) | delivered by the source when relayed, so a replay without a loader shows it: `KeyedLoads` relays the keys loading and the abandoned loads that finished |
 
 ### Open
 

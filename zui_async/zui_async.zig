@@ -600,10 +600,19 @@ pub fn KeyedLoads(comptime Key: type, comptime Result: type, comptime options: K
 
         pub const Completion = struct { key: Key, result: Result };
 
-        /// The keys whose loads this frame's swap completed.
+        pub const Loading = struct { key: Key, progress: Progress };
+
+        /// The keys whose loads this frame's swap completed. Relayed, it
+        /// also holds what the loader changed between frames, which a
+        /// replay has no loader to change: the keys loading, and the
+        /// abandoned loads that finished.
         pub const Delivery = struct {
             completions: [capacity]Completion = undefined,
             len: u32 = 0,
+            loading: [capacity]Loading = undefined,
+            loading_len: u32 = 0,
+            abandoned: [capacity]Key = undefined,
+            abandoned_len: u32 = 0,
 
             pub const empty: Delivery = .{};
 
@@ -618,15 +627,32 @@ pub fn KeyedLoads(comptime Key: type, comptime Result: type, comptime options: K
                 return self.completions[0..self.len];
             }
 
-            /// Writes only the completions taken, for `zui_wire`.
+            pub fn loadingSlice(self: *const Delivery) []const Loading {
+                return self.loading[0..self.loading_len];
+            }
+
+            pub fn abandonedSlice(self: *const Delivery) []const Key {
+                return self.abandoned[0..self.abandoned_len];
+            }
+
+            /// Writes only the entries taken, for `zui_wire`.
             pub fn zuiSerialize(self: *const Delivery, serializer: anytype) !void {
                 try serializer.write(self.slice());
+                try serializer.write(self.loadingSlice());
+                try serializer.write(self.abandonedSlice());
             }
 
             pub fn zuiDeserialize(deserializer: anytype) !Delivery {
                 const completions = try deserializer.read([]const Completion);
-                if (completions.len > capacity) return error.Malformed;
-                return .init(completions);
+                const loading = try deserializer.read([]const Loading);
+                const abandoned = try deserializer.read([]const Key);
+                if (completions.len > capacity or loading.len > capacity or abandoned.len > capacity) return error.Malformed;
+                var delivery: Delivery = .init(completions);
+                delivery.loading_len = @intCast(loading.len);
+                @memcpy(delivery.loading[0..loading.len], loading);
+                delivery.abandoned_len = @intCast(abandoned.len);
+                @memcpy(delivery.abandoned[0..abandoned.len], abandoned);
+                return delivery;
             }
         };
 
@@ -728,6 +754,8 @@ pub fn KeyedLoads(comptime Key: type, comptime Result: type, comptime options: K
             generation: if (safety) u32 else void = if (safety) 0 else {},
             delivered: [capacity]u32 = undefined,
             delivered_count: u32 = 0,
+            abandoned_finished: [capacity]Key = undefined,
+            abandoned_finished_count: u32 = 0,
             releasing: if (options.owns_resources) [capacity]u32 else void = undefined,
             releasing_count: u32 = 0,
             one_reader: OneReader = .{},
@@ -925,6 +953,7 @@ pub fn KeyedLoads(comptime Key: type, comptime Result: type, comptime options: K
 
         pub fn zuiSwap(self: *Self) void {
             self.reader.delivered_count = 0;
+            self.reader.abandoned_finished_count = 0;
             if (!self.shared.fresh.load(.monotonic)) return;
             _ = self.shared.fresh.swap(false, .acq_rel);
             var tail = self.reader.completion_tail;
@@ -939,7 +968,11 @@ pub fn KeyedLoads(comptime Key: type, comptime Result: type, comptime options: K
                         self.reader.delivered[self.reader.delivered_count] = slot;
                         self.reader.delivered_count += 1;
                     },
-                    .abandoned => self.handBack(slot),
+                    .abandoned => {
+                        self.reader.abandoned_finished[self.reader.abandoned_finished_count] = self.slots[slot].key;
+                        self.reader.abandoned_finished_count += 1;
+                        self.handBack(slot);
+                    },
                     .free, .wanted, .ready, .releasing => unreachable,
                 }
             }
@@ -962,12 +995,41 @@ pub fn KeyedLoads(comptime Key: type, comptime Result: type, comptime options: K
             for (self.reader.delivered[0..self.reader.delivered_count], delivery.completions[0..delivery.len]) |slot, *completion| {
                 completion.* = .{ .key = self.slots[slot].key, .result = self.producer_slots[slot].result };
             }
+            delivery.loading_len = 0;
+            for (self.slots) |slot| {
+                if (slot.state != .loading) continue;
+                delivery.loading[delivery.loading_len] = .{ .key = slot.key, .progress = if (has_progress) slot.progress_seen else {} };
+                delivery.loading_len += 1;
+            }
+            delivery.abandoned_len = self.reader.abandoned_finished_count;
+            @memcpy(delivery.abandoned[0..delivery.abandoned_len], self.reader.abandoned_finished[0..delivery.abandoned_len]);
         }
 
-        /// Makes each recorded key ready with its recorded result. Replay
-        /// must not run loads alongside.
+        /// Makes each recorded key ready with its recorded result, and does
+        /// what the loader did between the recorded frames: starts the
+        /// recorded loads, with their progress, and frees what it released.
+        /// Replay must not run loads alongside.
         pub fn zuiInject(self: *Self, delivery: *const Delivery) void {
             self.reader.delivered_count = 0;
+            if (options.owns_resources) {
+                while (self.reader.releasing_count != 0) {
+                    self.reader.releasing_count -= 1;
+                    self.freeSlot(self.reader.releasing[self.reader.releasing_count]);
+                }
+            }
+            for (delivery.abandonedSlice()) |key| {
+                for (&self.slots, 0..) |*slot, index| {
+                    if (slot.state != .abandoned or !std.meta.eql(slot.key, key)) continue;
+                    self.handBack(@intCast(index));
+                    break;
+                }
+            }
+            for (delivery.loadingSlice()) |loading| {
+                const slot = if (self.findEntry(loading.key)) |position| self.index[position] - 1 else self.takeFreeSlot(loading.key, .loading) orelse continue;
+                if (self.slots[slot].state == .wanted) self.reader.wanted_count -= 1;
+                self.slots[slot].state = .loading;
+                if (has_progress) self.slots[slot].progress_seen = loading.progress;
+            }
             for (delivery.slice()) |completion| {
                 const slot = if (self.findEntry(completion.key)) |position| self.index[position] - 1 else self.takeFreeSlot(completion.key, .ready) orelse continue;
                 if (self.slots[slot].state == .wanted) self.reader.wanted_count -= 1;

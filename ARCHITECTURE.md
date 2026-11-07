@@ -156,7 +156,7 @@ The stage is the one in SPEC.md §21 that builds it.
 | the standard loop, capabilities and fallbacks | `zui_app` | 3 |
 | system materials (Mica, vibrancy) | host asks the OS; renderer clears to transparent | 4 |
 | per-monitor scale, lifecycle, signals | host, as record parameters and events | 4 |
-| relay, replay, remote rendering | core relay; `zui_wire`; `zui_testing.replay` | 5 |
+| relay, replay, remote rendering | core relay; `zui_wire`; `zui_testing`'s `Recording` and `Driver.replay` | 5 |
 | hot reload of themes and assets | a file-watching source from the host, plus `zui_debug` | 5 |
 | whole-string text cache, line-break segmentation | core caches; segmentation through the text contract | 6 |
 | grow basis, aspect ratio, right-to-left, wrap, floating options | core layout | 6 |
@@ -202,7 +202,8 @@ landed, and zui-sokol's renderer draws into its `win32` window, composed
 with alpha. From stage 5, relay has landed: `relayTo` hands a listener
 each applied record with its deliveries; and so has `zui_wire`, which
 writes records and frames, each frame as changes from the last, and reads
-them back. From stage 6, the single-line
+them back. `zui_testing` records a session's records and replays them
+(`Recording`, `Driver.replay`). From stage 6, the single-line
 fast path and the whole-string cache have landed.
 
 The code and the spec still differ in these places, each closed by the

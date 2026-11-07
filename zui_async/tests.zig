@@ -528,3 +528,88 @@ test "the driver delivers to the default sources without threads" {
     try testing.expectEqual(ThumbnailLoads.Status{ .ready = .{ .id = 9 } }, app.thumbnail);
     try testing.expectEqual(@as(?f32, 0.5), app.battery);
 }
+
+const TileLoads = zui_async.KeyedLoads(u64, DecodeError!u32, .{ .capacity = 16 });
+const GallerySources = struct {
+    battery: zui_async.Latest(f32) = .{},
+    log: zui_async.Stream(u32, .{ .capacity = 8 }) = .{},
+    tiles: TileLoads = .{},
+};
+const GalleryUi = zui.Context(.{ .limits = .{ .max_elements = 64, .max_render_commands = 128 }, .Sources = GallerySources });
+
+/// A grid of tiles loaded by key, as the demo's thumbnail grid is: the
+/// declaration asks, and the loader starts what it asked for.
+const Gallery = struct {
+    sources: GallerySources = .{},
+    loads_started: u32 = 0,
+    running: [16]TileLoads.Load = undefined,
+    running_count: usize = 0,
+    log_total: u32 = 0,
+
+    fn declare(gallery: *Gallery, ui: *GalleryUi) void {
+        const level = ui.source(.battery).get() orelse 1;
+        var log = ui.source(.log).items();
+        while (log.next()) |line| gallery.log_total += line.*;
+        ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .grow_both, .child_gap = 2 } });
+        ui.box(.{ .decoration = .{ .background = .rgb(0x00ff00) }, .layout = .{ .sizing = .{ .width = .fixed(100 * level), .height = .fixed(4) } } });
+        for (0..12) |tile| {
+            const color: zui.Color = switch (ui.source(.tiles).get(tile)) {
+                .idle => .rgb(0x404040),
+                .running => .rgb(0x808080),
+                .ready => |texture| .{ .r = @intCast(texture % 256), .g = 0, .b = 0 },
+                .failed, .canceled => .rgb(0xff0000),
+            };
+            ui.box(.{ .id = .indexed("tile", @intCast(tile)), .decoration = .{ .background = color }, .layout = .{ .sizing = .{ .width = .fixed(20), .height = .fixed(@floatFromInt(4 + gallery.log_total % 7)) } } });
+        }
+        ui.close();
+    }
+
+    /// Each load finishes at the loader's next call, so frames between
+    /// see it running.
+    fn load(gallery: *Gallery, waker: zui.Waker) void {
+        for (gallery.running[0..gallery.running_count]) |tile| tile.finish(if (tile.key == 7) error.Corrupt else @intCast(tile.key * 10));
+        gallery.running_count = 0;
+        var to_start = gallery.sources.tiles.toStart(waker);
+        while (to_start.next()) |tile| {
+            gallery.loads_started += 1;
+            gallery.running[gallery.running_count] = tile;
+            gallery.running_count += 1;
+        }
+    }
+};
+
+test "a recorded gallery session replays to identical commands without starting any work" {
+    var counter: WakeCounter = .{};
+    var ui: GalleryUi = try .init(testing.allocator, testing.io);
+    defer ui.deinit(testing.allocator);
+    var gallery: Gallery = .{};
+    var driver: zui_testing.Driver(GalleryUi) = .{ .ui = &ui, .sources = &gallery.sources };
+    var recording: zui_testing.Recording(GalleryUi) = try .init(testing.allocator, .{ .records = 8 });
+    defer recording.deinit(testing.allocator);
+    ui.relayTo(recording.listener());
+
+    var drawn: [8][128]GalleryUi.RenderCommand = undefined;
+    var drawn_counts: [8]usize = undefined;
+    for (&drawn, &drawn_counts, 0..) |*commands, *count, index| {
+        if (index == 2) _ = gallery.sources.battery.publish(0.5);
+        if (index % 3 == 1) _ = try gallery.sources.log.publish(@intCast(index));
+        const frame = try driver.frame(&gallery, Gallery.declare, &.{});
+        count.* = frame.commands().len;
+        @memcpy(commands[0..count.*], frame.commands());
+        gallery.load(counter.waker());
+    }
+    ui.relayTo(null);
+    try testing.expectEqual(12, gallery.loads_started);
+    try testing.expectEqual(0, recording.dropped);
+
+    var replayed_ui: GalleryUi = try .init(testing.allocator, testing.io);
+    defer replayed_ui.deinit(testing.allocator);
+    var replayed: Gallery = .{};
+    var replay_driver: zui_testing.Driver(GalleryUi) = .{ .ui = &replayed_ui, .sources = &replayed.sources };
+    for (recording.records(), drawn, drawn_counts) |*record, commands, count| {
+        const frame = try replay_driver.replay(&replayed, Gallery.declare, record);
+        try testing.expectEqualSlices(GalleryUi.RenderCommand, commands[0..count], frame.commands());
+    }
+    try testing.expectEqual(0, replayed.loads_started);
+    try testing.expectEqual(gallery.log_total, replayed.log_total);
+}

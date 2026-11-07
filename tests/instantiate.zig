@@ -407,7 +407,27 @@ export fn zuiCheckDriver() u32 {
     _ = driver.focus(&clicks, declareButton, .of("button")) catch return 0;
     _ = driver.pressKeys(&clicks, declareButton, &.{.enter}) catch return 0;
     _ = driver.typeText(&clicks, declareButton, "typed") catch return 0;
-    return clicks;
+    return clicks + replayDriven();
+}
+
+var recording_memory: [8 * 1024]u8 = undefined;
+
+fn replayDriven() u32 {
+    var fixed: std.heap.FixedBufferAllocator = .init(&recording_memory);
+    var recording = zui_testing.Recording(WireUi).init(fixed.allocator(), .{ .records = 2, .events = 4, .bytes = 16 }) catch return 0;
+    var ui = WireUi.initBuffer(&wire_ui_memory, undefined, &check_text) catch return 0;
+    var driver: zui_testing.Driver(WireUi) = .{ .ui = &ui, .sources = &wire_sources };
+    ui.relayTo(recording.listener());
+    var app: u8 = 0;
+    _ = driver.typeText(&app, declareWire, "x") catch return 0;
+    ui.relayTo(null);
+    for (recording.records()) |*record| _ = driver.replay(&app, declareWire, record) catch return 0;
+    return @intCast(recording.records().len + recording.dropped);
+}
+
+fn declareWire(_: *u8, ui: *WireUi) void {
+    ui.text(ui.typedText(), .{});
+    _ = ui.source(.thumbnails).get(1);
 }
 
 const CheckTracer = struct {

@@ -238,6 +238,134 @@ pub fn Driver(comptime Ui: type) type {
             self.ui.requestFocus(element_id);
             return self.frame(app, declare, &.{});
         }
+
+        /// One frame from a relayed record, applied as it was: its
+        /// parameters, its events and, with sources, its deliveries, which
+        /// each source takes instead of swapping. No loader runs between
+        /// replayed frames, so a replay starts no work. The driver's clock
+        /// continues from the record's.
+        ///
+        /// ```zig
+        /// for (recording.records()) |*record| _ = try driver.replay(&app, App.declare, record);
+        /// ```
+        pub fn replay(self: *Self, app: anytype, comptime declare: anytype, record: *const Ui.FrameRecord) !*const Ui.Frame {
+            self.now = record.params.now;
+            if (Ui.has_sources) {
+                const sources = self.sources orelse @panic("zui_testing: this Driver's context has sources; set `.sources = &app.sources`");
+                self.ui.beginFrame(record, sources);
+            } else {
+                self.ui.beginFrame(record);
+            }
+            declare(app, self.ui);
+            const ended = self.ui.endFrame();
+            self.ui.release(ended);
+            try ended.diagnostics.check();
+            return ended;
+        }
+    };
+}
+
+/// Keeps each record a context applies, as its relay listener, in memory
+/// reserved by `init`, for `Driver.replay`. A record that does not fit is
+/// dropped whole and counted in `dropped`.
+///
+/// ```zig
+/// var recording: zui_testing.Recording(Ui) = try .init(gpa, .{ .records = 600 });
+/// defer recording.deinit(gpa);
+/// ui.relayTo(recording.listener());
+/// ```
+pub fn Recording(comptime Ui: type) type {
+    return struct {
+        const Self = @This();
+        const DeliveriesSlice = if (Ui.has_sources) []Ui.Deliveries else void;
+
+        pub const Capacity = struct {
+            records: u32,
+            events: u32 = 4096,
+            /// Typed text and dropped paths.
+            bytes: u32 = 64 * 1024,
+        };
+
+        kept: []Ui.FrameRecord,
+        deliveries: DeliveriesSlice,
+        events: []zui.Event,
+        bytes: []u8,
+        record_count: usize = 0,
+        event_count: usize = 0,
+        byte_count: usize = 0,
+        dropped: u32 = 0,
+
+        pub fn init(gpa: std.mem.Allocator, capacity: Capacity) std.mem.Allocator.Error!Self {
+            const kept = try gpa.alloc(Ui.FrameRecord, capacity.records);
+            errdefer gpa.free(kept);
+            const deliveries: DeliveriesSlice = if (Ui.has_sources) try gpa.alloc(Ui.Deliveries, capacity.records) else {};
+            errdefer if (Ui.has_sources) gpa.free(deliveries);
+            const events = try gpa.alloc(zui.Event, capacity.events);
+            errdefer gpa.free(events);
+            return .{ .kept = kept, .deliveries = deliveries, .events = events, .bytes = try gpa.alloc(u8, capacity.bytes) };
+        }
+
+        pub fn deinit(self: *Self, gpa: std.mem.Allocator) void {
+            gpa.free(self.bytes);
+            gpa.free(self.events);
+            if (Ui.has_sources) gpa.free(self.deliveries);
+            gpa.free(self.kept);
+        }
+
+        pub fn listener(self: *Self) Ui.Relay {
+            return .{ .context = self, .relayFn = keep };
+        }
+
+        /// In the order they were applied.
+        pub fn records(self: *const Self) []const Ui.FrameRecord {
+            return self.kept[0..self.record_count];
+        }
+
+        fn keep(context: *anyopaque, record: *const Ui.FrameRecord) void {
+            const self: *Self = @ptrCast(@alignCast(context));
+            var bytes_needed: usize = 0;
+            for (record.events) |event| bytes_needed += borrowedBytes(event).len;
+            const fits = self.record_count < self.kept.len and
+                record.events.len <= self.events.len - self.event_count and
+                bytes_needed <= self.bytes.len - self.byte_count;
+            if (!fits) {
+                self.dropped +|= 1;
+                return;
+            }
+            const events = self.events[self.event_count..][0..record.events.len];
+            for (record.events, events) |event, *kept_event| kept_event.* = switch (event) {
+                .text => |text| .{ .text = self.copy(text) },
+                .files_dropped => |drop| copied: {
+                    var copied_drop = drop;
+                    copied_drop.path_list = self.copy(drop.path_list);
+                    break :copied .{ .files_dropped = copied_drop };
+                },
+                else => event,
+            };
+            self.event_count += events.len;
+            var kept: Ui.FrameRecord = .{ .params = record.params, .events = events };
+            if (Ui.has_sources) {
+                self.deliveries[self.record_count] = record.deliveries.?.*;
+                kept.deliveries = &self.deliveries[self.record_count];
+            }
+            self.kept[self.record_count] = kept;
+            self.record_count += 1;
+        }
+
+        fn borrowedBytes(event: zui.Event) []const u8 {
+            return switch (event) {
+                .text => |text| text,
+                .files_dropped => |drop| drop.path_list,
+                else => &.{},
+            };
+        }
+
+        fn copy(self: *Self, bytes: []const u8) []const u8 {
+            const kept = self.bytes[self.byte_count..][0..bytes.len];
+            @memcpy(kept, bytes);
+            self.byte_count += bytes.len;
+            return kept;
+        }
     };
 }
 
@@ -932,6 +1060,61 @@ test "the driver swaps the application's sources, or delivers what a test names"
     _ = try driver.frame(&reader, QueueReader.declare, &.{});
     try std.testing.expectEqualSlices(u64, &.{}, reader.first);
     try std.testing.expectEqualSlices(u64, &.{3}, reader.second);
+}
+
+test "a recorded session replays to what each source delivered, and its typed text" {
+    var ui: SourcesUi = try .init(std.testing.allocator, std.testing.io);
+    defer ui.deinit(std.testing.allocator);
+    var reader: QueueReader = .{};
+    var driver: Driver(SourcesUi) = .{ .ui = &ui, .sources = &reader.sources };
+    var recording: Recording(SourcesUi) = try .init(std.testing.allocator, .{ .records = 4 });
+    defer recording.deinit(std.testing.allocator);
+    ui.relayTo(recording.listener());
+
+    var seen_items: [3][2][4]u64 = undefined;
+    var seen_counts: [3][2]usize = undefined;
+    for (0..3) |index| {
+        _ = try reader.sources.first.publish(index);
+        if (index == 1) _ = try reader.sources.second.publish(10);
+        _ = try driver.frame(&reader, QueueReader.declare, &.{.{ .text = "typed" }});
+        for ([_][]const u64{ reader.first, reader.second }, &seen_items[index], &seen_counts[index]) |items, *storage, *count| {
+            @memcpy(storage[0..items.len], items);
+            count.* = items.len;
+        }
+    }
+    ui.relayTo(null);
+    try std.testing.expectEqual(3, recording.records().len);
+    try std.testing.expectEqual(0, recording.dropped);
+
+    var replayed_ui: SourcesUi = try .init(std.testing.allocator, std.testing.io);
+    defer replayed_ui.deinit(std.testing.allocator);
+    var replayed: QueueReader = .{};
+    var replay_driver: Driver(SourcesUi) = .{ .ui = &replayed_ui, .sources = &replayed.sources };
+    _ = try replayed.sources.first.publish(99);
+    for (recording.records(), seen_items, seen_counts) |*record, items, counts| {
+        _ = try replay_driver.replay(&replayed, QueueReader.declare, record);
+        try std.testing.expectEqualStrings("typed", replayed_ui.typedText());
+        try std.testing.expectEqualSlices(u64, items[0][0..counts[0]], replayed.first);
+        try std.testing.expectEqualSlices(u64, items[1][0..counts[1]], replayed.second);
+    }
+    try std.testing.expectEqual(recording.records()[2].params.now, replay_driver.now);
+}
+
+test "a recording drops a record that does not fit, whole" {
+    var text_contract: TestText = .{};
+    var ui = try initTestUi(&text_contract);
+    defer ui.deinit(std.testing.allocator);
+    var driver: Driver(TestUi) = .{ .ui = &ui };
+    var recording: Recording(TestUi) = try .init(std.testing.allocator, .{ .records = 4, .bytes = 4 });
+    defer recording.deinit(std.testing.allocator);
+    ui.relayTo(recording.listener());
+    var counter: Counter = .{};
+    _ = try driver.frame(&counter, Counter.declare, &.{.{ .text = "fits" }});
+    _ = try driver.frame(&counter, Counter.declare, &.{.{ .text = "too long" }});
+    _ = try driver.frame(&counter, Counter.declare, &.{});
+    try std.testing.expectEqual(2, recording.records().len);
+    try std.testing.expectEqual(1, recording.dropped);
+    try std.testing.expectEqualStrings("fits", recording.records()[0].events[0].text);
 }
 
 test {

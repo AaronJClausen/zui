@@ -500,7 +500,10 @@ pub fn Relay(comptime Record: type) type {   // as `Waker`: the listener's point
   and declaration starts no work (§14.1), so replay does no real I/O.
 - **The application's side.** Replay is exact if declaration reads the
   outside world only through the record and its sources: no clock, random
-  number or file read that bypasses them. This is documented, not
+  number or file read that bypasses them, and no state its own work
+  keeps outside its sources, such as a count of loads finished. A source
+  delivers whatever its view shows that the loader changed between frames,
+  as `KeyedLoads` delivers the keys loading. This is documented, not
   enforced. Text measurement is the one outside call during a frame; it
   is deterministic for a given set of fonts, which the wire format
   fingerprints (§19.6).
@@ -1693,7 +1696,7 @@ rides on, so an application that replaces it knows what to implement.
 | `Latest(T)` | the newest value only: battery, sync state, progress | one | `?T` if a new one was swapped |
 | `Stream(T, .{ .capacity, .producers })` | every item, in order: messages, log lines | one or many | the items swapped this frame |
 | `Task(Result, .{ .Progress })` | one piece of work with a status | one run at a time | `?Status` if it changed |
-| `KeyedLoads(Key, Result, .{ .capacity, .unread_frames_before_release, .owns_resources, .Progress })` | many keyed loads driven by demand: thumbnails, remote rows, search results per query | many | keys completed this frame, with status |
+| `KeyedLoads(Key, Result, .{ .capacity, .unread_frames_before_release, .owns_resources, .Progress })` | many keyed loads driven by demand: thumbnails, remote rows, search results per query | many | keys completed this frame, with status; relayed, also the keys loading, with progress, and abandoned loads that finished, which the loader changed between frames |
 
 - **`Latest`** is a triple buffer and one atomic byte (middle index and a
   fresh bit). A publish exchanges the producer's back buffer with the
@@ -1837,7 +1840,12 @@ edit (the message quotes the `.hidden = true` line that fixes it).
   takes them as `.sources = &app.sources`; in `frameDelivering`, a source
   not named receives nothing, which is `null` for an optional `Delivery`
   and `Delivery.empty` otherwise.
-- **`replay(records)`**: drives an application from relayed records.
+- **`Recording(Ui)`** keeps each record a context applies, as its relay
+  listener, in memory reserved by `init`; a record that does not fit is
+  dropped whole and counted. **`driver.replay(app, declare, record)`**
+  runs one frame from a recorded record, its deliveries injected and no
+  loader between frames, so a recorded session replays to the same
+  commands without starting any work.
 - **`snapshot` / `expectSnapshot`**: one line per command, for named ids
   only, defaults omitted, identical in debug and release.
 - **`checkCommands`**: finite bounds, nondecreasing layers, balanced
