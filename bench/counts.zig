@@ -17,7 +17,7 @@ const warmup_frames = 4;
 const counted_frames = 10;
 const growth_tolerance = 1.02;
 
-const Scenarios = .{ scenes.BoxTree, scenes.TextWall, scenes.TextWallCold, scenes.DeepTree, scenes.WideTree, scenes.DocumentsView, scenes.DeepTreeWithIdleSources };
+const Scenarios = .{ scenes.BoxTree, scenes.TextWall, scenes.TextWallCold, scenes.DeepTree, scenes.WideTree, scenes.DocumentsView, scenes.DeepTreeWithIdleSources, scenes.DeepTreeWithIdleAsyncSources };
 
 const Phase = enum {
     /// `beginFrame` and the scene's declaration.
@@ -142,8 +142,8 @@ pub fn main(init: std.process.Init) !void {
     var stdout_buffer: [4096]u8 = undefined;
     var stdout_writer = Io.File.stdout().writer(io, &stdout_buffer);
     const out = &stdout_writer.interface;
-    try out.print("{s:<40} {s:>14}\n", .{ "scenario, phase", "instr/frame" });
-    for (counts.items) |count| try out.print("{s:<40} {d:>14}\n", .{ count.key, count.instructions_per_frame });
+    try out.print("{s:<48} {s:>14}\n", .{ "scenario, phase", "instr/frame" });
+    for (counts.items) |count| try out.print("{s:<48} {d:>14}\n", .{ count.key, count.instructions_per_frame });
     try out.flush();
 
     if (options.json_path) |path| try writeJson(io, path, counts.items);
@@ -176,13 +176,13 @@ fn compare(io: Io, arena: std.mem.Allocator, out: *Io.Writer, path: []const u8, 
     var grew = false;
     for (counts) |count| {
         const before = baseline.map.get(count.key) orelse {
-            try out.print("  {s:<40} {d:>14}  new\n", .{ count.key, count.instructions_per_frame });
+            try out.print("  {s:<48} {d:>14}  new\n", .{ count.key, count.instructions_per_frame });
             continue;
         };
         const ratio = @as(f64, @floatFromInt(count.instructions_per_frame)) / @as(f64, @floatFromInt(before));
         const too_much = ratio > growth_tolerance;
         if (too_much) grew = true;
-        try out.print("  {s:<40} {d:>14} -> {d:>14}  {s}{d:.2}%{s}\n", .{
+        try out.print("  {s:<48} {d:>14} -> {d:>14}  {s}{d:.2}%{s}\n", .{
             count.key,
             before,
             count.instructions_per_frame,

@@ -65,6 +65,20 @@ jobs:
           version: ${{ env.ZIG_VERSION }}
       - run: zig build test -Dzui-tracy=true
 
+  thread-sanitizer:
+    name: Test (ThreadSanitizer)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      # ThreadSanitizer cannot place its shadow memory with the runner's
+      # default ASLR entropy, and exits before any test runs.
+      - run: sudo sysctl vm.mmap_rnd_bits=28
+      - run: zig build test -Dzui-sanitize-thread=true
+
   test-32-bit:
     name: Test (32-bit x86 Linux)
     runs-on: ubuntu-latest

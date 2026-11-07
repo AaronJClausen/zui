@@ -49,14 +49,19 @@ Implemented so far:
   of its host; and sources: application memory that producers publish
   into from any thread, swapped into each frame at `beginFrame`, read
   with `ui.source(.field)`, and reporting what the frame read so the
-  application's loader knows what to start or release.
+  application's loader knows what to start or release; and `zui_async`,
+  the default sources: `Latest` for the newest value, `Stream` for every
+  item in order, `Task` for one piece of work with its status, and
+  `KeyedLoads` for many loads driven by what the UI asks for, each
+  checked by `zui_testing.expectSourceConforms` under ThreadSanitizer and
+  on a single-threaded `Io`.
 
 The reference backend and demo application live in
 [zui-raylib](https://github.com/AaronJClausen/zui-raylib). It and the
 other backends still use the API from before stage 2.
 
-Next, in the order of SPEC.md §21: the rest of stage 2: the default
-sources in `zui_async`, and the backends moved to the new API. After that come
+Next, in the order of SPEC.md §21: the rest of stage 2, the backends
+moved to the new API. After that come
 the renderer and host contracts with `zui_app`, a native Windows host, the
 wire format, and from there text, layout, gestures, effects, an
 inspector and accessibility, more hosts, motion and text editing.
@@ -84,7 +89,26 @@ waitFor(ui.nextFrame());
 
 With `.Sources = AppSources` in the `Config`, a struct whose fields are
 sources (SPEC.md §14), `beginFrame` and `nextFrame` also take
-`&app.sources`, and declaration reads them with `ui.source(.quotes)`.
+`&app.sources`, and declaration reads them with `ui.source(.quotes)`:
+
+```zig
+const AppSources = struct {
+    battery: zui_async.Latest(f32) = .{},
+    thumbnails: zui_async.KeyedLoads(u64, LoadError!Texture, .{ .capacity = 128, .owns_resources = true }) = .{},
+};
+
+// Any thread:
+waker.wakeIf(app.sources.battery.publish(0.8));
+
+// Declaration asks; it starts nothing:
+const thumbnail = ui.source(.thumbnails).get(path_hash);
+
+// The loader, after endFrame, starts what was asked for and frees what went unread:
+var to_start = app.sources.thumbnails.toStart(waker);
+while (to_start.next()) |load| group.async(io, loadThumbnail, .{load});
+var to_release = app.sources.thumbnails.toRelease();
+while (to_release.next()) |released| if (released) |texture| unload(texture) else |_| {};
+```
 
 ## Requirements
 
@@ -95,9 +119,10 @@ sources (SPEC.md §14), `beginFrame` and `nextFrame` also take
 | Command | What it does |
 |---|---|
 | `zig build test` | run the unit, golden, randomized-invariant, widget and compile-error tests (add `-Doptimize=ReleaseSafe` or `ReleaseFast` to test other modes) |
-| `zig build check` | compile one full frame, every widget and the test driver without producing output; add `-Dtarget=wasm32-freestanding` to check another target |
+| `zig build check` | compile one full frame, every widget, the default sources and the test driver without producing output; add `-Dtarget=wasm32-freestanding` to check another target |
 | `zig build test -Dzui-debug=true` | keep id names, so duplicate-id and unbalanced-tree panics name the element |
 | `zig build test -Dzui-tracy=true` | fetch Tracy and test `zui_tracy` with its client linked |
+| `zig build test -Dzui-sanitize-thread=true` | run the tests under ThreadSanitizer, through LLVM, on Linux; ThreadSanitizer needs ASLR entropy of at most 28 bits (`sysctl vm.mmap_rnd_bits=28`), or a container started with `--security-opt seccomp=unconfined` |
 | `zig build bench` | run the benchmarks in ReleaseFast; add `-- --check-targets` to fail on a missed performance target, or `-- --compare old.json` after `-- --json old.json` to check for regressions |
 | `zig build counts` | count each benchmark's instructions per frame under Callgrind, on x86_64 Linux with Valgrind (on Windows, in a Linux container); add `-- --json counts.json` to save them and `-- --compare counts.json` to fail on more than 2% growth |
 | `zig build bench-compare -- main` | run the benchmarks of `main` and of the working tree alternately, and report each time's median change and its spread; `-- <base> <head>` compares two commits (SPEC.md §20.3) |
@@ -117,6 +142,8 @@ CI runs:
   `zig build bench-compare`;
 - instruction counts of this commit and its parent, failing on more than
   2% growth;
+- the tests under ThreadSanitizer, which stress every `zui_async` source
+  with producers on other threads;
 - `zui_tracy` with Tracy's client, on Linux, Windows and macOS.
 
 Those targets exist to catch assumptions about the host machine early:
@@ -153,6 +180,7 @@ zig fetch --save git+https://github.com/AaronJClausen/zui
 const zui = b.dependency("zui", .{ .target = target, .optimize = optimize });
 exe.root_module.addImport("zui", zui.module("zui"));
 // Optional:
+exe.root_module.addImport("zui_async", zui.module("zui_async"));
 exe.root_module.addImport("zui_widgets", zui.module("zui_widgets"));
 exe.root_module.addImport("zui_reflect", zui.module("zui_reflect"));
 tests.root_module.addImport("zui_testing", zui.module("zui_testing"));

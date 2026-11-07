@@ -5,6 +5,7 @@
 const std = @import("std");
 const zui = @import("zui");
 const zui_testing = @import("zui_testing");
+const zui_async = @import("zui_async");
 const zui_widgets = @import("zui_widgets");
 const zui_reflect = @import("zui_reflect");
 const zui_tracy = @import("zui_tracy");
@@ -272,4 +273,66 @@ export fn zuiCheckSources(published: u64) u64 {
     ui.release(second);
     const pending = @intFromBool(ui.nextFrame(&check_sources) == .immediately);
     return shown +% ui.framesSinceRead(.catalog) +% ui.framesSinceRead(.prices) +% second.diagnostics.refused_publishes +% pending;
+}
+
+const AsyncCatalog = zui_async.Task(error{Offline}!u32, .{ .Progress = f32 });
+const AsyncThumbnails = zui_async.KeyedLoads(u64, error{Corrupt}!u32, .{ .capacity = 8, .owns_resources = true, .Progress = f32 });
+
+const AsyncSources = struct {
+    battery: zui_async.Latest(f32) = .{},
+    quotes: zui_async.Stream(u32, .{ .capacity = 8, .producers = .many }) = .{},
+    log: zui_async.Stream(u8, .{ .capacity = 4 }) = .{},
+    catalog: AsyncCatalog = .{},
+    thumbnails: AsyncThumbnails = .{},
+};
+
+const AsyncUi = zui.Context(.{ .limits = .{ .max_elements = 8 }, .Sources = AsyncSources });
+
+var async_memory: [AsyncUi.required_bytes]u8 align(AsyncUi.buffer_alignment) = undefined;
+var async_sources: AsyncSources = .{};
+
+fn fetchCount(count: u32) error{Offline}!u32 {
+    return count;
+}
+
+fn declareAsync(total: *u64, ui: *AsyncUi) void {
+    total.* +%= @intFromFloat(ui.source(.battery).get() orelse 0);
+    var quotes = ui.source(.quotes).items();
+    while (quotes.next()) |quote| total.* +%= quote.*;
+    total.* +%= ui.source(.log).count();
+    switch (ui.source(.catalog).status()) {
+        .ready => |count| total.* +%= count,
+        .idle, .running, .failed, .canceled => {},
+    }
+    switch (ui.source(.thumbnails).get(7)) {
+        .ready => |handle| total.* +%= handle,
+        .idle, .running, .failed, .canceled => {},
+    }
+}
+
+export fn zuiCheckAsync(value: u32) u64 {
+    var ui = AsyncUi.initBuffer(&async_memory, undefined) catch return 0;
+    var wake_target: u8 = 0;
+    const waker: zui.Waker = .{ .context = &wake_target, .wakeFn = wakeNothing };
+    waker.wakeIf(async_sources.battery.publish(@floatFromInt(value)));
+    waker.wakeIf(async_sources.quotes.publish(value) catch .already_pending);
+    waker.wakeIf(async_sources.log.publish(1) catch .already_pending);
+    if (async_sources.catalog.begin(waker)) |run| {
+        run.progress(0.5);
+        AsyncCatalog.publishing(fetchCount)(run, .{value});
+    } else |_| {}
+    var total: u64 = 0;
+    var driver: zui_testing.Driver(AsyncUi) = .{ .ui = &ui, .sources = &async_sources };
+    _ = driver.frame(&total, declareAsync, &.{}) catch return 0;
+    var to_start = async_sources.thumbnails.toStart(waker);
+    while (to_start.next()) |load| {
+        load.progress(0.5);
+        if (load.abandoned()) load.finish(error.Corrupt) else load.finish(value);
+    }
+    _ = driver.frameDelivering(&total, declareAsync, .{ .catalog = .{ .ready = value }, .quotes = .init(&.{value}) }) catch return 0;
+    var to_release = async_sources.thumbnails.toRelease();
+    while (to_release.next()) |released| total +%= released catch 0;
+    if (async_sources.catalog.clear()) |_| total +%= 1;
+    async_sources.catalog.abandon();
+    return total +% @intFromBool(async_sources.catalog.isIdle()) +% @intFromBool(ui.nextFrame(&async_sources) == .immediately);
 }

@@ -34,12 +34,23 @@ pub fn FixedMetricsText(comptime FontId: type) type {
 /// previous frame's layout, so every helper that targets an element by id
 /// needs that element to have been declared in an earlier frame.
 ///
-/// `declare` is called once per frame as `declare(app, ui)`.
+/// `declare` is called once per frame as `declare(app, ui)`. A context with
+/// sources needs them set:
+///
+/// ```zig
+/// var driver: zui_testing.Driver(Ui) = .{ .ui = &ui, .sources = &app.sources };
+/// ```
 pub fn Driver(comptime Ui: type) type {
     return struct {
         const Self = @This();
+        const SourcesPointer = if (Ui.has_sources) ?*Ui.Sources else void;
+
+        /// For `frameDelivering`: each source's delivery, or null for one
+        /// that receives nothing.
+        pub const SomeDeliveries = if (Ui.has_sources) someDeliveries(Ui.Deliveries) else void;
 
         ui: *Ui,
+        sources: SourcesPointer = if (Ui.has_sources) null else {},
         viewport: [2]f32 = .{ 800, 600 },
         now: zui.Instant = .zero,
         frame_interval_ns: u64 = std.time.ns_per_s / 60,
@@ -49,14 +60,43 @@ pub fn Driver(comptime Ui: type) type {
         /// One frame from `events`: begin, declare, end, and release. The
         /// returned frame stays readable until the next frame begins.
         pub fn frame(self: *Self, app: anytype, comptime declare: anytype, events: []const zui.Event) !*const Ui.Frame {
+            return self.run(app, declare, events, null);
+        }
+
+        /// One frame in which each source named in `deliveries` receives
+        /// that delivery instead of swapping, and every other source
+        /// receives nothing, so a test sets any source's state without
+        /// threads. What producers published stays for the next frame.
+        ///
+        /// ```zig
+        /// _ = try driver.frameDelivering(&app, App.declare, .{ .catalog = .{ .ready = &catalog } });
+        /// ```
+        pub fn frameDelivering(self: *Self, app: anytype, comptime declare: anytype, deliveries: SomeDeliveries) !*const Ui.Frame {
+            if (!Ui.has_sources) @compileError("zui_testing: frameDelivering needs a context with Config.Sources");
+            var all: Ui.Deliveries = undefined;
+            inline for (@typeInfo(Ui.Deliveries).@"struct".fields) |field| {
+                @field(all, field.name) = @field(deliveries, field.name) orelse nothingDelivered(field.type, field.name);
+            }
+            return self.run(app, declare, &.{}, &all);
+        }
+
+        fn run(self: *Self, app: anytype, comptime declare: anytype, events: []const zui.Event, deliveries: ?*const DeliveriesOrVoid) !*const Ui.Frame {
             self.now = self.now.addNanoseconds(self.frame_interval_ns);
-            self.ui.beginFrame(&.{ .params = .{ .now = self.now, .viewport = self.viewport }, .events = events });
+            const params: zui.FrameParams = .{ .now = self.now, .viewport = self.viewport };
+            if (Ui.has_sources) {
+                const sources = self.sources orelse @panic("zui_testing: this Driver's context has sources; set `.sources = &app.sources`");
+                self.ui.beginFrame(&.{ .params = params, .events = events, .deliveries = deliveries }, sources);
+            } else {
+                self.ui.beginFrame(&.{ .params = params, .events = events });
+            }
             declare(app, self.ui);
             const ended = self.ui.endFrame();
             self.ui.release(ended);
             try ended.diagnostics.check();
             return ended;
         }
+
+        const DeliveriesOrVoid = if (Ui.has_sources) Ui.Deliveries else void;
 
         /// The point at `fractions` of the element's rectangle in the
         /// previous frame: `.{ 0.5, 0.5 }` is its center.
@@ -182,6 +222,29 @@ pub fn Driver(comptime Ui: type) type {
             return self.frame(app, declare, &.{});
         }
     };
+}
+
+fn someDeliveries(comptime Deliveries: type) type {
+    const fields = @typeInfo(Deliveries).@"struct".fields;
+    var names: [fields.len][]const u8 = undefined;
+    var types: [fields.len]type = undefined;
+    var attributes: [fields.len]std.builtin.Type.StructField.Attributes = undefined;
+    for (fields, &names, &types, &attributes) |field, *name, *Type, *attribute| {
+        name.* = field.name;
+        Type.* = ?field.type;
+        attribute.* = .{ .default_value_ptr = &@as(?field.type, null) };
+    }
+    return @Struct(.auto, null, &names, &types, &attributes);
+}
+
+fn nothingDelivered(comptime Delivery: type, comptime source_name: []const u8) Delivery {
+    if (Delivery == void) return {};
+    if (@typeInfo(Delivery) == .optional) return null;
+    switch (@typeInfo(Delivery)) {
+        .@"struct", .@"union", .@"enum", .@"opaque" => if (@hasDecl(Delivery, "empty")) return Delivery.empty,
+        else => {},
+    }
+    @compileError("zui_testing: frameDelivering cannot deliver nothing to `" ++ source_name ++ "`, whose Delivery is neither optional nor declares `empty`; give it a delivery");
 }
 
 fn isContinuationByte(byte: u8) bool {
@@ -336,6 +399,253 @@ pub fn findViolation(commands: anytype) ?Violation {
     return null;
 }
 
+/// How a source's items survive between swaps, for `expectSourceConforms`.
+pub const SourceOrder = enum {
+    /// Every item not refused arrives once, in its producer's order.
+    every_item,
+    /// A swap brings only the newest: each producer's items arrive in
+    /// order with gaps, and its last one arrives.
+    newest_only,
+};
+
+pub const SourceConformance = struct {
+    /// Producers run on it concurrently when it can, and inline otherwise,
+    /// as on a single-threaded `Io`.
+    io: std.Io,
+    /// One when the harness declares `single_producer`.
+    producers: u32 = 4,
+    items_per_producer: u32 = 1000,
+    seed: u64 = 0,
+    /// The suite fails instead of running past this.
+    deadline_seconds: i64 = 60,
+};
+
+/// Spins between publishes and between swaps, at random up to these, so
+/// producers and the reader interleave at every pace.
+const max_producer_pause = 64;
+const max_reader_pause = 256;
+
+/// The item `producer` publishes as its `sequence`th: the producer in the
+/// high 32 bits, the sequence in the low.
+pub fn sourceItem(producer: u32, sequence: u32) u64 {
+    return @as(u64, producer) << 32 | sequence;
+}
+
+/// Stresses one source's contract: producers publish items through the
+/// harness on `conformance.io` while this thread swaps at random
+/// intervals. Each frame checks the delivery against the view, injects it
+/// into a second source and checks that it reproduces, and ends the frame.
+/// At the end every item has arrived as the harness's `order` says, every
+/// refusal was reported, nothing is pending, no pending source went
+/// without a wake, and no swap was woken for more than once.
+///
+/// `harness` is a pointer to a value that declares:
+/// - `pub const order: zui_testing.SourceOrder`, and optionally
+///   `pub const single_producer = true`;
+/// - `fn publish(self, source: *Source, item: u64, last: bool, waker: zui.Waker) error{Full}!void`,
+///   called from the producers, which never retry a refused item;
+/// - `fn delivered(self, delivery: *const Source.Delivery, items: []u64) []u64`,
+///   the items a delivery carries;
+/// - `fn expectViewShows(self, view: Source.View, delivery: *const Source.Delivery) !void`;
+/// - optionally `fn prepare(self, source: *Source, waker: zui.Waker, conformance: SourceConformance) void`,
+///   called before the producers start, and
+///   `fn declare(self, view: Source.View) void`, called for both each frame.
+///
+/// ```zig
+/// test "Latest conforms" {
+///     var harness: LatestHarness = .{};
+///     try zui_testing.expectSourceConforms(zui_async.Latest(u64), &harness, .{ .io = std.testing.io });
+/// }
+/// ```
+pub fn expectSourceConforms(comptime Source: type, harness: anytype, conformance: SourceConformance) !void {
+    const violation = try findSourceViolation(Source, harness, conformance) orelse return;
+    std.debug.print("zui_testing.expectSourceConforms: {s} {s}\n", .{ @typeName(Source), violation.description() });
+    return violation.kind;
+}
+
+pub const SourceError = error{ LostWake, UnknownItem, ItemOutOfOrder, InjectDiffers, Timeout, ItemLost, NewestLost, RefusalsUnreported, TooManyWakes };
+
+pub const SourceViolation = struct {
+    kind: SourceError,
+    buffer: [160]u8 = undefined,
+    len: usize = 0,
+
+    fn init(kind: SourceError, comptime format: []const u8, arguments: anytype) SourceViolation {
+        var violation: SourceViolation = .{ .kind = kind };
+        const written = std.fmt.bufPrint(&violation.buffer, format, arguments) catch &violation.buffer;
+        violation.len = written.len;
+        return violation;
+    }
+
+    /// What went wrong, after the source's name: "never delivered producer 2's last item".
+    pub fn description(self: *const SourceViolation) []const u8 {
+        return self.buffer[0..self.len];
+    }
+};
+
+/// `expectSourceConforms` without printing: the first violation, or null.
+pub fn findSourceViolation(comptime Source: type, harness: anytype, conformance: SourceConformance) !?SourceViolation {
+    const Harness = @typeInfo(@TypeOf(harness)).pointer.child;
+    const order: SourceOrder = Harness.order;
+    const producer_count: u32 = if (@hasDecl(Harness, "single_producer") and Harness.single_producer) 1 else conformance.producers;
+    const gpa = std.testing.allocator;
+
+    const Shared = struct {
+        harness: @TypeOf(harness),
+        source: *Source,
+        items_per_producer: u32,
+        seed: u64,
+        wakes: std.atomic.Value(u32) = .init(0),
+        finished_producers: std.atomic.Value(u32) = .init(0),
+        refused: []std.atomic.Value(u32),
+
+        fn wake(context: *anyopaque) void {
+            const shared: *@This() = @ptrCast(@alignCast(context));
+            _ = shared.wakes.fetchAdd(1, .acq_rel);
+        }
+
+        fn waker(shared: *@This()) zui.Waker {
+            return .{ .context = shared, .wakeFn = wake };
+        }
+
+        fn produce(shared: *@This(), producer: u32) void {
+            var pacing: std.Random.DefaultPrng = .init(shared.seed +% producer);
+            for (0..shared.items_per_producer) |sequence| {
+                for (0..pacing.random().uintLessThan(u32, max_producer_pause)) |_| std.atomic.spinLoopHint();
+                const last = sequence + 1 == shared.items_per_producer;
+                shared.harness.publish(shared.source, sourceItem(producer, @intCast(sequence)), last, shared.waker()) catch {
+                    _ = shared.refused[producer].fetchAdd(1, .monotonic);
+                };
+            }
+            _ = shared.finished_producers.fetchAdd(1, .release);
+        }
+    };
+
+    const source = try gpa.create(Source);
+    defer gpa.destroy(source);
+    source.* = .{};
+    const replica = try gpa.create(Source);
+    defer gpa.destroy(replica);
+    replica.* = .{};
+    const delivery = try gpa.create(Source.Delivery);
+    defer gpa.destroy(delivery);
+    const replayed = try gpa.create(Source.Delivery);
+    defer gpa.destroy(replayed);
+    const item_count = producer_count * conformance.items_per_producer;
+    const items_buffer = try gpa.alloc(u64, item_count);
+    defer gpa.free(items_buffer);
+    const replayed_buffer = try gpa.alloc(u64, item_count);
+    defer gpa.free(replayed_buffer);
+    const refused = try gpa.alloc(std.atomic.Value(u32), producer_count);
+    defer gpa.free(refused);
+    @memset(refused, .init(0));
+    const arrived = try gpa.alloc(u32, producer_count);
+    defer gpa.free(arrived);
+    @memset(arrived, 0);
+    const last_arrived = try gpa.alloc(?u32, producer_count);
+    defer gpa.free(last_arrived);
+    @memset(last_arrived, null);
+
+    var shared: Shared = .{ .harness = harness, .source = source, .items_per_producer = conformance.items_per_producer, .seed = conformance.seed, .refused = refused };
+    if (@hasDecl(Harness, "prepare")) {
+        var prepared = conformance;
+        prepared.producers = producer_count;
+        harness.prepare(source, shared.waker(), prepared);
+    }
+
+    const io = conformance.io;
+    var group: std.Io.Group = .init;
+    for (0..producer_count) |producer| {
+        group.concurrent(io, Shared.produce, .{ &shared, @as(u32, @intCast(producer)) }) catch {
+            group.async(io, Shared.produce, .{ &shared, @as(u32, @intCast(producer)) });
+        };
+    }
+
+    var prng: std.Random.DefaultPrng = .init(conformance.seed);
+    const random = prng.random();
+    const started = std.Io.Clock.awake.now(io);
+    var swaps: u32 = 0;
+    var refusals_reported: u64 = 0;
+    var frame_number: u64 = 0;
+    var wakes_before_last_swap: u32 = 0;
+    const outcome: anyerror!?SourceViolation = frames: while (true) {
+        const producers_finished = shared.finished_producers.load(.acquire) == producer_count;
+        if (swaps > 0 and producers_finished and source.zuiPending() and shared.wakes.load(.acquire) == wakes_before_last_swap) {
+            break .init(error.LostWake, "is pending, but nothing woke the host since the last swap", .{});
+        }
+        wakes_before_last_swap = shared.wakes.load(.acquire);
+        source.zuiSwap();
+        swaps += 1;
+        if (@hasDecl(Source, "zuiRefusedCount")) refusals_reported += source.zuiRefusedCount();
+
+        source.zuiDelivery(delivery);
+        const items = harness.delivered(delivery, items_buffer);
+        for (items) |item| {
+            const producer: u32 = @intCast(item >> 32);
+            const sequence: u32 = @truncate(item);
+            if (producer >= producer_count or sequence >= conformance.items_per_producer) {
+                break :frames .init(error.UnknownItem, "delivered {x}, which no producer published", .{item});
+            }
+            if (last_arrived[producer]) |previous| if (sequence <= previous) {
+                break :frames .init(error.ItemOutOfOrder, "delivered producer {d}'s item {d} after its item {d}", .{ producer, sequence, previous });
+            };
+            last_arrived[producer] = sequence;
+            arrived[producer] += 1;
+        }
+        harness.expectViewShows(source.zuiView(), delivery) catch |err| break err;
+
+        replica.zuiInject(delivery);
+        replica.zuiDelivery(replayed);
+        const replayed_items = harness.delivered(replayed, replayed_buffer);
+        if (!std.mem.eql(u64, items, replayed_items)) {
+            break .init(error.InjectDiffers, "delivered {d} items, and injecting them reproduced {d}", .{ items.len, replayed_items.len });
+        }
+        harness.expectViewShows(replica.zuiView(), delivery) catch |err| break err;
+
+        if (@hasDecl(Harness, "declare")) {
+            harness.declare(source.zuiView());
+            harness.declare(replica.zuiView());
+        }
+        const info: zui.EndFrameInfo = .{ .frame_number = frame_number, .frames_in_flight = 2 };
+        if (@hasDecl(Source, "zuiEndFrame")) {
+            source.zuiEndFrame(info);
+            replica.zuiEndFrame(info);
+        }
+        frame_number += 1;
+
+        if (producers_finished and !source.zuiPending()) break null;
+        if (started.durationTo(std.Io.Clock.awake.now(io)).toSeconds() > conformance.deadline_seconds) {
+            break .init(error.Timeout, "still had items to swap after {d} s", .{conformance.deadline_seconds});
+        }
+        for (0..random.uintLessThan(u32, max_reader_pause)) |_| std.atomic.spinLoopHint();
+    };
+    // Producers never wait, so they finish whatever the reader did.
+    group.await(io) catch {};
+    if (try outcome) |violation| return violation;
+
+    var refusals: u64 = 0;
+    for (0..producer_count) |producer| {
+        const producer_refused = refused[producer].load(.monotonic);
+        refusals += producer_refused;
+        switch (order) {
+            .every_item => if (arrived[producer] + producer_refused != conformance.items_per_producer) {
+                return .init(error.ItemLost, "delivered {d} and refused {d} of producer {d}'s {d} items", .{ arrived[producer], producer_refused, producer, conformance.items_per_producer });
+            },
+            .newest_only => if (last_arrived[producer] != conformance.items_per_producer - 1) {
+                return .init(error.NewestLost, "never delivered producer {d}'s last item", .{producer});
+            },
+        }
+    }
+    if (refusals_reported != refusals) {
+        return .init(error.RefusalsUnreported, "refused {d} publishes and reported {d}", .{ refusals, refusals_reported });
+    }
+    const wakes = shared.wakes.load(.acquire);
+    if (wakes > swaps + 1) {
+        return .init(error.TooManyWakes, "woke the host {d} times for {d} swaps", .{ wakes, swaps });
+    }
+    return null;
+}
+
 const TestText = FixedMetricsText(u16);
 const TestUi = zui.Context(.{
     .limits = .{ .max_elements = 64, .max_text_bytes = 1024, .max_render_commands = 128, .state_slots = 64, .measure_cache_entries = 64 },
@@ -471,4 +781,155 @@ fn expectViolation(kind: CommandError, command_index: usize, commands: []const T
     const found = findViolation(commands) orelse return error.TestExpectedViolation;
     try std.testing.expectEqual(kind, found.kind);
     try std.testing.expectEqual(command_index, found.command_index);
+}
+
+/// A queue behind a spin lock: the plainest source that conforms, and with
+/// `loses_items`, one that silently drops some of what it accepts.
+fn LockedQueue(comptime loses_items: bool) type {
+    return struct {
+        const Self = @This();
+        const capacity = 64;
+
+        pub const Delivery = struct {
+            items: [capacity]u64 = undefined,
+            len: usize = 0,
+
+            pub const empty: Delivery = .{};
+
+            fn slice(self: *const Delivery) []const u64 {
+                return self.items[0..self.len];
+            }
+        };
+        pub const View = *const Delivery;
+
+        lock: std.atomic.Mutex = .unlocked,
+        published: Delivery = .{},
+        refused: u32 = 0,
+        pending: std.atomic.Value(bool) = .init(false),
+        front: Delivery = .{},
+
+        fn acquire(self: *Self) void {
+            while (!self.lock.tryLock()) std.atomic.spinLoopHint();
+        }
+
+        fn publish(self: *Self, item: u64) error{Full}!zui.Wake {
+            self.acquire();
+            defer self.lock.unlock();
+            if (self.published.len == capacity) {
+                self.refused += 1;
+                return error.Full;
+            }
+            if (!(loses_items and item % 10 == 3)) {
+                self.published.items[self.published.len] = item;
+                self.published.len += 1;
+            }
+            return if (self.pending.swap(true, .monotonic)) .already_pending else .needed;
+        }
+
+        pub fn zuiSwap(self: *Self) void {
+            self.acquire();
+            defer self.lock.unlock();
+            self.front = self.published;
+            self.published.len = 0;
+            self.pending.store(false, .monotonic);
+        }
+
+        pub fn zuiView(self: *Self) View {
+            return &self.front;
+        }
+
+        pub fn zuiDelivery(self: *const Self, delivery: *Delivery) void {
+            delivery.* = self.front;
+        }
+
+        pub fn zuiInject(self: *Self, delivery: *const Delivery) void {
+            self.front = delivery.*;
+        }
+
+        pub fn zuiPending(self: *const Self) bool {
+            return self.pending.load(.monotonic);
+        }
+
+        pub fn zuiRefusedCount(self: *Self) u32 {
+            self.acquire();
+            defer self.lock.unlock();
+            defer self.refused = 0;
+            return self.refused;
+        }
+    };
+}
+
+fn QueueHarness(comptime Queue: type) type {
+    return struct {
+        pub const order: SourceOrder = .every_item;
+
+        pub fn publish(_: *@This(), queue: *Queue, item: u64, _: bool, waker: zui.Waker) error{Full}!void {
+            waker.wakeIf(try queue.publish(item));
+        }
+
+        pub fn delivered(_: *@This(), delivery: *const Queue.Delivery, items: []u64) []u64 {
+            @memcpy(items[0..delivery.len], delivery.slice());
+            return items[0..delivery.len];
+        }
+
+        pub fn expectViewShows(_: *@This(), view: Queue.View, delivery: *const Queue.Delivery) !void {
+            try std.testing.expectEqualSlices(u64, delivery.slice(), view.slice());
+        }
+    };
+}
+
+test "a source that conforms passes the suite, with threads and on a single-threaded Io" {
+    var harness: QueueHarness(LockedQueue(false)) = .{};
+    try expectSourceConforms(LockedQueue(false), &harness, .{ .io = std.testing.io, .items_per_producer = 500 });
+    var single_threaded: std.Io.Threaded = .init_single_threaded;
+    try expectSourceConforms(LockedQueue(false), &harness, .{ .io = single_threaded.io(), .items_per_producer = 500 });
+}
+
+test "a source that loses items fails the suite" {
+    var harness: QueueHarness(LockedQueue(true)) = .{};
+    var single_threaded: std.Io.Threaded = .init_single_threaded;
+    const violation = (try findSourceViolation(LockedQueue(true), &harness, .{ .io = single_threaded.io(), .producers = 1, .items_per_producer = 20 })).?;
+    try std.testing.expectEqual(error.ItemLost, violation.kind);
+    try std.testing.expectEqualStrings("delivered 18 and refused 0 of producer 0's 20 items", violation.description());
+}
+
+const QueueSources = struct {
+    first: LockedQueue(false) = .{},
+    second: LockedQueue(false) = .{},
+};
+const SourcesUi = zui.Context(.{ .limits = .{ .max_elements = 8 }, .Sources = QueueSources });
+
+const QueueReader = struct {
+    sources: QueueSources = .{},
+    first: []const u64 = &.{},
+    second: []const u64 = &.{},
+
+    fn declare(reader: *QueueReader, ui: *SourcesUi) void {
+        reader.first = ui.source(.first).slice();
+        reader.second = ui.source(.second).slice();
+    }
+};
+
+test "the driver swaps the application's sources, or delivers what a test names" {
+    var ui: SourcesUi = try .init(std.testing.allocator, std.testing.io);
+    defer ui.deinit(std.testing.allocator);
+    var reader: QueueReader = .{};
+    var driver: Driver(SourcesUi) = .{ .ui = &ui, .sources = &reader.sources };
+
+    _ = try reader.sources.first.publish(1);
+    _ = try reader.sources.second.publish(2);
+    _ = try driver.frame(&reader, QueueReader.declare, &.{});
+    try std.testing.expectEqualSlices(u64, &.{1}, reader.first);
+    try std.testing.expectEqualSlices(u64, &.{2}, reader.second);
+
+    _ = try reader.sources.second.publish(3);
+    var delivered: LockedQueue(false).Delivery = .{ .len = 2 };
+    delivered.items[0..2].* = .{ 7, 8 };
+    _ = try driver.frameDelivering(&reader, QueueReader.declare, .{ .first = delivered });
+    try std.testing.expectEqualSlices(u64, &.{ 7, 8 }, reader.first);
+    try std.testing.expectEqualSlices(u64, &.{}, reader.second);
+
+    _ = try driver.frame(&reader, QueueReader.declare, &.{});
+    try std.testing.expectEqualSlices(u64, &.{}, reader.first);
+    try std.testing.expectEqualSlices(u64, &.{3}, reader.second);
 }

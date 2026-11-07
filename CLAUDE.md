@@ -99,6 +99,7 @@ reused (`ROADMAP.md` explains the letters).
 | `zig build test -Doptimize=ReleaseFast` and `-Doptimize=ReleaseSafe` | before committing; CI runs all three |
 | `zig build check -Dtarget=wasm32-freestanding` and `-Dtarget=powerpc-linux` | any change to `src/` (freestanding and big-endian) |
 | `zig build test -Dtarget=x86-linux` | any index or hash arithmetic; catches 64-bit assumptions |
+| `zig build test -Dzui-sanitize-thread=true` | any change to a source, an atomic or the conformance suite; on Linux only, so here in a container run with `--security-opt seccomp=unconfined` |
 | `zig build test -Dzui-tracy=true` | any change to `zui_tracy` or the trace zones; fetches Tracy |
 | `zig build fmt` | before committing; CI runs `fmt-check` |
 | `zig build bench -- --check-targets` | any change to a hot path |

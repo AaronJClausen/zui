@@ -23,7 +23,7 @@ Each item says:
 | after 0.5 | declaration work: −42% to −56% | on `main` |
 | 0.6, in part | `bench-compare` (R2), startup benchmarks (P1), task completions at `beginFrame` (A2), the async design (A1) | done; the rest of 0.6 became stage 1 |
 | stage 1 | instruction counts in CI (R1), the tracer contract and `zui_tracy` (P2) | on `main`, but for a trace of the demo, which needs C8 |
-| stage 2, in part | the code brought to the spec's shape: C5, S1, I4, C6, A5 and `nextFrame` (I2); letter spacing (T3); the environment and host requests (I6); sources in the core (A3) | on `main`; the other repos still need the same change (C8) |
+| stage 2, in part | the code brought to the spec's shape: C5, S1, I4, C6, A5 and `nextFrame` (I2); letter spacing (T3); the environment and host requests (I6); sources in the core (A3); `zui_async` (A4) | on `main`; the other repos still need the same change (C8) |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
@@ -47,8 +47,7 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
-| A4. `zui_async` | 2 | a new `zui_async/` module; `expectSourceConforms` and the driver's sources in `zui_testing/` | | |
-| C8. The backends on the stage-2 API | 2 | `../zui-raylib`, `../zui-sokol`, `../zui-terminal` | A4 | |
+| C8. The backends on the stage-2 API | 2 | `../zui-raylib`, `../zui-sokol`, `../zui-terminal` | | |
 | P2. The tracer contract: a trace of the demo | 1 | `../zui-raylib`'s demo with `zui_tracy` | C8 | waiting on C8; the rest is done |
 | T1. The single-line fast path | 6, early | `src/text.zig` | | |
 | T2. The whole-string cache | 6, early | `src/text.zig`, `Limits.string_cache_entries` | T1 | |
@@ -81,8 +80,7 @@ Things to know:
 - **The code has the spec's shape where the feature exists.** What is
   still missing is listed in ARCHITECTURE.md §7 with the item that adds
   it. With `TaskPool` deleted, outside data reaches a frame only through
-  sources an application writes against the contract (A3) until A4
-  ships the defaults.
+  sources: `zui_async`'s (A4) or the application's own (A3).
 - **Stage 2 ends in the other repos.** Its *Done when* in SPEC.md §21
   (the demo's thumbnail grid on `KeyedLoads`, idling at 0% CPU) can only
   be met in zui-raylib, which is C8.
@@ -125,6 +123,77 @@ Things to know:
 
 ## Done
 
+### A4. `zui_async`
+
+`zui_async`, the default sources of SPEC.md §19.1, each memory fixed at
+comptime in the application's own struct:
+- `Latest(T)`: a triple buffer and one atomic byte;
+- `Stream(T, .{ .capacity, .producers })`: a ring with a sequence per
+  slot, claimed by compare-and-swap for `.many` and a plain store for
+  `.one`, refusing the newest item when full;
+- `Task(Result, .{ .Progress })`: a `Latest` of its status, one run at a
+  time through `begin`, `progress`, `finish`, `abandon` and `clear`, and
+  `publishing(f)` to finish a run with a plain function's result;
+- `KeyedLoads(Key, Result, .{ .capacity, .unread_frames_before_release,
+  .owns_resources, .Progress })`: keys moved from wanted to loading by
+  `toStart`, completions through a ring with a place per slot, release
+  after `max(unread_frames_before_release, frames_in_flight)` unread
+  frames, and with `owns_resources` everything handed back by
+  `toRelease`.
+
+Safe builds assert what SPEC.md §14.9 gives the sources: one reader (the
+frame numbers `zuiEndFrame` sees only increase), one producer for
+`Latest` and `Stream(.one)`, and a run or load finished once. Every
+publish reports `Wake`, so 100 loads finishing between two frames cause
+one wake, which a test proves with 100 producers on threads.
+
+`zui_testing` gains `expectSourceConforms(Source, harness, .{ .io })` (and
+`findSourceViolation`): producers publish items through a harness while
+the reader swaps at random intervals, and every frame checks the
+delivery against the view and injects it into a replica. It fails on a
+lost, repeated, reordered or unreported item, a lost wake, or more wakes
+than swaps. All four sources pass it on `std.testing.io` with threads and
+on `Io.Threaded.init_single_threaded`, where every producer runs inline
+and refuses rather than waits; and under ThreadSanitizer
+(`-Dzui-sanitize-thread=true`, through LLVM), locally in a Linux container
+and in CI. Weakening `Latest`'s exchanges to `.monotonic` makes
+ThreadSanitizer report races, so the suite reaches them. `Driver` takes
+the application's `.sources` and gains `frameDelivering`.
+
+Decided here, and written into SPEC.md:
+- **`publishing` is declared on the `Task` type** and takes `f`'s
+  arguments as one tuple, `.{ run, .{ io, url } }`: `Io.Group.async`
+  needs a concrete function type, and a `Run`'s type depends on
+  `Progress`, which `f` does not name.
+- **`Stream`'s capacity is a power of two,** so positions may wrap a
+  32-bit `usize` without changing slot.
+- **`KeyedLoads`' `Progress` fits a `usize`,** not 64 bits: 32-bit
+  targets have no 64-bit atomic store, and `zig build check` for x86,
+  PowerPC and WebAssembly caught it.
+- **A slot is reused only after its completion is swapped,** so
+  generations are needed only to catch a load finished twice, and exist
+  only in safe builds.
+- **A key `get` cannot track is reported by the next frame:** refusals
+  are counted after the swap, and `get` runs during declaration.
+- **`frameDelivering` delivers nothing to a source it does not name:**
+  `null` for an optional `Delivery`, `Delivery.empty` otherwise, and a
+  compile error naming the source when neither exists.
+
+`zig build counts` against `179e88d`, in a local Docker container: the
+core did not change, and every existing scenario is identical but the
+documents view's declaration, 5 fewer (38,186), the shift of constant
+data R1 describes. A new scenario, depth 64 reading ten idle `zui_async`
+sources (four `Latest`, two `Stream`, two `Task`, two `KeyedLoads` with
+one key read each frame), takes 16,346 instructions in declaration
+against 16,003 for depth 64 alone (about 34 per source: the swaps, a
+`KeyedLoads` key hashed and probed), and 24,915 in `endFrame` against
+24,881. `KeyedLoads` walks its
+slots only once a key could have gone unread long enough; before that
+change the scenario's `endFrame` took 25,955.
+
+Left to C8: the demo's thumbnail grid on `KeyedLoads`, idling at 0% CPU,
+and its 100 loads causing one wake, all in zui-raylib.
+
 ### A3. Sources in the core
 
 `Config.Sources`, checked at instantiation: a struct whose every field
@@ -157,7 +226,7 @@ Decided here, and written into SPEC.md:
   in it.
 - **"Two contexts swapping one source" is asserted by the source,** as
   the core keeps nothing in it; that assertion and the producer-side ones
-  are A4's.
+  are `zui_async`'s (A4).
 
 `zig build counts` against `66f4ca7`, in a local Docker container, with a
 new scenario, depth 64 reading ten sources that receive nothing: its
@@ -437,28 +506,6 @@ over every limit still draws what fit.
 
 **Spec.** §6.3, §6.5, §17.
 
-### A4. `zui_async`
-
-**Grounding.** The core's side is done (A3): `Config.Sources` and its
-checks, the swap and injection in `beginFrame` (`src/context.zig`,
-`swapSources`), demand through `ui.source`, and `Status`, `Waker` and
-`EndFrameInfo` in `src/sources.zig`. `zui_testing.Driver` still calls
-`beginFrame(record)`, so it cannot drive a context with sources.
-
-**Plan.** `Latest`, `Stream`, `Task` and `KeyedLoads` as SPEC.md §19.1,
-and `expectSourceConforms` in `zui_testing`, run against each. The
-safe-build assertions of SPEC.md §14.9 live in these sources: one reader
-(the frame numbers `zuiEndFrame` sees only increase), one producer where
-declared, and a run finished once. `zui_testing.Driver` takes the
-application's sources and gains `frameDelivering` (SPEC.md §19.4).
-
-**Done when:** each passes the conformance suite under ThreadSanitizer
-and on a single-threaded `Io`; the demo's thumbnail grid runs on
-`KeyedLoads` with no wait on the UI thread, idles at 0% CPU, and 100
-loads finishing between two frames cause one wake.
-
-**Spec.** §19.1, §19.4.
-
 ### A5. Delete `TaskPool`
 
 **Plan.** Remove `src/tasks.zig`, its tests and every reference; the
@@ -467,13 +514,14 @@ demo's loads move to A4's sources.
 **Done when:** nothing in this repository or the backends names a task
 pool.
 
-**Status.** Done in this repository; the demo's loads wait for A4, and
-the backends for C8.
+**Status.** Done in this repository; the demo's loads and the backends
+wait for C8.
 
 ### C8. The backends on the stage-2 API
 
 **Grounding.** zui-raylib, zui-sokol and zui-terminal pin zui at
-`c41b571`, before stage 2. They still declare a `Platform` with
+`c41b571`, before stage 2. `zui_async` (A4) holds the sources the demo's
+loads move to. They still declare a `Platform` with
 `measureText(text, font, size)`, `scale` and `wake`
 (`../zui-raylib/src/root.zig:31`), read `zui.Input`, and zui-raylib's
 demo loads through `TaskPool` (`../zui-raylib/examples/demo.zig`).
@@ -993,18 +1041,20 @@ Deliberate, and each a reason to choose zui:
 | `Status.failed` (A3) | `Result`'s whole error set, since Zig cannot subtract one at comptime; `fromResult` maps `Canceled` to `.canceled` |
 | One reader per source (A3) | asserted by the source from `zuiEndFrame`'s frame numbers, not by the core (A4) |
 | The tracer's shape (P2) | plain functions with the zone at comptime, no tracer value: profilers keep per-thread state, and Tracy needs a static location per zone |
+| `Task` restarts (A4) | one run at a time; `begin` refuses while a run is active or its final status is unswapped, and restartable work is keyed in `KeyedLoads` |
+| `unread_frames_before_release`'s default (A4) | 30 frames, since reloading a thumbnail costs far more than keeping it |
+| `Task.publishing` (A4) | declared on the `Task` type, taking the function's arguments as one tuple |
+| `KeyedLoads`' `Progress` (A4) | at most a `usize`, so every target stores it with one atomic |
+| Sources in tests (A4) | `Driver` takes `.sources`; `frameDelivering` gives sources it does not name `null` or `Delivery.empty`; `expectSourceConforms` publishes through a harness |
 
 ### Open
 
 Each is planned with its first option. SPEC.md §22 has those that change
 the spec.
 
-1. **`Task` restarts:** one run at a time, or generation-tagged runs?
-   Planned: one at a time.
-2. **`unread_frames_before_release`'s default.** Planned: 30 frames.
-3. **A custom recognizer's claim lands a frame late.** Planned: accept it.
-4. **Physical keys.** Planned: logical keys plus the opaque scancode.
-5. **V4, a web renderer or a thin client over the wire?** Planned: the
+1. **A custom recognizer's claim lands a frame late.** Planned: accept it.
+2. **Physical keys.** Planned: logical keys plus the opaque scancode.
+3. **V4, a web renderer or a thin client over the wire?** Planned: the
    wire client first, since F5 builds it anyway.
-6. **H2, sokol_gfx as the first renderer on a native surface?** Planned:
+4. **H2, sokol_gfx as the first renderer on a native surface?** Planned:
    yes; it already backs zui-sokol.

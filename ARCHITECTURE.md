@@ -181,15 +181,15 @@ scale and zoom, input as an ordered event log over a pointer table,
 `endFrame` that always returns a frame, `nextFrame()`, letter spacing
 through the measurement key, the environment and host requests, sources
 in the core (the contract and its checks, swap and injection, demand,
-`Status` and `Waker`), and `Element` with `decoration` and
-`clip: Axes`. `TaskPool` is deleted.
+`Status` and `Waker`), the default sources in `zui_async` with
+`zui_testing`'s conformance suite for sources, and `Element` with
+`decoration` and `clip: Axes`. `TaskPool` is deleted.
 
 The code and the spec still differ in these places, each closed by the
 roadmap item named:
 
 | Today | The spec | Where today | Item |
 |---|---|---|---|
-| no default sources: an application writes its own against the contract, and `zui_testing.Driver` cannot drive a context with sources | `zui_async`'s `Latest`, `Stream`, `Task` and `KeyedLoads`; `expectSourceConforms`; `Driver.frameDelivering` | `zui_testing/`; `zui_async/` does not exist yet | A4 |
 | one fixed `RenderCommand` union, `image` and `custom` present even when their payload is `void` | generated from `Config.commands` and the payload types | `src/commands.zig`, `src/emission.zig` | C1 |
 | configs copied into the frame | config references, static styles | `src/context.zig`, `src/style.zig` | L8 |
 | `Widgets(Ui)` with a `Theme` struct | `Widgets(Ui, Skin)` | `zui_widgets/` | K5 |

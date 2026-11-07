@@ -1596,31 +1596,38 @@ rides on, so an application that replaces it knows what to implement.
   middle one; a swap exchanges front and middle if fresh. The view reads
   the front buffer in place. Two publishes between swaps lose the first,
   so `Latest` holds plain data or handles the producer keeps alive.
-- **`Stream`** is a bounded ring with a sequence per slot. Many producers
-  claim with a compare-and-swap on the head; one producer compiles to a
-  plain store. A swap first releases the slots the previous frame read,
-  then walks forward while slots are written, stopping without waiting at
-  the first claimed but unwritten slot. Items are read in place, through
-  an iterator, because they may wrap.
+- **`Stream`** is a bounded ring with a sequence per slot, its capacity a
+  power of two. Many producers claim with a compare-and-swap on the head;
+  one producer compiles to a plain store. A swap first releases the slots
+  the previous frame read, then walks forward while slots are written,
+  stopping without waiting at the first claimed but unwritten slot. Items
+  are read in place, through an iterator, because they may wrap.
 - **`Task`** is a `Latest` of its status plus run bookkeeping. The loader
   calls `begin(waker)` for a `Run`; the producer calls `progress` and
   exactly one `finish`. `begin` refuses while the previous run's final
   status is unswapped, which keeps it single-producer; restartable work
-  is keyed. `zui_async.publishing(f)` adapts a plain function into one
-  that finishes a `Run`. `clear` hands back an owned result once
-  `frames_in_flight` frames have passed since it was last read.
+  is keyed. `CatalogTask.publishing(f)` adapts a plain function into one
+  that finishes a `Run`, taking `f`'s arguments as one tuple. `clear`
+  hands back an owned result once `frames_in_flight` frames have passed
+  since it was last read. The loader can `abandon` a run, which the
+  producer reads from `run.abandoned()`.
 - **`KeyedLoads`** moves keys through *wanted* (`get` asked; `.idle`) →
   *loading* (the loader took it from `toStart`; `.running`) → *ready*
   (`.ready`/`.failed`) → *releasing* (unread too long; handed back by
   `toRelease`). `get` never starts work. Completions go through a ring
   sized by claims, so it can never overflow however rarely it is drained.
-  Slot generations stop an abandoned load from completing the next one.
-  An abandoned load still finishes, into `toRelease`. A value is never
+  A slot is reused only after its load's completion is swapped, so an
+  abandoned load never completes the next one; safe builds keep a
+  generation per load to catch one finished twice. An abandoned load
+  still finishes, into `toRelease`. A value is never
   released before `max(unread_frames_before_release, frames_in_flight)`
   unread frames, computed rather than configured, so a texture is never
   freed under a frame in flight. `toRelease` exists only with
   `owns_resources`, and a forgotten release shows as a full source, not a
-  leak. `Progress` must fit in 64 bits, checked at comptime.
+  leak. A key `get` cannot track for lack of space stays `.idle`, and
+  the next frame reports the refusal. `Progress` must fit in a `usize`,
+  checked at comptime, so a producer reports it with one atomic store on
+  every target.
 - **Costs:** a swap with nothing published is one atomic load; a publish
   is one copy and one atomic exchange; producer-side and reader-side
   atomics sit on separate cache lines; memory is fixed at comptime in the
@@ -1629,9 +1636,10 @@ rides on, so an application that replaces it knows what to implement.
 ```zig
 // Keyed by a hash of the image's path; with owns_resources, textures come back through toRelease to be freed.
 const ThumbnailLoads = zui_async.KeyedLoads(u64, DecodeError!Texture, .{ .capacity = 128, .owns_resources = true });
+const CatalogTask = zui_async.Task(FetchError!*const Catalog, .{ .Progress = f32 });
 
 const AppSources = struct {
-    catalog: zui_async.Task(FetchError!*const Catalog, .{ .Progress = f32 }) = .{},
+    catalog: CatalogTask = .{},
     quotes: zui_async.Stream(Quote, .{ .capacity = 64, .producers = .many }) = .{},   // capacity: items published but not yet released
     thumbnails: ThumbnailLoads = .{},
 };
@@ -1643,7 +1651,8 @@ fn declare(app: *App, ui: *Ui) void {
         .ready => |catalog| catalogGrid(ui, catalog),
         .failed => |err| errorBanner(ui, err),
     }
-    for (ui.source(.quotes).items()) |quote| tickerRow(ui, quote);
+    var quotes = ui.source(.quotes).items();
+    while (quotes.next()) |quote| tickerRow(ui, quote.*);
 }
 
 fn catalogGrid(ui: *Ui, catalog: *const Catalog) void {
@@ -1656,7 +1665,7 @@ fn catalogGrid(ui: *Ui, catalog: *const Catalog) void {
 pub fn zuiLoader(app: *App, ui: *const Ui, io: std.Io) void {
     if (ui.framesSinceRead(.catalog) == 0 and app.sources.catalog.isIdle()) {
         if (app.sources.catalog.begin(app.waker)) |run| {
-            app.work.async(io, zui_async.publishing(fetchCatalog), .{ run, io, app.catalog_url });
+            app.work.async(io, CatalogTask.publishing(fetchCatalog), .{ run, .{ io, app.catalog_url } });
         } else |_| {}
     }
     var to_start = app.sources.thumbnails.toStart(app.waker);
@@ -1720,7 +1729,10 @@ edit (the message quotes the `.hidden = true` line that fixes it).
   points as fractions of the element's previous rectangle: `click`,
   `tap`, `drag`, `pinch`, multi-pointer drags, `typeText`, `pressKeys`,
   `action`, and `frameDelivering(.{ .catalog = .{ .ready = &catalog } })`
-  to set any source's state without threads.
+  to set any source's state without threads. A context with sources
+  takes them as `.sources = &app.sources`; in `frameDelivering`, a source
+  not named receives nothing, which is `null` for an optional `Delivery`
+  and `Delivery.empty` otherwise.
 - **`replay(records)`**: drives an application from relayed records.
 - **`snapshot` / `expectSnapshot`**: one line per command, for named ids
   only, defaults omitted, identical in debug and release.
@@ -1731,8 +1743,9 @@ edit (the message quotes the `.hidden = true` line that fixes it).
   balance, that every declared command is handled, and pixels within a
   tolerance; `expectHostConforms(Host)` checks event order, wake from
   another thread, sticky wake, and that waits honor `NextFrame`;
-  `expectSourceConforms(Source)` stresses publish, swap, inject and
-  refusal under many producers.
+  `expectSourceConforms(Source, harness, .{ .io })` stresses publish,
+  swap, inject and refusal under many producers, on any `Io`, with a
+  harness that publishes, since publishing is not part of the contract.
 
 ### 19.5 `zui_app`
 
@@ -1873,12 +1886,7 @@ Two rules hold throughout:
 
 ## 22. Open questions
 
-1. **`Task` restarts.** One run at a time, with restartable work keyed in
-   `KeyedLoads`, or generation-tagged runs? Planned: one at a time,
-   since generations would need several writers on one triple buffer.
-2. **`unread_frames_before_release`'s default.** Planned: 30 frames,
-   since reloading a thumbnail costs far more than keeping it.
-3. **A custom recognizer's claim lands a frame late.** Planned: accept it,
+1. **A custom recognizer's claim lands a frame late.** Planned: accept it,
    until a recognizer shows that it matters.
-4. **Physical keys.** Planned: logical keys plus the opaque scancode; a
+2. **Physical keys.** Planned: logical keys plus the opaque scancode; a
    physical key enum only when a binding needs portable physical keys.

@@ -1,5 +1,6 @@
 const std = @import("std");
 const zui = @import("zui");
+const zui_async = @import("zui_async");
 
 /// Text measurement with the cost profile of a bitmap font: one table
 /// lookup per byte.
@@ -334,6 +335,45 @@ pub const DeepTreeWithIdleSources = struct {
         inline for (std.meta.fields(Sources)) |field| {
             if (ui.source(@field(SourceField, field.name)) != null) ui.requestFrame();
         }
+        self.tree.declare(ui, frame_index);
+    }
+};
+
+/// `DeepTree`, reading ten of `zui_async`'s sources that receive nothing,
+/// one key of each `KeyedLoads` included: what the default sources cost a
+/// frame when no data arrives.
+pub const DeepTreeWithIdleAsyncSources = struct {
+    pub const name = "depth 64, 10 idle zui_async sources";
+    pub const layout_target_ns: ?u64 = null;
+    pub const limits = DeepTree.limits;
+    pub const Sources = struct {
+        battery: zui_async.Latest(f32) = .{},
+        network: zui_async.Latest(u32) = .{},
+        sync_state: zui_async.Latest(u8) = .{},
+        clock: zui_async.Latest(u64) = .{},
+        quotes: zui_async.Stream(u64, .{ .capacity = 64, .producers = .many }) = .{},
+        log_lines: zui_async.Stream(u32, .{ .capacity = 64 }) = .{},
+        catalog: zui_async.Task(error{Offline}!u64, .{ .Progress = f32 }) = .{},
+        sync: zui_async.Task(u32, .{}) = .{},
+        thumbnails: zui_async.KeyedLoads(u64, u64, .{ .capacity = 64 }) = .{},
+        search_results: zui_async.KeyedLoads(u64, u32, .{ .capacity = 64, .Progress = f32 }) = .{},
+    };
+
+    tree: DeepTree = .{},
+
+    pub fn declare(self: *DeepTreeWithIdleAsyncSources, ui: anytype, frame_index: usize) void {
+        var heard: u64 = 0;
+        heard += @intFromBool(ui.source(.battery).get() != null);
+        heard += @intFromBool(ui.source(.network).get() != null);
+        heard += @intFromBool(ui.source(.sync_state).get() != null);
+        heard += @intFromBool(ui.source(.clock).get() != null);
+        heard += ui.source(.quotes).count();
+        heard += ui.source(.log_lines).count();
+        heard += @intFromBool(ui.source(.catalog).status() != .idle);
+        heard += @intFromBool(ui.source(.sync).status() != .idle);
+        heard += @intFromBool(ui.source(.thumbnails).get(1) != .idle);
+        heard += @intFromBool(ui.source(.search_results).get(2) != .idle);
+        if (heard != 0) ui.requestFrame();
         self.tree.declare(ui, frame_index);
     }
 };

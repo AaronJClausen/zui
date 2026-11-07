@@ -31,6 +31,11 @@ const compile_error_cases = [_]struct { name: []const u8, expected_error: []cons
     .{ .name = "source_not_in_sources", .expected_error = "enum 'meta.FieldEnum(source_not_in_sources.AppSources)' has no member named 'quotez'" },
     .{ .name = "status_failed_on_infallible", .expected_error = "enum '@typeInfo(sources.StatusWithProgress(u32,void)).@\"union\".tag_type.?' has no member named 'failed'" },
     .{ .name = "status_missing_prong", .expected_error = "switch must handle all possibilities" },
+    .{ .name = "async_stream_capacity", .expected_error = "zui_async: Stream capacity must be a power of two, got 100" },
+    .{ .name = "async_keyed_progress_too_large", .expected_error = "zui_async: KeyedLoads Progress must fit in a usize, got [3]f64" },
+    .{ .name = "async_keyed_no_capacity", .expected_error = "zui_async: KeyedLoads capacity must be at least 1" },
+    .{ .name = "async_release_without_ownership", .expected_error = "zui_async: toRelease() needs .owns_resources = true" },
+    .{ .name = "testing_deliver_nothing", .expected_error = "zui_testing: frameDelivering cannot deliver nothing to `other`, whose Delivery is neither optional nor declares `empty`; give it a delivery" },
     .{ .name = "widgets_slider_on_bool", .expected_error = "zui_widgets: slider needs a pointer to an integer or float, got *bool" },
     .{ .name = "reflect_misspelled_option", .expected_error = "no field named 'volum' in struct 'zui_reflect.FieldOptionsOf(reflect_misspelled_option.Settings)'" },
     .{ .name = "reflect_untyped_options", .expected_error = "; declare it as `pub const zui_inspector: zui_reflect.Options(@This())` so misspelled options fail to compile" },
@@ -43,6 +48,7 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const sanitize_thread = b.option(bool, "zui-sanitize-thread", "Build zui and its modules with ThreadSanitizer, through LLVM (Linux)") orelse false;
     const build_options = b.addOptions();
     build_options.addOption(bool, "debug", b.option(bool, "zui-debug", "Keep id names for diagnostics") orelse false);
 
@@ -50,6 +56,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
+        .sanitize_thread = if (sanitize_thread) true else null,
     });
     zui_module.addOptions("zui_options", build_options);
 
@@ -59,12 +66,21 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("zui_testing/zui_testing.zig"),
         .target = target,
         .optimize = optimize,
+        .sanitize_thread = if (sanitize_thread) true else null,
         .imports = &.{.{ .name = "zui", .module = zui_module }},
     });
     const widgets_module = b.addModule("zui_widgets", .{
         .root_source_file = b.path("zui_widgets/zui_widgets.zig"),
         .target = target,
         .optimize = optimize,
+        .sanitize_thread = if (sanitize_thread) true else null,
+        .imports = &.{.{ .name = "zui", .module = zui_module }},
+    });
+    const async_module = b.addModule("zui_async", .{
+        .root_source_file = b.path("zui_async/zui_async.zig"),
+        .target = target,
+        .optimize = optimize,
+        .sanitize_thread = if (sanitize_thread) true else null,
         .imports = &.{.{ .name = "zui", .module = zui_module }},
     });
     const tracy_enabled = b.option(bool, "zui-tracy", "Link Tracy's client, so zui_tracy.Tracer traces into the Tracy profiler") orelse false;
@@ -74,6 +90,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("zui_tracy/zui_tracy.zig"),
         .target = target,
         .optimize = optimize,
+        .sanitize_thread = if (sanitize_thread) true else null,
         .imports = &.{
             .{ .name = "zui", .module = zui_module },
             .{ .name = "zui_tracy_options", .module = tracy_options.createModule() },
@@ -84,6 +101,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("zui_reflect/zui_reflect.zig"),
         .target = target,
         .optimize = optimize,
+        .sanitize_thread = if (sanitize_thread) true else null,
         .imports = &.{
             .{ .name = "zui", .module = zui_module },
             .{ .name = "zui_widgets", .module = widgets_module },
@@ -91,12 +109,12 @@ pub fn build(b: *std.Build) void {
     });
 
     const test_step = b.step("test", "Run the unit tests and the compile-error tests");
-    const tested_modules = [_]*std.Build.Module{ zui_module, testing_module, widgets_module, reflect_module, tracy_module };
+    const tested_modules = [_]*std.Build.Module{ zui_module, testing_module, async_module, widgets_module, reflect_module, tracy_module };
     for (tested_modules) |tested_module| {
-        const module_tests = b.addTest(.{ .root_module = tested_module });
+        const module_tests = b.addTest(.{ .root_module = tested_module, .use_llvm = if (sanitize_thread) true else null });
         test_step.dependOn(&b.addRunArtifact(module_tests).step);
     }
-    for ([_]*std.Build.Module{ widgets_module, reflect_module, tracy_module }) |module_with_driven_tests| {
+    for ([_]*std.Build.Module{ async_module, widgets_module, reflect_module, tracy_module }) |module_with_driven_tests| {
         module_with_driven_tests.addImport("zui_testing", testing_module);
     }
 
@@ -108,6 +126,8 @@ pub fn build(b: *std.Build) void {
                 .target = target,
                 .imports = &.{
                     .{ .name = "zui", .module = zui_module },
+                    .{ .name = "zui_testing", .module = testing_module },
+                    .{ .name = "zui_async", .module = async_module },
                     .{ .name = "zui_widgets", .module = widgets_module },
                     .{ .name = "zui_reflect", .module = reflect_module },
                 },
@@ -140,6 +160,7 @@ pub fn build(b: *std.Build) void {
             .imports = &.{
                 .{ .name = "zui", .module = zui_module },
                 .{ .name = "zui_testing", .module = testing_module },
+                .{ .name = "zui_async", .module = async_module },
                 .{ .name = "zui_widgets", .module = widgets_module },
                 .{ .name = "zui_reflect", .module = reflect_module },
                 .{ .name = "zui_tracy", .module = tracy_module },
@@ -148,18 +169,17 @@ pub fn build(b: *std.Build) void {
     });
     b.step("check", "Type-check zui for the selected target").dependOn(&check_object.step);
 
+    const bench_zui = releaseFastZui(b, target, build_options);
     const bench_executable = b.addExecutable(.{
         .name = "zui-bench",
         .root_module = b.createModule(.{
             .root_source_file = b.path("bench/bench.zig"),
             .target = target,
             .optimize = .ReleaseFast,
-            .imports = &.{.{ .name = "zui", .module = b.createModule(.{
-                .root_source_file = b.path("src/root.zig"),
-                .target = target,
-                .optimize = .ReleaseFast,
-                .imports = &.{.{ .name = "zui_options", .module = build_options.createModule() }},
-            }) }},
+            .imports = &.{
+                .{ .name = "zui", .module = bench_zui },
+                .{ .name = "zui_async", .module = releaseFastAsync(b, target, bench_zui) },
+            },
         }),
     });
     const run_bench = b.addRunArtifact(bench_executable);
@@ -174,6 +194,7 @@ pub fn build(b: *std.Build) void {
         .abi = .none,
         .cpu_model = .{ .explicit = &std.Target.x86.cpu.x86_64_v3 },
     });
+    const counts_zui = releaseFastZui(b, counts_target, build_options);
     const counts_executable = b.addExecutable(.{
         .name = "zui-counts",
         .root_module = b.createModule(.{
@@ -181,12 +202,10 @@ pub fn build(b: *std.Build) void {
             .target = counts_target,
             .optimize = .ReleaseFast,
             .valgrind = true,
-            .imports = &.{.{ .name = "zui", .module = b.createModule(.{
-                .root_source_file = b.path("src/root.zig"),
-                .target = counts_target,
-                .optimize = .ReleaseFast,
-                .imports = &.{.{ .name = "zui_options", .module = build_options.createModule() }},
-            }) }},
+            .imports = &.{
+                .{ .name = "zui", .module = counts_zui },
+                .{ .name = "zui_async", .module = releaseFastAsync(b, counts_target, counts_zui) },
+            },
         }),
     });
     const run_counts = b.addRunArtifact(counts_executable);
@@ -207,9 +226,28 @@ pub fn build(b: *std.Build) void {
     b.step("bench-compare", "Alternate the benchmarks of two commits: -- <base> [<head>] [--rounds <count>]").dependOn(&run_bench_compare.step);
     test_step.dependOn(&bench_compare_executable.step);
 
-    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "tests", "bench", "zui_testing", "zui_widgets", "zui_reflect", "zui_tracy" };
+    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "tests", "bench", "zui_testing", "zui_async", "zui_widgets", "zui_reflect", "zui_tracy" };
     b.step("fmt", "Format all Zig sources").dependOn(&b.addFmt(.{ .paths = formatted_paths }).step);
     b.step("fmt-check", "Fail if any Zig source is not formatted").dependOn(&b.addFmt(.{ .paths = formatted_paths, .check = true }).step);
+}
+
+/// The benchmarks always measure ReleaseFast, whatever `-Doptimize` says.
+fn releaseFastZui(b: *std.Build, target: std.Build.ResolvedTarget, build_options: *std.Build.Step.Options) *std.Build.Module {
+    return b.createModule(.{
+        .root_source_file = b.path("src/root.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+        .imports = &.{.{ .name = "zui_options", .module = build_options.createModule() }},
+    });
+}
+
+fn releaseFastAsync(b: *std.Build, target: std.Build.ResolvedTarget, zui_module: *std.Build.Module) *std.Build.Module {
+    return b.createModule(.{
+        .root_source_file = b.path("zui_async/zui_async.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+        .imports = &.{.{ .name = "zui", .module = zui_module }},
+    });
 }
 
 /// Tracy is a lazy dependency, fetched only by a build that asks for it.

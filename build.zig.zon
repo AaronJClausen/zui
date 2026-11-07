@@ -17,6 +17,7 @@
         "tests",
         "bench",
         "zui_testing",
+        "zui_async",
         "zui_widgets",
         "zui_reflect",
         "zui_tracy",
