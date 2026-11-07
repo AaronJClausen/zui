@@ -25,6 +25,7 @@ Each item says:
 | stage 1 | instruction counts in CI (R1), the tracer contract and `zui_tracy` (P2) | done |
 | stage 2 | the code brought to the spec's shape: C5, S1, I4, C6, A5 and `nextFrame` (I2); letter spacing (T3); the environment and host requests (I6); sources in the core (A3); `zui_async` (A4); the backends on the new API, the demo's thumbnails on `KeyedLoads` (C8) | done; the demo idles at 0% CPU |
 | stage 3 | the renderer contract and the generated commands (C1); the host contract and `RecordBuilder` (C2); the conformance suites (C3); `Features` (C7); `zui_app` (C4); the raylib adapter host (H1) | done; the backends are renderers and pass the renderer suite in CI, raylib's host passes the host suite, and the demo runs through `zui_app`, presenting its first frame 288 ms after the process starts; lowering comes with stage 8's commands |
+| stage 4, in part | the Windows host (H2), with dropped files and lifecycle events in the record | done; zui-sokol's tour runs on it unchanged and idles at 0% CPU; the system material (H8) remains |
 | stage 6, early | the single-line fast path (T1), the whole-string cache (T2), the box tree's layout passes (P4, in part) | done; warm text and the box tree's layout and emission within their budgets; the box tree's declaration is not (P5) |
 
 No release is tagged; everything is on `main`. From here, work is
@@ -59,11 +60,12 @@ green, and its **Status** line below says which slice is next.
 |---|---|---|---|---|
 | P4. The box tree's layout and emission within budget | 6, early | `src/layout.zig`, `src/emission.zig` | | waiting on P5 |
 | P5. The box tree's declaration within budget | 6, early | `src/context.zig` | L8 | waiting on L8 |
-| H2. The Windows host | 4 | `../zui-host` | H1 | in progress |
 | H8. The desktop showing through the window | 4 | `../zui-host` | H2 | |
 | F2. Relay | 5 | `src/context.zig` | | |
 | F3. `zui_wire` | 5 | a new `zui_wire/` module | F2 | |
 | F4. Replay in `zui_testing` | 5 | `zui_testing/` | F2 | |
+| F5. Rendering somewhere else | 5 | `zui_wire/`, a wire host and renderer | F3 | |
+| F6. Watching files | 5 | `../zui-host` | H2 | |
 
 After the queue come stages 5 to 11 in the order of SPEC.md §21. They join the queue as it runs short.
 
@@ -129,6 +131,91 @@ Things to know:
 ---
 
 ## Done
+
+### H2. The Windows host
+
+[zui-host](https://github.com/AaronJClausen/zui-host) (`dc57eae`,
+pinning zui at `d9d279e` and zui-sokol at `78ba9ad`), created here, one
+directory per OS; `zui_host.Host` is `windows/host.zig` on Windows and a
+compile error naming the OS elsewhere. The Windows host:
+- runs its window's message loop on a thread of its own, so the window
+  keeps drawing while Windows runs a move or resize loop; the window
+  thread queues events in physical pixels under a lock, and `zuiPoll`
+  converts them with the record's scale and zoom;
+- waits on a sticky manual-reset wake event, an input event the poll
+  resets, and a high-resolution waitable timer for `.at`;
+- reports per-monitor scale (DPI awareness v2, `WM_DPICHANGED`), the
+  mouse, the wheel (40 layout units a notch, as raylib and sokol), keys
+  with modifiers and scan codes, UTF-8 text with surrogate pairs joined
+  and consecutive characters in one event, the environment (dark mode,
+  which also darkens the title bar, high contrast, animations, power,
+  focus), dropped files (`WM_DROPFILES`), and lifecycle events: console
+  control events and `WM_QUERYENDSESSION` are `.terminate_requested`,
+  `WM_POWERBROADCAST` gives `.suspend` and `.resume`, and a memory
+  resource notification `.low_memory`;
+- sets the cursor and places the IME's composition and candidate windows
+  at the caret, turning the IME off while no editable asks for text;
+- offers the clipboard as text through `zuiClipboard`.
+
+zui gained what such a host reports and the record could not carry
+(`d9d279e`): `Event.files_dropped` (`zui.FilesDropped`, paths copied
+whole into the new `limits.max_dropped_path_bytes`, `ui.filesDropped()`,
+`RecordBuilder.appendFilesDropped`) and `Event.lifecycle`
+(`zui.Lifecycle`, `ui.lifecycle()`). `zig build counts` against `638080d`,
+in a local Docker container: declaration +1 instruction in every
+scenario, `endFrame` unchanged.
+
+zui-sokol's renderer (`88d400d`, `78ba9ad`) draws into a `win32` surface
+when built with OpenGL (`-Dgl=true`): `Renderer.initForSurface` makes the
+window's OpenGL 4.3 core context through WGL and sets sokol_gfx up on it
+without sokol_app, and `zuiSubmit` presents with vsync. A D3D11 build does
+not declare the surface, so pairing it with the host fails to compile.
+
+It passes C3: `expectHostConforms` against a hidden window, with a
+harness that sends the messages Windows would, and ten more tests (DPI
+changes, text, the wheel, dropped files, the session ending, Ctrl+C, the
+clipboard, requests). The demo is zui-sokol's tour, whose application
+zui-sokol exports as `zui_sokol_tour` and zui-host runs unchanged under
+its own six-line loop; under sokol_app it runs as before (`test-tour`
+passes). Measured on the reference machine in ReleaseSafe with
+`--measure-idle` on the Layout Lab screen (heartbeat off): 15.6, 15.6,
+31.3 and 62.5 ms of CPU over 10 s, 0 or 1 frames and 0 wakes; the Welcome
+screen, which animates once a second, 15.6 ms and 10 frames. A screenshot
+through the compositor (`--screenshot`) shows the tour drawn. zui-host's
+CI checks the format, runs the tests and the host suite on GitHub's
+Windows runner in Debug and ReleaseSafe, and cross-compiles from Linux for
+x86-64 and ARM64 Windows, which found a function-pointer alignment that
+only ARM64 enforces in zui-sokol's WGL code (`78ba9ad`).
+
+Decided here:
+- **The demo for a native host is zui-sokol's tour,** not zui-raylib's
+  demo: raylib owns its window and cannot draw into another, so the
+  application that runs unchanged across hosts is the one whose renderer
+  can. The tour runs under a loop written by hand, not `zui_app`, because
+  `zui_app` gives the context the renderer as its text contract and
+  zui-sokol's text contract is a separate `Text`.
+- **The window's loop runs on its own thread,** so Windows' modal move
+  and resize loops never stop frames; the contract does not change, as
+  the host owns its threads.
+- **A terminate request closes the window one frame later:** the host
+  delivers it, and its next `zuiPoll` returns false, the OS default with a
+  frame to react (SPEC.md §7.1).
+- **The clipboard service** is `zuiClipboard`, a type with
+  `read(host, buffer) ?[]u8` and `write(host, text) !void`, until H6 gives
+  the services one shape.
+- **A test may fix the host's scale** (`Host.forced_scale`), so the suite's
+  positions in layout units are whole pixels on any monitor.
+
+What remains, and where it went:
+- **Touch and pen** (`WM_POINTER`) are not reported yet; nothing in H2's
+  plan asked for them, and I5's gestures will.
+- **IME composition text** is shown by the IME's own window; the
+  `composition` event and the IME area's use by an editable are E1's.
+- **A console close, logoff or shutdown** ends the process when the
+  handler returns, so the application's frame for that request may not
+  run; `WM_QUERYENDSESSION` gives it the time Windows allows.
+- **Seen only on this machine:** one monitor at 125%; a second monitor of
+  another DPI was simulated by sending `WM_DPICHANGED`.
 
 ### H1. The raylib adapter host
 
@@ -866,32 +953,6 @@ with H2.
 
 ## Stage 4: a native host
 
-### H2. The Windows host
-
-**Grounding.** The owner develops on Windows, and Windows has every
-system feature planned (materials, signals, scale changes, file drop), so
-it tests the contract hardest.
-
-**Plan.** In `zui-host/windows`: Win32 windows and the event loop,
-`win32` surfaces, per-monitor scale, lifecycle events from console
-control events and `WM_QUERYENDSESSION`, the clipboard, dropped files,
-pacing to `nextFrame`, cursor and IME requests. zui-sokol's renderer
-accepts its surface, through sokol_gfx without sokol_app.
-
-**Done when:** the demo runs on it unchanged from H1, it passes C3, and it
-idles at 0% CPU.
-
-**Status.** Landed in zui: the events a native host reports that the
-record could not carry, `Event.files_dropped` (`zui.FilesDropped`, its
-paths copied whole into the new `limits.max_dropped_path_bytes`, read with
-`ui.filesDropped()`, and copied by the host through
-`RecordBuilder.appendFilesDropped`) and `Event.lifecycle`
-(`zui.Lifecycle`, read with `ui.lifecycle()`); `zui_app`'s record builder
-holds dropped paths besides typed text. `zig build counts` against
-`638080d`, in a local Docker container: declaration +1 instruction in every
-scenario, `endFrame` unchanged. Next: `zui-host` with its Windows host,
-then zui-sokol's renderer on its `win32` surface.
-
 ### H8. The desktop showing through the window
 
 **Grounding.** Windows offers Mica and Acrylic (`DwmSetWindowAttribute`),
@@ -1394,6 +1455,11 @@ Deliberate, and each a reason to choose zui:
 | How the raylib host waits (H1) | in GLFW, past raylib: `glfwWaitEventsTimeout` until an instant, `glfwWaitEvents` on event, and callbacks in front of raylib's to tell input from a spurious OS event; raylib's `EndDrawing` only presents and polls |
 | How a host harness posts events raylib cannot inject (H1) | `Host.script(sample)`, input for one poll instead of raylib's; the demo's screenshots use it too |
 | The raylib renderer's text contract (H1) | the renderer itself, as SPEC.md §16.1 expects of most renderers, so `zui_app.contextConfig` gives it to the context |
+| The first renderer on a native surface (H2) | sokol_gfx, with OpenGL through WGL: zui-sokol's renderer makes the window's context itself, without sokol_app |
+| The demo on a native host (H2) | zui-sokol's tour, unchanged, under a loop written by hand; raylib cannot draw into a window it does not own |
+| A native host's loop (H2) | the Windows host runs its message loop on a thread of its own, so modal move and resize loops never stop frames |
+| A terminate request (H2) | delivered in one record; the host's next `zuiPoll` returns false |
+| The clipboard service before H6 (H2) | `zuiClipboard`, a type with `read(host, buffer)` and `write(host, text)` |
 
 ### Open
 
@@ -1404,5 +1470,3 @@ the spec.
 2. **Physical keys.** Planned: logical keys plus the opaque scancode.
 3. **V4, a web renderer or a thin client over the wire?** Planned: the
    wire client first, since F5 builds it anyway.
-4. **H2, sokol_gfx as the first renderer on a native surface?** Planned:
-   yes; it already backs zui-sokol.

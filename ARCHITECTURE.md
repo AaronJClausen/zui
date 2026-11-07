@@ -195,7 +195,10 @@ suites for renderers and hosts in `zui_testing`, whose renderer suite the
 three backends run in CI, and whose host suite raylib's host runs; and `Features`, whose fields gate their APIs
 with compile errors naming them; and `zui_app`, the loop of SPEC.md §6.1 as a
 library, with a render thread, pacing and its reports, tested against an
-offscreen host, and running the demo on raylib's host. From stage 6, the single-line fast path and the
+offscreen host, and running the demo on raylib's host. From stage 4, the
+Windows host in `zui-host`, with dropped files and lifecycle events in
+the record, has landed, and zui-sokol's renderer draws into its `win32`
+window. From stage 6, the single-line fast path and the
 whole-string cache have landed.
 
 The code and the spec still differ in these places, each closed by the
@@ -219,7 +222,7 @@ frame arenas, parallel measurement and the module boundary.
 | Repository | Holds |
 |---|---|
 | `zui` | the core, the contracts, and the modules: async, widgets, reflect, testing, tracy, app, wire, debug, motion, color, icons |
-| `zui-host` | native hosts, one directory per OS, chosen by target (created in stage 4) |
+| `zui-host` | native hosts, one directory per OS, chosen by target: `windows/` today (H2) |
 | `zui-raylib`, `zui-sokol`, `zui-terminal`, later `zui-web` | renderers; `zui-raylib` also ships the raylib adapter host |
 | `zui-themes` | skins for OS design languages |
 | `zui-examples` | samples and the template project |
@@ -235,4 +238,8 @@ declarations, so its `switch` over the commands names exactly what it
 draws (the terminal's names only the five base commands). zui-raylib is
 also a host (H1): `zui_raylib.Host` waits in GLFW and samples raylib's
 input, and its demo runs through `zui_app`. zui-sokol's and
-zui-terminal's loops still do a host's work by hand.
+zui-terminal's loops still do a host's work by hand, but zui-sokol's
+renderer, built with OpenGL, also draws into a native host's `win32`
+window without sokol_app, and zui-host runs zui-sokol's tour that way
+(H2). zui-host pins zui and zui-sokol by commit, as the renderers pin
+zui; its Windows host runs its message loop on a thread of its own.
