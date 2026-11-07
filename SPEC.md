@@ -161,7 +161,9 @@ because Zig names types after their file and users read those names in
 compile errors. A module can import only files in its own directory, so
 modules reach zui only through `@import("zui")`: **the compiler keeps
 them on the public API.** Anything a module does, application code can do,
-and any module can be replaced by the application's own.
+and any module can be replaced by the application's own. A module may also
+import its own build options (`zui_tracy_options`) and a third-party
+library it binds, never another part of zui.
 
 ### 3.4 Build options
 
