@@ -1789,14 +1789,29 @@ edit (the message quotes the `.hidden = true` line that fixes it).
   only, defaults omitted, identical in debug and release.
 - **`checkCommands`**: finite bounds, nondecreasing layers, balanced
   clips and transforms.
-- **Conformance suites**, which every implementation runs in its own CI:
-  `expectRendererConforms(Renderer)` draws recorded frames and checks clip
-  balance, that every declared command is handled, and pixels within a
-  tolerance; `expectHostConforms(Host)` checks event order, wake from
-  another thread, sticky wake, and that waits honor `NextFrame`;
-  `expectSourceConforms(Source, harness, .{ .io })` stresses publish,
-  swap, inject and refusal under many producers, on any `Io`, with a
-  harness that publishes, since publishing is not part of the contract.
+- **Conformance suites**, which every implementation runs in its own CI.
+  Each takes a harness that does what only the implementation can: make
+  a drawing target and read it back, make the OS report an event, or
+  publish into a source.
+  - `expectRendererConforms(Renderer, harness, .{ .gpa, .io })` draws a
+    reference scene of every command the renderer's declarations can
+    produce (the base commands, `image` and `custom` with their payload
+    types), clips nested 100 deep, commands of no size or out of bounds,
+    an empty frame, and the reference scene again. When the harness
+    reads pixels back, it checks that each clip cuts off what lies
+    outside it and is restored when a clip inside it ends, that nothing
+    an earlier frame set outlives it, and the scene's colors within a
+    tolerance. An optional command joins the scene with the declaration
+    that produces it (§13.3).
+  - `expectHostConforms(Host, harness, .{ .io })` checks that a poll
+    keeps the application's zoom and reports posted events in order,
+    that `.immediately` does not wait, that a wake before a wait ends it
+    and is then cleared, that a wake from another thread ends an
+    `.on_event` wait, and that an `.at` wait ends at its instant. Every
+    wait it starts is bounded: a lost wake fails the suite, never hangs it.
+  - `expectSourceConforms(Source, harness, .{ .io })` stresses publish,
+    swap, inject and refusal under many producers, on any `Io`, with a
+    harness that publishes, since publishing is not part of the contract.
 
 ### 19.5 `zui_app`
 

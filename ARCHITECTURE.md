@@ -189,7 +189,9 @@ deleted, and the three backends and the demo are on this API. From stage
 `Config.commands` and the payload types have landed, and the three
 backends are renderers; so has the host contract, with `RecordBuilder`
 and the check that a host and a renderer share a surface kind, proven so
-far by a test host (no backend is a host until H1). From stage 6, the single-line fast path and the
+far by a test host (no backend is a host until H1); and the conformance
+suites for renderers and hosts in `zui_testing`, whose renderer suite the
+three backends run in CI. From stage 6, the single-line fast path and the
 whole-string cache have landed.
 
 The code and the spec still differ in these places, each closed by the

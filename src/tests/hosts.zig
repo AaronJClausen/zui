@@ -17,7 +17,6 @@ const TestHost = struct {
     queued_text: []const u8 = "",
     window_open: bool = true,
     applied: zui.HostRequests = .{},
-    last_wait_was_woken: bool = false,
 
     /// An `.on_event` wait gives up after this long, so a lost wake fails a
     /// test instead of hanging it.
@@ -52,7 +51,6 @@ const TestHost = struct {
         while (!self.woken.isSet() and self.now().isBefore(deadline)) {
             self.woken.waitTimeout(self.io, .{ .deadline = awake_deadline }) catch {};
         }
-        self.last_wait_was_woken = self.woken.isSet();
         self.woken.reset();
     }
 
@@ -151,47 +149,6 @@ test "the loop runs on a host: its record in, its surface drawn, its requests ap
     try testing.expectEqual(zui.Cursor.pointer, host.applied.cursor);
     try testing.expectEqual(@as(u32, 2), renderer.rectangles);
     try testing.expectEqual(TestHost.surface_size, renderer.surface_size);
-}
-
-test "a wake that arrives before the wait ends it: wakes are sticky" {
-    var host: TestHost = .{ .io = testing.io };
-    const start = host.now();
-    host.zuiWaker().wake();
-    host.zuiWait(.on_event);
-    try testing.expect(host.last_wait_was_woken);
-    try testing.expect(host.now().isBefore(start.addNanoseconds(TestHost.longest_wait_ns)));
-
-    const instant = host.now().addNanoseconds(5 * std.time.ns_per_ms);
-    host.zuiWait(.{ .at = instant });
-    try testing.expect(!host.last_wait_was_woken);
-    try testing.expect(!host.now().isBefore(instant));
-}
-
-test "a wake from another thread ends a wait" {
-    var host: TestHost = .{ .io = testing.io };
-    const waker = host.zuiWaker();
-    const producer = try std.Thread.spawn(.{}, wakeAfter, .{ testing.io, waker, 20 * std.time.ns_per_ms });
-    const start = host.now();
-    host.zuiWait(.on_event);
-    producer.join();
-    try testing.expect(host.last_wait_was_woken);
-    try testing.expect(host.now().isBefore(start.addNanoseconds(TestHost.longest_wait_ns)));
-}
-
-fn wakeAfter(io: std.Io, waker: zui.Waker, nanoseconds: u64) void {
-    io.sleep(.fromNanoseconds(nanoseconds), .awake) catch {};
-    waker.wake();
-}
-
-test "a wait honors the next frame: none when immediate, until the instant when at one" {
-    var host: TestHost = .{ .io = testing.io };
-    const start = host.now();
-    host.zuiWait(.immediately);
-    try testing.expect(host.now().isBefore(start.addNanoseconds(TestHost.longest_wait_ns)));
-
-    const instant = host.now().addNanoseconds(30 * std.time.ns_per_ms);
-    host.zuiWait(.{ .at = instant });
-    try testing.expect(!host.now().isBefore(instant));
 }
 
 test "a record builder keeps events in order and drops the newest that do not fit" {

@@ -170,7 +170,7 @@ const EveryCommandRenderer = struct {
     }
 };
 
-const RendererUi = zui.Context(config: {
+const every_command_config: zui.Config = config: {
     zui.checkRenderer(EveryCommandRenderer);
     break :config .{
         .limits = .{ .max_elements = 16 },
@@ -179,7 +179,8 @@ const RendererUi = zui.Context(config: {
         .MaterialHandle = EveryCommandRenderer.MaterialHandle,
         .CustomData = EveryCommandRenderer.CustomData,
     };
-});
+};
+const RendererUi = zui.Context(every_command_config);
 
 var renderer_memory: [RendererUi.required_bytes]u8 align(RendererUi.buffer_alignment) = undefined;
 
@@ -243,6 +244,50 @@ export fn zuiCheckHost() usize {
     }
     host.zuiWaker().wake();
     return renderer.drawn;
+}
+
+const EveryCommandHarness = struct {
+    pub const config: zui.Config = every_command_config;
+
+    drawn: EveryCommandRenderer = .{},
+    host_under_test: OffscreenHost = .{},
+
+    pub fn renderer(self: *EveryCommandHarness) *EveryCommandRenderer {
+        return &self.drawn;
+    }
+
+    pub fn beginDraw(_: *EveryCommandHarness, size: [2]u32) zui.Surface {
+        return .{ .offscreen = .{ .size = size } };
+    }
+
+    pub fn pixel(_: *EveryCommandHarness, _: u32, _: u32) zui.Color {
+        return .black;
+    }
+
+    pub fn image(_: *EveryCommandHarness, color: zui.Color) u32 {
+        return color.r;
+    }
+
+    pub fn custom(_: *EveryCommandHarness) u16 {
+        return 1;
+    }
+
+    pub fn host(self: *EveryCommandHarness) *OffscreenHost {
+        return &self.host_under_test;
+    }
+
+    pub fn post(_: *EveryCommandHarness, _: zui.Event) bool {
+        return false;
+    }
+};
+
+export fn zuiCheckConformanceSuites(io: *const std.Io) usize {
+    var harness: EveryCommandHarness = .{};
+    var nothing: [1]u8 = undefined;
+    var no_memory: std.heap.FixedBufferAllocator = .init(&nothing);
+    const renderer_violation = zui_testing.findRendererViolation(EveryCommandRenderer, &harness, .{ .gpa = no_memory.allocator(), .io = io.* }) catch return 0;
+    const host_violation = zui_testing.findHostViolation(OffscreenHost, &harness, .{ .io = io.* }) catch return 0;
+    return @intFromBool(renderer_violation == null) + @intFromBool(host_violation == null);
 }
 
 const TestingUi = zui.Context(.{ .limits = .{ .max_elements = 32 }, .Text = zui_testing.FixedMetricsText(u16) });

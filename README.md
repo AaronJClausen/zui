@@ -69,14 +69,20 @@ Implemented so far:
   The host contract (`zuiPoll`, `zuiWaker`, `zuiWait`, `zuiSurface`,
   `zuiApply`), checked by `zui.checkHost`, with `zui.RecordBuilder` for
   the record a host fills and `zui.checkHostAndRenderer` failing to
-  compile when a host and a renderer share no kind of surface.
+  compile when a host and a renderer share no kind of surface. And the
+  conformance suites every implementation runs in its own CI:
+  `zui_testing.expectRendererConforms` draws a reference scene, deep
+  clips and out-of-bounds commands and reads the pixels back, and
+  `zui_testing.expectHostConforms` checks a host's event order, sticky
+  and cross-thread wakes, and waits. All three backends pass the renderer
+  suite in CI.
 
 The reference backend and demo application live in
 [zui-raylib](https://github.com/AaronJClausen/zui-raylib); the other
 backends are [zui-sokol](https://github.com/AaronJClausen/zui-sokol) and
 [zui-terminal](https://github.com/AaronJClausen/zui-terminal).
 
-Next, in the order of SPEC.md §21: conformance suites, `zui_app` and the raylib adapter host, a native Windows host, the wire format, and from there text,
+Next, in the order of SPEC.md §21: `Features`, `zui_app` and the raylib adapter host, a native Windows host, the wire format, and from there text,
 layout, gestures, effects, an inspector and accessibility, more hosts,
 motion and text editing. The box tree's layout budget (P4) comes early,
 as the text fast path and string cache did.
@@ -191,6 +197,37 @@ To keep noise out of a profile or a timing:
 - compare two builds by alternating them, never one after the other, as
   `zig build bench-compare` does; and prefer `zig build counts`, which no
   machine's noise can move.
+
+### Conformance suites
+
+A renderer or host proves its contract by running zui's suite in its own
+CI. Each suite takes a harness: a value that gives the suite what only
+the implementation knows how to do, such as making a drawing target and
+reading its pixels back, or making the OS report an event.
+
+```zig
+// src/conformance.zig, a test root importing the backend and zui_testing
+test "the renderer passes zui's renderer suite" {
+    var harness: MyHarness = undefined; // declares config, renderer, beginDraw, and pixel when it can read back
+    harness.init();
+    defer harness.deinit();
+    try zui_testing.expectRendererConforms(MyRenderer, &harness, .{ .gpa = std.testing.allocator, .io = std.testing.io });
+}
+```
+
+The recipe the backends follow:
+- `src/conformance.zig` holds the harness and the test, built by a
+  `conformance` step in `build.zig`;
+- CI runs `zig build conformance`, under `xvfb-run --auto-servernum` on
+  Linux when the backend needs a window for its graphics context;
+- a backend whose test step needs no display adds `conformance` to
+  `test` too, as zui-terminal does.
+
+`zui_testing.findRendererViolation` and `findHostViolation` return the
+first violation instead of failing, and the doc comments of
+`expectRendererConforms` and `expectHostConforms` list what a harness
+declares. zui-raylib, zui-sokol and zui-terminal each have a
+`src/conformance.zig` to copy.
 
 The repository uses LF line endings everywhere (see `.gitattributes`),
 whatever your `core.autocrlf` setting.

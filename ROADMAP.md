@@ -24,7 +24,7 @@ Each item says:
 | 0.6, in part | `bench-compare` (R2), startup benchmarks (P1), task completions at `beginFrame` (A2), the async design (A1) | done; the rest of 0.6 became stage 1 |
 | stage 1 | instruction counts in CI (R1), the tracer contract and `zui_tracy` (P2) | done |
 | stage 2 | the code brought to the spec's shape: C5, S1, I4, C6, A5 and `nextFrame` (I2); letter spacing (T3); the environment and host requests (I6); sources in the core (A3); `zui_async` (A4); the backends on the new API, the demo's thumbnails on `KeyedLoads` (C8) | done; the demo idles at 0% CPU |
-| stage 3, in part | the renderer contract and the generated commands (C1); the host contract and `RecordBuilder` (C2) | done; the backends are renderers; lowering comes with stage 8's commands, the suites with C3, and the first host with H1 |
+| stage 3, in part | the renderer contract and the generated commands (C1); the host contract and `RecordBuilder` (C2); the conformance suites (C3) | done; the backends are renderers and pass the renderer suite in CI; lowering comes with stage 8's commands, and the first host, with the host suite, with H1 |
 | stage 6, early | the single-line fast path (T1), the whole-string cache (T2), the box tree's layout passes (P4, in part) | done; warm text and the box tree's layout and emission within their budgets; the box tree's declaration is not (P5) |
 
 No release is tagged; everything is on `main`. From here, work is
@@ -59,13 +59,13 @@ green, and its **Status** line below says which slice is next.
 |---|---|---|---|---|
 | P4. The box tree's layout and emission within budget | 6, early | `src/layout.zig`, `src/emission.zig` | | waiting on P5 |
 | P5. The box tree's declaration within budget | 6, early | `src/context.zig` | L8 | waiting on L8 |
-| C3. Conformance suites | 3 | `zui_testing/` | C1, C2 | |
 | C7. `Features` | 3 | `src/context.zig` | | |
 | C4. `zui_app` | 3 | a new `zui_app/` module | C3 | |
 | H1. The raylib adapter host | 3 | `../zui-raylib` | C4 | |
+| H2. The Windows host | 4 | `../zui-host` | H1 | |
+| H8. The desktop showing through the window | 4 | `../zui-host` | H2 | |
 
-After the queue come stage 4 (H2, H8, in `../zui-host`) and then stages
-5 to 11 in the order of SPEC.md §21. They join the queue as it runs short.
+After the queue come stages 5 to 11 in the order of SPEC.md §21. They join the queue as it runs short.
 
 Statuses: `next` (the first open row), `in progress` (a slice has
 landed), `waiting on <what>` (blocked by something the next session cannot
@@ -129,6 +129,64 @@ Things to know:
 ---
 
 ## Done
+
+### C3. Conformance suites
+
+`zui_testing.expectRendererConforms(Renderer, harness, .{ .gpa, .io })`
+and `expectHostConforms(Host, harness, .{ .io })`, with
+`findRendererViolation` and `findHostViolation` returning the first
+violation instead. Each takes a harness, as `expectSourceConforms` does,
+for what only the implementation can do.
+
+The renderer suite draws five frames from a `Context` built on the
+backend's own `Config`: a reference scene of a fill, a border, text, an
+image when the renderer has `ImageHandle` and a clip inside a clip, each
+clip cutting off a child larger than itself; clips nested 100 deep, then a
+fill drawn after them; commands of no size and 100,000 units wide; an
+empty frame; and the reference scene again. With a harness that reads
+pixels back it checks the colors at 10 points of the scene, inside, outside and below
+each clip and after each clip ends, and that the text's bounds hold its
+color somewhere, since glyphs differ between fonts. A software renderer
+in `zui_testing`'s tests passes with no tolerance; the same renderer
+restoring no clip when an inner one ends fails with "drew #0040ff at
+(248, 64) in the reference scene, where what the outer clip cut off
+should be #203040".
+
+The host suite generalizes C2's test host's checks: a poll keeps the
+application's zoom, reports a viewport and gives back what the harness
+posted (a click, a key, typed text and a move) in order; `zuiSurface`
+gives a kind `zui_surfaces` names; `.immediately` returns at once; a wake
+before an `.on_event` wait ends it at once and is cleared, so the next
+30 ms `.at` wait lasts until its instant; a wake from another thread
+ends an `.on_event` wait; an `.at` wait ends within `prompt_ns` of its
+instant; and a closed window polls false. Every wait is bounded: past
+`lost_wake_ns` the suite keeps waking the host, so a lost wake fails it
+rather than hanging it. A test host in `zui_testing` passes; one that
+clears its wake before waiting fails with `WakeNotSticky`. The three wait
+tests of `src/tests/hosts.zig` moved into the suite. `zig build check`
+instantiates both suites on every target.
+
+Each backend has `src/conformance.zig` and a `conformance` step, which
+its CI runs (README.md's *Conformance suites* is the recipe):
+- **zui-terminal** reads each pixel as the cell covering it, and passes
+  with no tolerance; its `test` step runs the suite too;
+- **zui-raylib** draws into a render texture of a hidden window and reads
+  it back with `LoadImageFromTexture`; on Linux CI under Xvfb;
+- **zui-sokol** runs the suite in a sokol_app window's first frame,
+  reading each frame back with `glReadPixels` before it is presented, so
+  its suite always renders with OpenGL; on Linux CI under Xvfb.
+
+All three pass on Windows here. Breaking either readback (rows read top
+down) fails the suite at the scene's first point.
+
+Nothing on a hot path changed, so there is nothing to count or compare.
+
+What remains, and where it went:
+- **The host suite against a real host** is H1's: the raylib adapter
+  runs `expectHostConforms` in its `conformance` step.
+- **Optional commands** are drawn by no scene yet, since no declaration
+  produces one; each stage-8 item adds its command to the reference scene
+  with the declaration (*Done when* of stage 8).
 
 ### C2. The host contract
 
@@ -705,21 +763,6 @@ pool.
 
 ## Stage 3: the contracts
 
-### C3. Conformance suites
-
-**Plan.** `expectRendererConforms` and `expectHostConforms`, and a CI
-recipe the backends copy. zui-raylib, zui-sokol and zui-terminal run the
-renderer suite in their CI, which is what C1's *Done when* left to this
-item. The host suite generalizes the checks of C2's test host
-(`src/tests/hosts.zig`): events in arrival order through the
-`RecordBuilder`, a wake from another thread, a sticky wake, `.at` and
-`.immediately` honored, each wait bounded; it runs first against a test
-host in `zui_testing`'s own tests, and against the raylib adapter in H1.
-
-**Done when:** every backend's CI runs them.
-
-**Spec.** §19.4.
-
 ### C4. `zui_app`
 
 **Plan.** `contextConfig(Renderer, overrides)` and `run(App, init,
@@ -748,10 +791,13 @@ slower than today's.
 ### H1. The raylib adapter host
 
 **Plan.** zui-raylib implements the host contract with one window and no
-system material, through `InputSampler`.
+system material, through `InputSampler`. Its `src/conformance.zig` gains
+a host harness, whose `post` sets the state `InputSampler` reads (raylib
+reports no events to inject), and its `conformance` step runs
+`expectHostConforms` beside the renderer suite, under Xvfb on Linux CI.
 
-**Done when:** it passes C3's host suite, and the demo runs on it through
-`zui_app`.
+**Done when:** it passes C3's host suite in CI, and the demo runs on it
+through `zui_app`.
 
 ---
 
@@ -1078,8 +1124,9 @@ C1 generated the optional commands' variants; each item here adds the
 declaration that produces its command and the lowering for renderers that
 do not declare it, and the first adds `Diagnostics.lowered`.
 
-**Done when (each):** snapshot and lowering tests, and one renderer draws
-it; for G3, an interaction test clicks a rotated button; for G6, the
+**Done when (each):** snapshot and lowering tests; the renderer suite's
+reference scene declares it, and one renderer that declares the command
+passes the suite; for G3, an interaction test clicks a rotated button; for G6, the
 Windows host shows HDR white brighter than SDR white.
 
 **Spec.** §13.1, §13.3, §16.4, §18.
@@ -1251,6 +1298,9 @@ Deliberate, and each a reason to choose zui:
 | When a sticky wake is cleared (C2) | after the wait returns, never before it: a wake between `nextFrame` and the wait then ends the wait, and one cleared after it belongs to a publish the next swap sees |
 | A backend's `config()` (C1) | built from its `Renderer`'s declarations, overriding the application's `commands` and payload types, since the renderer draws only those; `zui_app.contextConfig` (C4) generalizes it |
 | Lowering before stage 8 (C1) | none: no declaration can produce an optional command until its stage-8 item adds one, which lands the lowering with it |
+| What a conformance suite takes (C3) | a harness, as `expectSourceConforms` does: the implementation makes the drawing target and reads it back, or makes the OS report an event; the suite owns the frames, the waits and the checks |
+| Reading pixels back (C3) | optional: without `pixel` the renderer suite checks only that each frame draws without an error; every backend today reads back, zui-sokol through OpenGL's `glReadPixels`, so its suite renders with OpenGL on every system |
+| A lost wake in the host suite (C3) | bounded: after `lost_wake_ns` the suite wakes the host every 50 ms until the wait ends, and fails |
 | Warm benchmark scenes (T2) | sized to hold every string (`string_cache_entries = 2048` for 1,000 texts): 1,000 strings in 1,024 entries overflow eight-entry probe windows, and about a fifth of them missed every frame |
 
 ### Open

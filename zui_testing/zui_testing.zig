@@ -16,6 +16,23 @@
 
 const std = @import("std");
 const zui = @import("zui");
+const DescribedViolation = @import("violation.zig").DescribedViolation;
+
+const renderer_conformance = @import("renderer_conformance.zig");
+pub const RendererConformance = renderer_conformance.RendererConformance;
+pub const RendererError = renderer_conformance.RendererError;
+pub const RendererViolation = renderer_conformance.RendererViolation;
+pub const renderer_viewport = renderer_conformance.renderer_viewport;
+pub const scene_colors = renderer_conformance.scene_colors;
+pub const expectRendererConforms = renderer_conformance.expectRendererConforms;
+pub const findRendererViolation = renderer_conformance.findRendererViolation;
+
+const host_conformance = @import("host_conformance.zig");
+pub const HostConformance = host_conformance.HostConformance;
+pub const HostError = host_conformance.HostError;
+pub const HostViolation = host_conformance.HostViolation;
+pub const expectHostConforms = host_conformance.expectHostConforms;
+pub const findHostViolation = host_conformance.findHostViolation;
 
 /// A text contract whose metrics don't depend on fonts: each byte is
 /// `size / 2` wide plus the letter spacing after it, and `size` tall, so
@@ -464,23 +481,7 @@ pub fn expectSourceConforms(comptime Source: type, harness: anytype, conformance
 
 pub const SourceError = error{ LostWake, UnknownItem, ItemOutOfOrder, InjectDiffers, Timeout, ItemLost, NewestLost, RefusalsUnreported, TooManyWakes };
 
-pub const SourceViolation = struct {
-    kind: SourceError,
-    buffer: [160]u8 = undefined,
-    len: usize = 0,
-
-    fn init(kind: SourceError, comptime format: []const u8, arguments: anytype) SourceViolation {
-        var violation: SourceViolation = .{ .kind = kind };
-        const written = std.fmt.bufPrint(&violation.buffer, format, arguments) catch &violation.buffer;
-        violation.len = written.len;
-        return violation;
-    }
-
-    /// What went wrong, after the source's name: "never delivered producer 2's last item".
-    pub fn description(self: *const SourceViolation) []const u8 {
-        return self.buffer[0..self.len];
-    }
-};
+pub const SourceViolation = DescribedViolation(SourceError);
 
 /// `expectSourceConforms` without printing: the first violation, or null.
 pub fn findSourceViolation(comptime Source: type, harness: anytype, conformance: SourceConformance) !?SourceViolation {
@@ -931,4 +932,9 @@ test "the driver swaps the application's sources, or delivers what a test names"
     _ = try driver.frame(&reader, QueueReader.declare, &.{});
     try std.testing.expectEqualSlices(u64, &.{}, reader.first);
     try std.testing.expectEqualSlices(u64, &.{3}, reader.second);
+}
+
+test {
+    _ = renderer_conformance;
+    _ = host_conformance;
 }
