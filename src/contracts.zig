@@ -4,6 +4,8 @@ const trace = @import("trace.zig");
 const sources = @import("sources.zig");
 const commands = @import("commands.zig");
 const surface = @import("surface.zig");
+const host = @import("host.zig");
+const record = @import("record.zig");
 
 /// Every `zui`-prefixed declaration of every contract. One that is not
 /// here belongs to no contract, which is almost always a misspelling.
@@ -13,10 +15,8 @@ const known_declarations = text_declarations ++ source_declarations ++ renderer_
 const text_declarations = [_][]const u8{ "zuiMeasure", "zuiSegment", "zui_thread_safe", "zuiFingerprint" };
 const source_declarations = [_][]const u8{ "zuiSwap", "zuiView", "zuiDelivery", "zuiInject", "zuiPending", "zuiEndFrame", "zuiRefusedCount" };
 const renderer_declarations = [_][]const u8{ "zuiSubmit", "zui_surfaces", "zui_commands", "zui_extended_color" };
-const host_declarations = [_][]const u8{
-    "zuiPoll",      "zuiWaker",         "zuiWait",        "zuiSurface", "zuiApply", "zui_capabilities",
-    "zuiClipboard", "zuiNotifications", "zuiFileDialogs", "zuiOpenUrl", "zuiMenus", "zuiFileWatch",
-};
+const host_declarations = [_][]const u8{ "zuiPoll", "zuiWaker", "zuiWait", "zuiSurface", "zuiApply", "zui_capabilities" } ++ host_services;
+const host_services = [_][]const u8{ "zuiClipboard", "zuiNotifications", "zuiFileDialogs", "zuiOpenUrl", "zuiMenus", "zuiFileWatch" };
 const tracer_declarations = [_][]const u8{ "zuiBegin", "zuiEnd" };
 const skin_declarations = [_][]const u8{"zuiStyle"};
 const wire_declarations = [_][]const u8{ "zuiSerialize", "zuiDeserialize" };
@@ -66,6 +66,58 @@ pub fn checkRenderer(comptime Renderer: type) void {
     };
     // Not "found ...": a generic function's type name spells out its inferred error set in builtins.
     if (!submits_a_frame) @compileError("zui: " ++ name ++ ".zuiSubmit must be " ++ expected_submit);
+}
+
+/// The host contract: the five calls of the loop and `zui_surfaces`, and
+/// optionally `zui_capabilities` and the services, each a type.
+pub fn checkHost(comptime Host: type) void {
+    if (@typeInfo(Host) != .@"struct") @compileError("zui: a host must be a struct type, got " ++ @typeName(Host));
+    const name = @typeName(Host);
+    checkKnownDeclarations(Host);
+    for ([_][]const u8{ "zuiPoll", "zuiWaker", "zuiWait", "zuiSurface", "zuiApply", "zui_surfaces" }) |required| {
+        if (!@hasDecl(Host, required)) @compileError("zui: " ++ name ++ " does not implement zui.Host: missing `" ++ required ++ "`");
+    }
+    expectDeclarationType(Host, "zui_surfaces", surface.SurfaceKinds, "zui.SurfaceKinds");
+    if (Host.zui_surfaces.count() == 0) @compileError("zui: " ++ name ++ ".zui_surfaces names no surface kind, so no renderer can draw into it");
+    if (@hasDecl(Host, "zui_capabilities")) expectDeclarationType(Host, "zui_capabilities", host.HostCapabilities, "zui.HostCapabilities");
+    for (host_services) |service| {
+        if (@hasDecl(Host, service)) expectDeclarationType(Host, service, type, "type");
+    }
+
+    const host_pointer = "*" ++ name;
+    expectHostCall(Host, "zuiPoll", fn (*Host, host.WindowId, *record.RecordBuilder) bool, "fn (" ++ host_pointer ++ ", zui.WindowId, *zui.RecordBuilder) bool");
+    expectHostCall(Host, "zuiWaker", fn (*Host) sources.Waker, "fn (" ++ host_pointer ++ ") zui.Waker");
+    expectHostCall(Host, "zuiWait", fn (*Host, record.NextFrame) void, "fn (" ++ host_pointer ++ ", zui.NextFrame) void");
+    expectHostCall(Host, "zuiSurface", fn (*Host, host.WindowId) surface.Surface, "fn (" ++ host_pointer ++ ", zui.WindowId) zui.Surface");
+    expectHostCall(Host, "zuiApply", fn (*Host, host.WindowId, record.HostRequests) void, "fn (" ++ host_pointer ++ ", zui.WindowId, zui.HostRequests) void");
+}
+
+/// `expected_name` spells zui's types as the application does: their own
+/// type names would be the files that declare them.
+fn expectHostCall(comptime Host: type, comptime declaration: []const u8, comptime Expected: type, comptime expected_name: []const u8) void {
+    const Found = @TypeOf(@field(Host, declaration));
+    if (Found != Expected) @compileError("zui: " ++ @typeName(Host) ++ "." ++ declaration ++ " must be " ++ expected_name ++ ", found " ++ @typeName(Found));
+}
+
+/// Both contracts, and a surface kind the host gives and the renderer
+/// draws into.
+pub fn checkHostAndRenderer(comptime Host: type, comptime Renderer: type) void {
+    checkHost(Host);
+    checkRenderer(Renderer);
+    if (Host.zui_surfaces.intersectWith(Renderer.zui_surfaces).count() == 0) {
+        @compileError("zui: " ++ @typeName(Host) ++ " and " ++ @typeName(Renderer) ++ " share no surface kind: the host gives " ++
+            surfaceKindNames(Host.zui_surfaces) ++ ", the renderer draws into " ++ surfaceKindNames(Renderer.zui_surfaces));
+    }
+}
+
+/// `.win32, .x11`
+fn surfaceKindNames(comptime kinds: surface.SurfaceKinds) []const u8 {
+    var names: []const u8 = "";
+    for (std.enums.values(surface.SurfaceKind)) |kind| {
+        if (!kinds.contains(kind)) continue;
+        names = names ++ (if (names.len == 0) "." else ", .") ++ @tagName(kind);
+    }
+    return names;
 }
 
 /// The renderer's declaration `declaration`, or `default` without one.

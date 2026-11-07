@@ -66,41 +66,51 @@ Implemented so far:
   by `zui.checkRenderer`, and a `RenderCommand` union generated with
   exactly the variants a renderer draws, so its exhaustive `switch` names
   nothing else. zui-raylib, zui-sokol and zui-terminal are renderers.
+  The host contract (`zuiPoll`, `zuiWaker`, `zuiWait`, `zuiSurface`,
+  `zuiApply`), checked by `zui.checkHost`, with `zui.RecordBuilder` for
+  the record a host fills and `zui.checkHostAndRenderer` failing to
+  compile when a host and a renderer share no kind of surface.
 
 The reference backend and demo application live in
 [zui-raylib](https://github.com/AaronJClausen/zui-raylib); the other
 backends are [zui-sokol](https://github.com/AaronJClausen/zui-sokol) and
 [zui-terminal](https://github.com/AaronJClausen/zui-terminal).
 
-Next, in the order of SPEC.md §21: the host contract with `zui_app`, a native Windows host, the wire format, and from there text,
+Next, in the order of SPEC.md §21: conformance suites, `zui_app` and the raylib adapter host, a native Windows host, the wire format, and from there text,
 layout, gestures, effects, an inspector and accessibility, more hosts,
 motion and text editing. The box tree's layout budget (P4) comes early,
 as the text fast path and string cache did.
 [ROADMAP.md](ROADMAP.md) keeps the queue of work in order, and
 [ARCHITECTURE.md](ARCHITECTURE.md) shows how the pieces connect.
 
-Today's API, until stage 3 adds the host contract and `zui_app` of
-SPEC.md §6.1:
+Today's API, until stage 3 adds `zui_app`, which runs this loop for
+you (SPEC.md §6.1):
 
 ```zig
 const Ui = zui.Context(.{ .Text = MyFonts }); // MyFonts declares zuiMeasure
 var ui = try Ui.init(gpa, io, &fonts);
 defer ui.deinit(gpa);
 
-ui.beginFrame(&.{ .params = .{ .now = now, .viewport = .{ 800, 600 } }, .events = events });
-ui.open(.{ .id = .of("toolbar"), .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(40) }, .padding = .all(4) }, .decoration = .{ .background = .rgb(0x202020) } });
-ui.text("Hello, zui", .{ .color = .white });
-ui.close();
-const frame = ui.endFrame();
-try renderer.zuiSubmit(surface, frame); // e.g. zui_raylib.Renderer, with surface .library
-host.setCursor(frame.requests().cursor);
-ui.release(frame);
-waitFor(ui.nextFrame());
+comptime zui.checkHostAndRenderer(MyHost, MyRenderer);
+var events: [256]zui.Event = undefined;
+var text: [256]u8 = undefined;
+var builder: zui.RecordBuilder = .init(&events, &text);
+while (host.zuiPoll(.main, &builder)) { // the host sets the time, viewport and scale, and appends events
+    ui.beginFrame(&builder.record());
+    ui.open(.{ .id = .of("toolbar"), .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(40) }, .padding = .all(4) }, .decoration = .{ .background = .rgb(0x202020) } });
+    ui.text("Hello, zui", .{ .color = .white });
+    ui.close();
+    const frame = ui.endFrame();
+    try renderer.zuiSubmit(host.zuiSurface(.main), frame);
+    host.zuiApply(.main, frame.requests()); // the cursor, the IME window
+    ui.release(frame);
+    host.zuiWait(ui.nextFrame());
+}
 ```
 
 With `.Sources = AppSources` in the `Config`, a struct whose fields are
 sources (SPEC.md §14), `beginFrame` and `nextFrame` also take
-`&app.sources`, and declaration reads them with `ui.source(.quotes)`:
+`&app.sources`, the record is `builder.recordWith(Ui.Deliveries)`, and declaration reads them with `ui.source(.quotes)`:
 
 ```zig
 const AppSources = struct {

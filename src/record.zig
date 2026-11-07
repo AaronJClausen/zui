@@ -69,6 +69,105 @@ pub fn FrameRecordWith(comptime Deliveries: type) type {
     };
 }
 
+/// What a host fills in `zuiPoll`: the parameters it measures and the
+/// events since the last record, in memory the application reserved, so
+/// polling allocates nothing. The application keeps `params.zoom`.
+///
+/// ```zig
+/// var events: [256]zui.Event = undefined;
+/// var text: [256]u8 = undefined;
+/// var builder: zui.RecordBuilder = .init(&events, &text);
+/// while (host.zuiPoll(.main, &builder)) {
+///     ui.beginFrame(&builder.record()); // with sources: builder.recordWith(Ui.Deliveries)
+///     // ...
+/// }
+/// ```
+pub const RecordBuilder = struct {
+    params: FrameParams = .{ .now = .zero, .viewport = .{ 0, 0 } },
+    event_buffer: []input.Event,
+    event_count: usize = 0,
+    text_buffer: []u8,
+    text_len: usize = 0,
+    /// Events refused since `begin` because `event_buffer` was full.
+    dropped_events: u32 = 0,
+    /// Bytes of text refused since `begin`, with their events or because
+    /// `text_buffer` was full.
+    dropped_text_bytes: u32 = 0,
+
+    /// The parameters a host measures; zoom is the application's.
+    pub const HostParams = struct {
+        now: Instant,
+        viewport: [2]f32,
+        scale: f32 = 1,
+    };
+
+    pub fn init(event_buffer: []input.Event, text_buffer: []u8) RecordBuilder {
+        return .{ .event_buffer = event_buffer, .text_buffer = text_buffer };
+    }
+
+    /// Starts a record: forgets the last one's events and text, and sets
+    /// what the host measures. The zoom is kept.
+    pub fn begin(self: *RecordBuilder, host_params: HostParams) void {
+        self.params = .{ .now = host_params.now, .viewport = host_params.viewport, .scale = host_params.scale, .zoom = self.params.zoom };
+        self.event_count = 0;
+        self.text_len = 0;
+        self.dropped_events = 0;
+        self.dropped_text_bytes = 0;
+    }
+
+    /// Keeps `event` if there is room. When there is none the newest is
+    /// dropped, so what is kept stays in arrival order. A `.text` event
+    /// appended here borrows its bytes; `appendText` copies them.
+    pub fn append(self: *RecordBuilder, event: input.Event) void {
+        if (self.event_count == self.event_buffer.len) {
+            self.dropped_events +|= 1;
+            if (event == .text) self.dropped_text_bytes +|= saturatingCount(event.text.len);
+            return;
+        }
+        self.event_buffer[self.event_count] = event;
+        self.event_count += 1;
+    }
+
+    /// Copies committed UTF-8 into `text_buffer`, so the host may reuse its
+    /// own at once, and appends it as a `.text` event. What does not fit is
+    /// cut at a character boundary.
+    pub fn appendText(self: *RecordBuilder, text: []const u8) void {
+        if (self.event_count == self.event_buffer.len) return self.append(.{ .text = text });
+        const room = self.text_buffer.len - self.text_len;
+        var kept = @min(text.len, room);
+        if (kept < text.len) {
+            while (kept > 0 and text[kept] & 0b1100_0000 == 0b1000_0000) kept -= 1;
+            self.dropped_text_bytes +|= saturatingCount(text.len - kept);
+        }
+        if (kept == 0) return;
+        const copy = self.text_buffer[self.text_len..][0..kept];
+        @memcpy(copy, text[0..kept]);
+        self.text_len += kept;
+        self.append(.{ .text = copy });
+    }
+
+    /// Valid until the next `begin`.
+    pub fn events(self: *const RecordBuilder) []const input.Event {
+        return self.event_buffer[0..self.event_count];
+    }
+
+    /// The record for a `Context` without sources. It borrows the
+    /// builder's memory until the next `begin`.
+    pub fn record(self: *const RecordBuilder) FrameRecord {
+        return .{ .params = self.params, .events = self.events() };
+    }
+
+    /// The record for a `Context` with sources, which swap rather than
+    /// replay: `builder.recordWith(Ui.Deliveries)`.
+    pub fn recordWith(self: *const RecordBuilder, comptime Deliveries: type) FrameRecordWith(Deliveries) {
+        return .{ .params = self.params, .events = self.events() };
+    }
+
+    fn saturatingCount(count: usize) u32 {
+        return std.math.lossyCast(u32, count);
+    }
+};
+
 /// The pointer's shape. Hosts map each to the closest their OS has.
 pub const Cursor = enum(u8) {
     default,

@@ -24,7 +24,7 @@ Each item says:
 | 0.6, in part | `bench-compare` (R2), startup benchmarks (P1), task completions at `beginFrame` (A2), the async design (A1) | done; the rest of 0.6 became stage 1 |
 | stage 1 | instruction counts in CI (R1), the tracer contract and `zui_tracy` (P2) | done |
 | stage 2 | the code brought to the spec's shape: C5, S1, I4, C6, A5 and `nextFrame` (I2); letter spacing (T3); the environment and host requests (I6); sources in the core (A3); `zui_async` (A4); the backends on the new API, the demo's thumbnails on `KeyedLoads` (C8) | done; the demo idles at 0% CPU |
-| stage 3, in part | the renderer contract and the generated commands (C1) | done; the backends are renderers; lowering comes with stage 8's commands, and the renderer suite with C3 |
+| stage 3, in part | the renderer contract and the generated commands (C1); the host contract and `RecordBuilder` (C2) | done; the backends are renderers; lowering comes with stage 8's commands, the suites with C3, and the first host with H1 |
 | stage 6, early | the single-line fast path (T1), the whole-string cache (T2), the box tree's layout passes (P4, in part) | done; warm text and the box tree's layout and emission within their budgets; the box tree's declaration is not (P5) |
 
 No release is tagged; everything is on `main`. From here, work is
@@ -59,7 +59,6 @@ green, and its **Status** line below says which slice is next.
 |---|---|---|---|---|
 | P4. The box tree's layout and emission within budget | 6, early | `src/layout.zig`, `src/emission.zig` | | waiting on P5 |
 | P5. The box tree's declaration within budget | 6, early | `src/context.zig` | L8 | waiting on L8 |
-| C2. The host contract and the surface | 3 | `src/contracts.zig`, a new `src/surface.zig` | C1 | |
 | C3. Conformance suites | 3 | `zui_testing/` | C1, C2 | |
 | C7. `Features` | 3 | `src/context.zig` | | |
 | C4. `zui_app` | 3 | a new `zui_app/` module | C3 | |
@@ -130,6 +129,42 @@ Things to know:
 ---
 
 ## Done
+
+### C2. The host contract
+
+`zui.checkHost(Host)`: `zuiPoll`, `zuiWaker`, `zuiWait`, `zuiSurface`,
+`zuiApply` and `zui_surfaces` required; `zui_capabilities`
+(`zui.HostCapabilities`: one window or many, a system material) and the
+services (`zuiClipboard` and the rest, each a type until H6 defines them)
+optional; each mistake a compile error with its message, pinned by five
+compile-error tests. `zui.checkHostAndRenderer(Host, Renderer)` checks
+both and fails, naming both and listing each one's kinds, when the host
+gives no surface kind the renderer draws into; a sixth test pins it.
+`zui.WindowId`, and `zui.RecordBuilder`, which a host fills in `zuiPoll`
+in memory the application reserved: `begin` sets what the host measures
+(`now`, viewport, scale) and keeps the application's zoom, `append` keeps
+events in arrival order and drops the newest that do not fit,
+`appendText` copies committed text and cuts it at a character boundary,
+and each drop is counted on the builder; `record()` and
+`recordWith(Ui.Deliveries)` make the record for a context without and
+with sources.
+
+A test host in `src/tests/hosts.zig` runs the loop of SPEC.md §6.1 with a
+`Context` and a renderer on its offscreen surface: a click and typed text
+queued as the OS's events arrive through the builder, the frame's cursor
+request is applied, and the loop ends when the window closes. Its wake is
+an `Io.Event` reset after the wait, never before, and tests show it
+sticky (a wake before the wait ends it at once), ended by a wake from
+another thread, and honoring `.immediately` and `.at`; every wait has a
+deadline. `zig build check` instantiates a host and the builder on every
+target.
+
+Nothing on a hot path changed, so there is nothing to count or compare.
+
+What remains, and where it went:
+- **A host suite and a real host.** "The raylib adapter (H1) passes C3's
+  host suite" is H1's *Done when*; C3's plan now builds
+  `expectHostConforms` from this test host's checks.
 
 ### C1. The renderer contract and the generated commands
 
@@ -670,27 +705,16 @@ pool.
 
 ## Stage 3: the contracts
 
-### C2. The host contract and the surface
-
-**Grounding.** `zui.Surface`, `SurfaceKind` and `SurfaceKinds` exist
-(`src/surface.zig`, from C1), because the renderer contract names them;
-nothing hands one out yet, and the renderers' `zui_surfaces` are checked
-against no host.
-
-**Plan.** `zuiPoll`, `zuiWaker`, `zuiWait`, `zuiSurface`, `zuiApply`;
-`RecordBuilder`; sticky wakes; a host and a renderer whose `zui_surfaces`
-share no kind are a compile error naming both.
-
-**Done when:** the raylib adapter (H1) passes C3's host suite.
-
-**Spec.** §16.3, §16.4.
-
 ### C3. Conformance suites
 
 **Plan.** `expectRendererConforms` and `expectHostConforms`, and a CI
 recipe the backends copy. zui-raylib, zui-sokol and zui-terminal run the
 renderer suite in their CI, which is what C1's *Done when* left to this
-item.
+item. The host suite generalizes the checks of C2's test host
+(`src/tests/hosts.zig`): events in arrival order through the
+`RecordBuilder`, a wake from another thread, a sticky wake, `.at` and
+`.immediately` honored, each wait bounded; it runs first against a test
+host in `zui_testing`'s own tests, and against the raylib adapter in H1.
 
 **Done when:** every backend's CI runs them.
 
@@ -701,7 +725,8 @@ item.
 **Plan.** `contextConfig(Renderer, overrides)` and `run(App, init,
 options)`: the loop of SPEC.md §6.1, a render thread when the renderer
 allows, host requests applied, pacing to `nextFrame`, capabilities and
-fallbacks reported.
+fallbacks reported, and the `RecordBuilder`'s dropped events and text
+logged once, as a limit is (SPEC.md §17.2).
 
 **Done when:** the demo runs on `zui_app` with less code than today, and
 its time from process start to its first presented frame is measured
@@ -1220,6 +1245,10 @@ Deliberate, and each a reason to choose zui:
 | `zuiSubmit`'s frame (C1) | `anytype`: a renderer is not generic over the `Context`; its exhaustive `switch` over the payload is the check that it draws what the frame holds |
 | Surfaces that are not native windows (C1) | `zui.Surface` gains `terminal` (cells) and `library` (a window a library such as raylib or sokol_app owns, which only its adapter host provides) |
 | Where the surface vocabulary lands (C1) | with the renderer contract, which names it; C2 adds the host side and the check that a host and a renderer share a kind |
+| Who checks that a host and a renderer meet (C2) | `zui.checkHostAndRenderer`, called by the composition root (the application or `zui_app`), the one place that names both |
+| What fills a record (C2) | `zui.RecordBuilder`, over the application's buffers: the host sets `now`, viewport and scale with `begin` and appends events; the zoom is the application's and survives `begin`; what does not fit is dropped newest first and counted on the builder, which `zui_app` reports |
+| A record for a context with sources (C2) | `builder.recordWith(Ui.Deliveries)`, since `Ui.FrameRecord` is a different type there; a live record has no deliveries |
+| When a sticky wake is cleared (C2) | after the wait returns, never before it: a wake between `nextFrame` and the wait then ends the wait, and one cleared after it belongs to a publish the next swap sees |
 | A backend's `config()` (C1) | built from its `Renderer`'s declarations, overriding the application's `commands` and payload types, since the renderer draws only those; `zui_app.contextConfig` (C4) generalizes it |
 | Lowering before stage 8 (C1) | none: no declaration can produce an optional command until its stage-8 item adds one, which lands the lowering with it |
 | Warm benchmark scenes (T2) | sized to hold every string (`string_cache_entries = 2048` for 1,000 texts): 1,000 strings in 1,024 entries overflow eight-entry probe windows, and about a fifth of them missed every frame |

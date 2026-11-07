@@ -195,6 +195,56 @@ export fn zuiCheckRenderer() usize {
     return renderer.drawn;
 }
 
+const OffscreenHost = struct {
+    pub const zui_surfaces: zui.SurfaceKinds = .initOne(.offscreen);
+    pub const zui_capabilities: zui.HostCapabilities = .{ .windows = .many };
+
+    polls: u32 = 0,
+    applied: zui.HostRequests = .{},
+
+    pub fn zuiPoll(self: *OffscreenHost, _: zui.WindowId, record: *zui.RecordBuilder) bool {
+        self.polls += 1;
+        record.begin(.{ .now = .fromNanoseconds(self.polls), .viewport = .{ 100, 100 } });
+        record.appendText("a");
+        return self.polls == 1;
+    }
+
+    pub fn zuiWaker(self: *OffscreenHost) zui.Waker {
+        return .{ .context = self, .wakeFn = wakeNothing };
+    }
+
+    pub fn zuiWait(_: *OffscreenHost, _: zui.NextFrame) void {}
+
+    pub fn zuiSurface(_: *OffscreenHost, _: zui.WindowId) zui.Surface {
+        return .{ .offscreen = .{ .size = .{ 100, 100 } } };
+    }
+
+    pub fn zuiApply(self: *OffscreenHost, _: zui.WindowId, requests: zui.HostRequests) void {
+        self.applied = requests;
+    }
+};
+
+export fn zuiCheckHost() usize {
+    comptime zui.checkHostAndRenderer(OffscreenHost, EveryCommandRenderer);
+    var ui = RendererUi.initBuffer(&renderer_memory, undefined) catch return 0;
+    var host: OffscreenHost = .{};
+    var renderer: EveryCommandRenderer = .{};
+    var events: [4]zui.Event = undefined;
+    var text: [4]u8 = undefined;
+    var builder: zui.RecordBuilder = .init(&events, &text);
+    while (host.zuiPoll(.main, &builder)) {
+        ui.beginFrame(&builder.record());
+        ui.box(.{ .decoration = .{ .background = .black } });
+        const frame = ui.endFrame();
+        renderer.zuiSubmit(host.zuiSurface(.main), frame) catch return 0;
+        host.zuiApply(.main, frame.requests());
+        ui.release(frame);
+        host.zuiWait(ui.nextFrame());
+    }
+    host.zuiWaker().wake();
+    return renderer.drawn;
+}
+
 const TestingUi = zui.Context(.{ .limits = .{ .max_elements = 32 }, .Text = zui_testing.FixedMetricsText(u16) });
 
 var testing_text: zui_testing.FixedMetricsText(u16) = .{};
@@ -304,7 +354,9 @@ export fn zuiCheckSources(published: u64) u64 {
     const waker: zui.Waker = .{ .context = &wake_target, .wakeFn = wakeNothing };
     check_sources.catalog.published = published;
     waker.wakeIf(.needed);
-    ui.tryBeginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 100, 100 } } }, &check_sources) catch return 0;
+    var builder: zui.RecordBuilder = .init(&.{}, &.{});
+    builder.begin(.{ .now = .zero, .viewport = .{ 100, 100 } });
+    ui.tryBeginFrame(&builder.recordWith(SourcedUi.Deliveries), &check_sources) catch return 0;
     const shown: u64 = switch (ui.source(.catalog)) {
         .idle, .canceled => 0,
         .running => |fraction| @intFromFloat(fraction),

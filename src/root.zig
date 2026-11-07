@@ -9,6 +9,7 @@ const trace = @import("trace.zig");
 const sources = @import("sources.zig");
 const commands = @import("commands.zig");
 const surface = @import("surface.zig");
+const host = @import("host.zig");
 const contracts = @import("contracts.zig");
 
 pub const Context = context.Context;
@@ -43,6 +44,26 @@ pub const SurfaceKinds = surface.SurfaceKinds;
 /// ```
 pub const checkRenderer = contracts.checkRenderer;
 
+pub const WindowId = host.WindowId;
+pub const HostCapabilities = host.HostCapabilities;
+
+/// Fails to compile, with a message naming the declaration, unless `Host`
+/// implements the host contract: `zuiPoll`, `zuiWaker`, `zuiWait`,
+/// `zuiSurface`, `zuiApply` and `zui_surfaces`, and optionally
+/// `zui_capabilities` and the services (`zuiClipboard`, `zuiFileDialogs`
+/// and the rest), each a type. A host's `zuiWaker` must be sticky: a wake
+/// that arrives while the loop is not waiting ends its next wait.
+pub const checkHost = contracts.checkHost;
+
+/// `checkHost` and `checkRenderer`, and fails to compile, naming both,
+/// unless the host gives a surface kind the renderer draws into. The
+/// composition root calls it, as it is the one place naming both:
+///
+/// ```zig
+/// comptime zui.checkHostAndRenderer(zui_raylib.Host, zui_raylib.Renderer);
+/// ```
+pub const checkHostAndRenderer = contracts.checkHostAndRenderer;
+
 pub const Waker = sources.Waker;
 pub const Wake = sources.Wake;
 pub const EndFrameInfo = sources.EndFrameInfo;
@@ -54,6 +75,7 @@ pub const Instant = record.Instant;
 pub const FrameParams = record.FrameParams;
 pub const FrameRecord = record.FrameRecord;
 pub const FrameRecordWith = record.FrameRecordWith;
+pub const RecordBuilder = record.RecordBuilder;
 pub const NextFrame = record.NextFrame;
 pub const HostRequests = record.HostRequests;
 pub const Cursor = record.Cursor;
@@ -122,4 +144,5 @@ test {
     _ = @import("tests/tracing.zig");
     _ = @import("tests/sources.zig");
     _ = @import("tests/renderers.zig");
+    _ = @import("tests/hosts.zig");
 }

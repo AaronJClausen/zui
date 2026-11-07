@@ -333,14 +333,15 @@ pub fn main(init: std.process.Init) !void {
 }
 ```
 
-Written by hand, it is the same six steps, in this order:
+Written by hand, it is the same steps, in this order:
 
 ```zig
-while (host.zuiPoll(window, &record)) {
-    ui.beginFrame(&record, &app.sources);
+while (host.zuiPoll(window, &builder)) {   // builder: a zui.RecordBuilder (§16.3)
+    ui.beginFrame(&builder.recordWith(Ui.Deliveries), &app.sources);
     app.declare(&ui);
     const frame = ui.endFrame();
-    try renderer.zuiSubmit(surface, frame);
+    try renderer.zuiSubmit(host.zuiSurface(window), frame);
+    host.zuiApply(window, frame.requests());
     ui.release(frame);              // or from the render thread
     app.load(&ui, io);              // the loader: demand → work
     host.zuiWait(ui.nextFrame(&app.sources));
@@ -1479,6 +1480,42 @@ const Win32Host = struct {
 };
 ```
 
+```zig
+pub const WindowId = enum(u32) { main = 0, _ };
+pub const HostCapabilities = struct {
+    windows: enum { one, many } = .one,
+    system_material: bool = false,
+};
+
+/// Filled by `zuiPoll`, in buffers the application reserved, so polling allocates nothing.
+pub const RecordBuilder = struct {
+    params: FrameParams,          // the host sets now, viewport and scale; zoom is the application's
+    dropped_events: u32,          // refused since `begin`: the newest are dropped, so order holds
+    dropped_text_bytes: u32,
+    pub fn init(events: []Event, text: []u8) RecordBuilder
+    pub fn begin(self: *RecordBuilder, host_params: HostParams) void   // .{ now, viewport, scale }; forgets the last record, keeps zoom
+    pub fn append(self: *RecordBuilder, event: Event) void
+    pub fn appendText(self: *RecordBuilder, text: []const u8) void     // copied; cut at a character boundary
+    pub fn record(self: *const RecordBuilder) FrameRecord              // valid until the next `begin`
+    pub fn recordWith(self: *const RecordBuilder, comptime Deliveries: type) FrameRecordWith(Deliveries)
+};
+
+pub fn checkHost(comptime Host: type) void
+pub fn checkHostAndRenderer(comptime Host: type, comptime Renderer: type) void   // also: a surface kind both share
+```
+
+- **`zuiPoll`** starts the record with `begin`, appends what the OS
+  reported since the last poll in arrival order, and returns false when
+  the window has closed.
+- **`zuiWait`** returns at once for `.immediately`, at the instant for
+  `.at`, and on input or a wake for `.on_event`. Its wake is sticky: it
+  clears the wake after the wait returns, never before, so a wake between
+  `nextFrame` and the wait ends the wait.
+- **`zuiApply`** takes the frame's `HostRequests`, setting the cursor and
+  placing the IME window.
+- **The composition root checks the pair.** `checkHostAndRenderer` is
+  called by the application or `zui_app`, the one place naming both:
+  ``"zui: RaylibHost and TerminalRenderer share no surface kind: the host gives .library, the renderer draws into .terminal"``.
 - **Native hosts** own the window and loop, one per OS.
 - **Adapter hosts** wrap a library that insists on owning its window
   (raylib), with fewer capabilities, through `InputSampler`.
@@ -1495,7 +1532,8 @@ const Win32Host = struct {
 by its size in cells, and `library`, a window that a library such as
 raylib or sokol_app creates and draws into itself, which only that
 library's adapter host provides. A host and renderer whose
-`zui_surfaces` share no kind are a compile error naming both. Output
+`zui_surfaces` share no kind are a compile error naming both, from
+`checkHostAndRenderer` (§16.3). Output
 formats (an FP16 swapchain for HDR) are negotiated through it, and fall
 back to SDR unless both sides support them.
 

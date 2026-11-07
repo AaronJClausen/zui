@@ -187,7 +187,9 @@ sources, and `Element` with `decoration` and `clip: Axes`. `TaskPool` is
 deleted, and the three backends and the demo are on this API. From stage
 3, the renderer contract and the `RenderCommand` union generated from
 `Config.commands` and the payload types have landed, and the three
-backends are renderers. From stage 6, the single-line fast path and the
+backends are renderers; so has the host contract, with `RecordBuilder`
+and the check that a host and a renderer share a surface kind, proven so
+far by a test host (no backend is a host until H1). From stage 6, the single-line fast path and the
 whole-string cache have landed.
 
 The code and the spec still differ in these places, each closed by the
@@ -197,7 +199,6 @@ roadmap item named:
 |---|---|---|---|
 | optional commands have variants, but nothing in declaration produces one, so nothing is lowered and `Diagnostics` lists no lowerings | `Decoration` and `Element` carry gradients, shadows, blur, transforms and materials, each lowered for a renderer that does not declare it | `src/style.zig`, `src/emission.zig` | G1, G2, G3, G5 |
 | no `Config.Color`; colors are RGBA8 only | `zui.Color` or `zui.ExtendedColor`, clamped for a renderer without `zui_extended_color` | `src/context.zig`, `src/commands.zig` | G6 |
-| `zui.Surface` exists, but no host contract hands one out or checks it against a renderer's `zui_surfaces` | the host contract and the surface check | `src/contracts.zig`, `src/surface.zig` | C2 |
 | configs copied into the frame | config references, static styles | `src/context.zig`, `src/style.zig` | L8 |
 | `Widgets(Ui)` with a `Theme` struct | `Widgets(Ui, Skin)` | `zui_widgets/` | K5 |
 | `Frame` exposes its storage arrays and `rectOf` | `Frame.inspect(index)` | `src/context.zig` | V1 |
@@ -226,5 +227,5 @@ the renderer contract, whose `config()` builds the `Config` from its
 declarations, so its `switch` over the commands names exactly what it
 draws (the terminal's names only the five base commands). Each loop still
 does a host's work by hand: zui-raylib's `FramePacer`, `InputReader` and
-`HostRequestApplier` become the raylib adapter host (H1) when stage 3 adds
-the host contract.
+`HostRequestApplier` become the raylib adapter host (H1), on the host
+contract C2 added.
