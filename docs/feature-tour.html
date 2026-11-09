@@ -705,7 +705,7 @@ pub const Fonts = struct {
 
       <article class="feature" id="images" data-title="Images and custom elements">
         <div class="feature-head"><h3>Images and self-drawn elements</h3><span class="pill shipped">Shipped</span></div>
-        <p><code class="z">ui.image</code> places the renderer's own image handle. <code class="z">ui.custom</code> places a payload your renderer draws itself, such as a 3D viewport or a histogram. Both are leaves that take an <code class="z">Element</code>, so they size, clip and hit-test like any box. Give an image its <code class="z">natural_size</code> and a <code class="z">fit</code> image takes it, keeping its proportions when its width grows or is squeezed. Its <code class="z">tint</code> is multiplied into its pixels and its <code class="z">corner_radius</code> rounds it; both reach the renderer in the <code class="z">image</code> command.</p>
+        <p><code class="z">ui.image</code> places the renderer's own image handle. <code class="z">ui.custom</code> places a payload your renderer draws itself, such as a 3D viewport or a histogram. Both are leaves that take an <code class="z">Element</code>, so they size, clip and hit-test like any box. Give an image its <code class="z">natural_size</code> and a <code class="z">fit</code> image takes it, keeping its proportions when its width grows or is squeezed. Its <code class="z">tint</code> is multiplied into its pixels and its <code class="z">corner_radius</code> rounds each corner; both reach the renderer in the <code class="z">image</code> command, and zui-raylib and zui-sokol draw them.</p>
 <script type="text/x-zig" data-file="src/ui/viewer.zig">
 const HistogramPayload = struct { photo_id: u64, channel: Channel };
 
@@ -1512,7 +1512,7 @@ pub const Renderer = struct {
             .rectangle => |rectangle| self.batch.roundedRect(command.bounds, rectangle.color, rectangle.corner_radius),
             .border => |border| self.batch.roundedOutline(command.bounds, border.color, border.widths, border.corner_radius),
             .text => |text| self.batch.glyphs(command.bounds, text.content, text.style),
-            .image => |image| self.batch.texturedQuad(command.bounds, image.handle),
+            .image => |image| self.batch.roundedTexturedQuad(command.bounds, image.handle, image.tint, image.corner_radius),
             .clip_begin => |rect| self.batch.pushScissor(self.scissors.push(rect)),
             .clip_end => self.batch.pushScissor(self.scissors.pop()),
         };
@@ -1828,7 +1828,6 @@ fn present(renderer: *Renderer, surface: zui.Surface, frame: *const Ui.Frame) !v
         <li><b>Gradients, shadows, backdrop blur, transforms, materials <span class="pill partial">Declared only</span></b><span>The variants exist in <code class="z">RenderCommand</code> when a renderer declares them, but <code class="z">Decoration</code> has no field that produces them, so nothing is emitted or lowered. Items G1–G6, stage 8.</span></li>
         <li><b><code class="z">features.semantics</code> and <code class="z">features.gestures</code> <span class="pill partial">Declared only</span></b><span><code class="z">Frame.semantics()</code> is always empty and <code class="z">ui.manipulation</code> always returns null. Accessibility is V2; gestures (arbitration, momentum, custom recognizers) are I5.</span></li>
         <li><b><code class="z">features.safety_sweeps</code> <span class="pill partial">Declared only</span></b><span>The flag exists, but it doesn't change behaviour yet. Sweeps are V3.</span></li>
-        <li><b>Images' tint and corner radius in the backends</b><span>The <code class="z">image</code> command carries them, but zui-raylib and zui-sokol still draw every image untinted and square. Item C10.</span></li>
         <li><b>Extended color</b><span>Colors are RGBA8 only. <code class="z">zui.ExtendedColor</code> for HDR is G6.</span></li>
         <li><b>Still to come</b><span>Drag and drop between elements (I1), a visual inspector <code>zui_debug</code> (V1), motion, multi-line text editing, skins, and more hosts (macOS, Linux, web).</span></li>
       </ul>

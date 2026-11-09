@@ -379,7 +379,7 @@ pub const Fonts = struct {
 
 ### Images and self-drawn elements · *shipped*
 
-`ui.image` places the renderer's own image handle. `ui.custom` places a payload your renderer draws itself, such as a 3D viewport or a histogram. Both are leaves that take an `Element`, so they size, clip and hit-test like any box. Give an image its `natural_size` and a `fit` image takes it, keeping its proportions when its width grows or is squeezed. Its `tint` is multiplied into its pixels and its `corner_radius` rounds it; both reach the renderer in the `image` command.
+`ui.image` places the renderer's own image handle. `ui.custom` places a payload your renderer draws itself, such as a 3D viewport or a histogram. Both are leaves that take an `Element`, so they size, clip and hit-test like any box. Give an image its `natural_size` and a `fit` image takes it, keeping its proportions when its width grows or is squeezed. Its `tint` is multiplied into its pixels and its `corner_radius` rounds each corner; both reach the renderer in the `image` command, and zui-raylib and zui-sokol draw them.
 
 `src/ui/viewer.zig`
 
@@ -1304,7 +1304,7 @@ pub const Renderer = struct {
             .rectangle => |rectangle| self.batch.roundedRect(command.bounds, rectangle.color, rectangle.corner_radius),
             .border => |border| self.batch.roundedOutline(command.bounds, border.color, border.widths, border.corner_radius),
             .text => |text| self.batch.glyphs(command.bounds, text.content, text.style),
-            .image => |image| self.batch.texturedQuad(command.bounds, image.handle),
+            .image => |image| self.batch.roundedTexturedQuad(command.bounds, image.handle, image.tint, image.corner_radius),
             .clip_begin => |rect| self.batch.pushScissor(self.scissors.push(rect)),
             .clip_end => self.batch.pushScissor(self.scissors.pop()),
         };
@@ -1657,7 +1657,6 @@ These names compile, but they don't do anything yet. This list is from `ARCHITEC
 - **Gradients, shadows, backdrop blur, transforms, materials** *(declared only)*: The variants exist in `RenderCommand` when a renderer declares them, but `Decoration` has no field that produces them, so nothing is emitted or lowered. Items G1–G6, stage 8.
 - **`features.semantics` and `features.gestures`** *(declared only)*: `Frame.semantics()` is always empty and `ui.manipulation` always returns null. Accessibility is V2; gestures (arbitration, momentum, custom recognizers) are I5.
 - **`features.safety_sweeps`** *(declared only)*: The flag exists, but it doesn't change behaviour yet. Sweeps are V3.
-- **Images' tint and corner radius in the backends**: The `image` command carries them, but zui-raylib and zui-sokol still draw every image untinted and square. Item C10.
 - **Extended color**: Colors are RGBA8 only. `zui.ExtendedColor` for HDR is G6.
 - **Still to come**: Drag and drop between elements (I1), a visual inspector `zui_debug` (V1), motion, multi-line text editing, skins, and more hosts (macOS, Linux, web).
 

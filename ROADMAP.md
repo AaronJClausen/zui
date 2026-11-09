@@ -27,7 +27,7 @@ Each item says:
 | stage 3 | the renderer contract and the generated commands (C1); the host contract and `RecordBuilder` (C2); the conformance suites (C3); `Features` (C7); `zui_app` (C4); the raylib adapter host (H1) | done; the backends are renderers and pass the renderer suite in CI, raylib's host passes the host suite, and the demo runs through `zui_app`, presenting its first frame 288 ms after the process starts; lowering comes with stage 8's commands |
 | stage 4 | the Windows host (H2), with dropped files and lifecycle events in the record; the system material (H8); `zui_app` with the application's own text contract (C9) | done; zui-sokol's tour runs on it unchanged, through `zui_app`, and idles at 0% CPU, and the same code shows Mica or a solid background |
 | stage 5 | relay (F2); `zui_wire` (F3); replay in `zui_testing` (F4); the wire host, renderer and client (F5); file watching as a source (F6) | done; editing a theme file restyles a running window on the Windows host within 4 ms; a recorded session of zui-sokol's tour replays to identical commands without starting any work, zui-sokol's tour goes over the wire at a hundredth of its frames' whole size, but for the screen that moves every box, and it runs in one process and draws in another on the Windows host, its keys going back |
-| stage 6, early | the single-line fast path (T1), the whole-string cache (T2), static styles (L8), the box tree's layout and emission (P4) and declaration (P5), line-break segmentation (T4), the grow basis (L1), aspect ratio and natural sizes (L2), dividers and decorated images (L3), floating options (L4), right-to-left layout (L6), wrap (L7) | done; the box tree's and warm text's budgets met: the box tree declares in 48.9 µs and lays out and emits in 89.2 µs, warm text in 90.5 µs; a box tree of static styles declares in 28.0 µs; C10, the backends drawing images' tint and corner radius, remains |
+| stage 6 | the single-line fast path (T1), the whole-string cache (T2), static styles (L8), the box tree's layout and emission (P4) and declaration (P5), line-break segmentation (T4), the grow basis (L1), aspect ratio and natural sizes (L2), dividers and decorated images (L3), floating options (L4), right-to-left layout (L6), wrap (L7); the backends drawing images' tint and corner radius (C10) | done; the box tree's and warm text's budgets met: the box tree declares in 48.9 µs and lays out and emits in 89.2 µs, warm text in 90.5 µs; a box tree of static styles declares in 28.0 µs; zui-raylib and zui-sokol draw tinted, rounded images and pass the renderer suite that checks them |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
@@ -62,7 +62,6 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
-| C10. The backends draw images' tint and corner radius | 6 | `../zui-raylib`, `../zui-sokol`, `zui_testing/` | | |
 | I5. Gestures | 7 | `src/interaction.zig`, `src/input.zig`, `zui_testing/` | | |
 | I1. Drag and drop between elements | 7 | `src/interaction.zig`, `src/state.zig`, `zui_testing/` | I5 | |
 | G1. Gradients, shadows and glow | 8 | `src/style.zig`, `src/emission.zig`, `zui_testing/` | | |
@@ -135,6 +134,56 @@ Things to know:
 ---
 
 ## Done
+
+### C10. The backends draw images' tint and corner radius
+
+**Grounding.** Since L3 the `image` command carries `tint` and
+`corner_radius`, but zui-raylib draws an image with its handle and bounds
+alone (`src/root.zig:541`, `drawTexture(image.handle, bounds)`), and so
+does zui-sokol (`src/renderer.zig:185`); zui-terminal has no images. The
+renderer suite's reference scene declares an untinted, square image.
+
+**Plan.** Each backend multiplies the tint into the image and rounds its
+corners; the renderer suite's reference scene declares a tinted image
+with a corner radius and checks a pixel inside it and one in a corner.
+Then each backend's pin moves past L3.
+
+**Done when:** zui-raylib and zui-sokol pass the extended renderer suite
+in CI.
+
+**Spec.** §10.1, §13.1, §16.2.
+
+**Status.** Done. The renderer suite's reference scene declares its image
+with a tint, `0xffff80`, and corners rounded by 12 units, and checks the
+pixel at its center for the image's color times the tint, `0x00ff80`, and
+the pixels just inside its top-left and bottom-right corners for the
+background behind it. A renderer that draws the image untinted, or that
+replaces its pixels with the tint, is a whole channel off at the center;
+one that draws it square fills the corners. `zui_testing`'s own software
+renderer multiplies the tint and tests each pixel against the rounded
+corners, and a flawed copy of it that draws images untinted and square
+fails with
+`drew #00ffff at (32, 112) in the reference scene, where a tinted image of one color should be #00ff80`.
+
+zui-sokol sets the tint as the vertex color, which sokol_gl multiplies
+into each texel, and draws a rounded image as a fan of textured triangles
+from its center over the outline its rounded rectangles already trace,
+each corner with its own radius. raylib multiplies a texture by a tint
+too, but cannot round one, so zui-raylib draws a rounded image the same
+way through rlgl, wound counter-clockwise on screen as raylib's culling
+wants, with each corner's own radius, though its rectangles round all
+four corners by the largest. A square image is drawn as before, one
+quad, with the tint.
+
+Both backends' pins move to this commit, from `cd3ddd6` (zui-raylib) and
+`ad90c3a` (zui-sokol), with no change to their code beyond drawing
+images; zui-terminal, which has no images, moves from `0268dbd`, and
+zui-host to this commit and the new zui-sokol. Run against the zui
+worktree with `--fork`, zui-raylib's renderer and host suites and
+zui-sokol's renderer suite pass on Windows, and zui-raylib's old drawing
+fails the extended suite with the message above; their CI runs the suites
+on Linux under `xvfb-run`. zui core is unchanged, so its instruction
+counts and times are too.
 
 ### L7. Wrap
 
@@ -1937,23 +1986,8 @@ Done: F2, F3, F4, F5 and F6 are in *Done*.
 
 ## Stage 6: text and layout
 
-### C10. The backends draw images' tint and corner radius
-
-**Grounding.** Since L3 the `image` command carries `tint` and
-`corner_radius`, but zui-raylib draws an image with its handle and bounds
-alone (`src/root.zig:541`, `drawTexture(image.handle, bounds)`), and so
-does zui-sokol (`src/renderer.zig:185`); zui-terminal has no images. The
-renderer suite's reference scene declares an untinted, square image.
-
-**Plan.** Each backend multiplies the tint into the image and rounds its
-corners; the renderer suite's reference scene declares a tinted image
-with a corner radius and checks a pixel inside it and one in a corner.
-Then each backend's pin moves past L3.
-
-**Done when:** zui-raylib and zui-sokol pass the extended renderer suite
-in CI.
-
-**Spec.** §10.1, §13.1, §16.2.
+Done: T1, T2, L8, P4, P5, T4, L1, L2, L3, L4, L6, L7 and C10 are in
+*Done*.
 
 ---
 
@@ -2163,6 +2197,7 @@ Deliberate, and each a reason to choose zui:
 | A border inside its element's clip (L4) | emitted before the element's own `clip_end`, which leaves it whole since it lies in the element's box, so a floating element's merged clip also cuts off its border with one clip pair |
 | Dividers (L3) | `Border.between_children`, emitted as `rectangle` commands in the border's color, so no renderer breaks; centered in the gap, spanning the element inside its widths; inside the element's clip, after its children and before its border; a border of zero widths emits no `border` command |
 | Images' tint and corner radius (L3) | declared on `Ui.Image` and carried by the `image` command with defaults (white, square), so existing renderers and their tests still compile; drawing them is the backends' (C10) |
+| Drawing images' tint and corner radius (C10) | the tint multiplies the texels as the vertex color; a rounded image is a fan of textured triangles from its center, each corner with its own radius, in zui-raylib too, whose rectangles keep raylib's one radius; the renderer suite checks the tinted color at the image's center and the background just inside two of its corners |
 | Natural sizes (L2) | `Ui.Image` is the declaration's type, apart from the `image` command; a natural size is the content inside the padding, may shrink in a narrower parent, and gives the height its proportions unless the height has a rule of its own |
 | A grow basis (L1) | a rule, `grow_from_min`, not a `basis` field, which would cost declaration; never narrower than the content's minimum, the rest shared by weight |
 | Config references (L8) | pointers in element storage, the default layout one constant; an element's own `layout` or `decoration` replaces the style's whole |

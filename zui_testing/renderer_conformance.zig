@@ -28,13 +28,22 @@ pub const scene_colors = struct {
     pub const text: zui.Color = .rgb(0xffff00);
     /// `harness.image` is asked for an image of this one color.
     pub const image: zui.Color = .rgb(0x00ffff);
+    /// The reference scene's image is declared with this tint, so it
+    /// draws as `tinted_image`: `image` multiplied by the tint.
+    pub const image_tint: zui.Color = .rgb(0xffff80);
+    pub const tinted_image: zui.Color = .rgb(0x00ff80);
 };
+
+/// The reference scene's image is rounded by this much, so a pixel just
+/// inside its bounding corner lies outside the curve.
+pub const image_corner_radius: f32 = 12;
 
 /// Draws frames that every renderer must draw the same way, and fails on
 /// the first thing it drew wrong:
 /// - a reference scene of the base commands (a fill, a border, text, and
 ///   a clip inside a clip, each cutting off a child larger than itself),
-///   with `image` and `custom` when the renderer has their payload types;
+///   with `image` and `custom` when the renderer has their payload types,
+///   the image tinted and with rounded corners;
 /// - clips nested 100 deep, then a fill drawn after all of them ended;
 /// - commands of no size, and far outside the viewport;
 /// - an empty frame;
@@ -42,8 +51,9 @@ pub const scene_colors = struct {
 ///   set, such as a clip, outlived it.
 ///
 /// With `pixel`, every frame is read back: each clip cuts off exactly what
-/// lies outside it and is restored when the clip inside it ends, and the
-/// scene's colors are where its layout put them. Without it, the suite
+/// lies outside it and is restored when the clip inside it ends, the
+/// scene's colors are where its layout put them, the image's tint is
+/// multiplied into its pixels, and its corners are left undrawn. Without it, the suite
 /// checks only that each frame is drawn without an error.
 ///
 /// `harness` is a pointer to a value that declares:
@@ -188,7 +198,11 @@ fn declareReference(ui: anytype, comptime config: zui.Config, payloads: anytype)
     }
     {
         ui.open(.{ .layout = .{ .child_gap = 16 } });
-        if (config.ImageHandle != void) ui.image(.{ .handle = payloads.image }, .{ .id = ids.picture, .layout = .{ .sizing = fixedSize(32, 32) } });
+        if (config.ImageHandle != void) ui.image(.{
+            .handle = payloads.image,
+            .tint = scene_colors.image_tint,
+            .corner_radius = .all(image_corner_radius),
+        }, .{ .id = ids.picture, .layout = .{ .sizing = fixedSize(32, 32) } });
         if (config.CustomData != void) ui.custom(payloads.custom, .{ .id = ids.custom, .layout = .{ .sizing = fixedSize(32, 32) } });
         if (config.Text != void) ui.text("MMMM", .{ .color = scene_colors.text });
         ui.close();
@@ -247,7 +261,15 @@ fn PixelCheck(comptime Harness: type) type {
                 if (self.expect(expectation)) |violation| return violation;
             }
             if (has_image) {
-                if (self.expect(.{ .at = center(frame.rectOf(ids.picture).?), .color = scene_colors.image, .what = "an image of one color" })) |violation| return violation;
+                const picture = frame.rectOf(ids.picture).?;
+                const image_expectations = [_]Expectation{
+                    .{ .at = center(picture), .color = scene_colors.tinted_image, .what = "a tinted image of one color" },
+                    .{ .at = .{ picture.x + 1, picture.y + 1 }, .color = scene_colors.background, .what = "an image's rounded top-left corner" },
+                    .{ .at = .{ picture.x + picture.width - 2, picture.y + picture.height - 2 }, .color = scene_colors.background, .what = "an image's rounded bottom-right corner" },
+                };
+                for (image_expectations) |expectation| {
+                    if (self.expect(expectation)) |violation| return violation;
+                }
             }
             for (frame.commands()) |command| {
                 if (command.payload == .text) return self.expectTextDrawn(command.bounds);
@@ -308,11 +330,13 @@ fn hex(color: zui.Color) u24 {
     return @as(u24, color.r) << 16 | @as(u24, color.g) << 8 | color.b;
 }
 
+const Flaw = enum { none, forgets_enclosing_clip, ignores_image_decoration };
+
 /// A software renderer into its own pixels, the plainest that conforms:
 /// fills ignore corner radii, text fills its bounds, and an image is its
-/// handle's color. With `forgets_enclosing_clip`, ending a clip ends every
-/// clip, which the suite must catch.
-fn PixelRenderer(comptime forgets_enclosing_clip: bool) type {
+/// handle's color times its tint, inside its rounded corners. Each `Flaw`
+/// is a mistake the suite must catch.
+fn PixelRenderer(comptime flaw: Flaw) type {
     return struct {
         const Self = @This();
         const width = renderer_viewport[0];
@@ -343,12 +367,15 @@ fn PixelRenderer(comptime forgets_enclosing_clip: bool) type {
                         self.fill(.{ .x = bounds.x + bounds.width - widths.right, .y = bounds.y, .width = widths.right, .height = bounds.height }, clip, border.color);
                     },
                     .text => |text| self.fill(bounds, clip, text.style.color),
-                    .image => |image| self.fill(bounds, clip, image.handle),
+                    .image => |image| if (flaw == .ignores_image_decoration)
+                        self.fill(bounds, clip, image.handle)
+                    else
+                        self.fillRounded(bounds, clip, multiply(image.handle, image.tint), image.corner_radius),
                     .clip_begin => |rect| {
                         clips[depth] = rect;
                         depth += 1;
                     },
-                    .clip_end => depth = if (forgets_enclosing_clip) 0 else depth - 1,
+                    .clip_end => depth = if (flaw == .forgets_enclosing_clip) 0 else depth - 1,
                 }
             }
         }
@@ -363,7 +390,48 @@ fn PixelRenderer(comptime forgets_enclosing_clip: bool) type {
                 @memset(self.pixels[y * width ..][@intFromFloat(left)..@intFromFloat(right)], color);
             }
         }
+
+        fn fillRounded(self: *Self, rect: zui.Rect, clip: zui.Rect, color: zui.Color, radius: zui.CornerRadius) void {
+            for (0..height) |y| for (0..width) |x| {
+                const at: [2]f32 = .{ @as(f32, @floatFromInt(x)) + 0.5, @as(f32, @floatFromInt(y)) + 0.5 };
+                if (contains(clip, at) and insideRounded(rect, radius, at)) self.pixels[y * width + x] = color;
+            };
+        }
     };
+}
+
+fn contains(rect: zui.Rect, at: [2]f32) bool {
+    return at[0] >= rect.x and at[0] < rect.x + rect.width and at[1] >= rect.y and at[1] < rect.y + rect.height;
+}
+
+fn insideRounded(rect: zui.Rect, radius: zui.CornerRadius, at: [2]f32) bool {
+    if (!contains(rect, at)) return false;
+    const is_left = at[0] < rect.x + rect.width / 2;
+    const is_top = at[1] < rect.y + rect.height / 2;
+    const declared_radius = if (is_top)
+        (if (is_left) radius.top_left else radius.top_right)
+    else
+        (if (is_left) radius.bottom_left else radius.bottom_right);
+    const corner_radius = @min(declared_radius, @min(rect.width, rect.height) / 2);
+    const arc_x = if (is_left) rect.x + corner_radius else rect.x + rect.width - corner_radius;
+    const arc_y = if (is_top) rect.y + corner_radius else rect.y + rect.height - corner_radius;
+    const beyond_x = if (is_left) arc_x - at[0] else at[0] - arc_x;
+    const beyond_y = if (is_top) arc_y - at[1] else at[1] - arc_y;
+    if (beyond_x <= 0 or beyond_y <= 0) return true;
+    return beyond_x * beyond_x + beyond_y * beyond_y <= corner_radius * corner_radius;
+}
+
+fn multiply(color: zui.Color, tint: zui.Color) zui.Color {
+    return .{
+        .r = multiplyChannel(color.r, tint.r),
+        .g = multiplyChannel(color.g, tint.g),
+        .b = multiplyChannel(color.b, tint.b),
+        .a = multiplyChannel(color.a, tint.a),
+    };
+}
+
+fn multiplyChannel(a: u8, b: u8) u8 {
+    return @intCast(@as(u16, a) * b / 255);
 }
 
 fn PixelHarness(comptime Renderer: type) type {
@@ -404,16 +472,26 @@ const FixedText = struct {
 };
 
 test "a renderer that draws every frame right passes the suite" {
-    var harness: PixelHarness(PixelRenderer(false)) = .{};
-    try expectRendererConforms(PixelRenderer(false), &harness, .{ .gpa = std.testing.allocator, .io = std.testing.io, .tolerance = 0 });
+    var harness: PixelHarness(PixelRenderer(.none)) = .{};
+    try expectRendererConforms(PixelRenderer(.none), &harness, .{ .gpa = std.testing.allocator, .io = std.testing.io, .tolerance = 0 });
 }
 
 test "a renderer that forgets the enclosing clip when a clip ends fails the suite" {
-    var harness: PixelHarness(PixelRenderer(true)) = .{};
-    const violation = (try findRendererViolation(PixelRenderer(true), &harness, .{ .gpa = std.testing.allocator, .io = std.testing.io })).?;
+    var harness: PixelHarness(PixelRenderer(.forgets_enclosing_clip)) = .{};
+    const violation = (try findRendererViolation(PixelRenderer(.forgets_enclosing_clip), &harness, .{ .gpa = std.testing.allocator, .io = std.testing.io })).?;
     try std.testing.expectEqual(error.WrongColor, violation.kind);
     try std.testing.expectEqualStrings(
         "drew #0040ff at (248, 64) in the reference scene, where what the outer clip cut off should be #203040",
+        violation.description(),
+    );
+}
+
+test "a renderer that draws an image untinted and square fails the suite" {
+    var harness: PixelHarness(PixelRenderer(.ignores_image_decoration)) = .{};
+    const violation = (try findRendererViolation(PixelRenderer(.ignores_image_decoration), &harness, .{ .gpa = std.testing.allocator, .io = std.testing.io })).?;
+    try std.testing.expectEqual(error.WrongColor, violation.kind);
+    try std.testing.expectEqualStrings(
+        "drew #00ffff at (32, 112) in the reference scene, where a tinted image of one color should be #00ff80",
         violation.description(),
     );
 }

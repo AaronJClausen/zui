@@ -2007,13 +2007,14 @@ edit (the message quotes the `.hidden = true` line that fixes it).
   publish into a source.
   - `expectRendererConforms(Renderer, harness, .{ .gpa, .io })` draws a
     reference scene of every command the renderer's declarations can
-    produce (the base commands, `image` and `custom` with their payload
-    types), clips nested 100 deep, commands of no size or out of bounds,
-    an empty frame, and the reference scene again. When the harness
+    produce (the base commands, and `image`, tinted and rounded, and
+    `custom` with their payload types), clips nested 100 deep, commands
+    of no size or out of bounds, an empty frame, and the reference scene again. When the harness
     reads pixels back, it checks that each clip cuts off what lies
     outside it and is restored when a clip inside it ends, that nothing
     an earlier frame set outlives it, and the scene's colors within a
-    tolerance. An optional command joins the scene with the declaration
+    tolerance, an image's tint multiplied into it and its corners left
+    undrawn. An optional command joins the scene with the declaration
     that produces it (§13.3).
   - `expectHostConforms(Host, harness, .{ .io })` checks that a poll
     keeps the application's zoom and reports posted events in order,

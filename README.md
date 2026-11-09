@@ -77,7 +77,7 @@ Implemented so far:
   can watch directories (`zuiFileWatch`), publishing each
   `zui.FileChange` into a source: zui-host's `zig build theme` restyles
   its window a few milliseconds after its theme file is saved.
-- **Stage 6, early:** a text that fits is laid out as one line without
+- **Stage 6:** a text that fits is laid out as one line without
   walking its words, and a whole-string cache makes a warm text one probe
   instead of one per word: 1,000 warm texts lay out in about 91 µs. The
   box tree of 4,096 boxes declares in about 50 µs and lays out and emits
@@ -95,7 +95,8 @@ Implemented so far:
   `.natural_size` takes that size and keeps its proportions as its width
   grows or shrinks. A border's `.between_children = 1` draws a divider
   between each two children, centered in the gap, and an image's `tint`
-  and `corner_radius` reach the renderer in its `image` command. A
+  is multiplied into its pixels and its `corner_radius` rounds it, as
+  zui-raylib and zui-sokol draw it and the renderer suite checks. A
   floating element may attach to an element declared after it; with
   `.capture = false` it lets the pointer through to what it covers, as a
   tooltip should, and with `.clip = .target` it is cut off where its
@@ -159,9 +160,8 @@ hosts live in [zui-host](https://github.com/AaronJClausen/zui-host).
 shipped feature in the code a consumer writes, with semantic highlighting;
 open it in a browser, or read [docs/feature-tour.md](docs/feature-tour.md).
 
-Next, in the order of SPEC.md §21: text,
-layout, gestures, effects, an inspector and accessibility, more hosts,
-motion and text editing.
+Next, in the order of SPEC.md §21: gestures, effects, an inspector and
+accessibility, more hosts, motion and text editing.
 [ROADMAP.md](ROADMAP.md) keeps the queue of work in order, and
 [ARCHITECTURE.md](ARCHITECTURE.md) shows how the pieces connect.
 

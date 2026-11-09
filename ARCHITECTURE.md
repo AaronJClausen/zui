@@ -216,7 +216,8 @@ segmentation through the text contract's `zuiSegment`, and the grow
 basis: `grow` starts from the content, `grow_from_min` from `min`; and
 the `aspect_ratio` rule, a height from the settled width, and images'
 natural sizes; and dividers between children, `Border.between_children`,
-and images' tint and corner radius in the `image` command; and the
+and images' tint and corner radius in the `image` command, which
+zui-raylib and zui-sokol draw and the renderer suite checks; and the
 floating options: targets declared later, `Floating.capture` and
 `Floating.clip`; and right-to-left layout: `Layout.mirrored`, inherited
 from the environment's direction, and `Direction.right_to_left`; and
@@ -229,7 +230,6 @@ roadmap item named:
 |---|---|---|---|
 | optional commands have variants, but nothing in declaration produces one, so nothing is lowered and `Diagnostics` lists no lowerings | `Decoration` and `Element` carry gradients, shadows, blur, transforms and materials, each lowered for a renderer that does not declare it | `src/style.zig`, `src/emission.zig` | G1, G2, G3, G5 |
 | no `Config.Color`; colors are RGBA8 only | `zui.Color` or `zui.ExtendedColor`, clamped for a renderer without `zui_extended_color` | `src/context.zig`, `src/commands.zig` | G6 |
-| zui-raylib and zui-sokol draw an image untinted and square | a renderer multiplies the `image` command's tint into it and rounds its corners | `../zui-raylib/src/root.zig`, `../zui-sokol/src/renderer.zig` | C10 |
 | `Widgets(Ui)` with a `Theme` struct | `Widgets(Ui, Skin)` | `zui_widgets/` | K5 |
 | `Frame` exposes its storage arrays and `rectOf` | `Frame.inspect(index)` | `src/context.zig` | V1 |
 | `Features` has every field and gates its API, but `Frame.semantics()` is always empty, `manipulation` always null, and `safety_sweeps` changes nothing | semantics, gestures and safety sweeps, each behind its field | `src/context.zig` | V2, I5, V3 |
@@ -252,9 +252,9 @@ frame arenas, parallel measurement and the module boundary.
 `zui-web`, `zui-themes` and `zui-examples` were created ahead of their
 items: each has its build, CI and an agent guide, and pins zui by commit.
 
-The renderer repositories pin zui by commit and moved to stage 2 with it
-(C8): each declares `Text`, a text contract, and its loop builds a
-`FrameRecord`, from events where its library reports them and through
+The renderer repositories pin zui by commit, moved to stage 2 with it
+(C8), and to the end of stage 6 with C10: each declares `Text`, a text
+contract, and its loop builds a `FrameRecord`, from events where its library reports them and through
 `zui.InputSampler` where it reports state (raylib), then waits as
 `nextFrame` says. Each is a renderer (C1): a `Renderer` type implementing
 the renderer contract, whose `config()` (zui-raylib's through
