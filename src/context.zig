@@ -1328,6 +1328,8 @@ pub fn Context(comptime config: Config) type {
                 input_state.pending_focus = null;
             }
 
+            if (features.gestures and input_state.coasting_count != 0) self.coast();
+
             const kept = @min(events.len, limits.max_events_per_frame);
             if (events.len > kept) {
                 frame.diagnostics.exceeded.insert(.max_events_per_frame);
@@ -1341,7 +1343,10 @@ pub fn Context(comptime config: Config) type {
                     const contact = found orelse continue;
                     contact.pointer = move.pointer;
                     contact.hover_stale = contact.hovers();
-                    if (features.gestures and contact.buttons.contains(.primary)) self.pan(contact);
+                    if (features.gestures and contact.buttons.contains(.primary)) {
+                        contact.gesture.sample(move.pointer);
+                        self.pan(contact);
+                    }
                 },
                 .pointer_down => |down| {
                     const contact = self.contactFor(frame, down.pointer) orelse continue;
@@ -1354,6 +1359,7 @@ pub fn Context(comptime config: Config) type {
                             contact.gesture = .pressedAt(down.pointer);
                             contact.gesture.long_press_owner = self.longPressOwner(down.pointer.position);
                             if (contact.gesture.long_press_owner != 0) input_state.timers_armed = true;
+                            self.stopCoastingAt(down.pointer.position);
                             self.startZoom(contact);
                         }
                     }
@@ -1371,6 +1377,10 @@ pub fn Context(comptime config: Config) type {
                         contact.press_target = 0;
                         if (features.gestures) {
                             contact.gesture.long_press_owner = 0;
+                            if (contact.gesture.pan_owner != 0 and !contact.gesture.zooming) {
+                                contact.gesture.sample(up.pointer);
+                                self.fling(frame, contact);
+                            }
                             self.endZoom(contact);
                         }
                     }
@@ -1414,6 +1424,7 @@ pub fn Context(comptime config: Config) type {
             };
 
             if (features.gestures and input_state.timers_armed) self.runGestureTimers();
+            if (features.gestures and input_state.coasting_count != 0) self.requestFrameAt(self.now_instant.addSeconds(interaction.Gestures.momentum_frame_seconds));
 
             for (&input_state.contacts) |*slot| {
                 if (slot.*) |*contact| if (contact.hover_stale) {
@@ -1543,6 +1554,80 @@ pub fn Context(comptime config: Config) type {
             for (0..2) |axis| delta[axis] = if (gesture.pan_axes.includes(axis)) position[axis] - gesture.panned_to[axis] else 0;
             gesture.panned_to = position;
             self.panElement(gesture.pan_owner, delta);
+        }
+
+        /// A pan released fast enough goes on moving its element, slowing
+        /// down, in the frames that follow.
+        fn fling(self: *Self, frame: *Frame, contact: *const InputState.Slot) void {
+            const gesture = &contact.gesture;
+            var velocity = gesture.velocity();
+            for (0..2) |axis| {
+                if (!gesture.pan_axes.includes(axis)) velocity[axis] = 0;
+            }
+            const fling_speed = interaction.Gestures.fling_speed;
+            if (velocity[0] * velocity[0] + velocity[1] * velocity[1] < fling_speed * fling_speed) return;
+            const input_state = &self.memory.input;
+            const owner = gesture.pan_owner;
+            const already_coasting = std.mem.indexOfScalar(u64, input_state.coasting[0..input_state.coasting_count], owner) != null;
+            if (!already_coasting) {
+                if (input_state.coasting_count == InputState.max_coasting) {
+                    frame.diagnostics.exceeded.insert(.max_input_contacts);
+                    frame.diagnostics.needed.set(.max_input_contacts, limits.max_input_contacts + 1);
+                    return;
+                }
+                input_state.coasting[input_state.coasting_count] = owner;
+                input_state.coasting_count += 1;
+            }
+            self.state(.{ .hash = owner }, interaction.Momentum).* = .{ .velocity = velocity, .last_moved = gesture.recent[gesture.recent_count - 1].at };
+        }
+
+        /// Moves each coasting element on to the record's `now`, before the
+        /// record's events, any of which may stop it. One that
+        /// was not declared last frame, has slowed to a stop or has
+        /// reached the end of its scrolling stops.
+        fn coast(self: *Self) void {
+            const input_state = &self.memory.input;
+            var index: usize = 0;
+            while (index < input_state.coasting_count) {
+                if (self.coastOnce(input_state.coasting[index])) {
+                    index += 1;
+                } else {
+                    input_state.coasting_count -= 1;
+                    input_state.coasting[index] = input_state.coasting[input_state.coasting_count];
+                }
+            }
+        }
+
+        fn coastOnce(self: *Self, hash: u64) bool {
+            const results = &self.memory.results;
+            const entry = results.find(hash) orelse return false;
+            if (entry.region == interaction.no_region) return false;
+            const momentum = self.memory.states.get(hash, interaction.Momentum, self.stateGeneration(), .existing_only) orelse return false;
+            if (!momentum.last_moved.isBefore(self.now_instant)) return true;
+            const moved = momentum.advance(self.now_instant);
+            const region = &results.regions[entry.region];
+            const scrolls = region.flags.scroll_x or region.flags.scroll_y;
+            const offset_before = if (scrolls) self.scrollOffset(.{ .hash = hash }) else [2]f32{ 0, 0 };
+            self.panElement(hash, moved);
+            if (scrolls) {
+                const offset_after = self.scrollOffset(.{ .hash = hash });
+                if (offset_after[0] == offset_before[0] and offset_after[1] == offset_before[1]) return false;
+            }
+            return !momentum.stopped();
+        }
+
+        fn stopCoastingAt(self: *Self, position: [2]f32) void {
+            const input_state = &self.memory.input;
+            const results = &self.memory.results;
+            var index: usize = 0;
+            while (index < input_state.coasting_count) {
+                const entry = results.find(input_state.coasting[index]);
+                const under = if (entry) |found| found.region != interaction.no_region and results.regions[found.region].bounds.contains(position) else false;
+                if (under) {
+                    input_state.coasting_count -= 1;
+                    input_state.coasting[index] = input_state.coasting[input_state.coasting_count];
+                } else index += 1;
+            }
         }
 
         /// A tap on the element it pressed: a click, unless the element

@@ -516,3 +516,94 @@ test "a right click and the menu key ask for the context menu; Escape dismisses;
     try testing.expect(ui.dismissed(dialog));
     try testing.expect(!ui.dismissed(double));
 }
+
+/// Touch events of one finger at instants `step_ms` apart from `start`:
+/// down at the first point, moves through the rest, and up at the last.
+fn flick(start: zui.Instant, step_ms: u64, points: []const [2]f32, buffer: []zui.Event) []const zui.Event {
+    for (points, 0..) |point, index| {
+        const pointer: zui.Pointer = .{ .id = @enumFromInt(1), .kind = .touch, .position = point, .at = start.addNanoseconds(index * step_ms * std.time.ns_per_ms) };
+        buffer[index] = if (index == 0) .{ .pointer_down = .{ .pointer = pointer } } else .{ .pointer_move = .{ .pointer = pointer } };
+    }
+    var last = buffer[points.len - 1];
+    const lifted: zui.Pointer = switch (last) {
+        .pointer_down => |pressed| pressed.pointer,
+        .pointer_move => |moved| moved.pointer,
+        else => unreachable,
+    };
+    last = .{ .pointer_up = .{ .pointer = lifted } };
+    buffer[points.len] = last;
+    return buffer[0 .. points.len + 1];
+}
+
+test "a flick within one frame coasts on, slowing, until it stops" {
+    var harness: Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    _ = try frame(&harness, &.{});
+    var buffer: [8]zui.Event = undefined;
+    var ui = try frame(&harness, flick(harness.now, 10, &.{ .{ 100, 280 }, .{ 100, 260 }, .{ 100, 240 }, .{ 100, 220 }, .{ 100, 200 } }, &buffer));
+    try testing.expectEqual([2]f32{ 0, 80 }, ui.scrollOffset(list));
+    try testing.expect(ui.nextFrame() == .at);
+
+    // The release came after its frame's `now`, so the next frame waits
+    // for it and the one after moves part of a frame's way; from then on,
+    // each frame moves less.
+    var previous_offset: f32 = 80;
+    var previous_step: f32 = std.math.inf(f32);
+    var frames: u32 = 0;
+    while (ui.nextFrame() != .on_event) : (frames += 1) {
+        if (frames == 200) return error.NeverStopped;
+        ui = try frame(&harness, &.{});
+        const offset = ui.scrollOffset(list)[1];
+        const step_moved = offset - previous_offset;
+        try testing.expect(step_moved >= 0);
+        if (frames >= 3) try testing.expect(step_moved <= previous_step);
+        previous_offset = offset;
+        previous_step = step_moved;
+    }
+    // About the release speed, 2,000 units a second, times the momentum time.
+    try testing.expectApproxEqAbs(80 + 2000 * zui.Gestures.momentum_seconds, previous_offset, 20);
+    try testing.expectEqual([2]f32{ 0, 0 }, ui.scrollOffset(carousel));
+}
+
+test "a slow release does not coast, and a press stops a coasting list" {
+    var harness: Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    _ = try frame(&harness, &.{});
+    var buffer: [8]zui.Event = undefined;
+    var ui = try frame(&harness, flick(harness.now, 400, &.{ .{ 100, 280 }, .{ 100, 260 } }, &buffer));
+    try testing.expectEqual(zui.NextFrame.on_event, ui.nextFrame());
+
+    ui = try frame(&harness, flick(harness.now, 10, &.{ .{ 100, 280 }, .{ 100, 260 }, .{ 100, 240 } }, &buffer));
+    ui = try frame(&harness, &.{});
+    ui = try frame(&harness, &.{down(2, .{ 100, 250 })});
+    try testing.expectEqual(zui.NextFrame.on_event, ui.nextFrame());
+    const offset = ui.scrollOffset(list);
+    ui = try frame(&harness, &.{up(2, .{ 100, 250 })});
+    try testing.expectEqual(offset, ui.scrollOffset(list));
+}
+
+test "a flung map coasts as manipulations, and stops when it is no longer declared" {
+    var harness: Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    _ = try mapFrame(&harness, &.{});
+    var buffer: [8]zui.Event = undefined;
+    var ui = try mapFrame(&harness, flick(harness.now, 10, &.{ .{ 200, 150 }, .{ 220, 150 }, .{ 240, 150 } }, &buffer));
+    ui = try mapFrame(&harness, &.{});
+    const coasted = ui.manipulation(map) orelse return error.NotCoasting;
+    try testing.expect(coasted.translation[0] > 0);
+    try testing.expectEqual(@as(f32, 0), coasted.translation[1]);
+
+    ui = harness.beginEvents(&.{});
+    try testing.expect(ui.manipulation(map) != null);
+    _ = try harness.end(); // the map is not declared
+    ui = harness.beginEvents(&.{});
+    try testing.expectEqual(@as(?zui.Manipulation, null), ui.manipulation(map));
+    _ = try harness.end();
+    try testing.expectEqual(zui.NextFrame.on_event, harness.ui.nextFrame());
+}

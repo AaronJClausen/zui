@@ -1228,7 +1228,17 @@ stays with what it pressed, unless the container declares `pan` itself.
   (§6.6), so a replay fires them in the same frames.
 - **Momentum** is state in the state table under the element, so it ends
   when the element is no longer declared, and it sets the next frame's
-  deadline (§6.6).
+  deadline (§6.6). A pan released faster than `Gestures.fling_speed` (50
+  layout units a second, measured over the events of the last 0.1 s
+  before the release, by their instants) coasts on its axes, slowing by
+  a factor of e every `Gestures.momentum_seconds` (0.325 s), so it
+  travels about the release speed times that; each frame moves it to the
+  record's `now`, before the record's events, as `manipulation` and a
+  scroll container's offset. It stops below 10 units a second, at the
+  end of a scroll container's content, or when a pointer presses on it,
+  and asks for frames `Gestures.momentum_frame_seconds` (1/120 s) apart
+  meanwhile. At most `max_input_contacts` elements coast at once; a
+  fling beyond them does not coast and is reported on that limit.
 - **Custom recognizers are code in declaration.** `ui.pointerEvents(id)`
   returns the frame's events of pointers pressed on or claimed by `id`.
   A recognizer keeps its state in `state(id, T)`. An element with

@@ -226,7 +226,7 @@ stage 7, pans: elements declare `Element.gestures`, and a pointer past
 the touch slop goes to the innermost one that pans on its axis with room
 to move, and two pointers zoom the innermost element that accepts
 `zoom`, both reported by `manipulation`; long presses and double taps,
-timed against the record's `now`; and the intents `contextRequested`,
+timed against the record's `now`; momentum after a fling; and the intents `contextRequested`,
 `doubleTapped`, `dismissed`, `adjusted` and `navigated`.
 
 The code and the spec still differ in these places, each closed by the
@@ -239,7 +239,7 @@ roadmap item named:
 | `Widgets(Ui)` with a `Theme` struct | `Widgets(Ui, Skin)` | `zui_widgets/` | K5 |
 | `Frame` exposes its storage arrays and `rectOf` | `Frame.inspect(index)` | `src/context.zig` | V1 |
 | `Features` has every field and gates its API, but `Frame.semantics()` is always empty and `safety_sweeps` changes nothing | semantics and safety sweeps, each behind its field | `src/context.zig` | V2, V3 |
-| gestures arbitrate pans, the wheel, two-pointer zoom, long presses and double taps, but nothing coasts and the application cannot recognize its own | momentum and custom recognizers (`pointerEvents`, `claim`, `decline`) | `src/interaction.zig`, `src/context.zig` | I5 |
+| gestures arbitrate pans, the wheel, two-pointer zoom, long presses, double taps and momentum, but the application cannot recognize its own | custom recognizers (`pointerEvents`, `claim`, `decline`) | `src/interaction.zig`, `src/context.zig` | I5 |
 
 Unchanged in shape: element storage in pre-order structure-of-arrays, the
 layout passes, the segment and string caches, ids, the state table, the

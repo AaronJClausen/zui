@@ -67,6 +67,18 @@ pub const Gestures = packed struct(u8) {
     pub const long_press_seconds: f64 = 0.5;
     /// From the first tap's release to the second's.
     pub const double_tap_seconds: f64 = 0.3;
+    /// A pan released faster than this, in layout units per second, coasts.
+    pub const fling_speed: f32 = 50;
+    /// Coasting slows by a factor of e in this time, so it travels about
+    /// the release speed times this far.
+    pub const momentum_seconds: f32 = 0.325;
+    /// Coasting stops below this speed, in layout units per second.
+    pub const momentum_stop_speed: f32 = 10;
+    /// How far before the release the motion that sets its speed began.
+    pub const velocity_window_seconds: f64 = 0.1;
+    /// The deadline a coasting element sets for the next frame, after this
+    /// one's `now`.
+    pub const momentum_frame_seconds: f64 = 1.0 / 120.0;
 
     pub fn any(self: Gestures) bool {
         return @as(u8, @bitCast(self)) != 0;
@@ -224,6 +236,35 @@ pub fn Results(comptime max_regions: u32, comptime table_slots: u32, comptime ha
     };
 }
 
+/// What keeps an element moving after a fling, in the state table under
+/// its id.
+pub const Momentum = struct {
+    /// Layout units per second, as the content moves.
+    velocity: [2]f32,
+    last_moved: Instant,
+
+    /// Moves on to `now`, slowing exponentially, and returns how far.
+    pub fn advance(self: *Momentum, now: Instant) [2]f32 {
+        const elapsed = now.secondsSince(self.last_moved);
+        self.last_moved = now;
+        const kept = @exp(-elapsed / Gestures.momentum_seconds);
+        const travel = Gestures.momentum_seconds * (1 - kept);
+        const moved: [2]f32 = .{ self.velocity[0] * travel, self.velocity[1] * travel };
+        self.velocity = .{ self.velocity[0] * kept, self.velocity[1] * kept };
+        return moved;
+    }
+
+    pub fn stopped(self: *const Momentum) bool {
+        return self.velocity[0] * self.velocity[0] + self.velocity[1] * self.velocity[1] < Gestures.momentum_stop_speed * Gestures.momentum_stop_speed;
+    }
+};
+
+/// Where a pointer was, and when, for its speed at release.
+pub const MotionSample = struct {
+    position: [2]f32,
+    at: Instant,
+};
+
 /// What a pressed pointer is doing to the elements under it.
 pub const PointerGesture = struct {
     press_position: [2]f32,
@@ -245,9 +286,35 @@ pub const PointerGesture = struct {
     long_press_owner: u64,
     /// The press was held long enough, so its release is not a tap.
     long_pressed: bool,
+    /// The latest positions, oldest first.
+    recent: [4]MotionSample,
+    recent_count: u8,
 
     pub fn pressedAt(pointer: input.Pointer) PointerGesture {
-        return .{ .press_position = pointer.position, .panned_to = pointer.position, .pan_owner = 0, .pan_axes = .none, .past_slop = false, .zooming = false, .pressed_at = pointer.at, .long_press_owner = 0, .long_pressed = false };
+        var gesture: PointerGesture = .{ .press_position = pointer.position, .panned_to = pointer.position, .pan_owner = 0, .pan_axes = .none, .past_slop = false, .zooming = false, .pressed_at = pointer.at, .long_press_owner = 0, .long_pressed = false, .recent = undefined, .recent_count = 0 };
+        gesture.sample(pointer);
+        return gesture;
+    }
+
+    pub fn sample(self: *PointerGesture, pointer: input.Pointer) void {
+        if (self.recent_count == self.recent.len) {
+            std.mem.copyForwards(MotionSample, self.recent[0 .. self.recent.len - 1], self.recent[1..]);
+            self.recent_count -= 1;
+        }
+        self.recent[self.recent_count] = .{ .position = pointer.position, .at = pointer.at };
+        self.recent_count += 1;
+    }
+
+    /// Over the samples within the velocity window before the latest, in
+    /// layout units per second; zero without time between them.
+    pub fn velocity(self: *const PointerGesture) [2]f32 {
+        const latest = self.recent[self.recent_count - 1];
+        const earliest = for (self.recent[0..self.recent_count]) |recent| {
+            if (latest.at.secondsSince(recent.at) <= Gestures.velocity_window_seconds) break recent;
+        } else latest;
+        const elapsed = latest.at.secondsSince(earliest.at);
+        if (elapsed <= 0) return .{ 0, 0 };
+        return .{ (latest.position[0] - earliest.position[0]) / elapsed, (latest.position[1] - earliest.position[1]) / elapsed };
     }
 
     pub fn longPressDue(self: *const PointerGesture) Instant {
@@ -307,8 +374,9 @@ pub fn State(comptime max_contacts: u8, comptime max_chain: usize, comptime max_
     return struct {
         const Self = @This();
         pub const Slot = Contact(max_chain, has_gestures);
-        /// Each takes an event, so this many cannot overflow.
-        const max_manipulations = if (has_gestures) max_events else 0;
+        /// Each takes an event or a coasting element.
+        const max_manipulations = if (has_gestures) @as(u32, max_events) + max_coasting else 0;
+        pub const max_coasting = if (has_gestures) max_contacts else 0;
         /// Each takes an event or a long press, one per contact.
         const max_context_requests = @as(u32, max_events) + max_contacts;
         const max_double_taps = if (has_gestures) max_events else 0;
@@ -345,7 +413,11 @@ pub fn State(comptime max_contacts: u8, comptime max_chain: usize, comptime max_
         drop_count: u16,
         lifecycle: input.LifecycleSet,
         manipulated: [max_manipulations]ManipulatedElement,
-        manipulated_count: u16,
+        manipulated_count: u32,
+        /// Elements moving on after a fling, each with `Momentum` in the
+        /// state table.
+        coasting: [max_coasting]u64,
+        coasting_count: u8,
         context_requested: [max_context_requests]u64,
         context_request_count: u32,
         double_tapped: [max_double_taps]u64,
@@ -364,6 +436,7 @@ pub fn State(comptime max_contacts: u8, comptime max_chain: usize, comptime max_
             self.presses_begun = 0;
             self.pending_taps = @splat(null);
             self.timers_armed = false;
+            self.coasting_count = 0;
             self.focus = 0;
             self.pending_focus = null;
             self.clearFrameEvents();

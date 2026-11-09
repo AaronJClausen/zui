@@ -163,7 +163,8 @@ Implemented so far:
   right click and the menu key do, and `.double_tap` gives
   `ui.doubleTapped(id)`, delaying only that element's single tap;
   `ui.dismissed`, `ui.adjusted` and `ui.navigated` read Escape and the
-  arrows. Momentum and custom recognizers come next.
+  arrows. A flick coasts on and slows down, frame by frame, as
+  `nextFrame` asks. Custom recognizers come next.
 
 The reference backend, its adapter host and the demo application live in
 [zui-raylib](https://github.com/AaronJClausen/zui-raylib); the other

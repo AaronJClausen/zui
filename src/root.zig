@@ -147,6 +147,7 @@ pub const AnchorPoint = style.AnchorPoint;
 pub const WidgetState = interaction.WidgetState;
 pub const ScrollState = interaction.ScrollState;
 pub const Gestures = interaction.Gestures;
+pub const Momentum = interaction.Momentum;
 
 test {
     std.testing.refAllDecls(@This());
