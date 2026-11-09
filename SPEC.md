@@ -942,6 +942,29 @@ pub const Element = struct {
 };
 ```
 
+```zig
+pub const Decoration = struct {
+    background: ?config.Color = null,
+    border: ?Border = null,
+    corner_radius: CornerRadius = .{},
+};
+
+pub const Border = struct {
+    color: config.Color,
+    widths: Edges = .{},
+    between_children: f32 = 0,   // a divider of this width between each two adjacent children in the flow
+};
+```
+
+A divider is centered in the gap between two children and spans the
+element across its flow, inside the border's widths. Floating children
+take no part. Dividers are `rectangle` commands in the border's color,
+emitted inside the element's clip, so they scroll and are cut off with
+the children they separate, and they paint over the children and under
+the border. A border whose widths are all zero emits no `border`
+command, so `.border = .{ .color = line, .between_children = 1 }` draws
+dividers alone.
+
 The four switches are written as booleans, `.focusable = true`, and null
 means false. They are optional because Zig stores a `bool` field as one
 bit and loads it as a byte, which LLVM cannot fold: with `bool`, every
@@ -1187,7 +1210,8 @@ pub const RenderCommand = struct {
 
 **Base commands** exist for every renderer: `rectangle`, `border`,
 `text` (one per line), `clip_begin`, `clip_end`, plus `image` when
-`ImageHandle` is set and `custom` when `CustomData` is set.
+`ImageHandle` is set and `custom` when `CustomData` is set. An `image`
+carries its handle, tint and corner radius, as declared (§10.1).
 **Optional commands** exist only when `Config.commands` includes them:
 `gradient`, `shadow`, `backdrop_blur`, `transform_begin`/`transform_end`,
 `material`.
@@ -1200,7 +1224,7 @@ adding a base command always does, at compile time.
 ### 13.2 Order and snapping
 
 `Frame.commands()` is in paint order: by layer, then declaration order.
-A border is emitted after its element's subtree. Bounds snap to whole
+A border and its dividers are emitted after its element's subtree. Bounds snap to whole
 physical pixels using the frame's `scale × zoom`.
 
 ### 13.3 Lowering

@@ -469,6 +469,25 @@ test "a fit image takes its natural size, inside its padding" {
     }.check);
 }
 
+test "an image command carries its tint and corner radius" {
+    try layOutImages(struct {
+        fn declare(ui: *ImageUi) void {
+            ui.image(.{ .handle = 1, .natural_size = .{ 8, 8 } }, .{});
+            ui.image(.{ .handle = 2, .natural_size = .{ 8, 8 }, .tint = .rgba(0xff800080), .corner_radius = .all(4) }, .{});
+        }
+    }.declare, struct {
+        fn check(frame: *const ImageUi.Frame) !void {
+            const plain = frame.commands()[0].payload.image;
+            try testing.expectEqual(zui.Color.white, plain.tint);
+            try testing.expectEqual(zui.CornerRadius.zero, plain.corner_radius);
+            const tinted = frame.commands()[1].payload.image;
+            try testing.expectEqual(@as(u32, 2), tinted.handle);
+            try testing.expectEqual(zui.Color.rgba(0xff800080), tinted.tint);
+            try testing.expectEqual(zui.CornerRadius.all(4), tinted.corner_radius);
+        }
+    }.check);
+}
+
 test "an image keeps its natural proportions when its width grows or shrinks" {
     try layOutImages(struct {
         fn declare(ui: *ImageUi) void {
@@ -695,6 +714,79 @@ test "backgrounds, children, then borders: paint order" {
         \\rect 0 0 100 50 #111111
         \\rect 5 5 90 40 #333333
         \\border 0 0 100 50 #222222
+        \\
+    , try support.snapshot(try harness.end(), &buffer));
+}
+
+test "dividers sit centered in the gaps between children, inside the border, under it" {
+    var harness: support.Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    const ui = harness.begin();
+    ui.open(.{
+        .layout = .{ .sizing = .{ .width = .fixed(100), .height = .fixed(20) }, .child_gap = 10 },
+        .decoration = .{ .border = .{ .color = .rgb(0x222222), .widths = .all(1), .between_children = 2 } },
+    });
+    for (0..3) |_| ui.box(.{ .layout = .{ .sizing = .{ .width = .fixed(20), .height = .grow } }, .decoration = .{ .background = .rgb(0x333333) } });
+    ui.close();
+
+    var buffer: [256]u8 = undefined;
+    try testing.expectEqualStrings(
+        \\rect 0 0 20 20 #333333
+        \\rect 30 0 20 20 #333333
+        \\rect 60 0 20 20 #333333
+        \\rect 24 1 2 18 #222222
+        \\rect 54 1 2 18 #222222
+        \\border 0 0 100 20 #222222
+        \\
+    , try support.snapshot(try harness.end(), &buffer));
+}
+
+test "dividers down a column skip floating children, and need no outline" {
+    var harness: support.Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    const ui = harness.begin();
+    ui.open(.{
+        .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(50) }, .child_gap = 9 },
+        .decoration = .{ .border = .{ .color = .rgb(0x444444), .between_children = 1 } },
+    });
+    fixedBox(ui, .of("first"), 50, 10);
+    ui.box(.{ .floating = .{}, .layout = .{ .sizing = .{ .width = .fixed(5), .height = .fixed(5) } } });
+    fixedBox(ui, .of("second"), 50, 10);
+    fixedBox(ui, .of("third"), 50, 10);
+    ui.close();
+
+    var buffer: [256]u8 = undefined;
+    try testing.expectEqualStrings(
+        \\rect 0 14 50 1 #444444
+        \\rect 0 33 50 1 #444444
+        \\
+    , try support.snapshot(try harness.end(), &buffer));
+}
+
+test "dividers are clipped with the children they separate" {
+    var harness: support.Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    const ui = harness.begin();
+    ui.open(.{
+        .clip = .both,
+        .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(50), .height = .fixed(25) }, .child_gap = 10 },
+        .decoration = .{ .border = .{ .color = .rgb(0x555555), .widths = .{ .left = 1 }, .between_children = 2 } },
+    });
+    for (0..4) |_| ui.box(.{ .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(10) } } });
+    ui.close();
+
+    var buffer: [256]u8 = undefined;
+    try testing.expectEqualStrings(
+        \\clip 0 0 50 25
+        \\rect 1 14 49 2 #555555
+        \\clip_end
+        \\border 0 0 50 25 #555555
         \\
     , try support.snapshot(try harness.end(), &buffer));
 }

@@ -132,9 +132,22 @@ pub const Rect = struct {
     }
 };
 
+/// Drawn over the element's children, after its subtree.
 pub const Border = struct {
     color: Color,
-    widths: Edges,
+    /// All zero: no outline, so a border can draw only its dividers.
+    widths: Edges = .zero,
+    /// The width of a divider between each two adjacent children in the
+    /// flow, centered in the gap between them and spanning the element
+    /// inside its `widths`. Dividers scroll and clip with the children.
+    ///
+    /// ```zig
+    /// ui.open(.{
+    ///     .layout = .{ .direction = .top_to_bottom, .child_gap = 9 },
+    ///     .decoration = .{ .border = .{ .color = .rgb(0x2c2c38), .between_children = 1 } },
+    /// });
+    /// ```
+    between_children: f32 = 0,
 };
 
 /// How an element's size along one axis is decided. A struct with

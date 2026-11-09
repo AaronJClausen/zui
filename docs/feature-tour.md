@@ -71,7 +71,7 @@ Limits are validated at compile time. For example, `state_slots` must be a power
 
 ### Elements, layout and decoration · *shipped*
 
-Each frame you declare a tree. `open` and `close` bracket a container, `box` is a leaf, and `text` is a leaf with content. An element is a struct literal: `layout` sets direction, sizing, padding, gap and alignment, and `decoration` sets background, border and corner radius. Because `defer ui.close()` keeps the tree balanced, a helper function reads like markup.
+Each frame you declare a tree. `open` and `close` bracket a container, `box` is a leaf, and `text` is a leaf with content. An element is a struct literal: `layout` sets direction, sizing, padding, gap and alignment, and `decoration` sets background, border and corner radius. A border's `between_children` draws a divider between each two children, centered in the gap, over the children and under the border; with no `widths` it draws the dividers alone. Because `defer ui.close()` keeps the tree balanced, a helper function reads like markup.
 
 `src/ui/shell.zig`
 
@@ -117,6 +117,16 @@ fn toolbar(app: *App, ui: *Ui) void {
     ui.text(app.currentAlbum().name, .{ .size = 13, .color = .rgb(0x9a9aae) });
     ui.box(.{ .layout = .{ .sizing = .{ .width = .grow } } });
     importButton(app, ui);
+}
+
+fn settingsList(app: *App, ui: *Ui) void {
+    ui.open(.{
+        .id = .of("settings"),
+        .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow }, .child_gap = 9 },
+        .decoration = .{ .border = .{ .color = .rgb(0x2c2c38), .between_children = 1 } },
+    });
+    defer ui.close();
+    for (app.settings.items) |setting| settingRow(ui, setting);
 }
 ```
 
@@ -316,7 +326,7 @@ pub const Fonts = struct {
 
 ### Images and self-drawn elements · *shipped*
 
-`ui.image` places the renderer's own image handle. `ui.custom` places a payload your renderer draws itself, such as a 3D viewport or a histogram. Both are leaves that take an `Element`, so they size, clip and hit-test like any box. Give an image its `natural_size` and a `fit` image takes it, keeping its proportions when its width grows or is squeezed.
+`ui.image` places the renderer's own image handle. `ui.custom` places a payload your renderer draws itself, such as a 3D viewport or a histogram. Both are leaves that take an `Element`, so they size, clip and hit-test like any box. Give an image its `natural_size` and a `fit` image takes it, keeping its proportions when its width grows or is squeezed. Its `tint` is multiplied into its pixels and its `corner_radius` rounds it; both reach the renderer in the `image` command.
 
 `src/ui/viewer.zig`
 
@@ -329,7 +339,12 @@ fn viewer(app: *App, ui: *Ui, photo: *const Photo, texture: Texture) void {
     ui.open(.{ .id = .of("viewer"), .layout = .{ .direction = .top_to_bottom, .sizing = .grow_both, .child_alignment = .{ .x = .center } } });
     defer ui.close();
 
-    ui.image(.{ .handle = texture, .natural_size = .{ photo.width, photo.height } }, .{
+    ui.image(.{
+        .handle = texture,
+        .natural_size = .{ photo.width, photo.height },
+        .tint = if (photo.rejected) .rgba(0xffffff66) else .white,
+        .corner_radius = .all(6),
+    }, .{
         .id = .of("full_image"),
         .layout = .{ .sizing = .{ .width = .grow } },
     });
@@ -1573,8 +1588,9 @@ These names compile, but they don't do anything yet. This list is from `ARCHITEC
 - **Gradients, shadows, backdrop blur, transforms, materials** *(declared only)*: The variants exist in `RenderCommand` when a renderer declares them, but `Decoration` has no field that produces them, so nothing is emitted or lowered. Items G1–G6, stage 8.
 - **`features.semantics` and `features.gestures`** *(declared only)*: `Frame.semantics()` is always empty and `ui.manipulation` always returns null. Accessibility is V2; gestures (arbitration, momentum, custom recognizers) are I5.
 - **`features.flex_wrap` and `features.safety_sweeps`** *(declared only)*: The flags exist and gate their API, but they don't change behaviour yet. Wrap is L7; sweeps are V3.
+- **Images' tint and corner radius in the backends**: The `image` command carries them, but zui-raylib and zui-sokol still draw every image untinted and square. Item C10.
 - **Extended color**: Colors are RGBA8 only. `zui.ExtendedColor` for HDR is G6.
-- **Still to come**: Dividers (L3), more floating options (L4), right-to-left layout (L6), drag and drop between elements (I1), a visual inspector `zui_debug` (V1), motion, multi-line text editing, skins, and more hosts (macOS, Linux, web).
+- **Still to come**: More floating options (L4), right-to-left layout (L6), drag and drop between elements (I1), a visual inspector `zui_debug` (V1), motion, multi-line text editing, skins, and more hosts (macOS, Linux, web).
 
 <a id="dx"></a>
 

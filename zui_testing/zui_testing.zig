@@ -435,7 +435,11 @@ pub fn snapshot(writer: *std.Io.Writer, commands: anytype, names: anytype) std.I
                 try writeColor(writer, text.style.color);
                 try writer.print(" \"{s}\"", .{text.content});
             },
-            inline else => |payload, kind| if (comptime std.mem.eql(u8, @tagName(kind), "image")) try writeHandle(writer, payload.handle),
+            inline else => |payload, kind| if (comptime std.mem.eql(u8, @tagName(kind), "image")) {
+                try writeHandle(writer, payload.handle);
+                if (!payload.tint.eql(.white)) try writer.print(" tint=#{x:0>2}{x:0>2}{x:0>2}{x:0>2}", .{ payload.tint.r, payload.tint.g, payload.tint.b, payload.tint.a });
+                try writeCorners(writer, payload.corner_radius);
+            },
         }
         try writer.writeByte('\n');
     }
@@ -832,6 +836,19 @@ test "snapshots name the ids they are given" {
         \\rectangle id=panel x=0 y=0 w=84 h=36 color=#202020
         \\rectangle x=8 y=8 w=40 h=20 color=#3366ff80 radius=4
         \\text x=52 y=8 w=24 h=16 size=16 color=#ffffff "Add"
+        \\
+    );
+}
+
+test "snapshots write an image's handle, tint and corner radius" {
+    const Command = zui.Context(.{ .limits = .{ .max_elements = 8 }, .ImageHandle = u32 }).RenderCommand;
+    const commands = [_]Command{
+        .{ .bounds = .{ .width = 8, .height = 8 }, .id = 1, .payload = .{ .image = .{ .handle = 7 } } },
+        .{ .bounds = .{ .width = 8, .height = 8 }, .id = 2, .payload = .{ .image = .{ .handle = 8, .tint = .rgba(0xff800080), .corner_radius = .all(4) } } },
+    };
+    try expectSnapshot(&commands, .{},
+        \\image x=0 y=0 w=8 h=8 handle=7
+        \\image x=0 y=0 w=8 h=8 handle=8 tint=#ff800080 radius=4
         \\
     );
 }

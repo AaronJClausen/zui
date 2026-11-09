@@ -275,6 +275,9 @@ pub fn Context(comptime config: Config) type {
             /// height has a rule of its own: `aspectRatio`, `fixed` or
             /// `percent`. Padding goes around it.
             natural_size: ?[2]f32 = null,
+            /// Multiplied into the image's pixels; white leaves them unchanged.
+            tint: style.Color = .white,
+            corner_radius: style.CornerRadius = .zero,
         };
         /// Rounded up to a whole number of bytes: a `u13` is stored in 16
         /// bits anyway, and every load of one would be masked.

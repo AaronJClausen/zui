@@ -25,8 +25,8 @@ pub fn EmitLevel(comptime Index: type) type {
 /// id → rect results and the focus order that the next frame's
 /// interaction queries read. Elements are visited in declaration order,
 /// which is depth-first order. A background and content are emitted when
-/// an element is entered, its border when its subtree ends, so the border
-/// paints over the element's children. Elements entirely outside the clip
+/// an element is entered, its dividers and border when its subtree ends, so
+/// they paint over the element's children. Elements entirely outside the clip
 /// are not drawn.
 pub fn run(comptime Ui: type, ui: *Ui, frame: *Ui.Frame) void {
     const emitting = Ui.Tracing.begin(.emit);
@@ -154,7 +154,10 @@ fn Emitter(comptime Ui: type) type {
 
             switch (frame.kindOf(element)) {
                 .none => {},
-                .image => if (Ui.RenderCommand.has_image and drawn) self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = level.z, .payload = .{ .image = .{ .handle = frame.imageOf(element).handle } } }),
+                .image => if (Ui.RenderCommand.has_image and drawn) {
+                    const image = frame.imageOf(element);
+                    self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = level.z, .payload = .{ .image = .{ .handle = image.handle, .tint = image.tint, .corner_radius = image.corner_radius } } });
+                },
                 .custom => if (Ui.RenderCommand.has_custom and drawn) self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = level.z, .payload = .{ .custom = frame.customs[frame.content_index[element]] } }),
                 .text => if (Ui.has_text) self.emitText(element, element_id, level),
             }
@@ -237,16 +240,55 @@ fn Emitter(comptime Ui: type) type {
         fn leave(self: *Self, level: *const Level) void {
             const frame = self.frame;
             const element = level.element;
+            const decoration = frame.decorationOf(element);
+            if (decoration) |found| if (found.border) |*border| if (border.between_children > 0) {
+                @call(.never_inline, emitDividers, .{ self, element, border, level });
+            };
             if (level.pushed_clip) self.push(.{ .bounds = self.snap(level.clip), .id = frame.element_id[element], .z = level.z, .payload = .clip_end });
-            const decoration = frame.decorationOf(element) orelse return;
-            const border = decoration.border orelse return;
+            const found = decoration orelse return;
+            const border = if (found.border) |*border| border else return;
+            const widths = border.widths;
+            if (widths.left == 0 and widths.right == 0 and widths.top == 0 and widths.bottom == 0) return;
             const bounds = self.rectOf(element);
             if (bounds.intersect(level.outer_clip).isEmpty()) return;
             self.push(.{ .bounds = self.snap(bounds), .id = frame.element_id[element], .z = level.z, .payload = .{ .border = .{
                 .color = border.color,
-                .widths = border.widths,
-                .corner_radius = decoration.corner_radius,
+                .widths = widths,
+                .corner_radius = found.corner_radius,
             } } });
+        }
+
+        /// Inside the element's own clip, so dividers scroll and are cut off
+        /// with the children they separate.
+        fn emitDividers(self: *Self, element: Ui.Index, border: *const style.Border, level: *const Level) void {
+            const frame = self.frame;
+            const along: usize = @intFromEnum(frame.layoutOf(element).direction.axis());
+            const across = 1 - along;
+            const bounds = self.rectOf(element);
+            const widths = border.widths;
+            const across_start = if (across == 0) bounds.x + widths.left else bounds.y + widths.top;
+            const across_length = if (across == 0) bounds.width - widths.left - widths.right else bounds.height - widths.top - widths.bottom;
+            const thickness = border.between_children;
+
+            var previous_end: ?f32 = null;
+            var child = element + 1;
+            while (child < frame.subtree_end[element]) : (child = frame.subtree_end[child]) {
+                if (frame.isFloating(child)) continue;
+                const child_start = frame.position[child][along];
+                if (previous_end) |end| {
+                    var origin: [2]f32 = undefined;
+                    var size: [2]f32 = undefined;
+                    origin[along] = (end + child_start - thickness) / 2;
+                    size[along] = thickness;
+                    origin[across] = across_start;
+                    size[across] = across_length;
+                    const divider: style.Rect = .{ .x = origin[0], .y = origin[1], .width = size[0], .height = size[1] };
+                    if (!divider.intersect(level.clip).isEmpty()) {
+                        self.push(.{ .bounds = self.snap(divider), .id = frame.element_id[element], .z = level.z, .payload = .{ .rectangle = .{ .color = border.color, .corner_radius = .zero } } });
+                    }
+                }
+                previous_end = child_start + frame.size[child][along];
+            }
         }
     };
 }

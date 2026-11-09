@@ -436,7 +436,7 @@ pub fn main(init: std.process.Init) !void {
 
       <article class="feature" id="elements" data-title="Elements, layout, decoration">
         <div class="feature-head"><h3>Elements, layout and decoration</h3><span class="pill shipped">Shipped</span></div>
-        <p>Each frame you declare a tree. <code class="z">open</code> and <code class="z">close</code> bracket a container, <code class="z">box</code> is a leaf, and <code class="z">text</code> is a leaf with content. An element is a struct literal: <code class="z">layout</code> sets direction, sizing, padding, gap and alignment, and <code class="z">decoration</code> sets background, border and corner radius. Because <code class="z">defer ui.close()</code> keeps the tree balanced, a helper function reads like markup.</p>
+        <p>Each frame you declare a tree. <code class="z">open</code> and <code class="z">close</code> bracket a container, <code class="z">box</code> is a leaf, and <code class="z">text</code> is a leaf with content. An element is a struct literal: <code class="z">layout</code> sets direction, sizing, padding, gap and alignment, and <code class="z">decoration</code> sets background, border and corner radius. A border's <code class="z">between_children</code> draws a divider between each two children, centered in the gap, over the children and under the border; with no <code class="z">widths</code> it draws the dividers alone. Because <code class="z">defer ui.close()</code> keeps the tree balanced, a helper function reads like markup.</p>
 <script type="text/x-zig" data-file="src/ui/shell.zig">
 const zui = @import("zui");
 const Ui = @import("../main.zig").Ui;
@@ -479,6 +479,16 @@ fn toolbar(app: *App, ui: *Ui) void {
     ui.text(app.currentAlbum().name, .{ .size = 13, .color = .rgb(0x9a9aae) });
     ui.box(.{ .layout = .{ .sizing = .{ .width = .grow } } });
     importButton(app, ui);
+}
+
+fn settingsList(app: *App, ui: *Ui) void {
+    ui.open(.{
+        .id = .of("settings"),
+        .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow }, .child_gap = 9 },
+        .decoration = .{ .border = .{ .color = .rgb(0x2c2c38), .between_children = 1 } },
+    });
+    defer ui.close();
+    for (app.settings.items) |setting| settingRow(ui, setting);
 }
 </script>
         <p>Elements without an <code class="z">id</code> get an internal one. Give an element an id when you want to query it, keep state on it, scroll it, or focus it.</p>
@@ -652,7 +662,7 @@ pub const Fonts = struct {
 
       <article class="feature" id="images" data-title="Images and custom elements">
         <div class="feature-head"><h3>Images and self-drawn elements</h3><span class="pill shipped">Shipped</span></div>
-        <p><code class="z">ui.image</code> places the renderer's own image handle. <code class="z">ui.custom</code> places a payload your renderer draws itself, such as a 3D viewport or a histogram. Both are leaves that take an <code class="z">Element</code>, so they size, clip and hit-test like any box. Give an image its <code class="z">natural_size</code> and a <code class="z">fit</code> image takes it, keeping its proportions when its width grows or is squeezed.</p>
+        <p><code class="z">ui.image</code> places the renderer's own image handle. <code class="z">ui.custom</code> places a payload your renderer draws itself, such as a 3D viewport or a histogram. Both are leaves that take an <code class="z">Element</code>, so they size, clip and hit-test like any box. Give an image its <code class="z">natural_size</code> and a <code class="z">fit</code> image takes it, keeping its proportions when its width grows or is squeezed. Its <code class="z">tint</code> is multiplied into its pixels and its <code class="z">corner_radius</code> rounds it; both reach the renderer in the <code class="z">image</code> command.</p>
 <script type="text/x-zig" data-file="src/ui/viewer.zig">
 const HistogramPayload = struct { photo_id: u64, channel: Channel };
 
@@ -662,7 +672,12 @@ fn viewer(app: *App, ui: *Ui, photo: *const Photo, texture: Texture) void {
     ui.open(.{ .id = .of("viewer"), .layout = .{ .direction = .top_to_bottom, .sizing = .grow_both, .child_alignment = .{ .x = .center } } });
     defer ui.close();
 
-    ui.image(.{ .handle = texture, .natural_size = .{ photo.width, photo.height } }, .{
+    ui.image(.{
+        .handle = texture,
+        .natural_size = .{ photo.width, photo.height },
+        .tint = if (photo.rejected) .rgba(0xffffff66) else .white,
+        .corner_radius = .all(6),
+    }, .{
         .id = .of("full_image"),
         .layout = .{ .sizing = .{ .width = .grow } },
     });
@@ -1754,8 +1769,9 @@ fn present(renderer: *Renderer, surface: zui.Surface, frame: *const Ui.Frame) !v
         <li><b>Gradients, shadows, backdrop blur, transforms, materials <span class="pill partial">Declared only</span></b><span>The variants exist in <code class="z">RenderCommand</code> when a renderer declares them, but <code class="z">Decoration</code> has no field that produces them, so nothing is emitted or lowered. Items G1–G6, stage 8.</span></li>
         <li><b><code class="z">features.semantics</code> and <code class="z">features.gestures</code> <span class="pill partial">Declared only</span></b><span><code class="z">Frame.semantics()</code> is always empty and <code class="z">ui.manipulation</code> always returns null. Accessibility is V2; gestures (arbitration, momentum, custom recognizers) are I5.</span></li>
         <li><b><code class="z">features.flex_wrap</code> and <code class="z">features.safety_sweeps</code> <span class="pill partial">Declared only</span></b><span>The flags exist and gate their API, but they don't change behaviour yet. Wrap is L7; sweeps are V3.</span></li>
+        <li><b>Images' tint and corner radius in the backends</b><span>The <code class="z">image</code> command carries them, but zui-raylib and zui-sokol still draw every image untinted and square. Item C10.</span></li>
         <li><b>Extended color</b><span>Colors are RGBA8 only. <code class="z">zui.ExtendedColor</code> for HDR is G6.</span></li>
-        <li><b>Still to come</b><span>Dividers (L3), more floating options (L4), right-to-left layout (L6), drag and drop between elements (I1), a visual inspector <code>zui_debug</code> (V1), motion, multi-line text editing, skins, and more hosts (macOS, Linux, web).</span></li>
+        <li><b>Still to come</b><span>More floating options (L4), right-to-left layout (L6), drag and drop between elements (I1), a visual inspector <code>zui_debug</code> (V1), motion, multi-line text editing, skins, and more hosts (macOS, Linux, web).</span></li>
       </ul>
     </section>
 

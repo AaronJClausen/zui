@@ -90,6 +90,9 @@ pub fn RenderCommand(comptime options: CommandOptions) type {
 
         pub const Image = struct {
             handle: options.ImageHandle,
+            /// Multiplied into the image's pixels; white leaves them unchanged.
+            tint: style.Color = .white,
+            corner_radius: style.CornerRadius = .zero,
         };
 
         /// A linear gradient across the bounds; lowered to a rectangle in

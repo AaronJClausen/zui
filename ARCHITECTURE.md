@@ -160,6 +160,7 @@ The stage is the one in SPEC.md §21 that builds it.
 | hot reload of themes and assets | a file-watching source from the host, plus `zui_debug` | 5 |
 | whole-string text cache, line-break segmentation | core caches; segmentation through the text contract | 6 |
 | grow basis, aspect ratio, right-to-left, wrap, floating options | core layout | 6 |
+| dividers, images' tint and corner radius | core emission; renderers draw them | 6 |
 | static styles | core | 6 |
 | gestures, intents, momentum, drag and drop | core arbitration; custom recognizers in modules | 7 |
 | gradients, shadows, blur, transforms, materials, HDR | core commands and lowering; renderers draw; host reports headroom | 8 |
@@ -214,7 +215,8 @@ style made at comptime with `zui.static`; and so has line-break
 segmentation through the text contract's `zuiSegment`, and the grow
 basis: `grow` starts from the content, `grow_from_min` from `min`; and
 the `aspect_ratio` rule, a height from the settled width, and images'
-natural sizes.
+natural sizes; and dividers between children, `Border.between_children`,
+and images' tint and corner radius in the `image` command.
 
 The code and the spec still differ in these places, each closed by the
 roadmap item named:
@@ -223,6 +225,7 @@ roadmap item named:
 |---|---|---|---|
 | optional commands have variants, but nothing in declaration produces one, so nothing is lowered and `Diagnostics` lists no lowerings | `Decoration` and `Element` carry gradients, shadows, blur, transforms and materials, each lowered for a renderer that does not declare it | `src/style.zig`, `src/emission.zig` | G1, G2, G3, G5 |
 | no `Config.Color`; colors are RGBA8 only | `zui.Color` or `zui.ExtendedColor`, clamped for a renderer without `zui_extended_color` | `src/context.zig`, `src/commands.zig` | G6 |
+| zui-raylib and zui-sokol draw an image untinted and square | a renderer multiplies the `image` command's tint into it and rounds its corners | `../zui-raylib/src/root.zig`, `../zui-sokol/src/renderer.zig` | C10 |
 | `Widgets(Ui)` with a `Theme` struct | `Widgets(Ui, Skin)` | `zui_widgets/` | K5 |
 | `Frame` exposes its storage arrays and `rectOf` | `Frame.inspect(index)` | `src/context.zig` | V1 |
 | `Features` has every field and gates its API, but `Frame.semantics()` is always empty, `manipulation` always null, and `flex_wrap` and `safety_sweeps` change nothing | semantics, gestures, wrap and safety sweeps, each behind its field | `src/context.zig`, `src/layout.zig` | V2, I5, L7, V3 |

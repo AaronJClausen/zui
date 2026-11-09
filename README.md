@@ -93,7 +93,9 @@ Implemented so far:
   come out equal whatever they hold. `.height = .aspectRatio(16.0 / 9.0)`
   derives a height from the width, and an image declared with
   `.natural_size` takes that size and keeps its proportions as its width
-  grows or shrinks.
+  grows or shrinks. A border's `.between_children = 1` draws a divider
+  between each two children, centered in the gap, and an image's `tint`
+  and `corner_radius` reach the renderer in its `image` command.
 - **Stage 3:** the renderer contract (`zuiSubmit`, the surfaces
   it draws into, the optional commands it draws), checked at compile time
   by `zui.checkRenderer`, and a `RenderCommand` union generated with

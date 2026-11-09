@@ -27,7 +27,7 @@ Each item says:
 | stage 3 | the renderer contract and the generated commands (C1); the host contract and `RecordBuilder` (C2); the conformance suites (C3); `Features` (C7); `zui_app` (C4); the raylib adapter host (H1) | done; the backends are renderers and pass the renderer suite in CI, raylib's host passes the host suite, and the demo runs through `zui_app`, presenting its first frame 288 ms after the process starts; lowering comes with stage 8's commands |
 | stage 4 | the Windows host (H2), with dropped files and lifecycle events in the record; the system material (H8); `zui_app` with the application's own text contract (C9) | done; zui-sokol's tour runs on it unchanged, through `zui_app`, and idles at 0% CPU, and the same code shows Mica or a solid background |
 | stage 5 | relay (F2); `zui_wire` (F3); replay in `zui_testing` (F4); the wire host, renderer and client (F5); file watching as a source (F6) | done; editing a theme file restyles a running window on the Windows host within 4 ms; a recorded session of zui-sokol's tour replays to identical commands without starting any work, zui-sokol's tour goes over the wire at a hundredth of its frames' whole size, but for the screen that moves every box, and it runs in one process and draws in another on the Windows host, its keys going back |
-| stage 6, early | the single-line fast path (T1), the whole-string cache (T2), static styles (L8), the box tree's layout and emission (P4) and declaration (P5), line-break segmentation (T4), the grow basis (L1), aspect ratio and natural sizes (L2) | done; the box tree's and warm text's budgets met: the box tree declares in 48.9 µs and lays out and emits in 89.2 µs, warm text in 91.7 µs; a box tree of static styles declares in 28.0 µs |
+| stage 6, early | the single-line fast path (T1), the whole-string cache (T2), static styles (L8), the box tree's layout and emission (P4) and declaration (P5), line-break segmentation (T4), the grow basis (L1), aspect ratio and natural sizes (L2), dividers and decorated images (L3) | done; the box tree's and warm text's budgets met: the box tree declares in 48.9 µs and lays out and emits in 89.2 µs, warm text in 91.7 µs; a box tree of static styles declares in 28.0 µs |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
@@ -60,10 +60,10 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
-| L3. Dividers and decorated images | 6 | `src/emission.zig` | | |
 | L4. Floating options | 6 | `src/layout.zig`, `src/emission.zig` | | |
 | L6. Right-to-left layout | 6 | `src/layout.zig` | | |
 | L7. Wrap | 6 | `src/layout.zig` | | |
+| C10. The backends draw images' tint and corner radius | 6 | `../zui-raylib`, `../zui-sokol`, `zui_testing/` | | |
 | I5. Gestures | 7 | `src/interaction.zig`, `src/input.zig`, `zui_testing/` | | |
 | I1. Drag and drop between elements | 7 | `src/interaction.zig`, `src/state.zig`, `zui_testing/` | I5 | |
 
@@ -131,6 +131,55 @@ Things to know:
 ---
 
 ## Done
+
+### L3. Dividers and decorated images
+
+**Plan.** `Border.between_children`; image commands with `corner_radius`
+and `tint`. **Done when:** snapshot tests for both. **Spec.** §10.1,
+§13.1.
+
+`Border.between_children` is the width of a divider between each two
+adjacent children in the flow, emitted as a `rectangle` in the border's
+color rather than a command of its own, so no renderer breaks. It is
+centered in the gap, from the end of one child to the start of the next,
+so alignment and scrolling move it with them, and it spans the element
+across its flow inside the border's widths. Floating children take no
+part. Dividers are emitted when the element's subtree ends, inside its
+clip, so they paint over the children, scroll and are cut off with them,
+and come before the border. `Border.widths` now defaults to zero, and a
+border of zero widths emits no `border` command, so
+`.border = .{ .color = line, .between_children = 1 }` draws dividers
+alone. SPEC.md §10.1 now shows `Decoration` and `Border` and says so.
+
+`Ui.Image` takes `tint` (white) and `corner_radius` (square), and the
+`image` command carries both, with the same defaults so that renderers
+and tests that build one with a handle alone still compile.
+`zui_testing.snapshot` writes them when they are not the defaults.
+zui-raylib and zui-sokol draw images without them until C10.
+
+Tests: dividers across a row with a border, sitting in the gaps inside
+the border's widths, after the children and before the border; down a
+column with no outline, skipping a floating child, with no `border`
+command; in a clipping container, only the divider inside the clip,
+between `clip_begin` and `clip_end`. An image command's default and
+declared tint and corner radius, and `zui_testing`'s snapshot of both.
+
+`zig build counts` against `5824aea`, in a local Docker container: every
+declaration unchanged; every `endFrame` +15 instructions, but the
+documents view's +1.36% (59,710 to 60,522), about 20 instructions in
+`leave` for each of its 40 focusable rows, which leave a level of their
+own and carry a decoration.
+Emitting the dividers inline, and comparing the widths with
+`std.meta.eql`, had made it +1.86%; `emitDividers` is never inlined, and
+`leave` reads the border through a pointer.
+`zig build bench-compare -- 5824aea` (8 rounds): the box tree's
+`endFrame` −0.8% and declaration +0.4%, the static-styled tree's −1.0%,
+the documents view's `endFrame` +2.1% (−2.0% to +2.1%); called slower:
+warm text's `endFrame` +2.8% (90.0 to 92.6 µs), which runs the same
+instructions but 15, so code placement as T4 found, and depth 64's
++4.8%, one step of its 0.1 µs resolution. `zig build bench --
+--check-targets` meets every budget: the box tree declares in 51.0 µs and
+lays out and emits in 91.8 µs, warm text in 92.0 µs.
 
 ### L2. Aspect ratio and natural sizes
 
@@ -1692,15 +1741,6 @@ Done: F2, F3, F4, F5 and F6 are in *Done*.
 
 ## Stage 6: text and layout
 
-### L3. Dividers and decorated images
-
-**Plan.** `Border.between_children`; image commands with `corner_radius`
-and `tint`.
-
-**Done when:** snapshot tests for both.
-
-**Spec.** §10.1, §13.1.
-
 ### L4. Floating options
 
 **Grounding.** Every floating element gets a hit region
@@ -1723,6 +1763,24 @@ padding, alignment and anchors, following the environment's direction.
 **Done when:** golden tests mirror every alignment and anchor.
 
 **Spec.** §8.1.
+
+### C10. The backends draw images' tint and corner radius
+
+**Grounding.** Since L3 the `image` command carries `tint` and
+`corner_radius`, but zui-raylib draws an image with its handle and bounds
+alone (`src/root.zig:541`, `drawTexture(image.handle, bounds)`), and so
+does zui-sokol (`src/renderer.zig:185`); zui-terminal has no images. The
+renderer suite's reference scene declares an untinted, square image.
+
+**Plan.** Each backend multiplies the tint into the image and rounds its
+corners; the renderer suite's reference scene declares a tinted image
+with a corner radius and checks a pixel inside it and one in a corner.
+Then each backend's pin moves past L3.
+
+**Done when:** zui-raylib and zui-sokol pass the extended renderer suite
+in CI.
+
+**Spec.** §10.1, §13.1, §16.2.
 
 ### L7. Wrap
 
@@ -1940,6 +1998,8 @@ Deliberate, and each a reason to choose zui:
 | An element's switches | `?bool`, null meaning false, so that their defaults fold away; written as booleans (P5) |
 | Line-break segmentation | the text contract's `zuiSegment`, one paragraph at a time; spaces before a break hang (T4) |
 | Aspect ratio (L2) | a height rule, `.aspectRatio(r)`, not a `Layout` field, which made every layout eight bytes larger and declaration 6.6% slower; neither stretched nor grown by its parent; on a width, or not positive, the content's size |
+| Dividers (L3) | `Border.between_children`, emitted as `rectangle` commands in the border's color, so no renderer breaks; centered in the gap, spanning the element inside its widths; inside the element's clip, after its children and before its border; a border of zero widths emits no `border` command |
+| Images' tint and corner radius (L3) | declared on `Ui.Image` and carried by the `image` command with defaults (white, square), so existing renderers and their tests still compile; drawing them is the backends' (C10) |
 | Natural sizes (L2) | `Ui.Image` is the declaration's type, apart from the `image` command; a natural size is the content inside the padding, may shrink in a narrower parent, and gives the height its proportions unless the height has a rule of its own |
 | A grow basis (L1) | a rule, `grow_from_min`, not a `basis` field, which would cost declaration; never narrower than the content's minimum, the rest shared by weight |
 | Config references (L8) | pointers in element storage, the default layout one constant; an element's own `layout` or `decoration` replaces the style's whole |
