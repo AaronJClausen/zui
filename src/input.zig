@@ -48,7 +48,9 @@ pub const Manipulation = struct {
 pub const Wheel = struct {
     /// Where the pointer was, in layout units.
     position: [2]f32,
-    /// In layout units; positive scrolls toward the end of the content.
+    /// In layout units, as the OS reports it: positive moves the view down
+    /// and to the right, toward the end of the content but the start of a
+    /// mirrored row.
     delta: [2]f32,
     at: Instant,
 };

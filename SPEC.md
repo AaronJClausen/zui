@@ -597,7 +597,7 @@ pub const Environment = struct {
     reduced_transparency: bool = false,
     text_scale: f32 = 1,            // the user's text size preference, e.g. 1.25; applied by skins, not by layout
     locale: Locale = .default,      // a BCP 47 tag of up to 23 bytes, e.g. "fr-CA"; zui only reports it
-    direction: ReadingDirection = .left_to_right,   // the language's, which `mirrored = null` follows
+    direction: ReadingDirection = .left_to_right,   // the language's, which the root's `mirrored = .inherit` follows
     hdr_headroom: f32 = 1,          // display peak over SDR white, e.g. 4; 1 is an SDR display
     power: Power = .plugged,                        // enum { plugged, battery, saver }
     window_focused: bool = true,    // the OS window has keyboard focus, not an element
@@ -658,12 +658,14 @@ children, alignment on both axes, and a sizing rule per axis.
 pub const Layout = struct {
     direction: Direction = .left_to_right,   // how children flow: .left_to_right, .right_to_left, .top_to_bottom
     sizing: Sizing2 = .{},
-    padding: Edges = .{},                    // logical: start/end resolve by direction
+    padding: Edges = .{},                    // logical: `left` is the start side, on the right when mirrored
     child_gap: f32 = 0,                      // between adjacent children, not around them
     child_alignment: Alignment2 = .{},       // where the children as a group sit, on each axis
     wrap: bool = false,                      // features.flex_wrap
-    mirrored: ?bool = null,                  // null: follow the environment's direction
+    mirrored: Mirrored = .inherit,           // .yes, .no; .inherit: the parent's, and the root the environment's
 };
+
+pub const Mirrored = enum(u8) { inherit, yes, no };   // one byte: a `?bool` is two, and `Layout` would grow
 
 pub const Sizing = struct {
     rule: enum(u32) { fit, grow, grow_from_min, aspect_ratio, fixed, percent } = .fit,   // four bytes: no padding to copy
@@ -712,9 +714,22 @@ The meanings, which follow CSS where CSS has an answer:
   field of `Layout` for the reason the basis is: a field made every
   `Layout` eight bytes larger, and the box tree's declaration 6.6%
   slower.
-- **Direction** is logical. `right_to_left` mirrors rows, alignment,
-  padding and floating anchors; `mirrored` applies it to a subtree.
-  Bidirectional text inside a run is the text contract's (§9.4).
+- **Direction** is logical. A mirrored element (`mirrored`, inherited
+  from the parent, and at the root from the environment's `direction`)
+  places its children from the right: a row flows from its right edge,
+  `.start` alignment on either axis is the right, its padding's `left` is
+  its start side and lies on the right, its floating children's anchors,
+  attach points and offsets are reflected across the box they attach to,
+  a text's `.start` and `.end` lines swap, and a horizontal scroll offset
+  grows to the left, so the wheel moves it the way the pointer does.
+  `right_to_left` does the same for an element's own children alone, as
+  CSS `row-reverse` does, so in a mirrored element it flows from the left.
+  Positions in a frame are physical, and borders stay physical. A frame
+  in which no element mirrors, in a left-to-right environment, does no
+  mirroring work. `mirrored` is a one-byte enum rather than a `?bool`,
+  which is two bytes and would make every `Layout` four bytes larger, as
+  the aspect ratio's field did. Bidirectional text inside a run is the
+  text contract's (§9.4).
 - **Wrap** moves children that overflow a row onto new lines, for parents
   that opt in, in a pass between distribution and positioning.
 
@@ -729,7 +744,7 @@ The meanings, which follow CSS where CSS has an answer:
 | 4 | fit heights | reverse | as 1; `aspect_ratio` heights, and images' natural heights, from the settled widths |
 | 5 | distribute heights | forward | as 2 |
 | 5½ | wrap rows | forward | only for `wrap` parents, compiled out without `features.flex_wrap` |
-| 6 | position | forward | a cursor per parent from its content box, alignment, direction and scroll offset; floating elements from their targets (§8.4) |
+| 6 | position | forward | a cursor per parent from its content box, alignment, direction and scroll offset, reflected across the parent when it is mirrored; floating elements from their targets (§8.4) |
 | 7 | emit | forward, then by layer | commands, clips, hit regions, semantics (§13) |
 
 Widths settle before heights because wrapping needs the width and the

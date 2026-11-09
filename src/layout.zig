@@ -457,27 +457,75 @@ fn wrapTexts(comptime Ui: type, ui: *Ui, frame: *Ui.Frame) void {
 /// it is reached, against its target, which is already placed if declared
 /// earlier; one whose target comes later is placed against its parent
 /// first, and again with its subtree once the pass has placed the target.
+///
+/// Until it meets a parent that mirrors its children, the pass runs
+/// without working out which elements are mirrored, so a frame without
+/// one pays only for looking. When it meets one, it starts again,
+/// mirroring. Only a parent's mirroring moves anything: a leaf's places
+/// nothing, and a floating element's anchors follow its parent's.
 fn position(comptime Ui: type, ui: *Ui, frame: *Ui.Frame) void {
+    if (!frame.may_mirror and positionUnlessMirrored(Ui, ui, frame, false)) return;
+    frame.may_mirror = true;
+    @call(.never_inline, positionMirrored, .{ Ui, ui, frame });
+}
+
+fn positionMirrored(comptime Ui: type, ui: *Ui, frame: *Ui.Frame) void {
+    _ = positionUnlessMirrored(Ui, ui, frame, true);
+}
+
+/// Returns false, having placed only some elements, when `may_mirror` is
+/// false and a parent mirrors its children.
+inline fn positionUnlessMirrored(comptime Ui: type, ui: *Ui, frame: *Ui.Frame, comptime may_mirror: bool) bool {
     frame.position[Ui.root_index] = .{ 0, 0 };
     var first_with_later_target: ?Ui.Index = null;
     for (0..frame.element_count) |index| {
         const element: Ui.Index = @intCast(index);
-        if (frame.isFloating(element)) @call(.never_inline, placeFloatingInPass, .{ Ui, frame, element, &first_with_later_target });
+        if (may_mirror) resolveMirroring(Ui, ui, frame, element);
+        if (frame.isFloating(element)) @call(.never_inline, placeFloatingInPass, .{ Ui, frame, element, &first_with_later_target, may_mirror });
         if (frame.child_counts[element].all == 0) continue;
-        switch (frame.flags[element].top_to_bottom) {
-            inline else => |top_to_bottom| placeChildren(Ui, ui, frame, element, if (top_to_bottom) .y else .x),
-        }
+        if (!may_mirror and mirrorsChildren(frame.layoutOf(element))) return false;
+        placeChildrenOf(Ui, ui, frame, element, may_mirror);
     }
-    if (first_with_later_target) |first| @call(.never_inline, placeAfterLaterTargets, .{ Ui, ui, frame, first });
+    if (first_with_later_target) |first| @call(.never_inline, placeAfterLaterTargets, .{ Ui, ui, frame, first, may_mirror });
+    return true;
 }
 
-fn placeFloatingInPass(comptime Ui: type, frame: *Ui.Frame, floating: Ui.Index, first_with_later_target: *?Ui.Index) void {
-    if (!placeFloating(Ui, frame, floating, .earlier_targets) and first_with_later_target.* == null) first_with_later_target.* = floating;
+inline fn mirrorsChildren(element_layout: *const style.Layout) bool {
+    return element_layout.direction == .right_to_left or element_layout.mirrored != .inherit;
 }
 
-inline fn placeChildrenOf(comptime Ui: type, ui: *Ui, frame: *Ui.Frame, parent: Ui.Index) void {
+/// Parents come first, so the parent's mirroring is already known. A
+/// reversed text's lines are aligned by swapping its alignment's start and
+/// end.
+fn resolveMirroring(comptime Ui: type, ui: *const Ui, frame: *Ui.Frame, element: Ui.Index) void {
+    const element_layout = frame.layoutOf(element);
+    const flags = &frame.flags[element];
+    flags.mirrored = switch (element_layout.mirrored) {
+        .yes => true,
+        .no => false,
+        .inherit => if (element == Ui.root_index)
+            ui.environment().direction == .right_to_left
+        else
+            frame.flags[frame.parent[element]].mirrored,
+    };
+    flags.reversed = flags.mirrored != (element_layout.direction == .right_to_left);
+    if (Ui.has_text and flags.reversed and frame.kindOf(element) == .text) {
+        const alignment = &frame.texts[frame.content_index[element]].style.alignment;
+        alignment.* = switch (alignment.*) {
+            .start => .end,
+            .center => .center,
+            .end => .start,
+        };
+    }
+}
+
+fn placeFloatingInPass(comptime Ui: type, frame: *Ui.Frame, floating: Ui.Index, first_with_later_target: *?Ui.Index, comptime may_mirror: bool) void {
+    if (!placeFloating(Ui, frame, floating, .earlier_targets, may_mirror) and first_with_later_target.* == null) first_with_later_target.* = floating;
+}
+
+inline fn placeChildrenOf(comptime Ui: type, ui: *Ui, frame: *Ui.Frame, parent: Ui.Index, comptime may_mirror: bool) void {
     switch (frame.flags[parent].top_to_bottom) {
-        inline else => |top_to_bottom| placeChildren(Ui, ui, frame, parent, if (top_to_bottom) .y else .x),
+        inline else => |top_to_bottom| placeChildren(Ui, ui, frame, parent, if (top_to_bottom) .y else .x, may_mirror),
     }
 }
 
@@ -485,23 +533,26 @@ inline fn placeChildrenOf(comptime Ui: type, ui: *Ui, frame: *Ui.Frame, parent: 
 /// declaration order, so a subtree nested in another is placed after the
 /// one it moves with. A target inside a floating subtree that is itself
 /// placed here later is taken where that subtree was first placed.
-fn placeAfterLaterTargets(comptime Ui: type, ui: *Ui, frame: *Ui.Frame, first: Ui.Index) void {
+fn placeAfterLaterTargets(comptime Ui: type, ui: *Ui, frame: *Ui.Frame, first: Ui.Index, comptime may_mirror: bool) void {
     for (first..frame.element_count) |index| {
         const floating: Ui.Index = @intCast(index);
         if (!frame.isFloating(floating)) continue;
         const target = targetOf(Ui, frame, floating) orelse continue;
         if (target < floating) continue;
-        _ = placeFloating(Ui, frame, floating, .all_targets);
+        _ = placeFloating(Ui, frame, floating, .all_targets, may_mirror);
         for (floating..frame.subtree_end[floating]) |subtree_index| {
             const element: Ui.Index = @intCast(subtree_index);
-            if (element != floating and frame.isFloating(element)) _ = placeFloating(Ui, frame, element, .all_targets);
-            if (frame.child_counts[element].all != 0) placeChildrenOf(Ui, ui, frame, element);
+            if (element != floating and frame.isFloating(element)) _ = placeFloating(Ui, frame, element, .all_targets, may_mirror);
+            if (frame.child_counts[element].all != 0) placeChildrenOf(Ui, ui, frame, element, may_mirror);
         }
     }
 }
 
 /// Specialized by the flow's axis, so no coordinate is indexed at run time.
-inline fn placeChildren(comptime Ui: type, ui: *Ui, frame: *Ui.Frame, parent: Ui.Index, comptime flow_axis: Axis) void {
+/// A reversed parent places its children as if it were not, then reflects
+/// them across its box, which carries its padding, alignment and scroll
+/// offset over with them.
+inline fn placeChildren(comptime Ui: type, ui: *Ui, frame: *Ui.Frame, parent: Ui.Index, comptime flow_axis: Axis, comptime may_mirror: bool) void {
     const along = @intFromEnum(flow_axis);
     const across = 1 - along;
     const parent_layout = frame.layoutOf(parent);
@@ -516,6 +567,8 @@ inline fn placeChildren(comptime Ui: type, ui: *Ui, frame: *Ui.Frame, parent: Ui
     var next_along = frame.position[parent][along] + padding_start[along] - offset[along] + if (free_along > 0) free_along * along_fraction else 0;
     const across_start = frame.position[parent][across] + padding_start[across] - offset[across];
     const across_space = frame.size[parent][across] - parent_layout.padding.total(across_axis);
+    const reversed = may_mirror and frame.flags[parent].reversed;
+    const reflected_sum = 2 * frame.position[parent][0] + frame.size[parent][0];
 
     var children = FlowChildren(Ui).init(frame, parent);
     while (children.next()) |child| {
@@ -524,6 +577,7 @@ inline fn placeChildren(comptime Ui: type, ui: *Ui, frame: *Ui.Frame, parent: Ui
         var placed: [2]f32 = undefined;
         placed[along] = next_along;
         placed[across] = across_start + if (free_across > 0) free_across * across_fraction else 0;
+        if (reversed) placed[0] = reflected_sum - placed[0] - size[0];
         frame.position[child] = placed;
         next_along += size[along] + gap;
     }
@@ -549,7 +603,9 @@ const PlacedTargets = enum { earlier_targets, all_targets };
 
 /// Returns false when the target comes later and is not placed yet, in
 /// which case the element is placed against its parent for now.
-fn placeFloating(comptime Ui: type, frame: *Ui.Frame, floating: Ui.Index, comptime placed: PlacedTargets) bool {
+/// A reversed parent reflects its floating children's anchors, attach
+/// points and offsets across the box they attach to.
+fn placeFloating(comptime Ui: type, frame: *Ui.Frame, floating: Ui.Index, comptime placed: PlacedTargets, comptime may_mirror: bool) bool {
     const config = frame.floatingOf(floating);
     const parent = frame.parent[floating];
     var placed_against_target = true;
@@ -568,6 +624,9 @@ fn placeFloating(comptime Ui: type, frame: *Ui.Frame, floating: Ui.Index, compti
     const anchor = config.anchor.fractions();
     for (0..2) |a| {
         frame.position[floating][a] = target_position[a] + target_size[a] * attach[a] - frame.size[floating][a] * anchor[a] + config.offset[a];
+    }
+    if (may_mirror and frame.flags[parent].reversed) {
+        frame.position[floating][0] = 2 * target_position[0] + target_size[0] - frame.position[floating][0] - frame.size[floating][0];
     }
     return placed_against_target;
 }

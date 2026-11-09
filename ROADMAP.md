@@ -27,7 +27,7 @@ Each item says:
 | stage 3 | the renderer contract and the generated commands (C1); the host contract and `RecordBuilder` (C2); the conformance suites (C3); `Features` (C7); `zui_app` (C4); the raylib adapter host (H1) | done; the backends are renderers and pass the renderer suite in CI, raylib's host passes the host suite, and the demo runs through `zui_app`, presenting its first frame 288 ms after the process starts; lowering comes with stage 8's commands |
 | stage 4 | the Windows host (H2), with dropped files and lifecycle events in the record; the system material (H8); `zui_app` with the application's own text contract (C9) | done; zui-sokol's tour runs on it unchanged, through `zui_app`, and idles at 0% CPU, and the same code shows Mica or a solid background |
 | stage 5 | relay (F2); `zui_wire` (F3); replay in `zui_testing` (F4); the wire host, renderer and client (F5); file watching as a source (F6) | done; editing a theme file restyles a running window on the Windows host within 4 ms; a recorded session of zui-sokol's tour replays to identical commands without starting any work, zui-sokol's tour goes over the wire at a hundredth of its frames' whole size, but for the screen that moves every box, and it runs in one process and draws in another on the Windows host, its keys going back |
-| stage 6, early | the single-line fast path (T1), the whole-string cache (T2), static styles (L8), the box tree's layout and emission (P4) and declaration (P5), line-break segmentation (T4), the grow basis (L1), aspect ratio and natural sizes (L2), dividers and decorated images (L3), floating options (L4) | done; the box tree's and warm text's budgets met: the box tree declares in 48.9 µs and lays out and emits in 89.2 µs, warm text in 91.7 µs; a box tree of static styles declares in 28.0 µs |
+| stage 6, early | the single-line fast path (T1), the whole-string cache (T2), static styles (L8), the box tree's layout and emission (P4) and declaration (P5), line-break segmentation (T4), the grow basis (L1), aspect ratio and natural sizes (L2), dividers and decorated images (L3), floating options (L4), right-to-left layout (L6) | done; the box tree's and warm text's budgets met: the box tree declares in 48.9 µs and lays out and emits in 89.2 µs, warm text in 91.7 µs; a box tree of static styles declares in 28.0 µs |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
@@ -60,12 +60,12 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
-| L6. Right-to-left layout | 6 | `src/layout.zig` | | |
 | L7. Wrap | 6 | `src/layout.zig` | | |
 | C10. The backends draw images' tint and corner radius | 6 | `../zui-raylib`, `../zui-sokol`, `zui_testing/` | | |
 | I5. Gestures | 7 | `src/interaction.zig`, `src/input.zig`, `zui_testing/` | | |
 | I1. Drag and drop between elements | 7 | `src/interaction.zig`, `src/state.zig`, `zui_testing/` | I5 | |
 | G1. Gradients, shadows and glow | 8 | `src/style.zig`, `src/emission.zig`, `zui_testing/` | | |
+| G2. Backdrop blur | 8 | `src/style.zig`, `src/emission.zig`, `zui_testing/` | G1 | |
 
 After the queue come the rest of stage 8 and stages 9 to 11 in the order of SPEC.md §21. They join the queue as it runs short.
 
@@ -131,6 +131,71 @@ Things to know:
 ---
 
 ## Done
+
+### L6. Right-to-left layout
+
+**Plan.** `Direction.right_to_left`, `Layout.mirrored`, and logical
+padding, alignment and anchors, following the environment's direction.
+**Done when:** golden tests mirror every alignment and anchor.
+**Spec.** §8.1.
+
+`Layout.mirrored` is `zui.Mirrored`, `.inherit`, `.yes` or `.no`: an
+element is mirrored by its own, else by its parent's, and the root by the
+environment's `direction`. A `?bool`, as SPEC.md had it, is two bytes and
+would have made every `Layout` 60 bytes instead of 56, the size that made
+the box tree's `endFrame` 6.7% slower in L2; SPEC.md §8.1 now says so.
+`Direction` gains `right_to_left`, which reverses an element for its own
+children alone, as CSS `row-reverse`, so in a mirrored element it flows
+from the left. An element places its children from the right when it is
+mirrored or `right_to_left`, not both: the position pass lays them out as
+before, then reflects them across the parent's box, which carries the
+padding (`left` is the start side), the alignment on both axes and the
+scroll offset over with them, and a floating child's position across the
+box it attaches to, which reflects its anchor, attach point and offset.
+A mirrored text's `.start` and `.end` swap, in the text record, so the
+text path does no work for it. A reversed scroll container's horizontal
+offset grows to the left, and its region carries `scroll_x_reversed`, so
+the wheel's physical delta moves it the way the pointer goes. Dividers
+sit in the gap between two children whichever way they flow. Positions
+and borders stay physical.
+
+Nothing is paid for it in a frame that does not mirror. `Frame.may_mirror`
+starts true only in a right-to-left environment; otherwise the position
+pass looks at each parent's `direction` and `mirrored` and, at the first
+that mirrors, starts again with a copy of the pass that works out each
+element's `mirrored` and `reversed` flags. Detecting it at declaration
+instead cost the static-styled tree's declaration 5.4% more instructions,
+since a static style's layout is not folded there.
+
+Tests: each of the nine alignments of a row and a column, with uneven
+padding, mirrored by the environment, by an ancestor's `.mirrored = .yes`
+and by the row's own `right_to_left`, is the left-to-right layout
+reflected; and one by hand. Each of the 81 anchor and attach point pairs,
+for a parent, the root and an element target, likewise, and a menu by
+hand. A text's alignments; `.no` and `.yes` overriding the parent, and
+`right_to_left` in a mirrored row flowing from the left; a mirrored
+scroller starting at its right edge and following the wheel; a reversed
+row's dividers; a frame that cannot mirror setting no flag. The
+randomized trees declare `right_to_left` and `mirrored`, check that
+children start inside the content box at the right for a reversed
+parent, and 500 of them, laid out in a right-to-left environment, are the
+left-to-right trees reflected, element by element.
+
+`zig build counts` against `68545eb`, in a local Docker container: the
+box tree's declaration +0.94% (436,051 to 440,150), one store per element
+for the `mirrored` byte that was padding, and every other declaration
+within +0.54%; the box tree's `endFrame` +0.82% (1,251,001 to 1,261,249)
+and depth 64's +1.00%, from looking at each parent's `direction` and
+`mirrored`; the documents view's +0.86%; warm text's +0.03% (1,036,264 to
+1,036,572), and every other text scenario within +0.05%.
+`zig build bench-compare -- 68545eb` (6 rounds): declarations −1.1% to
++0.3%; the box tree's `endFrame` +1.0%, the static-styled tree's +1.8%,
+warm text's +1.5% (100.0 to 101.1 µs), with the same instructions but
+308; called slower only depth 64's declaration, one step of its 0.1 µs
+resolution, and `initBuffer`, a startup time this does not touch.
+`zig build bench -- --check-targets` meets every budget, over three runs:
+the box tree declares in 50.4 to 51.0 µs and lays out and emits in 92.1
+to 93.2 µs, warm text in 101.3 to 101.7 µs.
 
 ### L4. Floating options
 
@@ -1803,15 +1868,6 @@ Done: F2, F3, F4, F5 and F6 are in *Done*.
 
 ## Stage 6: text and layout
 
-### L6. Right-to-left layout
-
-**Plan.** `Direction.right_to_left`, `Layout.mirrored`, and logical
-padding, alignment and anchors, following the environment's direction.
-
-**Done when:** golden tests mirror every alignment and anchor.
-
-**Spec.** §8.1.
-
 ### C10. The backends draw images' tint and corner radius
 
 **Grounding.** Since L3 the `image` command carries `tint` and
@@ -2046,6 +2102,7 @@ Deliberate, and each a reason to choose zui:
 | An element's switches | `?bool`, null meaning false, so that their defaults fold away; written as booleans (P5) |
 | Line-break segmentation | the text contract's `zuiSegment`, one paragraph at a time; spaces before a break hang (T4) |
 | Aspect ratio (L2) | a height rule, `.aspectRatio(r)`, not a `Layout` field, which made every layout eight bytes larger and declaration 6.6% slower; neither stretched nor grown by its parent; on a width, or not positive, the content's size |
+| Right-to-left layout (L6) | `Layout.mirrored: zui.Mirrored` (`.inherit`, `.yes`, `.no`), one byte rather than a `?bool`, which would make every `Layout` four bytes larger; inherited, the root's from the environment's `direction`; a mirrored or `right_to_left` element, not both, reflects its children across its box, so padding's `left` is the start side, alignment and floating anchors and offsets mirror, and a text's `.start` and `.end` swap; `right_to_left` covers the element's own children only, as `row-reverse`; a reversed scroller's offset grows to the left and takes the wheel's physical delta reversed; positions and borders stay physical; found by the position pass, which starts again mirroring at the first parent that mirrors, so other frames pay nothing |
 | Floating options (L4) | `capture = false` gives the floating element no hit region of its own, while interactive elements inside it keep theirs; `.clip = .target` cuts it off where its target's children are, merged with its own clip into one pair pushed in its layer before it draws; a later target places the subtree again after pass 6, in declaration order, and a target inside the subtree falls back to the parent; `capture` and `clip` are copied into the element's flags, so emission reads no floating config for other elements |
 | A border inside its element's clip (L4) | emitted before the element's own `clip_end`, which leaves it whole since it lies in the element's box, so a floating element's merged clip also cuts off its border with one clip pair |
 | Dividers (L3) | `Border.between_children`, emitted as `rectangle` commands in the border's color, so no renderer breaks; centered in the gap, spanning the element inside its widths; inside the element's clip, after its children and before its border; a border of zero widths emits no `border` command |

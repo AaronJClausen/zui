@@ -69,6 +69,9 @@ pub const Color = extern struct {
     }
 };
 
+/// As padding, logical: `left` is the start side and `right` the end,
+/// so a mirrored element puts `left` on its right. As a border's widths,
+/// physical.
 pub const Edges = struct {
     left: f32 = 0,
     right: f32 = 0,
@@ -83,10 +86,6 @@ pub const Edges = struct {
 
     pub fn symmetric(horizontal: f32, vertical: f32) Edges {
         return .{ .left = horizontal, .right = horizontal, .top = vertical, .bottom = vertical };
-    }
-
-    pub fn start(self: Edges, axis: Axis) f32 {
-        return if (axis == .x) self.left else self.top;
     }
 
     pub fn total(self: Edges, axis: Axis) f32 {
@@ -230,13 +229,30 @@ pub const Sizing2 = struct {
     }
 };
 
+/// How an element's children flow. A row flows from its start: the left,
+/// or the right in a mirrored element. `right_to_left` mirrors the element
+/// for its own children alone: their flow, their alignment, its padding
+/// and its floating children's anchors, so in a mirrored element it flows
+/// from the left.
 pub const Direction = enum(u8) {
     left_to_right,
     top_to_bottom,
+    right_to_left,
 
     pub fn axis(self: Direction) Axis {
-        return if (self == .left_to_right) .x else .y;
+        return if (self == .top_to_bottom) .y else .x;
     }
+};
+
+/// Whether an element and its subtree are laid out right to left: start
+/// on the right for rows, alignment, padding, floating anchors and text.
+/// One byte, not a `?bool`, which is two and would make every `Layout`
+/// four bytes larger.
+pub const Mirrored = enum(u8) {
+    /// As the parent is; the root follows the environment's `direction`.
+    inherit,
+    yes,
+    no,
 };
 
 pub const Alignment = enum(u8) {
@@ -266,9 +282,18 @@ pub const Alignment2 = struct {
 pub const Layout = struct {
     direction: Direction = .left_to_right,
     sizing: Sizing2 = .{},
+    /// `left` is the start side, so a mirrored element puts it on the right.
     padding: Edges = .{},
     child_gap: f32 = 0,
+    /// `x = .start` is the left, or the right in a mirrored element.
     child_alignment: Alignment2 = .{},
+    /// Overrides the parent's for the whole subtree. A phone number in an
+    /// Arabic form stays left to right:
+    ///
+    /// ```zig
+    /// ui.open(.{ .layout = .{ .mirrored = .no } });
+    /// ```
+    mirrored: Mirrored = .inherit,
 };
 
 /// A byte rather than two bits: Zig stores a two-bit enum field as two bits
@@ -452,6 +477,10 @@ test "Sizing decl literals" {
     try std.testing.expectEqual(@as(f32, 48), sizing.axis(.y).amount);
     try std.testing.expectEqual(Sizing.Rule.grow_from_min, (Sizing2{ .width = .grow_equal }).width.rule);
     try std.testing.expectEqual(Sizing{ .rule = .aspect_ratio, .amount = 2 }, (Sizing2{ .height = .aspectRatio(2) }).height);
+}
+
+test "Layout keeps its size with mirroring" {
+    try std.testing.expectEqual(56, @sizeOf(Layout));
 }
 
 test "Sizing has no padding bytes" {

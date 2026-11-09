@@ -179,6 +179,36 @@ fn photoInfoColumns(ui: *Ui, photo: *const Photo) void {
 }
 ```
 
+<a id="right-to-left"></a>
+
+### Right-to-left layout · *shipped*
+
+When the host reports a right-to-left language, the whole layout mirrors: rows flow from the right, `.start` alignment is the right edge, a padding's `left` is its start side and lands on the right, floating anchors and offsets flip, text lines align to the right, and a horizontal scroller starts at its right edge. You write the layout once, in logical terms. `.mirrored = .yes` or `.no` sets a subtree either way whatever its parent, and `direction = .right_to_left` reverses one row alone, as CSS `row-reverse` does. Positions in the frame are physical, so hit testing and `rectOf` need nothing. Borders stay physical too.
+
+`src/ui/compose.zig`
+
+```zig
+fn composeHeader(app: *App, ui: *Ui) void {
+    ui.open(.{ .layout = .{
+        .sizing = .{ .width = .grow, .height = .fixed(40) },
+        .padding = .{ .left = 12, .right = 4 },
+        .child_gap = 8,
+        .child_alignment = .{ .y = .center },
+    } });
+    defer ui.close();
+    ui.text(app.strings.to, .{ .size = 13 });
+
+    ui.open(.{ .layout = .{ .mirrored = .no } });
+    ui.text(app.draft.recipient_phone, .{ .size = 13 });
+    ui.close();
+
+    ui.box(.{ .layout = .{ .sizing = .{ .width = .grow } } });
+    sendButton(app, ui);
+}
+```
+
+In Arabic or Hebrew the label sits on the right, 12 units in, the send button on the left, and the phone number still reads left to right.
+
 <a id="static-styles"></a>
 
 ### Static styles · *shipped*
@@ -1605,7 +1635,7 @@ These names compile, but they don't do anything yet. This list is from `ARCHITEC
 - **`features.flex_wrap` and `features.safety_sweeps`** *(declared only)*: The flags exist and gate their API, but they don't change behaviour yet. Wrap is L7; sweeps are V3.
 - **Images' tint and corner radius in the backends**: The `image` command carries them, but zui-raylib and zui-sokol still draw every image untinted and square. Item C10.
 - **Extended color**: Colors are RGBA8 only. `zui.ExtendedColor` for HDR is G6.
-- **Still to come**: Right-to-left layout (L6), drag and drop between elements (I1), a visual inspector `zui_debug` (V1), motion, multi-line text editing, skins, and more hosts (macOS, Linux, web).
+- **Still to come**: Drag and drop between elements (I1), a visual inspector `zui_debug` (V1), motion, multi-line text editing, skins, and more hosts (macOS, Linux, web).
 
 <a id="dx"></a>
 

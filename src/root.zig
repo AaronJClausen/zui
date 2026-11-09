@@ -130,6 +130,7 @@ pub const static = style.static;
 pub const Sizing = style.Sizing;
 pub const Sizing2 = style.Sizing2;
 pub const Direction = style.Direction;
+pub const Mirrored = style.Mirrored;
 pub const Alignment = style.Alignment;
 pub const Alignment2 = style.Alignment2;
 pub const Layout = style.Layout;
@@ -167,4 +168,5 @@ test {
     _ = @import("tests/relay.zig");
     _ = @import("tests/styles.zig");
     _ = @import("tests/segmentation.zig");
+    _ = @import("tests/mirroring.zig");
 }

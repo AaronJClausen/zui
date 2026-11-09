@@ -221,6 +221,7 @@ fn Emitter(comptime Ui: type) type {
                     .disabled = flags.disabled,
                     .scroll_x = flags.scroll_x,
                     .scroll_y = flags.scroll_y,
+                    .scroll_x_reversed = flags.scroll_x and flags.reversed,
                 },
                 // `content_size` is only computed for elements with children.
                 .max_scroll = if (frame.child_counts[element].all == 0) .{ 0, 0 } else .{
@@ -306,7 +307,9 @@ fn Emitter(comptime Ui: type) type {
         }
 
         /// Inside the element's own clip, so dividers scroll and are cut off
-        /// with the children they separate.
+        /// with the children they separate. The gap between two children is
+        /// from the later start to the earlier end, so a reversed row's
+        /// dividers sit in its gaps too.
         fn emitDividers(self: *Self, element: Ui.Index, border: *const style.Border, level: *const Level) void {
             const frame = self.frame;
             const along: usize = @intFromEnum(frame.layoutOf(element).direction.axis());
@@ -317,15 +320,18 @@ fn Emitter(comptime Ui: type) type {
             const across_length = if (across == 0) bounds.width - widths.left - widths.right else bounds.height - widths.top - widths.bottom;
             const thickness = border.between_children;
 
-            var previous_end: ?f32 = null;
+            var previous: ?[2]f32 = null;
             var child = element + 1;
             while (child < frame.subtree_end[element]) : (child = frame.subtree_end[child]) {
                 if (frame.isFloating(child)) continue;
                 const child_start = frame.position[child][along];
-                if (previous_end) |end| {
+                const child_end = child_start + frame.size[child][along];
+                if (previous) |previous_extent| {
+                    const gap_start = style.smaller(previous_extent[1], child_end);
+                    const gap_end = style.larger(previous_extent[0], child_start);
                     var origin: [2]f32 = undefined;
                     var size: [2]f32 = undefined;
-                    origin[along] = (end + child_start - thickness) / 2;
+                    origin[along] = (gap_start + gap_end - thickness) / 2;
                     size[along] = thickness;
                     origin[across] = across_start;
                     size[across] = across_length;
@@ -334,7 +340,7 @@ fn Emitter(comptime Ui: type) type {
                         self.push(.{ .bounds = self.snap(divider), .id = frame.element_id[element], .z = level.z, .payload = .{ .rectangle = .{ .color = border.color, .corner_radius = .zero } } });
                     }
                 }
-                previous_end = child_start + frame.size[child][along];
+                previous = .{ child_start, child_end };
             }
         }
     };

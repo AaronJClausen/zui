@@ -201,7 +201,14 @@ pub const ElementFlags = packed struct(u16) {
     captures_pointer: bool = false,
     /// A floating element cut off by its target's clip.
     clips_to_target: bool = false,
-    _: u3 = 0,
+    /// Laid out right to left, by its own `mirrored`, its parent's or the
+    /// environment's direction. Set by the layout, and only in a frame
+    /// that may mirror.
+    mirrored: bool = false,
+    /// Places its children from the right: mirrored, or `right_to_left`,
+    /// but not both. Set with `mirrored`.
+    reversed: bool = false,
+    _: u1 = 0,
 
     pub fn clips(self: ElementFlags) bool {
         return self.clip_x or self.clip_y;
@@ -212,10 +219,12 @@ pub const ElementFlags = packed struct(u16) {
     }
 
     /// Any flag that makes emission record the element: everything but
-    /// the layout direction.
+    /// the layout direction and mirroring.
     pub fn emits(self: ElementFlags) bool {
         var without_direction = self;
         without_direction.top_to_bottom = false;
+        without_direction.mirrored = false;
+        without_direction.reversed = false;
         return @as(u16, @bitCast(without_direction)) != 0;
     }
 
@@ -405,6 +414,10 @@ pub fn Context(comptime config: Config) type {
             command_count: u32,
 
             id_table: [id_table_slots]Index,
+            /// The environment reads right to left, or the layout met a
+            /// parent that declares `mirrored` or `right_to_left`: only
+            /// then does it work out which elements are mirrored.
+            may_mirror: bool,
             /// Physical pixels per layout unit: the record's scale times its zoom.
             pixels_per_unit: f32,
             held: std.atomic.Value(bool),
@@ -711,6 +724,7 @@ pub fn Context(comptime config: Config) type {
             self.current = frame;
             self.dropped_depth = 0;
             self.depth = 0;
+            frame.may_mirror = self.current_environment.direction == .right_to_left;
 
             const root_layout: style.Layout = .{
                 .direction = .top_to_bottom,
@@ -1420,7 +1434,8 @@ pub fn Context(comptime config: Config) type {
                     const region = results.regions[region_index];
                     if (!region.flags.scrolls(axis) or !region.bounds.contains(wheel.position)) continue;
                     const offset = self.memory.states.get(region.hash, interaction.ScrollState, self.stateGeneration(), .create) orelse break;
-                    const moved = std.math.clamp(offset.offset[axis] + wheel.delta[axis], 0, region.max_scroll[axis]);
+                    const delta = if (axis == 0 and region.flags.scroll_x_reversed) -wheel.delta[0] else wheel.delta[axis];
+                    const moved = std.math.clamp(offset.offset[axis] + delta, 0, region.max_scroll[axis]);
                     if (moved != offset.offset[axis]) {
                         offset.offset[axis] = moved;
                         break;

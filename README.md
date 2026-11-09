@@ -100,6 +100,11 @@ Implemented so far:
   `.capture = false` it lets the pointer through to what it covers, as a
   tooltip should, and with `.clip = .target` it is cut off where its
   target's children are, so a badge on a row scrolls away with the row.
+  When the environment reads right to left, the layout mirrors: rows
+  flow from the right, `.start` and a padding's `left` are on the right,
+  floating anchors flip and text lines align right; `.mirrored = .no`
+  keeps a subtree left to right, and `.direction = .right_to_left`
+  reverses one row.
 - **Stage 3:** the renderer contract (`zuiSubmit`, the surfaces
   it draws into, the optional commands it draws), checked at compile time
   by `zui.checkRenderer`, and a `RenderCommand` union generated with

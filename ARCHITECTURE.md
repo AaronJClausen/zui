@@ -218,7 +218,8 @@ the `aspect_ratio` rule, a height from the settled width, and images'
 natural sizes; and dividers between children, `Border.between_children`,
 and images' tint and corner radius in the `image` command; and the
 floating options: targets declared later, `Floating.capture` and
-`Floating.clip`.
+`Floating.clip`; and right-to-left layout: `Layout.mirrored`, inherited
+from the environment's direction, and `Direction.right_to_left`.
 
 The code and the spec still differ in these places, each closed by the
 roadmap item named:

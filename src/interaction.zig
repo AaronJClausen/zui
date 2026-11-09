@@ -16,7 +16,9 @@ pub const RegionFlags = packed struct(u8) {
     disabled: bool = false,
     scroll_x: bool = false,
     scroll_y: bool = false,
-    _: u3 = 0,
+    /// Its horizontal offset grows to the left, as a mirrored row's does.
+    scroll_x_reversed: bool = false,
+    _: u2 = 0,
 
     pub fn scrolls(self: RegionFlags, axis: usize) bool {
         return if (axis == 0) self.scroll_x else self.scroll_y;

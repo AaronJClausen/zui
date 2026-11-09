@@ -13,6 +13,9 @@ const words = [_][]const u8{ "a", "zui", "layout", "immediate", "mode", "x", "fr
 const Generator = struct {
     random: std.Random,
     remaining: u32,
+    /// Off, every element follows the environment's direction, so the whole
+    /// tree mirrors with it.
+    overrides_mirroring: bool = true,
     next_scroll_id: u32 = 0,
     text_buffer: [64]u8 = undefined,
 
@@ -35,7 +38,7 @@ const Generator = struct {
 
     fn layout(self: *Generator) zui.Layout {
         return .{
-            .direction = if (self.random.boolean()) .left_to_right else .top_to_bottom,
+            .direction = self.random.enumValue(zui.Direction),
             .sizing = .{ .width = self.sizing(), .height = self.sizing() },
             .padding = .all(@floatFromInt(self.random.uintLessThan(u8, 12))),
             .child_gap = @floatFromInt(self.random.uintLessThan(u8, 9)),
@@ -43,6 +46,7 @@ const Generator = struct {
                 .x = self.random.enumValue(zui.Alignment),
                 .y = self.random.enumValue(zui.Alignment),
             },
+            .mirrored = if (self.overrides_mirroring and self.random.uintLessThan(u8, 8) == 0) self.random.enumValue(zui.Mirrored) else .inherit,
         };
     }
 
@@ -176,7 +180,10 @@ fn checkParent(frame: *const Frame, parent: Ui.Index) !void {
     const b = 1 - a;
     const content_along = @max(0, frame.size[parent][a] - parent_layout.padding.total(along));
     const content_across = @max(0, frame.size[parent][b] - parent_layout.padding.total(along.other()));
-    const content_start = [2]f32{ frame.position[parent][0] + parent_layout.padding.left, frame.position[parent][1] + parent_layout.padding.top };
+    const content_top = frame.position[parent][1] + parent_layout.padding.top;
+    const content_left = frame.position[parent][0] + parent_layout.padding.left;
+    const content_right = frame.position[parent][0] + frame.size[parent][0] - parent_layout.padding.left;
+    const reversed = frame.flags[parent].reversed;
 
     const flow_count = flowCount(frame, parent);
     if (flow_count == 0) return;
@@ -207,10 +214,15 @@ fn checkParent(frame: *const Frame, parent: Ui.Index) !void {
             const expected = @max(frame.min_size[child][b], std.math.clamp(content_across, across_sizing.min, across_sizing.max));
             try std.testing.expectApproxEqAbs(expected, frame.size[child][b], tolerance);
         }
-        // Children start inside the parent's content box. These frames never
-        // scroll, so every offset is zero.
-        try std.testing.expect(frame.position[child][0] >= content_start[0] - tolerance);
-        try std.testing.expect(frame.position[child][1] >= content_start[1] - tolerance);
+        // Children start inside the parent's content box, at its right for
+        // a reversed parent. These frames never scroll, so every offset is
+        // zero.
+        if (reversed) {
+            try std.testing.expect(frame.position[child][0] + frame.size[child][0] <= content_right + tolerance);
+        } else {
+            try std.testing.expect(frame.position[child][0] >= content_left - tolerance);
+        }
+        try std.testing.expect(frame.position[child][1] >= content_top - tolerance);
     }
 }
 
@@ -235,9 +247,17 @@ fn checkGrowFromMinWeights(frame: *const Frame, parent: Ui.Index, along: zui.Axi
 }
 
 fn buildRandomFrame(ui: *Ui, seed: u64, element_budget: u32) void {
+    buildRandomFrameIn(ui, seed, element_budget, .left_to_right, true);
+}
+
+fn buildRandomFrameIn(ui: *Ui, seed: u64, element_budget: u32, direction: zui.ReadingDirection, overrides_mirroring: bool) void {
     var prng: std.Random.DefaultPrng = .init(seed);
-    var generator: Generator = .{ .random = prng.random(), .remaining = element_budget };
-    ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ @floatFromInt(generator.random.intRangeAtMost(u16, 1, 1200)), @floatFromInt(generator.random.intRangeAtMost(u16, 1, 900)) } } });
+    var generator: Generator = .{ .random = prng.random(), .remaining = element_budget, .overrides_mirroring = overrides_mirroring };
+    const environment = [_]zui.Event{.{ .environment = .{ .direction = direction } }};
+    ui.beginFrame(&.{
+        .params = .{ .now = .zero, .viewport = .{ @floatFromInt(generator.random.intRangeAtMost(u16, 1, 1200)), @floatFromInt(generator.random.intRangeAtMost(u16, 1, 900)) } },
+        .events = &environment,
+    });
     generator.children(ui, 1);
 }
 
@@ -257,6 +277,35 @@ test "random trees satisfy the layout invariants" {
     }
 }
 
+test "a random tree in a right-to-left environment is the left-to-right one reflected" {
+    var harness: support.Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    var unmirrored: [Ui.max_elements]zui.Rect = undefined;
+    for (0..500) |seed| {
+        buildRandomFrameIn(&harness.ui, seed, @intCast(seed % 200 + 1), .left_to_right, false);
+        const plain = harness.ui.endFrame();
+        for (unmirrored[0..plain.element_count], 0..) |*rect, index| rect.* = rectAt(plain, index);
+        const element_count = plain.element_count;
+        harness.ui.release(plain);
+
+        buildRandomFrameIn(&harness.ui, seed, @intCast(seed % 200 + 1), .right_to_left, false);
+        const mirrored = harness.ui.endFrame();
+        defer harness.ui.release(mirrored);
+        try std.testing.expectEqual(element_count, mirrored.element_count);
+        const width = mirrored.params.viewport[0];
+        for (unmirrored[0..element_count], 0..) |rect, index| {
+            errdefer std.debug.print("seed {d}, element {d}\n", .{ seed, index });
+            const reflected = rectAt(mirrored, index);
+            try std.testing.expectApproxEqAbs(width - rect.x - rect.width, reflected.x, tolerance);
+            try std.testing.expectEqual(rect.y, reflected.y);
+            try std.testing.expectEqual(rect.width, reflected.width);
+            try std.testing.expectEqual(rect.height, reflected.height);
+        }
+    }
+}
+
 test "layout is deterministic" {
     var harness: support.Harness = .{};
     try harness.init();
@@ -273,6 +322,10 @@ test "layout is deterministic" {
         }
         try std.testing.expectEqualStrings(snapshots[0][0..lengths[0]], snapshots[1][0..lengths[1]]);
     }
+}
+
+fn rectAt(frame: *const Frame, index: usize) zui.Rect {
+    return .{ .x = frame.position[index][0], .y = frame.position[index][1], .width = frame.size[index][0], .height = frame.size[index][1] };
 }
 
 fn sizingAlong(frame: *const Frame, child: Ui.Index, axis: zui.Axis) zui.Sizing {
