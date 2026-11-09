@@ -203,6 +203,21 @@ pub fn Driver(comptime Ui: type) type {
             return self.frame(app, declare, events[0..strokes.len]);
         }
 
+        /// Two fingers either side of the element's center, `from` apart,
+        /// spreading or closing to `to` apart, both as fractions of its
+        /// width: three frames, as `dragFingers`. The element zooms when it
+        /// accepts `.gestures.zoom`.
+        ///
+        /// ```zig
+        /// _ = try driver.pinch(&app, App.declare, .of("map"), 0.2, 0.4); // the map doubles in size
+        /// ```
+        pub fn pinch(self: *Self, app: anytype, comptime declare: anytype, element_id: zui.Id, from: f32, to: f32) !*const Ui.Frame {
+            return self.dragFingers(app, declare, element_id, &.{
+                .{ .from = .{ 0.5 - from / 2, 0.5 }, .to = .{ 0.5 - to / 2, 0.5 } },
+                .{ .from = .{ 0.5 + from / 2, 0.5 }, .to = .{ 0.5 + to / 2, 0.5 } },
+            });
+        }
+
         /// Each key down and up, in order, in one frame, with `modifiers` held.
         pub fn pressKeys(self: *Self, app: anytype, comptime declare: anytype, keys: []const zui.Key) !*const Ui.Frame {
             var events: [Ui.limits.max_events_per_frame]zui.Event = undefined;
@@ -907,6 +922,26 @@ test "the driver taps and drags with several fingers" {
     });
     try std.testing.expect(pad.pressed_together);
     try std.testing.expectEqual(@as(u32, 2), pad.taps);
+}
+
+test "the driver pinches an element that zooms" {
+    const Map = struct {
+        zoom: f32 = 1,
+
+        fn declare(map: *@This(), ui: *TestUi) void {
+            if (ui.manipulation(.of("map"))) |moved| map.zoom *= moved.scale;
+            ui.box(.{ .id = .of("map"), .gestures = .{ .pan = .both, .zoom = true }, .layout = .{ .sizing = .{ .width = .fixed(400), .height = .fixed(300) } } });
+        }
+    };
+    var text_contract: TestText = .{};
+    var ui = try initTestUi(&text_contract);
+    defer ui.deinit(std.testing.allocator);
+    var driver: Driver(TestUi) = .{ .ui = &ui };
+
+    var map: Map = .{};
+    _ = try driver.frame(&map, Map.declare, &.{});
+    _ = try driver.pinch(&map, Map.declare, .of("map"), 0.2, 0.4);
+    try std.testing.expectApproxEqAbs(@as(f32, 2), map.zoom, 1e-5);
 }
 
 test "findViolation rejects broken command lists" {

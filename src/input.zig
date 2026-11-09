@@ -41,7 +41,8 @@ pub const Manipulation = struct {
     scale: f32 = 1,
     /// Radians, clockwise.
     rotation: f32 = 0,
-    /// The point the scale and rotation are about, in layout units.
+    /// The point the scale and rotation are about, after the translation:
+    /// where the pointers' centroid ended, in layout units.
     pivot: [2]f32 = .{ 0, 0 },
 };
 

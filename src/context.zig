@@ -1350,7 +1350,10 @@ pub fn Context(comptime config: Config) type {
                     contact.buttons.insert(down.button);
                     if (down.button == .primary) {
                         self.press(contact, hot);
-                        if (features.gestures) contact.gesture = .pressedAt(down.pointer.position);
+                        if (features.gestures) {
+                            contact.gesture = .pressedAt(down.pointer.position);
+                            self.startZoom(contact);
+                        }
                     }
                 },
                 .pointer_up => |up| {
@@ -1362,10 +1365,14 @@ pub fn Context(comptime config: Config) type {
                         const panned = features.gestures and contact.gesture.pan_owner != 0;
                         if (contact.press_target != 0 and !panned) if (hot) |region| if (results.regions[region].hash == contact.press_target) input_state.addClick(contact.press_target);
                         contact.press_target = 0;
+                        if (features.gestures) self.endZoom(contact);
                     }
                     if (!contact.hovers() and contact.buttons.count() == 0) contact.lifted = true;
                 },
-                .pointer_cancel => |pointer_id| if (input_state.find(pointer_id)) |contact| input_state.remove(contact),
+                .pointer_cancel => |pointer_id| if (input_state.find(pointer_id)) |contact| {
+                    if (features.gestures) self.endZoom(contact);
+                    input_state.remove(contact);
+                },
                 .pointer_leave => |pointer_id| if (input_state.find(pointer_id)) |contact| {
                     if (contact.buttons.count() == 0) input_state.remove(contact) else contact.hover_count = 0;
                 },
@@ -1504,6 +1511,7 @@ pub fn Context(comptime config: Config) type {
         fn pan(self: *Self, contact: *InputState.Slot) void {
             const gesture = &contact.gesture;
             const position = contact.pointer.position;
+            if (gesture.zooming) if (self.zoomPartner(contact)) |partner| return self.applyZoom(contact, partner);
             if (!gesture.past_slop) {
                 const moved: [2]f32 = .{ position[0] - gesture.press_position[0], position[1] - gesture.press_position[1] };
                 const slop = interaction.Gestures.touch_slop;
@@ -1515,11 +1523,80 @@ pub fn Context(comptime config: Config) type {
                 gesture.pan_axes = if (owner.pans(1 - axis, contact.pointer.kind)) .both else if (axis == 0) .horizontal else .vertical;
                 if (contact.press_target != owner.hash) contact.press_target = 0;
             }
-            if (gesture.pan_owner == 0) return;
+            if (gesture.pan_owner == 0 or gesture.pan_axes == .none) return;
             var delta: [2]f32 = undefined;
             for (0..2) |axis| delta[axis] = if (gesture.pan_axes.includes(axis)) position[axis] - gesture.panned_to[axis] else 0;
             gesture.panned_to = position;
             self.panElement(gesture.pan_owner, delta);
+        }
+
+        /// A second pointer pressed while another is down, both within an
+        /// element that accepts zoom, makes the two zoom the innermost such
+        /// element, taking both from whatever else they pressed or panned.
+        fn startZoom(self: *Self, contact: *InputState.Slot) void {
+            const results = &self.memory.results;
+            if (!results.has_frame) return;
+            const partner = for (&self.memory.input.contacts) |*slot| {
+                if (slot.*) |*other| if (other != contact and other.buttons.contains(.primary) and !other.gesture.zooming) break other;
+            } else return;
+            const position = contact.pointer.position;
+            var region_index = results.topmostAt(position) orelse return;
+            const owner = while (region_index != interaction.no_region) : (region_index = results.regions[region_index].parent) {
+                const region = &results.regions[region_index];
+                if (region.zooms() and region.bounds.contains(position) and region.bounds.contains(partner.pointer.position)) break region;
+            } else return;
+            for ([_]*InputState.Slot{ contact, partner }) |zooming| {
+                zooming.gesture.pan_owner = owner.hash;
+                zooming.gesture.zooming = true;
+                zooming.gesture.past_slop = true;
+                zooming.gesture.panned_to = zooming.pointer.position;
+                if (zooming.press_target != owner.hash) zooming.press_target = 0;
+            }
+        }
+
+        fn zoomPartner(self: *Self, contact: *const InputState.Slot) ?*InputState.Slot {
+            for (&self.memory.input.contacts) |*slot| {
+                if (slot.*) |*other| if (other != contact and other.gesture.zooming and other.gesture.pan_owner == contact.gesture.pan_owner) return other;
+            }
+            return null;
+        }
+
+        /// The pointer still down goes on panning the element, if it pans.
+        fn endZoom(self: *Self, contact: *InputState.Slot) void {
+            if (!contact.gesture.zooming) return;
+            contact.gesture.zooming = false;
+            const partner = self.zoomPartner(contact) orelse return;
+            partner.gesture.zooming = false;
+            partner.gesture.panned_to = partner.pointer.position;
+            const results = &self.memory.results;
+            const entry = results.find(partner.gesture.pan_owner) orelse return;
+            partner.gesture.pan_axes = if (entry.region == interaction.no_region) .none else results.regions[entry.region].panAxes(partner.pointer.kind);
+        }
+
+        /// The motion of one of two zooming pointers, as the change in their
+        /// centroid, their distance and their angle.
+        fn applyZoom(self: *Self, contact: *InputState.Slot, partner: *const InputState.Slot) void {
+            const before = contact.gesture.panned_to;
+            const after = contact.pointer.position;
+            const other = partner.pointer.position;
+            contact.gesture.panned_to = after;
+            const centroid_before: [2]f32 = .{ (before[0] + other[0]) / 2, (before[1] + other[1]) / 2 };
+            const centroid_after: [2]f32 = .{ (after[0] + other[0]) / 2, (after[1] + other[1]) / 2 };
+            const span_before: [2]f32 = .{ before[0] - other[0], before[1] - other[1] };
+            const span_after: [2]f32 = .{ after[0] - other[0], after[1] - other[1] };
+            const distance_before = @sqrt(span_before[0] * span_before[0] + span_before[1] * span_before[1]);
+            const distance_after = @sqrt(span_after[0] * span_after[0] + span_after[1] * span_after[1]);
+
+            const manipulated = self.memory.input.manipulate(contact.gesture.pan_owner);
+            manipulated.translation[0] += centroid_after[0] - centroid_before[0];
+            manipulated.translation[1] += centroid_after[1] - centroid_before[1];
+            manipulated.pivot = centroid_after;
+            if (distance_before == 0 or distance_after == 0) return;
+            manipulated.scale *= distance_after / distance_before;
+            var turn = std.math.atan2(span_after[1], span_after[0]) - std.math.atan2(span_before[1], span_before[0]);
+            if (turn > std.math.pi) turn -= 2 * std.math.pi;
+            if (turn < -std.math.pi) turn += 2 * std.math.pi;
+            manipulated.rotation += turn;
         }
 
         fn panOwner(self: *Self, press_position: [2]f32, axis: usize, motion: f32, kind: input.PointerKind) ?*const Results.Region {
@@ -1576,8 +1653,10 @@ pub fn Context(comptime config: Config) type {
         /// What pointers and the wheel did to `element_id` this frame,
         /// summed, or null when nothing moved it. `translation` is how far
         /// the content should move: with a pointer that pans the element,
-        /// and against the wheel. A scroll container scrolls itself and
-        /// reports it here too.
+        /// with the centroid of two that zoom it, and against the wheel.
+        /// Two pointers zooming it also scale and rotate it, about `pivot`,
+        /// where their centroid ended. A scroll container scrolls itself
+        /// and reports it here too.
         ///
         /// ```zig
         /// if (ui.manipulation(.of("map"))) |moved| {

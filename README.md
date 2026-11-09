@@ -155,9 +155,11 @@ Implemented so far:
   on that axis and can still move that way: a vertical drag on a
   carousel scrolls the list around it, and a drag that scrolls a list
   takes the press from the button it started on. Scroll containers pan
-  with touch and pen; `ui.manipulation(id)` reports what pans and the
-  wheel did to an element, such as a map. Zoom, long press, double tap,
-  momentum and custom recognizers come next.
+  with touch and pen. Two fingers zoom the innermost element that
+  accepts `.zoom`, even when the pinch starts on a list inside it.
+  `ui.manipulation(id)` reports what pans, pinches and the wheel did to
+  an element, such as a map: translation, scale, rotation and pivot.
+  Long press, double tap, momentum and custom recognizers come next.
 
 The reference backend, its adapter host and the demo application live in
 [zui-raylib](https://github.com/AaronJClausen/zui-raylib); the other

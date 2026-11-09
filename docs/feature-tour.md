@@ -555,9 +555,9 @@ fn photoGrid(app: *App, ui: *Ui) void {
 
 <a id="gestures"></a>
 
-### Pans between nested elements · *in progress*
+### Pans and pinches between nested elements · *in progress*
 
-An element declares what it accepts from pointers with `gestures`. Once a pointer moves 8 units from where it pressed (`zui.Gestures.touch_slop`), its axis locks, and it goes to the innermost element under the press that pans on that axis and can still move that way. So a vertical swipe on a horizontal filmstrip scrolls the page around it, a swipe past the strip's end does too, and the button it started on loses the press: no click. Scroll containers pan by touch and pen on their scrolled axes; the mouse keeps the wheel, so a mouse drag in a list stays with what it pressed. `ui.manipulation(id)` reports what pans and the wheel did to an element this frame. Declaring a gesture makes the element interactive, and without `features.gestures` it is ignored, so widgets declare it for every context: `zui_widgets`' slider keeps a horizontal drag. Zoom, long press, double tap, momentum and custom recognizers are still to come (I5).
+An element declares what it accepts from pointers with `gestures`. Once a pointer moves 8 units from where it pressed (`zui.Gestures.touch_slop`), its axis locks, and it goes to the innermost element under the press that pans on that axis and can still move that way. So a vertical swipe on a horizontal filmstrip scrolls the page around it, a swipe past the strip's end does too, and the button it started on loses the press: no click. Scroll containers pan by touch and pen on their scrolled axes; the mouse keeps the wheel, so a mouse drag in a list stays with what it pressed. `ui.manipulation(id)` reports what pans and the wheel did to an element this frame. Declaring a gesture makes the element interactive, and without `features.gestures` it is ignored, so widgets declare it for every context: `zui_widgets`' slider keeps a horizontal drag. Two pointers pressed inside an element with `.gestures.zoom` zoom the innermost one, even when the pinch starts on a list inside it, and `manipulation` adds their scale, rotation and pivot. Long press, double tap, momentum and custom recognizers are still to come (I5).
 
 `src/ui/album.zig`
 
@@ -579,10 +579,11 @@ fn viewer(app: *App, ui: *Ui) void {
     if (ui.manipulation(id)) |moved| {
         app.viewer.offset[0] += moved.translation[0];
         app.viewer.offset[1] += moved.translation[1];
+        app.viewer.zoomBy(moved.scale, moved.pivot);
     }
     if (ui.clicked(id)) app.viewer.toggleChrome(); // a tap, not the end of a pan
 
-    ui.open(.{ .id = id, .gestures = .{ .pan = .both }, .cursor = .grab, .clip = .both, .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(480) } } });
+    ui.open(.{ .id = id, .gestures = .{ .pan = .both, .zoom = true }, .cursor = .grab, .clip = .both, .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(480) } } });
     defer ui.close();
     ui.image(.{ .handle = app.viewer.texture, .natural_size = app.viewer.size }, .{ .floating = .{ .offset = app.viewer.offset, .clip = .target } });
 }
@@ -1473,7 +1474,7 @@ The strongest part of the developer experience today. UIs are tested by id and i
 
 ### Driver tests by element id · *shipped*
 
-`FixedMetricsText` makes every character 8×16 at size 16, so layout assertions hold on any machine. `Driver` runs frames of your declare function and synthesizes input aimed at elements by id: `click`, `clickAt`, `tap`, `hover`, `drag`, multi-finger `dragFingers`, `pressKeys`, `typeText`, `focus`, and `frameDelivering` to inject source deliveries.
+`FixedMetricsText` makes every character 8×16 at size 16, so layout assertions hold on any machine. `Driver` runs frames of your declare function and synthesizes input aimed at elements by id: `click`, `clickAt`, `tap`, `hover`, `drag`, multi-finger `dragFingers` and `pinch`, `pressKeys`, `typeText`, `focus`, and `frameDelivering` to inject source deliveries.
 
 `tests/rename.zig`
 
@@ -1691,7 +1692,7 @@ These names compile, but they don't do anything yet. This list is from `ARCHITEC
 
 - **Gradients, shadows, backdrop blur, transforms, materials** *(declared only)*: The variants exist in `RenderCommand` when a renderer declares them, but `Decoration` has no field that produces them, so nothing is emitted or lowered. Items G1–G6, stage 8.
 - **`features.semantics`** *(declared only)*: `Frame.semantics()` is always empty. Accessibility is V2.
-- **The rest of `features.gestures`** *(in progress)*: pans work; zoom, long press, double tap, momentum, the other intents and custom recognizers are the rest of I5.
+- **The rest of `features.gestures`** *(in progress)*: pans and zoom work; long press, double tap, momentum, the other intents and custom recognizers are the rest of I5.
 - **`features.safety_sweeps`** *(declared only)*: The flag exists, but it doesn't change behaviour yet. Sweeps are V3.
 - **Extended color**: Colors are RGBA8 only. `zui.ExtendedColor` for HDR is G6.
 - **Still to come**: Drag and drop between elements (I1), a visual inspector `zui_debug` (V1), motion, multi-line text editing, skins, and more hosts (macOS, Linux, web).

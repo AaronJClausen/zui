@@ -242,3 +242,108 @@ test "without the feature, gestures are ignored and a touch drag scrolls nothing
     }
     try testing.expectEqual(0, @sizeOf(@FieldType(PlainUi.Frame, "gestures")));
 }
+
+const atlas: zui.Id = .of("atlas");
+const places: zui.Id = .of("places");
+const place: zui.Id = .of("place");
+
+/// A 400×400 map that pans and zooms, with a list of places 200×200 at
+/// (100, 100) that scrolls over 600 units and starts with a 50-tall button.
+fn atlasView(ui: *Ui) void {
+    ui.open(.{ .id = atlas, .gestures = .{ .pan = .both, .zoom = true }, .layout = .{ .sizing = .{ .width = .fixed(400), .height = .fixed(400) }, .padding = .all(100) } });
+    ui.open(.{ .id = places, .scroll = .{}, .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(200), .height = .fixed(200) } } });
+    ui.box(.{ .id = place, .interactive = true, .layout = fixed(200, 50) });
+    ui.box(.{ .layout = fixed(200, 550) });
+    ui.close();
+    ui.close();
+}
+
+fn atlasFrame(harness: *Harness, events: []const zui.Event) !*Ui {
+    const ui = harness.beginEvents(events);
+    atlasView(ui);
+    _ = try harness.end();
+    return ui;
+}
+
+fn expectManipulation(expected: zui.Manipulation, actual: ?zui.Manipulation) !void {
+    const moved = actual orelse return error.NotManipulated;
+    const tolerance = 1e-4;
+    try testing.expectApproxEqAbs(expected.translation[0], moved.translation[0], tolerance);
+    try testing.expectApproxEqAbs(expected.translation[1], moved.translation[1], tolerance);
+    try testing.expectApproxEqAbs(expected.scale, moved.scale, tolerance);
+    try testing.expectApproxEqAbs(expected.rotation, moved.rotation, tolerance);
+    try testing.expectApproxEqAbs(expected.pivot[0], moved.pivot[0], tolerance);
+    try testing.expectApproxEqAbs(expected.pivot[1], moved.pivot[1], tolerance);
+}
+
+test "a button in a list in a zoomable map: a tap clicks it, and each motion goes to its own element" {
+    var harness: Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    _ = try atlasFrame(&harness, &.{});
+    var ui = try atlasFrame(&harness, &.{ down(1, .{ 150, 125 }), up(1, .{ 150, 125 }) });
+    try testing.expect(ui.clicked(place));
+
+    ui = try atlasFrame(&harness, &.{ down(1, .{ 150, 140 }), move(1, .{ 150, 100 }), up(1, .{ 150, 100 }) });
+    try testing.expectEqual([2]f32{ 0, 40 }, ui.scrollOffset(places));
+    try testing.expectEqual(@as(?zui.Manipulation, null), ui.manipulation(atlas));
+    try testing.expect(!ui.clicked(place));
+
+    ui = try atlasFrame(&harness, &.{ down(1, .{ 150, 140 }), move(1, .{ 190, 150 }), up(1, .{ 190, 150 }) });
+    try expectManipulation(.{ .translation = .{ 40, 10 } }, ui.manipulation(atlas));
+    try testing.expectEqual([2]f32{ 0, 40 }, ui.scrollOffset(places));
+
+    ui = try atlasFrame(&harness, &.{ down(1, .{ 120, 125 }), down(2, .{ 180, 125 }) });
+    try testing.expect(!ui.pressed(place));
+    ui = try atlasFrame(&harness, &.{ move(1, .{ 100, 125 }), move(2, .{ 200, 125 }) });
+    try expectManipulation(.{ .translation = .{ 0, 0 }, .scale = 100.0 / 60.0, .pivot = .{ 150, 125 } }, ui.manipulation(atlas));
+    try testing.expectEqual(@as(?zui.Manipulation, null), ui.manipulation(places));
+    ui = try atlasFrame(&harness, &.{ up(1, .{ 100, 125 }), up(2, .{ 200, 125 }) });
+    try testing.expect(!ui.clicked(place));
+    try testing.expect(!ui.clicked(atlas));
+    try testing.expectEqual([2]f32{ 0, 40 }, ui.scrollOffset(places));
+}
+
+test "a pinch that starts on a list goes to the map around it" {
+    var harness: Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    _ = try atlasFrame(&harness, &.{});
+    var ui = try atlasFrame(&harness, &.{ down(1, .{ 150, 200 }), move(1, .{ 150, 170 }) });
+    try testing.expectEqual([2]f32{ 0, 30 }, ui.scrollOffset(places)); // one finger scrolls the list
+    ui = try atlasFrame(&harness, &.{ down(2, .{ 150, 260 }), move(1, .{ 150, 150 }), move(2, .{ 150, 280 }) });
+    try testing.expectEqual([2]f32{ 0, 30 }, ui.scrollOffset(places));
+    try expectManipulation(.{ .translation = .{ 0, 0 }, .scale = 130.0 / 90.0, .pivot = .{ 150, 215 } }, ui.manipulation(atlas));
+
+    // Lifting one finger leaves the other panning the map.
+    ui = try atlasFrame(&harness, &.{ up(1, .{ 150, 150 }), move(2, .{ 170, 290 }) });
+    try expectManipulation(.{ .translation = .{ 20, 10 } }, ui.manipulation(atlas));
+    try testing.expectEqual([2]f32{ 0, 30 }, ui.scrollOffset(places));
+    _ = try atlasFrame(&harness, &.{up(2, .{ 170, 290 })});
+}
+
+test "two pointers turning about each other rotate the map clockwise" {
+    var harness: Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    _ = try atlasFrame(&harness, &.{});
+    _ = try atlasFrame(&harness, &.{ down(1, .{ 120, 200 }), down(2, .{ 180, 200 }) });
+    const ui = try atlasFrame(&harness, &.{ move(1, .{ 150, 170 }), move(2, .{ 150, 230 }) });
+    try expectManipulation(.{ .translation = .{ 0, 0 }, .rotation = std.math.pi / 2.0, .pivot = .{ 150, 200 } }, ui.manipulation(atlas));
+    _ = try atlasFrame(&harness, &.{ up(1, .{ 150, 170 }), up(2, .{ 150, 230 }) });
+}
+
+test "two pointers on an element that does not zoom each do what one would" {
+    var harness: Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    _ = try frame(&harness, &.{});
+    var ui = try frame(&harness, &.{ down(1, .{ 150, 50 }), down(2, .{ 100, 250 }), move(1, .{ 110, 50 }), move(2, .{ 100, 220 }) });
+    try testing.expectEqual([2]f32{ 40, 0 }, ui.scrollOffset(carousel));
+    try testing.expectEqual([2]f32{ 0, 30 }, ui.scrollOffset(list));
+    ui = try frame(&harness, &.{ up(1, .{ 110, 50 }), up(2, .{ 100, 220 }) });
+}

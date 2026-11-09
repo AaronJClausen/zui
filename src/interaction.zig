@@ -38,7 +38,9 @@ pub const Gestures = packed struct(u8) {
     /// pans on its scrolled axes with touch and pen without it, and the
     /// mouse scrolls it with the wheel.
     pan: Pan = .none,
-    _: u6 = 0,
+    /// Scale and rotation by two pointers, and the pan of their centroid.
+    zoom: bool = false,
+    _: u5 = 0,
 
     /// The axes an element pans on.
     pub const Pan = enum(u2) {
@@ -74,6 +76,17 @@ pub fn RegionOf(comptime has_gestures: bool) type {
         gestures: if (has_gestures) Gestures else void,
         /// For scroll containers: the largest offset per axis.
         max_scroll: [2]f32,
+
+        pub fn zooms(self: *const @This()) bool {
+            return has_gestures and self.gestures.zoom and !self.flags.disabled;
+        }
+
+        /// The axes a pointer of `kind` can pan it on.
+        pub fn panAxes(self: *const @This(), kind: input.PointerKind) Gestures.Pan {
+            const horizontal = self.pans(0, kind);
+            const vertical = self.pans(1, kind);
+            return if (horizontal and vertical) .both else if (horizontal) .horizontal else if (vertical) .vertical else .none;
+        }
 
         /// Whether a pointer of `kind` moving along `axis` can pan it.
         pub fn pans(self: *const @This(), axis: usize, kind: input.PointerKind) bool {
@@ -206,9 +219,11 @@ pub const PointerGesture = struct {
     /// Past the touch slop, so the pan has been arbitrated, whether or not
     /// an element took it.
     past_slop: bool,
+    /// One of two pointers zooming `pan_owner`.
+    zooming: bool,
 
     pub fn pressedAt(position: [2]f32) PointerGesture {
-        return .{ .press_position = position, .panned_to = position, .pan_owner = 0, .pan_axes = .none, .past_slop = false };
+        return .{ .press_position = position, .panned_to = position, .pan_owner = 0, .pan_axes = .none, .past_slop = false, .zooming = false };
     }
 };
 

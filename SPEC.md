@@ -1203,8 +1203,13 @@ stays with what it pressed, unless the container declares `pan` itself.
   pointer pressed, and a scroll container scrolls by it itself. The
   wheel goes to the innermost region that scrolls with room on its axis,
   or pans on it, likewise. With two pointers, scale and rotation go to
-  the innermost region that accepts zoom. A release nothing claimed is a
-  tap.
+  the innermost region that accepts zoom: a pointer pressed while
+  another is down, both inside such a region, makes the pair zoom it,
+  taking both from what they pressed or panned, so a pinch that starts
+  on a list inside a map zooms the map. `scale`, `rotation` (clockwise)
+  and the centroid's `translation` are summed over the frame, and
+  `pivot` is where the centroid ended. When one lifts, the other pans
+  the region if it pans. A release nothing claimed is a tap.
 - **Delays are opt-in and local.** Only an element with `double_tap`
   delays its single tap until the double-tap window passes.
 - **Momentum** is state in the state table under the element, so it ends

@@ -1911,7 +1911,7 @@ multi-pointer `drag`. First rebuild `resolveInput` over the log with
 - two pointers press two buttons at once;
 - R1's counts on the mouse-only scenarios are no higher than before.
 
-**Status.** Done but for `pinch`, which waits for gestures (I5), and R1's
+**Status.** Done (`pinch` came with I5) but for R1's
 counts: `zig build counts` has no scenario with input yet, and commits
 from before I4 cannot be counted by today's scenarios, so the mouse-only
 check becomes a counted input scenario that later changes must not grow. Every hovering pointer is hit-tested once a
@@ -2026,10 +2026,10 @@ unchanged with the feature off:
    chaining; scroll containers that pan by touch and pen; presses
    cancelled by a pan; `manipulation`'s translation from pans and the
    wheel; the slider keeping a horizontal drag.
-2. *Zoom* (next): `zoom`, two-pointer scale, rotation and pivot to the
+2. *Zoom* (done): `zoom`, two-pointer scale, rotation and pivot to the
    innermost region that accepts it, and `Driver.pinch` (from I4): a
    button in a list in a zoomable map, a pinch that starts on the list.
-3. *Timers and intents:* `long_press` and `double_tap` with their
+3. *Timers and intents* (next): `long_press` and `double_tap` with their
    deadlines in `nextFrame` (from I2), `contextRequested`, a double-tap
    query, `dismissed`, `adjusted`, `navigated`: a long press, a double
    tap next to a single tap.
@@ -2059,6 +2059,23 @@ three runs: the box tree declares in 50.4 to 51.0 µs and lays out and
 emits in 93.4 to 94.7 µs, warm text in 100.9 to 101.5 µs, on the
 instructions it had before. The 32-bit tests (`-Dtarget=x86-linux`) run
 in the Linux container, since Windows cannot execute them.
+
+Slice 2: a second pointer pressed while another is down, both inside an
+element that accepts `zoom`, makes the two zoom the innermost such
+element, taking both from whatever else they pressed or panned, so a
+pinch that starts on a list in a map zooms the map even after the first
+finger began scrolling the list. Each move adds the change in the two
+pointers' centroid to `translation`, multiplies `scale` by the change in
+their distance and adds the change in their angle to `rotation`
+(clockwise on screen), with `pivot` where the centroid ended; when one
+lifts, the other goes on panning the element if it pans. Tests: a button
+in a list in a zoomable map (a tap clicks it, a vertical drag scrolls
+the list, a horizontal one pans the map, a pinch over it zooms the map
+and neither presses nor clicks it), a pinch that starts on the list, a
+rotation by a quarter turn, two pointers on elements that do not zoom
+each panning their own, and `zui_testing.Driver.pinch`, which I4 left
+waiting. `zig build counts` against `397ce28`: the same as slice 1, with
+the feature off and on, since only input changed.
 
 ### I1. Drag and drop between elements
 
@@ -2249,6 +2266,7 @@ Deliberate, and each a reason to choose zui:
 | Signals | lifecycle events; uncatchable signals are not representable |
 | Input | an ordered event log with host instants, many pointers (I4) |
 | Gesture arbitration | elements declare what they accept; one rule, by motion component (I5) |
+| Zoom (I5) | a second pointer pressed while another is down, both inside an element that accepts zoom, makes the pair zoom the innermost such element, taking both pointers from what they pressed or panned; `scale`, `rotation` (clockwise) and the centroid's `translation` are summed over the frame, `pivot` is where the centroid ended; the pointer left when one lifts pans the element if it pans |
 | Pans (I5) | past a touch slop of 8 layout units from the press, the axis locks to the larger component and the innermost region under the press that pans on it with room to move takes the pointer until it lifts, both axes if it pans on both; any other element it pressed loses the press; a scroll container pans on its scrolled axes with touch and pen only, since the mouse has the wheel, unless it declares `pan`, which takes every pointer; declaring a gesture makes an element interactive; `Element.gestures` is ignored without `features.gestures` rather than failing to compile, so widgets declare gestures for every context; `manipulation` reports pans and the wheel, scroll containers included, `translation` moving content with the pointer |
 | Custom gestures | code in declaration over `pointerEvents` and `state`, not a registry |
 | Comparing two commits | each commit's own benchmarks, alternated, judged by the middle half beyond 2% (R2) |
