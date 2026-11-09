@@ -34,21 +34,20 @@ jobs:
       - run: zig build docs
 
   test:
-    name: Test (${{ matrix.os }})
+    name: Test (${{ matrix.os }}, ${{ matrix.optimize }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
+        optimize: [Debug, ReleaseSafe, ReleaseFast]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: ${{ env.ZIG_VERSION }}
-      - run: zig build test -Doptimize=Debug
-      - run: zig build test -Doptimize=ReleaseSafe
-      - run: zig build test -Doptimize=ReleaseFast
+      - run: zig build test -Doptimize=${{ matrix.optimize }}
 
   tracy:
     name: Tracy (${{ matrix.os }})
