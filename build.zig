@@ -17,6 +17,7 @@ const compile_error_cases = [_]struct { name: []const u8, expected_error: []cons
     .{ .name = "semantics_without_feature", .expected_error = "zui: semantics() needs Config.features.semantics = true" },
     .{ .name = "manipulation_without_gestures", .expected_error = "zui: manipulation() needs Config.features.gestures = true" },
     .{ .name = "double_tapped_without_gestures", .expected_error = "zui: doubleTapped() needs Config.features.gestures = true" },
+    .{ .name = "pointer_events_without_gestures", .expected_error = "zui: pointerEvents() needs Config.features.gestures = true" },
     .{ .name = "wrap_without_feature", .expected_error = "zui: wrapChildren() needs Config.features.flex_wrap = true" },
     .{ .name = "custom_without_custom_data", .expected_error = "zui: custom() needs Config.CustomData set to your payload type" },
     .{ .name = "state_type_too_large", .expected_error = "zui: state type state_type_too_large.History is 80 bytes, but a state slot holds at most 64; store an index into your own storage instead" },

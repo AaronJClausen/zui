@@ -28,6 +28,7 @@ Each item says:
 | stage 4 | the Windows host (H2), with dropped files and lifecycle events in the record; the system material (H8); `zui_app` with the application's own text contract (C9) | done; zui-sokol's tour runs on it unchanged, through `zui_app`, and idles at 0% CPU, and the same code shows Mica or a solid background |
 | stage 5 | relay (F2); `zui_wire` (F3); replay in `zui_testing` (F4); the wire host, renderer and client (F5); file watching as a source (F6) | done; editing a theme file restyles a running window on the Windows host within 4 ms; a recorded session of zui-sokol's tour replays to identical commands without starting any work, zui-sokol's tour goes over the wire at a hundredth of its frames' whole size, but for the screen that moves every box, and it runs in one process and draws in another on the Windows host, its keys going back |
 | stage 6 | the single-line fast path (T1), the whole-string cache (T2), static styles (L8), the box tree's layout and emission (P4) and declaration (P5), line-break segmentation (T4), the grow basis (L1), aspect ratio and natural sizes (L2), dividers and decorated images (L3), floating options (L4), right-to-left layout (L6), wrap (L7); the backends drawing images' tint and corner radius (C10) | done; the box tree's and warm text's budgets met: the box tree declares in 48.9 µs and lays out and emits in 89.2 µs, warm text in 90.5 µs; a box tree of static styles declares in 28.0 µs; zui-raylib and zui-sokol draw tinted, rounded images and pass the renderer suite that checks them |
+| stage 7, in part | gestures (I5): arbitration by motion component, zoom, long press, double tap, momentum, the intents and custom recognizers | gestures done, with every scene of their *Done when*; drag and drop (I1) remains |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
@@ -62,7 +63,6 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
-| I5. Gestures | 7 | `src/interaction.zig`, `src/input.zig`, `zui_testing/` | | in progress |
 | I1. Drag and drop between elements | 7 | `src/interaction.zig`, `src/state.zig`, `zui_testing/` | I5 | |
 | G1. Gradients, shadows and glow | 8 | `src/style.zig`, `src/emission.zig`, `zui_testing/` | | |
 | G2. Backdrop blur | 8 | `src/style.zig`, `src/emission.zig`, `zui_testing/` | G1 | |
@@ -134,6 +134,183 @@ Things to know:
 ---
 
 ## Done
+
+### I5. Gestures: arbitration, intents, momentum, custom recognizers
+
+**Grounding.**
+- The slider drags with `pressed` and `pointerLocal`
+  (`zui_widgets/zui_widgets.zig:290`); drag-to-scroll and drag and drop
+  want the same pointer, and nothing decides between them.
+- Routing by gesture kind fails: a vertical drag on a horizontal carousel
+  inside a vertical list goes to the carousel, and a pinch that starts on
+  a list inside a map goes to the list.
+
+**Plan.** As SPEC.md §11.3–§11.4: accepted gestures in hit regions, one
+rule by motion component, opt-in delays, intents, momentum in the state
+table, and custom recognizers over `pointerEvents`, `claim` and
+`decline`. All of it behind `features.gestures`, which C7 added with
+`manipulation`, gated and null until this item fills it; each new
+gesture query is gated the same way, and `Element.gestures` is ignored
+without it, so that widgets declare gestures for every context.
+
+**Done when:** interaction tests cover a button in a list in a zoomable
+map, a carousel in a vertical list, a pinch that starts on the list, a
+slider in a drag-scrolled list, a long press, a double tap next to a
+single tap, a flick within one frame, and a lasso written as a module
+function against the map's pan; and with the feature off, R1 counts are
+unchanged.
+
+**Spec.** §11.3, §11.4.
+
+**Status.** Done, in five slices, each with its tests and with R1 counts
+unchanged with the feature off:
+1. *Pans* (done): `zui.Gestures` with `pan`, stored in hit regions;
+   the one rule by motion component past the touch slop, with scroll
+   chaining; scroll containers that pan by touch and pen; presses
+   cancelled by a pan; `manipulation`'s translation from pans and the
+   wheel; the slider keeping a horizontal drag.
+2. *Zoom* (done): `zoom`, two-pointer scale, rotation and pivot to the
+   innermost region that accepts it, and `Driver.pinch` (from I4): a
+   button in a list in a zoomable map, a pinch that starts on the list.
+3. *Timers and intents* (done): `long_press` and `double_tap` with their
+   deadlines in `nextFrame` (from I2), `contextRequested`, a double-tap
+   query, `dismissed`, `adjusted`, `navigated`: a long press, a double
+   tap next to a single tap.
+4. *Momentum* (done): velocity from the events' instants, momentum in the
+   state table under the element, its deadline in `nextFrame`: a flick
+   within one frame.
+5. *Custom recognizers* (done): `custom`, `pointerEvents`, `claim` and
+   `decline` (open decision 1): a lasso in a module against the map's
+   pan.
+
+Slice 1: the core's tests cover a carousel in a vertical list (a
+vertical drag on it scrolls the list, a horizontal one the carousel), a
+button in a list (a tap clicks, a drag scrolls the list and cancels the
+press), a slider-like element that pans horizontally in a list, scroll
+chaining at a carousel's end and a list's start, a mouse drag that does
+not scroll a list while the wheel does, a map panning freely on both
+axes with the mouse and the wheel, a button on the map, and a context
+without the feature ignoring `Element.gestures`. `zui_widgets`' slider
+declares `.pan = .horizontal`, tested in a list driven by
+`Driver.dragFingers`. `zig build counts` against `397ce28`, in a local
+Docker container: with the feature off, every scenario within ±2
+instructions; with it on, as the benchmarks run, the same, but for the
+documents view, whose interactive elements store their gestures:
+declaration +0.38% (33,320 to 33,447) and `endFrame` +0.49% (61,189 to
+61,489). `zig build bench -- --check-targets` meets every budget over
+three runs: the box tree declares in 50.4 to 51.0 µs and lays out and
+emits in 93.4 to 94.7 µs, warm text in 100.9 to 101.5 µs, on the
+instructions it had before. The 32-bit tests (`-Dtarget=x86-linux`) run
+in the Linux container, since Windows cannot execute them.
+
+Slice 2: a second pointer pressed while another is down, both inside an
+element that accepts `zoom`, makes the two zoom the innermost such
+element, taking both from whatever else they pressed or panned, so a
+pinch that starts on a list in a map zooms the map even after the first
+finger began scrolling the list. Each move adds the change in the two
+pointers' centroid to `translation`, multiplies `scale` by the change in
+their distance and adds the change in their angle to `rotation`
+(clockwise on screen), with `pivot` where the centroid ended; when one
+lifts, the other goes on panning the element if it pans. Tests: a button
+in a list in a zoomable map (a tap clicks it, a vertical drag scrolls
+the list, a horizontal one pans the map, a pinch over it zooms the map
+and neither presses nor clicks it), a pinch that starts on the list, a
+rotation by a quarter turn, two pointers on elements that do not zoom
+each panning their own, and `zui_testing.Driver.pinch`, which I4 left
+waiting. `zig build counts` against `397ce28`: the same as slice 1, with
+the feature off and on, since only input changed.
+
+Slice 3: a press on an element with `long_press`, held within the slop
+for 0.5 s, is `contextRequested` and not a tap, fired by the first frame
+whose `now` reaches it (or by a release that comes later, in the same
+record), with that instant as the next frame's deadline. A tap on an
+element with `double_tap` waits 0.3 s from its release: a second tap in
+time is `doubleTapped`, and otherwise the first is `clicked` in the
+frame that reaches the deadline, which `nextFrame` asks for. The other
+intents: `contextRequested` from a right click and the menu key,
+`dismissed` by Escape while the element or one in its focus scope is
+focused, `adjusted` and `navigated` from the arrows on the focused
+element. Only `doubleTapped` and `manipulation` need the feature, and
+`doubleTapped` without it fails with
+`"zui: doubleTapped() needs Config.features.gestures = true"`. Tests: a
+long press firing once when due and not tapping, one released in the
+frame it falls due, a short press tapping, a moved press not long
+pressing; a double tap next to a single tap (one clicks at once, the
+other once its window passes, a double tap is never clicked, a late
+second tap is a click of its own); a right click, the menu key, Escape
+in a dialog's scope, and the arrows. Looking for due timers at every
+`beginFrame` cost depth 64's declaration 1.28%, so a flag says whether
+any timer is armed. `zig build counts` against `397ce28`: with the
+feature off, unchanged from slice 1; with it on, every declaration within
++8 instructions but the documents view's, +0.40% (33,453), and every
+`endFrame` as in slice 1. `zig build bench -- --check-targets` meets every budget
+over three runs: the box tree declares in 50.3 to 51.1 µs and lays out
+and emits in 91.9 to 93.9 µs, warm text in 94.4 to 95.5 µs.
+
+Slice 4: each pressed pointer keeps its last four positions with their
+instants. A pan released faster than 50 units a second, over the samples
+of the last 0.1 s, coasts on the axes it panned: `zui.Momentum` in the
+state table under the element, slowing exponentially with a time
+constant of 0.325 s and moved to each record's `now` before its events,
+through the same path as a pan, so a scroll container scrolls and every
+element reports a `manipulation`. It stops below 10 units a second, at
+the end of a scroll container's content, when a pointer presses on it,
+or when the element was not declared in the last frame; while it coasts,
+`nextFrame` asks for a frame 1/120 s after `now`. Tests: a flick within
+one frame (press, four moves and release 10 ms apart) scrolls a list by
+the finger's 80 units, then coasts each frame by less, stopping after
+about 2,000 units a second times 0.325 s; a slow release does not coast;
+a press stops a coasting list; a flung map coasts as manipulations and
+stops when it is no longer declared. `zig build counts` against
+`397ce28`: with the feature off, unchanged; with it on, every declaration
+within +16 instructions but the documents view's, +0.42% (33,461), and
+every `endFrame` as in slice 1. `zig build bench -- --check-targets`, over four runs, met
+every budget in the last three: the box tree declares in 51.0 to 51.3 µs
+and lays out and emits in 91.1 to 92.0 µs, warm text in 98.2 to 98.4 µs;
+the first, right after the build, ran every scenario slower alike and
+missed the declaration budget at 68.8 µs, as first runs here often do.
+
+Slice 5: an element that declares `custom` holds every pointer pressed on
+it: no pan, zoom or long press of its own or its ancestors' starts while
+it is undecided, and `ui.pointerEvents(id)` returns the frame's events of
+those pointers, in order, through a `zui.PointerEvents` iterator.
+`ui.claim(pointer)` makes the pointer the recognizer's alone from the
+next `beginFrame`, taking its press from whatever it pressed;
+`ui.decline(pointer)` gives it back, and that `beginFrame` arbitrates it
+over all its motion since the press, so nothing moved meanwhile is lost.
+A pointer released undecided is a tap. Open decision 1, that a decision
+lands a frame late, is taken as planned: the lasso scene passes with it,
+the finger's pan arriving whole one frame after its press. The lasso is
+`zui_widgets`' `lasso(ui, id, &path)`, written on the public API alone: a
+pen pressed on the element draws a `zui_widgets.Lasso` path in the
+application's memory, and every other pointer is declined, so fingers
+pan and zoom the map. `pointerEvents` without the feature fails with
+`"zui: pointerEvents() needs Config.features.gestures = true"`. Tests: a
+lasso drawn by a pen over a map that does not move, then a finger that
+pans the map by its whole motion; in the core, a recognizer holding a
+list off until it declines and the list then scrolling by everything
+the pointer moved, a claimed pointer taking a button's press and never
+scrolling the list, and a pointer released undecided tapping. Looking at
+every contact at each `beginFrame` cost depth 64's declaration 0.79%, so
+a flag says whether a decision is waiting. `zig build counts` against
+`397ce28`: with the feature off, every scenario within ±2 instructions,
+as for every slice; with it on, every declaration within +19 instructions
+but the documents view's, +0.43% (33,320 to 33,464), every `endFrame`
+within +2 but the documents view's, +0.49% (61,189 to 61,489).
+`zig build bench -- --check-targets` meets every budget over four runs:
+the box tree declares in 51.1 to 52.4 µs and lays out and emits in 92.5
+to 93.6 µs, warm text in 91.1 to 92.6 µs.
+
+The whole item, by `zig build bench-compare -- 397ce28` (10 rounds):
+layout and emission unchanged or faster (the box tree's −1.8%, single-line
+text's −3.7%); declarations slower where they include `beginFrame` and
+little else: warm and cold text's +5.6% and +5.2% (15.3 to 16.1 µs) on 19
+more instructions of 106,521, the box tree's +1.9% on 102 fewer than
+slice 3 had, the documents view's +3.0%; the documents view's first frame
++4.2%. Instruction counts, which do not move with code placement, are
+within +0.02% for every declaration but the documents view's, so this is
+where `beginFrame`'s code now lands, as T4 and L4 found for warm text,
+not work added.
 
 ### C10. The backends draw images' tint and corner radius
 
@@ -1993,140 +2170,7 @@ Done: T1, T2, L8, P4, P5, T4, L1, L2, L3, L4, L6, L7 and C10 are in
 
 ## Stage 7: gestures
 
-### I5. Gestures: arbitration, intents, momentum, custom recognizers
-
-**Grounding.**
-- The slider drags with `pressed` and `pointerLocal`
-  (`zui_widgets/zui_widgets.zig:290`); drag-to-scroll and drag and drop
-  want the same pointer, and nothing decides between them.
-- Routing by gesture kind fails: a vertical drag on a horizontal carousel
-  inside a vertical list goes to the carousel, and a pinch that starts on
-  a list inside a map goes to the list.
-
-**Plan.** As SPEC.md §11.3–§11.4: accepted gestures in hit regions, one
-rule by motion component, opt-in delays, intents, momentum in the state
-table, and custom recognizers over `pointerEvents`, `claim` and
-`decline`. All of it behind `features.gestures`, which C7 added with
-`manipulation`, gated and null until this item fills it; each new query
-and `Element.gestures` are gated the same way.
-
-**Done when:** interaction tests cover a button in a list in a zoomable
-map, a carousel in a vertical list, a pinch that starts on the list, a
-slider in a drag-scrolled list, a long press, a double tap next to a
-single tap, a flick within one frame, and a lasso written as a module
-function against the map's pan; and with the feature off, R1 counts are
-unchanged.
-
-**Spec.** §11.3, §11.4.
-
-**Status.** In five slices, each with its tests and with R1 counts
-unchanged with the feature off:
-1. *Pans* (done): `zui.Gestures` with `pan`, stored in hit regions;
-   the one rule by motion component past the touch slop, with scroll
-   chaining; scroll containers that pan by touch and pen; presses
-   cancelled by a pan; `manipulation`'s translation from pans and the
-   wheel; the slider keeping a horizontal drag.
-2. *Zoom* (done): `zoom`, two-pointer scale, rotation and pivot to the
-   innermost region that accepts it, and `Driver.pinch` (from I4): a
-   button in a list in a zoomable map, a pinch that starts on the list.
-3. *Timers and intents* (done): `long_press` and `double_tap` with their
-   deadlines in `nextFrame` (from I2), `contextRequested`, a double-tap
-   query, `dismissed`, `adjusted`, `navigated`: a long press, a double
-   tap next to a single tap.
-4. *Momentum* (done): velocity from the events' instants, momentum in the
-   state table under the element, its deadline in `nextFrame`: a flick
-   within one frame.
-5. *Custom recognizers* (next): `custom`, `pointerEvents`, `claim` and
-   `decline` (open decision 1): a lasso in a module against the map's
-   pan.
-
-Slice 1: the core's tests cover a carousel in a vertical list (a
-vertical drag on it scrolls the list, a horizontal one the carousel), a
-button in a list (a tap clicks, a drag scrolls the list and cancels the
-press), a slider-like element that pans horizontally in a list, scroll
-chaining at a carousel's end and a list's start, a mouse drag that does
-not scroll a list while the wheel does, a map panning freely on both
-axes with the mouse and the wheel, a button on the map, and a context
-without the feature ignoring `Element.gestures`. `zui_widgets`' slider
-declares `.pan = .horizontal`, tested in a list driven by
-`Driver.dragFingers`. `zig build counts` against `397ce28`, in a local
-Docker container: with the feature off, every scenario within ±2
-instructions; with it on, as the benchmarks run, the same, but for the
-documents view, whose interactive elements store their gestures:
-declaration +0.38% (33,320 to 33,447) and `endFrame` +0.49% (61,189 to
-61,489). `zig build bench -- --check-targets` meets every budget over
-three runs: the box tree declares in 50.4 to 51.0 µs and lays out and
-emits in 93.4 to 94.7 µs, warm text in 100.9 to 101.5 µs, on the
-instructions it had before. The 32-bit tests (`-Dtarget=x86-linux`) run
-in the Linux container, since Windows cannot execute them.
-
-Slice 2: a second pointer pressed while another is down, both inside an
-element that accepts `zoom`, makes the two zoom the innermost such
-element, taking both from whatever else they pressed or panned, so a
-pinch that starts on a list in a map zooms the map even after the first
-finger began scrolling the list. Each move adds the change in the two
-pointers' centroid to `translation`, multiplies `scale` by the change in
-their distance and adds the change in their angle to `rotation`
-(clockwise on screen), with `pivot` where the centroid ended; when one
-lifts, the other goes on panning the element if it pans. Tests: a button
-in a list in a zoomable map (a tap clicks it, a vertical drag scrolls
-the list, a horizontal one pans the map, a pinch over it zooms the map
-and neither presses nor clicks it), a pinch that starts on the list, a
-rotation by a quarter turn, two pointers on elements that do not zoom
-each panning their own, and `zui_testing.Driver.pinch`, which I4 left
-waiting. `zig build counts` against `397ce28`: the same as slice 1, with
-the feature off and on, since only input changed.
-
-Slice 3: a press on an element with `long_press`, held within the slop
-for 0.5 s, is `contextRequested` and not a tap, fired by the first frame
-whose `now` reaches it (or by a release that comes later, in the same
-record), with that instant as the next frame's deadline. A tap on an
-element with `double_tap` waits 0.3 s from its release: a second tap in
-time is `doubleTapped`, and otherwise the first is `clicked` in the
-frame that reaches the deadline, which `nextFrame` asks for. The other
-intents: `contextRequested` from a right click and the menu key,
-`dismissed` by Escape while the element or one in its focus scope is
-focused, `adjusted` and `navigated` from the arrows on the focused
-element. Only `doubleTapped` and `manipulation` need the feature, and
-`doubleTapped` without it fails with
-`"zui: doubleTapped() needs Config.features.gestures = true"`. Tests: a
-long press firing once when due and not tapping, one released in the
-frame it falls due, a short press tapping, a moved press not long
-pressing; a double tap next to a single tap (one clicks at once, the
-other once its window passes, a double tap is never clicked, a late
-second tap is a click of its own); a right click, the menu key, Escape
-in a dialog's scope, and the arrows. Looking for due timers at every
-`beginFrame` cost depth 64's declaration 1.28%, so a flag says whether
-any timer is armed. `zig build counts` against `397ce28`: with the
-feature off, unchanged from slice 1; with it on, every declaration within
-+8 instructions but the documents view's, +0.40% (33,453), and every
-`endFrame` as in slice 1. `zig build bench -- --check-targets` meets every budget
-over three runs: the box tree declares in 50.3 to 51.1 µs and lays out
-and emits in 91.9 to 93.9 µs, warm text in 94.4 to 95.5 µs.
-
-Slice 4: each pressed pointer keeps its last four positions with their
-instants. A pan released faster than 50 units a second, over the samples
-of the last 0.1 s, coasts on the axes it panned: `zui.Momentum` in the
-state table under the element, slowing exponentially with a time
-constant of 0.325 s and moved to each record's `now` before its events,
-through the same path as a pan, so a scroll container scrolls and every
-element reports a `manipulation`. It stops below 10 units a second, at
-the end of a scroll container's content, when a pointer presses on it,
-or when the element was not declared in the last frame; while it coasts,
-`nextFrame` asks for a frame 1/120 s after `now`. Tests: a flick within
-one frame (press, four moves and release 10 ms apart) scrolls a list by
-the finger's 80 units, then coasts each frame by less, stopping after
-about 2,000 units a second times 0.325 s; a slow release does not coast;
-a press stops a coasting list; a flung map coasts as manipulations and
-stops when it is no longer declared. `zig build counts` against
-`397ce28`: with the feature off, unchanged; with it on, every declaration
-within +16 instructions but the documents view's, +0.42% (33,461), and
-every `endFrame` as in slice 1. `zig build bench -- --check-targets`, over four runs, met
-every budget in the last three: the box tree declares in 51.0 to 51.3 µs
-and lays out and emits in 91.1 to 92.0 µs, warm text in 98.2 to 98.4 µs;
-the first, right after the build, ran every scenario slower alike and
-missed the declaration budget at 68.8 µs, as ROADMAP's measurements note
-of a first run.
+Done: I5 is in *Done*.
 
 ### I1. Drag and drop between elements
 
@@ -2317,6 +2361,8 @@ Deliberate, and each a reason to choose zui:
 | Signals | lifecycle events; uncatchable signals are not representable |
 | Input | an ordered event log with host instants, many pointers (I4) |
 | Gesture arbitration | elements declare what they accept; one rule, by motion component (I5) |
+| A custom recognizer's decision lands a frame late (I5, open decision 1) | accepted: `claim` and `decline` apply at the next `beginFrame`, and a declined pointer is arbitrated over all its motion since the press, so nothing is lost; the lasso against a map's pan passes with it |
+| Custom recognizers (I5) | an element with `custom` holds each pointer pressed on it from every built-in gesture until it decides; `pointerEvents(id)` is an iterator, `zui.PointerEvents`, over the frame's events of the pointers it holds; a claimed pointer takes the press from what it pressed and is never a tap; one released undecided is a tap; the lasso is `zui_widgets.Widgets.lasso`, a pen drawing and every other pointer declined |
 | Momentum (I5) | a pan released faster than 50 units a second over its last 0.1 s coasts on its axes, slowing exponentially with a time constant of 0.325 s, moved to each record's `now` before its events through the pan's path; it stops below 10 units a second, at a scroll container's end, under a press, or when its element was not declared; it asks for frames 1/120 s apart; at most `max_input_contacts` elements coast, and a fling beyond them is reported on that limit |
 | Long press and double tap (I5) | timed from the events' instants against the record's `now`, setting the next frame's deadline: a long press after 0.5 s held within the slop, which is not a tap; a double tap within 0.3 s of the first tap's release, whose single tap is clicked only when that window passes; `doubleTapped(id)`, which SPEC.md lacked; `navigated` returns `zui.NavigationDirection`, since `Direction` has no up or left; `dismissed` while the element or one in its focus scope is focused; `contextRequested`, `dismissed`, `adjusted` and `navigated` need no feature, `doubleTapped` needs `features.gestures` |
 | Zoom (I5) | a second pointer pressed while another is down, both inside an element that accepts zoom, makes the pair zoom the innermost such element, taking both pointers from what they pressed or panned; `scale`, `rotation` (clockwise) and the centroid's `translation` are summed over the frame, `pivot` is where the centroid ended; the pointer left when one lifts pans the element if it pans |
@@ -2390,7 +2436,6 @@ Deliberate, and each a reason to choose zui:
 Each is planned with its first option. SPEC.md §22 has those that change
 the spec.
 
-1. **A custom recognizer's claim lands a frame late.** Planned: accept it.
-2. **Physical keys.** Planned: logical keys plus the opaque scancode.
-3. **V4, a web renderer or a thin client over the wire?** Planned: the
+1. **Physical keys.** Planned: logical keys plus the opaque scancode.
+2. **V4, a web renderer or a thin client over the wire?** Planned: the
    wire client first, since F5 builds it anyway.

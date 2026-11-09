@@ -74,6 +74,28 @@ fn LabelFromIdentifier(comptime identifier: []const u8) type {
     };
 }
 
+/// The path a `lasso` draws, in the application's memory: a state slot
+/// is too small for it. Points beyond its capacity are dropped.
+pub const Lasso = struct {
+    buffer: [capacity][2]f32 = undefined,
+    len: usize = 0,
+    /// The pen drawing it, while one is.
+    pen: ?zui.PointerId = null,
+
+    pub const capacity = 256;
+
+    /// In layout units, from the surface's top-left.
+    pub fn points(self: *const Lasso) []const [2]f32 {
+        return self.buffer[0..self.len];
+    }
+
+    fn add(self: *Lasso, point: [2]f32) void {
+        if (self.len == capacity) return;
+        self.buffer[self.len] = point;
+        self.len += 1;
+    }
+};
+
 pub fn Widgets(comptime UiType: type) type {
     return struct {
         const Self = @This();
@@ -264,6 +286,46 @@ pub fn Widgets(comptime UiType: type) type {
             if (content.len != 0) ui.text(content, textStyle(theme, if (options.disabled) .disabled else .normal));
             ui.close();
             return toggled;
+        }
+
+        /// A recognizer on `id`, an element that declares
+        /// `.gestures.custom`: a pen pressed on it draws `path`, and it
+        /// declines every other pointer, so fingers and the mouse pan and
+        /// zoom the element as they would without it. Returns true in the
+        /// frame the pen lifts.
+        ///
+        /// ```zig
+        /// ui.open(.{ .id = map_id, .gestures = .{ .pan = .both, .zoom = true, .custom = true } });
+        /// if (widgets.lasso(ui, map_id, &app.selection)) app.selectInside(app.selection.points());
+        /// ```
+        pub fn lasso(self: Self, ui: *Ui, id: zui.Id, path: *Lasso) bool {
+            _ = self;
+            var finished = false;
+            var events = ui.pointerEvents(id);
+            while (events.next()) |event| switch (event) {
+                .pointer_down => |down| {
+                    if (down.pointer.kind != .pen or path.pen != null) {
+                        ui.decline(down.pointer.id);
+                        continue;
+                    }
+                    ui.claim(down.pointer.id);
+                    path.pen = down.pointer.id;
+                    path.len = 0;
+                    path.add(down.pointer.position);
+                },
+                .pointer_move => |moved| if (path.pen == moved.pointer.id) path.add(moved.pointer.position),
+                .pointer_up => |lifted| if (path.pen == lifted.pointer.id) {
+                    path.add(lifted.pointer.position);
+                    path.pen = null;
+                    finished = true;
+                },
+                .pointer_cancel => |pointer_id| if (path.pen == pointer_id) {
+                    path.pen = null;
+                    path.len = 0;
+                },
+                else => {},
+            };
+            return finished;
         }
 
         pub const SliderOptions = struct {

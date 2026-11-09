@@ -1329,6 +1329,7 @@ pub fn Context(comptime config: Config) type {
             }
 
             if (features.gestures and input_state.coasting_count != 0) self.coast();
+            if (features.gestures and input_state.decisions_pending) self.applyRecognitions();
 
             const kept = @min(events.len, limits.max_events_per_frame);
             if (events.len > kept) {
@@ -1345,6 +1346,7 @@ pub fn Context(comptime config: Config) type {
                     contact.hover_stale = contact.hovers();
                     if (features.gestures and contact.buttons.contains(.primary)) {
                         contact.gesture.sample(move.pointer);
+                        if (contact.gesture.held()) input_state.recognize(contact.gesture.recognizer, event);
                         self.pan(contact);
                     }
                 },
@@ -1358,6 +1360,8 @@ pub fn Context(comptime config: Config) type {
                         if (features.gestures) {
                             contact.gesture = .pressedAt(down.pointer);
                             contact.gesture.long_press_owner = self.longPressOwner(down.pointer.position);
+                            contact.gesture.recognizer = self.recognizerAt(down.pointer.position);
+                            if (contact.gesture.recognizer != 0) input_state.recognize(contact.gesture.recognizer, event);
                             if (contact.gesture.long_press_owner != 0) input_state.timers_armed = true;
                             self.stopCoastingAt(down.pointer.position);
                             self.startZoom(contact);
@@ -1371,7 +1375,8 @@ pub fn Context(comptime config: Config) type {
                     const hot = self.refreshHover(contact);
                     contact.buttons.remove(up.button);
                     if (up.button == .primary) {
-                        if (features.gestures and contact.gesture.long_press_owner != 0 and !up.pointer.at.isBefore(contact.gesture.longPressDue())) self.longPress(contact);
+                        if (features.gestures and contact.gesture.held()) input_state.recognize(contact.gesture.recognizer, event);
+                        if (features.gestures and !contact.gesture.held() and contact.gesture.long_press_owner != 0 and !up.pointer.at.isBefore(contact.gesture.longPressDue())) self.longPress(contact);
                         const claimed = features.gestures and contact.gesture.claimed();
                         if (contact.press_target != 0 and !claimed) if (hot) |region| if (results.regions[region].hash == contact.press_target) self.tap(region, up.pointer.at);
                         contact.press_target = 0;
@@ -1391,6 +1396,7 @@ pub fn Context(comptime config: Config) type {
                     if (!contact.hovers() and contact.buttons.count() == 0) contact.lifted = true;
                 },
                 .pointer_cancel => |pointer_id| if (input_state.find(pointer_id)) |contact| {
+                    if (features.gestures and contact.gesture.held()) input_state.recognize(contact.gesture.recognizer, event);
                     if (features.gestures) self.endZoom(contact);
                     input_state.remove(contact);
                 },
@@ -1537,6 +1543,7 @@ pub fn Context(comptime config: Config) type {
             const gesture = &contact.gesture;
             const position = contact.pointer.position;
             if (gesture.zooming) if (self.zoomPartner(contact)) |partner| return self.applyZoom(contact, partner);
+            if (gesture.held()) return;
             if (!gesture.past_slop) {
                 const moved: [2]f32 = .{ position[0] - gesture.press_position[0], position[1] - gesture.press_position[1] };
                 const slop = interaction.Gestures.touch_slop;
@@ -1630,6 +1637,40 @@ pub fn Context(comptime config: Config) type {
             }
         }
 
+        fn recognizerAt(self: *Self, position: [2]f32) u64 {
+            const results = &self.memory.results;
+            if (!results.has_frame) return 0;
+            var region_index = results.topmostAt(position) orelse return 0;
+            while (region_index != interaction.no_region) : (region_index = results.regions[region_index].parent) {
+                const region = &results.regions[region_index];
+                if (region.gestures.custom and !region.flags.disabled and region.bounds.contains(position)) return region.hash;
+            }
+            return 0;
+        }
+
+        /// What recognizers decided last frame. A claimed pointer is the
+        /// recognizer's alone: whatever else it pressed loses the press. A
+        /// declined one is arbitrated as if it had never been held, over
+        /// all its motion since the press.
+        fn applyRecognitions(self: *Self) void {
+            self.memory.input.decisions_pending = false;
+            for (&self.memory.input.contacts) |*slot| {
+                const contact = &(slot.* orelse continue);
+                const gesture = &contact.gesture;
+                if (gesture.decided == .undecided) continue;
+                gesture.recognition = gesture.decided;
+                gesture.decided = .undecided;
+                switch (gesture.recognition) {
+                    .claimed => {
+                        if (contact.press_target != gesture.recognizer) contact.press_target = 0;
+                        gesture.long_press_owner = 0;
+                    },
+                    .declined => if (contact.buttons.contains(.primary)) self.pan(contact),
+                    .undecided => unreachable,
+                }
+            }
+        }
+
         /// A tap on the element it pressed: a click, unless the element
         /// accepts double taps, which delays it.
         fn tap(self: *Self, region_index: u32, released_at: Instant) void {
@@ -1665,7 +1706,9 @@ pub fn Context(comptime config: Config) type {
                 const contact = &(slot.* orelse continue);
                 if (contact.gesture.long_press_owner == 0) continue;
                 const due = contact.gesture.longPressDue();
-                if (self.now_instant.isBefore(due)) {
+                if (contact.gesture.held()) {
+                    input_state.timers_armed = true;
+                } else if (self.now_instant.isBefore(due)) {
                     self.requestFrameAt(due);
                     input_state.timers_armed = true;
                 } else self.longPress(contact);
@@ -1688,8 +1731,9 @@ pub fn Context(comptime config: Config) type {
         fn startZoom(self: *Self, contact: *InputState.Slot) void {
             const results = &self.memory.results;
             if (!results.has_frame) return;
+            if (contact.gesture.held()) return;
             const partner = for (&self.memory.input.contacts) |*slot| {
-                if (slot.*) |*other| if (other != contact and other.buttons.contains(.primary) and !other.gesture.zooming) break other;
+                if (slot.*) |*other| if (other != contact and other.buttons.contains(.primary) and !other.gesture.zooming and !other.gesture.held()) break other;
             } else return;
             const position = contact.pointer.position;
             var region_index = results.topmostAt(position) orelse return;
@@ -1829,6 +1873,39 @@ pub fn Context(comptime config: Config) type {
         pub fn doubleTapped(self: *const Self, element_id: Id) bool {
             comptime requireFeature(.gestures, "doubleTapped()");
             return !element_id.isNone() and self.memory.input.isDoubleTapped(element_id.hash);
+        }
+
+        /// This frame's events of the pointers pressed on `element_id`, an
+        /// element that declares `.gestures.custom`, until it declines
+        /// them, in order. Every other gesture waits for its decision.
+        pub fn pointerEvents(self: *const Self, element_id: Id) input.PointerEvents {
+            comptime requireFeature(.gestures, "pointerEvents()");
+            const input_state = &self.memory.input;
+            const count = if (element_id.isNone()) 0 else input_state.recognized_count;
+            return .{ .events = input_state.recognized[0..count], .recognizers = input_state.recognized_by[0..count], .recognizer = element_id.hash };
+        }
+
+        /// The recognizer that holds `pointer` takes it from the next
+        /// frame on: nothing else pans, zooms, presses or taps with it.
+        pub fn claim(self: *Self, pointer: input.PointerId) void {
+            comptime requireFeature(.gestures, "claim()");
+            self.decide(pointer, .claimed);
+        }
+
+        /// The recognizer that holds `pointer` gives it up: from the next
+        /// frame on it pans, zooms and taps as if it had never been held,
+        /// with all its motion since the press.
+        pub fn decline(self: *Self, pointer: input.PointerId) void {
+            comptime requireFeature(.gestures, "decline()");
+            self.decide(pointer, .declined);
+        }
+
+        fn decide(self: *Self, pointer: input.PointerId, recognition: interaction.Recognition) void {
+            const contact = self.memory.input.find(pointer) orelse return;
+            const gesture = &contact.gesture;
+            if (gesture.recognizer == 0 or gesture.recognition != .undecided) return;
+            gesture.decided = recognition;
+            self.memory.input.decisions_pending = true;
         }
 
         /// The user asked for the element's context menu this frame: a

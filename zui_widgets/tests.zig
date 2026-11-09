@@ -473,3 +473,58 @@ test "a slider in a list that scrolls by dragging keeps a horizontal drag, and t
     try testing.expectApproxEqAbs(@as(f32, 0.5), settings.brightness, 1e-4); // set where the finger landed, then left alone
     try testing.expect(fixture.ui.scrollOffset(ScrollingSettings.ids.settings)[1] > 0);
 }
+
+const LassoMap = struct {
+    const id: zui.Id = .of("map");
+
+    selection: zui_widgets.Lasso = .{},
+    lassos: u32 = 0,
+    panned: [2]f32 = .{ 0, 0 },
+
+    fn declare(map: *LassoMap, ui: *Ui) void {
+        if (ui.manipulation(id)) |moved| {
+            map.panned[0] += moved.translation[0];
+            map.panned[1] += moved.translation[1];
+        }
+        ui.box(.{ .id = id, .gestures = .{ .pan = .both, .zoom = true, .custom = true }, .layout = .{ .sizing = .{ .width = .fixed(400), .height = .fixed(300) } } });
+        if (widgets.lasso(ui, id, &map.selection)) map.lassos += 1;
+    }
+};
+
+fn pointerAt(driver: *const Driver, kind: zui.PointerKind, position: [2]f32) zui.Pointer {
+    return .{ .id = @enumFromInt(7), .kind = kind, .position = position, .at = driver.now };
+}
+
+test "a lasso written as a module function draws with a pen and leaves fingers to pan the map" {
+    var fixture: Fixture = .{};
+    try fixture.init();
+    defer fixture.deinit();
+    const driver = &fixture.driver;
+    var map: LassoMap = .{};
+    _ = try driver.frame(&map, LassoMap.declare, &.{});
+
+    _ = try driver.frame(&map, LassoMap.declare, &.{
+        .{ .pointer_down = .{ .pointer = pointerAt(driver, .pen, .{ 100, 100 }) } },
+        .{ .pointer_move = .{ .pointer = pointerAt(driver, .pen, .{ 150, 100 }) } },
+    });
+    _ = try driver.frame(&map, LassoMap.declare, &.{.{ .pointer_move = .{ .pointer = pointerAt(driver, .pen, .{ 150, 150 }) } }});
+    _ = try driver.frame(&map, LassoMap.declare, &.{.{ .pointer_up = .{ .pointer = pointerAt(driver, .pen, .{ 100, 150 }) } }});
+    try testing.expectEqual(@as(u32, 1), map.lassos);
+    try testing.expectEqualSlices([2]f32, &.{ .{ 100, 100 }, .{ 150, 100 }, .{ 150, 150 }, .{ 100, 150 } }, map.selection.points());
+    try testing.expectEqual([2]f32{ 0, 0 }, map.panned);
+    try testing.expect(!fixture.ui.clicked(LassoMap.id));
+
+    // The finger's first frame waits for the lasso to decline it; then
+    // the map pans by all of it, from where it pressed.
+    _ = try driver.frame(&map, LassoMap.declare, &.{
+        .{ .pointer_down = .{ .pointer = pointerAt(driver, .touch, .{ 200, 200 }) } },
+        .{ .pointer_move = .{ .pointer = pointerAt(driver, .touch, .{ 240, 190 }) } },
+    });
+    try testing.expectEqual([2]f32{ 0, 0 }, map.panned);
+    _ = try driver.frame(&map, LassoMap.declare, &.{});
+    try testing.expectEqual([2]f32{ 40, -10 }, map.panned);
+    _ = try driver.frame(&map, LassoMap.declare, &.{.{ .pointer_move = .{ .pointer = pointerAt(driver, .touch, .{ 250, 190 }) } }});
+    _ = try driver.frame(&map, LassoMap.declare, &.{.{ .pointer_up = .{ .pointer = pointerAt(driver, .touch, .{ 250, 190 }) } }});
+    try testing.expectEqual([2]f32{ 50, -10 }, map.panned);
+    try testing.expectEqual(@as(u32, 1), map.lassos);
+}

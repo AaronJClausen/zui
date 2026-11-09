@@ -607,3 +607,83 @@ test "a flung map coasts as manipulations, and stops when it is no longer declar
     _ = try harness.end();
     try testing.expectEqual(zui.NextFrame.on_event, harness.ui.nextFrame());
 }
+
+const canvas: zui.Id = .of("canvas");
+const tool: zui.Id = .of("tool");
+
+/// A 200×300 list that scrolls by touch over a 200×200 canvas with its own
+/// recognizer, holding a 50×50 tool button, then filler.
+fn sketchbook(ui: *Ui) void {
+    ui.open(.{ .id = list, .scroll = .{}, .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(200), .height = .fixed(300) } } });
+    ui.open(.{ .id = canvas, .gestures = .{ .custom = true }, .layout = fixed(200, 200) });
+    ui.box(.{ .id = tool, .interactive = true, .layout = fixed(50, 50) });
+    ui.close();
+    ui.box(.{ .layout = fixed(200, 800) });
+    ui.close();
+}
+
+const Decision = enum { wait, claim, decline };
+
+fn sketchFrame(harness: *Harness, events: []const zui.Event, decision: Decision, seen: *u32) !*Ui {
+    const ui = harness.beginEvents(events);
+    var recognized = ui.pointerEvents(canvas);
+    while (recognized.next()) |event| {
+        seen.* += 1;
+        const pointer = switch (event) {
+            .pointer_down, .pointer_up => |pressed| pressed.pointer.id,
+            .pointer_move => |moved| moved.pointer.id,
+            .pointer_cancel => |pointer_id| pointer_id,
+            else => unreachable,
+        };
+        switch (decision) {
+            .wait => {},
+            .claim => ui.claim(pointer),
+            .decline => ui.decline(pointer),
+        }
+    }
+    sketchbook(ui);
+    _ = try harness.end();
+    return ui;
+}
+
+test "a custom recognizer holds the list off until it declines, and nothing moved meanwhile is lost" {
+    var harness: Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    var seen: u32 = 0;
+    _ = try sketchFrame(&harness, &.{}, .wait, &seen);
+    var ui = try sketchFrame(&harness, &.{ down(1, .{ 100, 150 }), move(1, .{ 100, 120 }) }, .wait, &seen);
+    try testing.expectEqual(@as(u32, 2), seen);
+    try testing.expectEqual([2]f32{ 0, 0 }, ui.scrollOffset(list));
+    ui = try sketchFrame(&harness, &.{move(1, .{ 100, 100 })}, .decline, &seen);
+    try testing.expectEqual(@as(u32, 3), seen);
+    try testing.expectEqual([2]f32{ 0, 0 }, ui.scrollOffset(list));
+    ui = try sketchFrame(&harness, &.{}, .wait, &seen);
+    try testing.expectEqual([2]f32{ 0, 50 }, ui.scrollOffset(list));
+    ui = try sketchFrame(&harness, &.{ move(1, .{ 100, 90 }), up(1, .{ 100, 90 }) }, .wait, &seen);
+    try testing.expectEqual(@as(u32, 3), seen); // declined pointers are no longer the recognizer's
+    try testing.expectEqual([2]f32{ 0, 60 }, ui.scrollOffset(list));
+}
+
+test "a claimed pointer is the recognizer's alone, and one released undecided is a tap" {
+    var harness: Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    var seen: u32 = 0;
+    _ = try sketchFrame(&harness, &.{}, .wait, &seen);
+    var ui = try sketchFrame(&harness, &.{down(1, .{ 25, 25 })}, .claim, &seen);
+    try testing.expect(ui.pressed(tool));
+    ui = try sketchFrame(&harness, &.{move(1, .{ 25, 5 })}, .wait, &seen);
+    try testing.expect(!ui.pressed(tool));
+    ui = try sketchFrame(&harness, &.{move(1, .{ 25, 150 })}, .wait, &seen);
+    try testing.expectEqual([2]f32{ 0, 0 }, ui.scrollOffset(list));
+    ui = try sketchFrame(&harness, &.{up(1, .{ 25, 150 })}, .wait, &seen);
+    try testing.expect(!ui.clicked(tool));
+    try testing.expectEqual(@as(u32, 4), seen);
+
+    ui = try sketchFrame(&harness, &.{ down(1, .{ 25, 25 }), up(1, .{ 25, 25 }) }, .wait, &seen);
+    try testing.expect(ui.clicked(tool));
+    try testing.expectEqual(@as(u32, 6), seen);
+}

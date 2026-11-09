@@ -49,6 +49,28 @@ pub const Manipulation = struct {
 /// Which way the arrow keys or a D-pad moved, on screen.
 pub const NavigationDirection = enum { left, right, up, down };
 
+/// The events of the pointers one recognizer holds this frame, in order:
+///
+/// ```zig
+/// var events = ui.pointerEvents(id);
+/// while (events.next()) |event| switch (event) { ... };
+/// ```
+pub const PointerEvents = struct {
+    events: []const Event,
+    recognizers: []const u64,
+    recognizer: u64,
+    next_index: usize = 0,
+
+    pub fn next(self: *PointerEvents) ?Event {
+        while (self.next_index < self.events.len) {
+            const index = self.next_index;
+            self.next_index += 1;
+            if (self.recognizers[index] == self.recognizer) return self.events[index];
+        }
+        return null;
+    }
+};
+
 pub const Wheel = struct {
     /// Where the pointer was, in layout units.
     position: [2]f32,

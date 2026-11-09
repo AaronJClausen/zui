@@ -47,7 +47,11 @@ pub const Gestures = packed struct(u8) {
     /// A second tap within `double_tap_seconds` is `doubleTapped`; a single
     /// tap is `clicked` only once that window has passed.
     double_tap: bool = false,
-    _: u3 = 0,
+    /// The application's recognizer reads the pointers pressed on it with
+    /// `pointerEvents`, and holds every other gesture off each one until
+    /// it calls `claim` or `decline`.
+    custom: bool = false,
+    _: u2 = 0,
 
     /// The axes an element pans on.
     pub const Pan = enum(u2) {
@@ -259,6 +263,9 @@ pub const Momentum = struct {
     }
 };
 
+/// What a custom recognizer decided about a pointer pressed on it.
+pub const Recognition = enum(u8) { undecided, claimed, declined };
+
 /// Where a pointer was, and when, for its speed at release.
 pub const MotionSample = struct {
     position: [2]f32,
@@ -289,9 +296,15 @@ pub const PointerGesture = struct {
     /// The latest positions, oldest first.
     recent: [4]MotionSample,
     recent_count: u8,
+    /// The element whose custom recognizer the pointer was pressed on, or 0.
+    recognizer: u64,
+    recognition: Recognition,
+    /// What the recognizer decided this frame, applied at the next
+    /// `beginFrame`.
+    decided: Recognition,
 
     pub fn pressedAt(pointer: input.Pointer) PointerGesture {
-        var gesture: PointerGesture = .{ .press_position = pointer.position, .panned_to = pointer.position, .pan_owner = 0, .pan_axes = .none, .past_slop = false, .zooming = false, .pressed_at = pointer.at, .long_press_owner = 0, .long_pressed = false, .recent = undefined, .recent_count = 0 };
+        var gesture: PointerGesture = .{ .press_position = pointer.position, .panned_to = pointer.position, .pan_owner = 0, .pan_axes = .none, .past_slop = false, .zooming = false, .pressed_at = pointer.at, .long_press_owner = 0, .long_pressed = false, .recent = undefined, .recent_count = 0, .recognizer = 0, .recognition = .undecided, .decided = .undecided };
         gesture.sample(pointer);
         return gesture;
     }
@@ -323,7 +336,13 @@ pub const PointerGesture = struct {
 
     /// Whether this pointer has done anything but tap.
     pub fn claimed(self: *const PointerGesture) bool {
-        return self.pan_owner != 0 or self.long_pressed;
+        return self.pan_owner != 0 or self.long_pressed or (self.recognizer != 0 and self.recognition == .claimed);
+    }
+
+    /// Held off every built-in gesture by a recognizer, which has not
+    /// declined it.
+    pub fn held(self: *const PointerGesture) bool {
+        return self.recognizer != 0 and self.recognition != .declined;
     }
 };
 
@@ -414,6 +433,14 @@ pub fn State(comptime max_contacts: u8, comptime max_chain: usize, comptime max_
         lifecycle: input.LifecycleSet,
         manipulated: [max_manipulations]ManipulatedElement,
         manipulated_count: u32,
+        /// This frame's events of pointers that recognizers hold, with the
+        /// recognizer of each.
+        recognized: [if (has_gestures) max_events else 0]input.Event,
+        recognized_by: [if (has_gestures) max_events else 0]u64,
+        recognized_count: u16,
+        /// A recognizer claimed or declined a pointer since the last
+        /// `beginFrame`, which applies it.
+        decisions_pending: bool,
         /// Elements moving on after a fling, each with `Momentum` in the
         /// state table.
         coasting: [max_coasting]u64,
@@ -437,6 +464,7 @@ pub fn State(comptime max_contacts: u8, comptime max_chain: usize, comptime max_
             self.pending_taps = @splat(null);
             self.timers_armed = false;
             self.coasting_count = 0;
+            self.decisions_pending = false;
             self.focus = 0;
             self.pending_focus = null;
             self.clearFrameEvents();
@@ -457,6 +485,15 @@ pub fn State(comptime max_contacts: u8, comptime max_chain: usize, comptime max_
             self.manipulated_count = 0;
             self.context_request_count = 0;
             self.double_tap_count = 0;
+            self.recognized_count = 0;
+        }
+
+        /// Each recognized event is one of the record's, so this cannot
+        /// overflow.
+        pub fn recognize(self: *Self, recognizer: u64, event: input.Event) void {
+            self.recognized[self.recognized_count] = event;
+            self.recognized_by[self.recognized_count] = recognizer;
+            self.recognized_count += 1;
         }
 
         pub fn find(self: *Self, id: input.PointerId) ?*Slot {

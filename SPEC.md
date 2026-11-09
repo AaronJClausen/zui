@@ -261,6 +261,7 @@ compile-error test:
   `"zui: semantics() needs Config.features.semantics = true"`,
   `"zui: manipulation() needs Config.features.gestures = true"`,
   `"zui: doubleTapped() needs Config.features.gestures = true"`,
+  `"zui: pointerEvents() needs Config.features.gestures = true"`,
   `"zui: wrapChildren() needs Config.features.flex_wrap = true"`;
 - every contract violation, in the form of §16.1.
 
@@ -1240,12 +1241,16 @@ stays with what it pressed, unless the container declares `pan` itself.
   meanwhile. At most `max_input_contacts` elements coast at once; a
   fling beyond them does not coast and is reported on that limit.
 - **Custom recognizers are code in declaration.** `ui.pointerEvents(id)`
-  returns the frame's events of pointers pressed on or claimed by `id`.
-  A recognizer keeps its state in `state(id, T)`. An element with
-  `custom` holds its ancestors off a pointer until it calls
+  returns the frame's events of pointers pressed on or claimed by `id`,
+  in order, as an iterator (`zui.PointerEvents`). A recognizer keeps its
+  state in `state(id, T)`. An element with `custom` holds itself and its
+  ancestors off a pointer, with every built-in gesture, until it calls
   `ui.claim(pointer)` or `ui.decline(pointer)`; the decision applies at
-  the next `beginFrame`, and no events are lost meanwhile. A module ships
-  a recognizer as a plain function.
+  the next `beginFrame`, a frame late, and no events are lost meanwhile:
+  a declined pointer is arbitrated over all its motion since the press,
+  and a claimed one takes its press from whatever else it pressed and is
+  never a tap. A pointer released undecided is a tap. A module ships a
+  recognizer as a plain function, as `zui_widgets`' `lasso` does.
 
 ### 11.5 Drag and drop
 
@@ -2325,7 +2330,5 @@ Two rules hold throughout:
 
 ## 22. Open questions
 
-1. **A custom recognizer's claim lands a frame late.** Planned: accept it,
-   until a recognizer shows that it matters.
-2. **Physical keys.** Planned: logical keys plus the opaque scancode; a
+1. **Physical keys.** Planned: logical keys plus the opaque scancode; a
    physical key enum only when a binding needs portable physical keys.

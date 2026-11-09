@@ -164,7 +164,11 @@ Implemented so far:
   `ui.doubleTapped(id)`, delaying only that element's single tap;
   `ui.dismissed`, `ui.adjusted` and `ui.navigated` read Escape and the
   arrows. A flick coasts on and slows down, frame by frame, as
-  `nextFrame` asks. Custom recognizers come next.
+  `nextFrame` asks. An element with `.custom` runs the application's own
+  recognizer: `ui.pointerEvents(id)` gives it the pointers pressed on it,
+  and every other gesture waits until it calls `ui.claim` or
+  `ui.decline`; `zui_widgets`' `lasso` draws with a pen over a map that
+  fingers still pan. Drag and drop between elements comes next.
 
 The reference backend, its adapter host and the demo application live in
 [zui-raylib](https://github.com/AaronJClausen/zui-raylib); the other

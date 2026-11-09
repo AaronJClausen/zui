@@ -555,9 +555,9 @@ fn photoGrid(app: *App, ui: *Ui) void {
 
 <a id="gestures"></a>
 
-### Gestures and intents · *in progress*
+### Gestures and intents · *shipped*
 
-An element declares what it accepts from pointers with `gestures`. Once a pointer moves 8 units from where it pressed (`zui.Gestures.touch_slop`), its axis locks, and it goes to the innermost element under the press that pans on that axis and can still move that way. So a vertical swipe on a horizontal filmstrip scrolls the page around it, a swipe past the strip's end does too, and the button it started on loses the press: no click. Scroll containers pan by touch and pen on their scrolled axes; the mouse keeps the wheel, so a mouse drag in a list stays with what it pressed. `ui.manipulation(id)` reports what pans and the wheel did to an element this frame. Declaring a gesture makes the element interactive, and without `features.gestures` it is ignored, so widgets declare it for every context: `zui_widgets`' slider keeps a horizontal drag. Two pointers pressed inside an element with `.gestures.zoom` zoom the innermost one, even when the pinch starts on a list inside it, and `manipulation` adds their scale, rotation and pivot. An element with `.long_press` turns a press held still for half a second into `contextRequested`, as a right click and the menu key do, and one with `.double_tap` reports `doubleTapped`, delaying only its own single tap until the window passes. `dismissed`, `adjusted` and `navigated` read Escape and the arrows on the focused element. A flick coasts on after the finger lifts, slowing down, through the same `manipulation` and scrolling, with `nextFrame` asking for each frame until it stops. Custom recognizers are still to come (I5).
+An element declares what it accepts from pointers with `gestures`. Once a pointer moves 8 units from where it pressed (`zui.Gestures.touch_slop`), its axis locks, and it goes to the innermost element under the press that pans on that axis and can still move that way. So a vertical swipe on a horizontal filmstrip scrolls the page around it, a swipe past the strip's end does too, and the button it started on loses the press: no click. Scroll containers pan by touch and pen on their scrolled axes; the mouse keeps the wheel, so a mouse drag in a list stays with what it pressed. `ui.manipulation(id)` reports what pans and the wheel did to an element this frame. Declaring a gesture makes the element interactive, and without `features.gestures` it is ignored, so widgets declare it for every context: `zui_widgets`' slider keeps a horizontal drag. Two pointers pressed inside an element with `.gestures.zoom` zoom the innermost one, even when the pinch starts on a list inside it, and `manipulation` adds their scale, rotation and pivot. An element with `.long_press` turns a press held still for half a second into `contextRequested`, as a right click and the menu key do, and one with `.double_tap` reports `doubleTapped`, delaying only its own single tap until the window passes. `dismissed`, `adjusted` and `navigated` read Escape and the arrows on the focused element. A flick coasts on after the finger lifts, slowing down, through the same `manipulation` and scrolling, with `nextFrame` asking for each frame until it stops. An element with `.custom` runs your own recognizer: `ui.pointerEvents(id)` gives it the pointers pressed on it, and every other gesture waits until it calls `ui.claim(pointer)` or `ui.decline(pointer)`, which apply a frame later, a declined pointer keeping all its motion. `zui_widgets`' `lasso` is one, drawing with a pen over a map that fingers still pan.
 
 `src/ui/album.zig`
 
@@ -586,8 +586,9 @@ fn viewer(app: *App, ui: *Ui) void {
     if (ui.contextRequested(id)) app.openPhotoMenu(ui.primaryPointer());
     if (ui.dismissed(id)) app.closeViewer();
 
-    ui.open(.{ .id = id, .gestures = .{ .pan = .both, .zoom = true, .long_press = true, .double_tap = true }, .focusable = true, .cursor = .grab, .clip = .both, .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(480) } } });
+    ui.open(.{ .id = id, .gestures = .{ .pan = .both, .zoom = true, .long_press = true, .double_tap = true, .custom = true }, .focusable = true, .cursor = .grab, .clip = .both, .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(480) } } });
     defer ui.close();
+    if (widgets.lasso(ui, id, &app.viewer.selection)) app.selectFacesInside(app.viewer.selection.points());
     ui.image(.{ .handle = app.viewer.texture, .natural_size = app.viewer.size }, .{ .floating = .{ .offset = app.viewer.offset, .clip = .target } });
 }
 ```
@@ -1695,7 +1696,6 @@ These names compile, but they don't do anything yet. This list is from `ARCHITEC
 
 - **Gradients, shadows, backdrop blur, transforms, materials** *(declared only)*: The variants exist in `RenderCommand` when a renderer declares them, but `Decoration` has no field that produces them, so nothing is emitted or lowered. Items G1–G6, stage 8.
 - **`features.semantics`** *(declared only)*: `Frame.semantics()` is always empty. Accessibility is V2.
-- **The rest of `features.gestures`** *(in progress)*: pans, zoom, long press, double tap, momentum and the intents work; custom recognizers are the rest of I5.
 - **`features.safety_sweeps`** *(declared only)*: The flag exists, but it doesn't change behaviour yet. Sweeps are V3.
 - **Extended color**: Colors are RGBA8 only. `zui.ExtendedColor` for HDR is G6.
 - **Still to come**: Drag and drop between elements (I1), a visual inspector `zui_debug` (V1), motion, multi-line text editing, skins, and more hosts (macOS, Linux, web).

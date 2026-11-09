@@ -101,6 +101,7 @@ pub const Button = input.Button;
 pub const Wheel = input.Wheel;
 pub const Manipulation = input.Manipulation;
 pub const NavigationDirection = input.NavigationDirection;
+pub const PointerEvents = input.PointerEvents;
 pub const Key = input.Key;
 pub const KeyEvent = input.KeyEvent;
 pub const Modifiers = input.Modifiers;
