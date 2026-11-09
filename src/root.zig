@@ -102,6 +102,7 @@ pub const Wheel = input.Wheel;
 pub const Manipulation = input.Manipulation;
 pub const NavigationDirection = input.NavigationDirection;
 pub const PointerEvents = input.PointerEvents;
+pub const Drag = input.Drag;
 pub const Key = input.Key;
 pub const KeyEvent = input.KeyEvent;
 pub const Modifiers = input.Modifiers;
@@ -175,4 +176,5 @@ test {
     _ = @import("tests/mirroring.zig");
     _ = @import("tests/wrapping.zig");
     _ = @import("tests/gestures.zig");
+    _ = @import("tests/drag_drop.zig");
 }

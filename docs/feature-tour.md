@@ -593,6 +593,42 @@ fn viewer(app: *App, ui: *Ui) void {
 }
 ```
 
+<a id="drag-and-drop"></a>
+
+### Drag and drop · *shipped*
+
+A card that declares `.gestures.drag` is arbitrated with every other gesture: once the pointer passes the touch slop, the card takes it on the axes no element around it pans on, so in a list that scrolls vertically a sideways swipe drags the card and a vertical one scrolls the list, while the mouse, which scrolls lists with its wheel, drags on both. `ui.dragging(id)` reports the pointer and how far it has moved, and you draw what follows it, a floating element with `.capture = false` so the hit test sees what lies beneath. `ui.startDrag(id, payload)` gives the drag a payload of your own type, kept in the state table under the card while the drag lasts, even if the card leaves its list meanwhile; called on a card still pressed, after a long press say, it lifts the card itself. A target asks `ui.dropped(id, Payload)` in the frame of the release, and `ui.draggedOver(id, Payload)` while a drag is over it: any element with a hit region, the list and the card under the pointer alike, receives it, and a payload of another type is `null`, never reinterpreted. Files dropped from the OS are `filesDropped`, not this.
+
+`src/ui/board.zig`
+
+```zig
+const CardRef = struct { column: u8, index: u16 };
+
+fn board(app: *App, ui: *Ui) void {
+    ui.open(.{ .layout = .{ .child_gap = 16, .sizing = .grow_both } });
+    defer ui.close();
+    for (app.columns, 0..) |*column, column_index| {
+        const column_id: zui.Id = .indexed("column", column_index);
+        if (ui.dropped(column_id, CardRef)) |moved| app.moveCard(moved, column_index);
+        const highlight = ui.draggedOver(column_id, CardRef) != null;
+        ui.open(.{ .id = column_id, .scroll = .{}, .decoration = .{ .background = if (highlight) theme.drop_target else theme.column }, .layout = .{ .direction = .top_to_bottom, .child_gap = 8, .sizing = .{ .width = .fixed(280), .height = .grow } } });
+        defer ui.close();
+        for (column.cards(), 0..) |card, index| {
+            const card_id: zui.Id = .indexed("card", card.key);
+            ui.open(.{ .id = card_id, .gestures = .{ .drag = true }, .cursor = .grab, .decoration = .{ .background = theme.card }, .layout = theme.card_layout });
+            defer ui.close();
+            if (ui.dragging(card_id)) |drag| {
+                ui.startDrag(card_id, CardRef{ .column = @intCast(column_index), .index = @intCast(index) });
+                ui.open(.{ .floating = .{ .offset = drag.translation, .z = 10, .capture = false }, .decoration = .{ .background = theme.card_lifted }, .layout = theme.card_layout });
+                cardContent(ui, card);
+                ui.close();
+            }
+            cardContent(ui, card);
+        }
+    }
+}
+```
+
 <a id="floating"></a>
 
 ### Floating elements in paint layers · *shipped*
@@ -1698,7 +1734,7 @@ These names compile, but they don't do anything yet. This list is from `ARCHITEC
 - **`features.semantics`** *(declared only)*: `Frame.semantics()` is always empty. Accessibility is V2.
 - **`features.safety_sweeps`** *(declared only)*: The flag exists, but it doesn't change behaviour yet. Sweeps are V3.
 - **Extended color**: Colors are RGBA8 only. `zui.ExtendedColor` for HDR is G6.
-- **Still to come**: Drag and drop between elements (I1), a visual inspector `zui_debug` (V1), motion, multi-line text editing, skins, and more hosts (macOS, Linux, web).
+- **Still to come**: A visual inspector `zui_debug` (V1), motion, multi-line text editing, skins, and more hosts (macOS, Linux, web).
 
 <a id="dx"></a>
 

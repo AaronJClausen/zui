@@ -149,7 +149,7 @@ Implemented so far:
   lets it set its zoom and add events to each record (`zuiRecord`).
   The record carries the new events: `ui.filesDropped()` and
   `ui.lifecycle()`.
-- **Stage 7, in progress:** gestures. An element declares what it
+- **Stage 7:** gestures, and drag and drop. An element declares what it
   accepts, `.gestures = .{ .pan = .horizontal }`, and once a pointer
   moves past the touch slop it goes to the innermost element that pans
   on that axis and can still move that way: a vertical drag on a
@@ -168,7 +168,12 @@ Implemented so far:
   recognizer: `ui.pointerEvents(id)` gives it the pointers pressed on it,
   and every other gesture waits until it calls `ui.claim` or
   `ui.decline`; `zui_widgets`' `lasso` draws with a pen over a map that
-  fingers still pan. Drag and drop between elements comes next.
+  fingers still pan. A card that declares `.drag` drags on the axes no
+  element around it pans on, so it leaves a vertically scrolling list
+  sideways: `ui.dragging(id)` says where its pointer is,
+  `ui.startDrag(id, payload)` gives it a typed payload, and a target
+  reads it with `ui.dropped(id, Payload)`, or `ui.draggedOver` before
+  the release, never as another type.
 
 The reference backend, its adapter host and the demo application live in
 [zui-raylib](https://github.com/AaronJClausen/zui-raylib); the other
@@ -180,7 +185,7 @@ hosts live in [zui-host](https://github.com/AaronJClausen/zui-host).
 shipped feature in the code a consumer writes, with semantic highlighting;
 open it in a browser, or read [docs/feature-tour.md](docs/feature-tour.md).
 
-Next, in the order of SPEC.md §21: the rest of gestures, effects, an inspector and
+Next, in the order of SPEC.md §21: effects, an inspector and
 accessibility, more hosts, motion and text editing.
 [ROADMAP.md](ROADMAP.md) keeps the queue of work in order, and
 [ARCHITECTURE.md](ARCHITECTURE.md) shows how the pieces connect.

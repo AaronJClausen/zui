@@ -28,7 +28,7 @@ Each item says:
 | stage 4 | the Windows host (H2), with dropped files and lifecycle events in the record; the system material (H8); `zui_app` with the application's own text contract (C9) | done; zui-sokol's tour runs on it unchanged, through `zui_app`, and idles at 0% CPU, and the same code shows Mica or a solid background |
 | stage 5 | relay (F2); `zui_wire` (F3); replay in `zui_testing` (F4); the wire host, renderer and client (F5); file watching as a source (F6) | done; editing a theme file restyles a running window on the Windows host within 4 ms; a recorded session of zui-sokol's tour replays to identical commands without starting any work, zui-sokol's tour goes over the wire at a hundredth of its frames' whole size, but for the screen that moves every box, and it runs in one process and draws in another on the Windows host, its keys going back |
 | stage 6 | the single-line fast path (T1), the whole-string cache (T2), static styles (L8), the box tree's layout and emission (P4) and declaration (P5), line-break segmentation (T4), the grow basis (L1), aspect ratio and natural sizes (L2), dividers and decorated images (L3), floating options (L4), right-to-left layout (L6), wrap (L7); the backends drawing images' tint and corner radius (C10) | done; the box tree's and warm text's budgets met: the box tree declares in 48.9 µs and lays out and emits in 89.2 µs, warm text in 90.5 µs; a box tree of static styles declares in 28.0 µs; zui-raylib and zui-sokol draw tinted, rounded images and pass the renderer suite that checks them |
-| stage 7, in part | gestures (I5): arbitration by motion component, zoom, long press, double tap, momentum, the intents and custom recognizers | gestures done, with every scene of their *Done when*; drag and drop (I1) remains |
+| stage 7 | gestures (I5): arbitration by motion component, zoom, long press, double tap, momentum, the intents and custom recognizers; drag and drop between elements (I1) | done: a carousel in a list, a pinch starting on a list inside a map, a lasso module against a map's pan, and `zui_testing.Driver.drag` moving an item between two lists, out of one that scrolls by dragging |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
@@ -63,14 +63,17 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
-| I1. Drag and drop between elements | 7 | `src/interaction.zig`, `src/state.zig`, `zui_testing/` | I5 | |
 | G1. Gradients, shadows and glow | 8 | `src/style.zig`, `src/emission.zig`, `zui_testing/` | | |
 | G2. Backdrop blur | 8 | `src/style.zig`, `src/emission.zig`, `zui_testing/` | G1 | |
 | G3. Transforms | 8 | `src/style.zig`, `src/emission.zig`, `src/interaction.zig`, `zui_testing/` | G1 | |
 | G5. Materials | 8 | `src/context.zig`, `src/emission.zig`, `zui_testing/`, a renderer | G1 | |
 | G6. HDR and wide gamut | 8 | `src/context.zig`, `src/commands.zig`, `../zui-host` | G1 | |
+| V1. `zui_debug` | 9 | `zui_debug/`, `src/context.zig`, `../zui-raylib` | G1 | |
+| V2. Semantics and accessibility actions | 9 | `src/context.zig`, `zui_widgets/`, `../zui-host` | | |
+| V3. Safety sweeps | 9 | `src/context.zig`, `src/tests/` | | |
+| V4. The demo in a browser | 9 | `../zui-web`, `zui_wire/` | | |
 
-After the queue come the rest of stage 8 and stages 9 to 11 in the order of SPEC.md §21. They join the queue as it runs short.
+After the queue come stages 10 and 11 in the order of SPEC.md §21. They join the queue as it runs short.
 
 Statuses: `next` (the first open row), `in progress` (a slice has
 landed), `waiting on <what>` (blocked by something the next session cannot
@@ -134,6 +137,69 @@ Things to know:
 ---
 
 ## Done
+
+### I1. Drag and drop between elements
+
+**Grounding.** I5 arbitrates every pointer by motion component past the
+touch slop (`src/context.zig`, `pan` and `panOwner`), and `Gestures` had
+two spare bits; SPEC.md §11.5 named `dragging`, `dropped` and `startDrag`
+and the payload's place in the state table, but no element could declare
+`drag`.
+
+**Plan.** `dragging`, `dropped` and `startDrag`, with typed payloads in
+the state table, arbitrated by I5.
+
+**Done when:** `zui_testing.Driver.drag` moves an item between two lists,
+including out of a list that scrolls by dragging.
+
+**Spec.** §11.5.
+
+**Status.** Done, in one commit. `Gestures.drag` makes an element a drag
+source: past the touch slop it takes the pointer on the axes no region
+around it pans on for that pointer, after any region inside it that pans
+on the axis, so a card in a list that scrolls vertically drags sideways
+and scrolls the list vertically, and with the mouse, which scrolls a list
+with its wheel, drags on both axes. The source is then neither pressed
+by another element, clicked, scrolled nor zoomed. `ui.dragging(id)`
+returns a `zui.Drag`: the pointer, its position and its translation from
+the press. `ui.startDrag(id, payload)` keeps the payload in the state
+table under the source as a type of its own, `DragPayload(T)`, so it never
+shares a slot with the application's state of `T`; called on a source
+whose press is still down but that nothing drags, it starts the drag
+there, taking the pointer from any pan, zoom or recognizer, which lifts a
+card after a long press. While a drag lasts, `beginFrame` touches its
+payload's slot through `StateTable.touch`, behind a flag, so the source
+may go undeclared. `ui.dropped(id, Payload)` and `ui.draggedOver(id,
+Payload)` answer for every region the hit test at the pointer passes
+through, and only for the payload's own type. `draggedOver` was added to
+SPEC.md §11.5, since a target needs to show it would take a drag before
+the release and touch has no hover. The four need `features.gestures`,
+and `dropped` without it fails with
+`"zui: dropped() needs Config.features.gestures = true"`; a payload above
+64 bytes fails with the state table's message, naming the payload's type.
+
+Tests: in the core, a card dragged sideways out of a list that scrolls by
+touch, over the other list (`draggedOver`) and dropped on it; a vertical
+drag on a card scrolling its list, and a tap clicking one; the mouse
+dragging a card on either axis; a drop yielding its payload to the list
+and the card under it and null to other types and lists; a drag released
+in the record that started it and a cancelled one dropping nothing; a
+payload given once outliving ten frames in which its source is not
+declared; a long press and `startDrag` lifting a card that then drags
+along its list. In `zui_testing`, `Driver.drag` scrolling a list that
+declares `.pan = .vertical`, then moving an item out of it into a second
+list and another back, the dragged item drawn as a floating element with
+`capture = false`.
+
+`zig build counts` against `8d75b8d`, in a local Docker container: with
+the feature off, every scenario within −4 to 0 instructions; with it on,
+as the benchmarks run, every declaration within +2 and every `endFrame`
+unchanged. `zig build bench -- --check-targets`, over four runs, met every budget
+in the last three: the box tree declares in 51.6 to 52.1 µs and lays out
+and emits in 92.2 to 92.8 µs, warm text in 90.9 to 97.3 µs; the first,
+right after the build, missed the declaration budget at 68.0 µs, as first
+runs here often do. The 32-bit tests (`-Dtarget=x86-linux`) pass in the
+Linux container.
 
 ### I5. Gestures: arbitration, intents, momentum, custom recognizers
 
@@ -2170,17 +2236,7 @@ Done: T1, T2, L8, P4, P5, T4, L1, L2, L3, L4, L6, L7 and C10 are in
 
 ## Stage 7: gestures
 
-Done: I5 is in *Done*.
-
-### I1. Drag and drop between elements
-
-**Plan.** `dragging`, `dropped` and `startDrag`, with typed payloads in
-the state table, arbitrated by I5.
-
-**Done when:** `zui_testing.Driver.drag` moves an item between two lists,
-including out of a list that scrolls by dragging.
-
-**Spec.** §11.5.
+Done: I5 and I1 are in *Done*.
 
 ---
 
@@ -2367,6 +2423,7 @@ Deliberate, and each a reason to choose zui:
 | Long press and double tap (I5) | timed from the events' instants against the record's `now`, setting the next frame's deadline: a long press after 0.5 s held within the slop, which is not a tap; a double tap within 0.3 s of the first tap's release, whose single tap is clicked only when that window passes; `doubleTapped(id)`, which SPEC.md lacked; `navigated` returns `zui.NavigationDirection`, since `Direction` has no up or left; `dismissed` while the element or one in its focus scope is focused; `contextRequested`, `dismissed`, `adjusted` and `navigated` need no feature, `doubleTapped` needs `features.gestures` |
 | Zoom (I5) | a second pointer pressed while another is down, both inside an element that accepts zoom, makes the pair zoom the innermost such element, taking both pointers from what they pressed or panned; `scale`, `rotation` (clockwise) and the centroid's `translation` are summed over the frame, `pivot` is where the centroid ended; the pointer left when one lifts pans the element if it pans |
 | Pans (I5) | past a touch slop of 8 layout units from the press, the axis locks to the larger component and the innermost region under the press that pans on it with room to move takes the pointer until it lifts, both axes if it pans on both; any other element it pressed loses the press; a scroll container pans on its scrolled axes with touch and pen only, since the mouse has the wheel, unless it declares `pan`, which takes every pointer; declaring a gesture makes an element interactive; `Element.gestures` is ignored without `features.gestures` rather than failing to compile, so widgets declare gestures for every context; `manipulation` reports pans and the wheel, scroll containers included, `translation` moving content with the pointer |
+| Drag and drop (I1) | a source declares `Gestures.drag` and takes a pointer past the slop on the axes no region around it pans on for that pointer, after any region inside it that pans; `startDrag` gives the payload, in the state table under the source as `DragPayload(T)`, or starts the drag with a pointer still pressed on the source, which is how a long press or a recognizer lifts it; the payload is kept while the drag lasts, the source may go undeclared; a target is any element with a hit region the hit test at the pointer passes through; `draggedOver`, which SPEC.md lacked, shows a drop target before the release; a drag released in its starting record, before it had a payload, or cancelled, drops nothing |
 | Custom gestures | code in declaration over `pointerEvents` and `state`, not a registry |
 | Comparing two commits | each commit's own benchmarks, alternated, judged by the middle half beyond 2% (R2) |
 | The inspector | a module over `Frame.inspect` (V1) |

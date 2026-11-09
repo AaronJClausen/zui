@@ -71,6 +71,22 @@ pub fn StateTable(comptime slot_count: u32) type {
             return null;
         }
 
+        /// Touches the slot for `element_id` whose type has `type_hash`, if
+        /// there is one, so that it survives eviction.
+        pub fn touch(self: *Self, element_id: u64, type_hash: u64, frame_number: u32) void {
+            const key = keyFor(element_id, type_hash);
+            var index: usize = @as(usize, @truncate(key)) & mask;
+            for (0..slot_count) |_| {
+                const slot = &self.slots[index];
+                if (slot.key == 0) return;
+                if (slot.key == key and slot.element_id == element_id and slot.type_hash == type_hash) {
+                    slot.last_touched = frame_number;
+                    return;
+                }
+                index = (index + 1) & mask;
+            }
+        }
+
         pub fn scratch(self: *Self, comptime T: type) *T {
             checkStateType(T);
             self.overflow_scratch = @splat(0);
@@ -151,6 +167,18 @@ test "untouched slots are evicted, and the rest stay reachable" {
             try std.testing.expectEqual(@as(?*Counter, null), found);
         }
     }
+}
+
+test "a slot touched by its type's hash survives eviction" {
+    var table: StateTable(8) = undefined;
+    table.reset();
+    table.get(3, Counter, 1, .create).?.count = 9;
+    table.touch(3, typeHash(Counter), 4);
+    table.touch(3, typeHash(Expanded), 4);
+    table.evict(5, 2);
+    try std.testing.expectEqual(@as(u32, 9), table.get(3, Counter, 5, .existing_only).?.count);
+    table.evict(8, 2);
+    try std.testing.expectEqual(@as(?*Counter, null), table.get(3, Counter, 8, .existing_only));
 }
 
 test "backward-shift deletion keeps every survivor reachable under heavy churn" {

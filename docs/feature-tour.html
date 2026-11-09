@@ -894,6 +894,38 @@ fn viewer(app: *App, ui: *Ui) void {
 </script>
       </article>
 
+      <article class="feature" id="drag-and-drop" data-title="Drag and drop">
+        <div class="feature-head"><h3>Drag and drop</h3><span class="pill shipped">Shipped</span></div>
+        <p>A card that declares <code class="z">.gestures.drag</code> is arbitrated with every other gesture: once the pointer passes the touch slop, the card takes it on the axes no element around it pans on, so in a list that scrolls vertically a sideways swipe drags the card and a vertical one scrolls the list, while the mouse, which scrolls lists with its wheel, drags on both. <code class="z">ui.dragging(id)</code> reports the pointer and how far it has moved, and you draw what follows it, a floating element with <code class="z">.capture = false</code> so the hit test sees what lies beneath. <code class="z">ui.startDrag(id, payload)</code> gives the drag a payload of your own type, kept in the state table under the card while the drag lasts, even if the card leaves its list meanwhile; called on a card still pressed, after a long press say, it lifts the card itself. A target asks <code class="z">ui.dropped(id, Payload)</code> in the frame of the release, and <code class="z">ui.draggedOver(id, Payload)</code> while a drag is over it: any element with a hit region, the list and the card under the pointer alike, receives it, and a payload of another type is <code class="z">null</code>, never reinterpreted. Files dropped from the OS are <code class="z">filesDropped</code>, not this.</p>
+<script type="text/x-zig" data-file="src/ui/board.zig">
+const CardRef = struct { column: u8, index: u16 };
+
+fn board(app: *App, ui: *Ui) void {
+    ui.open(.{ .layout = .{ .child_gap = 16, .sizing = .grow_both } });
+    defer ui.close();
+    for (app.columns, 0..) |*column, column_index| {
+        const column_id: zui.Id = .indexed("column", column_index);
+        if (ui.dropped(column_id, CardRef)) |moved| app.moveCard(moved, column_index);
+        const highlight = ui.draggedOver(column_id, CardRef) != null;
+        ui.open(.{ .id = column_id, .scroll = .{}, .decoration = .{ .background = if (highlight) theme.drop_target else theme.column }, .layout = .{ .direction = .top_to_bottom, .child_gap = 8, .sizing = .{ .width = .fixed(280), .height = .grow } } });
+        defer ui.close();
+        for (column.cards(), 0..) |card, index| {
+            const card_id: zui.Id = .indexed("card", card.key);
+            ui.open(.{ .id = card_id, .gestures = .{ .drag = true }, .cursor = .grab, .decoration = .{ .background = theme.card }, .layout = theme.card_layout });
+            defer ui.close();
+            if (ui.dragging(card_id)) |drag| {
+                ui.startDrag(card_id, CardRef{ .column = @intCast(column_index), .index = @intCast(index) });
+                ui.open(.{ .floating = .{ .offset = drag.translation, .z = 10, .capture = false }, .decoration = .{ .background = theme.card_lifted }, .layout = theme.card_layout });
+                cardContent(ui, card);
+                ui.close();
+            }
+            cardContent(ui, card);
+        }
+    }
+}
+</script>
+      </article>
+
       <article class="feature" id="floating" data-title="Floating elements">
         <div class="feature-head"><h3>Floating elements in paint layers</h3><span class="pill shipped">Shipped</span></div>
         <p>A floating element takes no space in its parent's flow. It attaches to its parent, the viewport, or any element in the frame, declared before or after it, by matching an anchor point on itself to a point on the target, plus an offset. It paints in layer <code class="z">z</code>, escaping its ancestors' clips, or with <code class="z">.clip = .target</code> cut off where its target's children are, so a badge on a row scrolls out of sight with the row. It takes the pointer from whatever it covers, unless <code class="z">.capture = false</code> lets the pointer through, as a tooltip should. Tooltips, popups, menus and dialogs are all built this way.</p>
@@ -1865,7 +1897,7 @@ fn present(renderer: *Renderer, surface: zui.Surface, frame: *const Ui.Frame) !v
         <li><b><code class="z">features.semantics</code> <span class="pill partial">Declared only</span></b><span><code class="z">Frame.semantics()</code> is always empty. Accessibility is V2.</span></li>
         <li><b><code class="z">features.safety_sweeps</code> <span class="pill partial">Declared only</span></b><span>The flag exists, but it doesn't change behaviour yet. Sweeps are V3.</span></li>
         <li><b>Extended color</b><span>Colors are RGBA8 only. <code class="z">zui.ExtendedColor</code> for HDR is G6.</span></li>
-        <li><b>Still to come</b><span>Drag and drop between elements (I1), a visual inspector <code>zui_debug</code> (V1), motion, multi-line text editing, skins, and more hosts (macOS, Linux, web).</span></li>
+        <li><b>Still to come</b><span>A visual inspector <code>zui_debug</code> (V1), motion, multi-line text editing, skins, and more hosts (macOS, Linux, web).</span></li>
       </ul>
     </section>
 

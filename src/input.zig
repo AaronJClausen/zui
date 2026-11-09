@@ -46,6 +46,24 @@ pub const Manipulation = struct {
     pivot: [2]f32 = .{ 0, 0 },
 };
 
+/// A drag-and-drop in progress, as `dragging` reports it. The source stays
+/// where it is laid out; the application draws what follows the pointer:
+///
+/// ```zig
+/// if (ui.dragging(card)) |drag| {
+///     ui.open(.{ .floating = .{ .attach_to = .{ .element = card }, .offset = drag.translation, .capture = false } });
+///     drawCard(ui, app.cards[index]);
+///     ui.close();
+/// }
+/// ```
+pub const Drag = struct {
+    pointer: PointerId,
+    /// Layout units, from the surface's top-left.
+    position: [2]f32,
+    /// From where the pointer pressed to where it is now.
+    translation: [2]f32,
+};
+
 /// Which way the arrow keys or a D-pad moved, on screen.
 pub const NavigationDirection = enum { left, right, up, down };
 

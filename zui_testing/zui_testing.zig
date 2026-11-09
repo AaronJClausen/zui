@@ -162,6 +162,12 @@ pub fn Driver(comptime Ui: type) type {
         /// Presses the mouse at `from`, moves to `to` with the button held,
         /// and releases there: three frames. Both points are fractions of
         /// the element's rectangle when the drag starts, and may lie outside it.
+        /// An element that declares `.gestures.drag` drags its payload to
+        /// the element under `to`:
+        ///
+        /// ```zig
+        /// _ = try driver.drag(&app, App.declare, .indexed("task", 3), .{ 0.5, 0.5 }, .{ 2, 0.5 }); // into the next list
+        /// ```
         pub fn drag(self: *Self, app: anytype, comptime declare: anytype, element_id: zui.Id, from: [2]f32, to: [2]f32) !*const Ui.Frame {
             const start = self.mouseAt(try self.pointOn(element_id, from));
             const end_point = try self.pointOn(element_id, to);
@@ -942,6 +948,65 @@ test "the driver pinches an element that zooms" {
     _ = try driver.frame(&map, Map.declare, &.{});
     _ = try driver.pinch(&map, Map.declare, .of("map"), 0.2, 0.4);
     try std.testing.expectApproxEqAbs(@as(f32, 2), map.zoom, 1e-5);
+}
+
+test "the driver drags an item between two lists, out of one that scrolls by dragging" {
+    const Board = struct {
+        const Task = struct { number: u8 };
+
+        lists: [2][8]u8 = .{ .{ 1, 2, 3, 4, 5, 6, 0, 0 }, .{ 7, 0, 0, 0, 0, 0, 0, 0 } },
+        counts: [2]usize = .{ 6, 1 },
+
+        fn declare(board: *@This(), ui: *TestUi) void {
+            var moved: ?struct { task: Task, to: usize } = null;
+            ui.open(.{ .layout = .{ .child_gap = 50 } });
+            for (0..2) |list| {
+                const pan: zui.Gestures.Pan = if (list == 0) .vertical else .none;
+                ui.open(.{ .id = .indexed("list", list), .scroll = .{}, .gestures = .{ .pan = pan }, .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(200), .height = .fixed(300) } } });
+                for (board.lists[list][0..board.counts[list]]) |number| {
+                    const task: zui.Id = .indexed("task", number);
+                    ui.open(.{ .id = task, .gestures = .{ .drag = true }, .layout = .{ .sizing = .{ .width = .fixed(200), .height = .fixed(60) } } });
+                    if (ui.dragging(task)) |drag| {
+                        ui.startDrag(task, Task{ .number = number });
+                        ui.box(.{ .floating = .{ .offset = drag.translation, .capture = false }, .layout = .{ .sizing = .{ .width = .fixed(200), .height = .fixed(60) } } });
+                    }
+                    ui.close();
+                }
+                ui.close();
+                if (ui.dropped(.indexed("list", list), Task)) |task| moved = .{ .task = task, .to = list };
+            }
+            ui.close();
+            if (moved) |drop| board.move(drop.task.number, drop.to);
+        }
+
+        fn move(board: *@This(), number: u8, to: usize) void {
+            for (&board.lists, &board.counts) |*list, *count| {
+                const index = std.mem.indexOfScalar(u8, list[0..count.*], number) orelse continue;
+                std.mem.copyForwards(u8, list[index .. count.* - 1], list[index + 1 .. count.*]);
+                count.* -= 1;
+            }
+            board.lists[to][board.counts[to]] = number;
+            board.counts[to] += 1;
+        }
+    };
+    var text_contract: TestText = .{};
+    var ui = try initTestUi(&text_contract);
+    defer ui.deinit(std.testing.allocator);
+    var driver: Driver(TestUi) = .{ .ui = &ui };
+
+    var board: Board = .{};
+    _ = try driver.frame(&board, Board.declare, &.{});
+    _ = try driver.drag(&board, Board.declare, .indexed("task", 1), .{ 0.5, 0.5 }, .{ 0.5, -0.5 });
+    try std.testing.expectEqual([2]f32{ 0, 60 }, ui.scrollOffset(.indexed("list", 0)));
+    try std.testing.expectEqual(@as(usize, 6), board.counts[0]);
+
+    _ = try driver.drag(&board, Board.declare, .indexed("task", 3), .{ 0.5, 0.5 }, .{ 2, 0.5 });
+    try std.testing.expectEqualSlices(u8, &.{ 1, 2, 4, 5, 6 }, board.lists[0][0..board.counts[0]]);
+    try std.testing.expectEqualSlices(u8, &.{ 7, 3 }, board.lists[1][0..board.counts[1]]);
+
+    _ = try driver.drag(&board, Board.declare, .indexed("task", 7), .{ 0.5, 0.5 }, .{ -1, 0.5 });
+    try std.testing.expectEqualSlices(u8, &.{ 1, 2, 4, 5, 6, 7 }, board.lists[0][0..board.counts[0]]);
+    try std.testing.expectEqualSlices(u8, &.{3}, board.lists[1][0..board.counts[1]]);
 }
 
 test "findViolation rejects broken command lists" {

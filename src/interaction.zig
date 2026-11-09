@@ -41,6 +41,11 @@ pub const Gestures = packed struct(u8) {
     pan: Pan = .none,
     /// Scale and rotation by two pointers, and the pan of their centroid.
     zoom: bool = false,
+    /// Moves a drag-and-drop payload rather than the view: past the touch
+    /// slop, on the axes no element around it pans on for that pointer.
+    /// A source in a list that scrolls vertically drags sideways, and with
+    /// the mouse, which scrolls the list with the wheel, on both axes.
+    drag: bool = false,
     /// A press held still for `long_press_seconds` asks for its context
     /// menu, `contextRequested`, instead of tapping.
     long_press: bool = false,
@@ -51,7 +56,7 @@ pub const Gestures = packed struct(u8) {
     /// `pointerEvents`, and holds every other gesture off each one until
     /// it calls `claim` or `decline`.
     custom: bool = false,
-    _: u2 = 0,
+    _: u1 = 0,
 
     /// The axes an element pans on.
     pub const Pan = enum(u2) {
@@ -105,6 +110,10 @@ pub fn RegionOf(comptime has_gestures: bool) type {
 
         pub fn zooms(self: *const @This()) bool {
             return has_gestures and self.gestures.zoom and !self.flags.disabled;
+        }
+
+        pub fn drags(self: *const @This()) bool {
+            return has_gestures and self.gestures.drag and !self.flags.disabled;
         }
 
         /// The axes a pointer of `kind` can pan it on.
@@ -263,6 +272,12 @@ pub const Momentum = struct {
     }
 };
 
+/// A drag's payload in the state table under its source: a type of its
+/// own, so it never shares a slot with the application's state of `T`.
+pub fn DragPayload(comptime T: type) type {
+    return struct { value: T };
+}
+
 /// What a custom recognizer decided about a pointer pressed on it.
 pub const Recognition = enum(u8) { undecided, claimed, declined };
 
@@ -302,9 +317,13 @@ pub const PointerGesture = struct {
     /// What the recognizer decided this frame, applied at the next
     /// `beginFrame`.
     decided: Recognition,
+    /// The drag source the pointer drags, or 0.
+    drag_source: u64,
+    /// The `typeHash` of the payload `startDrag` gave the drag, or 0.
+    drag_payload: u64,
 
     pub fn pressedAt(pointer: input.Pointer) PointerGesture {
-        var gesture: PointerGesture = .{ .press_position = pointer.position, .panned_to = pointer.position, .pan_owner = 0, .pan_axes = .none, .past_slop = false, .zooming = false, .pressed_at = pointer.at, .long_press_owner = 0, .long_pressed = false, .recent = undefined, .recent_count = 0, .recognizer = 0, .recognition = .undecided, .decided = .undecided };
+        var gesture: PointerGesture = .{ .press_position = pointer.position, .panned_to = pointer.position, .pan_owner = 0, .pan_axes = .none, .past_slop = false, .zooming = false, .pressed_at = pointer.at, .long_press_owner = 0, .long_pressed = false, .recent = undefined, .recent_count = 0, .recognizer = 0, .recognition = .undecided, .decided = .undecided, .drag_source = 0, .drag_payload = 0 };
         gesture.sample(pointer);
         return gesture;
     }
@@ -336,7 +355,7 @@ pub const PointerGesture = struct {
 
     /// Whether this pointer has done anything but tap.
     pub fn claimed(self: *const PointerGesture) bool {
-        return self.pan_owner != 0 or self.long_pressed or (self.recognizer != 0 and self.recognition == .claimed);
+        return self.pan_owner != 0 or self.long_pressed or self.drag_source != 0 or (self.recognizer != 0 and self.recognition == .claimed);
     }
 
     /// Held off every built-in gesture by a recognizer, which has not
@@ -412,6 +431,13 @@ pub fn State(comptime max_contacts: u8, comptime max_chain: usize, comptime max_
             }
         };
 
+        /// A drag released this frame, with a payload, where it was released.
+        pub const Drop = struct {
+            source: u64,
+            payload: u64,
+            position: [2]f32,
+        };
+
         pub const ManipulatedElement = struct {
             hash: u64,
             manipulation: input.Manipulation,
@@ -445,6 +471,12 @@ pub fn State(comptime max_contacts: u8, comptime max_chain: usize, comptime max_
         /// state table.
         coasting: [max_coasting]u64,
         coasting_count: u8,
+        /// A pointer may drag, so `beginFrame` keeps drag payloads from
+        /// being evicted; otherwise it looks at nothing.
+        drags_active: bool,
+        /// Each takes a release, one of the record's events.
+        dropped_drags: [if (has_gestures) max_events else 0]Drop,
+        dropped_drag_count: u16,
         context_requested: [max_context_requests]u64,
         context_request_count: u32,
         double_tapped: [max_double_taps]u64,
@@ -465,6 +497,7 @@ pub fn State(comptime max_contacts: u8, comptime max_chain: usize, comptime max_
             self.timers_armed = false;
             self.coasting_count = 0;
             self.decisions_pending = false;
+            self.drags_active = false;
             self.focus = 0;
             self.pending_focus = null;
             self.clearFrameEvents();
@@ -486,6 +519,7 @@ pub fn State(comptime max_contacts: u8, comptime max_chain: usize, comptime max_
             self.context_request_count = 0;
             self.double_tap_count = 0;
             self.recognized_count = 0;
+            self.dropped_drag_count = 0;
         }
 
         /// Each recognized event is one of the record's, so this cannot

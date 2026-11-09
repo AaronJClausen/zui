@@ -229,7 +229,10 @@ to move, and two pointers zoom the innermost element that accepts
 timed against the record's `now`; momentum after a fling; custom recognizers over `pointerEvents`,
 `claim` and `decline`, such as `zui_widgets`' lasso; and the intents
 `contextRequested`, `doubleTapped`, `dismissed`, `adjusted` and
-`navigated`.
+`navigated`; and drag and drop: a source that declares `drag` takes a
+pointer on the axes no region around it pans on, `startDrag` keeps its
+typed payload in the state table, and a target reads it with `dropped`
+or `draggedOver`.
 
 The code and the spec still differ in these places, each closed by the
 roadmap item named:

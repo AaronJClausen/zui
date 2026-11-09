@@ -1330,6 +1330,7 @@ pub fn Context(comptime config: Config) type {
 
             if (features.gestures and input_state.coasting_count != 0) self.coast();
             if (features.gestures and input_state.decisions_pending) self.applyRecognitions();
+            if (features.gestures and input_state.drags_active) self.keepDragPayloads();
 
             const kept = @min(events.len, limits.max_events_per_frame);
             if (events.len > kept) {
@@ -1382,6 +1383,7 @@ pub fn Context(comptime config: Config) type {
                         contact.press_target = 0;
                         if (features.gestures) {
                             contact.gesture.long_press_owner = 0;
+                            if (contact.gesture.drag_source != 0) self.releaseDrag(contact);
                             if (contact.gesture.pan_owner != 0 and !contact.gesture.zooming) {
                                 contact.gesture.sample(up.pointer);
                                 self.fling(frame, contact);
@@ -1542,6 +1544,7 @@ pub fn Context(comptime config: Config) type {
         fn pan(self: *Self, contact: *InputState.Slot) void {
             const gesture = &contact.gesture;
             const position = contact.pointer.position;
+            if (gesture.drag_source != 0) return;
             if (gesture.zooming) if (self.zoomPartner(contact)) |partner| return self.applyZoom(contact, partner);
             if (gesture.held()) return;
             if (!gesture.past_slop) {
@@ -1552,6 +1555,7 @@ pub fn Context(comptime config: Config) type {
                 gesture.long_press_owner = 0;
                 const axis: usize = if (@abs(moved[0]) >= @abs(moved[1])) 0 else 1;
                 const owner = self.panOwner(gesture.press_position, axis, moved[axis], contact.pointer.kind) orelse return;
+                if (!owner.pans(axis, contact.pointer.kind)) return self.startDragging(contact, owner.hash);
                 gesture.pan_owner = owner.hash;
                 gesture.pan_axes = if (owner.pans(1 - axis, contact.pointer.kind)) .both else if (axis == 0) .horizontal else .vertical;
                 if (contact.press_target != owner.hash) contact.press_target = 0;
@@ -1733,7 +1737,7 @@ pub fn Context(comptime config: Config) type {
             if (!results.has_frame) return;
             if (contact.gesture.held()) return;
             const partner = for (&self.memory.input.contacts) |*slot| {
-                if (slot.*) |*other| if (other != contact and other.buttons.contains(.primary) and !other.gesture.zooming and !other.gesture.held()) break other;
+                if (slot.*) |*other| if (other != contact and other.buttons.contains(.primary) and !other.gesture.zooming and !other.gesture.held() and other.gesture.drag_source == 0) break other;
             } else return;
             const position = contact.pointer.position;
             var region_index = results.topmostAt(position) orelse return;
@@ -1802,7 +1806,88 @@ pub fn Context(comptime config: Config) type {
             var region_index = results.topmostAt(press_position) orelse return null;
             while (region_index != interaction.no_region) : (region_index = results.regions[region_index].parent) {
                 const region = &results.regions[region_index];
-                if (region.bounds.contains(press_position) and region.pans(axis, kind) and self.canFollow(region, axis, motion)) return region;
+                if (!region.bounds.contains(press_position)) continue;
+                if (region.pans(axis, kind) and self.canFollow(region, axis, motion)) return region;
+                if (region.drags() and !region.pans(axis, kind) and !self.enclosingRegionPans(region, axis, kind)) return region;
+            }
+            return null;
+        }
+
+        fn enclosingRegionPans(self: *Self, region: *const Results.Region, axis: usize, kind: input.PointerKind) bool {
+            const regions = &self.memory.results.regions;
+            var enclosing = region.parent;
+            while (enclosing != interaction.no_region) : (enclosing = regions[enclosing].parent) {
+                if (regions[enclosing].pans(axis, kind)) return true;
+            }
+            return false;
+        }
+
+        /// The pointer drags `source` from now until it lifts, and nothing
+        /// else pans, zooms, recognizes or taps with it.
+        fn startDragging(self: *Self, contact: *InputState.Slot, source_hash: u64) void {
+            const gesture = &contact.gesture;
+            self.endZoom(contact);
+            gesture.drag_source = source_hash;
+            gesture.past_slop = true;
+            gesture.pan_owner = 0;
+            gesture.pan_axes = .none;
+            gesture.long_press_owner = 0;
+            gesture.recognizer = 0;
+            if (contact.press_target != source_hash) contact.press_target = 0;
+            self.memory.input.drags_active = true;
+        }
+
+        /// A drag with a payload is dropped where it was released; one
+        /// without is not dropped anywhere.
+        fn releaseDrag(self: *Self, contact: *InputState.Slot) void {
+            const input_state = &self.memory.input;
+            const gesture = &contact.gesture;
+            if (gesture.drag_payload != 0) {
+                input_state.dropped_drags[input_state.dropped_drag_count] = .{ .source = gesture.drag_source, .payload = gesture.drag_payload, .position = contact.pointer.position };
+                input_state.dropped_drag_count += 1;
+            }
+            gesture.drag_source = 0;
+            gesture.drag_payload = 0;
+        }
+
+        /// A payload stays while its drag lasts, however long its source
+        /// goes without being declared or given it again.
+        fn keepDragPayloads(self: *Self) void {
+            const input_state = &self.memory.input;
+            input_state.drags_active = false;
+            for (&input_state.contacts) |*slot| {
+                const contact = &(slot.* orelse continue);
+                if (contact.gesture.drag_source == 0) continue;
+                input_state.drags_active = true;
+                if (contact.gesture.drag_payload != 0) self.memory.states.touch(contact.gesture.drag_source, contact.gesture.drag_payload, self.stateGeneration());
+            }
+        }
+
+        /// Whether the hit test at `position` passes through the region of
+        /// `hash`: the topmost region there, or one around it.
+        fn hitPassesThrough(self: *const Self, position: [2]f32, hash: u64) bool {
+            const results = &self.memory.results;
+            if (!results.has_frame) return false;
+            var region_index = results.topmostAt(position) orelse return false;
+            while (region_index != interaction.no_region) : (region_index = results.regions[region_index].parent) {
+                const region = &results.regions[region_index];
+                if (region.hash == hash and region.bounds.contains(position)) return true;
+            }
+            return false;
+        }
+
+        /// The contact dragging `source`, or else one whose press, still
+        /// down, began on it, which starts dragging it.
+        fn dragContact(self: *Self, source_hash: u64) ?*InputState.Slot {
+            for (&self.memory.input.contacts) |*slot| {
+                if (slot.*) |*contact| if (contact.gesture.drag_source == source_hash) return contact;
+            }
+            for (&self.memory.input.contacts) |*slot| {
+                const contact = &(slot.* orelse continue);
+                if (!contact.buttons.contains(.primary) or contact.gesture.drag_source != 0) continue;
+                if (!self.hitPassesThrough(contact.gesture.press_position, source_hash)) continue;
+                self.startDragging(contact, source_hash);
+                return contact;
             }
             return null;
         }
@@ -1906,6 +1991,83 @@ pub fn Context(comptime config: Config) type {
             if (gesture.recognizer == 0 or gesture.recognition != .undecided) return;
             gesture.decided = recognition;
             self.memory.input.decisions_pending = true;
+        }
+
+        /// The drag of `source_id` while a pointer drags it: past the touch
+        /// slop on an element that declares `.gestures.drag`, or since
+        /// `startDrag`. Null once the pointer lifts.
+        pub fn dragging(self: *const Self, source_id: Id) ?input.Drag {
+            comptime requireFeature(.gestures, "dragging()");
+            if (source_id.isNone()) return null;
+            for (&self.memory.input.contacts) |*slot| {
+                const contact = &(slot.* orelse continue);
+                if (contact.gesture.drag_source != source_id.hash) continue;
+                const position = contact.pointer.position;
+                const pressed_at = contact.gesture.press_position;
+                return .{ .pointer = contact.pointer.id, .position = position, .translation = .{ position[0] - pressed_at[0], position[1] - pressed_at[1] } };
+            }
+            return null;
+        }
+
+        /// Gives the drag of `source_id` its payload, in the state table under
+        /// it, replacing any it had. When nothing drags it yet but
+        /// a pointer's press on it is still down, that pointer starts dragging
+        /// it now, taken from whatever else it pressed or panned: after a
+        /// long press, say, or from a recognizer that claimed it. A drag
+        /// released in the record that started it, before declaration could
+        /// give it a payload, drops nothing.
+        ///
+        /// ```zig
+        /// ui.box(.{ .id = card, .gestures = .{ .drag = true } });
+        /// if (ui.dragging(card) != null) ui.startDrag(card, CardRef{ .column = column, .index = index });
+        /// ```
+        pub fn startDrag(self: *Self, source_id: Id, payload: anytype) void {
+            comptime requireFeature(.gestures, "startDrag()");
+            const Payload = interaction.DragPayload(@TypeOf(payload));
+            comptime state_table.checkStateType(@TypeOf(payload));
+            if (source_id.isNone()) return;
+            const contact = self.dragContact(source_id.hash) orelse return;
+            self.state(source_id, Payload).* = .{ .value = payload };
+            contact.gesture.drag_payload = state_table.typeHash(Payload);
+        }
+
+        /// The payload of a drag released on `target` this frame, if it is a
+        /// `Payload`: never another type's, reinterpreted. `target` is any
+        /// element with a hit region (interactive, scrolling or declaring a
+        /// gesture) that the hit test at the release passes through, so a
+        /// list and the row the drag was released on both receive it.
+        ///
+        /// ```zig
+        /// if (ui.dropped(column, CardRef)) |moved| app.moveCard(moved, column_index);
+        /// ```
+        pub fn dropped(self: *Self, target: Id, comptime Payload: type) ?Payload {
+            comptime requireFeature(.gestures, "dropped()");
+            if (target.isNone()) return null;
+            const input_state = &self.memory.input;
+            const payload = state_table.typeHash(interaction.DragPayload(Payload));
+            for (input_state.dropped_drags[0..input_state.dropped_drag_count]) |released| {
+                if (released.payload != payload or !self.hitPassesThrough(released.position, target.hash)) continue;
+                const kept = self.memory.states.get(released.source, interaction.DragPayload(Payload), self.stateGeneration(), .existing_only) orelse continue;
+                return kept.value;
+            }
+            return null;
+        }
+
+        /// The payload of a drag whose pointer is over `target` now, if it
+        /// is a `Payload`, for a target to show that it would take it.
+        /// Over `target` as `dropped` means it.
+        pub fn draggedOver(self: *Self, target: Id, comptime Payload: type) ?Payload {
+            comptime requireFeature(.gestures, "draggedOver()");
+            if (target.isNone()) return null;
+            const payload = state_table.typeHash(interaction.DragPayload(Payload));
+            for (&self.memory.input.contacts) |*slot| {
+                const contact = &(slot.* orelse continue);
+                const gesture = &contact.gesture;
+                if (gesture.drag_source == 0 or gesture.drag_payload != payload or !self.hitPassesThrough(contact.pointer.position, target.hash)) continue;
+                const kept = self.memory.states.get(gesture.drag_source, interaction.DragPayload(Payload), self.stateGeneration(), .existing_only) orelse continue;
+                return kept.value;
+            }
+            return null;
         }
 
         /// The user asked for the element's context menu this frame: a

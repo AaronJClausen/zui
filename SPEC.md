@@ -262,6 +262,7 @@ compile-error test:
   `"zui: manipulation() needs Config.features.gestures = true"`,
   `"zui: doubleTapped() needs Config.features.gestures = true"`,
   `"zui: pointerEvents() needs Config.features.gestures = true"`,
+  `"zui: dropped() needs Config.features.gestures = true"`,
   `"zui: wrapChildren() needs Config.features.flex_wrap = true"`;
 - every contract violation, in the form of §16.1.
 
@@ -1254,17 +1255,44 @@ stays with what it pressed, unless the container declares `pan` itself.
 
 ### 11.5 Drag and drop
 
+*Compiled out without `features.gestures`, like the gestures it is
+arbitrated with.*
+
 ```zig
-pub fn dragging(self: *const Self, source: Id) ?Drag
-pub fn dropped(self: *Self, target: Id, comptime Payload: type) ?Payload   // released on `target` this frame
+pub fn dragging(self: *const Self, source: Id) ?Drag                       // the pointer, where it is, and how far from its press
 pub fn startDrag(self: *Self, source: Id, payload: anytype) void
+pub fn dropped(self: *Self, target: Id, comptime Payload: type) ?Payload   // released on `target` this frame
+pub fn draggedOver(self: *Self, target: Id, comptime Payload: type) ?Payload  // over `target` now
 ```
 
 A drag source declares `.gestures.drag`, so §11.4 decides between
-dragging, scrolling and clicking. The payload lives in the state table,
-typed, so dropping one type on a target that expects another yields
-`null`, never a reinterpretation. Files from the OS are a
-`files_dropped` event, not this.
+dragging, scrolling and clicking: past the touch slop, a source takes the
+pointer on the axes no region around it pans on for that pointer, so a
+card in a list that scrolls vertically drags sideways and scrolls the
+list vertically, and with the mouse, which scrolls the list with its
+wheel, drags on both axes. A region inside the source that pans on the
+axis is nearer and takes it first. The source stays where it is laid out
+and is neither scrolled nor clicked; `dragging` reports the pointer, and
+the application draws what follows it, as a floating element with
+`capture = false`.
+
+`startDrag` gives the drag its payload, called once `dragging` reports
+it. Called while a pointer's press on the source is still down but
+nothing drags it, it starts the drag with that pointer, taking it from
+whatever else it pressed or panned: this is how a long press, or a custom
+recognizer that claims the pointer, lifts a card out of a list that pans
+on both axes. The payload lives in the state table under the source,
+typed, and stays while the drag lasts, so dropping one type on a target
+that expects another yields `null`, never a reinterpretation, and the
+source may stop being declared while it is dragged. A drag released in
+the record that started it, before declaration could give it a payload,
+drops nothing, and neither does a cancelled pointer.
+
+A target is any element with a hit region: `dropped` and `draggedOver`
+answer for each region the hit test at the pointer passes through, the
+topmost and those around it, so a list and the row a card was released
+on both receive it. Files from the OS are a `files_dropped` event, not
+this.
 
 ---
 
