@@ -52,7 +52,7 @@ fn measureTexts(comptime Ui: type, ui: *Ui, frame: *Ui.Frame) void {
 }
 
 /// Iterates the children that take part in a parent's flow.
-fn FlowChildren(comptime Ui: type) type {
+pub fn FlowChildren(comptime Ui: type) type {
     return struct {
         all_children: Ui.Frame.Children,
         has_floating: bool,
@@ -64,13 +64,56 @@ fn FlowChildren(comptime Ui: type) type {
             };
         }
 
-        fn next(self: *@This()) ?Ui.Index {
+        /// The children from `first` up to the sibling `end`, or the end of
+        /// the parent's subtree.
+        fn between(frame: *const Ui.Frame, parent: Ui.Index, first: Ui.Index, end: Ui.Index) @This() {
+            var children = init(frame, parent);
+            children.all_children.next_child = first;
+            children.all_children.end = end;
+            return children;
+        }
+
+        pub fn next(self: *@This()) ?Ui.Index {
             while (self.all_children.next()) |child| {
                 if (!self.has_floating or !self.all_children.frame.isFloating(child)) return child;
             }
             return null;
         }
     };
+}
+
+/// Iterates a wrapping row's lines, each as the flow children on it, from
+/// the line starts that distributing its widths recorded.
+pub fn Lines(comptime Ui: type) type {
+    return struct {
+        frame: *const Ui.Frame,
+        row: Ui.Index,
+        children: FlowChildren(Ui),
+        next_first: ?Ui.Index,
+
+        pub fn init(frame: *const Ui.Frame, row: Ui.Index) @This() {
+            var children = FlowChildren(Ui).init(frame, row);
+            const first = children.next();
+            return .{ .frame = frame, .row = row, .children = children, .next_first = first };
+        }
+
+        pub fn next(self: *@This()) ?FlowChildren(Ui) {
+            const first = self.next_first orelse return null;
+            while (self.children.next()) |child| {
+                if (self.frame.starts_line[child]) {
+                    self.next_first = child;
+                    return .between(self.frame, self.row, first, child);
+                }
+            }
+            self.next_first = null;
+            return .between(self.frame, self.row, first, self.frame.subtree_end[self.row]);
+        }
+    };
+}
+
+/// False for every element without `features.flex_wrap`, at compile time.
+pub inline fn wraps(comptime Ui: type, frame: *const Ui.Frame, element: Ui.Index) bool {
+    return Ui.features.flex_wrap and frame.flags[element].wraps;
 }
 
 fn gapsFor(child_gap: f32, flow_count: u32) f32 {
@@ -90,7 +133,7 @@ fn fit(comptime Ui: type, frame: *Ui.Frame, comptime axis: Axis) void {
     while (index > 0) {
         index -= 1;
         const element: Ui.Index = @intCast(index);
-        const content = contentSize(Ui, frame, element, axis);
+        const content = if (wraps(Ui, frame, element)) wrappedContentSize(Ui, frame, element, axis) else contentSize(Ui, frame, element, axis);
         const sizing = content.sizing;
         switch (sizing.rule) {
             // `aspect_ratio` shares the arm, and comes after `grow_from_min`
@@ -119,6 +162,7 @@ fn fit(comptime Ui: type, frame: *Ui.Frame, comptime axis: Axis) void {
 
         if (element == Ui.root_index or frame.isFloating(element)) continue;
         const parent = frame.parent[element];
+        if (wraps(Ui, frame, parent)) continue;
         if (frame.flags[parent].top_to_bottom == (axis == .y)) {
             frame.size[parent][a] += frame.size[element][a];
             frame.min_size[parent][a] += frame.min_size[element][a];
@@ -145,6 +189,44 @@ fn contentSize(comptime Ui: type, frame: *const Ui.Frame, element: Ui.Index, com
     const padding = element_layout.padding.total(axis);
     const gaps = if (element_layout.direction.axis() == axis) gapsFor(element_layout.child_gap, frame.child_counts[element].in_flow) else 0;
     return .{ .preferred = frame.size[element][a] + gaps + padding, .min = frame.min_size[element][a] + gaps + padding, .sizing = element_layout.sizing.axis(axis) };
+}
+
+/// A wrapping row is as wide as its children on one line, but no narrower
+/// than its widest child, since each may take a line of its own; it is as
+/// tall as its lines, each as tall as its tallest child.
+fn wrappedContentSize(comptime Ui: type, frame: *const Ui.Frame, row: Ui.Index, comptime axis: Axis) ContentSize {
+    const a = @intFromEnum(axis);
+    const row_layout = frame.layoutOf(row);
+    var preferred: f32 = 0;
+    var min: f32 = 0;
+    if (axis == .x) {
+        var children = FlowChildren(Ui).init(frame, row);
+        while (children.next()) |child| {
+            preferred += frame.size[child][a];
+            min = larger(min, frame.min_size[child][a]);
+        }
+        preferred += gapsFor(row_layout.child_gap, frame.child_counts[row].in_flow);
+    } else {
+        var line_count: u32 = 0;
+        var lines = Lines(Ui).init(frame, row);
+        while (lines.next()) |line| {
+            var children = line;
+            var line_preferred: f32 = 0;
+            var line_min: f32 = 0;
+            while (children.next()) |child| {
+                line_preferred = larger(line_preferred, frame.size[child][a]);
+                line_min = larger(line_min, frame.min_size[child][a]);
+            }
+            preferred += line_preferred;
+            min += line_min;
+            line_count += 1;
+        }
+        const line_gaps = gapsFor(row_layout.child_gap, line_count);
+        preferred += line_gaps;
+        min += line_gaps;
+    }
+    const padding = row_layout.padding.total(axis);
+    return .{ .preferred = preferred + padding, .min = min + padding, .sizing = row_layout.sizing.axis(axis) };
 }
 
 inline fn fitContent(comptime Ui: type, frame: *Ui.Frame, element: Ui.Index, comptime axis: Axis, content: ContentSize) void {
@@ -184,6 +266,11 @@ fn distribute(comptime Ui: type, frame: *Ui.Frame, comptime axis: Axis) void {
         const scrolls = frame.flags[parent].scrolls(axis);
 
         if (frame.child_counts[parent].in_flow != frame.child_counts[parent].all) @call(.never_inline, sizeFloatingChildren, .{ Ui, frame, parent, axis });
+
+        if (wraps(Ui, frame, parent)) {
+            if (axis == .x) @call(.never_inline, breakLines, .{ Ui, frame, parent }) else @call(.never_inline, stretchLines, .{ Ui, frame, parent });
+            continue;
+        }
 
         if (parent_layout.direction.axis() != axis) {
             var widest: f32 = 0;
@@ -229,9 +316,9 @@ fn distribute(comptime Ui: type, frame: *Ui.Frame, comptime axis: Axis) void {
         const remaining = content_box - used;
         if (remaining > tolerance and grow_weight > 0) {
             if (any_grow_from_min) {
-                used += @call(.never_inline, growFromMin, .{ Ui, frame, parent, axis, remaining });
+                used += @call(.never_inline, growFromMin, .{ Ui, frame, FlowChildren(Ui).init(frame, parent), frame.child_counts[parent].in_flow, axis, remaining });
             } else if (any_grow_max) {
-                used += grow(Ui, frame, parent, axis, remaining);
+                used += grow(Ui, frame, .init(frame, parent), axis, remaining);
             } else {
                 // No child can reach a max, so the space divides in one go.
                 children = FlowChildren(Ui).init(frame, parent);
@@ -242,10 +329,140 @@ fn distribute(comptime Ui: type, frame: *Ui.Frame, comptime axis: Axis) void {
                 used = content_box;
             }
         } else if (remaining < -tolerance and !scrolls) {
-            used -= shrink(Ui, frame, parent, axis, -remaining);
+            used -= shrink(Ui, frame, .init(frame, parent), frame.child_counts[parent].all, axis, -remaining);
         }
         frame.content_size[parent][a] = used + padding;
     }
+}
+
+/// What a line's children ask of its axis before free space is handed out.
+/// `distribute` keeps its own copy of these steps for a row that does not
+/// wrap: sharing them made the box tree's `endFrame` 1.5% more instructions.
+const FlowTotals = struct {
+    used: f32 = 0,
+    grow_weight: f32 = 0,
+    any_grow_max: bool = false,
+    any_grow_from_min: bool = false,
+
+    fn join(self: *FlowTotals, other: FlowTotals, gap: f32) void {
+        self.used += gap + other.used;
+        self.grow_weight += other.grow_weight;
+        self.any_grow_max = self.any_grow_max or other.any_grow_max;
+        self.any_grow_from_min = self.any_grow_from_min or other.any_grow_from_min;
+    }
+};
+
+/// Sizes a `percent` child from the content box and holds a
+/// `grow_from_min` child at its minimum, the floor it grows past from
+/// `min`, then adds the child to the totals.
+inline fn resolveFlowChild(comptime Ui: type, frame: *Ui.Frame, child: Ui.Index, comptime axis: Axis, content_box: f32, totals: *FlowTotals) void {
+    const a = @intFromEnum(axis);
+    const sizing = frame.sizingOf(child, axis);
+    switch (sizing.rule) {
+        .percent => frame.size[child][a] = clampSize(content_box * sizing.amount, sizing.min, sizing.max),
+        .grow => if (sizing.amount > 0) {
+            totals.grow_weight += sizing.amount;
+            totals.any_grow_max = totals.any_grow_max or sizing.max != std.math.inf(f32);
+        },
+        .grow_from_min => {
+            totals.grow_weight += sizing.amount;
+            totals.any_grow_from_min = true;
+            frame.size[child][a] = frame.min_size[child][a];
+        },
+        .fit, .fixed, .aspect_ratio => {},
+    }
+    totals.used += frame.size[child][a];
+}
+
+/// Hands the free space to the growing children, or takes the overflow
+/// from the shrinkable ones. Returns the size the flow ends up using.
+inline fn settleFlow(comptime Ui: type, frame: *Ui.Frame, children: FlowChildren(Ui), flow_count: usize, comptime axis: Axis, content_box: f32, totals: FlowTotals, scrolls: bool) f32 {
+    const a = @intFromEnum(axis);
+    var used = totals.used;
+    const remaining = content_box - used;
+    if (remaining > tolerance and totals.grow_weight > 0) {
+        if (totals.any_grow_from_min) {
+            used += @call(.never_inline, growFromMin, .{ Ui, frame, children, flow_count, axis, remaining });
+        } else if (totals.any_grow_max) {
+            used += grow(Ui, frame, children, axis, remaining);
+        } else {
+            // No child can reach a max, so the space divides in one go.
+            var growing = children;
+            while (growing.next()) |child| {
+                const sizing = frame.sizingOf(child, axis);
+                if (sizing.rule == .grow) frame.size[child][a] += remaining * sizing.amount / totals.grow_weight;
+            }
+            used = content_box;
+        }
+    } else if (remaining < -tolerance and !scrolls) {
+        used -= shrink(Ui, frame, children, flow_count, axis, -remaining);
+    }
+    return used;
+}
+
+/// Pass 2 for a wrapping row: each child goes on the current line if it
+/// fits there at the size its rule asks for before free space is handed
+/// out, and otherwise starts a new line, as a first child always does.
+/// Each line then shares its free space or overflow as a row would.
+fn breakLines(comptime Ui: type, frame: *Ui.Frame, row: Ui.Index) void {
+    const row_layout = frame.layoutOf(row);
+    const padding = row_layout.padding.total(.x);
+    const content_box = larger(0, frame.size[row][0] - padding);
+    const gap = row_layout.child_gap;
+    const scrolls = frame.flags[row].scroll_x;
+    var widest_line: f32 = 0;
+    var line: FlowTotals = .{};
+    var line_first: Ui.Index = undefined;
+    var line_count: u32 = 0;
+    var children = FlowChildren(Ui).init(frame, row);
+    while (children.next()) |child| {
+        var child_totals: FlowTotals = .{};
+        resolveFlowChild(Ui, frame, child, .x, content_box, &child_totals);
+        const starts_line = line_count == 0 or line.used + gap + child_totals.used > content_box + tolerance;
+        frame.starts_line[child] = starts_line;
+        if (!starts_line) {
+            line.join(child_totals, gap);
+            line_count += 1;
+            continue;
+        }
+        if (line_count > 0) widest_line = larger(widest_line, settleFlow(Ui, frame, .between(frame, row, line_first, child), line_count, .x, content_box, line, scrolls));
+        line = child_totals;
+        line_first = child;
+        line_count = 1;
+    }
+    if (line_count > 0) widest_line = larger(widest_line, settleFlow(Ui, frame, .between(frame, row, line_first, frame.subtree_end[row]), line_count, .x, content_box, line, scrolls));
+    frame.content_size[row][0] = widest_line + padding;
+}
+
+/// Pass 5 for a wrapping row: a line is as tall as its tallest child, and
+/// a growing child stretches to its line's height, not the row's.
+fn stretchLines(comptime Ui: type, frame: *Ui.Frame, row: Ui.Index) void {
+    const row_layout = frame.layoutOf(row);
+    const padding = row_layout.padding.total(.y);
+    const content_box = larger(0, frame.size[row][1] - padding);
+    var lines_height: f32 = 0;
+    var line_count: u32 = 0;
+    var lines = Lines(Ui).init(frame, row);
+    while (lines.next()) |line| {
+        var line_height: f32 = 0;
+        var children = line;
+        while (children.next()) |child| {
+            const sizing = frame.sizingOf(child, .y);
+            if (sizing.rule == .percent) frame.size[child][1] = clampSize(content_box * sizing.amount, sizing.min, sizing.max);
+            line_height = larger(line_height, frame.size[child][1]);
+        }
+        var stretched_height = line_height;
+        children = line;
+        while (children.next()) |child| {
+            const sizing = frame.sizingOf(child, .y);
+            if (!sizing.rule.grows()) continue;
+            frame.size[child][1] = larger(frame.min_size[child][1], clampSize(line_height, sizing.min, sizing.max));
+            stretched_height = larger(stretched_height, frame.size[child][1]);
+        }
+        lines_height += stretched_height;
+        line_count += 1;
+    }
+    frame.content_size[row][1] = lines_height + gapsFor(row_layout.child_gap, line_count) + padding;
 }
 
 /// `grow` and `percent` on a floating element resolve against the box it
@@ -273,19 +490,19 @@ fn sizeFloatingChildren(comptime Ui: type, frame: *Ui.Frame, parent: Ui.Index, c
 /// child that reaches its max is clamped and the rest is redistributed;
 /// each round clamps at least one child, so this ends. Returns the space
 /// handed out.
-fn grow(comptime Ui: type, frame: *Ui.Frame, parent: Ui.Index, comptime axis: Axis, free_space: f32) f32 {
+fn grow(comptime Ui: type, frame: *Ui.Frame, flow: FlowChildren(Ui), comptime axis: Axis, free_space: f32) f32 {
     const a = @intFromEnum(axis);
     var remaining = free_space;
     while (remaining > tolerance) {
         var total_weight: f32 = 0;
-        var children = FlowChildren(Ui).init(frame, parent);
+        var children = flow;
         while (children.next()) |child| {
             if (canGrow(Ui, frame, child, axis)) total_weight += frame.sizingOf(child, axis).amount;
         }
         if (total_weight <= 0) return free_space - remaining;
 
         var clamped_any = false;
-        children = FlowChildren(Ui).init(frame, parent);
+        children = flow;
         while (children.next()) |child| {
             if (!canGrow(Ui, frame, child, axis)) continue;
             const sizing = frame.sizingOf(child, axis);
@@ -298,7 +515,7 @@ fn grow(comptime Ui: type, frame: *Ui.Frame, parent: Ui.Index, comptime axis: Ax
         }
         if (clamped_any) continue;
 
-        children = FlowChildren(Ui).init(frame, parent);
+        children = flow;
         while (children.next()) |child| {
             if (!canGrow(Ui, frame, child, axis)) continue;
             frame.size[child][a] += remaining * frame.sizingOf(child, axis).amount / total_weight;
@@ -322,15 +539,15 @@ fn canGrow(comptime Ui: type, frame: *const Ui.Frame, child: Ui.Index, comptime 
 /// through each point where a child leaves its floor or reaches its max,
 /// until the free space is filled, so each child bends at most twice and
 /// this ends. Returns the space handed out.
-fn growFromMin(comptime Ui: type, frame: *Ui.Frame, parent: Ui.Index, comptime axis: Axis, free_space: f32) f32 {
+fn growFromMin(comptime Ui: type, frame: *Ui.Frame, flow: FlowChildren(Ui), flow_count: usize, comptime axis: Axis, free_space: f32) f32 {
     const a = @intFromEnum(axis);
     var share: f32 = 0;
-    var bends_left = 2 * @as(usize, frame.child_counts[parent].in_flow) + 1;
+    var bends_left = 2 * flow_count + 1;
     while (bends_left > 0) : (bends_left -= 1) {
         var handed_out: f32 = 0;
         var growing_weight: f32 = 0;
         var next_bend = std.math.inf(f32);
-        var children = FlowChildren(Ui).init(frame, parent);
+        var children = flow;
         while (children.next()) |child| {
             const sizing = frame.sizingOf(child, axis);
             if (!sizing.rule.grows() or sizing.amount <= 0) continue;
@@ -358,7 +575,7 @@ fn growFromMin(comptime Ui: type, frame: *Ui.Frame, parent: Ui.Index, comptime a
     }
 
     var handed_out: f32 = 0;
-    var children = FlowChildren(Ui).init(frame, parent);
+    var children = flow;
     while (children.next()) |child| {
         const sizing = frame.sizingOf(child, axis);
         if (!sizing.rule.grows() or sizing.amount <= 0) continue;
@@ -378,15 +595,15 @@ inline fn growStart(sizing: style.Sizing, floor: f32) f32 {
 /// them down to the next largest, never below a child's minimum. Each
 /// round levels a group, resolves the deficit, or retires a child at its
 /// minimum, so this ends. Returns the size taken away.
-fn shrink(comptime Ui: type, frame: *Ui.Frame, parent: Ui.Index, comptime axis: Axis, overflow: f32) f32 {
+fn shrink(comptime Ui: type, frame: *Ui.Frame, flow: FlowChildren(Ui), flow_count: usize, comptime axis: Axis, overflow: f32) f32 {
     const a = @intFromEnum(axis);
     var deficit = overflow;
     var rounds: usize = 0;
-    const max_rounds = 2 * @as(usize, frame.child_counts[parent].all) + 2;
+    const max_rounds = 2 * flow_count + 2;
     while (deficit > tolerance and rounds < max_rounds) : (rounds += 1) {
         var largest: f32 = 0;
         var largest_count: f32 = 0;
-        var children = FlowChildren(Ui).init(frame, parent);
+        var children = flow;
         while (children.next()) |child| {
             if (!canShrink(Ui, frame, child, axis)) continue;
             const size = frame.size[child][a];
@@ -400,7 +617,7 @@ fn shrink(comptime Ui: type, frame: *Ui.Frame, parent: Ui.Index, comptime axis: 
         if (largest_count == 0) break;
 
         var next_largest: f32 = 0;
-        children = FlowChildren(Ui).init(frame, parent);
+        children = flow;
         while (children.next()) |child| {
             if (!canShrink(Ui, frame, child, axis)) continue;
             const size = frame.size[child][a];
@@ -409,7 +626,7 @@ fn shrink(comptime Ui: type, frame: *Ui.Frame, parent: Ui.Index, comptime axis: 
 
         const share = deficit / largest_count;
         var removed: f32 = 0;
-        children = FlowChildren(Ui).init(frame, parent);
+        children = flow;
         while (children.next()) |child| {
             if (!canShrink(Ui, frame, child, axis)) continue;
             const size = frame.size[child][a];
@@ -524,8 +741,51 @@ fn placeFloatingInPass(comptime Ui: type, frame: *Ui.Frame, floating: Ui.Index, 
 }
 
 inline fn placeChildrenOf(comptime Ui: type, ui: *Ui, frame: *Ui.Frame, parent: Ui.Index, comptime may_mirror: bool) void {
+    if (wraps(Ui, frame, parent)) return @call(.never_inline, placeLines, .{ Ui, ui, frame, parent, may_mirror });
     switch (frame.flags[parent].top_to_bottom) {
         inline else => |top_to_bottom| placeChildren(Ui, ui, frame, parent, if (top_to_bottom) .y else .x, may_mirror),
+    }
+}
+
+/// A wrapping row's lines go down from the top of its content box. The
+/// alignment's `y` places them as a group and each child within its line,
+/// and its `x` places each line along the row. A reversed row reflects its
+/// children across its box, as `placeChildren` does.
+fn placeLines(comptime Ui: type, ui: *Ui, frame: *Ui.Frame, row: Ui.Index, comptime may_mirror: bool) void {
+    const row_layout = frame.layoutOf(row);
+    const padding = row_layout.padding;
+    const gap = row_layout.child_gap;
+    const along_fraction = row_layout.child_alignment.x.fraction();
+    const across_fraction = row_layout.child_alignment.y.fraction();
+    const offset = scrollOffset(Ui, ui, frame, row);
+    const content_width = frame.size[row][0] - padding.total(.x);
+    const line_start = frame.position[row][0] + padding.left - offset[0];
+    const free_height = frame.size[row][1] - frame.content_size[row][1];
+    var line_top = frame.position[row][1] + padding.top - offset[1] + if (free_height > 0) free_height * across_fraction else 0;
+    const reversed = may_mirror and frame.flags[row].reversed;
+    const reflected_sum = 2 * frame.position[row][0] + frame.size[row][0];
+
+    var lines = Lines(Ui).init(frame, row);
+    while (lines.next()) |line| {
+        var line_width = -gap;
+        var line_height: f32 = 0;
+        var children = line;
+        while (children.next()) |child| {
+            line_width += frame.size[child][0] + gap;
+            line_height = larger(line_height, frame.size[child][1]);
+        }
+        const free_width = content_width - line_width;
+        var next_x = line_start + if (free_width > 0) free_width * along_fraction else 0;
+        children = line;
+        while (children.next()) |child| {
+            const size = frame.size[child];
+            const free_across = line_height - size[1];
+            var placed: [2]f32 = .{ next_x, line_top + if (free_across > 0) free_across * across_fraction else 0 };
+            if (reversed) placed[0] = reflected_sum - placed[0] - size[0];
+            frame.position[child] = placed;
+            next_x += size[0] + gap;
+        }
+        line_top += line_height + gap;
     }
 }
 

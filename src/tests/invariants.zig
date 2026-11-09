@@ -104,6 +104,7 @@ const Generator = struct {
                 1 => ui.box(.{ .layout = self.layout(), .decoration = .{ .background = .rgb(0x404040) } }),
                 else => if (depth + 1 < Ui.max_depth) {
                     ui.open(self.container());
+                    if (self.random.uintLessThan(u8, 6) == 0) ui.wrapChildren();
                     self.children(ui, depth + 1);
                     ui.close();
                 },
@@ -174,6 +175,7 @@ fn flowCount(frame: *const Frame, parent: Ui.Index) u32 {
 }
 
 fn checkParent(frame: *const Frame, parent: Ui.Index) !void {
+    if (frame.flags[parent].wraps) return checkWrappingRow(frame, parent);
     const parent_layout = frame.layoutOf(parent);
     const along = parent_layout.direction.axis();
     const a = @intFromEnum(along);
@@ -223,6 +225,66 @@ fn checkParent(frame: *const Frame, parent: Ui.Index) !void {
             try std.testing.expect(frame.position[child][0] >= content_left - tolerance);
         }
         try std.testing.expect(frame.position[child][1] >= content_top - tolerance);
+    }
+}
+
+/// Each line fits the row unless it holds one child or the row scrolls,
+/// leaves free space only once its growing children are at their max, and
+/// lies below the line before it; every child starts inside the content box.
+fn checkWrappingRow(frame: *const Frame, row: Ui.Index) !void {
+    const row_layout = frame.layoutOf(row);
+    const gap = row_layout.child_gap;
+    const content_width = @max(0, frame.size[row][0] - row_layout.padding.total(.x));
+    const content_left = frame.position[row][0] + row_layout.padding.left;
+    const content_right = frame.position[row][0] + frame.size[row][0] - row_layout.padding.left;
+    const content_top = frame.position[row][1] + row_layout.padding.top;
+    const scrolls = frame.flags[row].scroll_x or frame.flags[row].scroll_y;
+
+    var line_first: ?Ui.Index = null;
+    var previous_line_bottom: f32 = -std.math.inf(f32);
+    var children = frame.children(row);
+    while (true) {
+        const next = children.next();
+        if (next) |child| if (frame.isFloating(child)) continue;
+        if (next == null or frame.starts_line[next.?]) {
+            if (line_first) |first| {
+                var line_width = -gap;
+                var line_count: u32 = 0;
+                var line_top = std.math.inf(f32);
+                var line_bottom = -std.math.inf(f32);
+                var line = frame.children(row);
+                line.next_child = first;
+                line.end = next orelse frame.subtree_end[row];
+                while (line.next()) |child| {
+                    if (frame.isFloating(child)) continue;
+                    line_width += frame.size[child][0] + gap;
+                    line_count += 1;
+                    line_top = @min(line_top, frame.position[child][1]);
+                    line_bottom = @max(line_bottom, frame.position[child][1] + frame.size[child][1]);
+                }
+                if (line_count > 1 and !scrolls) try std.testing.expect(line_width <= content_width + tolerance);
+                if (!scrolls) try std.testing.expect(line_top >= previous_line_bottom + gap - tolerance);
+                line = frame.children(row);
+                line.next_child = first;
+                line.end = next orelse frame.subtree_end[row];
+                while (line.next()) |child| {
+                    if (frame.isFloating(child)) continue;
+                    const sizing = frame.sizingOf(child, .x);
+                    if (line_width < content_width - tolerance and sizing.rule.grows() and sizing.amount > 0) {
+                        try std.testing.expect(frame.size[child][0] >= sizing.max - tolerance);
+                    }
+                    if (frame.flags[row].reversed) {
+                        try std.testing.expect(frame.position[child][0] + frame.size[child][0] <= content_right + tolerance);
+                    } else {
+                        try std.testing.expect(frame.position[child][0] >= content_left - tolerance);
+                    }
+                    try std.testing.expect(frame.position[child][1] >= content_top - tolerance);
+                }
+                previous_line_bottom = line_bottom;
+            }
+            line_first = next;
+        }
+        if (next == null) break;
     }
 }
 

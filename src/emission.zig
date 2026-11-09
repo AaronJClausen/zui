@@ -311,6 +311,7 @@ fn Emitter(comptime Ui: type) type {
         /// from the later start to the earlier end, so a reversed row's
         /// dividers sit in its gaps too.
         fn emitDividers(self: *Self, element: Ui.Index, border: *const style.Border, level: *const Level) void {
+            if (layout.wraps(Ui, self.frame, element)) return self.emitLineDividers(element, border, level);
             const frame = self.frame;
             const along: usize = @intFromEnum(frame.layoutOf(element).direction.axis());
             const across = 1 - along;
@@ -318,30 +319,73 @@ fn Emitter(comptime Ui: type) type {
             const widths = border.widths;
             const across_start = if (across == 0) bounds.x + widths.left else bounds.y + widths.top;
             const across_length = if (across == 0) bounds.width - widths.left - widths.right else bounds.height - widths.top - widths.bottom;
-            const thickness = border.between_children;
 
             var previous: ?[2]f32 = null;
             var child = element + 1;
             while (child < frame.subtree_end[element]) : (child = frame.subtree_end[child]) {
                 if (frame.isFloating(child)) continue;
-                const child_start = frame.position[child][along];
-                const child_end = child_start + frame.size[child][along];
+                const extent: [2]f32 = .{ frame.position[child][along], frame.position[child][along] + frame.size[child][along] };
                 if (previous) |previous_extent| {
-                    const gap_start = style.smaller(previous_extent[1], child_end);
-                    const gap_end = style.larger(previous_extent[0], child_start);
                     var origin: [2]f32 = undefined;
                     var size: [2]f32 = undefined;
-                    origin[along] = (gap_start + gap_end - thickness) / 2;
-                    size[along] = thickness;
+                    origin[along] = dividerStart(previous_extent, extent, border.between_children);
+                    size[along] = border.between_children;
                     origin[across] = across_start;
                     size[across] = across_length;
-                    const divider: style.Rect = .{ .x = origin[0], .y = origin[1], .width = size[0], .height = size[1] };
-                    if (!divider.intersect(level.clip).isEmpty()) {
-                        self.push(.{ .bounds = self.snap(divider), .id = frame.element_id[element], .z = level.z, .payload = .{ .rectangle = .{ .color = border.color, .corner_radius = .zero } } });
-                    }
+                    self.pushDivider(element, border, level, .{ .x = origin[0], .y = origin[1], .width = size[0], .height = size[1] });
                 }
-                previous = .{ child_start, child_end };
+                previous = extent;
             }
+        }
+
+        /// In a wrapping row, a divider between two children of a line is
+        /// as tall as the line, and one between two lines spans the row.
+        fn emitLineDividers(self: *Self, element: Ui.Index, border: *const style.Border, level: *const Level) void {
+            const frame = self.frame;
+            const bounds = self.rectOf(element);
+            const widths = border.widths;
+            const thickness = border.between_children;
+            var previous_line: ?[2]f32 = null;
+            var lines = layout.Lines(Ui).init(frame, element);
+            while (lines.next()) |line| {
+                var line_extent: [2]f32 = .{ std.math.inf(f32), -std.math.inf(f32) };
+                var children = line;
+                while (children.next()) |child| {
+                    line_extent[0] = style.smaller(line_extent[0], frame.position[child][1]);
+                    line_extent[1] = style.larger(line_extent[1], frame.position[child][1] + frame.size[child][1]);
+                }
+                if (previous_line) |previous_extent| self.pushDivider(element, border, level, .{
+                    .x = bounds.x + widths.left,
+                    .y = dividerStart(previous_extent, line_extent, thickness),
+                    .width = bounds.width - widths.left - widths.right,
+                    .height = thickness,
+                });
+                var previous_child: ?[2]f32 = null;
+                children = line;
+                while (children.next()) |child| {
+                    const extent: [2]f32 = .{ frame.position[child][0], frame.position[child][0] + frame.size[child][0] };
+                    if (previous_child) |previous_extent| self.pushDivider(element, border, level, .{
+                        .x = dividerStart(previous_extent, extent, thickness),
+                        .y = line_extent[0],
+                        .width = thickness,
+                        .height = line_extent[1] - line_extent[0],
+                    });
+                    previous_child = extent;
+                }
+                previous_line = line_extent;
+            }
+        }
+
+        /// Centered in the gap between two extents, in either order.
+        fn dividerStart(previous: [2]f32, next: [2]f32, thickness: f32) f32 {
+            const gap_start = style.smaller(previous[1], next[1]);
+            const gap_end = style.larger(previous[0], next[0]);
+            return (gap_start + gap_end - thickness) / 2;
+        }
+
+        fn pushDivider(self: *Self, element: Ui.Index, border: *const style.Border, level: *const Level, divider: style.Rect) void {
+            if (divider.intersect(level.clip).isEmpty()) return;
+            self.push(.{ .bounds = self.snap(divider), .id = self.frame.element_id[element], .z = level.z, .payload = .{ .rectangle = .{ .color = border.color, .corner_radius = .zero } } });
         }
     };
 }

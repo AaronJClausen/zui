@@ -79,7 +79,7 @@ Implemented so far:
   its window a few milliseconds after its theme file is saved.
 - **Stage 6, early:** a text that fits is laid out as one line without
   walking its words, and a whole-string cache makes a warm text one probe
-  instead of one per word: 1,000 warm texts lay out in about 92 µs. The
+  instead of one per word: 1,000 warm texts lay out in about 91 µs. The
   box tree of 4,096 boxes declares in about 50 µs and lays out and emits
   its commands in about 90 µs, both within their budgets. Static styles:
   `zui.static(zui.Style{ ... })` makes a style at comptime, and
@@ -104,7 +104,10 @@ Implemented so far:
   flow from the right, `.start` and a padding's `left` are on the right,
   floating anchors flip and text lines align right; `.mirrored = .no`
   keeps a subtree left to right, and `.direction = .right_to_left`
-  reverses one row.
+  reverses one row. With `.features = .{ .flex_wrap = true }`,
+  `ui.wrapChildren()` after a row's `open` moves each child that would
+  overflow it onto a new line, as CSS `flex-wrap`: each line grows and
+  shrinks its children on its own, and is as tall as its tallest child.
 - **Stage 3:** the renderer contract (`zuiSubmit`, the surfaces
   it draws into, the optional commands it draws), checked at compile time
   by `zui.checkRenderer`, and a `RenderCommand` union generated with

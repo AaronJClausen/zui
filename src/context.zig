@@ -208,7 +208,9 @@ pub const ElementFlags = packed struct(u16) {
     /// Places its children from the right: mirrored, or `right_to_left`,
     /// but not both. Set with `mirrored`.
     reversed: bool = false,
-    _: u1 = 0,
+    /// A row that moves the children that overflow it onto new lines,
+    /// set by `wrapChildren`.
+    wraps: bool = false,
 
     pub fn clips(self: ElementFlags) bool {
         return self.clip_x or self.clip_y;
@@ -219,13 +221,14 @@ pub const ElementFlags = packed struct(u16) {
     }
 
     /// Any flag that makes emission record the element: everything but
-    /// the layout direction and mirroring.
+    /// the layout direction, mirroring and wrapping.
     pub fn emits(self: ElementFlags) bool {
-        var without_direction = self;
-        without_direction.top_to_bottom = false;
-        without_direction.mirrored = false;
-        without_direction.reversed = false;
-        return @as(u16, @bitCast(without_direction)) != 0;
+        var without_flow = self;
+        without_flow.top_to_bottom = false;
+        without_flow.mirrored = false;
+        without_flow.reversed = false;
+        without_flow.wraps = false;
+        return @as(u16, @bitCast(without_flow)) != 0;
     }
 
     pub fn scrolls(self: ElementFlags, axis: style.Axis) bool {
@@ -390,6 +393,10 @@ pub fn Context(comptime config: Config) type {
             floating_index: [max_elements]Index,
             /// The extent of an element's children plus padding, for scrolling.
             content_size: [max_elements][2]f32,
+            /// True for the first child of each line of a wrapping row, set by
+            /// the layout. Written only for a wrapping row's children in the
+            /// flow.
+            starts_line: [if (features.flex_wrap) max_elements else 0]bool,
 
             /// The configs an element set itself, copied in declaration.
             layouts: [max_elements]style.Layout,
@@ -1042,6 +1049,26 @@ pub fn Context(comptime config: Config) type {
             frame.subtree_end[self.open_stack[self.depth]] = @intCast(frame.element_count);
         }
 
+        /// Makes the element just opened, if it is a row, move each child
+        /// that would overflow a line onto a new one. Lines are as tall as
+        /// their tallest child and `child_gap` apart, and `child_alignment`
+        /// places each child within its line and the lines as a group. A
+        /// column does not wrap. Breakpoints are plain code:
+        ///
+        /// ```zig
+        /// ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 8 } });
+        /// ui.wrapChildren();
+        /// for (app.tags) |tag| widgets.chip(ui, tag);
+        /// ui.close();
+        /// ```
+        pub fn wrapChildren(self: *Self) void {
+            comptime requireFeature(.flex_wrap, "wrapChildren()");
+            const frame = self.declaring();
+            if (self.dropped_depth > 0) return;
+            const flags = &frame.flags[self.open_stack[self.depth - 1]];
+            flags.wraps = !flags.top_to_bottom;
+        }
+
         /// A leaf element: `open` and `close` in one call.
         pub inline fn box(self: *Self, element: Element) void {
             _ = self.leaf(element, .none, 0);
@@ -1454,7 +1481,6 @@ pub fn Context(comptime config: Config) type {
             return self.memory.input.isHovered(element_id.hash);
         }
 
-        /// A pointer whose press began on this element is still down.
         /// What pointers did to `element_id` this frame, by dragging,
         /// pinching or rotating it, summed. No gesture is recognized yet,
         /// so it is null.
@@ -1469,6 +1495,7 @@ pub fn Context(comptime config: Config) type {
             if (!@field(features, @tagName(feature))) @compileError("zui: " ++ api ++ " needs Config.features." ++ @tagName(feature) ++ " = true");
         }
 
+        /// A pointer whose press began on this element is still down.
         pub fn pressed(self: *const Self, element_id: Id) bool {
             return !element_id.isNone() and self.memory.input.isPressed(element_id.hash);
         }

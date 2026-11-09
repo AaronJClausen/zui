@@ -209,6 +209,29 @@ fn composeHeader(app: *App, ui: *Ui) void {
 
 In Arabic or Hebrew the label sits on the right, 12 units in, the send button on the left, and the phone number still reads left to right.
 
+<a id="wrap"></a>
+
+### Wrapping rows · *shipped*
+
+With `.features = .{ .flex_wrap = true }`, calling `ui.wrapChildren()` right after a row's `open` moves each child that would overflow the row onto a new line, as CSS `flex-wrap` does. Each line grows and shrinks its own children, so a `.grow` chip fills the rest of its line, and a child wider than the row gets a line to itself and shrinks to fit. A line is as tall as its tallest child, lines are `child_gap` apart, and `child_alignment.y` places the lines as a group and each child within its line. The row's fit width is one line, but it narrows to its widest child, and its height follows its lines, so it scrolls like any other content. Dividers go between the children of a line and between lines. Breakpoints need nothing more: branch on `ui.viewport()` or `rectOf` in your own code. Without the feature, `wrapChildren` fails to compile, and none of this is in your binary.
+
+`src/ui/tags.zig`
+
+```zig
+fn tagBar(app: *App, ui: *Ui) void {
+    ui.open(.{ .layout = .{
+        .sizing = .{ .width = .grow },
+        .padding = .all(8),
+        .child_gap = 6,
+    } });
+    defer ui.close();
+    ui.wrapChildren();
+    for (app.tags, 0..) |tag, index| tagChip(ui, .indexed("tag", @intCast(index)), tag);
+}
+```
+
+In a wide window the tags sit on one line; narrow it and they flow onto as many lines as they need, each line starting at the left edge (the right, in Arabic).
+
 <a id="static-styles"></a>
 
 ### Static styles · *shipped*
@@ -855,6 +878,7 @@ Some of the messages you'll see:
 
 ```text
 error: zui: manipulation() needs Config.features.gestures = true
+error: zui: wrapChildren() needs Config.features.flex_wrap = true
 error: zui: limits.state_slots must be a power of two, got 1000
 error: zui: text_unknown_declaration.Text declares unknown `zui_threadsafe`
 error: zui: state type state_type_too_large.History is 80 bytes, but a state slot holds at most 64; store an index into your own storage instead
@@ -1632,7 +1656,7 @@ These names compile, but they don't do anything yet. This list is from `ARCHITEC
 
 - **Gradients, shadows, backdrop blur, transforms, materials** *(declared only)*: The variants exist in `RenderCommand` when a renderer declares them, but `Decoration` has no field that produces them, so nothing is emitted or lowered. Items G1–G6, stage 8.
 - **`features.semantics` and `features.gestures`** *(declared only)*: `Frame.semantics()` is always empty and `ui.manipulation` always returns null. Accessibility is V2; gestures (arbitration, momentum, custom recognizers) are I5.
-- **`features.flex_wrap` and `features.safety_sweeps`** *(declared only)*: The flags exist and gate their API, but they don't change behaviour yet. Wrap is L7; sweeps are V3.
+- **`features.safety_sweeps`** *(declared only)*: The flag exists, but it doesn't change behaviour yet. Sweeps are V3.
 - **Images' tint and corner radius in the backends**: The `image` command carries them, but zui-raylib and zui-sokol still draw every image untinted and square. Item C10.
 - **Extended color**: Colors are RGBA8 only. `zui.ExtendedColor` for HDR is G6.
 - **Still to come**: Drag and drop between elements (I1), a visual inspector `zui_debug` (V1), motion, multi-line text editing, skins, and more hosts (macOS, Linux, web).

@@ -230,7 +230,7 @@ pub const Limits = struct {
 pub const Features = struct {
     semantics: bool = false,                          // the accessibility tree (§13.5)
     gestures: bool = true,                            // pan, zoom, drag, long press, double tap (§11.4)
-    flex_wrap: bool = false,                          // `Layout.wrap` (§8.1)
+    flex_wrap: bool = false,                          // `wrapChildren()` (§8.1)
     safety_sweeps: bool = std.debug.runtime_safety,   // invariant checks at the end of `endFrame` (§20.1)
     /// The tracer contract (§16.5). `void` compiles tracing out.
     Tracer: type = void,
@@ -245,7 +245,7 @@ pub const Features = struct {
 | memory plan | every limit, every payload type | the offset of every array in the reservation, and `required_bytes`, as constants (§5) |
 | `RenderCommand` | `commands`, `ImageHandle`, `CustomData`, `MaterialHandle`, `Color` | a union with exactly the variants this renderer draws (§13.1) |
 | `FrameRecord`, `Deliveries`, `SourceField` | `Sources` | one delivery field per source, and a `FieldEnum` for `ui.source` (§14) |
-| API surface | payload types, `Text`, features | `image`, `custom`, `text`, `semantics` and the gesture queries exist only when their type or feature is set; calling one that does not is a compile error naming the field to set |
+| API surface | payload types, `Text`, features | `image`, `custom`, `text`, `semantics`, `wrapChildren` and the gesture queries exist only when their type or feature is set; calling one that does not is a compile error naming the field to set |
 | contract checks | `Text`, `Sources`, `Tracer` | run once, at instantiation, with exact messages (§16.1) |
 
 ### 4.2 Validation
@@ -259,7 +259,8 @@ compile-error test:
 - `"zui: commands includes .material but MaterialHandle is void"`;
 - each API whose feature is off, naming the field to set:
   `"zui: semantics() needs Config.features.semantics = true"`,
-  `"zui: manipulation() needs Config.features.gestures = true"`;
+  `"zui: manipulation() needs Config.features.gestures = true"`,
+  `"zui: wrapChildren() needs Config.features.flex_wrap = true"`;
 - every contract violation, in the form of §16.1.
 
 Limit names in diagnostics come from `std.meta.FieldEnum(Limits)`, so a
@@ -661,7 +662,6 @@ pub const Layout = struct {
     padding: Edges = .{},                    // logical: `left` is the start side, on the right when mirrored
     child_gap: f32 = 0,                      // between adjacent children, not around them
     child_alignment: Alignment2 = .{},       // where the children as a group sit, on each axis
-    wrap: bool = false,                      // features.flex_wrap
     mirrored: Mirrored = .inherit,           // .yes, .no; .inherit: the parent's, and the root the environment's
 };
 
@@ -730,21 +730,40 @@ The meanings, which follow CSS where CSS has an answer:
   which is two bytes and would make every `Layout` four bytes larger, as
   the aspect ratio's field did. Bidirectional text inside a run is the
   text contract's (§9.4).
-- **Wrap** moves children that overflow a row onto new lines, for parents
-  that opt in, in a pass between distribution and positioning.
+- **Wrap** moves each child that would overflow a row onto a new line,
+  for a row that opts in with `ui.wrapChildren()` after its `open`
+  (§10.1), with `features.flex_wrap` on; without it the call is a compile
+  error, `"zui: wrapChildren() needs Config.features.flex_wrap = true"`,
+  and none of the work below is compiled. A child goes on the current
+  line if it fits at the size its rule asks for before free space is
+  handed out (a `grow_from_min` child at its minimum, a `percent` one
+  resolved), and each line then grows and shrinks its children as a row
+  would, so a child wider than the row takes a line of its own and
+  shrinks to it. A wrapping row is as wide as its children on one line
+  but no narrower than its widest child's minimum, and as tall as its
+  lines, each as tall as its tallest child and `child_gap` apart. A
+  growing height stretches to its line. `child_alignment.y` places the
+  lines as a group and each child within its line, and `.x` each line
+  along the row; mirroring reflects them as it does a row. A column does
+  not wrap, since its heights would have to settle before its widths.
+  Dividers sit between the children of a line, as tall as the line, and
+  between lines, across the row. Wrap is a call rather than a `Layout`
+  field because a field's value is not known at compile time, so it
+  could not fail as a gated API does, and because `Layout` has no byte
+  free: a field would make it 60 bytes, the size that made the box tree's
+  `endFrame` 6.7% slower. The row keeps it in an element flag.
 
 ### 8.2 Passes
 
 | # | Pass | Order | Work |
 |---|---|---|---|
 | 0 | measure text | each text | look up whole strings, then segments, through the caches (§9.3) |
-| 1 | fit widths | reverse | each `fit` width from its children, plus padding and gaps; each element adds itself into its parent, so no child list is walked |
-| 2 | distribute widths | forward | fixed and percent first, then free space by weight, then shrinking |
+| 1 | fit widths | reverse | each `fit` width from its children, plus padding and gaps; each element adds itself into its parent, so no child list is walked; a wrapping row walks its children instead |
+| 2 | distribute widths | forward | fixed and percent first, then free space by weight, then shrinking; a wrapping row breaks its children into lines first, then distributes each line |
 | 3 | wrap text | each text | lines from the widths pass 0 recorded, looking up a long cached string's segments only if it wraps |
-| 4 | fit heights | reverse | as 1; `aspect_ratio` heights, and images' natural heights, from the settled widths |
-| 5 | distribute heights | forward | as 2 |
-| 5½ | wrap rows | forward | only for `wrap` parents, compiled out without `features.flex_wrap` |
-| 6 | position | forward | a cursor per parent from its content box, alignment, direction and scroll offset, reflected across the parent when it is mirrored; floating elements from their targets (§8.4) |
+| 4 | fit heights | reverse | as 1; `aspect_ratio` heights, and images' natural heights, from the settled widths; a wrapping row sums its lines |
+| 5 | distribute heights | forward | as 2; a wrapping row stretches each line's growing children to the line |
+| 6 | position | forward | a cursor per parent from its content box, alignment, direction and scroll offset, reflected across the parent when it is mirrored; a wrapping row line by line; floating elements from their targets (§8.4) |
 | 7 | emit | forward, then by layer | commands, clips, hit regions, semantics (§13) |
 
 Widths settle before heights because wrapping needs the width and the
@@ -936,6 +955,7 @@ pub fn box(self: *Self, element: Element) void                                  
 pub fn text(self: *Self, content: []const u8, style: TextStyle) void                  // Text != void
 pub fn image(self: *Self, image: Image, element: Element) void                        // ImageHandle != void
 pub fn custom(self: *Self, data: config.CustomData, element: Element) void            // CustomData != void
+pub fn wrapChildren(self: *Self) void                    // the open row wraps (§8.1); features.flex_wrap
 
 pub const Image = struct {
     handle: config.ImageHandle,

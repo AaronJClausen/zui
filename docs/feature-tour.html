@@ -564,6 +564,24 @@ fn composeHeader(app: *App, ui: *Ui) void {
         <p>In Arabic or Hebrew the label sits on the right, 12 units in, the send button on the left, and the phone number still reads left to right.</p>
       </article>
 
+      <article class="feature" id="wrap" data-title="Wrapping rows">
+        <div class="feature-head"><h3>Wrapping rows</h3><span class="pill shipped">Shipped</span></div>
+        <p>With <code class="z">.features = .{ .flex_wrap = true }</code>, calling <code class="z">ui.wrapChildren()</code> right after a row's <code class="z">open</code> moves each child that would overflow the row onto a new line, as CSS <code>flex-wrap</code> does. Each line grows and shrinks its own children, so a <code class="z">.grow</code> chip fills the rest of its line, and a child wider than the row gets a line to itself and shrinks to fit. A line is as tall as its tallest child, lines are <code class="z">child_gap</code> apart, and <code class="z">child_alignment.y</code> places the lines as a group and each child within its line. The row's fit width is one line, but it narrows to its widest child, and its height follows its lines, so it scrolls like any other content. Dividers go between the children of a line and between lines. Breakpoints need nothing more: branch on <code class="z">ui.viewport()</code> or <code class="z">rectOf</code> in your own code. Without the feature, <code class="z">wrapChildren</code> fails to compile, and none of this is in your binary.</p>
+<script type="text/x-zig" data-file="src/ui/tags.zig">
+fn tagBar(app: *App, ui: *Ui) void {
+    ui.open(.{ .layout = .{
+        .sizing = .{ .width = .grow },
+        .padding = .all(8),
+        .child_gap = 6,
+    } });
+    defer ui.close();
+    ui.wrapChildren();
+    for (app.tags, 0..) |tag, index| tagChip(ui, .indexed("tag", @intCast(index)), tag);
+}
+</script>
+        <p>In a wide window the tags sit on one line; narrow it and they flow onto as many lines as they need, each line starting at the left edge (the right, in Arabic).</p>
+      </article>
+
       <article class="feature" id="static-styles" data-title="Static styles">
         <div class="feature-head"><h3>Static styles</h3><span class="pill shipped">Shipped</span></div>
         <p><code class="z">zui.static</code> builds a <code class="z">Style</code> at comptime and stores it in read-only memory. Elements reference it instead of copying it, so it costs one pointer per element. A <code class="z">layout</code> or <code class="z">decoration</code> set beside <code class="z">style</code> replaces the style's. This is what brought 4,096 styled boxes down to about 28 µs to declare.</p>
@@ -1119,6 +1137,7 @@ pub const Ui = zui.Context(.{
         <p>Some of the messages you'll see:</p>
         <ul class="errors">
           <li><span>error:</span> zui: manipulation() needs Config.features.gestures = true</li>
+          <li><span>error:</span> zui: wrapChildren() needs Config.features.flex_wrap = true</li>
           <li><span>error:</span> zui: limits.state_slots must be a power of two, got 1000</li>
           <li><span>error:</span> zui: text_unknown_declaration.Text declares unknown `zui_threadsafe`</li>
           <li><span>error:</span> zui: state type state_type_too_large.History is 80 bytes, but a state slot holds at most 64; store an index into your own storage instead</li>
@@ -1808,7 +1827,7 @@ fn present(renderer: *Renderer, surface: zui.Surface, frame: *const Ui.Frame) !v
       <ul class="gap-list">
         <li><b>Gradients, shadows, backdrop blur, transforms, materials <span class="pill partial">Declared only</span></b><span>The variants exist in <code class="z">RenderCommand</code> when a renderer declares them, but <code class="z">Decoration</code> has no field that produces them, so nothing is emitted or lowered. Items G1–G6, stage 8.</span></li>
         <li><b><code class="z">features.semantics</code> and <code class="z">features.gestures</code> <span class="pill partial">Declared only</span></b><span><code class="z">Frame.semantics()</code> is always empty and <code class="z">ui.manipulation</code> always returns null. Accessibility is V2; gestures (arbitration, momentum, custom recognizers) are I5.</span></li>
-        <li><b><code class="z">features.flex_wrap</code> and <code class="z">features.safety_sweeps</code> <span class="pill partial">Declared only</span></b><span>The flags exist and gate their API, but they don't change behaviour yet. Wrap is L7; sweeps are V3.</span></li>
+        <li><b><code class="z">features.safety_sweeps</code> <span class="pill partial">Declared only</span></b><span>The flag exists, but it doesn't change behaviour yet. Sweeps are V3.</span></li>
         <li><b>Images' tint and corner radius in the backends</b><span>The <code class="z">image</code> command carries them, but zui-raylib and zui-sokol still draw every image untinted and square. Item C10.</span></li>
         <li><b>Extended color</b><span>Colors are RGBA8 only. <code class="z">zui.ExtendedColor</code> for HDR is G6.</span></li>
         <li><b>Still to come</b><span>Drag and drop between elements (I1), a visual inspector <code>zui_debug</code> (V1), motion, multi-line text editing, skins, and more hosts (macOS, Linux, web).</span></li>

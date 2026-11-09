@@ -169,4 +169,5 @@ test {
     _ = @import("tests/styles.zig");
     _ = @import("tests/segmentation.zig");
     _ = @import("tests/mirroring.zig");
+    _ = @import("tests/wrapping.zig");
 }

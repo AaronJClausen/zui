@@ -19,6 +19,7 @@ pub const Ui = zui.Context(.{
         .measure_cache_entries = 256,
     },
     .Text = FixedMetricsText,
+    .features = .{ .flex_wrap = true },
 });
 
 pub const frame_interval_ns = 16 * std.time.ns_per_ms;

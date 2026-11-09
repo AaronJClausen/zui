@@ -219,7 +219,8 @@ natural sizes; and dividers between children, `Border.between_children`,
 and images' tint and corner radius in the `image` command; and the
 floating options: targets declared later, `Floating.capture` and
 `Floating.clip`; and right-to-left layout: `Layout.mirrored`, inherited
-from the environment's direction, and `Direction.right_to_left`.
+from the environment's direction, and `Direction.right_to_left`; and
+wrapping rows, `ui.wrapChildren()` behind `features.flex_wrap`.
 
 The code and the spec still differ in these places, each closed by the
 roadmap item named:
@@ -231,7 +232,7 @@ roadmap item named:
 | zui-raylib and zui-sokol draw an image untinted and square | a renderer multiplies the `image` command's tint into it and rounds its corners | `../zui-raylib/src/root.zig`, `../zui-sokol/src/renderer.zig` | C10 |
 | `Widgets(Ui)` with a `Theme` struct | `Widgets(Ui, Skin)` | `zui_widgets/` | K5 |
 | `Frame` exposes its storage arrays and `rectOf` | `Frame.inspect(index)` | `src/context.zig` | V1 |
-| `Features` has every field and gates its API, but `Frame.semantics()` is always empty, `manipulation` always null, and `flex_wrap` and `safety_sweeps` change nothing | semantics, gestures, wrap and safety sweeps, each behind its field | `src/context.zig`, `src/layout.zig` | V2, I5, L7, V3 |
+| `Features` has every field and gates its API, but `Frame.semantics()` is always empty, `manipulation` always null, and `safety_sweeps` changes nothing | semantics, gestures and safety sweeps, each behind its field | `src/context.zig` | V2, I5, V3 |
 
 Unchanged in shape: element storage in pre-order structure-of-arrays, the
 layout passes, the segment and string caches, ids, the state table, the

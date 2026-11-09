@@ -27,7 +27,7 @@ Each item says:
 | stage 3 | the renderer contract and the generated commands (C1); the host contract and `RecordBuilder` (C2); the conformance suites (C3); `Features` (C7); `zui_app` (C4); the raylib adapter host (H1) | done; the backends are renderers and pass the renderer suite in CI, raylib's host passes the host suite, and the demo runs through `zui_app`, presenting its first frame 288 ms after the process starts; lowering comes with stage 8's commands |
 | stage 4 | the Windows host (H2), with dropped files and lifecycle events in the record; the system material (H8); `zui_app` with the application's own text contract (C9) | done; zui-sokol's tour runs on it unchanged, through `zui_app`, and idles at 0% CPU, and the same code shows Mica or a solid background |
 | stage 5 | relay (F2); `zui_wire` (F3); replay in `zui_testing` (F4); the wire host, renderer and client (F5); file watching as a source (F6) | done; editing a theme file restyles a running window on the Windows host within 4 ms; a recorded session of zui-sokol's tour replays to identical commands without starting any work, zui-sokol's tour goes over the wire at a hundredth of its frames' whole size, but for the screen that moves every box, and it runs in one process and draws in another on the Windows host, its keys going back |
-| stage 6, early | the single-line fast path (T1), the whole-string cache (T2), static styles (L8), the box tree's layout and emission (P4) and declaration (P5), line-break segmentation (T4), the grow basis (L1), aspect ratio and natural sizes (L2), dividers and decorated images (L3), floating options (L4), right-to-left layout (L6) | done; the box tree's and warm text's budgets met: the box tree declares in 48.9 µs and lays out and emits in 89.2 µs, warm text in 91.7 µs; a box tree of static styles declares in 28.0 µs |
+| stage 6, early | the single-line fast path (T1), the whole-string cache (T2), static styles (L8), the box tree's layout and emission (P4) and declaration (P5), line-break segmentation (T4), the grow basis (L1), aspect ratio and natural sizes (L2), dividers and decorated images (L3), floating options (L4), right-to-left layout (L6), wrap (L7) | done; the box tree's and warm text's budgets met: the box tree declares in 48.9 µs and lays out and emits in 89.2 µs, warm text in 90.5 µs; a box tree of static styles declares in 28.0 µs; C10, the backends drawing images' tint and corner radius, remains |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
@@ -39,13 +39,15 @@ P5, against the budgets of SPEC.md §20.2:
 | Scenario | Declaration | `endFrame` | Budget |
 |---|---|---|---|
 | 4,096 boxes, depth 8 | 48.9 µs | 89.2 µs | layout and emission < 100 µs, declaration < 55 µs: both met |
-| 1,000 texts, warm caches | 16.0 µs | 91.7 µs | < 120 µs: met |
+| 1,000 texts, warm caches | 15.2 µs | 90.5 µs | < 120 µs: met |
 | 4,096 boxes of static styles | 28.0 µs | 88.2 µs | |
 | 4,000 children of one parent | 54.0 µs | 65.8 µs | |
 
 These are the fastest of five settled runs of `zig build bench --
 --check-targets`, whose fastest box-tree frames were 48.9 to 50.2 µs for
-declaration and 89.2 to 93.5 µs for layout and emission. The first run
+declaration and 89.2 to 93.5 µs for layout and emission; warm text's
+row is from L7's runs, after it had drifted to 101.7 µs over L2 to L6 on
+the same instructions. The first run
 after a build is often slower here (68.6 µs once), so judge by a run that
 is not the first. The machine runs slower than when `a6d8e34` was
 measured at 101.2 µs and 52.2 µs: `afacf87`, before P4, took 111.0 µs
@@ -60,12 +62,14 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
-| L7. Wrap | 6 | `src/layout.zig` | | |
 | C10. The backends draw images' tint and corner radius | 6 | `../zui-raylib`, `../zui-sokol`, `zui_testing/` | | |
 | I5. Gestures | 7 | `src/interaction.zig`, `src/input.zig`, `zui_testing/` | | |
 | I1. Drag and drop between elements | 7 | `src/interaction.zig`, `src/state.zig`, `zui_testing/` | I5 | |
 | G1. Gradients, shadows and glow | 8 | `src/style.zig`, `src/emission.zig`, `zui_testing/` | | |
 | G2. Backdrop blur | 8 | `src/style.zig`, `src/emission.zig`, `zui_testing/` | G1 | |
+| G3. Transforms | 8 | `src/style.zig`, `src/emission.zig`, `src/interaction.zig`, `zui_testing/` | G1 | |
+| G5. Materials | 8 | `src/context.zig`, `src/emission.zig`, `zui_testing/`, a renderer | G1 | |
+| G6. HDR and wide gamut | 8 | `src/context.zig`, `src/commands.zig`, `../zui-host` | G1 | |
 
 After the queue come the rest of stage 8 and stages 9 to 11 in the order of SPEC.md §21. They join the queue as it runs short.
 
@@ -131,6 +135,71 @@ Things to know:
 ---
 
 ## Done
+
+### L7. Wrap
+
+**Plan.** Wrapping for rows that opt in, compiled out without
+`features.flex_wrap`, which C7 added; asking for it with the feature off
+fails as a gated API does. **Done when:** golden tests for wrapping under
+each alignment, and with the feature off, R1 counts are unchanged.
+**Spec.** §8.1, §8.2.
+
+A row wraps when `ui.wrapChildren()` is called after its `open`, not by
+a `Layout.wrap` field as SPEC.md had it: a field's value is not known at
+compile time, so it could not fail with
+`"zui: wrapChildren() needs Config.features.flex_wrap = true"`, and
+`Layout` has no byte free, so a field would make it 60 bytes, the size
+that made the box tree's `endFrame` 6.7% slower in L2. The call sets an
+element flag, the last free bit, and a column ignores it. SPEC.md §8.1
+and §8.2 now say so, and that the work is spread over the existing
+passes rather than in a pass of its own between distribution and
+positioning, where a fit row's height could no longer follow its lines.
+
+Pass 1 sizes a wrapping row from its children: as wide as one line, no
+narrower than its widest child's minimum. Pass 2 breaks the children into
+lines at the size each rule asks for before free space is handed out,
+recording each line's first child in `Frame.starts_line`, an array that
+is empty without the feature, then grows or shrinks each line as a row,
+so a child wider than the row takes a line of its own and shrinks to it.
+Pass 4 makes the row as tall as its lines, each as tall as its tallest
+child and `child_gap` apart; pass 5 stretches a growing height to its
+line; pass 6 places line by line, `child_alignment.y` placing the lines
+as a group and each child in its line, `.x` each line along the row,
+and reflects them when the row is mirrored. Dividers sit between the
+children of a line, as tall as the line, and between the lines, across
+the row. Each step is behind `features.flex_wrap` and out of line, so a
+frame that does not wrap pays one flag test per parent, and nothing
+without the feature.
+
+Tests: every alignment of a two-line row, against the formula and once by
+hand, and mirrored, the row reflected; growing children sharing each
+line's free space; a text wider than the row on a line of its own,
+wrapping; a fit row as wide as one line, narrowing in a narrower column;
+a growing height stretched to its line; a floating child outside the
+lines; a column that does not wrap; a gallery scrolling through its lines;
+dividers in a line and between lines; and the compile error. The test
+context turns the feature on, and the randomized trees wrap one container
+in six, checking that each line fits unless it holds one child, leaves
+space only when its growing children are at their max, and lies below
+the one before, and still mirror exactly.
+
+`zig build counts` against `0bd3ac2`, in a local Docker container, with
+the feature off as in every benchmark: every declaration within ±2
+instructions; warm text's `endFrame` unchanged (1,036,572), and every
+other text scenario too; the box tree's −0.28% (1,261,249 to 1,257,778),
+the documents view's −0.14%, 4,000 children's +0.06%, depth 64's −0.02%,
+from `grow`, `growFromMin` and `shrink` taking the children to share
+rather than the parent. Sharing the rest of distribution's steps with
+the wrapping path had cost the box tree +1.47%, so `distribute` keeps
+its own. `zig build bench-compare -- 0bd3ac2` (6 rounds): warm text's
+`endFrame` −9.8% (101.4 to 91.4 µs) on the same instructions, back from
+the drift of L2 to L6; the box tree's +1.3% and the static-styled tree's
++1.2%, on fewer instructions; none called slower. `zig build bench --
+--check-targets`, over six runs, met every budget in five: the box tree
+declares in 49.8 to 51.0 µs and lays out and emits in 93.6 to 95.0 µs,
+warm text in 90.5 to 91.2 µs; one run's box-tree declaration came out at
+65.3 µs, its other scenarios slower alike, on code this item does not
+change.
 
 ### L6. Right-to-left layout
 
@@ -1886,20 +1955,6 @@ in CI.
 
 **Spec.** §10.1, §13.1, §16.2.
 
-### L7. Wrap
-
-**Plan.** A wrap pass between distribution and positioning, for parents
-that opt in, compiled out without `features.flex_wrap`, which C7 added.
-Breakpoints are plain code over `ui.viewport()` or `rectOf`. Setting
-`Layout.wrap` with the feature off must fail as a gated API does, naming
-the field; a field's value is not always known at compile time, so this
-item decides how (SPEC.md §8.1 records it).
-
-**Done when:** golden tests for wrapping under each alignment, and with
-the feature off, R1 counts are unchanged.
-
-**Spec.** §8.1, §8.2.
-
 ---
 
 ## Stage 7: gestures
@@ -2102,6 +2157,7 @@ Deliberate, and each a reason to choose zui:
 | An element's switches | `?bool`, null meaning false, so that their defaults fold away; written as booleans (P5) |
 | Line-break segmentation | the text contract's `zuiSegment`, one paragraph at a time; spaces before a break hang (T4) |
 | Aspect ratio (L2) | a height rule, `.aspectRatio(r)`, not a `Layout` field, which made every layout eight bytes larger and declaration 6.6% slower; neither stretched nor grown by its parent; on a width, or not positive, the content's size |
+| Wrap (L7) | `ui.wrapChildren()` after a row's `open`, gated by `features.flex_wrap` with a compile error, not a `Layout.wrap` field, whose value is not known at compile time and which would make `Layout` four bytes larger; a column ignores it; lines break at each child's size before free space, then grow and shrink as rows; lines are as tall as their tallest child and `child_gap` apart; `child_alignment.y` places the lines and each child in its line; dividers between a line's children and between lines |
 | Right-to-left layout (L6) | `Layout.mirrored: zui.Mirrored` (`.inherit`, `.yes`, `.no`), one byte rather than a `?bool`, which would make every `Layout` four bytes larger; inherited, the root's from the environment's `direction`; a mirrored or `right_to_left` element, not both, reflects its children across its box, so padding's `left` is the start side, alignment and floating anchors and offsets mirror, and a text's `.start` and `.end` swap; `right_to_left` covers the element's own children only, as `row-reverse`; a reversed scroller's offset grows to the left and takes the wheel's physical delta reversed; positions and borders stay physical; found by the position pass, which starts again mirroring at the first parent that mirrors, so other frames pay nothing |
 | Floating options (L4) | `capture = false` gives the floating element no hit region of its own, while interactive elements inside it keep theirs; `.clip = .target` cuts it off where its target's children are, merged with its own clip into one pair pushed in its layer before it draws; a later target places the subtree again after pass 6, in declaration order, and a target inside the subtree falls back to the parent; `capture` and `clip` are copied into the element's flags, so emission reads no floating config for other elements |
 | A border inside its element's clip (L4) | emitted before the element's own `clip_end`, which leaves it whole since it lies in the element's box, so a floating element's merged clip also cuts off its border with one clip pair |
