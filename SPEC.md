@@ -260,6 +260,7 @@ compile-error test:
 - each API whose feature is off, naming the field to set:
   `"zui: semantics() needs Config.features.semantics = true"`,
   `"zui: manipulation() needs Config.features.gestures = true"`,
+  `"zui: doubleTapped() needs Config.features.gestures = true"`,
   `"zui: wrapChildren() needs Config.features.flex_wrap = true"`;
 - every contract violation, in the form of §16.1.
 
@@ -1160,10 +1161,16 @@ Queries that merge devices into what the user meant:
 |---|---|
 | `clicked(id)` | click, tap, Enter/Space, `invoke` action |
 | `manipulation(id) ?Manipulation` | drag, pinch, rotate, wheel, momentum, `scroll` action: translation, scale, rotation and pivot, summed over the frame; `translation` moves the content with the pointer, and against the wheel |
-| `contextRequested(id)` | right click, long press, the menu key |
-| `dismissed(id)` | Escape, back, gamepad B |
-| `adjusted(id) ?i32` | arrows on a focused slider, a dial, `set_value` action |
-| `navigated(id) ?Direction` | arrows, D-pad |
+| `contextRequested(id)` | right click, long press, the menu key on the focused element |
+| `doubleTapped(id)` | a second tap within the double-tap window, on an element with `double_tap` |
+| `dismissed(id)` | Escape, back, gamepad B, while `id` or an element in its focus scope is focused |
+| `adjusted(id) ?i32` | arrows on a focused slider, a dial, `set_value` action: right and up +1, left and down −1 |
+| `navigated(id) ?NavigationDirection` | arrows, D-pad, on the focused element: `left`, `right`, `up` or `down`, the last this frame |
+
+`navigated` returns a `NavigationDirection`, not `Layout`'s `Direction`,
+which has no up or left. Only `doubleTapped` and `manipulation` need
+`features.gestures`; the others come from keys and buttons too, so a
+long press is the only part of `contextRequested` the feature adds.
 
 ### 11.4 Gestures
 
@@ -1211,7 +1218,14 @@ stays with what it pressed, unless the container declares `pan` itself.
   `pivot` is where the centroid ended. When one lifts, the other pans
   the region if it pans. A release nothing claimed is a tap.
 - **Delays are opt-in and local.** Only an element with `double_tap`
-  delays its single tap until the double-tap window passes.
+  delays its single tap until the double-tap window passes
+  (`Gestures.double_tap_seconds`, 0.3 s from the first tap's release to
+  the second's); it is then `clicked`, and a second tap in time is
+  `doubleTapped` instead. A press on an element with `long_press` held
+  within the slop for `Gestures.long_press_seconds` (0.5 s) is
+  `contextRequested` and not a tap. Both are timed by the events'
+  instants and the record's `now`, and set the next frame's deadline
+  (§6.6), so a replay fires them in the same frames.
 - **Momentum** is state in the state table under the element, so it ends
   when the element is no longer declared, and it sets the next frame's
   deadline (§6.6).

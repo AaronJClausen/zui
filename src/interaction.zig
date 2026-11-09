@@ -1,6 +1,7 @@
 const std = @import("std");
 const style = @import("style.zig");
 const input = @import("input.zig");
+const Instant = @import("record.zig").Instant;
 
 pub const WidgetState = enum { idle, hovered, pressed, focused, disabled };
 
@@ -40,7 +41,13 @@ pub const Gestures = packed struct(u8) {
     pan: Pan = .none,
     /// Scale and rotation by two pointers, and the pan of their centroid.
     zoom: bool = false,
-    _: u5 = 0,
+    /// A press held still for `long_press_seconds` asks for its context
+    /// menu, `contextRequested`, instead of tapping.
+    long_press: bool = false,
+    /// A second tap within `double_tap_seconds` is `doubleTapped`; a single
+    /// tap is `clicked` only once that window has passed.
+    double_tap: bool = false,
+    _: u3 = 0,
 
     /// The axes an element pans on.
     pub const Pan = enum(u2) {
@@ -57,6 +64,9 @@ pub const Gestures = packed struct(u8) {
     /// How far, in layout units, a pointer moves from where it pressed
     /// before it pans: a shorter move is still a tap.
     pub const touch_slop: f32 = 8;
+    pub const long_press_seconds: f64 = 0.5;
+    /// From the first tap's release to the second's.
+    pub const double_tap_seconds: f64 = 0.3;
 
     pub fn any(self: Gestures) bool {
         return @as(u8, @bitCast(self)) != 0;
@@ -197,6 +207,14 @@ pub fn Results(comptime max_regions: u32, comptime table_slots: u32, comptime ha
             return current;
         }
 
+        /// The innermost focus scope holding the focusable element, or 0.
+        pub fn focusScopeOf(self: *const Self, hash: u64) u64 {
+            for (self.focusables[0..self.focusable_count]) |focusable| {
+                if (focusable.hash == hash) return focusable.scope;
+            }
+            return 0;
+        }
+
         pub fn isFocusable(self: *const Self, hash: u64) bool {
             for (self.focusables[0..self.focusable_count]) |focusable| {
                 if (focusable.hash == hash) return true;
@@ -221,9 +239,24 @@ pub const PointerGesture = struct {
     past_slop: bool,
     /// One of two pointers zooming `pan_owner`.
     zooming: bool,
+    pressed_at: Instant,
+    /// The element that asks for its context menu if the press is held
+    /// still, or 0.
+    long_press_owner: u64,
+    /// The press was held long enough, so its release is not a tap.
+    long_pressed: bool,
 
-    pub fn pressedAt(position: [2]f32) PointerGesture {
-        return .{ .press_position = position, .panned_to = position, .pan_owner = 0, .pan_axes = .none, .past_slop = false, .zooming = false };
+    pub fn pressedAt(pointer: input.Pointer) PointerGesture {
+        return .{ .press_position = pointer.position, .panned_to = pointer.position, .pan_owner = 0, .pan_axes = .none, .past_slop = false, .zooming = false, .pressed_at = pointer.at, .long_press_owner = 0, .long_pressed = false };
+    }
+
+    pub fn longPressDue(self: *const PointerGesture) Instant {
+        return self.pressed_at.addSeconds(Gestures.long_press_seconds);
+    }
+
+    /// Whether this pointer has done anything but tap.
+    pub fn claimed(self: *const PointerGesture) bool {
+        return self.pan_owner != 0 or self.long_pressed;
     }
 };
 
@@ -250,10 +283,12 @@ pub fn Contact(comptime max_chain: usize, comptime has_gestures: bool) type {
         /// A touch that lifted this frame. It stays until the next frame
         /// begins, so the frame that sees a tap can still ask where it was.
         lifted: bool,
+        /// The element the secondary button's press began on, or 0.
+        secondary_target: u64,
         gesture: if (has_gestures) PointerGesture else void,
 
         pub fn init(pointer: input.Pointer) Self {
-            return .{ .pointer = pointer, .buttons = .initEmpty(), .press_target = 0, .press_order = 0, .hover_stale = false, .hover_chain = undefined, .hover_count = 0, .lifted = false, .gesture = if (has_gestures) .pressedAt(pointer.position) else {} };
+            return .{ .pointer = pointer, .buttons = .initEmpty(), .press_target = 0, .press_order = 0, .hover_stale = false, .hover_chain = undefined, .hover_count = 0, .lifted = false, .secondary_target = 0, .gesture = if (has_gestures) .pressedAt(pointer) else {} };
         }
 
         pub fn hovers(self: *const Self) bool {
@@ -274,6 +309,21 @@ pub fn State(comptime max_contacts: u8, comptime max_chain: usize, comptime max_
         pub const Slot = Contact(max_chain, has_gestures);
         /// Each takes an event, so this many cannot overflow.
         const max_manipulations = if (has_gestures) max_events else 0;
+        /// Each takes an event or a long press, one per contact.
+        const max_context_requests = @as(u32, max_events) + max_contacts;
+        const max_double_taps = if (has_gestures) max_events else 0;
+        const max_pending_taps = if (has_gestures) max_contacts else 0;
+
+        /// A tap on an element that accepts double taps, waiting to see
+        /// whether a second one follows.
+        pub const PendingTap = struct {
+            hash: u64,
+            released_at: Instant,
+
+            pub fn due(self: PendingTap) Instant {
+                return self.released_at.addSeconds(Gestures.double_tap_seconds);
+            }
+        };
 
         pub const ManipulatedElement = struct {
             hash: u64,
@@ -287,8 +337,8 @@ pub fn State(comptime max_contacts: u8, comptime max_chain: usize, comptime max_
         key_event_count: u16,
         text: [max_text_bytes]u8,
         text_len: u16,
-        clicked: [max_events]u64,
-        clicked_count: u16,
+        clicked: [@as(u32, max_events) + max_pending_taps]u64,
+        clicked_count: u32,
         dropped_paths: [max_path_bytes]u8,
         dropped_path_len: u32,
         drops: [if (max_path_bytes == 0) 0 else max_events]input.FilesDropped,
@@ -296,6 +346,15 @@ pub fn State(comptime max_contacts: u8, comptime max_chain: usize, comptime max_
         lifecycle: input.LifecycleSet,
         manipulated: [max_manipulations]ManipulatedElement,
         manipulated_count: u16,
+        context_requested: [max_context_requests]u64,
+        context_request_count: u32,
+        double_tapped: [max_double_taps]u64,
+        double_tap_count: u16,
+        /// Kept across frames until each is clicked or tapped again.
+        pending_taps: [max_pending_taps]?PendingTap,
+        /// A long press or a delayed tap may be waiting, so `beginFrame`
+        /// looks for those that are due; otherwise it looks at nothing.
+        timers_armed: bool,
 
         focus: u64,
         pending_focus: ?u64,
@@ -303,6 +362,8 @@ pub fn State(comptime max_contacts: u8, comptime max_chain: usize, comptime max_
         pub fn reset(self: *Self) void {
             self.contacts = @splat(null);
             self.presses_begun = 0;
+            self.pending_taps = @splat(null);
+            self.timers_armed = false;
             self.focus = 0;
             self.pending_focus = null;
             self.clearFrameEvents();
@@ -321,6 +382,8 @@ pub fn State(comptime max_contacts: u8, comptime max_chain: usize, comptime max_
             self.drop_count = 0;
             self.lifecycle = .initEmpty();
             self.manipulated_count = 0;
+            self.context_request_count = 0;
+            self.double_tap_count = 0;
         }
 
         pub fn find(self: *Self, id: input.PointerId) ?*Slot {
@@ -374,7 +437,8 @@ pub fn State(comptime max_contacts: u8, comptime max_chain: usize, comptime max_
             return std.mem.indexOfScalar(u64, self.clicked[0..self.clicked_count], hash) != null;
         }
 
-        /// Each click takes at least one event, so `clicked` cannot overflow.
+        /// Each click takes an event or a tap that waited, one per
+        /// pending slot, so `clicked` cannot overflow.
         pub fn addClick(self: *Self, hash: u64) void {
             if (self.isClicked(hash)) return;
             self.clicked[self.clicked_count] = hash;
@@ -400,6 +464,51 @@ pub fn State(comptime max_contacts: u8, comptime max_chain: usize, comptime max_
                 }
             }
             return if (first_touch) |touch| touch.pointer else null;
+        }
+
+        pub fn isContextRequested(self: *const Self, hash: u64) bool {
+            return std.mem.indexOfScalar(u64, self.context_requested[0..self.context_request_count], hash) != null;
+        }
+
+        pub fn addContextRequest(self: *Self, hash: u64) void {
+            if (self.isContextRequested(hash)) return;
+            self.context_requested[self.context_request_count] = hash;
+            self.context_request_count += 1;
+        }
+
+        pub fn isDoubleTapped(self: *const Self, hash: u64) bool {
+            return std.mem.indexOfScalar(u64, self.double_tapped[0..self.double_tap_count], hash) != null;
+        }
+
+        /// A tap on an element that accepts double taps: the second within
+        /// the window is a double tap, and a first waits to become a click.
+        /// With every slot waiting, the one that has waited longest clicks
+        /// now to make room.
+        pub fn tapDelayed(self: *Self, hash: u64, released_at: Instant) void {
+            for (&self.pending_taps) |*slot| {
+                const pending = slot.* orelse continue;
+                if (pending.hash != hash) continue;
+                slot.* = null;
+                if (!pending.due().isBefore(released_at)) {
+                    if (!self.isDoubleTapped(hash)) {
+                        self.double_tapped[self.double_tap_count] = hash;
+                        self.double_tap_count += 1;
+                    }
+                    return;
+                }
+                self.addClick(hash);
+                break;
+            }
+            var free: *?PendingTap = &self.pending_taps[0];
+            for (&self.pending_taps) |*slot| {
+                const pending = slot.* orelse {
+                    free = slot;
+                    break;
+                };
+                if (pending.released_at.isBefore(free.*.?.released_at)) free = slot;
+            } else self.addClick(free.*.?.hash);
+            free.* = .{ .hash = hash, .released_at = released_at };
+            self.timers_armed = true;
         }
 
         pub fn manipulationOf(self: *const Self, hash: u64) ?input.Manipulation {

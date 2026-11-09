@@ -68,7 +68,7 @@ export fn zuiCheckFrame(width: f32, height: f32, pointer_x: f32, pointer_y: f32)
     ui.box(.{ .layout = .{ .sizing = .{ .width = .grow, .height = .aspectRatio(16.0 / 9.0) } } });
     ui.custom(2, .{ .id = .indexed("cell", 3) });
     ui.box(.{ .id = save, .focusable = true, .cursor = if (ui.environment().theme == .dark) .pointer else null, .decoration = .{ .background = if (ui.widgetState(save) == .hovered) .black else .white }, .layout = .{ .sizing = .{ .width = .{ .rule = .grow, .amount = 1, .max = 40 } } } });
-    ui.open(.{ .id = list, .scroll = .both, .focus_scope = true, .gestures = .{ .pan = if (ui.hovered(list)) .both else .vertical, .zoom = true }, .layout = .{ .sizing = .{ .width = .fixed(50), .height = .fixed(20) } } });
+    ui.open(.{ .id = list, .scroll = .both, .focus_scope = true, .gestures = .{ .pan = if (ui.hovered(list)) .both else .vertical, .zoom = true, .long_press = true, .double_tap = ui.focused(list) }, .layout = .{ .sizing = .{ .width = .fixed(50), .height = .fixed(20) } } });
     ui.wrapChildren();
     ui.box(.{ .clip = .both, .disabled = ui.clicked(save) or ui.pressed(save) or ui.focused(save), .layout = .{ .sizing = .{ .width = .fixed(80), .height = .fixed(80) } } });
     ui.box(.{ .floating = .{ .attach_to = .{ .element = save }, .anchor = .center, .z = 2, .capture = false, .clip = .target }, .interactive = true });
@@ -86,6 +86,7 @@ export fn zuiCheckFrame(width: f32, height: f32, pointer_x: f32, pointer_y: f32)
     _ = ui.rectOf(list);
     _ = ui.stateIfPresent(list, Expanded);
     _ = ui.manipulation(list);
+    _ = ui.doubleTapped(save) or ui.contextRequested(save) or ui.dismissed(list) or ui.adjusted(save) != null or ui.navigated(save) == .up;
     declareWidgets(&ui);
     const frame = ui.endFrame();
     defer ui.release(frame);

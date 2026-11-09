@@ -1932,7 +1932,7 @@ gesture timers. `needsFrame` goes.
 and an idle context reports `.on_event`.
 
 **Status.** `requestFrame`, `requestFrameAt` and pending sources (A3) are
-done; momentum and gesture timers join it with I5.
+done; so are long-press and double-tap timers (I5), and momentum joins it with I5.
 
 **Spec.** §6.6.
 
@@ -2029,11 +2029,11 @@ unchanged with the feature off:
 2. *Zoom* (done): `zoom`, two-pointer scale, rotation and pivot to the
    innermost region that accepts it, and `Driver.pinch` (from I4): a
    button in a list in a zoomable map, a pinch that starts on the list.
-3. *Timers and intents* (next): `long_press` and `double_tap` with their
+3. *Timers and intents* (done): `long_press` and `double_tap` with their
    deadlines in `nextFrame` (from I2), `contextRequested`, a double-tap
    query, `dismissed`, `adjusted`, `navigated`: a long press, a double
    tap next to a single tap.
-4. *Momentum:* velocity from the events' instants, momentum in the
+4. *Momentum* (next): velocity from the events' instants, momentum in the
    state table under the element, its deadline in `nextFrame`: a flick
    within one frame.
 5. *Custom recognizers:* `custom`, `pointerEvents`, `claim` and
@@ -2076,6 +2076,33 @@ rotation by a quarter turn, two pointers on elements that do not zoom
 each panning their own, and `zui_testing.Driver.pinch`, which I4 left
 waiting. `zig build counts` against `397ce28`: the same as slice 1, with
 the feature off and on, since only input changed.
+
+Slice 3: a press on an element with `long_press`, held within the slop
+for 0.5 s, is `contextRequested` and not a tap, fired by the first frame
+whose `now` reaches it (or by a release that comes later, in the same
+record), with that instant as the next frame's deadline. A tap on an
+element with `double_tap` waits 0.3 s from its release: a second tap in
+time is `doubleTapped`, and otherwise the first is `clicked` in the
+frame that reaches the deadline, which `nextFrame` asks for. The other
+intents: `contextRequested` from a right click and the menu key,
+`dismissed` by Escape while the element or one in its focus scope is
+focused, `adjusted` and `navigated` from the arrows on the focused
+element. Only `doubleTapped` and `manipulation` need the feature, and
+`doubleTapped` without it fails with
+`"zui: doubleTapped() needs Config.features.gestures = true"`. Tests: a
+long press firing once when due and not tapping, one released in the
+frame it falls due, a short press tapping, a moved press not long
+pressing; a double tap next to a single tap (one clicks at once, the
+other once its window passes, a double tap is never clicked, a late
+second tap is a click of its own); a right click, the menu key, Escape
+in a dialog's scope, and the arrows. Looking for due timers at every
+`beginFrame` cost depth 64's declaration 1.28%, so a flag says whether
+any timer is armed. `zig build counts` against `397ce28`: with the
+feature off, unchanged from slice 1; with it on, every declaration within
++8 instructions but the documents view's, +0.40% (33,453), and every
+`endFrame` as in slice 1. `zig build bench -- --check-targets` meets every budget
+over three runs: the box tree declares in 50.3 to 51.1 µs and lays out
+and emits in 91.9 to 93.9 µs, warm text in 94.4 to 95.5 µs.
 
 ### I1. Drag and drop between elements
 
@@ -2266,6 +2293,7 @@ Deliberate, and each a reason to choose zui:
 | Signals | lifecycle events; uncatchable signals are not representable |
 | Input | an ordered event log with host instants, many pointers (I4) |
 | Gesture arbitration | elements declare what they accept; one rule, by motion component (I5) |
+| Long press and double tap (I5) | timed from the events' instants against the record's `now`, setting the next frame's deadline: a long press after 0.5 s held within the slop, which is not a tap; a double tap within 0.3 s of the first tap's release, whose single tap is clicked only when that window passes; `doubleTapped(id)`, which SPEC.md lacked; `navigated` returns `zui.NavigationDirection`, since `Direction` has no up or left; `dismissed` while the element or one in its focus scope is focused; `contextRequested`, `dismissed`, `adjusted` and `navigated` need no feature, `doubleTapped` needs `features.gestures` |
 | Zoom (I5) | a second pointer pressed while another is down, both inside an element that accepts zoom, makes the pair zoom the innermost such element, taking both pointers from what they pressed or panned; `scale`, `rotation` (clockwise) and the centroid's `translation` are summed over the frame, `pivot` is where the centroid ended; the pointer left when one lifts pans the element if it pans |
 | Pans (I5) | past a touch slop of 8 layout units from the press, the axis locks to the larger component and the innermost region under the press that pans on it with room to move takes the pointer until it lifts, both axes if it pans on both; any other element it pressed loses the press; a scroll container pans on its scrolled axes with touch and pen only, since the mouse has the wheel, unless it declares `pan`, which takes every pointer; declaring a gesture makes an element interactive; `Element.gestures` is ignored without `features.gestures` rather than failing to compile, so widgets declare gestures for every context; `manipulation` reports pans and the wheel, scroll containers included, `translation` moving content with the pointer |
 | Custom gestures | code in declaration over `pointerEvents` and `state`, not a registry |

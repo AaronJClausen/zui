@@ -347,3 +347,172 @@ test "two pointers on an element that does not zoom each do what one would" {
     try testing.expectEqual([2]f32{ 0, 30 }, ui.scrollOffset(list));
     ui = try frame(&harness, &.{ up(1, .{ 110, 50 }), up(2, .{ 100, 220 }) });
 }
+
+const single: zui.Id = .of("single");
+const double: zui.Id = .of("double");
+const held: zui.Id = .of("held");
+const dialog: zui.Id = .of("dialog");
+
+/// `single` at (0, 0) and `double`, which accepts double taps, at
+/// (100, 0), both 100×40; `held`, which accepts a long press, 200×50 at
+/// (0, 40); all three in a dialog's focus scope.
+fn photoActions(ui: *Ui) void {
+    ui.open(.{ .id = dialog, .focus_scope = true, .layout = .{ .direction = .top_to_bottom } });
+    ui.open(.{});
+    ui.box(.{ .id = single, .focusable = true, .layout = fixed(100, 40) });
+    ui.box(.{ .id = double, .focusable = true, .gestures = .{ .double_tap = true }, .layout = fixed(100, 40) });
+    ui.close();
+    ui.box(.{ .id = held, .gestures = .{ .long_press = true }, .layout = fixed(200, 50) });
+    ui.close();
+}
+
+fn actionsFrame(harness: *Harness, events: []const zui.Event) !*Ui {
+    const ui = harness.beginEvents(events);
+    photoActions(ui);
+    _ = try harness.end();
+    return ui;
+}
+
+/// A finger at `position` when the harness's last frame began.
+fn fingerNow(harness: *const Harness, position: [2]f32) zui.Pointer {
+    return .{ .id = @enumFromInt(1), .kind = .touch, .position = position, .at = harness.now };
+}
+
+fn tapAt(harness: *const Harness, position: [2]f32) [2]zui.Event {
+    return .{ .{ .pointer_down = .{ .pointer = fingerNow(harness, position) } }, .{ .pointer_up = .{ .pointer = fingerNow(harness, position) } } };
+}
+
+test "a press held still asks for the context menu once it is due, and is not a tap" {
+    var harness: Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    _ = try actionsFrame(&harness, &.{});
+    const pressed_at = harness.now;
+    var ui = try actionsFrame(&harness, &.{.{ .pointer_down = .{ .pointer = fingerNow(&harness, .{ 50, 60 }) } }});
+    const due = pressed_at.addSeconds(zui.Gestures.long_press_seconds);
+    try testing.expectEqual(zui.NextFrame{ .at = due }, ui.nextFrame());
+
+    var requests: u32 = 0;
+    while (harness.now.isBefore(due.addSeconds(0.1))) {
+        ui = try actionsFrame(&harness, &.{});
+        if (ui.contextRequested(held)) {
+            requests += 1;
+            try testing.expect(!harness.now.isBefore(due));
+        }
+    }
+    try testing.expectEqual(@as(u32, 1), requests);
+    ui = try actionsFrame(&harness, &.{.{ .pointer_up = .{ .pointer = fingerNow(&harness, .{ 50, 60 }) } }});
+    try testing.expect(!ui.clicked(held));
+    try testing.expectEqual(zui.NextFrame.on_event, ui.nextFrame());
+}
+
+test "a long press released in the frame it falls due still asks for the menu, and a short one taps" {
+    var harness: Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    _ = try actionsFrame(&harness, &.{});
+    var down_pointer = fingerNow(&harness, .{ 50, 60 });
+    var up_pointer = down_pointer;
+    up_pointer.at = down_pointer.at.addSeconds(0.6);
+    var ui = try actionsFrame(&harness, &.{ .{ .pointer_down = .{ .pointer = down_pointer } }, .{ .pointer_up = .{ .pointer = up_pointer } } });
+    try testing.expect(ui.contextRequested(held));
+    try testing.expect(!ui.clicked(held));
+
+    ui = try actionsFrame(&harness, &tapAt(&harness, .{ 50, 60 }));
+    try testing.expect(ui.clicked(held));
+    try testing.expect(!ui.contextRequested(held));
+
+    // Moving past the slop is not holding still.
+    down_pointer = fingerNow(&harness, .{ 50, 60 });
+    ui = try actionsFrame(&harness, &.{ .{ .pointer_down = .{ .pointer = down_pointer } }, .{ .pointer_move = .{ .pointer = fingerNow(&harness, .{ 80, 60 }) } } });
+    try testing.expectEqual(zui.NextFrame.on_event, ui.nextFrame());
+    harness.now = harness.now.addSeconds(1);
+    ui = try actionsFrame(&harness, &.{.{ .pointer_up = .{ .pointer = fingerNow(&harness, .{ 80, 60 }) } }});
+    try testing.expect(!ui.contextRequested(held));
+}
+
+test "a double tap next to a single tap: one clicks at once, the other waits for a second tap" {
+    var harness: Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    _ = try actionsFrame(&harness, &.{});
+    var ui = try actionsFrame(&harness, &tapAt(&harness, .{ 50, 20 }));
+    try testing.expect(ui.clicked(single));
+    try testing.expectEqual(zui.NextFrame.on_event, ui.nextFrame());
+
+    const tapped_at = harness.now;
+    ui = try actionsFrame(&harness, &tapAt(&harness, .{ 150, 20 }));
+    try testing.expect(!ui.clicked(double));
+    const due = tapped_at.addSeconds(zui.Gestures.double_tap_seconds);
+    try testing.expectEqual(zui.NextFrame{ .at = due }, ui.nextFrame());
+    var clicks: u32 = 0;
+    while (harness.now.isBefore(due.addSeconds(0.1))) {
+        ui = try actionsFrame(&harness, &.{});
+        if (ui.clicked(double)) clicks += 1;
+        try testing.expect(!ui.doubleTapped(double));
+    }
+    try testing.expectEqual(@as(u32, 1), clicks);
+
+    ui = try actionsFrame(&harness, &tapAt(&harness, .{ 150, 20 }));
+    ui = try actionsFrame(&harness, &tapAt(&harness, .{ 152, 22 }));
+    try testing.expect(ui.doubleTapped(double));
+    try testing.expect(!ui.clicked(double));
+    try testing.expectEqual(zui.NextFrame.on_event, ui.nextFrame());
+    for (0..30) |_| {
+        ui = try actionsFrame(&harness, &.{});
+        try testing.expect(!ui.clicked(double));
+        try testing.expect(!ui.doubleTapped(double));
+    }
+
+    // A second tap after the window is a click of its own, late.
+    ui = try actionsFrame(&harness, &tapAt(&harness, .{ 150, 20 }));
+    harness.now = harness.now.addSeconds(0.5);
+    ui = try actionsFrame(&harness, &tapAt(&harness, .{ 150, 20 }));
+    try testing.expect(ui.clicked(double));
+    try testing.expect(!ui.doubleTapped(double));
+}
+
+test "a right click and the menu key ask for the context menu; Escape dismisses; arrows adjust and navigate" {
+    var harness: Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    _ = try actionsFrame(&harness, &.{});
+    const at = support.mouse(.{ 50, 20 });
+    var ui = try actionsFrame(&harness, &.{
+        .{ .pointer_move = .{ .pointer = at } },
+        .{ .pointer_down = .{ .pointer = at, .button = .secondary } },
+        .{ .pointer_up = .{ .pointer = at, .button = .secondary } },
+    });
+    try testing.expect(ui.contextRequested(single));
+    try testing.expect(!ui.clicked(single));
+
+    harness.ui.requestFocus(single);
+    ui = try actionsFrame(&harness, &.{});
+    try testing.expect(!ui.contextRequested(single));
+    const key = struct {
+        fn down(pressed: zui.Key) zui.Event {
+            return .{ .key_down = .{ .key = pressed, .at = .zero } };
+        }
+    }.down;
+    ui = try actionsFrame(&harness, &.{key(.menu)});
+    try testing.expect(ui.contextRequested(single));
+
+    ui = try actionsFrame(&harness, &.{ key(.right), key(.right), key(.left), key(.down) });
+    try testing.expectEqual(@as(?i32, 0), ui.adjusted(single));
+    try testing.expectEqual(@as(?zui.NavigationDirection, .down), ui.navigated(single));
+    try testing.expectEqual(@as(?i32, null), ui.adjusted(double));
+    ui = try actionsFrame(&harness, &.{key(.up)});
+    try testing.expectEqual(@as(?i32, 1), ui.adjusted(single));
+    ui = try actionsFrame(&harness, &.{key(.enter)});
+    try testing.expectEqual(@as(?i32, null), ui.adjusted(single));
+    try testing.expectEqual(@as(?zui.NavigationDirection, null), ui.navigated(single));
+
+    ui = try actionsFrame(&harness, &.{key(.escape)});
+    try testing.expect(ui.dismissed(single));
+    try testing.expect(ui.dismissed(dialog));
+    try testing.expect(!ui.dismissed(double));
+}

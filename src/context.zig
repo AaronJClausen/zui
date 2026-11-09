@@ -1351,10 +1351,13 @@ pub fn Context(comptime config: Config) type {
                     if (down.button == .primary) {
                         self.press(contact, hot);
                         if (features.gestures) {
-                            contact.gesture = .pressedAt(down.pointer.position);
+                            contact.gesture = .pressedAt(down.pointer);
+                            contact.gesture.long_press_owner = self.longPressOwner(down.pointer.position);
+                            if (contact.gesture.long_press_owner != 0) input_state.timers_armed = true;
                             self.startZoom(contact);
                         }
                     }
+                    if (down.button == .secondary) contact.secondary_target = if (hot) |region| if (results.regions[region].flags.disabled) 0 else results.regions[region].hash else 0;
                 },
                 .pointer_up => |up| {
                     const contact = input_state.find(up.pointer.id) orelse continue;
@@ -1362,10 +1365,18 @@ pub fn Context(comptime config: Config) type {
                     const hot = self.refreshHover(contact);
                     contact.buttons.remove(up.button);
                     if (up.button == .primary) {
-                        const panned = features.gestures and contact.gesture.pan_owner != 0;
-                        if (contact.press_target != 0 and !panned) if (hot) |region| if (results.regions[region].hash == contact.press_target) input_state.addClick(contact.press_target);
+                        if (features.gestures and contact.gesture.long_press_owner != 0 and !up.pointer.at.isBefore(contact.gesture.longPressDue())) self.longPress(contact);
+                        const claimed = features.gestures and contact.gesture.claimed();
+                        if (contact.press_target != 0 and !claimed) if (hot) |region| if (results.regions[region].hash == contact.press_target) self.tap(region, up.pointer.at);
                         contact.press_target = 0;
-                        if (features.gestures) self.endZoom(contact);
+                        if (features.gestures) {
+                            contact.gesture.long_press_owner = 0;
+                            self.endZoom(contact);
+                        }
+                    }
+                    if (up.button == .secondary) {
+                        if (contact.secondary_target != 0) if (hot) |region| if (results.regions[region].hash == contact.secondary_target) input_state.addContextRequest(contact.secondary_target);
+                        contact.secondary_target = 0;
                     }
                     if (!contact.hovers() and contact.buttons.count() == 0) contact.lifted = true;
                 },
@@ -1383,6 +1394,7 @@ pub fn Context(comptime config: Config) type {
                     switch (key_event.key) {
                         .tab => input_state.focus = results.nextFocus(input_state.focus, !key_event.modifiers.shift),
                         .enter, .space => if (input_state.focus != 0) input_state.addClick(input_state.focus),
+                        .menu => if (input_state.focus != 0) input_state.addContextRequest(input_state.focus),
                         else => {},
                     }
                 },
@@ -1400,6 +1412,8 @@ pub fn Context(comptime config: Config) type {
                     if (copied < typed.len) frame.diagnostics.exceeded.insert(.max_text_input_bytes);
                 },
             };
+
+            if (features.gestures and input_state.timers_armed) self.runGestureTimers();
 
             for (&input_state.contacts) |*slot| {
                 if (slot.*) |*contact| if (contact.hover_stale) {
@@ -1517,6 +1531,7 @@ pub fn Context(comptime config: Config) type {
                 const slop = interaction.Gestures.touch_slop;
                 if (moved[0] * moved[0] + moved[1] * moved[1] < slop * slop) return;
                 gesture.past_slop = true;
+                gesture.long_press_owner = 0;
                 const axis: usize = if (@abs(moved[0]) >= @abs(moved[1])) 0 else 1;
                 const owner = self.panOwner(gesture.press_position, axis, moved[axis], contact.pointer.kind) orelse return;
                 gesture.pan_owner = owner.hash;
@@ -1528,6 +1543,58 @@ pub fn Context(comptime config: Config) type {
             for (0..2) |axis| delta[axis] = if (gesture.pan_axes.includes(axis)) position[axis] - gesture.panned_to[axis] else 0;
             gesture.panned_to = position;
             self.panElement(gesture.pan_owner, delta);
+        }
+
+        /// A tap on the element it pressed: a click, unless the element
+        /// accepts double taps, which delays it.
+        fn tap(self: *Self, region_index: u32, released_at: Instant) void {
+            const input_state = &self.memory.input;
+            const region = &self.memory.results.regions[region_index];
+            if (features.gestures and region.gestures.double_tap) input_state.tapDelayed(region.hash, released_at) else input_state.addClick(region.hash);
+        }
+
+        fn longPressOwner(self: *Self, position: [2]f32) u64 {
+            const results = &self.memory.results;
+            if (!results.has_frame) return 0;
+            var region_index = results.topmostAt(position) orelse return 0;
+            while (region_index != interaction.no_region) : (region_index = results.regions[region_index].parent) {
+                const region = &results.regions[region_index];
+                if (region.gestures.long_press and !region.flags.disabled and region.bounds.contains(position)) return region.hash;
+            }
+            return 0;
+        }
+
+        fn longPress(self: *Self, contact: *InputState.Slot) void {
+            self.memory.input.addContextRequest(contact.gesture.long_press_owner);
+            contact.gesture.long_press_owner = 0;
+            contact.gesture.long_pressed = true;
+            contact.press_target = 0;
+        }
+
+        /// Fires the long presses and delayed taps that are due by the
+        /// record's `now`, and asks for a frame when the next one is.
+        fn runGestureTimers(self: *Self) void {
+            const input_state = &self.memory.input;
+            input_state.timers_armed = false;
+            for (&input_state.contacts) |*slot| {
+                const contact = &(slot.* orelse continue);
+                if (contact.gesture.long_press_owner == 0) continue;
+                const due = contact.gesture.longPressDue();
+                if (self.now_instant.isBefore(due)) {
+                    self.requestFrameAt(due);
+                    input_state.timers_armed = true;
+                } else self.longPress(contact);
+            }
+            for (&input_state.pending_taps) |*slot| {
+                const pending = slot.* orelse continue;
+                if (self.now_instant.isBefore(pending.due())) {
+                    self.requestFrameAt(pending.due());
+                    input_state.timers_armed = true;
+                } else {
+                    input_state.addClick(pending.hash);
+                    slot.* = null;
+                }
+            }
         }
 
         /// A second pointer pressed while another is down, both within an
@@ -1549,6 +1616,7 @@ pub fn Context(comptime config: Config) type {
                 zooming.gesture.pan_owner = owner.hash;
                 zooming.gesture.zooming = true;
                 zooming.gesture.past_slop = true;
+                zooming.gesture.long_press_owner = 0;
                 zooming.gesture.panned_to = zooming.pointer.position;
                 if (zooming.press_target != owner.hash) zooming.press_target = 0;
             }
@@ -1668,6 +1736,65 @@ pub fn Context(comptime config: Config) type {
             comptime requireFeature(.gestures, "manipulation()");
             if (element_id.isNone()) return null;
             return self.memory.input.manipulationOf(element_id.hash);
+        }
+
+        /// A second tap on `element_id`, within the double-tap window of
+        /// the first, this frame. Only for an element that declares
+        /// `.gestures.double_tap`, whose single taps are clicked late.
+        pub fn doubleTapped(self: *const Self, element_id: Id) bool {
+            comptime requireFeature(.gestures, "doubleTapped()");
+            return !element_id.isNone() and self.memory.input.isDoubleTapped(element_id.hash);
+        }
+
+        /// The user asked for the element's context menu this frame: a
+        /// right click on it, the menu key while it is focused, or, if it
+        /// declares `.gestures.long_press`, a press held still on it.
+        pub fn contextRequested(self: *const Self, element_id: Id) bool {
+            return !element_id.isNone() and self.memory.input.isContextRequested(element_id.hash);
+        }
+
+        /// Escape was pressed this frame while `element_id`, or an element
+        /// in its focus scope, was focused: a dialog or menu should close.
+        pub fn dismissed(self: *const Self, element_id: Id) bool {
+            if (element_id.isNone() or !self.keyPressed(.escape)) return false;
+            const focus = self.memory.input.focus;
+            return focus != 0 and (focus == element_id.hash or self.memory.results.focusScopeOf(focus) == element_id.hash);
+        }
+
+        /// The steps the arrow keys moved the focused element this frame:
+        /// right and up add one, left and down take one away. Null when it
+        /// is not focused or no arrow was pressed.
+        pub fn adjusted(self: *const Self, element_id: Id) ?i32 {
+            if (!self.focused(element_id)) return null;
+            var steps: i32 = 0;
+            var any = false;
+            for (self.keyEvents()) |key_event| switch (key_event.key) {
+                .right, .up => {
+                    steps += 1;
+                    any = true;
+                },
+                .left, .down => {
+                    steps -= 1;
+                    any = true;
+                },
+                else => {},
+            };
+            return if (any) steps else null;
+        }
+
+        /// The last arrow pressed this frame while `element_id` was
+        /// focused, for moving through a grid or a list.
+        pub fn navigated(self: *const Self, element_id: Id) ?input.NavigationDirection {
+            if (!self.focused(element_id)) return null;
+            var direction: ?input.NavigationDirection = null;
+            for (self.keyEvents()) |key_event| switch (key_event.key) {
+                .left => direction = .left,
+                .right => direction = .right,
+                .up => direction = .up,
+                .down => direction = .down,
+                else => {},
+            };
+            return direction;
         }
 
         fn requireFeature(comptime feature: std.meta.FieldEnum(Features), comptime api: []const u8) void {

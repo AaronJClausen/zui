@@ -46,6 +46,9 @@ pub const Manipulation = struct {
     pivot: [2]f32 = .{ 0, 0 },
 };
 
+/// Which way the arrow keys or a D-pad moved, on screen.
+pub const NavigationDirection = enum { left, right, up, down };
+
 pub const Wheel = struct {
     /// Where the pointer was, in layout units.
     position: [2]f32,

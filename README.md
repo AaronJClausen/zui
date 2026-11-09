@@ -159,7 +159,11 @@ Implemented so far:
   accepts `.zoom`, even when the pinch starts on a list inside it.
   `ui.manipulation(id)` reports what pans, pinches and the wheel did to
   an element, such as a map: translation, scale, rotation and pivot.
-  Long press, double tap, momentum and custom recognizers come next.
+  `.long_press` turns a held press into `ui.contextRequested(id)`, as a
+  right click and the menu key do, and `.double_tap` gives
+  `ui.doubleTapped(id)`, delaying only that element's single tap;
+  `ui.dismissed`, `ui.adjusted` and `ui.navigated` read Escape and the
+  arrows. Momentum and custom recognizers come next.
 
 The reference backend, its adapter host and the demo application live in
 [zui-raylib](https://github.com/AaronJClausen/zui-raylib); the other
