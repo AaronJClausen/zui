@@ -1,6 +1,7 @@
 const std = @import("std");
 const style = @import("style.zig");
 const interaction = @import("interaction.zig");
+const layout = @import("layout.zig");
 
 /// An open element whose subtree is drawn differently from its parent's:
 /// it clips, has a border to draw after its children, floats, is a hit
@@ -12,8 +13,10 @@ pub fn EmitLevel(comptime Index: type) type {
         subtree_end: Index,
         /// Clip in effect for this element's own commands and its children.
         clip: style.Rect,
-        /// Clip in effect before this element's own clip, for its border.
+        /// Clip in effect before this element's own clip, which culls the
+        /// element and its border.
         outer_clip: style.Rect,
+        /// The subtree ends a clip after its border.
         pushed_clip: bool,
         z: i16,
         region: u32,
@@ -52,6 +55,7 @@ pub fn run(comptime Ui: type, ui: *Ui, frame: *Ui.Frame) void {
     for (1..frame.element_count) |index| {
         const element: Ui.Index = @intCast(index);
         while (levels[depth].subtree_end <= element) : (depth -= 1) emitter.leave(&levels[depth]);
+        if (!frame.flags[element].emits() and frame.decorationOf(element) == null and frame.kindOf(element) == .none) continue;
         if (emitter.enter(element, levels[depth], viewport)) |level| {
             depth += 1;
             levels[depth] = level;
@@ -130,18 +134,19 @@ fn Emitter(comptime Ui: type) type {
         fn enter(self: *Self, element: Ui.Index, parent: Level, viewport: style.Rect) ?Level {
             const frame = self.frame;
             const flags = frame.flags[element];
-            const floating = frame.isFloating(element);
-            if (!floating and !flags.emits() and frame.decorationOf(element) == null and frame.kindOf(element) == .none) return null;
+            const floating = flags.floating;
             const element_id = frame.element_id[element];
             const bounds = self.rectOf(element);
-            const outer_clip = if (floating) viewport else parent.clip;
+            var layer: Layer = .{ .clip = parent.clip, .z = parent.z };
+            if (floating) layer = self.floatingLayer(element, parent.clip, viewport);
+            const outer_clip = layer.clip;
             var level: Level = .{
                 .element = element,
                 .subtree_end = frame.subtree_end[element],
                 .clip = outer_clip,
                 .outer_clip = outer_clip,
                 .pushed_clip = false,
-                .z = if (floating) frame.floatingOf(element).z else parent.z,
+                .z = layer.z,
                 .region = parent.region,
                 .focus_scope = if (flags.focus_scope) element_id else parent.focus_scope,
             };
@@ -162,7 +167,7 @@ fn Emitter(comptime Ui: type) type {
                 .text => if (Ui.has_text) self.emitText(element, element_id, level),
             }
 
-            if (flags.interactive or flags.scroll_x or flags.scroll_y or flags.disabled or floating) {
+            if (flags.interactive or flags.scroll_x or flags.scroll_y or flags.disabled or flags.captures_pointer) {
                 level.region = self.addRegion(element, visible, level.z, parent.region);
             }
             if (flags.explicit_id) self.results.insert(element_id, bounds, if (level.region != parent.region) level.region else interaction.no_region);
@@ -171,24 +176,36 @@ fn Emitter(comptime Ui: type) type {
                 self.results.focusable_count += 1;
             }
 
-            if (flags.clips()) {
-                const clip_box: style.Rect = .{
-                    .x = if (flags.clip_x) bounds.x else outer_clip.x,
-                    .y = if (flags.clip_y) bounds.y else outer_clip.y,
-                    .width = if (flags.clip_x) bounds.width else outer_clip.width,
-                    .height = if (flags.clip_y) bounds.height else outer_clip.height,
-                };
-                level.clip = outer_clip.intersect(clip_box);
+            if (flags.clipsOrClipsToTarget()) {
                 level.pushed_clip = true;
-                self.push(.{ .bounds = self.snap(level.clip), .id = element_id, .z = level.z, .payload = .{ .clip_begin = self.snap(level.clip) } });
+                if (!flags.clips_to_target) {
+                    level.clip = outer_clip.intersect(clipBox(flags, bounds, outer_clip));
+                    self.push(.{ .bounds = self.snap(level.clip), .id = element_id, .z = level.z, .payload = .{ .clip_begin = self.snap(level.clip) } });
+                }
             }
             const has_border = if (frame.decorationOf(element)) |decoration| decoration.border != null else false;
             if (!level.pushed_clip and !has_border and !floating and level.region == parent.region and !flags.focus_scope) return null;
             return level;
         }
 
-        /// Floating roots get a region even when not interactive: being on a
-        /// higher layer, they win the hit test over whatever they cover.
+        const Layer = struct { clip: style.Rect, z: i16 };
+
+        /// A floating element's layer and clip. Cut off by its target's
+        /// clip, it pushes that clip merged with its own before it draws:
+        /// its own box holds everything it draws itself.
+        fn floatingLayer(self: *Self, floating: Ui.Index, parent_clip: style.Rect, viewport: style.Rect) Layer {
+            const frame = self.frame;
+            const config = frame.floatingOf(floating);
+            if (config.clip == .none) return .{ .clip = viewport, .z = config.z };
+            const target_clip = self.floatingTargetClip(floating, parent_clip, viewport);
+            const clip = target_clip.intersect(clipBox(frame.flags[floating], self.rectOf(floating), target_clip));
+            self.push(.{ .bounds = self.snap(clip), .id = frame.element_id[floating], .z = config.z, .payload = .{ .clip_begin = self.snap(clip) } });
+            return .{ .clip = clip, .z = config.z };
+        }
+
+        /// A floating element that captures gets a region even when it is
+        /// not interactive: on a higher layer, it wins the hit test over
+        /// whatever it covers.
         fn addRegion(self: *Self, element: Ui.Index, visible: style.Rect, z: i16, parent_region: u32) u32 {
             const frame = self.frame;
             const flags = frame.flags[element];
@@ -238,15 +255,19 @@ fn Emitter(comptime Ui: type) type {
         }
 
         fn leave(self: *Self, level: *const Level) void {
+            self.closeSubtree(level);
+            if (level.pushed_clip) self.push(.{ .bounds = self.snap(level.clip), .id = self.frame.element_id[level.element], .z = level.z, .payload = .clip_end });
+        }
+
+        /// Dividers and the border. Both lie inside the element's box, so
+        /// its own clip leaves them whole, and a floating element's
+        /// target's clip cuts them off with the rest of it.
+        inline fn closeSubtree(self: *Self, level: *const Level) void {
             const frame = self.frame;
             const element = level.element;
-            const decoration = frame.decorationOf(element);
-            if (decoration) |found| if (found.border) |*border| if (border.between_children > 0) {
-                @call(.never_inline, emitDividers, .{ self, element, border, level });
-            };
-            if (level.pushed_clip) self.push(.{ .bounds = self.snap(level.clip), .id = frame.element_id[element], .z = level.z, .payload = .clip_end });
-            const found = decoration orelse return;
+            const found = frame.decorationOf(element) orelse return;
             const border = if (found.border) |*border| border else return;
+            if (border.between_children > 0) @call(.never_inline, emitDividers, .{ self, element, border, level });
             const widths = border.widths;
             if (widths.left == 0 and widths.right == 0 and widths.top == 0 and widths.bottom == 0) return;
             const bounds = self.rectOf(element);
@@ -256,6 +277,32 @@ fn Emitter(comptime Ui: type) type {
                 .widths = widths,
                 .corner_radius = found.corner_radius,
             } } });
+        }
+
+        /// What cuts off the children of a floating element's target. An
+        /// element target need not be on the stack of open levels, so its
+        /// clip is found by walking up from it; the walk is bounded, since
+        /// floating elements clipped to each other's subtrees form a cycle.
+        fn floatingTargetClip(self: *const Self, floating: Ui.Index, parent_clip: style.Rect, viewport: style.Rect) style.Rect {
+            const frame = self.frame;
+            switch (frame.floatingOf(floating).attach_to) {
+                .parent => return parent_clip,
+                .root => return viewport,
+                .element => {},
+            }
+            var clip = viewport;
+            var current = layout.targetOf(Ui, frame, floating) orelse return viewport;
+            for (0..frame.element_count) |_| {
+                const flags = frame.flags[current];
+                if (flags.clips()) clip = clip.intersect(clipBox(flags, self.rectOf(current), clip));
+                if (current == Ui.root_index) break;
+                if (!frame.isFloating(current)) {
+                    current = frame.parent[current];
+                } else if (flags.clips_to_target) {
+                    current = layout.targetOf(Ui, frame, current) orelse break;
+                } else break;
+            }
+            return clip;
         }
 
         /// Inside the element's own clip, so dividers scroll and are cut off
@@ -290,5 +337,16 @@ fn Emitter(comptime Ui: type) type {
                 previous_end = child_start + frame.size[child][along];
             }
         }
+    };
+}
+
+/// An element's own clip: its box on the axes it clips, and `outer`'s
+/// extent on the others.
+fn clipBox(flags: anytype, bounds: style.Rect, outer: style.Rect) style.Rect {
+    return .{
+        .x = if (flags.clip_x) bounds.x else outer.x,
+        .y = if (flags.clip_y) bounds.y else outer.y,
+        .width = if (flags.clip_x) bounds.width else outer.width,
+        .height = if (flags.clip_y) bounds.height else outer.height,
     };
 }

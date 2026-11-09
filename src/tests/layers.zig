@@ -195,7 +195,7 @@ test "attaching to another element by id" {
     try expectRect(try harness.end(), .of("menu"), 50, 150, 40, 10);
 }
 
-test "a target declared later falls back to the parent" {
+test "a target declared later places the floating subtree after it" {
     var harness: support.Harness = .{};
     try harness.init();
     defer harness.deinit();
@@ -203,11 +203,123 @@ test "a target declared later falls back to the parent" {
     const ui = harness.begin();
     ui.box(.{ .layout = fixed(800, 100) });
     ui.open(.{ .id = .of("panel"), .layout = fixed(200, 60) });
-    ui.box(.{ .id = .of("menu"), .layout = fixed(40, 10), .floating = .{ .attach_to = .{ .element = .of("later") }, .attach_point = .bottom_right } });
+    ui.open(.{
+        .id = .of("menu"),
+        .layout = .{ .direction = .top_to_bottom, .padding = .all(5) },
+        .floating = .{ .attach_to = .{ .element = .of("later") }, .attach_point = .bottom_right },
+    });
+    ui.box(.{ .id = .of("item"), .layout = fixed(40, 10) });
+    ui.box(.{ .id = .of("pinned"), .layout = fixed(10, 10), .floating = .{ .attach_to = .root, .anchor = .bottom_right, .attach_point = .bottom_right } });
+    ui.close();
     ui.close();
     ui.box(.{ .id = .of("later"), .layout = fixed(50, 50) });
 
-    try expectRect(try harness.end(), .of("menu"), 200, 160, 40, 10);
+    const frame = try harness.end();
+    try expectRect(frame, .of("later"), 0, 160, 50, 50);
+    try expectRect(frame, .of("menu"), 50, 210, 50, 20);
+    try expectRect(frame, .of("item"), 55, 215, 40, 10);
+    try expectRect(frame, .of("pinned"), 790, 590, 10, 10);
+}
+
+test "a later target inside a scrolled list is followed where the scroll put it" {
+    var harness: support.Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    const ui = harness.begin();
+    ui.setScrollOffset(list, .{ 0, 30 });
+    ui.box(.{ .id = .of("badge"), .layout = fixed(10, 10), .floating = .{ .attach_to = .{ .element = .indexed("row", 2) }, .anchor = .top_right, .attach_point = .top_right } });
+    scrollList(ui);
+
+    try expectRect(try harness.end(), .of("badge"), 90, 10, 10, 10);
+}
+
+test "a target inside the floating element's own subtree falls back to the parent" {
+    var harness: support.Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    const ui = harness.begin();
+    ui.box(.{ .layout = fixed(800, 100) });
+    ui.open(.{ .id = .of("panel"), .layout = fixed(200, 60) });
+    ui.open(.{ .id = .of("menu"), .floating = .{ .attach_to = .{ .element = .of("inner") }, .attach_point = .bottom_right } });
+    ui.box(.{ .id = .of("inner"), .layout = fixed(40, 10) });
+    ui.close();
+    ui.close();
+
+    const frame = try harness.end();
+    try expectRect(frame, .of("menu"), 200, 160, 40, 10);
+    try expectRect(frame, .of("inner"), 200, 160, 40, 10);
+}
+
+test "a floating element clipped to its target is cut off where the target's children are" {
+    var harness: support.Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    const ui = harness.begin();
+    ui.open(.{ .layout = fixed(100, 50), .clip = .both, .decoration = .{ .background = .rgb(0x111111) } });
+    ui.box(.{ .layout = fixed(20, 20), .decoration = .{ .background = .rgb(0x333333) }, .floating = .{ .offset = .{ 90, 0 }, .clip = .target } });
+    ui.close();
+
+    var buffer: [512]u8 = undefined;
+    try testing.expectEqualStrings(
+        \\rect 0 0 100 50 #111111
+        \\clip 0 0 100 50
+        \\clip_end
+        \\clip 0 0 100 50
+        \\rect 90 0 20 20 #333333
+        \\clip_end
+        \\
+    , try support.snapshot(try harness.end(), &buffer));
+}
+
+test "a floating element clipped to a row in a scrolled list keeps its own clip and border inside the list's" {
+    var harness: support.Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    const ui = harness.begin();
+    ui.setScrollOffset(list, .{ 0, 30 });
+    scrollList(ui);
+    ui.box(.{
+        .layout = fixed(10, 10),
+        .clip = .both,
+        .decoration = .{ .background = .rgb(0x333333), .border = .{ .color = .rgb(0x444444), .widths = .all(1) } },
+        .floating = .{ .attach_to = .{ .element = .indexed("row", 2) }, .anchor = .top_right, .attach_point = .top_right, .offset = .{ 0, -15 }, .clip = .target },
+    });
+
+    var buffer: [1024]u8 = undefined;
+    try testing.expectEqualStrings(
+        \\clip 0 0 800 50
+        \\rect 0 -10 100 20 #ffffff
+        \\rect 0 10 100 20 #ffffff
+        \\rect 0 30 100 20 #ffffff
+        \\clip_end
+        \\clip 90 0 10 5
+        \\rect 90 -5 10 10 #333333
+        \\border 90 -5 10 10 #444444
+        \\clip_end
+        \\
+    , try support.snapshot(try harness.end(), &buffer));
+}
+
+test "a floating element clipped to a target outside every clip is cut off by the viewport alone" {
+    var harness: support.Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    const ui = harness.begin();
+    ui.box(.{ .id = .of("target"), .layout = fixed(50, 50) });
+    ui.box(.{ .layout = fixed(20, 20), .decoration = .{ .background = .rgb(0x333333) }, .floating = .{ .attach_to = .{ .element = .of("target") }, .attach_point = .bottom_right, .clip = .target } });
+
+    var buffer: [512]u8 = undefined;
+    try testing.expectEqualStrings(
+        \\clip 0 0 800 600
+        \\rect 50 50 20 20 #333333
+        \\clip_end
+        \\
+    , try support.snapshot(try harness.end(), &buffer));
 }
 
 test "grow on a root-attached floating element fills the viewport" {

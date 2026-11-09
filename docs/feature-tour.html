@@ -817,7 +817,7 @@ fn photoGrid(app: *App, ui: *Ui) void {
 
       <article class="feature" id="floating" data-title="Floating elements">
         <div class="feature-head"><h3>Floating elements in paint layers</h3><span class="pill shipped">Shipped</span></div>
-        <p>A floating element takes no space in its parent's flow. It attaches to its parent, the viewport, or any element declared earlier in the frame, by matching an anchor point on itself to a point on the target, plus an offset. It paints in layer <code class="z">z</code>, escaping its parent's clip. Tooltips, popups, menus and dialogs are all built this way.</p>
+        <p>A floating element takes no space in its parent's flow. It attaches to its parent, the viewport, or any element in the frame, declared before or after it, by matching an anchor point on itself to a point on the target, plus an offset. It paints in layer <code class="z">z</code>, escaping its ancestors' clips, or with <code class="z">.clip = .target</code> cut off where its target's children are, so a badge on a row scrolls out of sight with the row. It takes the pointer from whatever it covers, unless <code class="z">.capture = false</code> lets the pointer through, as a tooltip should. Tooltips, popups, menus and dialogs are all built this way.</p>
 <script type="text/x-zig" data-file="src/ui/tooltips.zig">
 fn tooltipFor(ui: *Ui, target: zui.Id, content: []const u8) void {
     if (!ui.hovered(target)) return;
@@ -828,6 +828,7 @@ fn tooltipFor(ui: *Ui, target: zui.Id, content: []const u8) void {
             .attach_point = .bottom_center,
             .offset = .{ 0, 6 },
             .z = 50,
+            .capture = false,
         },
         .layout = .{ .padding = .symmetric(8, 4) },
         .decoration = .{ .background = .rgb(0x0f0f14), .corner_radius = .all(4) },
@@ -851,6 +852,20 @@ fn contextMenu(app: *App, ui: *Ui) void {
 
 // after declaring the import button:
 tooltipFor(ui, .of("import"), "Import photos (Ctrl+I)");
+
+// Declared before the photo card it marks, and cut off where the grid scrolls it away:
+fn unsavedBadge(ui: *Ui, index: usize) void {
+    ui.box(.{
+        .layout = .{ .sizing = .{ .width = .fixed(10), .height = .fixed(10) } },
+        .decoration = .{ .background = .rgb(0xffc65c), .corner_radius = .all(5) },
+        .floating = .{
+            .attach_to = .{ .element = .indexed("photo", index) },
+            .anchor = .center,
+            .attach_point = .top_right,
+            .clip = .target,
+        },
+    });
+}
 </script>
       </article>
 
@@ -1771,7 +1786,7 @@ fn present(renderer: *Renderer, surface: zui.Surface, frame: *const Ui.Frame) !v
         <li><b><code class="z">features.flex_wrap</code> and <code class="z">features.safety_sweeps</code> <span class="pill partial">Declared only</span></b><span>The flags exist and gate their API, but they don't change behaviour yet. Wrap is L7; sweeps are V3.</span></li>
         <li><b>Images' tint and corner radius in the backends</b><span>The <code class="z">image</code> command carries them, but zui-raylib and zui-sokol still draw every image untinted and square. Item C10.</span></li>
         <li><b>Extended color</b><span>Colors are RGBA8 only. <code class="z">zui.ExtendedColor</code> for HDR is G6.</span></li>
-        <li><b>Still to come</b><span>More floating options (L4), right-to-left layout (L6), drag and drop between elements (I1), a visual inspector <code>zui_debug</code> (V1), motion, multi-line text editing, skins, and more hosts (macOS, Linux, web).</span></li>
+        <li><b>Still to come</b><span>Right-to-left layout (L6), drag and drop between elements (I1), a visual inspector <code>zui_debug</code> (V1), motion, multi-line text editing, skins, and more hosts (macOS, Linux, web).</span></li>
       </ul>
     </section>
 

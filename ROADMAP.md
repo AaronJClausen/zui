@@ -27,7 +27,7 @@ Each item says:
 | stage 3 | the renderer contract and the generated commands (C1); the host contract and `RecordBuilder` (C2); the conformance suites (C3); `Features` (C7); `zui_app` (C4); the raylib adapter host (H1) | done; the backends are renderers and pass the renderer suite in CI, raylib's host passes the host suite, and the demo runs through `zui_app`, presenting its first frame 288 ms after the process starts; lowering comes with stage 8's commands |
 | stage 4 | the Windows host (H2), with dropped files and lifecycle events in the record; the system material (H8); `zui_app` with the application's own text contract (C9) | done; zui-sokol's tour runs on it unchanged, through `zui_app`, and idles at 0% CPU, and the same code shows Mica or a solid background |
 | stage 5 | relay (F2); `zui_wire` (F3); replay in `zui_testing` (F4); the wire host, renderer and client (F5); file watching as a source (F6) | done; editing a theme file restyles a running window on the Windows host within 4 ms; a recorded session of zui-sokol's tour replays to identical commands without starting any work, zui-sokol's tour goes over the wire at a hundredth of its frames' whole size, but for the screen that moves every box, and it runs in one process and draws in another on the Windows host, its keys going back |
-| stage 6, early | the single-line fast path (T1), the whole-string cache (T2), static styles (L8), the box tree's layout and emission (P4) and declaration (P5), line-break segmentation (T4), the grow basis (L1), aspect ratio and natural sizes (L2), dividers and decorated images (L3) | done; the box tree's and warm text's budgets met: the box tree declares in 48.9 µs and lays out and emits in 89.2 µs, warm text in 91.7 µs; a box tree of static styles declares in 28.0 µs |
+| stage 6, early | the single-line fast path (T1), the whole-string cache (T2), static styles (L8), the box tree's layout and emission (P4) and declaration (P5), line-break segmentation (T4), the grow basis (L1), aspect ratio and natural sizes (L2), dividers and decorated images (L3), floating options (L4) | done; the box tree's and warm text's budgets met: the box tree declares in 48.9 µs and lays out and emits in 89.2 µs, warm text in 91.7 µs; a box tree of static styles declares in 28.0 µs |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
@@ -60,14 +60,14 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
-| L4. Floating options | 6 | `src/layout.zig`, `src/emission.zig` | | |
 | L6. Right-to-left layout | 6 | `src/layout.zig` | | |
 | L7. Wrap | 6 | `src/layout.zig` | | |
 | C10. The backends draw images' tint and corner radius | 6 | `../zui-raylib`, `../zui-sokol`, `zui_testing/` | | |
 | I5. Gestures | 7 | `src/interaction.zig`, `src/input.zig`, `zui_testing/` | | |
 | I1. Drag and drop between elements | 7 | `src/interaction.zig`, `src/state.zig`, `zui_testing/` | I5 | |
+| G1. Gradients, shadows and glow | 8 | `src/style.zig`, `src/emission.zig`, `zui_testing/` | | |
 
-After the queue come the rest of stage 7 and stages 8 to 11 in the order of SPEC.md §21. They join the queue as it runs short.
+After the queue come the rest of stage 8 and stages 9 to 11 in the order of SPEC.md §21. They join the queue as it runs short.
 
 Statuses: `next` (the first open row), `in progress` (a slice has
 landed), `waiting on <what>` (blocked by something the next session cannot
@@ -131,6 +131,68 @@ Things to know:
 ---
 
 ## Done
+
+### L4. Floating options
+
+**Grounding.** Every floating element got a hit region, so a tooltip
+blocked what was under it; floating elements always escaped their
+ancestors' clip; a target declared after the floating element fell back
+to the parent. **Plan.** `Floating.capture`, `Floating.clip`, and later
+targets placed after pass 6. **Done when:** interaction, layer and golden
+tests for each. **Spec.** §8.4.
+
+`Floating.capture` (true) and `Floating.clip` (`.none`, or `.target`).
+With `capture = false` a floating element has no hit region of its own,
+so the pointer reaches what it covers, while interactive elements inside
+it still take it. `.clip = .target` cuts it off where its target's
+children are: as a child in the flow for `.parent`, by the element's own
+clip within its ancestors' for an element (found by walking up from it,
+bounded, since it is not on the stack of open levels), and by the
+viewport for `.root`. That clip, merged with the element's own, is one
+`clip_begin` pushed in its layer before it draws, since sorting moves the
+layer away from its ancestors' clips; its region is cut off with it.
+To end that one clip after the border, every border is now emitted
+before its element's own `clip_end`: it lies in the element's box, so
+its own clip leaves it whole, and SPEC.md §13.2 says so.
+
+A floating element whose target is declared later is placed against its
+parent in pass 6, then placed again with its subtree once the pass is
+over, in declaration order, so nested floating elements, `.root` ones
+included, end up against their own targets. A target inside the floating
+element's own subtree, or an id no element has, falls back to the parent.
+`capture` and `clip == .target` are copied into the element's flags at
+declaration, so emission reads them without the floating config.
+
+Tests: a menu attached to a later element, its child moved with it and a
+`.root`-attached element inside it left in the corner; a later target in
+a scrolled list followed where the scroll put it; a target inside the
+subtree falling back to the parent; a floating element clipped to its
+parent's clip, to a row of a scrolled list (with its own clip and border
+in one clip pair) and to a target outside every clip; a tooltip with
+`capture = false` passing the pointer to the button under it while a chip
+inside it is hovered; a flyout clipped to its pane taking the pointer
+only inside the pane; a button attached to a later target clicked where
+it is drawn. The randomized trees float elements with random `capture`
+and `clip`, attached to earlier, later, inner and missing targets.
+
+`zig build counts` against `96cbb40`, in a local Docker container: every
+declaration unchanged; the box tree's `endFrame` −0.41% (1,256,130 to
+1,251,001), depth 64's −1.96%, 4,000 children's +1.39%, warm text's
++0.51%, the documents view's +0.38%. The first versions cost up to +21%:
+emission reading the floating config for every element, a `Level` field
+for the target's clip, and a call to place floating elements that kept
+the passes' hot loops from staying in registers. Testing whether an
+element draws anything in emission's loop, before `enter`, is what
+brought the box tree and depth 64 below their old counts.
+`zig build bench-compare -- 96cbb40` (6 rounds): the box tree's
+`endFrame` −0.4%, the static-styled tree's −1.4%, depth 64's −4.5%;
+called slower: warm text's `endFrame` +8.1% (92.5 to 99.7 µs), single-line
+text's +2.7% and 4,000 children's +3.6%. Callgrind's branch and cache
+simulation of warm text gives the same mispredictions and misses as
+`96cbb40`, and 0.5% more instructions, so this is where the code lands,
+as T4 found, and not work added. `zig build bench -- --check-targets`
+meets every budget: the box tree declares in 50.7 µs and lays out and
+emits in 91.2 µs, warm text in 99.8 µs.
 
 ### L3. Dividers and decorated images
 
@@ -1741,20 +1803,6 @@ Done: F2, F3, F4, F5 and F6 are in *Done*.
 
 ## Stage 6: text and layout
 
-### L4. Floating options
-
-**Grounding.** Every floating element gets a hit region
-(`src/emission.zig:157`), so a tooltip blocks what is under it; floating
-elements always escape their ancestors' clip; a target declared after
-the floating element falls back to the parent (`src/layout.zig:421`).
-
-**Plan.** `Floating.capture`, `Floating.clip`, and later targets placed
-after pass 6 by shifting the contiguous subtree.
-
-**Done when:** interaction, layer and golden tests for each.
-
-**Spec.** §8.4.
-
 ### L6. Right-to-left layout
 
 **Plan.** `Direction.right_to_left`, `Layout.mirrored`, and logical
@@ -1998,6 +2046,8 @@ Deliberate, and each a reason to choose zui:
 | An element's switches | `?bool`, null meaning false, so that their defaults fold away; written as booleans (P5) |
 | Line-break segmentation | the text contract's `zuiSegment`, one paragraph at a time; spaces before a break hang (T4) |
 | Aspect ratio (L2) | a height rule, `.aspectRatio(r)`, not a `Layout` field, which made every layout eight bytes larger and declaration 6.6% slower; neither stretched nor grown by its parent; on a width, or not positive, the content's size |
+| Floating options (L4) | `capture = false` gives the floating element no hit region of its own, while interactive elements inside it keep theirs; `.clip = .target` cuts it off where its target's children are, merged with its own clip into one pair pushed in its layer before it draws; a later target places the subtree again after pass 6, in declaration order, and a target inside the subtree falls back to the parent; `capture` and `clip` are copied into the element's flags, so emission reads no floating config for other elements |
+| A border inside its element's clip (L4) | emitted before the element's own `clip_end`, which leaves it whole since it lies in the element's box, so a floating element's merged clip also cuts off its border with one clip pair |
 | Dividers (L3) | `Border.between_children`, emitted as `rectangle` commands in the border's color, so no renderer breaks; centered in the gap, spanning the element inside its widths; inside the element's clip, after its children and before its border; a border of zero widths emits no `border` command |
 | Images' tint and corner radius (L3) | declared on `Ui.Image` and carried by the `image` command with defaults (white, square), so existing renderers and their tests still compile; drawing them is the backends' (C10) |
 | Natural sizes (L2) | `Ui.Image` is the declaration's type, apart from the `image` command; a natural size is the content inside the padding, may shrink in a narrower parent, and gives the height its proportions unless the height has a rule of its own |

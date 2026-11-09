@@ -63,10 +63,17 @@ const Generator = struct {
                 element.scroll = .{ .horizontal = self.random.boolean(), .vertical = self.random.boolean() };
             },
             2 => element.floating = .{
-                .attach_to = if (self.random.boolean()) .parent else .root,
+                // A scroll container's id may name one declared earlier, later, inside, or none.
+                .attach_to = switch (self.random.uintLessThan(u8, 3)) {
+                    0 => .parent,
+                    1 => .root,
+                    else => .{ .element = .indexed("scroll", self.random.uintLessThan(u32, self.next_scroll_id + 4)) },
+                },
                 .anchor = self.random.enumValue(zui.AnchorPoint),
                 .attach_point = self.random.enumValue(zui.AnchorPoint),
                 .z = self.random.intRangeAtMost(i16, 1, 3),
+                .capture = self.random.boolean(),
+                .clip = self.random.enumValue(zui.FloatingClip),
             },
             else => {},
         }

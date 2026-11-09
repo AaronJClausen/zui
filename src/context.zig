@@ -197,10 +197,18 @@ pub const ElementFlags = packed struct(u16) {
     scroll_y: bool = false,
     top_to_bottom: bool = false,
     floating: bool = false,
-    _: u5 = 0,
+    /// A floating element that takes the pointer from what it covers.
+    captures_pointer: bool = false,
+    /// A floating element cut off by its target's clip.
+    clips_to_target: bool = false,
+    _: u3 = 0,
 
     pub fn clips(self: ElementFlags) bool {
         return self.clip_x or self.clip_y;
+    }
+
+    pub fn clipsOrClipsToTarget(self: ElementFlags) bool {
+        return self.clip_x or self.clip_y or self.clips_to_target;
     }
 
     /// Any flag that makes emission record the element: everything but
@@ -1192,6 +1200,8 @@ pub fn Context(comptime config: Config) type {
                 .clip_y = element.clip.includes(.y),
                 .top_to_bottom = directionOf(element) == .top_to_bottom,
                 .floating = element.floating != null,
+                .captures_pointer = if (element.floating) |floating| floating.capture else false,
+                .clips_to_target = if (element.floating) |floating| floating.clip == .target else false,
             };
             if (element.scroll) |scroll| {
                 if (element_id.isNone()) {

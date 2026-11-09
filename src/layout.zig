@@ -454,16 +454,48 @@ fn wrapTexts(comptime Ui: type, ui: *Ui, frame: *Ui.Frame) void {
 /// Pass 6, one forward pass in declaration order. Parents come before
 /// their children, so an element's position is final when it is reached,
 /// and it places its flow children then. A floating element is placed when
-/// it is reached, against its target, which, being declared earlier, is
-/// already placed; a target declared later falls back to the parent.
+/// it is reached, against its target, which is already placed if declared
+/// earlier; one whose target comes later is placed against its parent
+/// first, and again with its subtree once the pass has placed the target.
 fn position(comptime Ui: type, ui: *Ui, frame: *Ui.Frame) void {
     frame.position[Ui.root_index] = .{ 0, 0 };
+    var first_with_later_target: ?Ui.Index = null;
     for (0..frame.element_count) |index| {
         const element: Ui.Index = @intCast(index);
-        if (frame.isFloating(element)) placeFloating(Ui, frame, element);
+        if (frame.isFloating(element)) @call(.never_inline, placeFloatingInPass, .{ Ui, frame, element, &first_with_later_target });
         if (frame.child_counts[element].all == 0) continue;
         switch (frame.flags[element].top_to_bottom) {
             inline else => |top_to_bottom| placeChildren(Ui, ui, frame, element, if (top_to_bottom) .y else .x),
+        }
+    }
+    if (first_with_later_target) |first| @call(.never_inline, placeAfterLaterTargets, .{ Ui, ui, frame, first });
+}
+
+fn placeFloatingInPass(comptime Ui: type, frame: *Ui.Frame, floating: Ui.Index, first_with_later_target: *?Ui.Index) void {
+    if (!placeFloating(Ui, frame, floating, .earlier_targets) and first_with_later_target.* == null) first_with_later_target.* = floating;
+}
+
+inline fn placeChildrenOf(comptime Ui: type, ui: *Ui, frame: *Ui.Frame, parent: Ui.Index) void {
+    switch (frame.flags[parent].top_to_bottom) {
+        inline else => |top_to_bottom| placeChildren(Ui, ui, frame, parent, if (top_to_bottom) .y else .x),
+    }
+}
+
+/// Places each floating subtree whose target was declared after it, in
+/// declaration order, so a subtree nested in another is placed after the
+/// one it moves with. A target inside a floating subtree that is itself
+/// placed here later is taken where that subtree was first placed.
+fn placeAfterLaterTargets(comptime Ui: type, ui: *Ui, frame: *Ui.Frame, first: Ui.Index) void {
+    for (first..frame.element_count) |index| {
+        const floating: Ui.Index = @intCast(index);
+        if (!frame.isFloating(floating)) continue;
+        const target = targetOf(Ui, frame, floating) orelse continue;
+        if (target < floating) continue;
+        _ = placeFloating(Ui, frame, floating, .all_targets);
+        for (floating..frame.subtree_end[floating]) |subtree_index| {
+            const element: Ui.Index = @intCast(subtree_index);
+            if (element != floating and frame.isFloating(element)) _ = placeFloating(Ui, frame, element, .all_targets);
+            if (frame.child_counts[element].all != 0) placeChildrenOf(Ui, ui, frame, element);
         }
     }
 }
@@ -497,27 +529,47 @@ inline fn placeChildren(comptime Ui: type, ui: *Ui, frame: *Ui.Frame, parent: Ui
     }
 }
 
-fn placeFloating(comptime Ui: type, frame: *Ui.Frame, floating: Ui.Index) void {
+/// The element a floating element attaches to, or null for the viewport.
+/// A target that does not exist, or lies inside the floating element's own
+/// subtree, falls back to the parent: the subtree's position would depend
+/// on itself.
+pub fn targetOf(comptime Ui: type, frame: *const Ui.Frame, floating: Ui.Index) ?Ui.Index {
+    const parent = frame.parent[floating];
+    return switch (frame.floatingOf(floating).attach_to) {
+        .parent => parent,
+        .root => null,
+        .element => |target_id| if (frame.lookup(target_id.hash)) |target|
+            (if (target < floating or target >= frame.subtree_end[floating]) target else parent)
+        else
+            parent,
+    };
+}
+
+const PlacedTargets = enum { earlier_targets, all_targets };
+
+/// Returns false when the target comes later and is not placed yet, in
+/// which case the element is placed against its parent for now.
+fn placeFloating(comptime Ui: type, frame: *Ui.Frame, floating: Ui.Index, comptime placed: PlacedTargets) bool {
     const config = frame.floatingOf(floating);
     const parent = frame.parent[floating];
-    var target_position = frame.position[parent];
-    var target_size = frame.size[parent];
-    switch (config.attach_to) {
-        .parent => {},
-        .root => {
-            target_position = .{ 0, 0 };
-            target_size = frame.params.viewport;
-        },
-        .element => |target_id| if (frame.lookup(target_id.hash)) |target| if (target < floating) {
-            target_position = frame.position[target];
-            target_size = frame.size[target];
-        },
+    var placed_against_target = true;
+    var target_position: [2]f32 = .{ 0, 0 };
+    var target_size = frame.params.viewport;
+    if (targetOf(Ui, frame, floating)) |found| {
+        var target = found;
+        if (placed == .earlier_targets and target > floating) {
+            placed_against_target = false;
+            target = parent;
+        }
+        target_position = frame.position[target];
+        target_size = frame.size[target];
     }
     const attach = config.attach_point.fractions();
     const anchor = config.anchor.fractions();
     for (0..2) |a| {
         frame.position[floating][a] = target_position[a] + target_size[a] * attach[a] - frame.size[floating][a] * anchor[a] + config.offset[a];
     }
+    return placed_against_target;
 }
 
 /// The element's scroll offset, clamped to its content now that the

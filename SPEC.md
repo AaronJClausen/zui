@@ -773,15 +773,29 @@ was measured slower, so they stay separate.
 - **They take no space** in their parent's flow.
 - **`grow` and `percent`** resolve against the viewport for `.root`, and
   against the parent otherwise.
-- **An element target may be declared later.** Floating subtrees whose
-  target comes later are placed after pass 6 by shifting the subtree,
-  which is contiguous (`index..subtree_end`).
+- **An element target may be declared later.** A floating subtree whose
+  target comes later is placed against its parent in pass 6, then placed
+  again, with its subtree (`index..subtree_end`, contiguous), once pass 6
+  has placed the target. These subtrees are placed in declaration order,
+  so one nested in another follows it; a target inside a floating subtree
+  that is itself placed later is taken where pass 6 left it. A target
+  inside the floating element's own subtree, or an id no element has,
+  falls back to the parent, since the subtree's position would depend on
+  itself.
 - **They paint in layer `z`,** sorted stably, so declaration order holds
   within a layer, and they escape their ancestors' clips unless
-  `.clip = .target`.
+  `.clip = .target`, which cuts them off where their target's children
+  are: for `.parent`, as a child in the flow; for an element, by that
+  element's own clip within its ancestors'; for `.root`, by the viewport.
+  That clip, merged with the floating element's own, is pushed in its
+  layer before it draws, since sorting moves the layer away from its
+  ancestors' clips.
 - **They win the hit test** over lower layers when `capture` is true, and
   their tree ancestors still count as hovered, so a menu stays hovered
-  while the pointer is over its dropdown.
+  while the pointer is over its dropdown. With `capture = false` the
+  element has no hit region of its own, so a tooltip lets the pointer
+  through to what it covers; interactive elements inside it still take
+  it.
 
 ### 8.5 Layout islands *(later, measured)*
 
@@ -1224,8 +1238,10 @@ adding a base command always does, at compile time.
 ### 13.2 Order and snapping
 
 `Frame.commands()` is in paint order: by layer, then declaration order.
-A border and its dividers are emitted after its element's subtree. Bounds snap to whole
-physical pixels using the frame's `scale × zoom`.
+A border and its dividers are emitted after its element's subtree,
+inside the element's own clip, which leaves them whole since both lie in
+its box. Bounds snap to whole physical pixels using the frame's
+`scale × zoom`.
 
 ### 13.3 Lowering
 
@@ -1248,7 +1264,8 @@ diagnostics for the inspector.
 ### 13.4 Hit regions and chrome
 
 Hit regions carry the id, rectangle, clip, layer, flags and accepted
-gestures of every interactive or floating-capture element. Chrome
+gestures of every interactive element, and of every floating element
+with `capture = true`. Chrome
 regions mark title bars and resize edges, so a host with a custom title
 bar still lets the OS move, resize and snap the window.
 

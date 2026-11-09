@@ -767,7 +767,7 @@ test "dividers down a column skip floating children, and need no outline" {
     , try support.snapshot(try harness.end(), &buffer));
 }
 
-test "dividers are clipped with the children they separate" {
+test "dividers are clipped with the children they separate, and the border drawn inside the element's own clip" {
     var harness: support.Harness = .{};
     try harness.init();
     defer harness.deinit();
@@ -785,8 +785,8 @@ test "dividers are clipped with the children they separate" {
     try testing.expectEqualStrings(
         \\clip 0 0 50 25
         \\rect 1 14 49 2 #555555
-        \\clip_end
         \\border 0 0 50 25 #555555
+        \\clip_end
         \\
     , try support.snapshot(try harness.end(), &buffer));
 }

@@ -139,6 +139,7 @@ pub const BreakSink = text.BreakSink;
 pub const Scroll = style.Scroll;
 pub const Floating = style.Floating;
 pub const AttachTo = style.AttachTo;
+pub const FloatingClip = style.FloatingClip;
 pub const AnchorPoint = style.AnchorPoint;
 
 pub const WidgetState = interaction.WidgetState;

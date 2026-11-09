@@ -355,13 +355,28 @@ pub const AttachTo = union(enum) {
     parent,
     /// The viewport.
     root,
-    /// Another element, which must be declared earlier in the frame.
+    /// Another element, declared before or after this one but not inside
+    /// it; one declared after is placed once the rest of the frame is. An
+    /// id no element has, or one inside this element, falls back to the
+    /// parent.
     element: Id,
+};
+
+/// What cuts off a floating element and its subtree.
+pub const FloatingClip = enum(u8) {
+    /// Only the viewport: it escapes every ancestor's clip, as a menu
+    /// that opens past the edge of a scrolled list should.
+    none,
+    /// Whatever cuts off its target's children: the viewport for `.root`,
+    /// and otherwise the target's own clip within its ancestors', so a
+    /// badge on a row scrolls out of sight with the row.
+    target,
 };
 
 /// An element positioned relative to another box instead of its parent's
 /// flow. It takes no space in its parent, paints in layer `z`, escapes its
-/// ancestors' clipping, and receives the pointer before lower layers.
+/// ancestors' clipping unless `clip` is `.target`, and, while `capture`
+/// is true, receives the pointer before lower layers.
 pub const Floating = struct {
     attach_to: AttachTo = .parent,
     /// The point of the floating element that is placed...
@@ -370,6 +385,10 @@ pub const Floating = struct {
     attach_point: AnchorPoint = .top_left,
     offset: [2]f32 = .{ 0, 0 },
     z: i16 = 1,
+    /// False lets the pointer through to whatever lies beneath, as a
+    /// tooltip should; interactive elements inside it still take it.
+    capture: bool = true,
+    clip: FloatingClip = .none,
 };
 
 pub const TextWrap = enum(u8) {

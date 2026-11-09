@@ -95,7 +95,11 @@ Implemented so far:
   `.natural_size` takes that size and keeps its proportions as its width
   grows or shrinks. A border's `.between_children = 1` draws a divider
   between each two children, centered in the gap, and an image's `tint`
-  and `corner_radius` reach the renderer in its `image` command.
+  and `corner_radius` reach the renderer in its `image` command. A
+  floating element may attach to an element declared after it; with
+  `.capture = false` it lets the pointer through to what it covers, as a
+  tooltip should, and with `.clip = .target` it is cut off where its
+  target's children are, so a badge on a row scrolls away with the row.
 - **Stage 3:** the renderer contract (`zuiSubmit`, the surfaces
   it draws into, the optional commands it draws), checked at compile time
   by `zui.checkRenderer`, and a `RenderCommand` union generated with

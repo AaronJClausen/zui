@@ -216,7 +216,9 @@ segmentation through the text contract's `zuiSegment`, and the grow
 basis: `grow` starts from the content, `grow_from_min` from `min`; and
 the `aspect_ratio` rule, a height from the settled width, and images'
 natural sizes; and dividers between children, `Border.between_children`,
-and images' tint and corner radius in the `image` command.
+and images' tint and corner radius in the `image` command; and the
+floating options: targets declared later, `Floating.capture` and
+`Floating.clip`.
 
 The code and the spec still differ in these places, each closed by the
 roadmap item named:

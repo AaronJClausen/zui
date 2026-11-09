@@ -179,6 +179,80 @@ test "a floating element blocks the pointer from what it covers" {
     }
 }
 
+test "a floating element that does not capture lets the pointer through" {
+    var harness: Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    for (0..3) |frame_number| {
+        const pointer: [2]f32 = if (frame_number == 2) .{ 10, 10 } else .{ 40, 30 };
+        const ui = harness.beginWith(.{ .pointer = pointer });
+        if (frame_number == 1) {
+            try testing.expect(ui.hovered(a)); // through the tooltip's empty part
+            try testing.expect(!ui.hovered(.of("chip")));
+        }
+        if (frame_number == 2) {
+            try testing.expect(ui.hovered(.of("chip"))); // interactive inside it
+            try testing.expect(!ui.hovered(a));
+        }
+        buttons(ui, .{});
+        ui.open(.{ .floating = .{ .attach_to = .root, .capture = false }, .layout = .{ .sizing = .{ .width = .fixed(50), .height = .fixed(50) } } });
+        ui.box(.{ .id = .of("chip"), .interactive = true, .layout = .{ .sizing = .{ .width = .fixed(20), .height = .fixed(20) } } });
+        ui.close();
+        try finish(&harness);
+    }
+}
+
+test "a floating element clipped to its target takes the pointer only inside the clip" {
+    var harness: Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    const flyout: zui.Id = .of("flyout");
+    const pointers = [_][2]f32{ .{ 0, 0 }, .{ 120, 10 }, .{ 80, 10 } };
+    for (pointers, 0..) |pointer, frame_number| {
+        const ui = harness.beginWith(.{ .pointer = pointer });
+        if (frame_number == 1) {
+            try testing.expect(ui.hovered(b)); // the flyout is cut off at x 100
+            try testing.expect(!ui.hovered(flyout));
+        }
+        if (frame_number == 2) {
+            try testing.expect(ui.hovered(flyout));
+            try testing.expect(!ui.hovered(a));
+        }
+        ui.open(.{});
+        ui.open(.{ .layout = .{ .sizing = .{ .width = .fixed(100), .height = .fixed(40) } }, .clip = .both });
+        ui.box(.{ .id = a, .interactive = true, .layout = .{ .sizing = .{ .width = .fixed(100), .height = .fixed(40) } } });
+        ui.box(.{ .id = flyout, .interactive = true, .layout = .{ .sizing = .{ .width = .fixed(80), .height = .fixed(40) } }, .floating = .{ .offset = .{ 60, 0 }, .clip = .target } });
+        ui.close();
+        ui.box(.{ .id = b, .interactive = true, .layout = .{ .sizing = .{ .width = .fixed(100), .height = .fixed(40) } } });
+        ui.close();
+        try finish(&harness);
+    }
+}
+
+test "a floating button attached to a later target is clicked where it is drawn" {
+    var harness: Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    const close_button: zui.Id = .of("close");
+    const samples = [_]zui.InputSampler.Sample{
+        .{},
+        .{ .pointer = .{ 105, 205 }, .buttons = support.primaryDown() },
+        .{ .pointer = .{ 105, 205 } },
+    };
+    for (samples, 0..) |sample, frame_number| {
+        const ui = harness.beginWith(sample);
+        if (frame_number == 2) try testing.expect(ui.clicked(close_button));
+        ui.box(.{ .id = close_button, .interactive = true, .layout = .{ .sizing = .{ .width = .fixed(10), .height = .fixed(10) } }, .floating = .{ .attach_to = .{ .element = .of("dialog") }, .anchor = .top_right, .attach_point = .top_right } });
+        ui.box(.{ .layout = .{ .sizing = .{ .width = .fixed(10), .height = .fixed(200) } } });
+        ui.box(.{ .id = .of("dialog"), .layout = .{ .sizing = .{ .width = .fixed(110), .height = .fixed(50) } } });
+        const frame = try harness.end();
+        try support.expectRect(frame, close_button, 100, 200, 10, 10);
+    }
+}
+
 test "a floating descendant covers its siblings but keeps its ancestor hovered" {
     var harness: Harness = .{};
     try harness.init();
