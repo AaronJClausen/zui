@@ -278,7 +278,8 @@ pub fn Widgets(comptime UiType: type) type {
 
         /// Edits the integer or float behind `value` by dragging, or with
         /// the arrow keys, Page Up/Down, Home and End while focused.
-        /// Returns whether the value changed.
+        /// Returns whether the value changed. It keeps a horizontal drag,
+        /// so a list it is in scrolls only with a vertical one.
         pub fn slider(self: Self, ui: *Ui, id: zui.Id, value: anytype, options: SliderOptions) bool {
             const Value = NumberPointee(@TypeOf(value), "slider");
             const theme = self.activeTheme(ui);
@@ -321,6 +322,7 @@ pub fn Widgets(comptime UiType: type) type {
                 .focusable = true,
                 .disabled = options.disabled,
                 .cursor = if (options.disabled) null else .pointer,
+                .gestures = .{ .pan = .horizontal },
                 .layout = .{ .sizing = .{ .width = options.width, .height = .fixed(theme.control_height) }, .child_alignment = .{ .y = .center } },
             });
             // The grow weights split the track's free space at the value,

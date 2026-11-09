@@ -62,7 +62,7 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
-| I5. Gestures | 7 | `src/interaction.zig`, `src/input.zig`, `zui_testing/` | | |
+| I5. Gestures | 7 | `src/interaction.zig`, `src/input.zig`, `zui_testing/` | | in progress |
 | I1. Drag and drop between elements | 7 | `src/interaction.zig`, `src/state.zig`, `zui_testing/` | I5 | |
 | G1. Gradients, shadows and glow | 8 | `src/style.zig`, `src/emission.zig`, `zui_testing/` | | |
 | G2. Backdrop blur | 8 | `src/style.zig`, `src/emission.zig`, `zui_testing/` | G1 | |
@@ -1997,7 +1997,7 @@ Done: T1, T2, L8, P4, P5, T4, L1, L2, L3, L4, L6, L7 and C10 are in
 
 **Grounding.**
 - The slider drags with `pressed` and `pointerLocal`
-  (`zui_widgets/zui_widgets.zig:268`); drag-to-scroll and drag and drop
+  (`zui_widgets/zui_widgets.zig:290`); drag-to-scroll and drag and drop
   want the same pointer, and nothing decides between them.
 - Routing by gesture kind fails: a vertical drag on a horizontal carousel
   inside a vertical list goes to the carousel, and a pinch that starts on
@@ -2018,6 +2018,47 @@ function against the map's pan; and with the feature off, R1 counts are
 unchanged.
 
 **Spec.** §11.3, §11.4.
+
+**Status.** In five slices, each with its tests and with R1 counts
+unchanged with the feature off:
+1. *Pans* (done): `zui.Gestures` with `pan`, stored in hit regions;
+   the one rule by motion component past the touch slop, with scroll
+   chaining; scroll containers that pan by touch and pen; presses
+   cancelled by a pan; `manipulation`'s translation from pans and the
+   wheel; the slider keeping a horizontal drag.
+2. *Zoom* (next): `zoom`, two-pointer scale, rotation and pivot to the
+   innermost region that accepts it, and `Driver.pinch` (from I4): a
+   button in a list in a zoomable map, a pinch that starts on the list.
+3. *Timers and intents:* `long_press` and `double_tap` with their
+   deadlines in `nextFrame` (from I2), `contextRequested`, a double-tap
+   query, `dismissed`, `adjusted`, `navigated`: a long press, a double
+   tap next to a single tap.
+4. *Momentum:* velocity from the events' instants, momentum in the
+   state table under the element, its deadline in `nextFrame`: a flick
+   within one frame.
+5. *Custom recognizers:* `custom`, `pointerEvents`, `claim` and
+   `decline` (open decision 1): a lasso in a module against the map's
+   pan.
+
+Slice 1: the core's tests cover a carousel in a vertical list (a
+vertical drag on it scrolls the list, a horizontal one the carousel), a
+button in a list (a tap clicks, a drag scrolls the list and cancels the
+press), a slider-like element that pans horizontally in a list, scroll
+chaining at a carousel's end and a list's start, a mouse drag that does
+not scroll a list while the wheel does, a map panning freely on both
+axes with the mouse and the wheel, a button on the map, and a context
+without the feature ignoring `Element.gestures`. `zui_widgets`' slider
+declares `.pan = .horizontal`, tested in a list driven by
+`Driver.dragFingers`. `zig build counts` against `397ce28`, in a local
+Docker container: with the feature off, every scenario within ±2
+instructions; with it on, as the benchmarks run, the same, but for the
+documents view, whose interactive elements store their gestures:
+declaration +0.38% (33,320 to 33,447) and `endFrame` +0.49% (61,189 to
+61,489). `zig build bench -- --check-targets` meets every budget over
+three runs: the box tree declares in 50.4 to 51.0 µs and lays out and
+emits in 93.4 to 94.7 µs, warm text in 100.9 to 101.5 µs, on the
+instructions it had before. The 32-bit tests (`-Dtarget=x86-linux`) run
+in the Linux container, since Windows cannot execute them.
 
 ### I1. Drag and drop between elements
 
@@ -2208,6 +2249,7 @@ Deliberate, and each a reason to choose zui:
 | Signals | lifecycle events; uncatchable signals are not representable |
 | Input | an ordered event log with host instants, many pointers (I4) |
 | Gesture arbitration | elements declare what they accept; one rule, by motion component (I5) |
+| Pans (I5) | past a touch slop of 8 layout units from the press, the axis locks to the larger component and the innermost region under the press that pans on it with room to move takes the pointer until it lifts, both axes if it pans on both; any other element it pressed loses the press; a scroll container pans on its scrolled axes with touch and pen only, since the mouse has the wheel, unless it declares `pan`, which takes every pointer; declaring a gesture makes an element interactive; `Element.gestures` is ignored without `features.gestures` rather than failing to compile, so widgets declare gestures for every context; `manipulation` reports pans and the wheel, scroll containers included, `translation` moving content with the pointer |
 | Custom gestures | code in declaration over `pointerEvents` and `state`, not a registry |
 | Comparing two commits | each commit's own benchmarks, alternated, judged by the middle half beyond 2% (R2) |
 | The inspector | a module over `Frame.inspect` (V1) |

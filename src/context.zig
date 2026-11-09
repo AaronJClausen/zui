@@ -59,7 +59,8 @@ pub const Config = struct {
 pub const Features = struct {
     /// The accessibility tree, `Frame.semantics()`.
     semantics: bool = false,
-    /// Recognizing what pointers do to an element, `manipulation`.
+    /// Arbitrating pointers between nested elements by what each accepts,
+    /// `Element.gestures`, and what they did to it, `manipulation`.
     gestures: bool = true,
     /// Moving a row's children that overflow it onto new lines.
     flex_wrap: bool = false,
@@ -181,6 +182,11 @@ pub const Element = struct {
     /// the hovering pointer that sets a cursor. Only an interactive
     /// element is hit-tested, so on any other this has no effect.
     cursor: ?Cursor = null,
+    /// What it accepts from pointers, which decides which of nested
+    /// elements a pointer goes to. Declaring any makes it interactive.
+    /// Ignored without `Config.features.gestures`, so a widget can declare
+    /// them for every context.
+    gestures: interaction.Gestures = .{},
 };
 
 const ContentKind = enum(u8) { none, text, image, custom };
@@ -338,8 +344,8 @@ pub fn Context(comptime config: Config) type {
         const MeasureBatch = if (measures_in_parallel) parallel_measure.MeasureBatch(MeasureKey, TextContract, limits.parallel_measure_capacity) else void;
         const run_width_capacity = if (has_text) text_layout.maxRuns(limits.max_text_bytes, limits.max_elements) else 0;
         pub const States = state_table.StateTable(limits.state_slots);
-        pub const Results = interaction.Results(limits.max_elements, id_table_slots);
-        const InputState = interaction.State(limits.max_input_contacts, limits.max_depth + 1, limits.max_events_per_frame, limits.max_text_input_bytes, limits.max_dropped_path_bytes);
+        pub const Results = interaction.Results(limits.max_elements, id_table_slots, features.gestures);
+        const InputState = interaction.State(limits.max_input_contacts, limits.max_depth + 1, limits.max_events_per_frame, limits.max_text_input_bytes, limits.max_dropped_path_bytes, features.gestures);
 
         pub const Decoration = style.Decoration;
         const default_layout: style.Layout = .{};
@@ -397,6 +403,9 @@ pub fn Context(comptime config: Config) type {
             /// the layout. Written only for a wrapping row's children in the
             /// flow.
             starts_line: [if (features.flex_wrap) max_elements else 0]bool,
+            /// What the element accepts from pointers. Written only for an
+            /// element that is interactive or scrolls.
+            gestures: [if (features.gestures) max_elements else 0]interaction.Gestures,
 
             /// The configs an element set itself, copied in declaration.
             layouts: [max_elements]style.Layout,
@@ -1172,6 +1181,10 @@ pub fn Context(comptime config: Config) type {
             frame.content_kind[index] = kind;
             if (kind != .none) frame.content_index[index] = @intCast(record_index);
             frame.flags[index] = flagsFor(element_id, element);
+            if (features.gestures) {
+                const flags = frame.flags[index];
+                if (flags.interactive or flags.scroll_x or flags.scroll_y) frame.gestures[index] = element.gestures;
+            }
 
             if (element.cursor) |cursor| if (frame.flags[index].interactive) self.offerCursor(frame, hash, cursor);
 
@@ -1233,7 +1246,7 @@ pub fn Context(comptime config: Config) type {
         inline fn flagsFor(element_id: Id, element: Element) ElementFlags {
             var flags: ElementFlags = .{
                 .explicit_id = !element_id.isNone(),
-                .interactive = (element.interactive orelse false) or (element.focusable orelse false),
+                .interactive = (element.interactive orelse false) or (element.focusable orelse false) or (features.gestures and element.gestures.any()),
                 .focusable = element.focusable orelse false,
                 .focus_scope = element.focus_scope orelse false,
                 .disabled = element.disabled orelse false,
@@ -1328,13 +1341,17 @@ pub fn Context(comptime config: Config) type {
                     const contact = found orelse continue;
                     contact.pointer = move.pointer;
                     contact.hover_stale = contact.hovers();
+                    if (features.gestures and contact.buttons.contains(.primary)) self.pan(contact);
                 },
                 .pointer_down => |down| {
                     const contact = self.contactFor(frame, down.pointer) orelse continue;
                     contact.pointer = down.pointer;
                     const hot = self.refreshHover(contact);
                     contact.buttons.insert(down.button);
-                    if (down.button == .primary) self.press(contact, hot);
+                    if (down.button == .primary) {
+                        self.press(contact, hot);
+                        if (features.gestures) contact.gesture = .pressedAt(down.pointer.position);
+                    }
                 },
                 .pointer_up => |up| {
                     const contact = input_state.find(up.pointer.id) orelse continue;
@@ -1342,7 +1359,8 @@ pub fn Context(comptime config: Config) type {
                     const hot = self.refreshHover(contact);
                     contact.buttons.remove(up.button);
                     if (up.button == .primary) {
-                        if (contact.press_target != 0) if (hot) |region| if (results.regions[region].hash == contact.press_target) input_state.addClick(contact.press_target);
+                        const panned = features.gestures and contact.gesture.pan_owner != 0;
+                        if (contact.press_target != 0 and !panned) if (hot) |region| if (results.regions[region].hash == contact.press_target) input_state.addClick(contact.press_target);
                         contact.press_target = 0;
                     }
                     if (!contact.hovers() and contact.buttons.count() == 0) contact.lifted = true;
@@ -1449,7 +1467,8 @@ pub fn Context(comptime config: Config) type {
         }
 
         /// The innermost scroll container under the wheel that can still
-        /// move along an axis takes that axis.
+        /// move along an axis takes that axis, unless an element inside it
+        /// pans on that axis: that element takes it as a manipulation.
         fn applyWheel(self: *Self, wheel: input.Wheel) void {
             const results = &self.memory.results;
             if (!results.has_frame) return;
@@ -1459,15 +1478,88 @@ pub fn Context(comptime config: Config) type {
                 var region_index = innermost;
                 while (region_index != interaction.no_region) : (region_index = results.regions[region_index].parent) {
                     const region = results.regions[region_index];
-                    if (!region.flags.scrolls(axis) or !region.bounds.contains(wheel.position)) continue;
+                    if (!region.bounds.contains(wheel.position)) continue;
+                    if (features.gestures and !region.flags.scrolls(axis) and region.pans(axis, .mouse)) {
+                        self.memory.input.manipulate(region.hash).translation[axis] -= wheel.delta[axis];
+                        break;
+                    }
+                    if (!region.flags.scrolls(axis)) continue;
                     const offset = self.memory.states.get(region.hash, interaction.ScrollState, self.stateGeneration(), .create) orelse break;
                     const delta = if (axis == 0 and region.flags.scroll_x_reversed) -wheel.delta[0] else wheel.delta[axis];
                     const moved = std.math.clamp(offset.offset[axis] + delta, 0, region.max_scroll[axis]);
                     if (moved != offset.offset[axis]) {
                         offset.offset[axis] = moved;
+                        if (features.gestures) self.memory.input.manipulate(region.hash).translation[axis] -= wheel.delta[axis];
                         break;
                     }
                 }
+            }
+        }
+
+        /// Past the touch slop, the pointer's axis locks, and the innermost
+        /// element under its press that pans on that axis and can still
+        /// move that way takes it, so a list inside a list scrolls the
+        /// outer one once the inner one is at its end. From then on each
+        /// move pans that element, and the press belongs to no other.
+        fn pan(self: *Self, contact: *InputState.Slot) void {
+            const gesture = &contact.gesture;
+            const position = contact.pointer.position;
+            if (!gesture.past_slop) {
+                const moved: [2]f32 = .{ position[0] - gesture.press_position[0], position[1] - gesture.press_position[1] };
+                const slop = interaction.Gestures.touch_slop;
+                if (moved[0] * moved[0] + moved[1] * moved[1] < slop * slop) return;
+                gesture.past_slop = true;
+                const axis: usize = if (@abs(moved[0]) >= @abs(moved[1])) 0 else 1;
+                const owner = self.panOwner(gesture.press_position, axis, moved[axis], contact.pointer.kind) orelse return;
+                gesture.pan_owner = owner.hash;
+                gesture.pan_axes = if (owner.pans(1 - axis, contact.pointer.kind)) .both else if (axis == 0) .horizontal else .vertical;
+                if (contact.press_target != owner.hash) contact.press_target = 0;
+            }
+            if (gesture.pan_owner == 0) return;
+            var delta: [2]f32 = undefined;
+            for (0..2) |axis| delta[axis] = if (gesture.pan_axes.includes(axis)) position[axis] - gesture.panned_to[axis] else 0;
+            gesture.panned_to = position;
+            self.panElement(gesture.pan_owner, delta);
+        }
+
+        fn panOwner(self: *Self, press_position: [2]f32, axis: usize, motion: f32, kind: input.PointerKind) ?*const Results.Region {
+            const results = &self.memory.results;
+            if (!results.has_frame) return null;
+            var region_index = results.topmostAt(press_position) orelse return null;
+            while (region_index != interaction.no_region) : (region_index = results.regions[region_index].parent) {
+                const region = &results.regions[region_index];
+                if (region.bounds.contains(press_position) and region.pans(axis, kind) and self.canFollow(region, axis, motion)) return region;
+            }
+            return null;
+        }
+
+        /// Whether content following the pointer by `motion` along `axis`
+        /// would move: always for an element that does not scroll.
+        fn canFollow(self: *Self, region: *const Results.Region, axis: usize, motion: f32) bool {
+            if (!region.flags.scrolls(axis)) return true;
+            const offset = if (self.memory.states.get(region.hash, interaction.ScrollState, self.stateGeneration(), .existing_only)) |scroll| scroll.offset[axis] else 0;
+            return if (offsetChange(region.flags, axis, motion) < 0) offset > 0 else offset < region.max_scroll[axis];
+        }
+
+        /// Content follows the pointer, so the offset moves against it,
+        /// except on a reversed axis.
+        fn offsetChange(flags: interaction.RegionFlags, axis: usize, motion: f32) f32 {
+            return if (axis == 0 and flags.scroll_x_reversed) motion else -motion;
+        }
+
+        fn panElement(self: *Self, hash: u64, delta: [2]f32) void {
+            const manipulation_so_far = self.memory.input.manipulate(hash);
+            manipulation_so_far.translation[0] += delta[0];
+            manipulation_so_far.translation[1] += delta[1];
+            const results = &self.memory.results;
+            const entry = results.find(hash) orelse return;
+            if (entry.region == interaction.no_region) return;
+            const region = &results.regions[entry.region];
+            if (!region.flags.scroll_x and !region.flags.scroll_y) return;
+            const scroll = self.memory.states.get(hash, interaction.ScrollState, self.stateGeneration(), .create) orelse return;
+            for (0..2) |axis| {
+                if (delta[axis] == 0 or !region.flags.scrolls(axis)) continue;
+                scroll.offset[axis] = std.math.clamp(scroll.offset[axis] + offsetChange(region.flags, axis, delta[axis]), 0, region.max_scroll[axis]);
             }
         }
 
@@ -1481,14 +1573,22 @@ pub fn Context(comptime config: Config) type {
             return self.memory.input.isHovered(element_id.hash);
         }
 
-        /// What pointers did to `element_id` this frame, by dragging,
-        /// pinching or rotating it, summed. No gesture is recognized yet,
-        /// so it is null.
+        /// What pointers and the wheel did to `element_id` this frame,
+        /// summed, or null when nothing moved it. `translation` is how far
+        /// the content should move: with a pointer that pans the element,
+        /// and against the wheel. A scroll container scrolls itself and
+        /// reports it here too.
+        ///
+        /// ```zig
+        /// if (ui.manipulation(.of("map"))) |moved| {
+        ///     app.map_center[0] -= moved.translation[0] / app.map_zoom;
+        ///     app.map_center[1] -= moved.translation[1] / app.map_zoom;
+        /// }
+        /// ```
         pub fn manipulation(self: *const Self, element_id: Id) ?input.Manipulation {
             comptime requireFeature(.gestures, "manipulation()");
-            _ = self;
-            _ = element_id;
-            return null;
+            if (element_id.isNone()) return null;
+            return self.memory.input.manipulationOf(element_id.hash);
         }
 
         fn requireFeature(comptime feature: std.meta.FieldEnum(Features), comptime api: []const u8) void {

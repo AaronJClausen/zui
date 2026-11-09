@@ -223,6 +223,7 @@ fn Emitter(comptime Ui: type) type {
                     .scroll_y = flags.scroll_y,
                     .scroll_x_reversed = flags.scroll_x and flags.reversed,
                 },
+                .gestures = if (!Ui.features.gestures) {} else if (flags.interactive or flags.scroll_x or flags.scroll_y) frame.gestures[element] else .{},
                 // `content_size` is only computed for elements with children.
                 .max_scroll = if (frame.child_counts[element].all == 0) .{ 0, 0 } else .{
                     style.larger(0, frame.content_size[element][0] - frame.size[element][0]),

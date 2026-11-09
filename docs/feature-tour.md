@@ -553,6 +553,41 @@ fn photoGrid(app: *App, ui: *Ui) void {
 }
 ```
 
+<a id="gestures"></a>
+
+### Pans between nested elements · *in progress*
+
+An element declares what it accepts from pointers with `gestures`. Once a pointer moves 8 units from where it pressed (`zui.Gestures.touch_slop`), its axis locks, and it goes to the innermost element under the press that pans on that axis and can still move that way. So a vertical swipe on a horizontal filmstrip scrolls the page around it, a swipe past the strip's end does too, and the button it started on loses the press: no click. Scroll containers pan by touch and pen on their scrolled axes; the mouse keeps the wheel, so a mouse drag in a list stays with what it pressed. `ui.manipulation(id)` reports what pans and the wheel did to an element this frame. Declaring a gesture makes the element interactive, and without `features.gestures` it is ignored, so widgets declare it for every context: `zui_widgets`' slider keeps a horizontal drag. Zoom, long press, double tap, momentum and custom recognizers are still to come (I5).
+
+`src/ui/album.zig`
+
+```zig
+fn albumPage(app: *App, ui: *Ui) void {
+    ui.open(.{ .id = ids.album_page, .scroll = .{ .vertical = true }, .layout = .{ .direction = .top_to_bottom, .sizing = .grow_both } });
+    defer ui.close();
+
+    // A vertical swipe on the filmstrip scrolls the page; a horizontal one the strip.
+    ui.open(.{ .id = ids.filmstrip, .scroll = .{ .horizontal = true, .vertical = false }, .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(96) }, .child_gap = 4 } });
+    for (app.currentAlbum().photos, 0..) |*photo, index| thumbnail(app, ui, photo, index);
+    ui.close();
+
+    viewer(app, ui);
+}
+
+fn viewer(app: *App, ui: *Ui) void {
+    const id = ids.viewer;
+    if (ui.manipulation(id)) |moved| {
+        app.viewer.offset[0] += moved.translation[0];
+        app.viewer.offset[1] += moved.translation[1];
+    }
+    if (ui.clicked(id)) app.viewer.toggleChrome(); // a tap, not the end of a pan
+
+    ui.open(.{ .id = id, .gestures = .{ .pan = .both }, .cursor = .grab, .clip = .both, .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(480) } } });
+    defer ui.close();
+    ui.image(.{ .handle = app.viewer.texture, .natural_size = app.viewer.size }, .{ .floating = .{ .offset = app.viewer.offset, .clip = .target } });
+}
+```
+
 <a id="floating"></a>
 
 ### Floating elements in paint layers · *shipped*
@@ -1655,7 +1690,8 @@ Build with `-Dzui-tracy=true` to link Tracy's client, then connect profiler 0.14
 These names compile, but they don't do anything yet. This list is from `ARCHITECTURE.md` §7 and the roadmap.
 
 - **Gradients, shadows, backdrop blur, transforms, materials** *(declared only)*: The variants exist in `RenderCommand` when a renderer declares them, but `Decoration` has no field that produces them, so nothing is emitted or lowered. Items G1–G6, stage 8.
-- **`features.semantics` and `features.gestures`** *(declared only)*: `Frame.semantics()` is always empty and `ui.manipulation` always returns null. Accessibility is V2; gestures (arbitration, momentum, custom recognizers) are I5.
+- **`features.semantics`** *(declared only)*: `Frame.semantics()` is always empty. Accessibility is V2.
+- **The rest of `features.gestures`** *(in progress)*: pans work; zoom, long press, double tap, momentum, the other intents and custom recognizers are the rest of I5.
 - **`features.safety_sweeps`** *(declared only)*: The flag exists, but it doesn't change behaviour yet. Sweeps are V3.
 - **Extended color**: Colors are RGBA8 only. `zui.ExtendedColor` for HDR is G6.
 - **Still to come**: Drag and drop between elements (I1), a visual inspector `zui_debug` (V1), motion, multi-line text editing, skins, and more hosts (macOS, Linux, web).

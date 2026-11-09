@@ -149,6 +149,15 @@ Implemented so far:
   lets it set its zoom and add events to each record (`zuiRecord`).
   The record carries the new events: `ui.filesDropped()` and
   `ui.lifecycle()`.
+- **Stage 7, in progress:** gestures. An element declares what it
+  accepts, `.gestures = .{ .pan = .horizontal }`, and once a pointer
+  moves past the touch slop it goes to the innermost element that pans
+  on that axis and can still move that way: a vertical drag on a
+  carousel scrolls the list around it, and a drag that scrolls a list
+  takes the press from the button it started on. Scroll containers pan
+  with touch and pen; `ui.manipulation(id)` reports what pans and the
+  wheel did to an element, such as a map. Zoom, long press, double tap,
+  momentum and custom recognizers come next.
 
 The reference backend, its adapter host and the demo application live in
 [zui-raylib](https://github.com/AaronJClausen/zui-raylib); the other
@@ -160,7 +169,7 @@ hosts live in [zui-host](https://github.com/AaronJClausen/zui-host).
 shipped feature in the code a consumer writes, with semantic highlighting;
 open it in a browser, or read [docs/feature-tour.md](docs/feature-tour.md).
 
-Next, in the order of SPEC.md §21: gestures, effects, an inspector and
+Next, in the order of SPEC.md §21: the rest of gestures, effects, an inspector and
 accessibility, more hosts, motion and text editing.
 [ROADMAP.md](ROADMAP.md) keeps the queue of work in order, and
 [ARCHITECTURE.md](ARCHITECTURE.md) shows how the pieces connect.

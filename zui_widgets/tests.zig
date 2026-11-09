@@ -443,3 +443,33 @@ test "EditableText inserts and removes in place" {
     text.remove(0, 6);
     try testing.expectEqualStrings("ld", text.slice());
 }
+
+const ScrollingSettings = struct {
+    const ids = zui.ids(.{ "settings", "brightness" });
+
+    brightness: f32 = 0.5,
+
+    fn declare(settings: *ScrollingSettings, ui: *Ui) void {
+        ui.open(.{ .id = ids.settings, .scroll = .{}, .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(300), .height = .fixed(200) } } });
+        _ = widgets.slider(ui, ids.brightness, &settings.brightness, .{});
+        ui.box(.{ .layout = .{ .sizing = .{ .width = .fixed(300), .height = .fixed(1000) } } });
+        ui.close();
+    }
+};
+
+test "a slider in a list that scrolls by dragging keeps a horizontal drag, and the list a vertical one" {
+    var fixture: Fixture = .{};
+    try fixture.init();
+    defer fixture.deinit();
+    const driver = &fixture.driver;
+    var settings: ScrollingSettings = .{};
+    _ = try driver.frame(&settings, ScrollingSettings.declare, &.{});
+
+    _ = try driver.dragFingers(&settings, ScrollingSettings.declare, ScrollingSettings.ids.brightness, &.{.{ .from = .{ 0.5, 0.5 }, .to = .{ 1.5, 0.6 } }});
+    try testing.expectEqual(@as(f32, 1), settings.brightness);
+    try testing.expectEqual([2]f32{ 0, 0 }, fixture.ui.scrollOffset(ScrollingSettings.ids.settings));
+
+    _ = try driver.dragFingers(&settings, ScrollingSettings.declare, ScrollingSettings.ids.brightness, &.{.{ .from = .{ 0.5, 0.5 }, .to = .{ 0.4, -2 } }});
+    try testing.expectApproxEqAbs(@as(f32, 0.5), settings.brightness, 1e-4); // set where the finger landed, then left alone
+    try testing.expect(fixture.ui.scrollOffset(ScrollingSettings.ids.settings)[1] > 0);
+}

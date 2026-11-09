@@ -984,7 +984,7 @@ pub const Element = struct {
     focusable: ?bool = null,            // implies interactive
     focus_scope: ?bool = null,          // Tab cycles inside this subtree, as in a dialog
     disabled: ?bool = null,             // no hover, press or focus; queries report `.disabled`
-    gestures: Gestures = .{},           // features.gestures (§11.4)
+    gestures: Gestures = .{},           // features.gestures, ignored without it; makes it interactive (§11.4)
     cursor: ?Cursor = null,             // the pointer's shape while this element is hot
     semantics: ?Semantics = null,       // features.semantics (§13.5)
     exit_seconds: f32 = 0,              // limits.exit_ghost_commands (§19.9)
@@ -1159,7 +1159,7 @@ Queries that merge devices into what the user meant:
 | Query | From |
 |---|---|
 | `clicked(id)` | click, tap, Enter/Space, `invoke` action |
-| `manipulation(id) ?Manipulation` | drag, pinch, rotate, wheel, momentum, `scroll` action: translation, scale, rotation and pivot, summed over the frame |
+| `manipulation(id) ?Manipulation` | drag, pinch, rotate, wheel, momentum, `scroll` action: translation, scale, rotation and pivot, summed over the frame; `translation` moves the content with the pointer, and against the wheel |
 | `contextRequested(id)` | right click, long press, the menu key |
 | `dismissed(id)` | Escape, back, gamepad B |
 | `adjusted(id) ?i32` | arrows on a focused slider, a dial, `set_value` action |
@@ -1167,14 +1167,16 @@ Queries that merge devices into what the user meant:
 
 ### 11.4 Gestures
 
-*Compiled out without `features.gestures`.*
+*Compiled out without `features.gestures`. `Element.gestures` is then
+ignored rather than a compile error, so a widget declares its gestures
+once for every context.*
 
-Elements declare what they accept, as a packed set stored in their hit
-region:
+Elements declare what they accept, as a packed set (`zui.Gestures`, one
+byte) stored in their hit region:
 
 ```zig
 .gestures = .{
-    .pan = .vertical,   // the axes it scrolls or pans on: .horizontal, .vertical, .both
+    .pan = .vertical,   // the axes it scrolls or pans on, with any pointer: .horizontal, .vertical, .both
     .zoom = true,       // two-pointer scale and rotation
     .drag = true,       // moves a drag-and-drop payload (§11.5), not the view
     .long_press = true,
@@ -1183,13 +1185,26 @@ region:
 },
 ```
 
-A scroll container accepts pan on its scrolled axes by default.
+Declaring any gesture makes an element interactive, as `focusable`
+does: a map that pans is hovered, pressed and tapped like a button. A
+scroll container accepts pan on its scrolled axes by default, with touch
+and pen; the mouse scrolls it with the wheel, so a mouse drag in a list
+stays with what it pressed, unless the container declares `pan` itself.
 
-- **One rule decides.** Once a pointer passes the touch slop, its axis
-  locks, and the pointer goes to the innermost region that accepts that
-  motion component and still has room to move. That rule is also scroll
-  chaining. With two pointers, scale and rotation go to the innermost
-  region that accepts zoom. A release nothing claimed is a tap.
+- **One rule decides.** Once a pointer passes the touch slop
+  (`Gestures.touch_slop`, 8 layout units, measured from where it
+  pressed), its axis locks to the larger component of the motion, and
+  the pointer goes to the innermost region under its press that accepts
+  that motion component and still has room to move that way. That rule
+  is also scroll chaining. The region that takes it keeps it until it
+  lifts, and takes the other axis too if it pans on both. Any other
+  element it pressed loses the press, so it is neither `pressed` nor
+  clicked. The motion is reported by `manipulation`, from where the
+  pointer pressed, and a scroll container scrolls by it itself. The
+  wheel goes to the innermost region that scrolls with room on its axis,
+  or pans on it, likewise. With two pointers, scale and rotation go to
+  the innermost region that accepts zoom. A release nothing claimed is a
+  tap.
 - **Delays are opt-in and local.** Only an element with `double_tap`
   delays its single tap until the double-tap window passes.
 - **Momentum** is state in the state table under the element, so it ends

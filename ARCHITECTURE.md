@@ -221,7 +221,10 @@ zui-raylib and zui-sokol draw and the renderer suite checks; and the
 floating options: targets declared later, `Floating.capture` and
 `Floating.clip`; and right-to-left layout: `Layout.mirrored`, inherited
 from the environment's direction, and `Direction.right_to_left`; and
-wrapping rows, `ui.wrapChildren()` behind `features.flex_wrap`.
+wrapping rows, `ui.wrapChildren()` behind `features.flex_wrap`. From
+stage 7, pans: elements declare `Element.gestures`, and a pointer past
+the touch slop goes to the innermost one that pans on its axis with room
+to move, reported by `manipulation`.
 
 The code and the spec still differ in these places, each closed by the
 roadmap item named:
@@ -232,7 +235,8 @@ roadmap item named:
 | no `Config.Color`; colors are RGBA8 only | `zui.Color` or `zui.ExtendedColor`, clamped for a renderer without `zui_extended_color` | `src/context.zig`, `src/commands.zig` | G6 |
 | `Widgets(Ui)` with a `Theme` struct | `Widgets(Ui, Skin)` | `zui_widgets/` | K5 |
 | `Frame` exposes its storage arrays and `rectOf` | `Frame.inspect(index)` | `src/context.zig` | V1 |
-| `Features` has every field and gates its API, but `Frame.semantics()` is always empty, `manipulation` always null, and `safety_sweeps` changes nothing | semantics, gestures and safety sweeps, each behind its field | `src/context.zig` | V2, I5, V3 |
+| `Features` has every field and gates its API, but `Frame.semantics()` is always empty and `safety_sweeps` changes nothing | semantics and safety sweeps, each behind its field | `src/context.zig` | V2, V3 |
+| gestures arbitrate pans and the wheel only: `Gestures` has `pan` alone, and `manipulation` reports translation | zoom, long press, double tap, momentum, the other intents and custom recognizers (`pointerEvents`, `claim`, `decline`) | `src/interaction.zig`, `src/context.zig` | I5 |
 
 Unchanged in shape: element storage in pre-order structure-of-arrays, the
 layout passes, the segment and string caches, ids, the state table, the

@@ -145,6 +145,7 @@ pub const AnchorPoint = style.AnchorPoint;
 
 pub const WidgetState = interaction.WidgetState;
 pub const ScrollState = interaction.ScrollState;
+pub const Gestures = interaction.Gestures;
 
 test {
     std.testing.refAllDecls(@This());
@@ -170,4 +171,5 @@ test {
     _ = @import("tests/segmentation.zig");
     _ = @import("tests/mirroring.zig");
     _ = @import("tests/wrapping.zig");
+    _ = @import("tests/gestures.zig");
 }

@@ -27,18 +27,62 @@ pub const RegionFlags = packed struct(u8) {
 
 pub const no_region = std.math.maxInt(u32);
 
-/// A part of the last frame the pointer can hit, in paint order.
-pub const Region = struct {
-    hash: u64,
-    /// The element's rectangle, clipped by its ancestors.
-    bounds: style.Rect,
-    z: i16,
-    /// The nearest enclosing region in the tree, or `no_region`.
-    parent: u32,
-    flags: RegionFlags,
-    /// For scroll containers: the largest offset per axis.
-    max_scroll: [2]f32,
+/// What an element accepts from pointers. When elements are nested, a
+/// pointer goes to the innermost one that accepts what it does:
+///
+/// ```zig
+/// ui.open(.{ .id = .of("carousel"), .scroll = .{ .horizontal = true, .vertical = false }, .gestures = .{ .pan = .horizontal } });
+/// ```
+pub const Gestures = packed struct(u8) {
+    /// The axes it pans or scrolls on, with any pointer. A scroll container
+    /// pans on its scrolled axes with touch and pen without it, and the
+    /// mouse scrolls it with the wheel.
+    pan: Pan = .none,
+    _: u6 = 0,
+
+    /// The axes an element pans on.
+    pub const Pan = enum(u2) {
+        none,
+        horizontal,
+        vertical,
+        both,
+
+        pub fn includes(self: Pan, axis: usize) bool {
+            return self == .both or self == if (axis == 0) Pan.horizontal else Pan.vertical;
+        }
+    };
+
+    /// How far, in layout units, a pointer moves from where it pressed
+    /// before it pans: a shorter move is still a tap.
+    pub const touch_slop: f32 = 8;
+
+    pub fn any(self: Gestures) bool {
+        return @as(u8, @bitCast(self)) != 0;
+    }
 };
+
+/// A part of the last frame the pointer can hit, in paint order.
+pub fn RegionOf(comptime has_gestures: bool) type {
+    return struct {
+        hash: u64,
+        /// The element's rectangle, clipped by its ancestors.
+        bounds: style.Rect,
+        z: i16,
+        /// The nearest enclosing region in the tree, or `no_region`.
+        parent: u32,
+        flags: RegionFlags,
+        gestures: if (has_gestures) Gestures else void,
+        /// For scroll containers: the largest offset per axis.
+        max_scroll: [2]f32,
+
+        /// Whether a pointer of `kind` moving along `axis` can pan it.
+        pub fn pans(self: *const @This(), axis: usize, kind: input.PointerKind) bool {
+            if (self.flags.disabled) return false;
+            if (has_gestures and self.gestures.pan.includes(axis)) return true;
+            return kind != .mouse and self.flags.scrolls(axis);
+        }
+    };
+}
 
 pub const Focusable = struct {
     hash: u64,
@@ -49,9 +93,10 @@ pub const Focusable = struct {
 /// What zui keeps of the previous frame for interaction queries. It lives in
 /// the Context, not in a frame, because with `frames_in_flight = 1` the
 /// previous frame's memory is reused before the queries run.
-pub fn Results(comptime max_regions: u32, comptime table_slots: u32) type {
+pub fn Results(comptime max_regions: u32, comptime table_slots: u32, comptime has_gestures: bool) type {
     return struct {
         const Self = @This();
+        pub const Region = RegionOf(has_gestures);
 
         pub const Entry = struct {
             hash: u64,
@@ -148,9 +193,28 @@ pub fn Results(comptime max_regions: u32, comptime table_slots: u32) type {
     };
 }
 
+/// What a pressed pointer is doing to the elements under it.
+pub const PointerGesture = struct {
+    press_position: [2]f32,
+    /// Where the pan last moved its owner to.
+    panned_to: [2]f32,
+    /// The element the pointer pans, or 0.
+    pan_owner: u64,
+    /// The axes the owner takes: the one the pointer locked to, or both
+    /// when the owner pans on both.
+    pan_axes: Gestures.Pan,
+    /// Past the touch slop, so the pan has been arbitrated, whether or not
+    /// an element took it.
+    past_slop: bool,
+
+    pub fn pressedAt(position: [2]f32) PointerGesture {
+        return .{ .press_position = position, .panned_to = position, .pan_owner = 0, .pan_axes = .none, .past_slop = false };
+    }
+};
+
 /// One slot of the pointer table: a contact touching or hovering over the
 /// surface.
-pub fn Contact(comptime max_chain: usize) type {
+pub fn Contact(comptime max_chain: usize, comptime has_gestures: bool) type {
     return struct {
         const Self = @This();
 
@@ -171,9 +235,10 @@ pub fn Contact(comptime max_chain: usize) type {
         /// A touch that lifted this frame. It stays until the next frame
         /// begins, so the frame that sees a tap can still ask where it was.
         lifted: bool,
+        gesture: if (has_gestures) PointerGesture else void,
 
         pub fn init(pointer: input.Pointer) Self {
-            return .{ .pointer = pointer, .buttons = .initEmpty(), .press_target = 0, .press_order = 0, .hover_stale = false, .hover_chain = undefined, .hover_count = 0, .lifted = false };
+            return .{ .pointer = pointer, .buttons = .initEmpty(), .press_target = 0, .press_order = 0, .hover_stale = false, .hover_chain = undefined, .hover_count = 0, .lifted = false, .gesture = if (has_gestures) .pressedAt(pointer.position) else {} };
         }
 
         pub fn hovers(self: *const Self) bool {
@@ -188,10 +253,17 @@ pub fn Contact(comptime max_chain: usize) type {
 
 /// The pointer table plus what this frame's events delivered, which the
 /// interaction queries read until the next `beginFrame`.
-pub fn State(comptime max_contacts: u8, comptime max_chain: usize, comptime max_events: u16, comptime max_text_bytes: u16, comptime max_path_bytes: u32) type {
+pub fn State(comptime max_contacts: u8, comptime max_chain: usize, comptime max_events: u16, comptime max_text_bytes: u16, comptime max_path_bytes: u32, comptime has_gestures: bool) type {
     return struct {
         const Self = @This();
-        pub const Slot = Contact(max_chain);
+        pub const Slot = Contact(max_chain, has_gestures);
+        /// Each takes an event, so this many cannot overflow.
+        const max_manipulations = if (has_gestures) max_events else 0;
+
+        pub const ManipulatedElement = struct {
+            hash: u64,
+            manipulation: input.Manipulation,
+        };
 
         contacts: [max_contacts]?Slot,
         presses_begun: u64,
@@ -207,6 +279,8 @@ pub fn State(comptime max_contacts: u8, comptime max_chain: usize, comptime max_
         drops: [if (max_path_bytes == 0) 0 else max_events]input.FilesDropped,
         drop_count: u16,
         lifecycle: input.LifecycleSet,
+        manipulated: [max_manipulations]ManipulatedElement,
+        manipulated_count: u16,
 
         focus: u64,
         pending_focus: ?u64,
@@ -231,6 +305,7 @@ pub fn State(comptime max_contacts: u8, comptime max_chain: usize, comptime max_
             self.dropped_path_len = 0;
             self.drop_count = 0;
             self.lifecycle = .initEmpty();
+            self.manipulated_count = 0;
         }
 
         pub fn find(self: *Self, id: input.PointerId) ?*Slot {
@@ -310,6 +385,24 @@ pub fn State(comptime max_contacts: u8, comptime max_chain: usize, comptime max_
                 }
             }
             return if (first_touch) |touch| touch.pointer else null;
+        }
+
+        pub fn manipulationOf(self: *const Self, hash: u64) ?input.Manipulation {
+            for (self.manipulated[0..self.manipulated_count]) |*entry| {
+                if (entry.hash == hash) return entry.manipulation;
+            }
+            return null;
+        }
+
+        /// The element's manipulation this frame, started as the identity.
+        pub fn manipulate(self: *Self, hash: u64) *input.Manipulation {
+            for (self.manipulated[0..self.manipulated_count]) |*entry| {
+                if (entry.hash == hash) return &entry.manipulation;
+            }
+            const entry = &self.manipulated[self.manipulated_count];
+            entry.* = .{ .hash = hash, .manipulation = .{} };
+            self.manipulated_count += 1;
+            return &entry.manipulation;
         }
 
         pub fn keyPressed(self: *const Self, key: input.Key) bool {
