@@ -125,6 +125,10 @@ pub const Diagnostics = struct {
     /// The `Sources` field that refused first, e.g. "quotes": the one
     /// whose capacity to raise. Empty when none refused.
     first_refusing_source: []const u8 = "",
+    /// Optional commands this frame declared but the renderer does not
+    /// draw, so emission replaced them: a gradient by a rectangle in its
+    /// mean color, a shadow by nothing. Not a failure, so `ok` ignores it.
+    lowered: command_types.CommandSet = .initEmpty(),
 
     pub fn ok(self: Diagnostics) bool {
         return self.exceeded.count() == 0 and self.duplicate_ids == 0 and !self.unbalanced and self.refused_publishes == 0;
@@ -155,6 +159,8 @@ pub const Element = struct {
     style: ?style.Static(style.Style) = null,
     layout: ?style.Layout = null,
     decoration: ?style.Decoration = null,
+    /// Gradients and shadows. Replaces the style's.
+    effects: ?style.Effects = null,
     /// The axes on which descendants are cut off.
     clip: style.Axes = .none,
     scroll: ?style.Scroll = null,
@@ -349,6 +355,7 @@ pub fn Context(comptime config: Config) type {
 
         pub const Decoration = style.Decoration;
         const default_layout: style.Layout = .{};
+        const no_decoration: Decoration = .{};
 
         pub const TextRecord = struct {
             element: Index,
@@ -380,7 +387,7 @@ pub fn Context(comptime config: Config) type {
             /// The element's layout: the default, one copied into `layouts`, or
             /// a static style's.
             layout: [max_elements]*const style.Layout,
-            /// Null for an element that draws no background or border.
+            /// Null for an element that draws no background, border or effects.
             decoration: [max_elements]?*const Decoration,
             content_kind: [max_elements]ContentKind,
             /// Index into the record of the element's `content_kind`; not
@@ -413,6 +420,11 @@ pub fn Context(comptime config: Config) type {
             next_layout: [*]style.Layout,
             decorations: [max_elements]Decoration,
             next_decoration: [*]Decoration,
+            /// Written only for an element with a decoration, which every
+            /// element with effects has.
+            effects: [max_elements]?*const style.Effects,
+            copied_effects: [max_elements]style.Effects,
+            copied_effects_count: u32,
             texts: [if (has_text) max_elements else 0]TextRecord,
             text_count: u32,
             images: [if (has_image) max_elements else 0]Image,
@@ -505,9 +517,13 @@ pub fn Context(comptime config: Config) type {
                 return self.layout[index];
             }
 
-            /// Null for an element that draws no background or border.
+            /// Null for an element that draws no background, border or effects.
             pub fn decorationOf(self: *const Frame, index: Index) ?*const Decoration {
                 return self.decoration[index];
+            }
+
+            pub fn effectsOf(self: *const Frame, index: Index) ?*const style.Effects {
+                return if (self.decoration[index] != null) self.effects[index] else null;
             }
 
             /// Text elements never have a layout, so they are `.fit` here too.
@@ -539,6 +555,7 @@ pub fn Context(comptime config: Config) type {
                 self.element_count = 0;
                 self.next_layout = &self.layouts;
                 self.next_decoration = &self.decorations;
+                self.copied_effects_count = 0;
                 self.text_count = 0;
                 self.image_count = 0;
                 self.custom_count = 0;
@@ -1201,14 +1218,27 @@ pub fn Context(comptime config: Config) type {
                 frame.layout[index] = &copied_layout[0];
             } else frame.layout[index] = if (element.style) |static_style| &static_style.value.layout else &default_layout;
 
-            if (element.decoration) |decoration| {
-                if (decoration.background != null or decoration.border != null) {
-                    const copied_decoration = frame.next_decoration;
-                    frame.next_decoration = copied_decoration + 1;
-                    copied_decoration[0] = decoration;
-                    frame.decoration[index] = &copied_decoration[0];
-                } else frame.decoration[index] = null;
-            } else frame.decoration[index] = if (element.style) |static_style| drawnDecoration(&static_style.value.decoration) else null;
+            const effects: ?*const style.Effects = if (element.effects) |declared| copied: {
+                const copied_effects = &frame.copied_effects[frame.copied_effects_count];
+                frame.copied_effects_count += 1;
+                copied_effects.* = declared;
+                break :copied copied_effects;
+            } else if (element.style) |static_style| (if (static_style.value.effects) |*declared| declared else null) else null;
+
+            const decoration: ?*const Decoration = if (element.decoration) |declared| (if (declared.drawsAnything()) copied: {
+                const copied_decoration = frame.next_decoration;
+                frame.next_decoration = copied_decoration + 1;
+                copied_decoration[0] = declared;
+                break :copied &copied_decoration[0];
+            } else null) else if (element.style) |static_style| drawnDecoration(&static_style.value.decoration) else null;
+
+            if (decoration) |drawn| {
+                frame.decoration[index] = drawn;
+                frame.effects[index] = effects;
+            } else if (effects != null) {
+                frame.decoration[index] = &no_decoration;
+                frame.effects[index] = effects;
+            } else frame.decoration[index] = null;
 
             if (!is_root) {
                 if (element.floating == null) frame.child_counts[parent].count(false) else frame.child_counts[parent].count(true);
@@ -1240,7 +1270,7 @@ pub fn Context(comptime config: Config) type {
         /// A static decoration that draws nothing is stored as none, so
         /// emission skips it as it skips an element without one.
         inline fn drawnDecoration(decoration: *const Decoration) ?*const Decoration {
-            return if (decoration.background != null or decoration.border != null) decoration else null;
+            return if (decoration.drawsAnything()) decoration else null;
         }
 
         inline fn flagsFor(element_id: Id, element: Element) ElementFlags {

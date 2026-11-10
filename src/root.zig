@@ -127,6 +127,9 @@ pub const CornerRadius = style.CornerRadius;
 pub const Rect = style.Rect;
 pub const Border = style.Border;
 pub const Decoration = style.Decoration;
+pub const Gradient = style.Gradient;
+pub const Shadow = style.Shadow;
+pub const Effects = style.Effects;
 pub const Style = style.Style;
 pub const Static = style.Static;
 pub const static = style.static;
@@ -177,4 +180,5 @@ test {
     _ = @import("tests/wrapping.zig");
     _ = @import("tests/gestures.zig");
     _ = @import("tests/drag_drop.zig");
+    _ = @import("tests/effects.zig");
 }

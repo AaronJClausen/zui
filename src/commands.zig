@@ -95,18 +95,26 @@ pub fn RenderCommand(comptime options: CommandOptions) type {
             corner_radius: style.CornerRadius = .zero,
         };
 
-        /// A linear gradient across the bounds; lowered to a rectangle in
-        /// its mean color.
+        /// A linear gradient across the bounds, as `zui.Gradient` describes
+        /// it, interpolated in OKLab; lowered to a rectangle in its mean
+        /// color. A renderer that interpolates in sRGB draws it in strips,
+        /// each its `colorAt`.
         pub const Gradient = struct {
             from: style.Color,
             to: style.Color,
             /// Radians clockwise from left to right.
             angle: f32 = 0,
             corner_radius: style.CornerRadius = .zero,
+
+            pub fn colorAt(self: Gradient, bounds: style.Rect, point: [2]f32) style.Color {
+                const gradient: style.Gradient = .{ .from = self.from, .to = self.to, .angle = self.angle };
+                return gradient.colorAt(bounds, point);
+            }
         };
 
-        /// A shadow, or a glow when its offset is zero, around the bounds;
-        /// lowered to nothing.
+        /// A shadow, or a glow when its offset is zero, of the rounded box
+        /// at the bounds, as `zui.Shadow` describes it; lowered to nothing.
+        /// It paints outside the bounds, by its offset, spread and blur.
         pub const Shadow = struct {
             color: style.Color,
             offset: [2]f32 = .{ 0, 0 },

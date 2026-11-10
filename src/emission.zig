@@ -153,9 +153,12 @@ fn Emitter(comptime Ui: type) type {
             const visible = bounds.intersect(outer_clip);
             const drawn = !visible.isEmpty();
 
+            const effects = frame.effectsOf(element);
+            if (effects) |declared| if (declared.shadow) |*shadow| @call(.never_inline, emitShadow, .{ self, element, bounds, outer_clip, level.z, shadow });
             if (drawn) if (frame.decorationOf(element)) |decoration| if (decoration.background) |color| {
                 self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = level.z, .payload = .{ .rectangle = .{ .color = color, .corner_radius = decoration.corner_radius } } });
             };
+            if (drawn) if (effects) |declared| if (declared.gradient) |*gradient| @call(.never_inline, emitGradient, .{ self, element, bounds, level.z, gradient });
 
             switch (frame.kindOf(element)) {
                 .none => {},
@@ -186,6 +189,44 @@ fn Emitter(comptime Ui: type) type {
             const has_border = if (frame.decorationOf(element)) |decoration| decoration.border != null else false;
             if (!level.pushed_clip and !has_border and !floating and level.region == parent.region and !flags.focus_scope) return null;
             return level;
+        }
+
+        fn cornerRadiusOf(self: *const Self, element: Ui.Index) style.CornerRadius {
+            const decoration = self.frame.decorationOf(element) orelse return .zero;
+            return decoration.corner_radius;
+        }
+
+        /// Culled by what it paints rather than by the element's box, so the
+        /// shadow of an element just outside the clip still shows inside it.
+        fn emitShadow(self: *Self, element: Ui.Index, bounds: style.Rect, clip: style.Rect, z: i16, shadow: *const style.Shadow) void {
+            if (comptime !Ui.RenderCommand.commands.contains(.shadow)) {
+                self.frame.diagnostics.lowered.insert(.shadow);
+                return;
+            }
+            if (shadow.paintedBounds(bounds).intersect(clip).isEmpty()) return;
+            self.push(.{ .bounds = self.snap(bounds), .id = self.frame.element_id[element], .z = z, .payload = .{ .shadow = .{
+                .color = shadow.color,
+                .offset = shadow.offset,
+                .blur = shadow.blur,
+                .spread = shadow.spread,
+                .corner_radius = self.cornerRadiusOf(element),
+            } } });
+        }
+
+        fn emitGradient(self: *Self, element: Ui.Index, bounds: style.Rect, z: i16, gradient: *const style.Gradient) void {
+            const element_id = self.frame.element_id[element];
+            const corner_radius = self.cornerRadiusOf(element);
+            if (comptime !Ui.RenderCommand.commands.contains(.gradient)) {
+                self.frame.diagnostics.lowered.insert(.gradient);
+                self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = z, .payload = .{ .rectangle = .{ .color = gradient.meanColor(), .corner_radius = corner_radius } } });
+                return;
+            }
+            self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = z, .payload = .{ .gradient = .{
+                .from = gradient.from,
+                .to = gradient.to,
+                .angle = gradient.angle,
+                .corner_radius = corner_radius,
+            } } });
         }
 
         const Layer = struct { clip: style.Rect, z: i16 };
