@@ -9,8 +9,9 @@ Written against `db4ea4d`.
 
 ## Picking up from here
 
-B1, B2, B3 and B6 are committed (`3fb9f8e`, `4294abe`, and B6's own
-commit). Each step's **Status** line below says what it measured and what
+B1, B2, B3 and B6 are done (`3fb9f8e`, `4294abe`, `f099fd1`). The
+reference machine now boots bare-metal Linux with turbo off and the
+`performance` governor. Each step's **Status** line below says what it measured and what
 is left. Resume in this order:
 
 1. **B5, slice 1** (`ZUI_BENCH_LAYOUT_SEED`). Ideas from the last
@@ -37,10 +38,6 @@ is left. Resume in this order:
 4. **B7**: extend `Machine` with OS version, CPU vendor, caches, target
    and commit; `--results-dir`; `bench-report`. Windows plus a Linux
    container counts as two operating systems for its *Done when*.
-5. **B1's turbo-off check** needs the owner's permission to run
-   `powercfg ... PROCTHROTTLEMAX 99` on Windows, or to write 1 to
-   `/sys/devices/system/cpu/intel_pstate/no_turbo` on Linux (and to set
-   it back).
 
 Working notes:
 - `bench-compare` writes its progress to stderr, which `zig build` does
@@ -178,10 +175,16 @@ pins itself to the highest-numbered logical CPU after building, records
 the state before every run, and warns when it changes. Measured with turbo
 **on** (10 rounds each, `HEAD HEAD` at `468ffc8`): the middle halves
 averaged 2.74% wide unpinned and 2.50% pinned (medians 2.5% and 2.1%,
-widest 11.5% and 7.9%). Waiting on the same check with turbo off
-(`PROCTHROTTLEMAX 99`), which changes this machine's power plan. Windows
-reports the base clock (3696 MHz) as the current one, so the clock
-reading cannot show boosting there.
+widest 11.5% and 7.9%). Windows reports the base clock (3696 MHz) as
+the current one, so the clock reading cannot show boosting there.
+
+Done with turbo **off**, on the same i9-10900K booted into bare-metal
+Linux (`intel_pstate/no_turbo` 1, `performance` governor on every core,
+SMT on, no isolated cores, `randomize_va_space` 2). `HEAD HEAD` at
+`f099fd1`, 10 rounds each: the 95% intervals averaged 1.74% wide pinned
+to logical CPU 19 with `--require-quiet` (median 0.80%, widest 7.3%), and
+10.65% with `--no-pin` (median 5.25%, widest 78.7%). Neither called a
+change. Pinned, the clock read 3699 to 3700 MHz across every run.
 
 ### B2. Confidence intervals and a measured noise floor
 
