@@ -9,8 +9,8 @@ Written against `db4ea4d`.
 
 ## Picking up from here
 
-B1, B2, B3, B5 and B6 are done; B4 and B7 are built and wait on a
-measurement each. The
+B1, B2, B3, B5 and B6 are done. B4 is built and measured, and its
+*Done when* was not met; B7 is built and waits on a run on Windows. The
 reference machine now boots bare-metal Linux with turbo off and the
 `performance` governor; its noise bands are calibrated for that setup.
 Each step's **Status** line below says what it measured and what is
@@ -20,12 +20,9 @@ left. Resume in this order:
    `zig build bench -- --core 19 --results-dir <dir>` at the same commit
    there and here, into one directory both installs can reach, and run
    `zig build bench-report -- <dir>`.
-2. **B4's *Done when*** needs the cycles band compared with the time band
-   while the clock moves: with turbo off the two measure the same thing.
-   Ask the owner to run `turbo` to turn Turbo Boost back on (CLAUDE.md
-   says how to check which mode the machine is in), then run
-   `bench-compare -- --calibrate` and `-- --calibrate --metric cycles`
-   and compare the saved bands.
+2. **B4's *Done when*** was measured with turbo on and not met: the
+   cycles bands are no narrower than the time bands (B4's status). The
+   owner decides whether B4 closes on that result.
 3. **Optional:** B4 slice 2 (`rdpmc`, see B4's status); B7 slice 2's
    macOS counters through kperf; B8 is a decision for when hardware
    exists.
@@ -283,8 +280,8 @@ can only be verified once a Linux install exists.
 cycles has a noise band well under its band in nanoseconds, with both
 recorded.
 
-**Status:** slices 1 and 3 built; the *Done when* waits on a run with
-turbo on. `bench/counters.zig` opens one group of five events (cycles,
+**Status:** slices 1 and 3 built and measured; the *Done when* is not
+met (see below). `bench/counters.zig` opens one group of five events (cycles,
 instructions, branch misses, L1D read misses, `CACHE_MISSES` for the last
 level), user mode only, and refuses multiplexed counts. `bench
 --counters` starts the group before each phase, stops and reads it after,
@@ -303,6 +300,18 @@ off) called nothing; its intervals reached a mean 0.41% and median 0.20%
 from no change, against 0.29% and 0.20% for nanoseconds (64 rounds, one
 layout). With the clock fixed, cycles and nanoseconds are one
 measurement, so this cannot show the gain the *Done when* asks for.
+
+Measured again with turbo **on** (`powersave` governor, pinned to
+logical CPU 19, the clock reading 4899 to 5300 MHz), `abd12ce` against
+itself, 100 rounds over 3 layouts each: `--calibrate` and `--calibrate
+--metric cycles` both called nothing. Over the 26 keys both measure, the
+intervals reached a mean 0.37% (median 0.30%, widest 1.6%) from no change
+in nanoseconds and 0.43% (median 0.30%, widest 1.8%) in cycles, and the
+saved bands are the 0.5% floor for 20 keys in nanoseconds and 18 in
+cycles. Cycles are no narrower, so the *Done when* is not met: each time is
+a run's fastest frame, pinned, and the fastest frame runs at the top clock
+whether or not turbo moves it, so the clock adds almost no noise for
+cycles to remove. Whether to close B4 on this result is the owner's call.
 
 Slice 2 (`rdpmc`) matters less than planned: user-mode counting leaves
 the `ioctl` calls' kernel time out of the counts, the times are taken
