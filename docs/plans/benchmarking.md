@@ -9,10 +9,9 @@ Written against `db4ea4d`.
 
 ## Picking up from here
 
-B1, B2, B3, B5 and B6 are done. B4 is built and measured, and its
-*Done when* was not met; B7 is built and waits on a run on Windows. The
-reference machine now boots bare-metal Linux with turbo off and the
-`performance` governor; its noise bands are calibrated for that setup.
+B1 to B6 are done; B7 is built and waits on a run on Windows. The
+reference machine dual-boots; on bare-metal Linux its noise bands are
+calibrated both with turbo off (`performance`) and on (`powersave`).
 Each step's **Status** line below says what it measured and what is
 left. Resume in this order:
 
@@ -20,10 +19,7 @@ left. Resume in this order:
    `zig build bench -- --core 19 --results-dir <dir>` at the same commit
    there and here, into one directory both installs can reach, and run
    `zig build bench-report -- <dir>`.
-2. **B4's *Done when*** was measured with turbo on and not met: the
-   cycles bands are no narrower than the time bands (B4's status). The
-   owner decides whether B4 closes on that result.
-3. **Optional:** B4 slice 2 (`rdpmc`, see B4's status); B7 slice 2's
+2. **Optional:** B4 slice 2 (`rdpmc`, see B4's status); B7 slice 2's
    macOS counters through kperf; B8 is a decision for when hardware
    exists.
 
@@ -280,8 +276,8 @@ can only be verified once a Linux install exists.
 cycles has a noise band well under its band in nanoseconds, with both
 recorded.
 
-**Status:** slices 1 and 3 built and measured; the *Done when* is not
-met (see below). `bench/counters.zig` opens one group of five events (cycles,
+**Status:** done, without the gain its *Done when* expected: slices 1
+and 3 are built, and cycles proved no narrower than times (see below). `bench/counters.zig` opens one group of five events (cycles,
 instructions, branch misses, L1D read misses, `CACHE_MISSES` for the last
 level), user mode only, and refuses multiplexed counts. `bench
 --counters` starts the group before each phase, stops and reads it after,
@@ -311,7 +307,9 @@ saved bands are the 0.5% floor for 20 keys in nanoseconds and 18 in
 cycles. Cycles are no narrower, so the *Done when* is not met: each time is
 a run's fastest frame, pinned, and the fastest frame runs at the top clock
 whether or not turbo moves it, so the clock adds almost no noise for
-cycles to remove. Whether to close B4 on this result is the owner's call.
+cycles to remove. The owner closed B4 on this result: the counters stay
+for explaining a change (instructions against cycles tells more work from
+more waiting), and nanoseconds stay the default.
 
 Slice 2 (`rdpmc`) matters less than planned: user-mode counting leaves
 the `ioctl` calls' kernel time out of the counts, the times are taken
