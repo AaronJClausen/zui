@@ -7,6 +7,67 @@ only.
 
 Written against `db4ea4d`.
 
+## Picking up from here
+
+Last session: B1, B2 and B3 are committed (`3fb9f8e`, `4294abe`) and
+pushed. Each step's **Status** line below says what it measured and what
+is left. Resume in this order:
+
+1. **B6 is half-written, on the branch `wip/b6-counts-cache-sim`**
+   (pushed to `origin`, one commit on top of `main`; not on `main`).
+   Start with `git fetch && git checkout wip/b6-counts-cache-sim`, then
+   rebase it onto `main` or merge it into `main` once it is finished and
+   verified. Its `bench/counts.zig` runs Callgrind with `--cache-sim=yes --branch-sim=yes`
+   and a fixed `--I1/--D1/--LL` geometry, parses the `Events` and
+   `Collected` lines, and adds informational keys
+   (`"<scene>, <phase>, I1 misses"`, `D1 misses`, `LL misses`,
+   `branch misses`). Only the bare `"<scene>, <phase>"` instruction keys
+   gate (`Count.gated`). It has never been compiled. To finish:
+   `zig build counts` type-checks it (the exe is built by `zig build
+   test`); verify in Docker (`ubuntu:24.04`, `apt-get install valgrind`,
+   run the cross-built `zig-out/bin/zui-counts`, or run `zig build
+   counts` inside the container) twice and check the miss counts are
+   identical; time it against the CI job's `timeout-minutes` in
+   `.github/workflows/ci.yml`; update the doc comment at the top of
+   `counts.zig`, README's *Development* row and SPEC.md §20.3. Squash
+   the work-in-progress commit into one finished B6 commit, give that
+   step a **Status** line, and delete the branch on `origin`.
+2. **B5, slice 1** (`ZUI_BENCH_LAYOUT_SEED`). Ideas from the last
+   session: shift the stack with `switch (@as(u6, @truncate(seed)))
+   { inline else => |step| ... }` over a `[step * 64]u8` buffer passed
+   to `doNotOptimizeAway`, calling the scenarios through
+   `@call(.never_inline, ...)`; start each `Context` with `initBuffer`
+   at a seed-chosen multiple of 64 bytes inside one allocation of
+   `required_bytes + 4096` from the counting allocator; in
+   `bench-compare`, pass the seed and (on Linux) a padding variable
+   through `std.process.run`'s `environ_map`, copied from
+   `init.environ_map`. Advertise a `layout-seed` capability. The B2
+   bootstrap already resamples in two stages (`groups`), one group per
+   layout.
+3. **B5, slice 2 spike:** a module-level `comptime { asm (".text\n.skip
+   N"); }` in `bench.zig`, from a `-Dbench-layout-seed` build option,
+   should shift every function after it by `N` rounded to 16 bytes,
+   since LLVM emits module assembly first. Check it by printing
+   `@intFromPtr(&SomeUi.endFrame) & 0xfff` for two seeds.
+4. **B4** (`bench/counters.zig`, Linux `perf_event_open`): can only be
+   type-checked here (`zig build bench -Dtarget=x86_64-linux`); mark it
+   waiting on bare-metal Linux after slice 1 and 3.
+5. **B7**: extend `Machine` with OS version, CPU vendor, caches, target
+   and commit; `--results-dir`; `bench-report`. Windows plus a Linux
+   container counts as two operating systems for its *Done when*.
+6. **B1's turbo-off check** needs the owner's permission to run
+   `powercfg ... PROCTHROTTLEMAX 99` (and to set it back to 100).
+
+Working notes:
+- `bench-compare` writes its progress to stderr, which `zig build` does
+  not keep once the step succeeds; the report says which mode ran.
+- Noise bands live in `.zig-cache/bench-compare/noise-floor.json`, keyed
+  by `Machine.fingerprint()`; the reference machine has bands from
+  `468ffc8` (pinned to logical CPU 19, turbo on).
+- Run measurements one at a time and compile nothing while one runs.
+- Shell heredocs mangle `\n` in Zig string literals on this machine; edit
+  Zig files with the Edit or Write tools.
+
 ## Where things stand
 
 | Tool | Measures | Defends against noise by |
@@ -196,6 +257,17 @@ in whole steps, so most runs end at the time budget or the cap.
 
 **Done when:** a commit compared with itself calls nothing faster or
 slower, and the README says that full benefit needs a base from B3 on.
+
+**Status:** done (`4294abe`). Each side's benchmark is installed with
+`zig build bench-install`; `bench --list-scenarios` prints
+`name<TAB>compared|reported|startup`. `bench-compare -- HEAD HEAD` at
+`4294abe`, one scenario at a time (100 rounds, the cap; turbo on,
+pinned, against the bands from `468ffc8`) called nothing. Four intervals
+do not contain zero but lie inside their bands: static-styled boxes
+−1.4% to −0.1%, new strings −0.2% to −0.1%, first frame of 1000 texts
++0.1% to +0.3%, warm text +0.0% to +0.1%. One small flaw left: the
+report lists times in the first round's shuffled order, not the
+scenario table's.
 
 ### B4. Hardware counters per phase
 
