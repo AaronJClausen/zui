@@ -2,13 +2,18 @@
 //! zig build bench                                  # print the tables
 //! zig build bench -- --check-targets               # fail if a SPEC.md §20.2 budget is missed
 //! zig build bench -- --json results.json           # save each scenario's fastest declaration and layout
-//! zig build bench -- --compare baseline.json       # fail on a >10% regression
+//! zig build bench -- --core 3 --machine-json m.json # pin to core 3, raise priority, record the machine
 //! ```
+//!
+//! Two commits are compared with `zig build bench-compare`, never by two
+//! runs of this.
 
 const std = @import("std");
 const zui = @import("zui");
 const Io = std.Io;
 
+const machine = @import("machine.zig");
+const statistics = @import("statistics.zig");
 const scenes = @import("scenes.zig");
 const GlyphTableText = scenes.GlyphTableText;
 const Sentences = scenes.Sentences;
@@ -48,15 +53,30 @@ fn ShapingText(comptime thread_safe: bool) type {
     };
 }
 
+/// One phase's times over a scenario's timed frames.
+const Spread = struct {
+    min_ns: u64,
+    median_ns: u64,
+    p95_ns: u64,
+    clusters: ?statistics.Clusters,
+
+    fn of(sorted: []const u64) Spread {
+        return .{
+            .min_ns = sorted[0],
+            .median_ns = sorted[sorted.len / 2],
+            .p95_ns = statistics.percentile(sorted, 0.95),
+            .clusters = statistics.twoClusters(sorted),
+        };
+    }
+};
+
 const Measurement = struct {
     name: []const u8,
     elements: u32,
     /// `beginFrame` and the scene's `open`/`close` calls: everything before `endFrame`.
-    declare_min_ns: u64,
-    declare_median_ns: u64,
+    declare: Spread,
     /// Layout and emission: the time `endFrame` takes.
-    layout_min_ns: u64,
-    layout_median_ns: u64,
+    layout: Spread,
     /// Declaration, layout and emission together.
     frame_median_ns: u64,
     layout_target_ns: ?u64 = null,
@@ -113,10 +133,8 @@ fn Scenario(comptime limits: zui.Limits, comptime Text: type, comptime Scene: ty
             return .{
                 .name = Scene.name,
                 .elements = element_count,
-                .declare_min_ns = declare_times[0],
-                .declare_median_ns = declare_times[frame_count / 2],
-                .layout_min_ns = layout_times[0],
-                .layout_median_ns = layout_times[frame_count / 2],
+                .declare = .of(declare_times[0..frame_count]),
+                .layout = .of(layout_times[0..frame_count]),
                 .frame_median_ns = frame_times[frame_count / 2],
                 .layout_target_ns = Scene.layout_target_ns,
                 .declare_target_ns = if (@hasDecl(Scene, "declare_target_ns")) Scene.declare_target_ns else null,
@@ -240,15 +258,14 @@ fn simulateRender(comptime Ui: type, io: Io, frame: *const Ui.Frame) void {
 
 const StartupMeasurement = struct {
     name: []const u8,
-    min_ns: u64,
-    median_ns: u64,
+    spread: Spread,
 };
 
 const startup_samples = 50;
 
 fn startupMeasurement(name: []const u8, times: *[startup_samples]u64) StartupMeasurement {
     std.mem.sortUnstable(u64, times, {}, std.sort.asc(u64));
-    return .{ .name = name, .min_ns = times[0], .median_ns = times[startup_samples / 2] };
+    return .{ .name = name, .spread = .of(times) };
 }
 
 const DefaultUi = zui.Context(.{ .Text = GlyphTableText });
@@ -318,9 +335,16 @@ fn FirstFrame(comptime name: []const u8, comptime limits: zui.Limits, comptime S
 
 const Options = struct {
     json_path: ?[]const u8 = null,
-    compare_path: ?[]const u8 = null,
     check_targets: bool = false,
+    core: ?u32 = null,
+    machine_json_path: ?[]const u8 = null,
+    print_capabilities: bool = false,
 };
+
+/// What `--capabilities` prints, so `bench-compare` can tell which options
+/// a commit's benchmark understands. A benchmark from before this option
+/// fails on it with `UnknownArgument`.
+const capabilities = "core machine-json";
 
 fn parseOptions(arguments: []const [:0]const u8) !Options {
     var options: Options = .{};
@@ -330,13 +354,24 @@ fn parseOptions(arguments: []const [:0]const u8) !Options {
         if (std.mem.eql(u8, argument, "--json") and index + 1 < arguments.len) {
             index += 1;
             options.json_path = arguments[index];
-        } else if (std.mem.eql(u8, argument, "--compare") and index + 1 < arguments.len) {
-            index += 1;
-            options.compare_path = arguments[index];
         } else if (std.mem.eql(u8, argument, "--check-targets")) {
             options.check_targets = true;
+        } else if (std.mem.eql(u8, argument, "--core") and index + 1 < arguments.len) {
+            index += 1;
+            options.core = std.fmt.parseInt(u32, arguments[index], 10) catch {
+                std.debug.print("--core needs a core number, got \"{s}\"\n", .{arguments[index]});
+                return error.InvalidArgument;
+            };
+        } else if (std.mem.eql(u8, argument, "--machine-json") and index + 1 < arguments.len) {
+            index += 1;
+            options.machine_json_path = arguments[index];
+        } else if (std.mem.eql(u8, argument, "--capabilities")) {
+            options.print_capabilities = true;
+        } else if (std.mem.eql(u8, argument, "--compare")) {
+            std.debug.print("--compare was removed: compare two commits with `zig build bench-compare -- <base> [<head>]`\n", .{});
+            return error.UnknownArgument;
         } else {
-            std.debug.print("unknown argument \"{s}\"; expected --json <path>, --compare <path> or --check-targets\n", .{argument});
+            std.debug.print("unknown argument \"{s}\"; expected --json <path>, --check-targets, --core <n>, --machine-json <path> or --capabilities\n", .{argument});
             return error.UnknownArgument;
         }
     }
@@ -354,13 +389,12 @@ fn microseconds(nanoseconds: u64) f64 {
     return @as(f64, @floatFromInt(nanoseconds)) / std.time.ns_per_us;
 }
 
-/// The scenarios a regression check compares: the single-threaded ones,
+/// The scenarios `bench-compare` compares: the single-threaded ones,
 /// whose times don't depend on what the machine's other cores are doing.
 const compared_count = 13;
-const regression_tolerance = 1.10;
 
-/// One fastest time a regression check compares. The layout time keeps the
-/// scenario's bare name, so it still matches baselines from before the
+/// One fastest time `bench-compare` compares. The layout time keeps the
+/// scenario's bare name, so it still matches results from before the
 /// declaration time was recorded.
 const ComparedTime = struct {
     key_buffer: [64]u8,
@@ -381,12 +415,12 @@ const ComparedTime = struct {
 fn comparedTimes(measurements: []const Measurement, startup_measurements: []const StartupMeasurement, times: []ComparedTime) []const ComparedTime {
     var count: usize = 0;
     for (measurements) |measurement| {
-        times[count] = .init("{s}", measurement.name, measurement.layout_min_ns);
-        times[count + 1] = .init("{s}, declare", measurement.name, measurement.declare_min_ns);
+        times[count] = .init("{s}", measurement.name, measurement.layout.min_ns);
+        times[count + 1] = .init("{s}, declare", measurement.name, measurement.declare.min_ns);
         count += 2;
     }
     for (startup_measurements) |measurement| {
-        times[count] = .init("{s}", measurement.name, measurement.min_ns);
+        times[count] = .init("{s}", measurement.name, measurement.spread.min_ns);
         count += 1;
     }
     return times[0..count];
@@ -397,6 +431,12 @@ pub fn main(init: std.process.Init) !void {
     const gpa = init.gpa;
     const arena = init.arena.allocator();
     const options = try parseOptions(try init.minimal.args.toSlice(arena));
+    if (options.print_capabilities) {
+        var capabilities_writer = Io.File.stdout().writer(io, &.{});
+        return capabilities_writer.interface.writeAll(capabilities ++ "\n");
+    }
+    if (options.core) |core| try pinAndRaisePriority(core);
+    if (options.machine_json_path) |path| try writeMachineJson(io, arena, path, options.core);
 
     const measurements = [_]Measurement{
         try Scenario(BoxTree.limits, GlyphTableText, BoxTree).run(io, gpa, 20, 400),
@@ -427,21 +467,43 @@ pub fn main(init: std.process.Init) !void {
     var stdout_buffer: [4096]u8 = undefined;
     var stdout_writer = Io.File.stdout().writer(io, &stdout_buffer);
     const out = &stdout_writer.interface;
-    try out.print("{s:<28} {s:>8} {s:>11} {s:>11} {s:>11} {s:>11} {s:>11} {s:>8} {s:>14} {s:>14} {s:>9}\n", .{ "scenario", "elements", "declare min", "declare med", "layout min", "layout med", "frame med", "ns/elem", "declare budget", "layout budget", "measures" });
+    const missed_target = try printMeasurements(out, &measurements);
+    if (measurements.len > compared_count) {
+        const shaped_one_thread: f64 = @floatFromInt(measurements[compared_count].layout.median_ns);
+        const shaped_parallel: f64 = @floatFromInt(measurements[compared_count + 1].layout.median_ns);
+        try out.print("\nparallel measurement: {d:.2}x as fast as one thread\n", .{shaped_one_thread / shaped_parallel});
+    }
+    try out.print("render thread: {d:.0} frames/s against {d:.0} on one thread ({d:.2}x)\n", .{ render_thread_rate, one_thread_rate, render_thread_rate / one_thread_rate });
+    try out.writeAll("allocations after init: 0 in every scenario\n");
+    try printStartupMeasurements(out, &startup_measurements);
+    try printClusterWarnings(out, &measurements, &startup_measurements);
+    try out.flush();
+
+    var compared_time_buffer: [2 * compared_count + startup_measurements.len]ComparedTime = undefined;
+    const compared_times = comparedTimes(measurements[0..compared_count], &startup_measurements, &compared_time_buffer);
+    if (options.json_path) |path| try writeJson(io, path, compared_times);
+    if (options.check_targets and missed_target) return error.TargetMissed;
+}
+
+/// Prints the scenario table and returns whether any budget was missed.
+fn printMeasurements(out: *Io.Writer, measurements: []const Measurement) !bool {
+    try out.print("{s:<28} {s:>8} {s:>11} {s:>11} {s:>11} {s:>11} {s:>11} {s:>11} {s:>11} {s:>8} {s:>14} {s:>14} {s:>9}\n", .{ "scenario", "elements", "declare min", "declare med", "declare p95", "layout min", "layout med", "layout p95", "frame med", "ns/elem", "declare budget", "layout budget", "measures" });
     var missed_target = false;
     for (measurements) |measurement| {
-        const per_element = @as(f64, @floatFromInt(measurement.layout_min_ns)) / @as(f64, @floatFromInt(measurement.elements));
+        const per_element = @as(f64, @floatFromInt(measurement.layout.min_ns)) / @as(f64, @floatFromInt(measurement.elements));
         var declare_budget_buffer: [32]u8 = undefined;
         var layout_budget_buffer: [32]u8 = undefined;
-        const declare_budget = budgetText(&declare_budget_buffer, measurement.declare_min_ns, measurement.declare_target_ns, &missed_target);
-        const layout_budget = budgetText(&layout_budget_buffer, measurement.layout_min_ns, measurement.layout_target_ns, &missed_target);
-        try out.print("{s:<28} {d:>8} {d:>9.1}us {d:>9.1}us {d:>9.1}us {d:>9.1}us {d:>9.1}us {d:>8.1} {s:>14} {s:>14} {d:>9.0}\n", .{
+        const declare_budget = budgetText(&declare_budget_buffer, measurement.declare.min_ns, measurement.declare_target_ns, &missed_target);
+        const layout_budget = budgetText(&layout_budget_buffer, measurement.layout.min_ns, measurement.layout_target_ns, &missed_target);
+        try out.print("{s:<28} {d:>8} {d:>9.1}us {d:>9.1}us {d:>9.1}us {d:>9.1}us {d:>9.1}us {d:>9.1}us {d:>9.1}us {d:>8.1} {s:>14} {s:>14} {d:>9.0}\n", .{
             measurement.name,
             measurement.elements,
-            microseconds(measurement.declare_min_ns),
-            microseconds(measurement.declare_median_ns),
-            microseconds(measurement.layout_min_ns),
-            microseconds(measurement.layout_median_ns),
+            microseconds(measurement.declare.min_ns),
+            microseconds(measurement.declare.median_ns),
+            microseconds(measurement.declare.p95_ns),
+            microseconds(measurement.layout.min_ns),
+            microseconds(measurement.layout.median_ns),
+            microseconds(measurement.layout.p95_ns),
             microseconds(measurement.frame_median_ns),
             per_element,
             declare_budget,
@@ -449,26 +511,62 @@ pub fn main(init: std.process.Init) !void {
             measurement.measure_calls_per_frame,
         });
     }
-    const shaped_one_thread: f64 = @floatFromInt(measurements[compared_count].layout_median_ns);
-    const shaped_parallel: f64 = @floatFromInt(measurements[compared_count + 1].layout_median_ns);
-    try out.print("\nparallel measurement: {d:.2}x as fast as one thread\n", .{shaped_one_thread / shaped_parallel});
-    try out.print("render thread: {d:.0} frames/s against {d:.0} on one thread ({d:.2}x)\n", .{ render_thread_rate, one_thread_rate, render_thread_rate / one_thread_rate });
-    try out.writeAll("allocations after init: 0 in every scenario\n");
+    return missed_target;
+}
 
-    try out.print("\n{s:<28} {s:>11} {s:>11}\n", .{ "startup", "min", "median" });
+fn printStartupMeasurements(out: *Io.Writer, startup_measurements: []const StartupMeasurement) !void {
+    try out.print("\n{s:<28} {s:>11} {s:>11} {s:>11}\n", .{ "startup", "min", "median", "p95" });
     for (startup_measurements) |measurement| {
-        try out.print("{s:<28} {d:>9.1}us {d:>9.1}us\n", .{ measurement.name, microseconds(measurement.min_ns), microseconds(measurement.median_ns) });
+        try out.print("{s:<28} {d:>9.1}us {d:>9.1}us {d:>9.1}us\n", .{
+            measurement.name,
+            microseconds(measurement.spread.min_ns),
+            microseconds(measurement.spread.median_ns),
+            microseconds(measurement.spread.p95_ns),
+        });
     }
     try out.print("init allocates {d:.2} MiB at the default config\n", .{@as(f64, @floatFromInt(DefaultUi.required_bytes)) / (1024 * 1024)});
-    try out.flush();
+}
 
-    var compared_time_buffer: [2 * compared_count + startup_measurements.len]ComparedTime = undefined;
-    const compared_times = comparedTimes(measurements[0..compared_count], &startup_measurements, &compared_time_buffer);
-    if (options.json_path) |path| try writeJson(io, path, compared_times);
-    const regressed = if (options.compare_path) |path| try compare(io, arena, out, path, compared_times) else false;
-    try out.flush();
-    if (regressed) return error.Regression;
-    if (options.check_targets and missed_target) return error.TargetMissed;
+/// A scenario whose frames fell into two clusters measured two things, and
+/// its fastest frame says only which one was faster.
+fn printClusterWarnings(out: *Io.Writer, measurements: []const Measurement, startup_measurements: []const StartupMeasurement) !void {
+    for (measurements) |measurement| {
+        try printClusterWarning(out, measurement.name, "declare", measurement.declare);
+        try printClusterWarning(out, measurement.name, "layout", measurement.layout);
+    }
+    for (startup_measurements) |measurement| try printClusterWarning(out, measurement.name, "", measurement.spread);
+}
+
+fn printClusterWarning(out: *Io.Writer, name: []const u8, phase: []const u8, spread: Spread) !void {
+    const clusters = spread.clusters orelse return;
+    try out.print("warning: {s}{s}{s} times fell in two clusters, around {d:.1}us and {d:.1}us ({d:.0}% in the slower)\n", .{
+        name,
+        if (phase.len == 0) "" else ", ",
+        phase,
+        microseconds(clusters.lower_median),
+        microseconds(clusters.upper_median),
+        clusters.upper_share * 100,
+    });
+}
+
+/// Pins only this thread: on Windows the threads the parallel scenarios
+/// start still run on every core, while on Linux they inherit the pin.
+fn pinAndRaisePriority(core: u32) !void {
+    machine.pinToCore(core, .thread) catch |err| {
+        std.debug.print("could not pin to core {d}: {t}\n", .{ core, err });
+        return err;
+    };
+    machine.raisePriority() catch |err| std.debug.print("pinned to core {d}, but could not raise the priority: {t}\n", .{ core, err });
+}
+
+fn writeMachineJson(io: Io, arena: std.mem.Allocator, path: []const u8, core: ?u32) !void {
+    const state = try machine.read(io, arena, core);
+    const file = try Io.Dir.cwd().createFile(io, path, .{});
+    defer file.close(io);
+    var buffer: [1024]u8 = undefined;
+    var file_writer = file.writer(io, &buffer);
+    try state.writeJson(&file_writer.interface);
+    try file_writer.interface.flush();
 }
 
 fn writeJson(io: Io, path: []const u8, times: []const ComparedTime) !void {
@@ -483,32 +581,4 @@ fn writeJson(io: Io, path: []const u8, times: []const ComparedTime) !void {
     }
     try writer.writeAll("}\n");
     try writer.flush();
-}
-
-/// Prints each time's change against the baseline and returns whether any
-/// is more than 10% slower. A time missing from the baseline is new and
-/// only printed.
-fn compare(io: Io, arena: std.mem.Allocator, out: *Io.Writer, path: []const u8, times: []const ComparedTime) !bool {
-    const contents = try Io.Dir.cwd().readFileAlloc(io, path, arena, .limited(64 * 1024));
-    const baseline = try std.json.parseFromSliceLeaky(std.json.ArrayHashMap(u64), arena, contents, .{});
-    try out.writeAll("\nagainst the baseline (fastest frames):\n");
-    var regressed = false;
-    for (times) |*time| {
-        const before = baseline.map.get(time.key()) orelse {
-            try out.print("  {s:<37} new\n", .{time.key()});
-            continue;
-        };
-        const ratio = @as(f64, @floatFromInt(time.nanoseconds)) / @as(f64, @floatFromInt(before));
-        const slower = ratio > regression_tolerance;
-        if (slower) regressed = true;
-        try out.print("  {s:<37} {d:>9.1}us -> {d:>9.1}us  {s}{d:.1}%{s}\n", .{
-            time.key(),
-            microseconds(before),
-            microseconds(time.nanoseconds),
-            if (ratio >= 1) "+" else "",
-            (ratio - 1) * 100,
-            if (slower) "  REGRESSION" else "",
-        });
-    }
-    return regressed;
 }

@@ -127,6 +127,17 @@ has a narrower middle half than the same check unpinned. Both are
 recorded in the commit message, and the report shows each side's machine
 state.
 
+**Status:** built, with B2. `bench/machine.zig` pins, raises the
+priority and reads the machine state on Windows and Linux; `bench-compare`
+pins itself to the highest-numbered logical CPU after building, records
+the state before every run, and warns when it changes. Measured with turbo
+**on** (10 rounds each, `HEAD HEAD` at `468ffc8`): the middle halves
+averaged 2.74% wide unpinned and 2.50% pinned (medians 2.5% and 2.1%,
+widest 11.5% and 7.9%). Waiting on the same check with turbo off
+(`PROCTHROTTLEMAX 99`), which changes this machine's power plan. Windows
+reports the base clock (3696 MHz) as the current one, so the clock
+reading cannot show boosting there.
+
 ### B2. Confidence intervals and a measured noise floor
 
 **Where:** `bench/compare.zig`, `bench/bench.zig`, `README.md` and
@@ -155,6 +166,18 @@ SPEC.md §20.3.
 **Done when:** a commit compared with itself reports intervals that all
 contain zero, and the store-forwarding stall R2 found (`946405e~1` to
 `946405e`) is still called faster.
+
+**Status:** done, with one exception. `bench/statistics.zig` holds the
+bootstrap (two-stage, ready for B5's layouts) and the cluster test, with
+tests run by `zig build test`. `--calibrate` against `468ffc8` (61
+sequential rounds, turbo on, pinned) called nothing, and saved bands of
+0.5% (the floor) to 0.9%; 29 of 30 intervals contain zero, and warm
+text's layout lay at −0.4% to −0.1%, inside its band but not around zero.
+`946405e~1` to `946405e` (100 rounds, the cap) is still called faster:
+box tree declaration −27.4% (−27.5% to −27.4%), warm and cold text
+declarations −7.0%, depth 64's declaration −20%. Sequential rounds rarely
+stop early on Windows: the 0.1 µs clock keeps the small scenes' intervals
+in whole steps, so most runs end at the time budget or the cap.
 
 ### B3. Shuffled scenario order
 

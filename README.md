@@ -251,9 +251,10 @@ while (to_release.next()) |released| if (released) |texture| unload(texture) els
 | `zig build test -Dzui-debug=true` | keep id names, so duplicate-id and unbalanced-tree panics name the element |
 | `zig build test -Dzui-tracy=true` | fetch Tracy and test `zui_tracy` with its client linked |
 | `zig build test -Dzui-sanitize-thread=true` | run the tests under ThreadSanitizer, through LLVM, on Linux; ThreadSanitizer needs ASLR entropy of at most 28 bits (`sysctl vm.mmap_rnd_bits=28`), or a container started with `--security-opt seccomp=unconfined` |
-| `zig build bench` | run the benchmarks in ReleaseFast; add `-- --check-targets` to fail on a missed performance target, or `-- --compare old.json` after `-- --json old.json` to check for regressions |
+| `zig build bench` | run the benchmarks in ReleaseFast and print each phase's fastest, median and 95th-percentile frame; add `-- --check-targets` to fail on a missed performance target, `-- --core <n>` to pin to one core at a raised priority, or `-- --machine-json <path>` to record the machine's state |
 | `zig build counts` | count each benchmark's instructions per frame under Callgrind, on x86_64 Linux with Valgrind (on Windows, in a Linux container); add `-- --json counts.json` to save them and `-- --compare counts.json` to fail on more than 2% growth |
-| `zig build bench-compare -- main` | run the benchmarks of `main` and of the working tree alternately, and report each time's median change and its spread; `-- <base> <head>` compares two commits (SPEC.md §20.3) |
+| `zig build bench-compare -- main` | run the benchmarks of `main` and of the working tree alternately, pinned to one core, until each time's change is known closely enough; report each change with its 95% interval, calling it only beyond this machine's noise band; `-- <base> <head>` compares two commits (SPEC.md §20.3) |
+| `zig build bench-compare -- --calibrate` | compare `HEAD` with itself and save each time's noise band for this machine's setup; run it once per machine, and again after changing the setup |
 | `zig build docs` | generate API documentation into `zig-out/docs` |
 | `zig build fmt` | format every Zig source file |
 | `zig build fmt-check` | fail if any file is not formatted, as CI does |
@@ -292,12 +293,49 @@ zui-raylib's demo does all of this with `zig build demo
 
 To keep noise out of a profile or a timing:
 - pin the process to one core (`taskset -c 2` on Linux, `start /affinity 4`
-  on Windows) and keep other work off it;
-- fix the CPU frequency: turn off turbo and use a performance power plan,
-  or `cpupower frequency-set -g performance`;
+  on Windows) and keep other work off it; `bench-compare` pins itself to
+  the highest-numbered logical CPU, or the one `--core` names;
+- fix the CPU frequency, as the next section describes;
 - compare two builds by alternating them, never one after the other, as
   `zig build bench-compare` does; and prefer `zig build counts`, which no
   machine's noise can move.
+
+### Quieting the machine
+
+A CPU that boosts its clock with its temperature times the same code
+differently from one minute to the next. `bench-compare` records the
+machine's state before every run, shows it in its report, warns when it
+changed during the comparison, and with `--require-quiet` refuses to run
+while turbo is on or the Linux governor is not `performance`.
+
+On Windows, from an administrator prompt:
+
+```bat
+powercfg /setactive SCHEME_MIN
+powercfg /setacvalueindex scheme_current sub_processor PROCTHROTTLEMAX 99
+powercfg /setactive scheme_current
+```
+
+The first line picks the High Performance plan. A maximum processor state
+of 99% keeps the clock at or below its base frequency, which turns Turbo
+Boost off. `PROCTHROTTLEMAX 100` turns it back on.
+
+On Linux:
+
+```sh
+sudo cpupower frequency-set -g performance
+echo 1 | sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo   # AMD: echo 0 > .../cpufreq/boost
+# keep other work off the measuring core: isolcpus=3 on the kernel command line, or
+sudo cset shield --cpu 3 --kthread on
+# take its hyperthread sibling offline (thread_siblings_list names it)
+cat /sys/devices/system/cpu/cpu3/topology/thread_siblings_list
+echo 0 | sudo tee /sys/devices/system/cpu/cpu13/online
+# run without address randomization
+setarch -R zig build bench-compare -- main --core 3 --require-quiet
+```
+
+Then run `zig build bench-compare -- --calibrate` once, so comparisons on
+this setup are judged against its own noise.
 
 ### Conformance suites
 

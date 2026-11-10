@@ -278,13 +278,22 @@ pub fn build(b: *std.Build) void {
         .root_module = b.createModule(.{
             .root_source_file = b.path("bench/compare.zig"),
             .target = b.graph.host,
+            // Resampling the intervals after every round is slow in Debug.
+            .optimize = .ReleaseSafe,
         }),
     });
     const run_bench_compare = b.addRunArtifact(bench_compare_executable);
     run_bench_compare.addArgs(&.{ "--zig", b.graph.zig_exe, "--repository", b.pathFromRoot(".") });
     if (b.args) |arguments| run_bench_compare.addArgs(arguments);
-    b.step("bench-compare", "Alternate the benchmarks of two commits: -- <base> [<head>] [--rounds <count>]").dependOn(&run_bench_compare.step);
+    b.step("bench-compare", "Alternate the benchmarks of two commits, pinned to one core: -- <base> [<head>], or -- --calibrate").dependOn(&run_bench_compare.step);
     test_step.dependOn(&bench_compare_executable.step);
+
+    const bench_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("bench/statistics.zig"),
+        .target = target,
+        .optimize = optimize,
+    }) });
+    test_step.dependOn(&b.addRunArtifact(bench_tests).step);
 
     const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "tests", "bench", "zui_testing", "zui_async", "zui_widgets", "zui_reflect", "zui_tracy", "zui_app", "zui_wire" };
     b.step("fmt", "Format all Zig sources").dependOn(&b.addFmt(.{ .paths = formatted_paths }).step);

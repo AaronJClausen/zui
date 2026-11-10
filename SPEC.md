@@ -2313,10 +2313,23 @@ On one 2020-era desktop core (the reference is an i9-10900K):
 - **`zig build bench`**, always ReleaseFast: the budget scenarios, deep
   and wide trees, a realistic document view, cold text on one thread and
   in parallel, a render thread against one thread, and startup (`init`,
-  `initBuffer`, first frames). It fails on any allocation after `init`.
+  `initBuffer`, first frames). It fails on any allocation after `init`,
+  and reports each phase's fastest, median and 95th-percentile frame,
+  warning when a phase's frames fall into two clusters. `--core <n>` pins
+  it to one core at a raised priority; `--machine-json <path>` records
+  the machine's state; `--capabilities` lists the options it supports.
 - **`zig build bench-compare -- <base> [<head>]`** alternates two commits
-  on one machine and reports the median ratio with its middle half,
-  calling a change only when that whole range is beyond 2%.
+  on one machine, pinned to one core after both are built, recording the
+  machine's state before every run. It reports the median of the paired
+  head/base ratios with a bootstrap 95% confidence interval (a fixed
+  seed, 10,000 resamples), and calls a change only when the whole
+  interval lies beyond that time's noise band. `--calibrate` measures
+  the bands by comparing a commit with itself, and saves them for the
+  machine's setup; without them, each band is 2%. Rounds continue until
+  every interval is narrower than its target (`--target-width`, 1%, or
+  the band if wider) or the time budget (`--time-budget`, 420 s) is
+  spent; `--rounds` fixes their number. `--require-quiet` refuses to run
+  while turbo is on.
 - **`zig build counts`**, instruction counts under Callgrind for the
   single-threaded scenarios, from an executable always built for one CPU
   model without libc, over a fixed number of frames, so they are the same
