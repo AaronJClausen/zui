@@ -24,6 +24,10 @@ const ChangingTexts = scenes.ChangingTexts;
 const DeepTree = scenes.DeepTree;
 const WideTree = scenes.WideTree;
 const DocumentsView = scenes.DocumentsView;
+const GridWithTooltip = scenes.GridWithTooltip;
+const InteractiveBoxTree = scenes.InteractiveBoxTree;
+const PressedInteractiveBoxTree = scenes.PressedInteractiveBoxTree;
+const eventsOf = scenes.eventsOf;
 
 /// Text measurement with the cost profile of a shaping engine: about a
 /// microsecond for a short word.
@@ -77,7 +81,7 @@ fn Scenario(comptime limits: zui.Limits, comptime Text: type, comptime Scene: ty
 
             var scene: Scene = .{};
             for (0..warmup_frames) |index| {
-                ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 1600, 1200 } } });
+                ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 1600, 1200 } }, .events = eventsOf(&scene, index) });
                 scene.declare(&ui, index);
                 ui.release(ui.endFrame());
             }
@@ -89,7 +93,7 @@ fn Scenario(comptime limits: zui.Limits, comptime Text: type, comptime Scene: ty
             const calls_before = ui.measureCalls();
             for (0..frame_count) |index| {
                 const frame_start = Io.Timestamp.now(io, .awake);
-                ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 1600, 1200 } } });
+                ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 1600, 1200 } }, .events = eventsOf(&scene, warmup_frames + index) });
                 scene.declare(&ui, warmup_frames + index);
                 const layout_start = Io.Timestamp.now(io, .awake);
                 const frame = ui.endFrame();
@@ -352,7 +356,7 @@ fn microseconds(nanoseconds: u64) f64 {
 
 /// The scenarios a regression check compares: the single-threaded ones,
 /// whose times don't depend on what the machine's other cores are doing.
-const compared_count = 9;
+const compared_count = 13;
 const regression_tolerance = 1.10;
 
 /// One fastest time a regression check compares. The layout time keeps the
@@ -404,6 +408,10 @@ pub fn main(init: std.process.Init) !void {
         try Scenario(DeepTree.limits, GlyphTableText, DeepTree).run(io, gpa, 20, 400),
         try Scenario(WideTree.limits, GlyphTableText, WideTree).run(io, gpa, 20, 400),
         try Scenario(DocumentsView.limits, GlyphTableText, DocumentsView).run(io, gpa, 20, 400),
+        try Scenario(GridWithTooltip(.first).limits, GlyphTableText, GridWithTooltip(.first)).run(io, gpa, 20, 400),
+        try Scenario(GridWithTooltip(.last).limits, GlyphTableText, GridWithTooltip(.last)).run(io, gpa, 20, 400),
+        try Scenario(InteractiveBoxTree.limits, GlyphTableText, InteractiveBoxTree).run(io, gpa, 20, 400),
+        try Scenario(PressedInteractiveBoxTree.limits, GlyphTableText, PressedInteractiveBoxTree).run(io, gpa, 20, 400),
         try Scenario(shaping_limits, ShapingText(false), ShapedTextWall(false)).run(io, gpa, 2, 20),
         try Scenario(shaping_limits, ShapingText(true), ShapedTextWall(true)).run(io, gpa, 2, 20),
     };

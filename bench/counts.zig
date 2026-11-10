@@ -17,7 +17,7 @@ const warmup_frames = 4;
 const counted_frames = 10;
 const growth_tolerance = 1.02;
 
-const Scenarios = .{ scenes.BoxTree, scenes.StaticBoxTree, scenes.TextWall, scenes.TextWallCold, scenes.SingleLineTexts, scenes.ChangingTexts, scenes.DeepTree, scenes.WideTree, scenes.DocumentsView, scenes.DeepTreeWithIdleSources, scenes.DeepTreeWithIdleAsyncSources };
+const Scenarios = .{ scenes.BoxTree, scenes.StaticBoxTree, scenes.TextWall, scenes.TextWallCold, scenes.SingleLineTexts, scenes.ChangingTexts, scenes.DeepTree, scenes.WideTree, scenes.DocumentsView, scenes.GridWithTooltip(.first), scenes.GridWithTooltip(.last), scenes.InteractiveBoxTree, scenes.PressedInteractiveBoxTree, scenes.DeepTreeWithIdleSources, scenes.DeepTreeWithIdleAsyncSources };
 
 const Phase = enum {
     /// `beginFrame` and the scene's declaration.
@@ -43,7 +43,7 @@ fn runCounted(comptime Scene: type, io: Io, gpa: std.mem.Allocator, phase: Phase
         const counting_end_frame = counted and phase == .endFrame;
 
         if (counting_declare) callgrind.toggleCollect();
-        const record: Ui.FrameRecord = .{ .params = .{ .now = .zero, .viewport = .{ 1600, 1200 } } };
+        const record: Ui.FrameRecord = .{ .params = .{ .now = .zero, .viewport = .{ 1600, 1200 } }, .events = scenes.eventsOf(&scene, frame_index) };
         if (Ui.has_sources) ui.beginFrame(&record, &sources) else ui.beginFrame(&record);
         scene.declare(&ui, frame_index);
         if (counting_declare) callgrind.toggleCollect();

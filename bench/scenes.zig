@@ -31,14 +31,8 @@ pub const BoxTree = struct {
         ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .grow_both, .child_gap = 1 } });
         for (0..512) |row| {
             for (0..8) |depth| {
-                const sizing: zui.Sizing2 = switch ((row + depth) % 4) {
-                    0 => .{ .width = .grow, .height = .fit },
-                    1 => .{ .width = .fit, .height = .fixed(2) },
-                    2 => .{ .width = .percent(0.9), .height = .fit },
-                    else => .{ .width = .{ .rule = .grow, .amount = 1, .min = 4, .max = 400 }, .height = .fit },
-                };
                 ui.open(.{
-                    .layout = .{ .sizing = sizing, .padding = .all(1), .child_gap = 1, .direction = if (depth % 2 == 0) .left_to_right else .top_to_bottom },
+                    .layout = boxLayout(row, depth),
                     .decoration = .{
                         .background = if (depth % 3 == 0) zui.Color.rgb(0x202030) else null,
                     },
@@ -47,6 +41,128 @@ pub const BoxTree = struct {
             for (0..8) |_| ui.close();
         }
         ui.close();
+    }
+
+    pub inline fn boxLayout(row: usize, depth: usize) zui.Layout {
+        const sizing: zui.Sizing2 = switch ((row + depth) % 4) {
+            0 => .{ .width = .grow, .height = .fit },
+            1 => .{ .width = .fit, .height = .fixed(2) },
+            2 => .{ .width = .percent(0.9), .height = .fit },
+            else => .{ .width = .{ .rule = .grow, .amount = 1, .min = 4, .max = 400 }, .height = .fit },
+        };
+        return .{ .sizing = sizing, .padding = .all(1), .child_gap = 1, .direction = if (depth % 2 == 0) .left_to_right else .top_to_bottom };
+    }
+};
+
+/// What the record of frame `frame_index` carries: the scene's `events`,
+/// or none.
+pub fn eventsOf(scene: anytype, frame_index: usize) []const zui.Event {
+    if (!@hasDecl(@TypeOf(scene.*), "events")) return &.{};
+    return scene.events(frame_index);
+}
+
+pub const TooltipPlacement = enum { first, last };
+
+/// 3,000 decorated cells, 60 by 50, all inside the viewport, as in a
+/// spreadsheet, with a tooltip, a floating panel holding two lines of
+/// text, declared before the grid or after it. Any floating element makes
+/// emission order the commands by layer, and one declared first puts its
+/// commands ahead of the grid's, out of order. The other scenes cull most
+/// of their elements, so none of them draws more than 500 commands.
+pub fn GridWithTooltip(comptime placement: TooltipPlacement) type {
+    return struct {
+        const Self = @This();
+        pub const name = "3000 cells, tooltip " ++ @tagName(placement);
+        pub const layout_target_ns: ?u64 = null;
+        pub const limits: zui.Limits = .{ .max_elements = 3200, .max_render_commands = 4096 };
+        const columns = 60;
+        const rows = 50;
+
+        pub fn declare(_: *Self, ui: anytype, _: usize) void {
+            if (placement == .first) declareTooltip(ui);
+            ui.open(.{ .layout = .{ .direction = .top_to_bottom, .child_gap = 2 } });
+            for (0..rows) |row| {
+                ui.open(.{ .layout = .{ .child_gap = 2 } });
+                for (0..columns) |column| ui.box(.{
+                    .layout = .{ .sizing = .{ .width = .fixed(24), .height = .fixed(20) } },
+                    .decoration = .{
+                        .background = if ((row + column) % 2 == 0) zui.Color.rgb(0x202030) else zui.Color.rgb(0x282838),
+                    },
+                });
+                ui.close();
+            }
+            ui.close();
+            if (placement == .last) declareTooltip(ui);
+        }
+
+        fn declareTooltip(ui: anytype) void {
+            ui.open(.{
+                .floating = .{ .attach_to = .root, .offset = .{ 400, 300 }, .z = 1 },
+                .layout = .{ .direction = .top_to_bottom, .padding = .symmetric(10, 6), .child_gap = 2 },
+                .decoration = .{
+                    .background = .rgb(0x30303c),
+                    .border = .{ .color = .rgb(0x50505c), .widths = .all(1) },
+                    .corner_radius = .all(4),
+                },
+            });
+            ui.text("Saved to Documents", .{ .size = 14, .color = .white });
+            ui.text("3 minutes ago", .{ .size = 12, .color = .rgb(0xa0a0b0) });
+            ui.close();
+        }
+    };
+}
+
+/// Its own limits, so the box tree's `Context` and code stay as they were.
+const interactive_limits: zui.Limits = .{ .max_elements = 4220, .max_render_commands = 8192 };
+
+/// The box tree with an id on every box, each interactive and asking for
+/// its widget state, as a grid of buttons does: every box adds a hit region
+/// and an id-to-rect result when emitted, and looks its result up when
+/// declared.
+pub const InteractiveBoxTree = struct {
+    pub const name = "4096 interactive boxes";
+    pub const layout_target_ns: ?u64 = null;
+    pub const limits = interactive_limits;
+
+    pub fn declare(_: *InteractiveBoxTree, ui: anytype, _: usize) void {
+        ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .grow_both, .child_gap = 1 } });
+        for (0..512) |row| {
+            for (0..8) |depth| {
+                const id: zui.Id = .indexed("box", row * 8 + depth);
+                const highlighted = ui.widgetState(id) != .idle;
+                ui.open(.{
+                    .id = id,
+                    .interactive = true,
+                    .layout = BoxTree.boxLayout(row, depth),
+                    .decoration = .{
+                        .background = if (highlighted) zui.Color.rgb(0x404060) else if (depth % 3 == 0) zui.Color.rgb(0x202030) else null,
+                    },
+                });
+            }
+            for (0..8) |_| ui.close();
+        }
+        ui.close();
+    }
+};
+
+/// `InteractiveBoxTree` under a mouse that presses on one frame and
+/// releases on the next: every frame hit-tests the hovering pointer, and
+/// each press hit-tests it again for each gesture it may start.
+pub const PressedInteractiveBoxTree = struct {
+    pub const name = "4096 interactive, pressed";
+    pub const layout_target_ns: ?u64 = null;
+    pub const limits = interactive_limits;
+    tree: InteractiveBoxTree = .{},
+    event: [1]zui.Event = undefined,
+
+    pub fn declare(self: *PressedInteractiveBoxTree, ui: anytype, frame_index: usize) void {
+        self.tree.declare(ui, frame_index);
+    }
+
+    pub fn events(self: *PressedInteractiveBoxTree, frame_index: usize) []const zui.Event {
+        const mouse: zui.Pointer = .{ .id = .mouse, .kind = .mouse, .position = .{ 400, 300 }, .at = .zero };
+        self.event[0] = if (frame_index % 2 == 0) .{ .pointer_down = .{ .pointer = mouse } } else .{ .pointer_up = .{ .pointer = mouse } };
+        return &self.event;
     }
 };
 
