@@ -115,8 +115,19 @@ reused (`ROADMAP.md` explains the letters).
   `timeout 600 zig build test`, `timeout-minutes` in CI. No test may wait
   without a bound. Work that does not fit is restructured, never given a
   longer limit.
-- This machine is Windows. Valgrind and Callgrind do not run on it, but
-  Docker does, so instruction counts can be taken in a Linux container.
+- This machine dual-boots. On Windows, Valgrind and Callgrind do not run,
+  but Docker does, so instruction counts are taken in a Linux container.
+  On its bare-metal Linux install (Omarchy) they run natively, and so do
+  hardware counters (`bench --counters`).
+- On the Linux install, the owner switches the CPU between its normal mode
+  (Turbo Boost on, the usual governor) and benchmarking mode (Turbo Boost
+  off, `performance` governor on every core) with a shell command,
+  `turbo`, which needs sudo. It toggles, so check the state first:
+  `cat /sys/devices/system/cpu/intel_pstate/no_turbo` (1 is benchmarking
+  mode) and `cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor`.
+  When a measurement needs the other mode, ask the owner to run `turbo`
+  rather than changing the settings yourself, and tell them when the
+  measurement is done so they can switch back.
 - Wall-clock times are judged only on one machine with `bench-compare`,
   never across runs or runners.
 - A failing check is reported with its output, never skipped or relaxed

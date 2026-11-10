@@ -22,8 +22,8 @@ left. Resume in this order:
    `zig build bench-report -- <dir>`.
 2. **B4's *Done when*** needs the cycles band compared with the time band
    while the clock moves: with turbo off the two measure the same thing.
-   Ask the owner before turning turbo back on
-   (`/sys/devices/system/cpu/intel_pstate/no_turbo`), then run
+   Ask the owner to run `turbo` to turn Turbo Boost back on (CLAUDE.md
+   says how to check which mode the machine is in), then run
    `bench-compare -- --calibrate` and `-- --calibrate --metric cycles`
    and compare the saved bands.
 3. **Optional:** B4 slice 2 (`rdpmc`, see B4's status); B7 slice 2's
