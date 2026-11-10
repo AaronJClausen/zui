@@ -90,11 +90,21 @@ const cache_geometry = [_][]const u8{ "--I1=32768,8,64", "--D1=32768,8,64", "--L
 /// Runs this executable under Callgrind for one scenario and phase, and
 /// reads what Callgrind collected from its summary.
 fn countUnderCallgrind(io: Io, arena: std.mem.Allocator, self_path: []const u8, name: []const u8, phase: Phase) !Events {
+    // The environment and the executable's path are copied onto the initial
+    // stack, so their lengths move every stack address and with them the
+    // simulated D1 misses. An empty environment and a path relative to the
+    // executable's own directory keep the stack where it is on every runner.
+    const self_name = try std.fmt.allocPrint(arena, "./{s}", .{std.fs.path.basename(self_path)});
+    var empty_environment: std.process.Environ.Map = .init(arena);
     const argv: []const []const u8 = &(.{
         "valgrind",        "--tool=callgrind", "--collect-atstart=no", "--callgrind-out-file=/dev/null",
         "--cache-sim=yes", "--branch-sim=yes",
-    } ++ cache_geometry ++ .{ self_path, "--run", name, @tagName(phase) });
-    const result = std.process.run(arena, io, .{ .argv = argv }) catch |err| {
+    } ++ cache_geometry ++ .{ self_name, "--run", name, @tagName(phase) });
+    const result = std.process.run(arena, io, .{
+        .argv = argv,
+        .cwd = .{ .path = std.fs.path.dirname(self_path) orelse "." },
+        .environ_map = &empty_environment,
+    }) catch |err| {
         if (err == error.FileNotFound) std.debug.print("valgrind was not found; counts need x86_64 Linux with Valgrind installed\n", .{});
         return err;
     };

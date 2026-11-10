@@ -353,8 +353,19 @@ leaves trailing zeros off its `Collected` line, so missing values read as
 zero. Measured on bare-metal Linux (i9-10900K, Valgrind 3.25.1): two runs
 wrote byte-identical JSON; a run takes about 8 s once built. Against
 `main` without the simulation, every instruction count moved by 7 to 13
-per frame (at most −0.06%), well inside the 2% gate. Two CI runs have
-yet to be compared.
+per frame (at most −0.06%), well inside the 2% gate.
+
+The first two CI runs (`f099fd1`, and `75a9ade` by `workflow_dispatch`)
+agreed on every instruction, I1, LL and branch count, but 21 of 30 D1
+miss counts differed, by up to 0.8% (3% on counts under 40). The
+simulated cache sees real addresses, and the environment and the
+executable's path are copied onto the initial stack, so their lengths
+move every stack address: here, padding the environment moved documents
+view's D1 misses from 5025 to 4950. `counts` now runs each child with an
+empty environment, as `./zui-counts` from its own directory; a run from a
+longer path with 3000 bytes of extra environment then wrote byte-identical
+JSON. This is the same effect B5 sets out to randomize for wall-clock
+time.
 
 ### B7. Measuring across operating systems and hardware
 
