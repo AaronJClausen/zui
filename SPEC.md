@@ -2341,8 +2341,10 @@ On one 2020-era desktop core (the reference is an i9-10900K):
   single-threaded scenarios, from an executable always built for one CPU
   model without libc, over a fixed number of frames, so they are the same
   on every machine. CI fails on more than 2% growth over the parent
-  commit. Wall-clock times on shared runners are reported, never
-  compared.
+  commit. Beside each count, Callgrind's simulated I1, D1 and last-level
+  cache misses and branch mispredictions, under a fixed cache geometry;
+  they show the direction of a memory change and never fail the check.
+  Wall-clock times on shared runners are reported, never compared.
 - **Every feature that claims a speedup ships with its measurement,** and
   a feature whose win is not measured does not ship.
 

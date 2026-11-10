@@ -9,30 +9,11 @@ Written against `db4ea4d`.
 
 ## Picking up from here
 
-Last session: B1, B2 and B3 are committed (`3fb9f8e`, `4294abe`) and
-pushed. Each step's **Status** line below says what it measured and what
+B1, B2, B3 and B6 are committed (`3fb9f8e`, `4294abe`, and B6's own
+commit). Each step's **Status** line below says what it measured and what
 is left. Resume in this order:
 
-1. **B6 is half-written, on the branch `wip/b6-counts-cache-sim`**
-   (pushed to `origin`, one commit on top of `main`; not on `main`).
-   Start with `git fetch && git checkout wip/b6-counts-cache-sim`, then
-   rebase it onto `main` or merge it into `main` once it is finished and
-   verified. Its `bench/counts.zig` runs Callgrind with `--cache-sim=yes --branch-sim=yes`
-   and a fixed `--I1/--D1/--LL` geometry, parses the `Events` and
-   `Collected` lines, and adds informational keys
-   (`"<scene>, <phase>, I1 misses"`, `D1 misses`, `LL misses`,
-   `branch misses`). Only the bare `"<scene>, <phase>"` instruction keys
-   gate (`Count.gated`). It has never been compiled. To finish:
-   `zig build counts` type-checks it (the exe is built by `zig build
-   test`); verify in Docker (`ubuntu:24.04`, `apt-get install valgrind`,
-   run the cross-built `zig-out/bin/zui-counts`, or run `zig build
-   counts` inside the container) twice and check the miss counts are
-   identical; time it against the CI job's `timeout-minutes` in
-   `.github/workflows/ci.yml`; update the doc comment at the top of
-   `counts.zig`, README's *Development* row and SPEC.md §20.3. Squash
-   the work-in-progress commit into one finished B6 commit, give that
-   step a **Status** line, and delete the branch on `origin`.
-2. **B5, slice 1** (`ZUI_BENCH_LAYOUT_SEED`). Ideas from the last
+1. **B5, slice 1** (`ZUI_BENCH_LAYOUT_SEED`). Ideas from the last
    session: shift the stack with `switch (@as(u6, @truncate(seed)))
    { inline else => |step| ... }` over a `[step * 64]u8` buffer passed
    to `doNotOptimizeAway`, calling the scenarios through
@@ -44,19 +25,22 @@ is left. Resume in this order:
    `init.environ_map`. Advertise a `layout-seed` capability. The B2
    bootstrap already resamples in two stages (`groups`), one group per
    layout.
-3. **B5, slice 2 spike:** a module-level `comptime { asm (".text\n.skip
+2. **B5, slice 2 spike:** a module-level `comptime { asm (".text\n.skip
    N"); }` in `bench.zig`, from a `-Dbench-layout-seed` build option,
    should shift every function after it by `N` rounded to 16 bytes,
    since LLVM emits module assembly first. Check it by printing
    `@intFromPtr(&SomeUi.endFrame) & 0xfff` for two seeds.
-4. **B4** (`bench/counters.zig`, Linux `perf_event_open`): can only be
-   type-checked here (`zig build bench -Dtarget=x86_64-linux`); mark it
-   waiting on bare-metal Linux after slice 1 and 3.
-5. **B7**: extend `Machine` with OS version, CPU vendor, caches, target
+3. **B4** (`bench/counters.zig`, Linux `perf_event_open`): can now be
+   built and verified here, since the reference machine also boots
+   bare-metal Linux (`perf_event_paranoid` is 2, enough for user-mode
+   counting in its own process).
+4. **B7**: extend `Machine` with OS version, CPU vendor, caches, target
    and commit; `--results-dir`; `bench-report`. Windows plus a Linux
    container counts as two operating systems for its *Done when*.
-6. **B1's turbo-off check** needs the owner's permission to run
-   `powercfg ... PROCTHROTTLEMAX 99` (and to set it back to 100).
+5. **B1's turbo-off check** needs the owner's permission to run
+   `powercfg ... PROCTHROTTLEMAX 99` on Windows, or to write 1 to
+   `/sys/devices/system/cpu/intel_pstate/no_turbo` on Linux (and to set
+   it back).
 
 Working notes:
 - `bench-compare` writes its progress to stderr, which `zig build` does
@@ -356,6 +340,18 @@ instructions), is reported as within noise.
 **Done when:** two CI runs give identical miss counts, and the job still
 finishes within 10 minutes. It has to be timed, because the simulation
 slows Callgrind down.
+
+**Status:** done. Callgrind runs with `--cache-sim=yes --branch-sim=yes`
+and a fixed 32 KiB 8-way I1 and D1 and an 8 MiB 16-way LL (`-v` confirms
+Valgrind uses them, despite its warning that it found the host's L3).
+Each `"<scene>, <phase>"` instruction key gets four informational keys:
+`I1 misses`, `D1 misses`, `LL misses` and `branch misses`. Callgrind
+leaves trailing zeros off its `Collected` line, so missing values read as
+zero. Measured on bare-metal Linux (i9-10900K, Valgrind 3.25.1): two runs
+wrote byte-identical JSON; a run takes about 8 s once built. Against
+`main` without the simulation, every instruction count moved by 7 to 13
+per frame (at most −0.06%), well inside the 2% gate. Two CI runs have
+yet to be compared.
 
 ### B7. Measuring across operating systems and hardware
 

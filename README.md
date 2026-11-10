@@ -252,7 +252,7 @@ while (to_release.next()) |released| if (released) |texture| unload(texture) els
 | `zig build test -Dzui-tracy=true` | fetch Tracy and test `zui_tracy` with its client linked |
 | `zig build test -Dzui-sanitize-thread=true` | run the tests under ThreadSanitizer, through LLVM, on Linux; ThreadSanitizer needs ASLR entropy of at most 28 bits (`sysctl vm.mmap_rnd_bits=28`), or a container started with `--security-opt seccomp=unconfined` |
 | `zig build bench` | run the benchmarks in ReleaseFast and print each phase's fastest, median and 95th-percentile frame; add `-- --check-targets` to fail on a missed performance target, `-- --core <n>` to pin to one core at a raised priority, `-- --machine-json <path>` to record the machine's state, or `-- --scenario <name>` (see `-- --list-scenarios`) to run only some scenarios |
-| `zig build counts` | count each benchmark's instructions per frame under Callgrind, on x86_64 Linux with Valgrind (on Windows, in a Linux container); add `-- --json counts.json` to save them and `-- --compare counts.json` to fail on more than 2% growth |
+| `zig build counts` | count each benchmark's instructions per frame under Callgrind, on x86_64 Linux with Valgrind (on Windows, in a Linux container), with simulated cache and branch misses beside them; add `-- --json counts.json` to save them and `-- --compare counts.json` to fail on more than 2% growth in instructions (misses are informational) |
 | `zig build bench-compare -- main` | run the benchmarks of `main` and of the working tree alternately, pinned to one core, until each time's change is known closely enough; report each change with its 95% interval, calling it only beyond this machine's noise band; `-- <base> <head>` compares two commits (SPEC.md §20.3) |
 | `zig build bench-install` | install the benchmark executable into `zig-out/bin`, as `bench-compare` does to run one scenario at a time; a base from before this step is compared one whole run at a time instead, which a scenario's position in the run can bias |
 | `zig build bench-compare -- --calibrate` | compare `HEAD` with itself and save each time's noise band for this machine's setup; run it once per machine, and again after changing the setup |
@@ -271,7 +271,7 @@ CI runs:
   runners vary too much. Check for slowdowns on your own machine with
   `zig build bench-compare`;
 - instruction counts of this commit and its parent, failing on more than
-  2% growth;
+  2% growth, with simulated cache and branch misses reported beside them;
 - the tests under ThreadSanitizer, which stress every `zui_async` source
   with producers on other threads;
 - `zui_tracy` with Tracy's client, on Linux, Windows and macOS.
