@@ -292,6 +292,19 @@ pub fn build(b: *std.Build) void {
     b.step("bench-compare", "Alternate the benchmarks of two commits, pinned to one core: -- <base> [<head>], or -- --calibrate").dependOn(&run_bench_compare.step);
     test_step.dependOn(&bench_compare_executable.step);
 
+    const bench_report_executable = b.addExecutable(.{
+        .name = "zui-bench-report",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("bench/report.zig"),
+            .target = b.graph.host,
+            .optimize = .ReleaseSafe,
+        }),
+    });
+    const run_bench_report = b.addRunArtifact(bench_report_executable);
+    if (b.args) |arguments| run_bench_report.addArgs(arguments);
+    b.step("bench-report", "Set side by side each machine's results for one commit: -- <results dir> [<commit>]").dependOn(&run_bench_report.step);
+    test_step.dependOn(&bench_report_executable.step);
+
     const bench_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("bench/statistics.zig"),
         .target = target,

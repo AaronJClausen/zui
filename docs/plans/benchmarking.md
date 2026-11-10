@@ -9,22 +9,26 @@ Written against `db4ea4d`.
 
 ## Picking up from here
 
-B1, B2, B3, B5 and B6 are done, and B4's slices 1 and 3 are built. The
+B1, B2, B3, B5 and B6 are done; B4 and B7 are built and wait on a
+measurement each. The
 reference machine now boots bare-metal Linux with turbo off and the
 `performance` governor; its noise bands are calibrated for that setup.
 Each step's **Status** line below says what it measured and what is
 left. Resume in this order:
 
-1. **B4's *Done when*** needs the cycles band compared with the time band
+1. **B7's *Done when***: boot Windows on the reference machine, run
+   `zig build bench -- --core 19 --results-dir <dir>` at the same commit
+   there and here, into one directory both installs can reach, and run
+   `zig build bench-report -- <dir>`.
+2. **B4's *Done when*** needs the cycles band compared with the time band
    while the clock moves: with turbo off the two measure the same thing.
    Ask the owner before turning turbo back on
    (`/sys/devices/system/cpu/intel_pstate/no_turbo`), then run
    `bench-compare -- --calibrate` and `-- --calibrate --metric cycles`
    and compare the saved bands.
-2. **B7**: extend `Machine` with OS version, CPU vendor, caches, target
-   and commit; `--results-dir`; `bench-report`. This machine's Windows
-   and Linux installs count as two operating systems for its *Done when*.
-3. **B4, slice 2** (`rdpmc`) is optional now; see B4's status.
+3. **Optional:** B4 slice 2 (`rdpmc`, see B4's status); B7 slice 2's
+   macOS counters through kperf; B8 is a decision for when hardware
+   exists.
 
 Working notes:
 - `bench-compare` writes its progress to stderr, which `zig build` does
@@ -452,6 +456,31 @@ a new `bench/report.zig`, `build.zig` and `README.md`.
 
 **Done when:** one commit's results from at least two operating systems,
 or two CPU architectures, appear side by side in `bench-report`.
+
+**Status:** slices 1, 3 and 4 built; the *Done when* waits on a run on
+another OS. `Machine` now also records the OS version (`uname`,
+`RtlGetVersion`, `kern.osproductversion`), the CPU vendor (CPUID, or
+`CPU implementer`), the physical cores and the L1d, L2 and L3 sizes
+(sysfs, `GetLogicalProcessorInformation`, `sysctl`), the target triple
+and CPU model the reader was built for, and the commit. The commit and
+the clock are left out of the fingerprint, which changed with the new
+fields, so this setup was calibrated again. On Linux the CPU counts now
+come from `/sys/devices/system/cpu/present`, since a pinned process sees
+one CPU. `bench --results-dir <dir>` writes
+`<dir>/<fingerprint>/<commit>.json` (the commit from git, `-dirty` when
+tracked files changed, or `--commit`). `zig build bench-report -- <dir>
+[<commit>]` defaults to the commit measured on the most machines,
+divides each machine's times by its own box tree's in the same phase,
+and lists the five scenarios whose relative cost differs most. README's
+*Comparing machines* gives the recipe, cross-built executables included.
+Checked only on one machine, pinned against unpinned as two setups: the
+first frame of the documents view and `init` moved most (1.31× and
+1.28×).
+
+Slice 2 in part: `--counters` builds for ARM Linux (the same
+`perf_event_open` group) but is unverified there; macOS through kperf is
+not written, and README says so; Windows gets the WPR, VTune and uProf
+pointers.
 
 ### B8. A dedicated benchmark machine
 

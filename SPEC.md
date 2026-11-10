@@ -2328,7 +2328,14 @@ On one 2020-era desktop core (the reference is an i9-10900K):
   `ZUI_BENCH_LAYOUT_SEED` environment variable moves the stack by up to
   4 KiB and each `Context`'s memory within 4 KiB; the
   `-Dbench-layout-seed` build option moves every function by up to
-  4080 bytes.
+  4080 bytes. `--results-dir <dir>` writes the times with the machine
+  they came from (OS and version, CPU, cores, caches, the target built
+  for, the power settings and the commit) to
+  `<dir>/<machine fingerprint>/<commit>.json`.
+- **`zig build bench-report -- <dir> [<commit>]`** sets one commit's
+  results from each machine side by side, each divided by that machine's
+  box tree in the same phase, and names the scenarios whose relative cost
+  differs most between machines.
 - **`zig build bench-compare -- <base> [<head>]`** alternates two commits
   on one machine, pinned to one core after both are built, recording the
   machine's state before every run. It reports the median of the paired

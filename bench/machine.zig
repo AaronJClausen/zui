@@ -8,8 +8,27 @@ pub const Turbo = enum { on, off, unknown };
 /// two measurements can be compared.
 pub const Machine = struct {
     os: []const u8,
+    /// Linux: the kernel release; Windows: major.minor.build; macOS: the
+    /// product version.
+    os_version: ?[]const u8 = null,
     cpu: []const u8,
+    /// x86: the CPUID vendor (`GenuineIntel`, `AuthenticAMD`); elsewhere
+    /// what the platform names, if anything.
+    cpu_vendor: ?[]const u8 = null,
     logical_cpus: u32,
+    physical_cores: ?u32 = null,
+    /// One core's level 1 data cache, its level 2 cache, and the shared
+    /// level 3, in KiB.
+    l1d_kib: ?u32 = null,
+    l2_kib: ?u32 = null,
+    l3_kib: ?u32 = null,
+    /// What the reading executable was built for: an architecture, OS and
+    /// ABI, and the CPU model its code may assume.
+    target: []const u8 = target_triple,
+    built_for_cpu: []const u8 = builtin.cpu.model.name,
+    /// The commit whose benchmark produced a result; null for the machine
+    /// state `bench-compare` records, which covers two commits.
+    commit: ?[]const u8 = null,
     pinned_core: ?u32 = null,
     turbo: Turbo = .unknown,
     /// Windows: the active power plan's name.
@@ -28,8 +47,8 @@ pub const Machine = struct {
     address_randomization: ?u32 = null,
 
     /// The fields that may change from one run to the next without the
-    /// machine's setup changing.
-    const readings = [_][]const u8{"clock_mhz"};
+    /// machine's setup changing; the commit is what is measured, not where.
+    const readings = [_][]const u8{ "clock_mhz", "commit" };
 
     /// Names each setting that differs between `a` and `b`, ignoring the
     /// clock, which moves on its own.
@@ -75,7 +94,9 @@ pub const Machine = struct {
     }
 
     pub fn print(machine: *const Machine, out: *Io.Writer) !void {
-        try out.print("{s}, {s}, {d} logical CPUs", .{ machine.os, machine.cpu, machine.logical_cpus });
+        try out.print("{s}", .{machine.os});
+        if (machine.os_version) |version| try out.print(" {s}", .{version});
+        try out.print(", {s}, {d} logical CPUs", .{ machine.cpu, machine.logical_cpus });
         if (machine.pinned_core) |core| try out.print(", pinned to {d}", .{core}) else try out.writeAll(", not pinned");
         try out.print(", turbo {s}", .{@tagName(machine.turbo)});
         if (machine.power_plan) |plan| try out.print(", \"{s}\" plan", .{plan});
@@ -87,6 +108,8 @@ pub const Machine = struct {
         if (machine.max_clock_mhz) |mhz| try out.print(" of {d}", .{mhz});
     }
 };
+
+const target_triple = @tagName(builtin.cpu.arch) ++ "-" ++ @tagName(builtin.os.tag) ++ "-" ++ @tagName(builtin.abi);
 
 fn fieldEql(comptime T: type, a: T, b: T) bool {
     return switch (@typeInfo(T)) {
@@ -179,12 +202,20 @@ pub fn read(io: Io, arena: std.mem.Allocator, pinned_core: ?u32) !Machine {
         .logical_cpus = logicalCpuCount(),
         .pinned_core = pinned_core,
     };
+    if (builtin.cpu.arch.isX86()) machine.cpu_vendor = try x86Vendor(arena);
     switch (builtin.os.tag) {
         .windows => try readWindows(arena, &machine),
         .linux => try readLinux(io, arena, &machine),
+        .macos => try readMacos(arena, &machine),
         else => {},
     }
     return machine;
+}
+
+fn x86Vendor(arena: std.mem.Allocator) ![]const u8 {
+    const leaf = cpuid(0);
+    const words = [3]u32{ leaf.ebx, leaf.edx, leaf.ecx };
+    return arena.dupe(u8, std.mem.asBytes(&words));
 }
 
 fn cpuModel(io: Io, arena: std.mem.Allocator) ![]const u8 {
@@ -256,6 +287,16 @@ fn readNumber(io: Io, arena: std.mem.Allocator, path: []const u8) ?u32 {
 }
 
 fn readLinux(io: Io, arena: std.mem.Allocator, machine: *Machine) !void {
+    var uts: std.os.linux.utsname = undefined;
+    if (std.os.linux.errno(std.os.linux.uname(&uts)) == .SUCCESS) machine.os_version = try arena.dupe(u8, std.mem.sliceTo(&uts.release, 0));
+    if (machine.cpu_vendor == null) {
+        if (readSmallFile(io, arena, "/proc/cpuinfo")) |cpuinfo| machine.cpu_vendor = cpuinfoValue(cpuinfo, "CPU implementer") else |_| {}
+    }
+    // The affinity mask hides the other CPUs from a pinned process.
+    if (linuxPresentCpus(io, arena)) |present| machine.logical_cpus = present;
+    machine.physical_cores = try linuxPhysicalCores(io, arena, machine.logical_cpus);
+    try readLinuxCaches(io, arena, machine);
+
     const core = machine.pinned_core orelse 0;
     const cpu_directory = try std.fmt.allocPrint(arena, "/sys/devices/system/cpu/cpu{d}", .{core});
     machine.governor = readTrimmed(io, arena, try std.fs.path.join(arena, &.{ cpu_directory, "cpufreq/scaling_governor" }));
@@ -270,8 +311,86 @@ fn readLinux(io: Io, arena: std.mem.Allocator, machine: *Machine) !void {
     }
 }
 
+/// How many CPUs `/sys/devices/system/cpu/present` lists, as ranges such
+/// as `0-19` or `0-3,8-11`.
+fn linuxPresentCpus(io: Io, arena: std.mem.Allocator) ?u32 {
+    const present = readTrimmed(io, arena, "/sys/devices/system/cpu/present") orelse return null;
+    var count: u32 = 0;
+    var ranges = std.mem.tokenizeScalar(u8, present, ',');
+    while (ranges.next()) |range| {
+        const dash = std.mem.indexOfScalar(u8, range, '-');
+        const first = std.fmt.parseInt(u32, range[0 .. dash orelse range.len], 10) catch return null;
+        const last = if (dash) |at| std.fmt.parseInt(u32, range[at + 1 ..], 10) catch return null else first;
+        count += last - first + 1;
+    }
+    return count;
+}
+
+/// The distinct sets of hardware threads that share a core.
+fn linuxPhysicalCores(io: Io, arena: std.mem.Allocator, logical_cpus: u32) !?u32 {
+    var seen: std.StringHashMapUnmanaged(void) = .empty;
+    for (0..logical_cpus) |cpu| {
+        const path = try std.fmt.allocPrint(arena, "/sys/devices/system/cpu/cpu{d}/topology/thread_siblings_list", .{cpu});
+        try seen.put(arena, readTrimmed(io, arena, path) orelse return null, {});
+    }
+    return seen.count();
+}
+
+/// Core 0's caches, which on every CPU this has met are the same size as
+/// every other core's of their level.
+fn readLinuxCaches(io: Io, arena: std.mem.Allocator, machine: *Machine) !void {
+    for (0..8) |index| {
+        const directory = try std.fmt.allocPrint(arena, "/sys/devices/system/cpu/cpu0/cache/index{d}", .{index});
+        const level = readNumber(io, arena, try std.fs.path.join(arena, &.{ directory, "level" })) orelse break;
+        const kind = readTrimmed(io, arena, try std.fs.path.join(arena, &.{ directory, "type" })) orelse continue;
+        const size_text = readTrimmed(io, arena, try std.fs.path.join(arena, &.{ directory, "size" })) orelse continue;
+        const kib = std.fmt.parseInt(u32, std.mem.trimEnd(u8, size_text, "K"), 10) catch continue;
+        if (std.mem.eql(u8, kind, "Instruction")) continue;
+        switch (level) {
+            1 => machine.l1d_kib = kib,
+            2 => machine.l2_kib = kib,
+            3 => machine.l3_kib = kib,
+            else => {},
+        }
+    }
+}
+
+fn readMacos(arena: std.mem.Allocator, machine: *Machine) !void {
+    machine.os_version = try sysctlText(arena, "kern.osproductversion");
+    if (machine.cpu_vendor == null and builtin.cpu.arch == .aarch64) machine.cpu_vendor = "Apple";
+    if (!builtin.cpu.arch.isX86()) {
+        if (try sysctlText(arena, "machdep.cpu.brand_string")) |brand| machine.cpu = brand;
+    }
+    machine.physical_cores = if (sysctlNumber("hw.physicalcpu")) |cores| @intCast(cores) else null;
+    // On Apple silicon these describe the performance cores.
+    machine.l1d_kib = if (sysctlNumber("hw.l1dcachesize")) |bytes| @intCast(bytes / 1024) else null;
+    machine.l2_kib = if (sysctlNumber("hw.l2cachesize")) |bytes| @intCast(bytes / 1024) else null;
+    machine.l3_kib = if (sysctlNumber("hw.l3cachesize")) |bytes| @intCast(bytes / 1024) else null;
+}
+
+fn sysctlText(arena: std.mem.Allocator, comptime name: [:0]const u8) !?[]const u8 {
+    var buffer: [256]u8 = undefined;
+    var length: usize = buffer.len;
+    if (std.c.sysctlbyname(name, &buffer, &length, null, 0) != 0) return null;
+    return try arena.dupe(u8, std.mem.sliceTo(buffer[0..length], 0));
+}
+
+fn sysctlNumber(comptime name: [:0]const u8) ?u64 {
+    var value: u64 = 0;
+    var length: usize = @sizeOf(u64);
+    if (std.c.sysctlbyname(name, &value, &length, null, 0) != 0 or length == 0) return null;
+    return value;
+}
+
 fn readWindows(arena: std.mem.Allocator, machine: *Machine) !void {
     const windows = std.os.windows;
+    var version: windows.RTL_OSVERSIONINFOW = undefined;
+    version.dwOSVersionInfoSize = @sizeOf(windows.RTL_OSVERSIONINFOW);
+    if (windows.ntdll.RtlGetVersion(&version) == .SUCCESS) {
+        machine.os_version = try std.fmt.allocPrint(arena, "{d}.{d}.{d}", .{ version.dwMajorVersion, version.dwMinorVersion, version.dwBuildNumber });
+    }
+    try readWindowsTopology(arena, machine);
+
     var scheme: ?*windows.GUID = null;
     if (win.PowerGetActiveScheme(null, &scheme) == 0) {
         if (scheme) |active| {
@@ -299,6 +418,33 @@ fn readWindows(arena: std.mem.Allocator, machine: *Machine) !void {
         machine.clock_mhz = processor.CurrentMhz;
         machine.max_clock_mhz = processor.MaxMhz;
     }
+}
+
+fn readWindowsTopology(arena: std.mem.Allocator, machine: *Machine) !void {
+    var size: u32 = 0;
+    _ = win.GetLogicalProcessorInformation(null, &size);
+    if (size == 0) return;
+    const entries = try arena.alloc(win.SYSTEM_LOGICAL_PROCESSOR_INFORMATION, size / @sizeOf(win.SYSTEM_LOGICAL_PROCESSOR_INFORMATION));
+    if (!win.GetLogicalProcessorInformation(entries.ptr, &size).toBool()) return;
+    var cores: u32 = 0;
+    for (entries[0 .. size / @sizeOf(win.SYSTEM_LOGICAL_PROCESSOR_INFORMATION)]) |entry| {
+        switch (entry.Relationship) {
+            win.relation_processor_core => cores += 1,
+            win.relation_cache => {
+                const cache = entry.detail.Cache;
+                if (cache.Type == win.cache_instruction) continue;
+                const kib = cache.Size / 1024;
+                switch (cache.Level) {
+                    1 => machine.l1d_kib = machine.l1d_kib orelse kib,
+                    2 => machine.l2_kib = machine.l2_kib orelse kib,
+                    3 => machine.l3_kib = machine.l3_kib orelse kib,
+                    else => {},
+                }
+            },
+            else => {},
+        }
+    }
+    if (cores > 0) machine.physical_cores = cores;
 }
 
 fn onBattery() bool {
@@ -342,6 +488,29 @@ const win = struct {
         CurrentIdleState: u32,
     };
 
+    const relation_processor_core = 0;
+    const relation_cache = 2;
+    const cache_instruction = 1;
+
+    const CACHE_DESCRIPTOR = extern struct {
+        Level: u8,
+        Associativity: u8,
+        LineSize: u16,
+        Size: u32,
+        Type: u32,
+    };
+
+    const SYSTEM_LOGICAL_PROCESSOR_INFORMATION = extern struct {
+        ProcessorMask: usize,
+        Relationship: u32,
+        detail: extern union {
+            ProcessorCore: u8,
+            NumaNode: u32,
+            Cache: CACHE_DESCRIPTOR,
+            Reserved: [2]u64,
+        },
+    };
+
     const SYSTEM_POWER_STATUS = extern struct {
         ACLineStatus: u8,
         BatteryFlag: u8,
@@ -355,6 +524,7 @@ const win = struct {
     extern "kernel32" fn SetProcessAffinityMask(process: HANDLE, mask: usize) callconv(.winapi) BOOL;
     extern "kernel32" fn SetPriorityClass(process: HANDLE, priority_class: u32) callconv(.winapi) BOOL;
     extern "kernel32" fn GetSystemPowerStatus(status: *SYSTEM_POWER_STATUS) callconv(.winapi) BOOL;
+    extern "kernel32" fn GetLogicalProcessorInformation(buffer: ?[*]SYSTEM_LOGICAL_PROCESSOR_INFORMATION, length: *u32) callconv(.winapi) BOOL;
     extern "kernel32" fn LocalFree(memory: ?*anyopaque) callconv(.winapi) ?*anyopaque;
     extern "powrprof" fn PowerGetActiveScheme(root: ?*anyopaque, scheme: *?*GUID) callconv(.winapi) u32;
     extern "powrprof" fn PowerReadACValueIndex(root: ?*anyopaque, scheme: *const GUID, subgroup: *const GUID, setting: *const GUID, value: *u32) callconv(.winapi) u32;

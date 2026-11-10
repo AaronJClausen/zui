@@ -251,7 +251,8 @@ while (to_release.next()) |released| if (released) |texture| unload(texture) els
 | `zig build test -Dzui-debug=true` | keep id names, so duplicate-id and unbalanced-tree panics name the element |
 | `zig build test -Dzui-tracy=true` | fetch Tracy and test `zui_tracy` with its client linked |
 | `zig build test -Dzui-sanitize-thread=true` | run the tests under ThreadSanitizer, through LLVM, on Linux; ThreadSanitizer needs ASLR entropy of at most 28 bits (`sysctl vm.mmap_rnd_bits=28`), or a container started with `--security-opt seccomp=unconfined` |
-| `zig build bench` | run the benchmarks in ReleaseFast and print each phase's fastest, median and 95th-percentile frame; add `-- --check-targets` to fail on a missed performance target, `-- --core <n>` to pin to one core at a raised priority, `-- --machine-json <path>` to record the machine's state, `-- --scenario <name>` (see `-- --list-scenarios`) to run only some scenarios, or `-- --counters` to count each phase's cycles, instructions and cache and branch misses (Linux on bare metal); `ZUI_BENCH_LAYOUT_SEED=<n>` moves the stack and each `Context`'s memory, and `-Dbench-layout-seed=<n>` moves the code |
+| `zig build bench` | run the benchmarks in ReleaseFast and print each phase's fastest, median and 95th-percentile frame; add `-- --check-targets` to fail on a missed performance target, `-- --core <n>` to pin to one core at a raised priority, `-- --machine-json <path>` to record the machine's state, `-- --scenario <name>` (see `-- --list-scenarios`) to run only some scenarios, or `-- --counters` to count each phase's cycles, instructions and cache and branch misses (Linux on bare metal); `ZUI_BENCH_LAYOUT_SEED=<n>` moves the stack and each `Context`'s memory, and `-Dbench-layout-seed=<n>` moves the code; `-- --results-dir <dir>` keeps the times and the machine they came from for `bench-report` |
+| `zig build bench-report -- <dir> [<commit>]` | set side by side each machine's results for one commit, each normalized to its own box tree, and name the scenarios whose relative cost differs most between machines (see *Comparing machines*) |
 | `zig build counts` | count each benchmark's instructions per frame under Callgrind, on x86_64 Linux with Valgrind (on Windows, in a Linux container), with simulated cache and branch misses beside them; add `-- --json counts.json` to save them and `-- --compare counts.json` to fail on more than 2% growth in instructions (misses are informational) |
 | `zig build bench-compare -- main` | run the benchmarks of `main` and of the working tree alternately, pinned to one core, until each time's change is known closely enough; report each change with its 95% interval, calling it only beyond this machine's noise band; the rounds take turns with 3 layouts of code and memory (`-- --layouts <k>`), so a change that only moves code is not called; `-- --metric cycles` or `instructions` compares hardware counts instead of times; `-- <base> <head>` compares two commits (SPEC.md §20.3) |
 | `zig build bench-install` | install the benchmark executable into `zig-out/bin`, as `bench-compare` does to run one scenario at a time; a base from before this step is compared one whole run at a time instead, which a scenario's position in the run can bias |
@@ -337,6 +338,36 @@ setarch -R zig build bench-compare -- main --core 3 --require-quiet
 
 Then run `zig build bench-compare -- --calibrate` once, so comparisons on
 this setup are judged against its own noise.
+
+### Comparing machines
+
+Times from two machines are never compared directly, but what each
+scenario costs relative to the others can be. On each machine, keep a
+run in one shared directory:
+
+```sh
+zig build bench -- --core 3 --results-dir ~/zui-results            # also --counters on Linux
+zig build bench-install -Dtarget=aarch64-linux                      # or build for another machine,
+./zui-bench --core 3 --results-dir results --commit 45f48f4         # copy zig-out/bin/zui-bench there, run it, copy results/ back
+zig build bench-report -- ~/zui-results
+```
+
+Each result lands in `<dir>/<machine fingerprint>/<commit>.json`, with
+the OS and its version, the CPU, its cores and caches, the target the
+benchmark was built for, and the power settings. `bench-report` divides
+each machine's times by its own box tree's and lists the scenarios whose
+relative cost differs most between machines.
+
+Hardware counters come from `perf_event_open` on Linux, on x86-64 and
+ARM alike, but only on bare metal: WSL2, Docker on Windows and GitHub's
+hosted runners hide them. Windows has no public user-mode API for them:
+Windows Performance Recorder can record them into a trace, from an
+administrator prompt (`wpr -pmcsources` lists the counters a profile can
+name), and Intel VTune and AMD uProf read them too. `bench` then records
+the time and the clock speed alone.
+
+On macOS, they come from the private kperf framework and need `sudo`, as
+the macOS fork of poop reads them; `--counters` does not read them yet.
 
 ### Conformance suites
 

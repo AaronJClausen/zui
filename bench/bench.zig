@@ -6,6 +6,7 @@
 //! ZUI_BENCH_LAYOUT_SEED=7 zig build bench          # move the stack and each Context's memory
 //! zig build bench -Dbench-layout-seed=7            # move the code
 //! zig build bench -- --counters                    # also count cycles, instructions and misses (Linux)
+//! zig build bench -- --core 3 --results-dir ~/zui-results  # keep this machine's results, for bench-report
 //! ```
 //!
 //! Two commits are compared with `zig build bench-compare`, never by two
@@ -543,6 +544,9 @@ const Options = struct {
     selected: std.ArrayList(usize) = .empty,
     order_seed: ?u64 = null,
     counters: bool = false,
+    results_dir: ?[]const u8 = null,
+    /// Names the commit in `--results-dir`; otherwise git is asked.
+    commit: ?[]const u8 = null,
 };
 
 /// What `--capabilities` prints, so `bench-compare` can tell which options
@@ -590,6 +594,12 @@ fn parseOptions(arena: std.mem.Allocator, arguments: []const [:0]const u8) !Opti
                 std.debug.print("--order-seed needs a whole number, got \"{s}\"\n", .{arguments[index]});
                 return error.InvalidArgument;
             };
+        } else if (std.mem.eql(u8, argument, "--results-dir") and has_value) {
+            index += 1;
+            options.results_dir = arguments[index];
+        } else if (std.mem.eql(u8, argument, "--commit") and has_value) {
+            index += 1;
+            options.commit = arguments[index];
         } else if (std.mem.eql(u8, argument, "--counters")) {
             options.counters = true;
         } else if (std.mem.eql(u8, argument, "--compare")) {
@@ -597,7 +607,8 @@ fn parseOptions(arena: std.mem.Allocator, arguments: []const [:0]const u8) !Opti
             return error.UnknownArgument;
         } else {
             std.debug.print("unknown argument \"{s}\"; expected --json <path>, --check-targets, --core <n>, --machine-json <path>,\n" ++
-                "--scenario <name>, --order-seed <n>, --counters, --list-scenarios or --capabilities\n", .{argument});
+                "--scenario <name>, --order-seed <n>, --counters, --results-dir <dir>, --commit <name>,\n" ++
+                "--list-scenarios or --capabilities\n", .{argument});
             return error.UnknownArgument;
         }
     }
@@ -766,7 +777,9 @@ pub fn main(init: std.process.Init) !void {
     try out.flush();
 
     var compared_time_buffer: [max_compared_values]ComparedTime = undefined;
-    if (options.json_path) |path| try writeJson(io, path, comparedTimes(&runs, &compared_time_buffer));
+    const compared = comparedTimes(&runs, &compared_time_buffer);
+    if (options.json_path) |path| try writeJson(io, path, compared);
+    if (options.results_dir) |directory| try writeResults(io, arena, directory, options, compared);
     if (options.check_targets and missed_target) return error.TargetMissed;
 }
 
@@ -890,6 +903,39 @@ fn writeMachineJson(io: Io, arena: std.mem.Allocator, path: []const u8, core: ?u
     var file_writer = file.writer(io, &buffer);
     try state.writeJson(&file_writer.interface);
     try file_writer.interface.flush();
+}
+
+/// Writes the times and the machine they came from to
+/// `<directory>/<machine fingerprint>/<commit>.json`, for `bench-report`.
+fn writeResults(io: Io, arena: std.mem.Allocator, directory: []const u8, options: Options, times: []const ComparedTime) !void {
+    var state = try machine.read(io, arena, options.core);
+    state.commit = options.commit orelse try currentCommit(io, arena);
+    var results: struct { machine: machine.Machine, times: std.json.ArrayHashMap(u64) } = .{ .machine = state, .times = .{} };
+    for (times) |*time| try results.times.map.put(arena, time.key(), time.nanoseconds);
+
+    const machine_directory = try std.fs.path.join(arena, &.{ directory, try std.fmt.allocPrint(arena, "{x:0>16}", .{state.fingerprint()}) });
+    try Io.Dir.cwd().createDirPath(io, machine_directory);
+    const path = try std.fs.path.join(arena, &.{ machine_directory, try std.fmt.allocPrint(arena, "{s}.json", .{state.commit.?}) });
+    const file = try Io.Dir.cwd().createFile(io, path, .{});
+    defer file.close(io);
+    var buffer: [4096]u8 = undefined;
+    var file_writer = file.writer(io, &buffer);
+    try std.json.Stringify.value(results, .{ .whitespace = .indent_2, .emit_null_optional_fields = false }, &file_writer.interface);
+    try file_writer.interface.writeByte('\n');
+    try file_writer.interface.flush();
+    std.debug.print("wrote {s}\n", .{path});
+}
+
+/// The checked-out commit, with `-dirty` when tracked files have changed.
+fn currentCommit(io: Io, arena: std.mem.Allocator) ![]const u8 {
+    const head = std.process.run(arena, io, .{ .argv = &.{ "git", "rev-parse", "--short", "HEAD" } }) catch null;
+    if (head == null or !(head.?.term == .exited and head.?.term.exited == 0)) {
+        std.debug.print("--results-dir: git could not name the commit here; pass --commit <name>\n", .{});
+        return error.UnknownCommit;
+    }
+    const commit = std.mem.trimEnd(u8, head.?.stdout, "\r\n");
+    const status = try std.process.run(arena, io, .{ .argv = &.{ "git", "status", "--porcelain", "--untracked-files=no" } });
+    return if (status.stdout.len > 0) std.fmt.allocPrint(arena, "{s}-dirty", .{commit}) else commit;
 }
 
 fn writeJson(io: Io, path: []const u8, times: []const ComparedTime) !void {
