@@ -9,7 +9,8 @@ Written against `db4ea4d`.
 
 ## Picking up from here
 
-B1, B2, B3 and B6 are done (`3fb9f8e`, `4294abe`, `f099fd1`). The
+B1, B2, B3 and B6 are done (`3fb9f8e`, `4294abe`, `f099fd1`,
+`9d0ddac`). The
 reference machine now boots bare-metal Linux with turbo off and the
 `performance` governor. Each step's **Status** line below says what it measured and what
 is left. Resume in this order:
@@ -344,7 +345,7 @@ instructions), is reported as within noise.
 finishes within 10 minutes. It has to be timed, because the simulation
 slows Callgrind down.
 
-**Status:** done. Callgrind runs with `--cache-sim=yes --branch-sim=yes`
+**Status:** done (`f099fd1`, `9d0ddac`). Callgrind runs with `--cache-sim=yes --branch-sim=yes`
 and a fixed 32 KiB 8-way I1 and D1 and an 8 MiB 16-way LL (`-v` confirms
 Valgrind uses them, despite its warning that it found the host's L3).
 Each `"<scene>, <phase>"` instruction key gets four informational keys:
@@ -365,7 +366,12 @@ view's D1 misses from 5025 to 4950. `counts` now runs each child with an
 empty environment, as `./zui-counts` from its own directory; a run from a
 longer path with 3000 bytes of extra environment then wrote byte-identical
 JSON. This is the same effect B5 sets out to randomize for wall-clock
-time.
+time. With that fix, two CI runs of `9d0ddac` (a push and a
+`workflow_dispatch`) agreed on all 150 counts, and the counts job took
+2.5 to 5 minutes. This machine (Arch, Valgrind 3.25.1) still differs
+from CI (Ubuntu) on 15 D1 counts by a few misses, likely through
+Valgrind's version and the path of the preload library it adds to the
+environment; CI only ever compares with CI.
 
 ### B7. Measuring across operating systems and hardware
 
