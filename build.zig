@@ -245,6 +245,7 @@ pub fn build(b: *std.Build) void {
     const run_bench = b.addRunArtifact(bench_executable);
     if (b.args) |arguments| run_bench.addArgs(arguments);
     b.step("bench", "Run the benchmarks in ReleaseFast").dependOn(&run_bench.step);
+    b.step("bench-install", "Install the benchmark executable, which bench-compare runs one scenario at a time").dependOn(&b.addInstallArtifact(bench_executable, .{}).step);
 
     // A fixed CPU model and no libc, so every runner executes the same
     // instructions; Valgrind supports every extension of x86-64-v3.

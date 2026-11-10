@@ -288,7 +288,7 @@ var init_buffer: [DefaultUi.required_bytes]u8 align(DefaultUi.buffer_alignment) 
 
 /// Only the first sample touches `init_buffer` for the first time, so this
 /// is the time zui itself spends preparing memory.
-fn timeInitBuffer(io: Io) !StartupMeasurement {
+fn timeInitBuffer(io: Io, _: std.mem.Allocator) !StartupMeasurement {
     var text: GlyphTableText = .{};
     var times: [startup_samples]u64 = undefined;
     for (&times) |*time| {
@@ -333,49 +333,195 @@ fn FirstFrame(comptime name: []const u8, comptime limits: zui.Limits, comptime S
     };
 }
 
+const RenderThreadRates = struct {
+    one_thread: f64,
+    render_thread: f64,
+};
+
+const Run = union(enum) {
+    frames: Measurement,
+    startup: StartupMeasurement,
+    render_thread: RenderThreadRates,
+};
+
+const Kind = enum {
+    /// Single-threaded frames, whose times don't depend on what the
+    /// machine's other cores are doing: the ones `bench-compare` compares.
+    compared_frames,
+    reported_frames,
+    /// Runs after every other scenario, because its page faults are part
+    /// of what it times, and they depend on memory no scenario touched yet.
+    startup,
+    render_thread,
+
+    /// The second column of `--list-scenarios`, which `bench-compare` reads.
+    fn listedAs(kind: Kind) []const u8 {
+        return switch (kind) {
+            .compared_frames => "compared",
+            .reported_frames, .render_thread => "reported",
+            .startup => "startup",
+        };
+    }
+};
+
+const Entry = struct {
+    name: []const u8,
+    kind: Kind,
+    run: *const fn (Io, std.mem.Allocator) anyerror!Run,
+};
+
+fn frames(comptime kind: Kind, comptime limits: zui.Limits, comptime Text: type, comptime Scene: type) Entry {
+    const warmup_frames, const timed_frames = if (kind == .compared_frames) .{ 20, 400 } else .{ 2, 20 };
+    return .{ .name = Scene.name, .kind = kind, .run = struct {
+        fn run(io: Io, gpa: std.mem.Allocator) anyerror!Run {
+            return .{ .frames = try Scenario(limits, Text, Scene).run(io, gpa, warmup_frames, timed_frames) };
+        }
+    }.run };
+}
+
+fn startup(comptime name: []const u8, comptime timeStartup: anytype) Entry {
+    return .{ .name = name, .kind = .startup, .run = struct {
+        fn run(io: Io, gpa: std.mem.Allocator) anyerror!Run {
+            return .{ .startup = try timeStartup(io, gpa) };
+        }
+    }.run };
+}
+
+fn timeRenderThread(io: Io, gpa: std.mem.Allocator) anyerror!Run {
+    return .{ .render_thread = .{
+        .one_thread = try framesPerSecond(io, gpa, false),
+        .render_thread = try framesPerSecond(io, gpa, true),
+    } };
+}
+
+const shaped_one_thread = "shaped text, one thread";
+const shaped_parallel = "shaped text, parallel";
+
+/// Every scenario, in the order the tables print them.
+const entries = [_]Entry{
+    frames(.compared_frames, BoxTree.limits, GlyphTableText, BoxTree),
+    frames(.compared_frames, StaticBoxTree.limits, GlyphTableText, StaticBoxTree),
+    frames(.compared_frames, text_limits, GlyphTableText, TextWall),
+    frames(.compared_frames, text_limits, GlyphTableText, TextWallCold),
+    frames(.compared_frames, SingleLineTexts.limits, GlyphTableText, SingleLineTexts),
+    frames(.compared_frames, ChangingTexts.limits, GlyphTableText, ChangingTexts),
+    frames(.compared_frames, DeepTree.limits, GlyphTableText, DeepTree),
+    frames(.compared_frames, WideTree.limits, GlyphTableText, WideTree),
+    frames(.compared_frames, DocumentsView.limits, GlyphTableText, DocumentsView),
+    frames(.compared_frames, GridWithTooltip(.first).limits, GlyphTableText, GridWithTooltip(.first)),
+    frames(.compared_frames, GridWithTooltip(.last).limits, GlyphTableText, GridWithTooltip(.last)),
+    frames(.compared_frames, InteractiveBoxTree.limits, GlyphTableText, InteractiveBoxTree),
+    frames(.compared_frames, PressedInteractiveBoxTree.limits, GlyphTableText, PressedInteractiveBoxTree),
+    frames(.reported_frames, shaping_limits, ShapingText(false), ShapedTextWall(false)),
+    frames(.reported_frames, shaping_limits, ShapingText(true), ShapedTextWall(true)),
+    .{ .name = "render thread", .kind = .render_thread, .run = timeRenderThread },
+    startup("init, default config", timeInit),
+    startup("initBuffer, default config", timeInitBuffer),
+    startup("first frame, documents view", FirstFrame("documents view", DocumentsView.limits, DocumentsView).run),
+    startup("first frame, 1000 texts", FirstFrame("1000 texts", text_limits, TextWall).run),
+};
+
+comptime {
+    for (entries, 0..) |entry, index| {
+        for (entries[0..index]) |earlier| {
+            if (std.mem.eql(u8, entry.name, earlier.name)) @compileError("two scenarios are named \"" ++ entry.name ++ "\"");
+        }
+    }
+}
+
+fn entryIndex(name: []const u8) ?usize {
+    for (entries, 0..) |entry, index| {
+        if (std.mem.eql(u8, entry.name, name)) return index;
+    }
+    return null;
+}
+
 const Options = struct {
     json_path: ?[]const u8 = null,
     check_targets: bool = false,
     core: ?u32 = null,
     machine_json_path: ?[]const u8 = null,
     print_capabilities: bool = false,
+    list_scenarios: bool = false,
+    /// Indices into `entries`; empty runs every scenario.
+    selected: std.ArrayList(usize) = .empty,
+    order_seed: ?u64 = null,
 };
 
 /// What `--capabilities` prints, so `bench-compare` can tell which options
 /// a commit's benchmark understands. A benchmark from before this option
-/// fails on it with `UnknownArgument`.
-const capabilities = "core machine-json";
+/// fails on it with `UnknownArgument`. `bench-install` names the build
+/// step that installs this executable, so it can be run without the build
+/// runner.
+const capabilities = "core machine-json scenarios bench-install";
 
-fn parseOptions(arguments: []const [:0]const u8) !Options {
+fn parseOptions(arena: std.mem.Allocator, arguments: []const [:0]const u8) !Options {
     var options: Options = .{};
     var index: usize = 1;
     while (index < arguments.len) : (index += 1) {
         const argument = arguments[index];
-        if (std.mem.eql(u8, argument, "--json") and index + 1 < arguments.len) {
+        const has_value = index + 1 < arguments.len;
+        if (std.mem.eql(u8, argument, "--json") and has_value) {
             index += 1;
             options.json_path = arguments[index];
         } else if (std.mem.eql(u8, argument, "--check-targets")) {
             options.check_targets = true;
-        } else if (std.mem.eql(u8, argument, "--core") and index + 1 < arguments.len) {
+        } else if (std.mem.eql(u8, argument, "--core") and has_value) {
             index += 1;
             options.core = std.fmt.parseInt(u32, arguments[index], 10) catch {
                 std.debug.print("--core needs a core number, got \"{s}\"\n", .{arguments[index]});
                 return error.InvalidArgument;
             };
-        } else if (std.mem.eql(u8, argument, "--machine-json") and index + 1 < arguments.len) {
+        } else if (std.mem.eql(u8, argument, "--machine-json") and has_value) {
             index += 1;
             options.machine_json_path = arguments[index];
         } else if (std.mem.eql(u8, argument, "--capabilities")) {
             options.print_capabilities = true;
+        } else if (std.mem.eql(u8, argument, "--list-scenarios")) {
+            options.list_scenarios = true;
+        } else if (std.mem.eql(u8, argument, "--scenario") and has_value) {
+            index += 1;
+            const entry_index = entryIndex(arguments[index]) orelse {
+                std.debug.print("unknown scenario \"{s}\"; `--list-scenarios` lists them\n", .{arguments[index]});
+                return error.UnknownScenario;
+            };
+            if (std.mem.indexOfScalar(usize, options.selected.items, entry_index) == null) try options.selected.append(arena, entry_index);
+        } else if (std.mem.eql(u8, argument, "--order-seed") and has_value) {
+            index += 1;
+            options.order_seed = std.fmt.parseInt(u64, arguments[index], 10) catch {
+                std.debug.print("--order-seed needs a whole number, got \"{s}\"\n", .{arguments[index]});
+                return error.InvalidArgument;
+            };
         } else if (std.mem.eql(u8, argument, "--compare")) {
             std.debug.print("--compare was removed: compare two commits with `zig build bench-compare -- <base> [<head>]`\n", .{});
             return error.UnknownArgument;
         } else {
-            std.debug.print("unknown argument \"{s}\"; expected --json <path>, --check-targets, --core <n>, --machine-json <path> or --capabilities\n", .{argument});
+            std.debug.print("unknown argument \"{s}\"; expected --json <path>, --check-targets, --core <n>, --machine-json <path>,\n" ++
+                "--scenario <name>, --order-seed <n>, --list-scenarios or --capabilities\n", .{argument});
             return error.UnknownArgument;
         }
     }
+    if (options.selected.items.len == 0) {
+        for (0..entries.len) |entry_index| try options.selected.append(arena, entry_index);
+    }
     return options;
+}
+
+/// The selected scenarios in the order they run: shuffled by the seed, if
+/// one is given, with startup scenarios last.
+fn runOrder(arena: std.mem.Allocator, selected: []const usize, order_seed: ?u64) ![]const usize {
+    var order: std.ArrayList(usize) = .empty;
+    for (selected) |entry_index| {
+        if (entries[entry_index].kind != .startup) try order.append(arena, entry_index);
+    }
+    if (order_seed) |seed| {
+        var random: std.Random.DefaultPrng = .init(seed);
+        random.random().shuffle(usize, order.items);
+    }
+    for (selected) |entry_index| {
+        if (entries[entry_index].kind == .startup) try order.append(arena, entry_index);
+    }
+    return order.items;
 }
 
 fn budgetText(buffer: []u8, fastest_ns: u64, budget_ns: ?u64, missed_any: *bool) []const u8 {
@@ -388,10 +534,6 @@ fn budgetText(buffer: []u8, fastest_ns: u64, budget_ns: ?u64, missed_any: *bool)
 fn microseconds(nanoseconds: u64) f64 {
     return @as(f64, @floatFromInt(nanoseconds)) / std.time.ns_per_us;
 }
-
-/// The scenarios `bench-compare` compares: the single-threaded ones,
-/// whose times don't depend on what the machine's other cores are doing.
-const compared_count = 13;
 
 /// One fastest time `bench-compare` compares. The layout time keeps the
 /// scenario's bare name, so it still matches results from before the
@@ -412,16 +554,22 @@ const ComparedTime = struct {
     }
 };
 
-fn comparedTimes(measurements: []const Measurement, startup_measurements: []const StartupMeasurement, times: []ComparedTime) []const ComparedTime {
+fn comparedTimes(runs: []const ?Run, times: *[2 * entries.len]ComparedTime) []const ComparedTime {
     var count: usize = 0;
-    for (measurements) |measurement| {
-        times[count] = .init("{s}", measurement.name, measurement.layout.min_ns);
-        times[count + 1] = .init("{s}, declare", measurement.name, measurement.declare.min_ns);
-        count += 2;
-    }
-    for (startup_measurements) |measurement| {
-        times[count] = .init("{s}", measurement.name, measurement.spread.min_ns);
-        count += 1;
+    for (runs, entries) |maybe_run, entry| {
+        const run = maybe_run orelse continue;
+        switch (run) {
+            .frames => |measurement| if (entry.kind == .compared_frames) {
+                times[count] = .init("{s}", measurement.name, measurement.layout.min_ns);
+                times[count + 1] = .init("{s}, declare", measurement.name, measurement.declare.min_ns);
+                count += 2;
+            },
+            .startup => |measurement| {
+                times[count] = .init("{s}", measurement.name, measurement.spread.min_ns);
+                count += 1;
+            },
+            .render_thread => {},
+        }
     }
     return times[0..count];
 }
@@ -430,66 +578,50 @@ pub fn main(init: std.process.Init) !void {
     const io = init.io;
     const gpa = init.gpa;
     const arena = init.arena.allocator();
-    const options = try parseOptions(try init.minimal.args.toSlice(arena));
+    const options = try parseOptions(arena, try init.minimal.args.toSlice(arena));
+    var stdout_buffer: [4096]u8 = undefined;
+    var stdout_writer = Io.File.stdout().writer(io, &stdout_buffer);
+    const out = &stdout_writer.interface;
     if (options.print_capabilities) {
-        var capabilities_writer = Io.File.stdout().writer(io, &.{});
-        return capabilities_writer.interface.writeAll(capabilities ++ "\n");
+        try out.writeAll(capabilities ++ "\n");
+        return out.flush();
+    }
+    if (options.list_scenarios) {
+        for (entries) |entry| try out.print("{s}\t{s}\n", .{ entry.name, entry.kind.listedAs() });
+        return out.flush();
     }
     if (options.core) |core| try pinAndRaisePriority(core);
     if (options.machine_json_path) |path| try writeMachineJson(io, arena, path, options.core);
 
-    const measurements = [_]Measurement{
-        try Scenario(BoxTree.limits, GlyphTableText, BoxTree).run(io, gpa, 20, 400),
-        try Scenario(StaticBoxTree.limits, GlyphTableText, StaticBoxTree).run(io, gpa, 20, 400),
-        try Scenario(text_limits, GlyphTableText, TextWall).run(io, gpa, 20, 400),
-        try Scenario(text_limits, GlyphTableText, TextWallCold).run(io, gpa, 20, 400),
-        try Scenario(SingleLineTexts.limits, GlyphTableText, SingleLineTexts).run(io, gpa, 20, 400),
-        try Scenario(ChangingTexts.limits, GlyphTableText, ChangingTexts).run(io, gpa, 20, 400),
-        try Scenario(DeepTree.limits, GlyphTableText, DeepTree).run(io, gpa, 20, 400),
-        try Scenario(WideTree.limits, GlyphTableText, WideTree).run(io, gpa, 20, 400),
-        try Scenario(DocumentsView.limits, GlyphTableText, DocumentsView).run(io, gpa, 20, 400),
-        try Scenario(GridWithTooltip(.first).limits, GlyphTableText, GridWithTooltip(.first)).run(io, gpa, 20, 400),
-        try Scenario(GridWithTooltip(.last).limits, GlyphTableText, GridWithTooltip(.last)).run(io, gpa, 20, 400),
-        try Scenario(InteractiveBoxTree.limits, GlyphTableText, InteractiveBoxTree).run(io, gpa, 20, 400),
-        try Scenario(PressedInteractiveBoxTree.limits, GlyphTableText, PressedInteractiveBoxTree).run(io, gpa, 20, 400),
-        try Scenario(shaping_limits, ShapingText(false), ShapedTextWall(false)).run(io, gpa, 2, 20),
-        try Scenario(shaping_limits, ShapingText(true), ShapedTextWall(true)).run(io, gpa, 2, 20),
-    };
-    const startup_measurements = [_]StartupMeasurement{
-        try timeInit(io, gpa),
-        try timeInitBuffer(io),
-        try FirstFrame("documents view", DocumentsView.limits, DocumentsView).run(io, gpa),
-        try FirstFrame("1000 texts", text_limits, TextWall).run(io, gpa),
-    };
-    const one_thread_rate = try framesPerSecond(io, gpa, false);
-    const render_thread_rate = try framesPerSecond(io, gpa, true);
-
-    var stdout_buffer: [4096]u8 = undefined;
-    var stdout_writer = Io.File.stdout().writer(io, &stdout_buffer);
-    const out = &stdout_writer.interface;
-    const missed_target = try printMeasurements(out, &measurements);
-    if (measurements.len > compared_count) {
-        const shaped_one_thread: f64 = @floatFromInt(measurements[compared_count].layout.median_ns);
-        const shaped_parallel: f64 = @floatFromInt(measurements[compared_count + 1].layout.median_ns);
-        try out.print("\nparallel measurement: {d:.2}x as fast as one thread\n", .{shaped_one_thread / shaped_parallel});
+    var runs: [entries.len]?Run = @splat(null);
+    for (try runOrder(arena, options.selected.items, options.order_seed)) |entry_index| {
+        runs[entry_index] = try entries[entry_index].run(io, gpa);
     }
-    try out.print("render thread: {d:.0} frames/s against {d:.0} on one thread ({d:.2}x)\n", .{ render_thread_rate, one_thread_rate, render_thread_rate / one_thread_rate });
-    try out.writeAll("allocations after init: 0 in every scenario\n");
-    try printStartupMeasurements(out, &startup_measurements);
-    try printClusterWarnings(out, &measurements, &startup_measurements);
+
+    const missed_target = try printFrames(out, &runs);
+    try printRates(out, &runs);
+    try printStartup(out, &runs);
+    try printClusterWarnings(out, &runs);
     try out.flush();
 
-    var compared_time_buffer: [2 * compared_count + startup_measurements.len]ComparedTime = undefined;
-    const compared_times = comparedTimes(measurements[0..compared_count], &startup_measurements, &compared_time_buffer);
-    if (options.json_path) |path| try writeJson(io, path, compared_times);
+    var compared_time_buffer: [2 * entries.len]ComparedTime = undefined;
+    if (options.json_path) |path| try writeJson(io, path, comparedTimes(&runs, &compared_time_buffer));
     if (options.check_targets and missed_target) return error.TargetMissed;
 }
 
 /// Prints the scenario table and returns whether any budget was missed.
-fn printMeasurements(out: *Io.Writer, measurements: []const Measurement) !bool {
-    try out.print("{s:<28} {s:>8} {s:>11} {s:>11} {s:>11} {s:>11} {s:>11} {s:>11} {s:>11} {s:>8} {s:>14} {s:>14} {s:>9}\n", .{ "scenario", "elements", "declare min", "declare med", "declare p95", "layout min", "layout med", "layout p95", "frame med", "ns/elem", "declare budget", "layout budget", "measures" });
+fn printFrames(out: *Io.Writer, runs: []const ?Run) !bool {
     var missed_target = false;
-    for (measurements) |measurement| {
+    var printed_header = false;
+    for (runs) |maybe_run| {
+        const measurement = if (maybe_run) |run| switch (run) {
+            .frames => |frames_run| frames_run,
+            else => continue,
+        } else continue;
+        if (!printed_header) {
+            try out.print("{s:<28} {s:>8} {s:>11} {s:>11} {s:>11} {s:>11} {s:>11} {s:>11} {s:>11} {s:>8} {s:>14} {s:>14} {s:>9}\n", .{ "scenario", "elements", "declare min", "declare med", "declare p95", "layout min", "layout med", "layout p95", "frame med", "ns/elem", "declare budget", "layout budget", "measures" });
+            printed_header = true;
+        }
         const per_element = @as(f64, @floatFromInt(measurement.layout.min_ns)) / @as(f64, @floatFromInt(measurement.elements));
         var declare_budget_buffer: [32]u8 = undefined;
         var layout_budget_buffer: [32]u8 = undefined;
@@ -511,12 +643,38 @@ fn printMeasurements(out: *Io.Writer, measurements: []const Measurement) !bool {
             measurement.measure_calls_per_frame,
         });
     }
+    if (printed_header) try out.writeAll("allocations after init: 0 in every scenario\n");
     return missed_target;
 }
 
-fn printStartupMeasurements(out: *Io.Writer, startup_measurements: []const StartupMeasurement) !void {
-    try out.print("\n{s:<28} {s:>11} {s:>11} {s:>11}\n", .{ "startup", "min", "median", "p95" });
-    for (startup_measurements) |measurement| {
+fn printRates(out: *Io.Writer, runs: []const ?Run) !void {
+    const one_thread = runs[entryIndex(shaped_one_thread).?];
+    const parallel = runs[entryIndex(shaped_parallel).?];
+    if (one_thread != null and parallel != null) {
+        const one_thread_ns: f64 = @floatFromInt(one_thread.?.frames.layout.median_ns);
+        const parallel_ns: f64 = @floatFromInt(parallel.?.frames.layout.median_ns);
+        try out.print("\nparallel measurement: {d:.2}x as fast as one thread\n", .{one_thread_ns / parallel_ns});
+    }
+    for (runs) |maybe_run| {
+        const rates = if (maybe_run) |run| switch (run) {
+            .render_thread => |render_thread_rates| render_thread_rates,
+            else => continue,
+        } else continue;
+        try out.print("render thread: {d:.0} frames/s against {d:.0} on one thread ({d:.2}x)\n", .{ rates.render_thread, rates.one_thread, rates.render_thread / rates.one_thread });
+    }
+}
+
+fn printStartup(out: *Io.Writer, runs: []const ?Run) !void {
+    var printed_header = false;
+    for (runs) |maybe_run| {
+        const measurement = if (maybe_run) |run| switch (run) {
+            .startup => |startup_run| startup_run,
+            else => continue,
+        } else continue;
+        if (!printed_header) {
+            try out.print("\n{s:<28} {s:>11} {s:>11} {s:>11}\n", .{ "startup", "min", "median", "p95" });
+            printed_header = true;
+        }
         try out.print("{s:<28} {d:>9.1}us {d:>9.1}us {d:>9.1}us\n", .{
             measurement.name,
             microseconds(measurement.spread.min_ns),
@@ -524,24 +682,28 @@ fn printStartupMeasurements(out: *Io.Writer, startup_measurements: []const Start
             microseconds(measurement.spread.p95_ns),
         });
     }
-    try out.print("init allocates {d:.2} MiB at the default config\n", .{@as(f64, @floatFromInt(DefaultUi.required_bytes)) / (1024 * 1024)});
+    if (printed_header) try out.print("init allocates {d:.2} MiB at the default config\n", .{@as(f64, @floatFromInt(DefaultUi.required_bytes)) / (1024 * 1024)});
 }
 
 /// A scenario whose frames fell into two clusters measured two things, and
 /// its fastest frame says only which one was faster.
-fn printClusterWarnings(out: *Io.Writer, measurements: []const Measurement, startup_measurements: []const StartupMeasurement) !void {
-    for (measurements) |measurement| {
-        try printClusterWarning(out, measurement.name, "declare", measurement.declare);
-        try printClusterWarning(out, measurement.name, "layout", measurement.layout);
+fn printClusterWarnings(out: *Io.Writer, runs: []const ?Run) !void {
+    for (runs) |maybe_run| {
+        switch (maybe_run orelse continue) {
+            .frames => |measurement| {
+                try printClusterWarning(out, measurement.name, ", declare", measurement.declare);
+                try printClusterWarning(out, measurement.name, ", layout", measurement.layout);
+            },
+            .startup => |measurement| try printClusterWarning(out, measurement.name, "", measurement.spread),
+            .render_thread => {},
+        }
     }
-    for (startup_measurements) |measurement| try printClusterWarning(out, measurement.name, "", measurement.spread);
 }
 
 fn printClusterWarning(out: *Io.Writer, name: []const u8, phase: []const u8, spread: Spread) !void {
     const clusters = spread.clusters orelse return;
-    try out.print("warning: {s}{s}{s} times fell in two clusters, around {d:.1}us and {d:.1}us ({d:.0}% in the slower)\n", .{
+    try out.print("warning: {s}{s} times fell in two clusters, around {d:.1}us and {d:.1}us ({d:.0}% in the slower)\n", .{
         name,
-        if (phase.len == 0) "" else ", ",
         phase,
         microseconds(clusters.lower_median),
         microseconds(clusters.upper_median),

@@ -2318,6 +2318,10 @@ On one 2020-era desktop core (the reference is an i9-10900K):
   warning when a phase's frames fall into two clusters. `--core <n>` pins
   it to one core at a raised priority; `--machine-json <path>` records
   the machine's state; `--capabilities` lists the options it supports.
+  `--list-scenarios` lists the scenarios, `--scenario <name>` (repeated)
+  runs only those, and `--order-seed <n>` shuffles their order; startup
+  scenarios always run last, since their page faults are part of what
+  they time.
 - **`zig build bench-compare -- <base> [<head>]`** alternates two commits
   on one machine, pinned to one core after both are built, recording the
   machine's state before every run. It reports the median of the paired
@@ -2329,7 +2333,10 @@ On one 2020-era desktop core (the reference is an i9-10900K):
   every interval is narrower than its target (`--target-width`, 1%, or
   the band if wider) or the time budget (`--time-budget`, 420 s) is
   spent; `--rounds` fixes their number. `--require-quiet` refuses to run
-  while turbo is on.
+  while turbo is on. When both sides can, each round runs one scenario at
+  a time, from each side's installed benchmark, in a new random order,
+  alternating which side goes first from one scenario to the next;
+  otherwise each round runs every scenario at once.
 - **`zig build counts`**, instruction counts under Callgrind for the
   single-threaded scenarios, from an executable always built for one CPU
   model without libc, over a fixed number of frames, so they are the same

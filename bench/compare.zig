@@ -7,6 +7,7 @@
 //! ```
 
 const std = @import("std");
+const builtin = @import("builtin");
 const Io = std.Io;
 const machine = @import("machine.zig");
 const Machine = machine.Machine;
@@ -134,6 +135,25 @@ fn parseOptions(arguments: []const [:0]const u8) !Options {
     };
 }
 
+const Scenario = struct {
+    name: []const u8,
+    startup: bool,
+};
+
+/// The scenarios both sides know, in head's order.
+fn sharedScenarios(arena: std.mem.Allocator, base: []const Scenario, head: []const Scenario) ![]const Scenario {
+    var shared: std.ArrayList(Scenario) = .empty;
+    for (head) |scenario| {
+        for (base) |base_scenario| {
+            if (std.mem.eql(u8, scenario.name, base_scenario.name)) {
+                try shared.append(arena, scenario);
+                break;
+            }
+        }
+    }
+    return shared.items;
+}
+
 /// One build of the benchmarks: a commit checked out in its own worktree,
 /// or the working tree itself.
 const Side = struct {
@@ -150,6 +170,9 @@ const Side = struct {
     runs: std.ArrayList(std.json.ArrayHashMap(u64)) = .empty,
     /// The machine's state just before each run.
     machines: std.ArrayList(Machine) = .empty,
+    /// The installed benchmark, run without the build runner, when both
+    /// sides can run one scenario at a time.
+    executable: ?[]const u8 = null,
 
     fn supports(side: *const Side, capability: []const u8) bool {
         var words = std.mem.tokenizeAny(u8, side.capabilities, " \r\n");
@@ -232,20 +255,97 @@ const Tool = struct {
         if (result.term == .exited and result.term.exited == 0) side.capabilities = result.stdout;
     }
 
-    /// Runs that side's own `zig build bench`, so each commit is measured by
-    /// the scenarios it shipped with.
-    fn runBenchmarks(tool: *const Tool, side: *Side) !void {
+    /// Installs the side's benchmark, built unpinned like every build, so
+    /// each scenario can run in its own process without the build runner.
+    fn install(tool: *const Tool, side: *Side, role: []const u8) !void {
+        const prefix = try std.fs.path.join(tool.arena, &.{ tool.scratch_directory, try std.fmt.allocPrint(tool.arena, "{s}-bin", .{role}) });
+        _ = try tool.runCommand(&.{ tool.options.zig_exe, "build", "bench-install", "--prefix", prefix }, side.directory);
+        side.executable = try std.fs.path.join(tool.arena, &.{ prefix, "bin", if (builtin.os.tag == .windows) "zui-bench.exe" else "zui-bench" });
+    }
+
+    /// The compared and startup scenarios, with startup scenarios marked,
+    /// as `bench --list-scenarios` prints them.
+    fn listScenarios(tool: *const Tool, side: *const Side) ![]const Scenario {
+        const output = try tool.runCommand(&.{ side.executable.?, "--list-scenarios" }, side.directory);
+        var scenarios: std.ArrayList(Scenario) = .empty;
+        var lines = std.mem.tokenizeAny(u8, output, "\r\n");
+        while (lines.next()) |line| {
+            const tab = std.mem.indexOfScalar(u8, line, '\t') orelse continue;
+            const kind = line[tab + 1 ..];
+            const is_startup = std.mem.eql(u8, kind, "startup");
+            if (!is_startup and !std.mem.eql(u8, kind, "compared")) continue;
+            try scenarios.append(tool.arena, .{ .name = line[0..tab], .startup = is_startup });
+        }
+        return scenarios.items;
+    }
+
+    /// The command that runs the side's benchmark: its installed executable,
+    /// or its own `zig build bench`, so each commit is measured by the
+    /// scenarios it shipped with.
+    fn benchmarkArgv(tool: *const Tool, side: *const Side, arguments: []const []const u8) ![]const []const u8 {
         var argv: std.ArrayList([]const u8) = .empty;
-        try argv.appendSlice(tool.arena, &.{ tool.options.zig_exe, "build", "bench", "--", "--json", side.results_path });
+        if (side.executable) |executable| {
+            try argv.append(tool.arena, executable);
+        } else {
+            try argv.appendSlice(tool.arena, &.{ tool.options.zig_exe, "build", "bench", "--" });
+        }
+        try argv.appendSlice(tool.arena, &.{ "--json", side.results_path });
         // The pin is inherited already; this adds the raised priority, which
         // on Windows is not.
         if (tool.pinned_core) |core| {
             if (side.supports("core")) try argv.appendSlice(tool.arena, &.{ "--core", try std.fmt.allocPrint(tool.arena, "{d}", .{core}) });
         }
+        try argv.appendSlice(tool.arena, arguments);
+        return argv.items;
+    }
+
+    fn measure(tool: *const Tool, side: *Side, arguments: []const []const u8) !std.json.ArrayHashMap(u64) {
         try side.machines.append(tool.arena, try machine.read(tool.io, tool.arena, tool.pinned_core));
-        _ = try tool.runCommand(argv.items, side.directory);
+        _ = try tool.runCommand(try tool.benchmarkArgv(side, arguments), side.directory);
         const contents = try Io.Dir.cwd().readFileAlloc(tool.io, side.results_path, tool.arena, .limited(64 * 1024));
-        try side.runs.append(tool.arena, try std.json.parseFromSliceLeaky(std.json.ArrayHashMap(u64), tool.arena, contents, .{}));
+        return std.json.parseFromSliceLeaky(std.json.ArrayHashMap(u64), tool.arena, contents, .{});
+    }
+
+    /// One round of every scenario at once, for sides that cannot run one
+    /// scenario at a time.
+    fn runBenchmarks(tool: *const Tool, side: *Side) !void {
+        try side.runs.append(tool.arena, try tool.measure(side, &.{}));
+    }
+
+    /// One round of one scenario at a time, in an order shuffled by the
+    /// round, alternating which side goes first from one scenario to the
+    /// next. Startup scenarios stay last, as they do in `bench`.
+    fn runScenarioRound(tool: *const Tool, base: *Side, head: *Side, scenarios: []const Scenario, round: usize) !void {
+        const order = try tool.arena.dupe(Scenario, scenarios);
+        var frames_count: usize = 0;
+        for (scenarios) |scenario| {
+            if (!scenario.startup) {
+                order[frames_count] = scenario;
+                frames_count += 1;
+            }
+        }
+        var startup_count: usize = frames_count;
+        for (scenarios) |scenario| {
+            if (scenario.startup) {
+                order[startup_count] = scenario;
+                startup_count += 1;
+            }
+        }
+        var random: std.Random.DefaultPrng = .init(round);
+        random.random().shuffle(Scenario, order[0..frames_count]);
+
+        var base_times: std.json.ArrayHashMap(u64) = .{};
+        var head_times: std.json.ArrayHashMap(u64) = .{};
+        for (order, 0..) |scenario, position| {
+            const base_first = (round + position) % 2 == 0;
+            for ([_]bool{ base_first, !base_first }) |is_base| {
+                const side, const times = if (is_base) .{ base, &base_times } else .{ head, &head_times };
+                const measured = try tool.measure(side, &.{ "--scenario", scenario.name });
+                for (measured.map.keys(), measured.map.values()) |key, nanoseconds| try times.map.put(tool.arena, key, nanoseconds);
+            }
+        }
+        try base.runs.append(tool.arena, base_times);
+        try head.runs.append(tool.arena, head_times);
     }
 
     fn pin(tool: *Tool) !void {
@@ -329,6 +429,17 @@ pub fn main(init: std.process.Init) !void {
     std.debug.print("building {s} and {s}\n", .{ base.label, head.label });
     try tool.probeCapabilities(&base);
     try tool.probeCapabilities(&head);
+    var scenarios: []const Scenario = &.{};
+    const one_scenario_at_a_time = for ([_]*const Side{ &base, &head }) |side| {
+        if (!side.supports("scenarios") or !side.supports("bench-install")) break false;
+    } else true;
+    if (one_scenario_at_a_time) {
+        try tool.install(&base, "base");
+        try tool.install(&head, "head");
+        scenarios = try sharedScenarios(arena, try tool.listScenarios(&base), try tool.listScenarios(&head));
+    } else {
+        std.debug.print("{s} cannot run one scenario at a time, so each round runs every scenario at once, in one order\n", .{if (!base.supports("scenarios")) base.label else head.label});
+    }
     try tool.runBenchmarks(&base);
     try tool.runBenchmarks(&head);
     base.runs.clearRetainingCapacity();
@@ -370,18 +481,22 @@ pub fn main(init: std.process.Init) !void {
             std.debug.print("round {d}, until every interval is narrow enough or {d} s pass\n", .{ round + 1, options.time_budget_seconds });
         }
         const round_started = Io.Timestamp.now(io, .awake);
-        // Alternating which side goes first cancels a drift in the machine's
-        // speed over the comparison, such as a CPU warming up.
-        const first, const second = if (round % 2 == 0) .{ &base, &head } else .{ &head, &base };
-        try tool.runBenchmarks(first);
-        try tool.runBenchmarks(second);
+        if (one_scenario_at_a_time) {
+            try tool.runScenarioRound(&base, &head, scenarios, round);
+        } else {
+            // Alternating which side goes first cancels a drift in the
+            // machine's speed over the comparison, such as a CPU warming up.
+            const first, const second = if (round % 2 == 0) .{ &base, &head } else .{ &head, &base };
+            try tool.runBenchmarks(first);
+            try tool.runBenchmarks(second);
+        }
         round_ns = @intCast(round_started.durationTo(Io.Timestamp.now(io, .awake)).nanoseconds);
     }
 
     var stdout_buffer: [4096]u8 = undefined;
     var stdout_writer = Io.File.stdout().writer(io, &stdout_buffer);
     const out = &stdout_writer.interface;
-    const changes = try report(arena, out, &base, &head, &verdicts);
+    const changes = try report(arena, out, &base, &head, &verdicts, one_scenario_at_a_time);
     if (!options.calibrate and bands == null) {
         try out.print("\nThis machine setup has no noise bands, so each was taken as {d:.0}%. `zig build bench-compare -- --calibrate` measures them.\n", .{default_noise_band * 100});
     }
@@ -445,15 +560,21 @@ fn medianTime(arena: std.mem.Allocator, side: *const Side, key: []const u8) !f64
     return statistics.median(times);
 }
 
-fn report(arena: std.mem.Allocator, out: *Io.Writer, base: *const Side, head: *const Side, verdicts: *const Verdicts) ![]const Change {
+fn report(arena: std.mem.Allocator, out: *Io.Writer, base: *const Side, head: *const Side, verdicts: *const Verdicts, one_scenario_at_a_time: bool) ![]const Change {
     const rounds = base.runs.items.len;
     try printSide(out, "base", base);
     try printSide(out, "head", head);
     try warnOfChangedSetup(out, base, head);
-    try out.print("{d} rounds, alternating which goes first. Each time is a run's fastest frame;\n" ++
+    if (one_scenario_at_a_time) {
+        try out.print("{d} rounds, each running one scenario at a time in a new random order,\n" ++
+            "alternating which side goes first. ", .{rounds});
+    } else {
+        try out.print("{d} rounds of every scenario at once, alternating which side goes first. ", .{rounds});
+    }
+    try out.writeAll("Each time is a run's fastest frame;\n" ++
         "the change is the median of the rounds' head/base ratios, with its bootstrap 95%\n" ++
         "interval. A change is called only when its whole interval lies beyond the noise\n" ++
-        "band: how far a commit compared with itself strayed on this machine.\n\n", .{rounds});
+        "band: how far a commit compared with itself strayed on this machine.\n\n");
     try out.print("{s:<37} {s:>10} {s:>10} {s:>8}   {s:<19} {s:>6}\n", .{ "", "base", "head", "change", "95% interval", "band" });
 
     var changes: std.ArrayList(Change) = .empty;
