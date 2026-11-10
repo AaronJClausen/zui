@@ -4,6 +4,8 @@
 //! zig build bench-compare -- --calibrate        # HEAD against itself: save this machine's noise bands
 //! zig build bench-compare -- main --rounds 20   # a fixed number of rounds
 //! zig build bench-compare -- main --core 7 --require-quiet
+//! zig build bench-compare -- main --layouts 1   # one memory layout, as before B5
+//! zig build bench-compare -- main --metric cycles # core cycles, through hardware counters (Linux)
 //! ```
 
 const std = @import("std");
@@ -19,6 +21,40 @@ const min_sequential_rounds = 6;
 const max_sequential_rounds = 100;
 const default_target_width = 0.01;
 const default_time_budget_seconds = 420;
+/// Layouts the rounds take turns with, each a seed for where the
+/// benchmark's code, stack and `Context` memory land and, on Linux, a
+/// length of padding in its environment.
+const default_layouts = 3;
+const layout_seed_variable = "ZUI_BENCH_LAYOUT_SEED";
+const environment_padding_variable = "ZUI_BENCH_PADDING";
+const max_environment_padding = 4096;
+
+/// What a comparison compares. The counters ride in the benchmark's JSON
+/// beside the times, under keys ending in their name.
+const Metric = enum {
+    ns,
+    cycles,
+    instructions,
+
+    const counter_suffixes = [_][]const u8{ ", cycles", ", instructions", ", branch misses", ", L1D read misses", ", LL misses" };
+
+    fn suffix(metric: Metric) ?[]const u8 {
+        return switch (metric) {
+            .ns => null,
+            .cycles => ", cycles",
+            .instructions => ", instructions",
+        };
+    }
+
+    /// Whether `key` holds this metric.
+    fn selects(metric: Metric, key: []const u8) bool {
+        if (metric.suffix()) |wanted| return std.mem.endsWith(u8, key, wanted);
+        for (counter_suffixes) |counter| {
+            if (std.mem.endsWith(u8, key, counter)) return false;
+        }
+        return true;
+    }
+};
 
 /// The noise band when this machine has not been calibrated.
 const default_noise_band = 0.02;
@@ -40,10 +76,12 @@ const Options = struct {
     core: ?u32,
     pin: bool,
     require_quiet: bool,
+    layouts: usize,
+    metric: Metric,
 };
 
 const usage = "usage: zig build bench-compare -- <base> [<head>] [--rounds <count> | --target-width <percent>] [--time-budget <seconds>]\n" ++
-    "                                    [--core <n> | --no-pin] [--require-quiet]\n" ++
+    "                                    [--core <n> | --no-pin] [--require-quiet] [--layouts <count>] [--metric ns|cycles|instructions]\n" ++
     "       zig build bench-compare -- --calibrate [<commit>]\n" ++
     "<head> defaults to the working tree, uncommitted changes included; <commit> to HEAD\n";
 
@@ -59,6 +97,8 @@ fn parseOptions(arguments: []const [:0]const u8) !Options {
     var core: ?u32 = null;
     var pin = true;
     var require_quiet = false;
+    var layouts: usize = default_layouts;
+    var metric: Metric = .ns;
     var index: usize = 1;
     while (index < arguments.len) : (index += 1) {
         const argument = arguments[index];
@@ -103,6 +143,19 @@ fn parseOptions(arguments: []const [:0]const u8) !Options {
             pin = false;
         } else if (std.mem.eql(u8, argument, "--require-quiet")) {
             require_quiet = true;
+        } else if (std.mem.eql(u8, argument, "--layouts") and has_value) {
+            index += 1;
+            layouts = std.fmt.parseInt(usize, arguments[index], 10) catch 0;
+            if (layouts == 0) {
+                std.debug.print("--layouts needs a whole number of at least 1, got \"{s}\"\n", .{arguments[index]});
+                return error.InvalidArgument;
+            }
+        } else if (std.mem.eql(u8, argument, "--metric") and has_value) {
+            index += 1;
+            metric = std.meta.stringToEnum(Metric, arguments[index]) orelse {
+                std.debug.print("--metric needs ns, cycles or instructions, got \"{s}\"\n", .{arguments[index]});
+                return error.InvalidArgument;
+            };
         } else if (!std.mem.startsWith(u8, argument, "--") and ref_count < refs.len) {
             refs[ref_count] = argument;
             ref_count += 1;
@@ -132,6 +185,8 @@ fn parseOptions(arguments: []const [:0]const u8) !Options {
         .core = core,
         .pin = pin,
         .require_quiet = require_quiet,
+        .layouts = layouts,
+        .metric = metric,
     };
 }
 
@@ -171,8 +226,9 @@ const Side = struct {
     /// The machine's state just before each run.
     machines: std.ArrayList(Machine) = .empty,
     /// The installed benchmark, run without the build runner, when both
-    /// sides can run one scenario at a time.
-    executable: ?[]const u8 = null,
+    /// sides can run one scenario at a time: one build per layout when the
+    /// layouts move the code, otherwise one for all.
+    executables: []const []const u8 = &.{},
 
     fn supports(side: *const Side, capability: []const u8) bool {
         var words = std.mem.tokenizeAny(u8, side.capabilities, " \r\n");
@@ -183,15 +239,47 @@ const Side = struct {
     }
 };
 
+/// One layout the benchmarks run under.
+const Layout = struct {
+    /// Which of the comparison's layouts this is, and so which of a side's
+    /// builds runs under it.
+    index: usize,
+    /// Null when a side cannot move its own memory, so neither side does.
+    seed: ?u64,
+    /// Whether each side was built with `-Dbench-layout-seed=<seed>`, which
+    /// moves its code.
+    moves_code: bool,
+    /// Bytes of padding in the environment, which shifts the initial stack
+    /// of a benchmark from any commit. Zero where the environment is not on
+    /// the stack.
+    environment_padding: usize,
+
+    fn choose(random: std.Random, index: usize, moves_memory: bool, moves_code: bool) Layout {
+        return .{
+            .index = index,
+            // Zero would mean no code shift.
+            .seed = if (moves_memory) random.intRangeAtMost(u32, 1, std.math.maxInt(u32)) else null,
+            .moves_code = moves_memory and moves_code,
+            .environment_padding = if (builtin.os.tag == .linux) random.uintLessThan(usize, max_environment_padding) else 0,
+        };
+    }
+};
+
 const Tool = struct {
     io: Io,
     arena: std.mem.Allocator,
     options: Options,
     scratch_directory: []const u8,
+    environ: *const std.process.Environ.Map,
     pinned_core: ?u32 = null,
+    layouts: []const Layout = &.{.{ .index = 0, .seed = null, .moves_code = false, .environment_padding = 0 }},
 
     fn runCommand(tool: *const Tool, argv: []const []const u8, cwd: []const u8) ![]const u8 {
-        const result = try std.process.run(tool.arena, tool.io, .{ .argv = argv, .cwd = .{ .path = cwd } });
+        return tool.runCommandIn(argv, cwd, null);
+    }
+
+    fn runCommandIn(tool: *const Tool, argv: []const []const u8, cwd: []const u8, environ: ?*const std.process.Environ.Map) ![]const u8 {
+        const result = try std.process.run(tool.arena, tool.io, .{ .argv = argv, .cwd = .{ .path = cwd }, .environ_map = environ });
         if (result.term == .exited and result.term.exited == 0) return result.stdout;
         std.debug.print("in {s}, this failed with {any}:\n ", .{ cwd, result.term });
         for (argv) |argument| std.debug.print(" {s}", .{argument});
@@ -244,29 +332,100 @@ const Tool = struct {
             std.debug.print("could not remove the worktree at {s}; `git worktree remove --force` it by hand\n", .{side.directory});
     }
 
-    /// Builds the side's benchmark and asks it which options it supports.
-    /// A failure is taken as a benchmark too old to know the question; a
-    /// build that is really broken fails loudly on its first run.
-    fn probeCapabilities(tool: *const Tool, side: *Side) !void {
-        const result = try std.process.run(tool.arena, tool.io, .{
-            .argv = &.{ tool.options.zig_exe, "build", "bench", "--", "--capabilities" },
-            .cwd = .{ .path = side.directory },
-        });
-        if (result.term == .exited and result.term.exited == 0) side.capabilities = result.stdout;
+    /// A command run beside others by `runInParallel`.
+    const Job = struct {
+        argv: []const []const u8,
+        cwd: []const u8,
+        /// Where its output goes; printed if it fails.
+        log_path: []const u8,
+        /// Where its standard output goes, if not to the log.
+        stdout_path: ?[]const u8 = null,
+    };
+
+    /// Runs every job at once and waits for them all; returns whether each
+    /// succeeded. A build of the benchmarks spends most of its time in LLVM on
+    /// one thread, so several builds take about as long as one.
+    fn runInParallel(tool: *const Tool, jobs: []const Job) ![]const bool {
+        const io = tool.io;
+        const children = try tool.arena.alloc(?std.process.Child, jobs.len);
+        @memset(children, null);
+        defer for (children) |*maybe_child| {
+            if (maybe_child.*) |*child| child.kill(io);
+        };
+        for (jobs, children) |job, *child| {
+            const log = try Io.Dir.cwd().createFile(io, job.log_path, .{});
+            defer log.close(io);
+            const stdout_file = if (job.stdout_path) |path| try Io.Dir.cwd().createFile(io, path, .{}) else null;
+            defer if (stdout_file) |file| file.close(io);
+            child.* = try std.process.spawn(io, .{
+                .argv = job.argv,
+                .cwd = .{ .path = job.cwd },
+                .stdin = .ignore,
+                .stdout = .{ .file = stdout_file orelse log },
+                .stderr = .{ .file = log },
+            });
+        }
+        const succeeded = try tool.arena.alloc(bool, jobs.len);
+        for (jobs, children, succeeded) |job, *maybe_child, *job_succeeded| {
+            const term = try maybe_child.*.?.wait(io);
+            maybe_child.* = null;
+            job_succeeded.* = term == .exited and term.exited == 0;
+            if (job_succeeded.* or job.stdout_path != null) continue;
+            std.debug.print("in {s}, this failed with {any}:\n ", .{ job.cwd, term });
+            for (job.argv) |argument| std.debug.print(" {s}", .{argument});
+            const output = Io.Dir.cwd().readFileAlloc(io, job.log_path, tool.arena, .limited(64 * 1024)) catch "";
+            std.debug.print("\n{s}", .{output});
+        }
+        return succeeded;
     }
 
-    /// Installs the side's benchmark, built unpinned like every build, so
-    /// each scenario can run in its own process without the build runner.
-    fn install(tool: *const Tool, side: *Side, role: []const u8) !void {
-        const prefix = try std.fs.path.join(tool.arena, &.{ tool.scratch_directory, try std.fmt.allocPrint(tool.arena, "{s}-bin", .{role}) });
-        _ = try tool.runCommand(&.{ tool.options.zig_exe, "build", "bench-install", "--prefix", prefix }, side.directory);
-        side.executable = try std.fs.path.join(tool.arena, &.{ prefix, "bin", if (builtin.os.tag == .windows) "zui-bench.exe" else "zui-bench" });
+    /// Builds each side's benchmark and asks it which options it supports.
+    /// A failure is taken as a benchmark too old to know the question; a
+    /// build that is really broken fails loudly on its first run.
+    fn probeCapabilities(tool: *const Tool, sides: []const *Side) !void {
+        const jobs = try tool.arena.alloc(Job, sides.len);
+        for (jobs, sides, 0..) |*job, side, index| job.* = .{
+            .argv = &.{ tool.options.zig_exe, "build", "bench", "--", "--capabilities" },
+            .cwd = side.directory,
+            .log_path = try tool.scratchPath("probe-{d}.log", .{index}),
+            .stdout_path = try tool.scratchPath("probe-{d}.txt", .{index}),
+        };
+        for (jobs, sides, try tool.runInParallel(jobs)) |job, side, succeeded| {
+            if (succeeded) side.capabilities = try Io.Dir.cwd().readFileAlloc(tool.io, job.stdout_path.?, tool.arena, .limited(4096));
+        }
+    }
+
+    /// Installs each side's benchmark, built unpinned like every build, so
+    /// each scenario can run in its own process without the build runner:
+    /// once for each layout when the layouts move the code.
+    fn install(tool: *const Tool, sides: []const *Side, roles: []const []const u8) !void {
+        const builds = if (tool.layouts[0].moves_code) tool.layouts.len else 1;
+        var jobs: std.ArrayList(Job) = .empty;
+        for (sides, roles) |side, role| {
+            const executables = try tool.arena.alloc([]const u8, builds);
+            for (executables, 0..) |*executable, index| {
+                const prefix = try tool.scratchPath("{s}-bin-{d}", .{ role, index });
+                var argv: std.ArrayList([]const u8) = .empty;
+                try argv.appendSlice(tool.arena, &.{ tool.options.zig_exe, "build", "bench-install", "--prefix", prefix });
+                if (tool.layouts[0].moves_code) try argv.append(tool.arena, try std.fmt.allocPrint(tool.arena, "-Dbench-layout-seed={d}", .{tool.layouts[index].seed.?}));
+                try jobs.append(tool.arena, .{ .argv = argv.items, .cwd = side.directory, .log_path = try tool.scratchPath("{s}-build-{d}.log", .{ role, index }) });
+                executable.* = try std.fs.path.join(tool.arena, &.{ prefix, "bin", if (builtin.os.tag == .windows) "zui-bench.exe" else "zui-bench" });
+            }
+            side.executables = executables;
+        }
+        for (try tool.runInParallel(jobs.items)) |succeeded| {
+            if (!succeeded) return error.CommandFailed;
+        }
+    }
+
+    fn scratchPath(tool: *const Tool, comptime format: []const u8, arguments: anytype) ![]const u8 {
+        return std.fs.path.join(tool.arena, &.{ tool.scratch_directory, try std.fmt.allocPrint(tool.arena, format, arguments) });
     }
 
     /// The compared and startup scenarios, with startup scenarios marked,
     /// as `bench --list-scenarios` prints them.
     fn listScenarios(tool: *const Tool, side: *const Side) ![]const Scenario {
-        const output = try tool.runCommand(&.{ side.executable.?, "--list-scenarios" }, side.directory);
+        const output = try tool.runCommand(&.{ side.executables[0], "--list-scenarios" }, side.directory);
         var scenarios: std.ArrayList(Scenario) = .empty;
         var lines = std.mem.tokenizeAny(u8, output, "\r\n");
         while (lines.next()) |line| {
@@ -282,14 +441,15 @@ const Tool = struct {
     /// The command that runs the side's benchmark: its installed executable,
     /// or its own `zig build bench`, so each commit is measured by the
     /// scenarios it shipped with.
-    fn benchmarkArgv(tool: *const Tool, side: *const Side, arguments: []const []const u8) ![]const []const u8 {
+    fn benchmarkArgv(tool: *const Tool, side: *const Side, arguments: []const []const u8, layout: Layout) ![]const []const u8 {
         var argv: std.ArrayList([]const u8) = .empty;
-        if (side.executable) |executable| {
-            try argv.append(tool.arena, executable);
+        if (side.executables.len > 0) {
+            try argv.append(tool.arena, side.executables[if (side.executables.len > 1) layout.index else 0]);
         } else {
             try argv.appendSlice(tool.arena, &.{ tool.options.zig_exe, "build", "bench", "--" });
         }
         try argv.appendSlice(tool.arena, &.{ "--json", side.results_path });
+        if (tool.options.metric != .ns) try argv.append(tool.arena, "--counters");
         // The pin is inherited already; this adds the raised priority, which
         // on Windows is not.
         if (tool.pinned_core) |core| {
@@ -299,23 +459,38 @@ const Tool = struct {
         return argv.items;
     }
 
-    fn measure(tool: *const Tool, side: *Side, arguments: []const []const u8) !std.json.ArrayHashMap(u64) {
+    /// This process's environment with the layout's seed and padding.
+    fn layoutEnvironment(tool: *const Tool, layout: Layout) !std.process.Environ.Map {
+        var environ = try tool.environ.clone(tool.arena);
+        _ = environ.swapRemove(layout_seed_variable);
+        _ = environ.swapRemove(environment_padding_variable);
+        if (layout.seed) |seed| try environ.put(layout_seed_variable, try std.fmt.allocPrint(tool.arena, "{d}", .{seed}));
+        if (layout.environment_padding > 0) {
+            const padding = try tool.arena.alloc(u8, layout.environment_padding);
+            @memset(padding, 'x');
+            try environ.put(environment_padding_variable, padding);
+        }
+        return environ;
+    }
+
+    fn measure(tool: *const Tool, side: *Side, arguments: []const []const u8, layout: Layout) !std.json.ArrayHashMap(u64) {
         try side.machines.append(tool.arena, try machine.read(tool.io, tool.arena, tool.pinned_core));
-        _ = try tool.runCommand(try tool.benchmarkArgv(side, arguments), side.directory);
+        const environ = try tool.layoutEnvironment(layout);
+        _ = try tool.runCommandIn(try tool.benchmarkArgv(side, arguments, layout), side.directory, &environ);
         const contents = try Io.Dir.cwd().readFileAlloc(tool.io, side.results_path, tool.arena, .limited(64 * 1024));
         return std.json.parseFromSliceLeaky(std.json.ArrayHashMap(u64), tool.arena, contents, .{});
     }
 
     /// One round of every scenario at once, for sides that cannot run one
     /// scenario at a time.
-    fn runBenchmarks(tool: *const Tool, side: *Side) !void {
-        try side.runs.append(tool.arena, try tool.measure(side, &.{}));
+    fn runBenchmarks(tool: *const Tool, side: *Side, layout: Layout) !void {
+        try side.runs.append(tool.arena, try tool.measure(side, &.{}, layout));
     }
 
     /// One round of one scenario at a time, in an order shuffled by the
     /// round, alternating which side goes first from one scenario to the
     /// next. Startup scenarios stay last, as they do in `bench`.
-    fn runScenarioRound(tool: *const Tool, base: *Side, head: *Side, scenarios: []const Scenario, round: usize) !void {
+    fn runScenarioRound(tool: *const Tool, base: *Side, head: *Side, scenarios: []const Scenario, round: usize, layout: Layout) !void {
         const order = try tool.arena.dupe(Scenario, scenarios);
         var frames_count: usize = 0;
         for (scenarios) |scenario| {
@@ -340,7 +515,7 @@ const Tool = struct {
             const base_first = (round + position) % 2 == 0;
             for ([_]bool{ base_first, !base_first }) |is_base| {
                 const side, const times = if (is_base) .{ base, &base_times } else .{ head, &head_times };
-                const measured = try tool.measure(side, &.{ "--scenario", scenario.name });
+                const measured = try tool.measure(side, &.{ "--scenario", scenario.name }, layout);
                 for (measured.map.keys(), measured.map.values()) |key, nanoseconds| try times.map.put(tool.arena, key, nanoseconds);
             }
         }
@@ -416,6 +591,7 @@ pub fn main(init: std.process.Init) !void {
         .arena = arena,
         .options = options,
         .scratch_directory = try std.fs.path.join(arena, &.{ options.repository, ".zig-cache", "bench-compare" }),
+        .environ = init.environ_map,
     };
     try Io.Dir.cwd().createDirPath(io, tool.scratch_directory);
 
@@ -427,21 +603,38 @@ pub fn main(init: std.process.Init) !void {
     // Building, and a first run of each side that warms the machine and is
     // thrown away, happen unpinned: the compiler uses every core.
     std.debug.print("building {s} and {s}\n", .{ base.label, head.label });
-    try tool.probeCapabilities(&base);
-    try tool.probeCapabilities(&head);
+    try tool.probeCapabilities(&.{ &base, &head });
+    if (options.metric != .ns) {
+        for ([_]*const Side{ &base, &head }) |side| {
+            if (!side.supports("counters")) {
+                std.debug.print("--metric {t}: {s}'s benchmark cannot read hardware counters\n", .{ options.metric, side.label });
+                return error.CountersUnsupported;
+            }
+        }
+    }
     var scenarios: []const Scenario = &.{};
     const one_scenario_at_a_time = for ([_]*const Side{ &base, &head }) |side| {
         if (!side.supports("scenarios") or !side.supports("bench-install")) break false;
     } else true;
+
+    // Fresh layouts for every comparison, so repeated comparisons sample
+    // new ones rather than repeating the same few.
+    const moves_memory = base.supports("layout-seed") and head.supports("layout-seed");
+    const moves_code = one_scenario_at_a_time and options.layouts > 1 and base.supports("code-layout") and head.supports("code-layout");
+    var layout_random: std.Random.DefaultPrng = .init(@bitCast(@as(i64, @truncate(Io.Timestamp.now(io, .real).nanoseconds))));
+    const layouts = try arena.alloc(Layout, options.layouts);
+    for (layouts, 0..) |*layout, index| layout.* = .choose(layout_random.random(), index, moves_memory, moves_code);
+    tool.layouts = layouts;
+    if (moves_code) std.debug.print("building each side {d} times, once per code layout\n", .{layouts.len});
+
     if (one_scenario_at_a_time) {
-        try tool.install(&base, "base");
-        try tool.install(&head, "head");
+        try tool.install(&.{ &base, &head }, &.{ "base", "head" });
         scenarios = try sharedScenarios(arena, try tool.listScenarios(&base), try tool.listScenarios(&head));
     } else {
         std.debug.print("{s} cannot run one scenario at a time, so each round runs every scenario at once, in one order\n", .{if (!base.supports("scenarios")) base.label else head.label});
     }
-    try tool.runBenchmarks(&base);
-    try tool.runBenchmarks(&head);
+    try tool.runBenchmarks(&base, tool.layouts[0]);
+    try tool.runBenchmarks(&head, tool.layouts[0]);
     base.runs.clearRetainingCapacity();
     head.runs.clearRetainingCapacity();
     base.machines.clearRetainingCapacity();
@@ -458,7 +651,7 @@ pub fn main(init: std.process.Init) !void {
     var floors = try readNoiseFloors(&tool);
     const fingerprint = try fingerprintText(arena, &setup);
     const bands: ?std.json.ArrayHashMap(f64) = if (options.calibrate) null else if (floors.map.get(fingerprint)) |floor| floor.bands else null;
-    const verdicts: Verdicts = .{ .bands = bands, .target_width = options.target_width };
+    const verdicts: Verdicts = .{ .bands = bands, .target_width = options.target_width, .layouts = layouts.len, .metric = options.metric };
 
     const budget_ns = options.time_budget_seconds * std.time.ns_per_s;
     var round_ns: u64 = 0;
@@ -481,14 +674,15 @@ pub fn main(init: std.process.Init) !void {
             std.debug.print("round {d}, until every interval is narrow enough or {d} s pass\n", .{ round + 1, options.time_budget_seconds });
         }
         const round_started = Io.Timestamp.now(io, .awake);
+        const layout = layouts[round % layouts.len];
         if (one_scenario_at_a_time) {
-            try tool.runScenarioRound(&base, &head, scenarios, round);
+            try tool.runScenarioRound(&base, &head, scenarios, round, layout);
         } else {
             // Alternating which side goes first cancels a drift in the
             // machine's speed over the comparison, such as a CPU warming up.
             const first, const second = if (round % 2 == 0) .{ &base, &head } else .{ &head, &base };
-            try tool.runBenchmarks(first);
-            try tool.runBenchmarks(second);
+            try tool.runBenchmarks(first, layout);
+            try tool.runBenchmarks(second, layout);
         }
         round_ns = @intCast(round_started.durationTo(Io.Timestamp.now(io, .awake)).nanoseconds);
     }
@@ -496,12 +690,13 @@ pub fn main(init: std.process.Init) !void {
     var stdout_buffer: [4096]u8 = undefined;
     var stdout_writer = Io.File.stdout().writer(io, &stdout_buffer);
     const out = &stdout_writer.interface;
-    const changes = try report(arena, out, &base, &head, &verdicts, one_scenario_at_a_time);
+    const changes = try report(arena, out, &base, &head, &verdicts, one_scenario_at_a_time, layouts);
     if (!options.calibrate and bands == null) {
         try out.print("\nThis machine setup has no noise bands, so each was taken as {d:.0}%. `zig build bench-compare -- --calibrate` measures them.\n", .{default_noise_band * 100});
     }
     if (options.calibrate) {
-        var calibrated: std.json.ArrayHashMap(f64) = .{};
+        // Calibrating one metric keeps the bands of the others.
+        var calibrated: std.json.ArrayHashMap(f64) = if (floors.map.get(fingerprint)) |floor| floor.bands else .{};
         for (changes) |change| try calibrated.map.put(arena, change.key, @max(change.interval.reach(), min_noise_band));
         try floors.map.put(arena, fingerprint, .{ .machine = setup, .commit = base.commit.?, .bands = calibrated });
         try writeNoiseFloors(&tool, &floors);
@@ -520,6 +715,9 @@ const Verdicts = struct {
     /// Null before calibration, when every time gets the default band.
     bands: ?std.json.ArrayHashMap(f64),
     target_width: f64,
+    /// Round `r` ran under layout `r % layouts`.
+    layouts: usize,
+    metric: Metric,
 
     fn band(verdicts: *const Verdicts, key: []const u8) f64 {
         const bands = verdicts.bands orelse return default_noise_band;
@@ -534,24 +732,28 @@ const Verdicts = struct {
 
     fn allNarrowEnough(verdicts: *const Verdicts, arena: std.mem.Allocator, base: *const Side, head: *const Side) !bool {
         if (base.runs.items.len == 0) return false;
-        const ratios = try arena.alloc(f64, base.runs.items.len);
-        defer arena.free(ratios);
         for (head.runs.items[0].map.keys()) |key| {
-            if (!pairedRatios(base, head, key, ratios)) continue;
-            if (!verdicts.narrowEnough(key, try statistics.bootstrapMedian(arena, &.{ratios}))) return false;
+            if (!verdicts.metric.selects(key)) continue;
+            const groups = try ratiosByLayout(arena, base, head, key, verdicts.layouts) orelse continue;
+            if (!verdicts.narrowEnough(key, try statistics.bootstrapMedian(arena, groups))) return false;
         }
         return true;
     }
 };
 
-/// Fills `ratios` with each round's head/base ratio for `key`, or returns
-/// false when the base never measured it.
-fn pairedRatios(base: *const Side, head: *const Side, key: []const u8, ratios: []f64) bool {
-    for (ratios, base.runs.items, head.runs.items) |*ratio, base_run, head_run| {
-        const base_time = base_run.map.get(key) orelse return false;
-        ratio.* = @as(f64, @floatFromInt(head_run.map.get(key).?)) / @as(f64, @floatFromInt(base_time));
+/// Each round's head/base ratio for `key`, one group per layout, so the
+/// bootstrap resamples layouts before the rounds within them. Null when
+/// the base never measured `key`.
+fn ratiosByLayout(arena: std.mem.Allocator, base: *const Side, head: *const Side, key: []const u8, layouts: usize) !?[]const []const f64 {
+    const rounds = base.runs.items.len;
+    const group_count = @min(layouts, rounds);
+    const groups = try arena.alloc([]f64, group_count);
+    for (groups, 0..) |*group, layout| group.* = try arena.alloc(f64, (rounds - layout + group_count - 1) / group_count);
+    for (base.runs.items, head.runs.items, 0..) |base_run, head_run, round| {
+        const base_time = base_run.map.get(key) orelse return null;
+        groups[round % group_count][round / group_count] = @as(f64, @floatFromInt(head_run.map.get(key).?)) / @as(f64, @floatFromInt(base_time));
     }
-    return true;
+    return groups;
 }
 
 fn medianTime(arena: std.mem.Allocator, side: *const Side, key: []const u8) !f64 {
@@ -560,7 +762,7 @@ fn medianTime(arena: std.mem.Allocator, side: *const Side, key: []const u8) !f64
     return statistics.median(times);
 }
 
-fn report(arena: std.mem.Allocator, out: *Io.Writer, base: *const Side, head: *const Side, verdicts: *const Verdicts, one_scenario_at_a_time: bool) ![]const Change {
+fn report(arena: std.mem.Allocator, out: *Io.Writer, base: *const Side, head: *const Side, verdicts: *const Verdicts, one_scenario_at_a_time: bool, layouts: []const Layout) ![]const Change {
     const rounds = base.runs.items.len;
     try printSide(out, "base", base);
     try printSide(out, "head", head);
@@ -571,20 +773,22 @@ fn report(arena: std.mem.Allocator, out: *Io.Writer, base: *const Side, head: *c
     } else {
         try out.print("{d} rounds of every scenario at once, alternating which side goes first. ", .{rounds});
     }
+    try printLayouts(out, layouts, @min(layouts.len, rounds));
     try out.writeAll("Each time is a run's fastest frame;\n" ++
         "the change is the median of the rounds' head/base ratios, with its bootstrap 95%\n" ++
-        "interval. A change is called only when its whole interval lies beyond the noise\n" ++
-        "band: how far a commit compared with itself strayed on this machine.\n\n");
+        "interval, resampling layouts and then the rounds within them. A change is called\n" ++
+        "only when its whole interval lies beyond the noise band: how far a commit\n" ++
+        "compared with itself strayed on this machine.\n\n");
     try out.print("{s:<37} {s:>10} {s:>10} {s:>8}   {s:<19} {s:>6}\n", .{ "", "base", "head", "change", "95% interval", "band" });
 
     var changes: std.ArrayList(Change) = .empty;
-    const ratios = try arena.alloc(f64, rounds);
     for (head.runs.items[0].map.keys()) |key| {
-        if (!pairedRatios(base, head, key, ratios)) {
+        if (!verdicts.metric.selects(key)) continue;
+        const groups = try ratiosByLayout(arena, base, head, key, verdicts.layouts) orelse {
             try out.print("{s:<37} only in head\n", .{key});
             continue;
-        }
-        const interval = try statistics.bootstrapMedian(arena, &.{ratios});
+        };
+        const interval = try statistics.bootstrapMedian(arena, groups);
         try changes.append(arena, .{ .key = key, .interval = interval });
         const band = verdicts.band(key);
         var estimate_buffer: [16]u8 = undefined;
@@ -592,10 +796,12 @@ fn report(arena: std.mem.Allocator, out: *Io.Writer, base: *const Side, head: *c
         var upper_buffer: [16]u8 = undefined;
         var interval_buffer: [40]u8 = undefined;
         const interval_text = try std.fmt.bufPrint(&interval_buffer, "{s:>7} to {s}", .{ percentChange(&lower_buffer, interval.lower), percentChange(&upper_buffer, interval.upper) });
-        try out.print("{s:<37} {d:>8.1}us {d:>8.1}us {s:>8}   {s:<19} {d:>5.1}%", .{
-            key,
-            try medianTime(arena, base, key) / std.time.ns_per_us,
-            try medianTime(arena, head, key) / std.time.ns_per_us,
+        var base_buffer: [24]u8 = undefined;
+        var head_buffer: [24]u8 = undefined;
+        try out.print("{s:<37} {s:>10} {s:>10} {s:>8}   {s:<19} {d:>5.1}%", .{
+            if (verdicts.metric.suffix()) |suffix| key[0 .. key.len - suffix.len] else key,
+            try formatValue(&base_buffer, verdicts.metric, try medianTime(arena, base, key)),
+            try formatValue(&head_buffer, verdicts.metric, try medianTime(arena, head, key)),
             percentChange(&estimate_buffer, interval.estimate),
             interval_text,
             band * 100,
@@ -609,9 +815,32 @@ fn report(arena: std.mem.Allocator, out: *Io.Writer, base: *const Side, head: *c
         }
     }
     for (base.runs.items[0].map.keys()) |key| {
-        if (!head.runs.items[0].map.contains(key)) try out.print("{s:<37} only in base\n", .{key});
+        if (verdicts.metric.selects(key) and !head.runs.items[0].map.contains(key)) try out.print("{s:<37} only in base\n", .{key});
     }
     return changes.items;
+}
+
+fn formatValue(buffer: *[24]u8, metric: Metric, value: f64) ![]const u8 {
+    return switch (metric) {
+        .ns => std.fmt.bufPrint(buffer, "{d:.1}us", .{value / std.time.ns_per_us}),
+        .cycles, .instructions => std.fmt.bufPrint(buffer, "{d:.0}", .{value}),
+    };
+}
+
+/// The layouts the rounds used, so a comparison can be repeated under them.
+fn printLayouts(out: *Io.Writer, layouts: []const Layout, used: usize) !void {
+    if (used <= 1 and layouts[0].seed == null and layouts[0].environment_padding == 0) return;
+    try out.print("Rounds took turns with {d} layout{s} of {s}:", .{
+        used,
+        if (used == 1) "" else "s",
+        if (layouts[0].moves_code) "code and memory, each side built once per layout" else "memory",
+    });
+    for (layouts[0..used], 0..) |layout, index| {
+        try out.writeAll(if (index == 0) " " else ", ");
+        if (layout.seed) |seed| try out.print("{s}={d}", .{ layout_seed_variable, seed }) else try out.writeAll("no seed");
+        if (layout.environment_padding > 0) try out.print(" with {d} bytes of environment", .{layout.environment_padding});
+    }
+    try out.writeAll(".\n");
 }
 
 fn printSide(out: *Io.Writer, role: []const u8, side: *const Side) !void {

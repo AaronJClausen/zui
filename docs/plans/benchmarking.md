@@ -9,36 +9,22 @@ Written against `db4ea4d`.
 
 ## Picking up from here
 
-B1, B2, B3 and B6 are done (`3fb9f8e`, `4294abe`, `f099fd1`,
-`9d0ddac`). The
+B1, B2, B3, B5 and B6 are done, and B4's slices 1 and 3 are built. The
 reference machine now boots bare-metal Linux with turbo off and the
-`performance` governor. Each step's **Status** line below says what it measured and what
-is left. Resume in this order:
+`performance` governor; its noise bands are calibrated for that setup.
+Each step's **Status** line below says what it measured and what is
+left. Resume in this order:
 
-1. **B5, slice 1** (`ZUI_BENCH_LAYOUT_SEED`). Ideas from the last
-   session: shift the stack with `switch (@as(u6, @truncate(seed)))
-   { inline else => |step| ... }` over a `[step * 64]u8` buffer passed
-   to `doNotOptimizeAway`, calling the scenarios through
-   `@call(.never_inline, ...)`; start each `Context` with `initBuffer`
-   at a seed-chosen multiple of 64 bytes inside one allocation of
-   `required_bytes + 4096` from the counting allocator; in
-   `bench-compare`, pass the seed and (on Linux) a padding variable
-   through `std.process.run`'s `environ_map`, copied from
-   `init.environ_map`. Advertise a `layout-seed` capability. The B2
-   bootstrap already resamples in two stages (`groups`), one group per
-   layout.
-2. **B5, slice 2 spike:** a module-level `comptime { asm (".text\n.skip
-   N"); }` in `bench.zig`, from a `-Dbench-layout-seed` build option,
-   should shift every function after it by `N` rounded to 16 bytes,
-   since LLVM emits module assembly first. Check it by printing
-   `@intFromPtr(&SomeUi.endFrame) & 0xfff` for two seeds.
-3. **B4** (`bench/counters.zig`, Linux `perf_event_open`): can now be
-   built and verified here, since the reference machine also boots
-   bare-metal Linux (`perf_event_paranoid` is 2, enough for user-mode
-   counting in its own process).
-4. **B7**: extend `Machine` with OS version, CPU vendor, caches, target
-   and commit; `--results-dir`; `bench-report`. Windows plus a Linux
-   container counts as two operating systems for its *Done when*.
+1. **B4's *Done when*** needs the cycles band compared with the time band
+   while the clock moves: with turbo off the two measure the same thing.
+   Ask the owner before turning turbo back on
+   (`/sys/devices/system/cpu/intel_pstate/no_turbo`), then run
+   `bench-compare -- --calibrate` and `-- --calibrate --metric cycles`
+   and compare the saved bands.
+2. **B7**: extend `Machine` with OS version, CPU vendor, caches, target
+   and commit; `--results-dir`; `bench-report`. This machine's Windows
+   and Linux installs count as two operating systems for its *Done when*.
+3. **B4, slice 2** (`rdpmc`) is optional now; see B4's status.
 
 Working notes:
 - `bench-compare` writes its progress to stderr, which `zig build` does
@@ -293,6 +279,31 @@ can only be verified once a Linux install exists.
 cycles has a noise band well under its band in nanoseconds, with both
 recorded.
 
+**Status:** slices 1 and 3 built; the *Done when* waits on a run with
+turbo on. `bench/counters.zig` opens one group of five events (cycles,
+instructions, branch misses, L1D read misses, `CACHE_MISSES` for the last
+level), user mode only, and refuses multiplexed counts. `bench
+--counters` starts the group before each phase, stops and reads it after,
+and keeps each event's fewest per frame; the times are taken inside the
+counted span, so reading the counters stays out of them. The counts go
+into the JSON as `"<scenario>, <event>"` and `"<scenario>, declare,
+<event>"`, and `bench-compare --metric cycles|instructions` compares
+those keys alone (nanoseconds stay the default, and ignore them). On
+other platforms `--counters` names the alternatives.
+
+Measured on the i9-10900K under Linux: the box tree's declaration ran
+440,424 instructions a frame (Callgrind: 437,628, for a different CPU
+model) in 216,504 cycles, 58.5 µs at 3.7 GHz against 58.7 µs timed.
+`--calibrate --metric cycles` at `45f48f4` (100 rounds, 3 layouts, turbo
+off) called nothing; its intervals reached a mean 0.41% and median 0.20%
+from no change, against 0.29% and 0.20% for nanoseconds (64 rounds, one
+layout). With the clock fixed, cycles and nanoseconds are one
+measurement, so this cannot show the gain the *Done when* asks for.
+
+Slice 2 (`rdpmc`) matters less than planned: user-mode counting leaves
+the `ioctl` calls' kernel time out of the counts, the times are taken
+inside the counted span, and each frame already gets its own minimum.
+
 ### B5. Code and memory layout as a random factor
 
 **Where:** `bench/bench.zig`, `bench/compare.zig`, `build.zig`.
@@ -327,6 +338,37 @@ the tool stops at a time budget, so a comparison stays within 10 minutes.
 
 **Done when:** the T4 case, warm text at `c5b0401` (+7.8% on the same
 instructions), is reported as within noise.
+
+**Status:** done, with a constructed case in place of T4's. Slice 1:
+`ZUI_BENCH_LAYOUT_SEED` moves the stack down by 0 to 63 steps of 64 bytes
+(an `inline else` over buffer sizes, the scenario called through
+`@call(.never_inline, ...)`), and starts each frames scenario's `Context`
+at a multiple of 128 bytes (the cache line `initBuffer` needs) inside an
+allocation 4 KiB larger. Slice 2: the spike worked. A module-level
+`comptime { asm (".text\n.skip N"); }` moved every function in the
+executable, zui's included, by exactly `N` (`nm`: +0x30 for 48, +0x410
+for 1040); `-Dbench-layout-seed` picks `N` from 0 to 4080 in steps of 16.
+Slice 3: `bench-compare --layouts <k>` (3) chooses fresh layouts per
+comparison; when both sides advertise `code-layout`, each side is built
+once per layout, all builds at once (a benchmark build is 47 s, almost
+all of it on one thread). The rounds take turns with the layouts, on
+Linux with a random 0 to 4 KiB of environment padding as well, and the
+bootstrap resamples layouts and then rounds. The report names each
+layout's seed and padding.
+
+T4's case was a variant never committed, and aligning `wrapLines` to 64
+bytes, its other case, moved nothing past its band here (new strings
+−0.3%). So the case was built: a probe commit that only pads the start
+of the code by 864 bytes. Run directly, four code shifts moved
+static-styled boxes from 103.9 to 107.8 µs (3.7%), against 1.3% between
+repeats. `bench-compare -- main <probe>` with `--layouts 1` called eight
+times slower or faster, up to +2.8% (depth 64, 4000 children),
+static-styled boxes +2.6% (+2.5% to +2.7%); with the default 3 layouts
+it called nothing, static-styled boxes −1.0% (−2.7% to +2.7%), in 364 s
+including all twelve builds. A commit compared with itself over 3 layouts
+(100 rounds) called nothing either, its intervals 0.52% wide on average.
+The cost is honest width: in the layout-sensitive scenarios, a real
+change under about 2% is no longer called.
 
 ### B6. Simulated cache and branch misses in `counts`
 

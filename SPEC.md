@@ -2321,7 +2321,14 @@ On one 2020-era desktop core (the reference is an i9-10900K):
   `--list-scenarios` lists the scenarios, `--scenario <name>` (repeated)
   runs only those, and `--order-seed <n>` shuffles their order; startup
   scenarios always run last, since their page faults are part of what
-  they time.
+  they time. `--counters` also counts each phase's cycles, instructions,
+  branch misses, L1D read misses and last-level misses through Linux's
+  `perf_event_open`, user mode only, keeping each event's fewest per
+  frame, and refuses counts the kernel had to multiplex. The
+  `ZUI_BENCH_LAYOUT_SEED` environment variable moves the stack by up to
+  4 KiB and each `Context`'s memory within 4 KiB; the
+  `-Dbench-layout-seed` build option moves every function by up to
+  4080 bytes.
 - **`zig build bench-compare -- <base> [<head>]`** alternates two commits
   on one machine, pinned to one core after both are built, recording the
   machine's state before every run. It reports the median of the paired
@@ -2336,7 +2343,14 @@ On one 2020-era desktop core (the reference is an i9-10900K):
   while turbo is on. When both sides can, each round runs one scenario at
   a time, from each side's installed benchmark, in a new random order,
   alternating which side goes first from one scenario to the next;
-  otherwise each round runs every scenario at once.
+  otherwise each round runs every scenario at once. The rounds take
+  turns with `--layouts` layouts (3), fresh for each comparison: each a
+  seed for the stack, the `Context` memory and, with each side built once
+  per layout and in parallel, the code, plus on Linux a random length of
+  padding in the environment. The interval resamples layouts and then the
+  rounds within them, so a change that only moves code is not called.
+  `--metric cycles` or `instructions` compares hardware counts instead
+  of times.
 - **`zig build counts`**, instruction counts under Callgrind for the
   single-threaded scenarios, from an executable always built for one CPU
   model without libc, over a fixed number of frames, so they are the same

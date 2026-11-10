@@ -230,6 +230,8 @@ pub fn build(b: *std.Build) void {
     b.step("check", "Type-check zui for the selected target").dependOn(&check_object.step);
 
     const bench_zui = releaseFastZui(b, target, build_options);
+    const bench_options = b.addOptions();
+    bench_options.addOption(u64, "layout_seed", b.option(u64, "bench-layout-seed", "Move every function of the benchmark by a seed-chosen offset, as bench-compare's layouts do") orelse 0);
     const bench_executable = b.addExecutable(.{
         .name = "zui-bench",
         .root_module = b.createModule(.{
@@ -239,6 +241,7 @@ pub fn build(b: *std.Build) void {
             .imports = &.{
                 .{ .name = "zui", .module = bench_zui },
                 .{ .name = "zui_async", .module = releaseFastAsync(b, target, bench_zui) },
+                .{ .name = "bench_options", .module = bench_options.createModule() },
             },
         }),
     });

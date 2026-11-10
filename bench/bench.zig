@@ -3,6 +3,9 @@
 //! zig build bench -- --check-targets               # fail if a SPEC.md §20.2 budget is missed
 //! zig build bench -- --json results.json           # save each scenario's fastest declaration and layout
 //! zig build bench -- --core 3 --machine-json m.json # pin to core 3, raise priority, record the machine
+//! ZUI_BENCH_LAYOUT_SEED=7 zig build bench          # move the stack and each Context's memory
+//! zig build bench -Dbench-layout-seed=7            # move the code
+//! zig build bench -- --counters                    # also count cycles, instructions and misses (Linux)
 //! ```
 //!
 //! Two commits are compared with `zig build bench-compare`, never by two
@@ -12,6 +15,8 @@ const std = @import("std");
 const zui = @import("zui");
 const Io = std.Io;
 
+const bench_options = @import("bench_options");
+const counters = @import("counters.zig");
 const machine = @import("machine.zig");
 const statistics = @import("statistics.zig");
 const scenes = @import("scenes.zig");
@@ -79,6 +84,9 @@ const Measurement = struct {
     layout: Spread,
     /// Declaration, layout and emission together.
     frame_median_ns: u64,
+    /// Each event's fewest per frame, with `--counters`.
+    declare_counts: ?counters.Counts = null,
+    layout_counts: ?counters.Counts = null,
     layout_target_ns: ?u64 = null,
     declare_target_ns: ?u64 = null,
     measure_calls_per_frame: f64,
@@ -86,17 +94,83 @@ const Measurement = struct {
 
 const max_timed_frames = 400;
 
+/// Bytes of padding at the start of the code, so every function after it
+/// lands somewhere else: 0 to 4080, in steps of the 16 bytes functions are
+/// aligned to. LLVM emits module assembly before any function.
+const code_shift = if (bench_options.layout_seed == 0) 0 else (bench_options.layout_seed *% 0x9e3779b97f4a7c15 >> 56) * 16;
+
+comptime {
+    if (code_shift > 0) asm (std.fmt.comptimePrint(".text\n.skip {d}\n", .{code_shift}));
+}
+
+/// Where a run puts its stack and each scenario's `Context` memory, chosen
+/// by `ZUI_BENCH_LAYOUT_SEED`. Moving them shows how much of a time comes
+/// from where things happen to land: a cache set, a 4 KiB alias, a split
+/// line. Without a seed, both shifts are zero.
+const Layout = struct {
+    /// The stack moves down by this many 64-byte steps, up to 4 KiB.
+    stack_steps: u6 = 0,
+    /// Each `Context` starts this many bytes into a larger allocation, a
+    /// multiple of `heap_step` under 4 KiB.
+    heap_offset: usize = 0,
+    /// Counts each phase of the compared scenarios, with `--counters`.
+    counter_group: ?*counters.Group = null,
+
+    const environment_variable = "ZUI_BENCH_LAYOUT_SEED";
+    const heap_span = 4096;
+    /// Every `Context`'s buffer alignment, the cache line, divides this.
+    const heap_step = @max(128, std.atomic.cache_line);
+
+    fn fromSeed(seed: u64) Layout {
+        var prng: std.Random.DefaultPrng = .init(seed);
+        const random = prng.random();
+        return .{
+            .stack_steps = random.int(u6),
+            .heap_offset = random.uintLessThan(usize, heap_span / heap_step) * heap_step,
+        };
+    }
+
+    fn read(environ: *const std.process.Environ.Map) !Layout {
+        const text = environ.get(environment_variable) orelse return .{};
+        const seed = std.fmt.parseInt(u64, text, 10) catch {
+            std.debug.print("{s} needs a whole number, got \"{s}\"\n", .{ environment_variable, text });
+            return error.InvalidArgument;
+        };
+        return fromSeed(seed);
+    }
+
+    /// Runs `entry` with the stack moved down by `stack_steps`.
+    fn runShifted(layout: Layout, entry: Entry, io: Io, gpa: std.mem.Allocator) anyerror!Run {
+        switch (layout.stack_steps) {
+            inline else => |steps| return StackShift(steps).run(entry, layout, io, gpa),
+        }
+    }
+
+    fn StackShift(comptime steps: u6) type {
+        return struct {
+            noinline fn run(entry: Entry, layout: Layout, io: Io, gpa: std.mem.Allocator) anyerror!Run {
+                var padding: [@as(usize, steps) * 64]u8 = undefined;
+                std.mem.doNotOptimizeAway(&padding);
+                return @call(.never_inline, entry.run, .{ io, gpa, layout });
+            }
+        };
+    }
+};
+
 fn Scenario(comptime limits: zui.Limits, comptime Text: type, comptime Scene: type) type {
     return struct {
         const Ui = zui.Context(.{ .limits = limits, .Text = Text });
 
         /// Times `frame_count` frames after `warmup_frames`, in a fresh
         /// Context whose allocator counts every call after `init`.
-        fn run(io: Io, gpa: std.mem.Allocator, warmup_frames: usize, frame_count: usize) !Measurement {
+        fn run(io: Io, gpa: std.mem.Allocator, layout: Layout, warmup_frames: usize, frame_count: usize) !Measurement {
+            comptime std.debug.assert(Layout.heap_step % Ui.buffer_alignment == 0);
             var text: Text = .{};
             var counting: CountingAllocator = .{ .backing = gpa };
-            var ui = try Ui.init(counting.allocator(), io, &text);
-            defer ui.deinit(counting.allocator());
+            const memory = try counting.allocator().alignedAlloc(u8, .fromByteUnits(Ui.buffer_alignment), Ui.required_bytes + Layout.heap_span);
+            defer counting.allocator().free(memory);
+            var ui = try Ui.initBuffer(@alignCast(memory[layout.heap_offset..]), io, &text);
+            defer ui.deinit(undefined);
             const allocations_after_init = counting.allocations;
 
             var scene: Scene = .{};
@@ -110,19 +184,35 @@ fn Scenario(comptime limits: zui.Limits, comptime Text: type, comptime Scene: ty
             var declare_times: [max_timed_frames]u64 = undefined;
             var layout_times: [max_timed_frames]u64 = undefined;
             var frame_times: [max_timed_frames]u64 = undefined;
+            const group = layout.counter_group;
+            var declare_counts: counters.Counts = @splat(std.math.maxInt(u64));
+            var layout_counts: counters.Counts = @splat(std.math.maxInt(u64));
             const calls_before = ui.measureCalls();
             for (0..frame_count) |index| {
+                if (group) |counting_group| counting_group.start();
                 const frame_start = Io.Timestamp.now(io, .awake);
                 ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 1600, 1200 } }, .events = eventsOf(&scene, warmup_frames + index) });
                 scene.declare(&ui, warmup_frames + index);
-                const layout_start = Io.Timestamp.now(io, .awake);
+                const declare_end = Io.Timestamp.now(io, .awake);
+                // Reading the counters between the phases stays out of
+                // both phases' times.
+                const layout_start = if (group) |counting_group| started: {
+                    counting_group.stop();
+                    fewest(&declare_counts, try counting_group.read());
+                    counting_group.start();
+                    break :started Io.Timestamp.now(io, .awake);
+                } else declare_end;
                 const frame = ui.endFrame();
                 const end = Io.Timestamp.now(io, .awake);
+                if (group) |counting_group| {
+                    counting_group.stop();
+                    fewest(&layout_counts, try counting_group.read());
+                }
                 element_count = frame.elementCount();
                 ui.release(frame);
-                declare_times[index] = @intCast(frame_start.durationTo(layout_start).nanoseconds);
+                declare_times[index] = @intCast(frame_start.durationTo(declare_end).nanoseconds);
                 layout_times[index] = @intCast(layout_start.durationTo(end).nanoseconds);
-                frame_times[index] = @intCast(frame_start.durationTo(end).nanoseconds);
+                frame_times[index] = declare_times[index] + layout_times[index];
             }
             const calls = ui.measureCalls() - calls_before;
             if (counting.allocations != allocations_after_init) return error.FramesAllocated;
@@ -139,9 +229,15 @@ fn Scenario(comptime limits: zui.Limits, comptime Text: type, comptime Scene: ty
                 .layout_target_ns = Scene.layout_target_ns,
                 .declare_target_ns = if (@hasDecl(Scene, "declare_target_ns")) Scene.declare_target_ns else null,
                 .measure_calls_per_frame = @as(f64, @floatFromInt(calls)) / @as(f64, @floatFromInt(frame_count)),
+                .declare_counts = if (group != null) declare_counts else null,
+                .layout_counts = if (group != null) layout_counts else null,
             };
         }
     };
+}
+
+fn fewest(least: *counters.Counts, counts: counters.Counts) void {
+    for (least, counts) |*kept, count| kept.* = @min(kept.*, count);
 }
 
 const CountingAllocator = struct {
@@ -367,27 +463,27 @@ const Kind = enum {
 const Entry = struct {
     name: []const u8,
     kind: Kind,
-    run: *const fn (Io, std.mem.Allocator) anyerror!Run,
+    run: *const fn (Io, std.mem.Allocator, Layout) anyerror!Run,
 };
 
 fn frames(comptime kind: Kind, comptime limits: zui.Limits, comptime Text: type, comptime Scene: type) Entry {
     const warmup_frames, const timed_frames = if (kind == .compared_frames) .{ 20, 400 } else .{ 2, 20 };
     return .{ .name = Scene.name, .kind = kind, .run = struct {
-        fn run(io: Io, gpa: std.mem.Allocator) anyerror!Run {
-            return .{ .frames = try Scenario(limits, Text, Scene).run(io, gpa, warmup_frames, timed_frames) };
+        fn run(io: Io, gpa: std.mem.Allocator, layout: Layout) anyerror!Run {
+            return .{ .frames = try Scenario(limits, Text, Scene).run(io, gpa, layout, warmup_frames, timed_frames) };
         }
     }.run };
 }
 
 fn startup(comptime name: []const u8, comptime timeStartup: anytype) Entry {
     return .{ .name = name, .kind = .startup, .run = struct {
-        fn run(io: Io, gpa: std.mem.Allocator) anyerror!Run {
+        fn run(io: Io, gpa: std.mem.Allocator, _: Layout) anyerror!Run {
             return .{ .startup = try timeStartup(io, gpa) };
         }
     }.run };
 }
 
-fn timeRenderThread(io: Io, gpa: std.mem.Allocator) anyerror!Run {
+fn timeRenderThread(io: Io, gpa: std.mem.Allocator, _: Layout) anyerror!Run {
     return .{ .render_thread = .{
         .one_thread = try framesPerSecond(io, gpa, false),
         .render_thread = try framesPerSecond(io, gpa, true),
@@ -446,14 +542,16 @@ const Options = struct {
     /// Indices into `entries`; empty runs every scenario.
     selected: std.ArrayList(usize) = .empty,
     order_seed: ?u64 = null,
+    counters: bool = false,
 };
 
 /// What `--capabilities` prints, so `bench-compare` can tell which options
 /// a commit's benchmark understands. A benchmark from before this option
 /// fails on it with `UnknownArgument`. `bench-install` names the build
 /// step that installs this executable, so it can be run without the build
-/// runner.
-const capabilities = "core machine-json scenarios bench-install";
+/// runner. `layout-seed` reads `ZUI_BENCH_LAYOUT_SEED`; `code-layout` is
+/// the `-Dbench-layout-seed` build option.
+const capabilities = "core machine-json scenarios bench-install layout-seed code-layout counters";
 
 fn parseOptions(arena: std.mem.Allocator, arguments: []const [:0]const u8) !Options {
     var options: Options = .{};
@@ -492,12 +590,14 @@ fn parseOptions(arena: std.mem.Allocator, arguments: []const [:0]const u8) !Opti
                 std.debug.print("--order-seed needs a whole number, got \"{s}\"\n", .{arguments[index]});
                 return error.InvalidArgument;
             };
+        } else if (std.mem.eql(u8, argument, "--counters")) {
+            options.counters = true;
         } else if (std.mem.eql(u8, argument, "--compare")) {
             std.debug.print("--compare was removed: compare two commits with `zig build bench-compare -- <base> [<head>]`\n", .{});
             return error.UnknownArgument;
         } else {
             std.debug.print("unknown argument \"{s}\"; expected --json <path>, --check-targets, --core <n>, --machine-json <path>,\n" ++
-                "--scenario <name>, --order-seed <n>, --list-scenarios or --capabilities\n", .{argument});
+                "--scenario <name>, --order-seed <n>, --counters, --list-scenarios or --capabilities\n", .{argument});
             return error.UnknownArgument;
         }
     }
@@ -535,11 +635,48 @@ fn microseconds(nanoseconds: u64) f64 {
     return @as(f64, @floatFromInt(nanoseconds)) / std.time.ns_per_us;
 }
 
+fn openCounters() !counters.Group {
+    return counters.Group.open() catch |err| {
+        switch (err) {
+            error.Unsupported => std.debug.print("--counters needs Linux; {s}\n", .{counters.alternatives}),
+            error.CountersNotPermitted => std.debug.print("--counters was refused: /proc/sys/kernel/perf_event_paranoid must be 2 or lower\n", .{}),
+            error.CounterUnavailable => std.debug.print("--counters: this machine does not expose its hardware counters; {s}\n", .{counters.alternatives}),
+        }
+        return err;
+    };
+}
+
+fn printCounters(out: *Io.Writer, runs: []const ?Run) !void {
+    var printed_header = false;
+    for (runs) |maybe_run| {
+        const measurement = if (maybe_run) |run| switch (run) {
+            .frames => |frames_run| frames_run,
+            else => continue,
+        } else continue;
+        const phases = [_]struct { []const u8, ?counters.Counts }{ .{ "declare", measurement.declare_counts }, .{ "layout", measurement.layout_counts } };
+        for (phases) |phase| {
+            const counts = phase[1] orelse continue;
+            if (!printed_header) {
+                try out.print("\n{s:<38}", .{"fewest per frame"});
+                for (std.enums.values(counters.Event)) |event| try out.print(" {s:>15}", .{event.label()});
+                try out.print(" {s:>6}\n", .{"IPC"});
+                printed_header = true;
+            }
+            var label_buffer: [64]u8 = undefined;
+            try out.print("{s:<38}", .{std.fmt.bufPrint(&label_buffer, "{s}, {s}", .{ measurement.name, phase[0] }) catch measurement.name});
+            for (counts) |count| try out.print(" {d:>15}", .{count});
+            const cycles: f64 = @floatFromInt(counts[@intFromEnum(counters.Event.cycles)]);
+            const instructions: f64 = @floatFromInt(counts[@intFromEnum(counters.Event.instructions)]);
+            try out.print(" {d:>6.2}\n", .{instructions / cycles});
+        }
+    }
+}
+
 /// One fastest time `bench-compare` compares. The layout time keeps the
 /// scenario's bare name, so it still matches results from before the
 /// declaration time was recorded.
 const ComparedTime = struct {
-    key_buffer: [64]u8,
+    key_buffer: [96]u8,
     key_len: usize,
     nanoseconds: u64,
 
@@ -552,9 +689,19 @@ const ComparedTime = struct {
         time.key_len = (std.fmt.bufPrint(&time.key_buffer, key_format, .{name}) catch unreachable).len;
         return time;
     }
+
+    /// A counter rides in the same map as the times, its key ending in
+    /// the event's label; `nanoseconds` then holds the count.
+    fn initCounter(name: []const u8, phase: []const u8, event: []const u8, count: u64) ComparedTime {
+        var time: ComparedTime = .{ .key_buffer = undefined, .key_len = undefined, .nanoseconds = count };
+        time.key_len = (std.fmt.bufPrint(&time.key_buffer, "{s}{s}, {s}", .{ name, phase, event }) catch unreachable).len;
+        return time;
+    }
 };
 
-fn comparedTimes(runs: []const ?Run, times: *[2 * entries.len]ComparedTime) []const ComparedTime {
+const max_compared_values = (2 + 2 * counters.event_count) * entries.len;
+
+fn comparedTimes(runs: []const ?Run, times: *[max_compared_values]ComparedTime) []const ComparedTime {
     var count: usize = 0;
     for (runs, entries) |maybe_run, entry| {
         const run = maybe_run orelse continue;
@@ -563,6 +710,15 @@ fn comparedTimes(runs: []const ?Run, times: *[2 * entries.len]ComparedTime) []co
                 times[count] = .init("{s}", measurement.name, measurement.layout.min_ns);
                 times[count + 1] = .init("{s}, declare", measurement.name, measurement.declare.min_ns);
                 count += 2;
+                // A base without counters shows these as only in head.
+                const phases = [_]struct { []const u8, ?counters.Counts }{ .{ "", measurement.layout_counts }, .{ ", declare", measurement.declare_counts } };
+                for (phases) |phase| {
+                    const counts = phase[1] orelse continue;
+                    for (std.enums.values(counters.Event), counts) |event, value| {
+                        times[count] = .initCounter(measurement.name, phase[0], event.label(), value);
+                        count += 1;
+                    }
+                }
             },
             .startup => |measurement| {
                 times[count] = .init("{s}", measurement.name, measurement.spread.min_ns);
@@ -590,21 +746,26 @@ pub fn main(init: std.process.Init) !void {
         for (entries) |entry| try out.print("{s}\t{s}\n", .{ entry.name, entry.kind.listedAs() });
         return out.flush();
     }
+    var layout = try Layout.read(init.environ_map);
+    var counter_group: ?counters.Group = if (options.counters) try openCounters() else null;
+    defer if (counter_group) |*group| group.close();
+    if (counter_group) |*group| layout.counter_group = group;
     if (options.core) |core| try pinAndRaisePriority(core);
     if (options.machine_json_path) |path| try writeMachineJson(io, arena, path, options.core);
 
     var runs: [entries.len]?Run = @splat(null);
     for (try runOrder(arena, options.selected.items, options.order_seed)) |entry_index| {
-        runs[entry_index] = try entries[entry_index].run(io, gpa);
+        runs[entry_index] = try layout.runShifted(entries[entry_index], io, gpa);
     }
 
     const missed_target = try printFrames(out, &runs);
     try printRates(out, &runs);
     try printStartup(out, &runs);
+    try printCounters(out, &runs);
     try printClusterWarnings(out, &runs);
     try out.flush();
 
-    var compared_time_buffer: [2 * entries.len]ComparedTime = undefined;
+    var compared_time_buffer: [max_compared_values]ComparedTime = undefined;
     if (options.json_path) |path| try writeJson(io, path, comparedTimes(&runs, &compared_time_buffer));
     if (options.check_targets and missed_target) return error.TargetMissed;
 }

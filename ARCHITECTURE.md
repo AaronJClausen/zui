@@ -147,6 +147,7 @@ The stage is the one in SPEC.md §21 that builds it.
 | Feature | Lives in | Stage |
 |---|---|---|
 | instruction counts, trace zones | CI; the tracer contract in the core; the Tracy binding in `zui_tracy` | 1 |
+| hardware counters | `bench/counters.zig`, through Linux's `perf_event_open`; read by `bench --counters` and `bench-compare --metric`, never by the core | 1 |
 | frame record, time as an instant, scale and zoom | core | 2 |
 | input as events, many pointers, environment | host reports; core applies | 2 |
 | outside data, demand, `Status`, `Waker` | core contract; default sources in `zui_async` | 2 |
