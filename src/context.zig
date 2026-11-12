@@ -1354,18 +1354,19 @@ pub fn Context(comptime config: Config) type {
                 .pointer_down => |down| {
                     const contact = self.contactFor(frame, down.pointer) orelse continue;
                     contact.pointer = down.pointer;
-                    const hot = self.refreshHover(contact);
+                    const pressed_region = self.topmostAt(down.pointer.position);
+                    const hot = self.refreshHoverFrom(contact, pressed_region);
                     contact.buttons.insert(down.button);
                     if (down.button == .primary) {
                         self.press(contact, hot);
                         if (features.gestures) {
                             contact.gesture = .pressedAt(down.pointer);
-                            contact.gesture.long_press_owner = self.longPressOwner(down.pointer.position);
-                            contact.gesture.recognizer = self.recognizerAt(down.pointer.position);
+                            contact.gesture.long_press_owner = self.longPressOwner(down.pointer.position, pressed_region);
+                            contact.gesture.recognizer = self.recognizerAt(down.pointer.position, pressed_region);
                             if (contact.gesture.recognizer != 0) input_state.recognize(contact.gesture.recognizer, event);
                             if (contact.gesture.long_press_owner != 0) input_state.timers_armed = true;
                             self.stopCoastingAt(down.pointer.position);
-                            self.startZoom(contact);
+                            self.startZoom(contact, pressed_region);
                         }
                     }
                     if (down.button == .secondary) contact.secondary_target = if (hot) |region| if (results.regions[region].flags.disabled) 0 else results.regions[region].hash else 0;
@@ -1472,12 +1473,23 @@ pub fn Context(comptime config: Config) type {
         /// Hit-tests the contact where it is, rebuilds its hover chain, and
         /// returns the hot region: the topmost interactive one under it.
         fn refreshHover(self: *Self, contact: *InputState.Slot) ?u32 {
+            return self.refreshHoverFrom(contact, self.topmostAt(contact.pointer.position));
+        }
+
+        /// The topmost region at `position` in the previous frame, if any.
+        fn topmostAt(self: *const Self, position: [2]f32) ?u32 {
+            const results = &self.memory.results;
+            if (!results.has_frame) return null;
+            return results.topmostAt(position);
+        }
+
+        /// `refreshHover` with the contact's hit test already done.
+        fn refreshHoverFrom(self: *Self, contact: *InputState.Slot, topmost: ?u32) ?u32 {
             const results = &self.memory.results;
             contact.hover_stale = false;
             contact.hover_count = 0;
-            if (!results.has_frame) return null;
             const point = contact.pointer.position;
-            var region_index = results.topmostAt(point) orelse return null;
+            var region_index = topmost orelse return null;
             var hot: ?u32 = null;
             while (region_index != interaction.no_region) : (region_index = results.regions[region_index].parent) {
                 const region = results.regions[region_index];
@@ -1641,10 +1653,9 @@ pub fn Context(comptime config: Config) type {
             }
         }
 
-        fn recognizerAt(self: *Self, position: [2]f32) u64 {
+        fn recognizerAt(self: *Self, position: [2]f32, topmost: ?u32) u64 {
             const results = &self.memory.results;
-            if (!results.has_frame) return 0;
-            var region_index = results.topmostAt(position) orelse return 0;
+            var region_index = topmost orelse return 0;
             while (region_index != interaction.no_region) : (region_index = results.regions[region_index].parent) {
                 const region = &results.regions[region_index];
                 if (region.gestures.custom and !region.flags.disabled and region.bounds.contains(position)) return region.hash;
@@ -1683,10 +1694,9 @@ pub fn Context(comptime config: Config) type {
             if (features.gestures and region.gestures.double_tap) input_state.tapDelayed(region.hash, released_at) else input_state.addClick(region.hash);
         }
 
-        fn longPressOwner(self: *Self, position: [2]f32) u64 {
+        fn longPressOwner(self: *Self, position: [2]f32, topmost: ?u32) u64 {
             const results = &self.memory.results;
-            if (!results.has_frame) return 0;
-            var region_index = results.topmostAt(position) orelse return 0;
+            var region_index = topmost orelse return 0;
             while (region_index != interaction.no_region) : (region_index = results.regions[region_index].parent) {
                 const region = &results.regions[region_index];
                 if (region.gestures.long_press and !region.flags.disabled and region.bounds.contains(position)) return region.hash;
@@ -1732,15 +1742,14 @@ pub fn Context(comptime config: Config) type {
         /// A second pointer pressed while another is down, both within an
         /// element that accepts zoom, makes the two zoom the innermost such
         /// element, taking both from whatever else they pressed or panned.
-        fn startZoom(self: *Self, contact: *InputState.Slot) void {
+        fn startZoom(self: *Self, contact: *InputState.Slot, topmost: ?u32) void {
             const results = &self.memory.results;
-            if (!results.has_frame) return;
             if (contact.gesture.held()) return;
             const partner = for (&self.memory.input.contacts) |*slot| {
                 if (slot.*) |*other| if (other != contact and other.buttons.contains(.primary) and !other.gesture.zooming and !other.gesture.held() and other.gesture.drag_source == 0) break other;
             } else return;
             const position = contact.pointer.position;
-            var region_index = results.topmostAt(position) orelse return;
+            var region_index = topmost orelse return;
             const owner = while (region_index != interaction.no_region) : (region_index = results.regions[region_index].parent) {
                 const region = &results.regions[region_index];
                 if (region.zooms() and region.bounds.contains(position) and region.bounds.contains(partner.pointer.position)) break region;

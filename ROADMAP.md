@@ -63,8 +63,7 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
-| P8. One hit test per press | audit | `src/context.zig` | | next |
-| P9. Wrapped lines kept with the string cache | audit | `src/text.zig`, `src/layout.zig` | | |
+| P9. Wrapped lines kept with the string cache | audit | `src/text.zig`, `src/layout.zig` | | next |
 | P10. Cache probes over keys alone | audit | `src/text.zig`, `src/layout.zig` | | |
 | P11. Flat child lists | audit | `src/context.zig`, `src/layout.zig` | | |
 | G1. Gradients, shadows and glow | 8 | `src/style.zig`, `src/emission.zig`, `zui_testing/` | | |
@@ -141,6 +140,29 @@ Things to know:
 ---
 
 ## Done
+
+### P8. One hit test per press
+
+**Grounding.** A primary `pointer_down` ran `Results.topmostAt` in
+`refreshHover`, `longPressOwner` and `recognizerAt`, and `startZoom` a
+fourth time when another contact was down, each at the same point over
+the same results.
+
+**Plan.** Hit-test once per press. **Done when:** `4096 interactive,
+pressed` runs fewer instructions in its declaration by `counts`, and no
+scenario is slower.
+
+The press hit-tests once and hands the region to the four; a move, a
+release and the wheel still hit-test for themselves. `zig build counts`
+against `b0106bd`: `4096 interactive, pressed` declares in 2.6% fewer
+instructions (1,303,365 to 1,269,280, `beginFrame`'s events included),
+with 10.3% fewer simulated D1 misses; nothing else changed.
+`zig build bench-compare -- b0106bd` calls nothing faster or slower: the
+scene presses on every other frame, and `bench` keeps each scene's
+fastest frame, which is always a release, so the clock cannot see a
+press.
+
+**Spec.** §11.
 
 ### P7. A narrow id → rect table
 
@@ -2314,26 +2336,14 @@ Done: I5 and I1 are in *Done*.
 `DOD-AUDIT-2026-11-09-5b032b7.md` found the costs next to the layout
 sweeps, in paths no benchmark ran until `db4ea4d` added scenes for them:
 floating layers, ids on every element, and a pointer pressing. The owner
-put its findings ahead of stage 8. P6, the layer sort, and P7, the id →
-rect table, are in *Done*. Its
+put its findings ahead of stage 8. P6, the layer sort, P7, the id → rect
+table, and P8, one hit test per press, are in *Done*. Its
 finding 7, render commands that copy their text style, is not taken: it
 changes every renderer, and no profile shows renderer bandwidth.
 
 Each item is judged by `bench-compare` against its parent, with turbo
 off, and by `counts`; one that costs more elsewhere than it saves in its
 scene does not ship.
-
-### P8. One hit test per press
-
-**Grounding.** One primary `pointer_down` (`src/context.zig:1354-1369`)
-runs `Results.topmostAt` (`src/interaction.zig:209`) in `refreshHover`,
-`longPressOwner` and `recognizerAt`, and `startZoom` a fourth time when
-another contact is down, each at the same point over the same results.
-
-**Plan.** Hit-test once per press and hand the region to each.
-
-**Done when:** `4096 interactive, pressed` runs fewer instructions in its
-declaration by `counts`, and no scenario is slower.
 
 ### P9. Wrapped lines kept with the string cache
 
