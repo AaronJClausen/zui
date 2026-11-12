@@ -54,7 +54,7 @@ pub fn run(comptime Ui: type, ui: *Ui, frame: *Ui.Frame) void {
     var depth: usize = 0;
     for (1..frame.element_count) |index| {
         const element: Ui.Index = @intCast(index);
-        while (levels[depth].subtree_end <= element) : (depth -= 1) emitter.leave(&levels[depth]);
+        while (levels[depth].subtree_end <= element) : (depth -= 1) emitter.leave(&levels[depth], levels[depth - 1].z);
         if (!frame.flags[element].emits() and frame.decorationOf(element) == null and frame.kindOf(element) == .none) continue;
         if (emitter.enter(element, levels[depth], viewport)) |level| {
             depth += 1;
@@ -62,16 +62,16 @@ pub fn run(comptime Ui: type, ui: *Ui, frame: *Ui.Frame) void {
         }
     }
     while (true) : (depth -= 1) {
-        emitter.leave(&levels[depth]);
+        emitter.leave(&levels[depth], if (depth == 0) 0 else levels[depth - 1].z);
         if (depth == 0) break;
     }
     frame.diagnostics.needed.set(.max_render_commands, emitter.attempted_commands);
     emitting.end();
 
-    if (frame.floating_count != 0) {
+    if (emitter.layered_run_count != 0 or emitter.layered_runs_overflowed) {
         const sorting = Ui.Tracing.begin(.sort_layers);
         defer sorting.end();
-        std.sort.block(Ui.RenderCommand, frame.render_commands[0..frame.command_count], {}, lowerLayer(Ui));
+        emitter.sortLayers();
     }
 }
 
@@ -96,6 +96,17 @@ fn Emitter(comptime Ui: type) type {
         units_per_pixel: f32,
         /// Reported as `needed.render_commands` once emission ends.
         attempted_commands: u32 = 0,
+        /// Each run of commands in one layer other than 0, in the order
+        /// emitted, so sorting moves only what is out of place. Past
+        /// `max_layered_runs`, the whole frame is sorted instead.
+        layered_runs: [max_layered_runs]LayeredRun = undefined,
+        layered_run_count: u32 = 0,
+        current_z: i16 = 0,
+        layered_out_of_order: bool = false,
+        layered_runs_overflowed: bool = false,
+
+        const max_layered_runs = 64;
+        const LayeredRun = struct { start: u32, end: u32, z: i16 };
 
         fn rectOf(self: *const Self, element: Ui.Index) style.Rect {
             return .{
@@ -127,6 +138,71 @@ fn Emitter(comptime Ui: type) type {
             }
             frame.render_commands[frame.command_count] = command;
             frame.command_count += 1;
+        }
+
+        /// Called where the layer can change: entering a floating element,
+        /// and leaving one for its parent's layer.
+        fn switchLayer(self: *Self, z: i16) void {
+            if (z == self.current_z) return;
+            const here = self.frame.command_count;
+            if (self.current_z != 0) self.endLayeredRun(here);
+            self.current_z = z;
+            if (z == 0) return;
+            if (self.layered_run_count != 0) {
+                const previous = &self.layered_runs[self.layered_run_count - 1];
+                if (previous.end == here and previous.z == z) {
+                    previous.end = std.math.maxInt(u32);
+                    return;
+                }
+                self.layered_out_of_order = self.layered_out_of_order or z < previous.z;
+            }
+            if (self.layered_run_count == max_layered_runs) {
+                self.layered_runs_overflowed = true;
+                return;
+            }
+            self.layered_runs[self.layered_run_count] = .{ .start = here, .end = std.math.maxInt(u32), .z = z };
+            self.layered_run_count += 1;
+        }
+
+        fn endLayeredRun(self: *Self, here: u32) void {
+            if (self.layered_run_count == 0) return;
+            const layered_run = &self.layered_runs[self.layered_run_count - 1];
+            if (layered_run.end != std.math.maxInt(u32)) return;
+            layered_run.end = here;
+            if (layered_run.start == here) self.layered_run_count -= 1;
+        }
+
+        /// Reorders the commands as a stable sort by layer would. The
+        /// layered runs are gathered in the unused end of the commands, so
+        /// layer 0's commands each move at most once, and not at all when
+        /// they all come before every layered run.
+        fn sortLayers(self: *Self) void {
+            const frame = self.frame;
+            const commands = frame.render_commands[0..frame.command_count];
+            const runs = self.layered_runs[0..self.layered_run_count];
+            var layered_count: usize = 0;
+            for (runs) |layered_run| layered_count += layered_run.end - layered_run.start;
+            const fits = !self.layered_runs_overflowed and frame.render_commands.len - commands.len >= layered_count;
+            if (!fits) return std.sort.block(Ui.RenderCommand, commands, {}, lowerLayer(Ui));
+            if (layered_count == 0) return;
+
+            const gathered = frame.render_commands[frame.render_commands.len - layered_count ..];
+            var gathered_count: usize = 0;
+            var layer_zero_count: usize = runs[0].start;
+            for (runs, 0..) |layered_run, index| {
+                @memcpy(gathered[gathered_count..][0 .. layered_run.end - layered_run.start], commands[layered_run.start..layered_run.end]);
+                gathered_count += layered_run.end - layered_run.start;
+                const layer_zero_end = if (index + 1 < runs.len) runs[index + 1].start else commands.len;
+                std.mem.copyForwards(Ui.RenderCommand, frame.render_commands[layer_zero_count..], commands[layered_run.end..layer_zero_end]);
+                layer_zero_count += layer_zero_end - layered_run.end;
+            }
+            if (self.layered_out_of_order) std.sort.block(Ui.RenderCommand, gathered, {}, lowerLayer(Ui));
+            const below_count = for (gathered, 0..) |command, index| {
+                if (command.z > 0) break index;
+            } else gathered.len;
+
+            std.mem.copyForwards(Ui.RenderCommand, frame.render_commands[layer_zero_count..], gathered);
+            if (below_count != 0) std.mem.rotate(Ui.RenderCommand, frame.render_commands[0 .. layer_zero_count + below_count], layer_zero_count);
         }
 
         /// Returns the level the element's subtree is drawn in, or null if
@@ -196,6 +272,7 @@ fn Emitter(comptime Ui: type) type {
         fn floatingLayer(self: *Self, floating: Ui.Index, parent_clip: style.Rect, viewport: style.Rect) Layer {
             const frame = self.frame;
             const config = frame.floatingOf(floating);
+            self.switchLayer(config.z);
             if (config.clip == .none) return .{ .clip = viewport, .z = config.z };
             const target_clip = self.floatingTargetClip(floating, parent_clip, viewport);
             const clip = target_clip.intersect(clipBox(frame.flags[floating], self.rectOf(floating), target_clip));
@@ -256,9 +333,10 @@ fn Emitter(comptime Ui: type) type {
             }
         }
 
-        fn leave(self: *Self, level: *const Level) void {
+        fn leave(self: *Self, level: *const Level, outer_z: i16) void {
             self.closeSubtree(level);
             if (level.pushed_clip) self.push(.{ .bounds = self.snap(level.clip), .id = self.frame.element_id[level.element], .z = level.z, .payload = .clip_end });
+            if (level.z != outer_z) self.switchLayer(outer_z);
         }
 
         /// Dividers and the border. Both lie inside the element's box, so

@@ -24,7 +24,7 @@ test "every step of beginFrame and endFrame is a zone, nested in its call" {
     var sources: TracedUi.Sources = .{};
     ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 800, 600 } } }, &sources);
     ui.text("traced", .{});
-    ui.box(.{ .floating = .{ .z = 1 }, .decoration = .{ .background = .black } });
+    ui.box(.{ .floating = .{ .z = 1 }, .layout = .{ .sizing = .{ .width = .fixed(4), .height = .fixed(4) } }, .decoration = .{ .background = .black } });
     ui.release(ui.endFrame());
 
     const Mark = Tracer.Mark;

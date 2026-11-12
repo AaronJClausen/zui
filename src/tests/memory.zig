@@ -173,6 +173,27 @@ test "commands past max_render_commands are dropped and reported" {
     try testing.expectEqual(@as(usize, 4), frame.commands().len);
 }
 
+test "a full frame keeps the commands that fit from every layer, and reports the first one dropped" {
+    var text_contract: support.FixedMetricsText = .{};
+    var ui = try tinyUi(&text_contract);
+    defer ui.deinit(testing.allocator);
+
+    ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 100, 100 } } });
+    const square: zui.Layout = .{ .sizing = .{ .width = .fixed(10), .height = .fixed(10) } };
+    ui.box(.{ .layout = square, .decoration = .{ .background = .white }, .floating = .{ .z = 1 } });
+    ui.box(.{ .layout = square, .decoration = .{ .background = .black, .border = .{ .color = .white, .widths = .all(1) } } });
+    ui.box(.{ .id = .of("last"), .layout = square, .decoration = .{ .background = .black, .border = .{ .color = .white, .widths = .all(1) } } });
+    const frame = ui.endFrame();
+    defer ui.release(frame);
+
+    try testing.expectEqual(@as(u32, 5), frame.diagnostics.needed.get(.max_render_commands));
+    try testing.expectEqual(zui.Id.of("last").hash, frame.diagnostics.first_dropped_id);
+    const commands = frame.commands();
+    try testing.expectEqual(@as(usize, 4), commands.len);
+    try testing.expectEqual(@as(i16, 1), commands[3].z);
+    for (commands[0..3]) |command| try testing.expectEqual(@as(i16, 0), command.z);
+}
+
 // In safe builds the two mistakes below panic with the element's id.
 // Release builds recover and report, which these test.
 

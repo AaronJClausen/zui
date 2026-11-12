@@ -356,6 +356,62 @@ test "floating layers paint last and escape their ancestors' clip" {
     , try support.snapshot(try harness.end(), &buffer));
 }
 
+test "layers paint in order of z, each in declaration order, whatever order they are declared in" {
+    var harness: support.Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    const ui = harness.begin();
+    ui.box(.{ .layout = fixed(1, 1), .decoration = .{ .background = .rgb(0x000003) }, .floating = .{ .z = 3 } });
+    ui.box(.{ .layout = fixed(2, 2), .decoration = .{ .background = .rgb(0x000001) }, .floating = .{ .z = 1 } });
+    ui.box(.{ .layout = fixed(3, 3), .decoration = .{ .background = .rgb(0x000000) } });
+    ui.box(.{ .layout = fixed(4, 4), .decoration = .{ .background = .rgb(0x0000fe) }, .floating = .{ .z = -2 } });
+    ui.box(.{ .layout = fixed(5, 5), .decoration = .{ .background = .rgb(0x000000) } });
+    ui.box(.{ .layout = fixed(6, 6), .decoration = .{ .background = .rgb(0x000001) }, .floating = .{ .z = 1 } });
+    ui.box(.{ .layout = fixed(7, 7), .decoration = .{ .background = .rgb(0x0000ff) }, .floating = .{ .z = -1 } });
+    ui.box(.{ .layout = fixed(8, 8), .decoration = .{ .background = .rgb(0x0000fe) }, .floating = .{ .z = -2 } });
+
+    var buffer: [512]u8 = undefined;
+    try testing.expectEqualStrings(
+        \\rect 0 0 4 4 #0000fe
+        \\rect 0 0 8 8 #0000fe
+        \\rect 0 0 7 7 #0000ff
+        \\rect 0 0 3 3 #000000
+        \\rect 0 3 5 5 #000000
+        \\rect 0 0 2 2 #000001
+        \\rect 0 0 6 6 #000001
+        \\rect 0 0 1 1 #000003
+        \\
+    , try support.snapshot(try harness.end(), &buffer));
+}
+
+test "a frame of many short layers sorts the same as one of few" {
+    var harness: support.Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    const ui = harness.begin();
+    for (0..200) |index| {
+        const z: i16 = @intCast(index % 5);
+        const layer: ?zui.Floating = if (z == 0) null else .{ .z = 3 - z };
+        ui.box(.{ .id = .indexed("box", @intCast(index)), .layout = fixed(1, 1), .decoration = .{ .background = .black }, .floating = layer });
+    }
+    const frame = try harness.end();
+
+    var previous_z: i16 = std.math.minInt(i16);
+    var previous_index: u32 = 0;
+    for (frame.commands()) |command| {
+        const index: u32 = for (0..200) |candidate| {
+            if (zui.Id.indexed("box", @intCast(candidate)).hash == command.id) break @intCast(candidate);
+        } else return error.TestUnexpectedResult;
+        if (command.z == previous_z) try testing.expect(index > previous_index);
+        try testing.expect(command.z >= previous_z);
+        previous_z = command.z;
+        previous_index = index;
+    }
+    try testing.expectEqual(@as(usize, 200), frame.commands().len);
+}
+
 test "floating children add no gap to their parent's flow" {
     var harness: support.Harness = .{};
     try harness.init();

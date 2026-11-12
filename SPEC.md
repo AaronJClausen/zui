@@ -1837,7 +1837,7 @@ build's instruction counts are unchanged.
 | Zone | Encloses |
 |---|---|
 | `begin_frame` | `wait_for_frame`, `evict_state`, `apply_events`, `swap_sources` when `Sources` has a field, `relay` while a listener is attached (§6.3) |
-| `end_frame` | `measure_text`, `fit_widths`, `distribute_widths`, `wrap_text`, `fit_heights`, `distribute_heights`, `position` (§8.2), then `emit`, and `sort_layers` when a frame has floating layers |
+| `end_frame` | `measure_text`, `fit_widths`, `distribute_widths`, `wrap_text`, `fit_heights`, `distribute_heights`, `position` (§8.2), then `emit`, and `sort_layers` when a frame draws outside layer 0 |
 
 - **`zuiBegin` and `zuiEnd` are plain functions,** with no tracer value,
   because profilers keep their state per thread. Both are called on the

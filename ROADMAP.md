@@ -63,6 +63,11 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
+| P7. A narrow id → rect table | audit | `src/interaction.zig`, `src/emission.zig` | | next |
+| P8. One hit test per press | audit | `src/context.zig` | | |
+| P9. Wrapped lines kept with the string cache | audit | `src/text.zig`, `src/layout.zig` | | |
+| P10. Cache probes over keys alone | audit | `src/text.zig`, `src/layout.zig` | | |
+| P11. Flat child lists | audit | `src/context.zig`, `src/layout.zig` | | |
 | G1. Gradients, shadows and glow | 8 | `src/style.zig`, `src/emission.zig`, `zui_testing/` | | |
 | G2. Backdrop blur | 8 | `src/style.zig`, `src/emission.zig`, `zui_testing/` | G1 | |
 | G3. Transforms | 8 | `src/style.zig`, `src/emission.zig`, `src/interaction.zig`, `zui_testing/` | G1 | |
@@ -137,6 +142,45 @@ Things to know:
 ---
 
 ## Done
+
+### P6. The layer sort
+
+**Grounding.** Any frame with a floating element ran `std.sort.block`
+over all its 80-byte commands. With a tooltip declared before a 3,000-cell
+grid, `endFrame` took 670.9 µs, against 81.3 µs declared after it.
+
+**Plan.** Sort only what is out of place. **Done when:** both tooltip
+scenes are faster by `bench-compare`, and no scenario is slower.
+
+A frame's commands change layer only where emission enters a floating
+element or leaves one, so the emitter records each run of commands
+outside layer 0 there, and `push` is unchanged. After emission, the runs
+are gathered into the unused end of the commands; layer 0's commands
+close up behind them, each moving at most once and not at all when no
+run comes before them; the gathered runs are sorted only if their layers
+were emitted out of order, and copied back in place, the layers below 0
+rotated in front. Past 64 runs, or without room at the end, the whole
+frame is sorted as before. The `sort_layers` zone now runs when a frame
+draws outside layer 0, not when it merely declares a floating element.
+
+`zig build bench-compare -- fb3c7bd` (100 rounds over 3 layouts, turbo
+off, pinned): tooltip first −88.2% (671.0 to 79.4 µs), tooltip last
+−9.8% (81.3 to 73.4 µs); nothing slower. `zig build counts`: tooltip
+first's `endFrame` −86.4% (5,853,440 to 798,765 instructions), tooltip
+last's −7.6%; the other scenes' `endFrame` +0.1% to +1.0%, from the layer
+check when a level ends.
+
+Tried and dropped, each measured by `counts`:
+- **layered commands written backwards from the end in `push`,** as the
+  audit sketched: up to +2.9% instructions in scenes with no floating
+  element, as `push` choosing between two destinations kept LLVM from
+  building each command in place;
+- **one cursor and step in `push`, switched out of line:** up to +5.5%,
+  from the call on its path;
+- **the level's clip and layer endings in one packed byte:** up to
+  +3.7%.
+
+**Spec.** §16 (the tracer's zones), §17.2.
 
 ### I1. Drag and drop between elements
 
@@ -2237,6 +2281,97 @@ Done: T1, T2, L8, P4, P5, T4, L1, L2, L3, L4, L6, L7 and C10 are in
 ## Stage 7: gestures
 
 Done: I5 and I1 are in *Done*.
+
+---
+
+## The data-oriented design audit
+
+`DOD-AUDIT-2026-11-09-5b032b7.md` found the costs next to the layout
+sweeps, in paths no benchmark ran until `db4ea4d` added scenes for them:
+floating layers, ids on every element, and a pointer pressing. The owner
+put its findings ahead of stage 8. P6, the layer sort, is in *Done*. Its
+finding 7, render commands that copy their text style, is not taken: it
+changes every renderer, and no profile shows renderer bandwidth.
+
+Each item is judged by `bench-compare` against its parent, with turbo
+off, and by `counts`; one that costs more elsewhere than it saves in its
+scene does not ship.
+
+### P7. A narrow id → rect table
+
+**Grounding.** `Results.entries` (`src/interaction.zig:144-198`) is
+`nextPowerOfTwo(2 × max_elements)` slots of 32 bytes, 256 KiB at the
+default limits, written at random once per element with an id
+(`src/emission.zig`, `results.insert` in `enter`) and read by
+`widgetState`, `rectOf`, coasting and zoom. `regionFlags` then makes a
+second dependent read into `regions`. The audit's standalone model
+measured 4,000 cold inserts at 28.4 µs against 8.9 µs for a table of
+2-byte indices into dense entries.
+
+**Plan.** A table of the smallest index type into `entries`, which are
+dense in emission order, with the slot each entry took so `clear` resets
+only those; the region's flags copied into the entry, in its padding.
+
+**Done when:** `4096 interactive boxes` and `4096 interactive, pressed`
+are faster by `bench-compare`, and no scenario slower.
+
+### P8. One hit test per press
+
+**Grounding.** One primary `pointer_down` (`src/context.zig:1354-1369`)
+runs `Results.topmostAt` (`src/interaction.zig:209`) in `refreshHover`,
+`longPressOwner` and `recognizerAt`, and `startZoom` a fourth time when
+another contact is down, each at the same point over the same results.
+
+**Plan.** Hit-test once per press and hand the region to each.
+
+**Done when:** `4096 interactive, pressed` runs fewer instructions in its
+declaration by `counts`, and no scenario is slower.
+
+### P9. Wrapped lines kept with the string cache
+
+**Grounding.** `wrapTexts` (`src/layout.zig:650`) wraps every text wider
+than its box from its bytes every frame (`wrapLines`, `src/text.zig:597`),
+though a warm hit in the string cache already proves the text unchanged.
+The warm text wall's `endFrame` is about 50 µs more than the single-line
+wall's, which also counts emitting the extra lines.
+
+**Plan.** First measure the `.wrap_text` zone in the warm text wall; if
+it is under about 10 µs, retire this item. Otherwise keep the line breaks
+of texts with few lines, and the width they were wrapped at, beside the
+cached string, and copy them on a hit at the same width.
+
+**Done when:** warm text is faster by `bench-compare`, cold text no
+slower, and the string cache's growth is recorded against SPEC.md
+§20.2's memory.
+
+### P10. Cache probes over keys alone
+
+**Grounding.** `LruTable` (`src/text.zig:184`) keeps each key with its
+value, so a probe window of 8 steps over 104-byte string entries can touch
+8 cache lines, and `measureTexts` (`src/layout.zig:38`) resolves one text
+at a time.
+
+**Plan.** Only after a profile of `1000 new strings` and the cold text
+wall points at the probes: keys and ages in arrays of their own, and the
+next texts' keys prefetched.
+
+**Done when:** the cold scenes are faster by `bench-compare`, warm text
+no slower; or retired with the profile that shows the probes are not the
+cost.
+
+### P11. Flat child lists
+
+**Grounding.** `Frame.Children.next` (`src/context.zig:487`) and
+`FlowChildren` (`src/layout.zig:76`) step to each sibling through
+`subtree_end`, one dependent load at a time.
+
+**Plan.** Only after `perf` attributes cycles of `4000 children of one
+parent` to these walks: child indices in one array, built after
+declaration from `child_counts` and a prefix sum. P4 recorded that
+reshaping these passes cost 3% to 17% before.
+
+**Done when:** the wide tree is faster by `bench-compare` and the box tree
+no slower; or retired with the profile.
 
 ---
 
