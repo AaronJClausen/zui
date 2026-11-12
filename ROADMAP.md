@@ -70,7 +70,7 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
-| P11. Flat child lists | audit | `src/context.zig`, `src/layout.zig` | | next |
+| P11. Flat child lists | audit | `src/context.zig`, `src/layout.zig` | | waiting on the owner: retire it on the profile below? |
 | G1. Gradients, shadows and glow | 8 | `src/style.zig`, `src/emission.zig`, `zui_testing/` | | |
 | G2. Backdrop blur | 8 | `src/style.zig`, `src/emission.zig`, `zui_testing/` | G1 | |
 | G3. Transforms | 8 | `src/style.zig`, `src/emission.zig`, `src/interaction.zig`, `zui_testing/` | G1 | |
@@ -2445,6 +2445,16 @@ reshaping these passes cost 3% to 17% before.
 
 **Done when:** the wide tree is faster by `bench-compare` and the box tree
 no slower; or retired with the profile.
+
+**Status.** Profiled at `85242fc`; nothing built. `perf` is not installed
+on the reference machine, so the cycles are not attributed to lines, but
+the profile does not point at the walks. Under Callgrind, `Children.next`
+takes 24,000 steps a frame in `4000 children of one parent`, 5.5% of its
+`endFrame` instructions. `bench --counters` (turbo off, pinned) counts
+that `endFrame` at 877,162 instructions in 289,703 cycles, 3.0 a cycle,
+with 34 branch misses and no last-level misses: a pass waiting on a chain
+of dependent loads could not keep that rate. The box tree runs 3.1 a
+cycle. Retiring the item is the owner's decision.
 
 ---
 
