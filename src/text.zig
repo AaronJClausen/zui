@@ -178,10 +178,16 @@ pub fn fontBits(font: anytype) u64 {
     };
 }
 
+/// Whether a table keeps each key and age with its value, which a hit
+/// reads in one cache line, or apart from the values, which lets a probe
+/// window's keys share a line or two: worth it for large values, which a
+/// miss would otherwise walk one line each.
+const KeyLayout = enum { with_values, apart };
+
 /// An open-addressed table keyed by 64-bit hashes, 0 marking an empty
 /// entry. It outlives frames; a full probe window gives up its least
 /// recently used entry.
-fn LruTable(comptime Value: type, comptime entry_count: u32) type {
+fn LruTable(comptime Value: type, comptime entry_count: u32, comptime key_layout: KeyLayout) type {
     return struct {
         const Self = @This();
         const probe_window = 8;
@@ -192,20 +198,36 @@ fn LruTable(comptime Value: type, comptime entry_count: u32) type {
             value: Value,
         };
 
-        entries: [entry_count]Entry,
+        entries: if (key_layout == .with_values) [entry_count]Entry else void,
+        keys: if (key_layout == .apart) [entry_count]u64 else void,
+        ages: if (key_layout == .apart) [entry_count]u32 else void,
+        values: if (key_layout == .apart) [entry_count]Value else void,
+
+        inline fn keyAt(self: *Self, index: usize) *u64 {
+            return if (key_layout == .apart) &self.keys[index] else &self.entries[index].key;
+        }
+
+        inline fn lastUsedAt(self: *Self, index: usize) *u32 {
+            return if (key_layout == .apart) &self.ages[index] else &self.entries[index].last_used;
+        }
+
+        inline fn valueAt(self: anytype, index: usize) if (@typeInfo(@TypeOf(self)).pointer.is_const) *const Value else *Value {
+            return if (key_layout == .apart) &self.values[index] else &self.entries[index].value;
+        }
 
         fn clear(self: *Self) void {
-            for (&self.entries) |*entry| entry.key = 0;
+            for (0..entry_count) |index| self.keyAt(index).* = 0;
         }
 
         /// Marks a hit as used in `generation`, so it is evicted last.
         fn lookup(self: *Self, key: u64, generation: u32) ?*Value {
             for (0..probe_window) |step| {
-                const entry = &self.entries[(@as(usize, @truncate(key)) +% step) & (entry_count - 1)];
-                if (entry.key == 0) return null;
-                if (entry.key == key) {
-                    entry.last_used = generation;
-                    return &entry.value;
+                const index = (@as(usize, @truncate(key)) +% step) & (entry_count - 1);
+                const found_key = self.keyAt(index).*;
+                if (found_key == 0) return null;
+                if (found_key == key) {
+                    self.lastUsedAt(index).* = generation;
+                    return self.valueAt(index);
                 }
             }
             return null;
@@ -220,25 +242,24 @@ fn LruTable(comptime Value: type, comptime entry_count: u32) type {
             var replace_age: u32 = 0;
             for (0..probe_window) |step| {
                 const index = (home +% step) & (entry_count - 1);
-                const entry = &self.entries[index];
-                if (entry.key == key) {
-                    entry.last_used = generation;
-                    return .{ .value = &entry.value, .index = @intCast(index), .was_present = true };
+                const found_key = self.keyAt(index).*;
+                if (found_key == key) {
+                    self.lastUsedAt(index).* = generation;
+                    return .{ .value = self.valueAt(index), .index = @intCast(index), .was_present = true };
                 }
-                if (entry.key == 0) {
+                if (found_key == 0) {
                     replace_index = index;
                     break;
                 }
-                const age = generation -% entry.last_used;
+                const age = generation -% self.lastUsedAt(index).*;
                 if (age >= replace_age) {
                     replace_age = age;
                     replace_index = index;
                 }
             }
-            const entry = &self.entries[replace_index];
-            entry.key = key;
-            entry.last_used = generation;
-            return .{ .value = &entry.value, .index = @intCast(replace_index), .was_present = false };
+            self.keyAt(replace_index).* = key;
+            self.lastUsedAt(replace_index).* = generation;
+            return .{ .value = self.valueAt(replace_index), .index = @intCast(replace_index), .was_present = false };
         }
 
         /// For a key `lookup` just missed: the first empty entry in the
@@ -249,21 +270,19 @@ fn LruTable(comptime Value: type, comptime entry_count: u32) type {
             var replace_age: u32 = 0;
             for (0..probe_window) |step| {
                 const index = (@as(usize, @truncate(key)) +% step) & (entry_count - 1);
-                const entry = &self.entries[index];
-                if (entry.key == 0) {
+                if (self.keyAt(index).* == 0) {
                     replace_index = index;
                     break;
                 }
-                const age = generation -% entry.last_used;
+                const age = generation -% self.lastUsedAt(index).*;
                 if (age >= replace_age) {
                     replace_age = age;
                     replace_index = index;
                 }
             }
-            const entry = &self.entries[replace_index];
-            entry.key = key;
-            entry.last_used = generation;
-            return &entry.value;
+            self.keyAt(replace_index).* = key;
+            self.lastUsedAt(replace_index).* = generation;
+            return self.valueAt(replace_index);
         }
     };
 }
@@ -312,8 +331,8 @@ pub fn MeasureCache(comptime FontId: type, comptime segment_entries: u32, compti
         const Self = @This();
         pub const Key = style.MeasureKey(FontId);
 
-        segments: LruTable([2]f32, segment_entries),
-        strings: LruTable(CachedString, string_entries),
+        segments: LruTable([2]f32, segment_entries, .with_values),
+        strings: LruTable(CachedString, string_entries, .apart),
         /// By the index of the string's entry in `strings`.
         wrapped: [string_entries]WrappedLines,
         generation: u32,
@@ -371,14 +390,14 @@ pub fn MeasureCache(comptime FontId: type, comptime segment_entries: u32, compti
         }
 
         /// The string's entry, or one claimed for it, which the caller fills.
-        pub fn findString(self: *Self, key: u64) LruTable(CachedString, string_entries).Found {
+        pub fn findString(self: *Self, key: u64) LruTable(CachedString, string_entries, .apart).Found {
             return self.strings.lookupOrClaim(key, self.generation);
         }
 
         /// The lines the string at `index` was last wrapped into, if that
         /// was at exactly `width`.
         pub fn linesWrappedAt(self: *const Self, index: StringIndex, width: f32) ?[]const WrappedLines.KeptLine {
-            const string = &self.strings.entries[index].value;
+            const string = self.strings.valueAt(index);
             if (string.measured_in == self.generation or string.wrapped_width != width) return null;
             const wrapped = &self.wrapped[index];
             return wrapped.lines[0..wrapped.count];
@@ -388,7 +407,7 @@ pub fn MeasureCache(comptime FontId: type, comptime segment_entries: u32, compti
         /// for the string at `index`, if there are few enough of them and
         /// the text is short enough.
         pub fn keepLines(self: *Self, index: StringIndex, width: f32, base: u32, text_len: usize, lines: []const Line) void {
-            const string = &self.strings.entries[index].value;
+            const string = self.strings.valueAt(index);
             if (string.measured_in == self.generation or lines.len > max_cached_lines or text_len > std.math.maxInt(u16)) return;
             const wrapped = &self.wrapped[index];
             for (lines, wrapped.lines[0..lines.len]) |line, *kept| {

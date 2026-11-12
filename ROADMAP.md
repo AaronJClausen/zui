@@ -70,8 +70,7 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
-| P10. Cache probes over keys alone | audit | `src/text.zig`, `src/layout.zig` | | next |
-| P11. Flat child lists | audit | `src/context.zig`, `src/layout.zig` | | |
+| P11. Flat child lists | audit | `src/context.zig`, `src/layout.zig` | | next |
 | G1. Gradients, shadows and glow | 8 | `src/style.zig`, `src/emission.zig`, `zui_testing/` | | |
 | G2. Backdrop blur | 8 | `src/style.zig`, `src/emission.zig`, `zui_testing/` | G1 | |
 | G3. Transforms | 8 | `src/style.zig`, `src/emission.zig`, `src/interaction.zig`, `zui_testing/` | G1 | |
@@ -146,6 +145,39 @@ Things to know:
 ---
 
 ## Done
+
+### P10. The string cache's keys apart from its values
+
+**Grounding.** Under Callgrind's cache simulation, 39% of cold text's
+simulated D1 read misses in `endFrame` (67,646 of 174,532 over 10
+frames), and 34% of new strings', fell on one line: the string cache's
+probe in `lookupOrClaim`. A text it has not seen walks the whole probe
+window for the least recently used entry, and every step lands on a
+different 112-byte entry, about 7 misses a text.
+
+**Plan.** Keys and ages in arrays of their own. **Done when:** the cold
+scenes are faster by `bench-compare`, warm text no slower.
+
+`LruTable` takes a `KeyLayout`: the string cache keeps its keys and ages
+apart from its values, so a window's 8 keys share one or two lines; the
+segment cache, probed once a word and hit on its first step, keeps each
+key with its 8-byte value, which a hit reads in one line.
+
+`zig build bench-compare -- 5d2eb30` (100 rounds over 3 layouts, turbo
+off, pinned): cold text −2.0% (265.2 to 260.0 µs), warm text −1.2% (69.7
+to 68.9 µs), single-line texts −1.1%, `init` −11.9% (104.9 to 91.8 µs),
+whose reset now walks 8 KiB of keys rather than every entry,
+`initBuffer` −1.3%; nothing slower. This wins back what P9 cost cold
+text and `init`. `zig build counts`: the cold scenes' `endFrame` −0.7%
+instructions with 17.4% fewer simulated D1 misses; warm text's has 5.4%
+more, from its key and its value now on two lines.
+
+Tried and dropped: **both tables split:** +6% to +7% instructions in the
+cold scenes, from three addresses to work out at each of the segment
+cache's probes, once a word. Not tried: prefetching the next texts'
+keys, which the audit also proposed.
+
+**Spec.** §9.3.
 
 ### P9. Wrapped lines kept with the string cache
 
@@ -2391,29 +2423,14 @@ Done: I5 and I1 are in *Done*.
 sweeps, in paths no benchmark ran until `db4ea4d` added scenes for them:
 floating layers, ids on every element, and a pointer pressing. The owner
 put its findings ahead of stage 8. P6 (the layer sort), P7 (the id → rect
-table), P8 (one hit test per press) and P9 (wrapped lines kept with the
-string cache) are in *Done*. Its
+table), P8 (one hit test per press), P9 (wrapped lines kept with the string
+cache) and P10 (the string cache's keys apart) are in *Done*. Its
 finding 7, render commands that copy their text style, is not taken: it
 changes every renderer, and no profile shows renderer bandwidth.
 
 Each item is judged by `bench-compare` against its parent, with turbo
 off, and by `counts`; one that costs more elsewhere than it saves in its
 scene does not ship.
-
-### P10. Cache probes over keys alone
-
-**Grounding.** `LruTable` (`src/text.zig:184`) keeps each key with its
-value, so a probe window of 8 steps over 104-byte string entries can touch
-8 cache lines, and `measureTexts` (`src/layout.zig:38`) resolves one text
-at a time.
-
-**Plan.** Only after a profile of `1000 new strings` and the cold text
-wall points at the probes: keys and ages in arrays of their own, and the
-next texts' keys prefetched.
-
-**Done when:** the cold scenes are faster by `bench-compare`, warm text
-no slower; or retired with the profile that shows the probes are not the
-cost.
 
 ### P11. Flat child lists
 
