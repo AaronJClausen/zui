@@ -949,6 +949,7 @@ test "a cached string lays out as a freshly measured one, at any width and zoom"
         .{ .width = 200, .zoom = 1 },
         .{ .width = 64, .zoom = 2 },
         .{ .width = 64, .zoom = 1 },
+        .{ .width = 64, .zoom = 1 },
     };
     var calls_after_first_frame: u64 = 0;
     for (frames, 0..) |frame_params, index| {
@@ -969,4 +970,35 @@ test "a cached string lays out as a freshly measured one, at any width and zoom"
         if (index == 0) calls_after_first_frame = cached.ui.measureCalls();
         if (index == 1 or index == 2) try testing.expectEqual(calls_after_first_frame, cached.ui.measureCalls());
     }
+}
+
+const OneStringUi = zui.Context(.{
+    .limits = .{ .max_elements = 8, .max_text_bytes = 256, .max_render_commands = 32, .measure_cache_entries = 64, .string_cache_entries = 1 },
+    .Text = support.FixedMetricsText,
+});
+
+fn snapshotTexts(ui: *OneStringUi, texts: []const []const u8, buffer: []u8) ![]const u8 {
+    ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 800, 600 } } });
+    ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(64) } } });
+    for (texts) |content| ui.text(content, .{});
+    ui.close();
+    const frame = ui.endFrame();
+    defer ui.release(frame);
+    try frame.diagnostics.check();
+    return support.snapshot(frame, buffer);
+}
+
+test "a string whose cache entry another takes in the same frame keeps its lines to itself" {
+    var text_contract: support.FixedMetricsText = .{};
+    var ui = try OneStringUi.init(testing.allocator, testing.io, &text_contract);
+    defer ui.deinit(testing.allocator);
+
+    var buffer: [512]u8 = undefined;
+    for (0..2) |_| _ = try snapshotTexts(&ui, &.{"one two three"}, &buffer);
+    _ = try snapshotTexts(&ui, &.{ "one two three", "four five six" }, &buffer);
+    try testing.expectEqualStrings(
+        \\text 0 0 32 16 "four"
+        \\text 0 16 64 16 "five six"
+        \\
+    , try snapshotTexts(&ui, &.{"four five six"}, &buffer));
 }

@@ -211,7 +211,7 @@ fn LruTable(comptime Value: type, comptime entry_count: u32) type {
             return null;
         }
 
-        const Found = struct { value: *Value, was_present: bool };
+        const Found = struct { value: *Value, index: u32, was_present: bool };
 
         /// `lookup` and, on a miss, `claim`, in one walk of the probe window.
         fn lookupOrClaim(self: *Self, key: u64, generation: u32) Found {
@@ -223,7 +223,7 @@ fn LruTable(comptime Value: type, comptime entry_count: u32) type {
                 const entry = &self.entries[index];
                 if (entry.key == key) {
                     entry.last_used = generation;
-                    return .{ .value = &entry.value, .was_present = true };
+                    return .{ .value = &entry.value, .index = @intCast(index), .was_present = true };
                 }
                 if (entry.key == 0) {
                     replace_index = index;
@@ -238,7 +238,7 @@ fn LruTable(comptime Value: type, comptime entry_count: u32) type {
             const entry = &self.entries[replace_index];
             entry.key = key;
             entry.last_used = generation;
-            return .{ .value = &entry.value, .was_present = false };
+            return .{ .value = &entry.value, .index = @intCast(replace_index), .was_present = false };
         }
 
         /// For a key `lookup` just missed: the first empty entry in the
@@ -272,6 +272,10 @@ fn LruTable(comptime Value: type, comptime entry_count: u32) type {
 /// cached by its metrics alone, and measures its runs only to wrap.
 pub const max_cached_runs = 16;
 
+/// Lines the string cache keeps from a text's last wrap. A text that
+/// wraps into more is wrapped again every frame.
+pub const max_cached_lines = 4;
+
 /// A whole text's measurement, in layout units.
 pub const CachedString = struct {
     /// `first_run` is meaningless here, and `line_height` is the font's.
@@ -279,6 +283,21 @@ pub const CachedString = struct {
     run_count: u32,
     /// The first `run_count` are valid when it is at most `max_cached_runs`.
     run_widths: [max_cached_runs]f32,
+    /// What the text was last wrapped at, its lines kept beside the entry;
+    /// NaN, which equals no width, until then.
+    wrapped_width: f32 = std.math.nan(f32),
+    /// A text that found this entry earlier in the same generation found
+    /// another string's.
+    measured_in: u32,
+};
+
+/// Kept apart from `CachedString`, so a frame that only measures does not
+/// stream them through the cache.
+pub const WrappedLines = struct {
+    count: u32,
+    lines: [max_cached_lines]KeptLine,
+
+    pub const KeptLine = struct { start: u16, end: u16, width: f32 };
 };
 
 /// The persistent measurement caches, keyed by hashes of the bytes seeded
@@ -295,8 +314,17 @@ pub fn MeasureCache(comptime FontId: type, comptime segment_entries: u32, compti
 
         segments: LruTable([2]f32, segment_entries),
         strings: LruTable(CachedString, string_entries),
+        /// By the index of the string's entry in `strings`.
+        wrapped: [string_entries]WrappedLines,
         generation: u32,
         measure_calls: u64,
+
+        /// An entry's index in `strings`, as small as it can be: at the
+        /// default limits, a text's record holds one in what was padding.
+        pub const StringIndex = std.math.IntFittingRange(0, string_entries);
+        /// Marks a string `measureText` has only just measured, whose lines
+        /// are not kept.
+        pub const new_string = std.math.maxInt(StringIndex);
 
         pub fn reset(self: *Self) void {
             self.segments.clear();
@@ -345,6 +373,29 @@ pub fn MeasureCache(comptime FontId: type, comptime segment_entries: u32, compti
         /// The string's entry, or one claimed for it, which the caller fills.
         pub fn findString(self: *Self, key: u64) LruTable(CachedString, string_entries).Found {
             return self.strings.lookupOrClaim(key, self.generation);
+        }
+
+        /// The lines the string at `index` was last wrapped into, if that
+        /// was at exactly `width`.
+        pub fn linesWrappedAt(self: *const Self, index: StringIndex, width: f32) ?[]const WrappedLines.KeptLine {
+            const string = &self.strings.entries[index].value;
+            if (string.measured_in == self.generation or string.wrapped_width != width) return null;
+            const wrapped = &self.wrapped[index];
+            return wrapped.lines[0..wrapped.count];
+        }
+
+        /// Keeps `lines`, which index the frame's text buffer from `base`,
+        /// for the string at `index`, if there are few enough of them and
+        /// the text is short enough.
+        pub fn keepLines(self: *Self, index: StringIndex, width: f32, base: u32, text_len: usize, lines: []const Line) void {
+            const string = &self.strings.entries[index].value;
+            if (string.measured_in == self.generation or lines.len > max_cached_lines or text_len > std.math.maxInt(u16)) return;
+            const wrapped = &self.wrapped[index];
+            for (lines, wrapped.lines[0..lines.len]) |line, *kept| {
+                kept.* = .{ .start = @intCast(line.start - base), .end = @intCast(line.end - base), .width = line.width };
+            }
+            wrapped.count = @intCast(lines.len);
+            string.wrapped_width = width;
         }
 
         fn nonZero(key: u64) u64 {
@@ -400,10 +451,11 @@ pub fn Measurer(comptime Cache: type, comptime Text: type) type {
     };
 }
 
-/// Measures `text` through the string cache, then appends its run widths
-/// to `run_widths` as `measureMetrics` does. A hit walks no words; for a
-/// text of more than `max_cached_runs` runs it reserves their places and
-/// leaves them pending.
+/// Measures `text` through the string cache into `metrics`, then appends
+/// its run widths to `run_widths` as `measureMetrics` does. A hit walks no
+/// words; for a text of more than `max_cached_runs` runs it reserves their
+/// places and leaves them pending. Returns the index of the string's entry
+/// in the cache, or `new_string` if it was not there.
 pub fn measureText(
     measurer: anytype,
     text: []const u8,
@@ -411,26 +463,28 @@ pub fn measureText(
     line_height_override: f32,
     run_widths: []f32,
     run_count: *u32,
-) Metrics {
+    metrics: *Metrics,
+) u32 {
     const cache = measurer.cache;
     const hash = @TypeOf(cache.*).stringHashOf(text, measurer.key, wrap, measurer.inverse_zoom);
     const first_run = run_count.*;
     const cached_widths = run_widths[first_run..][0..max_cached_runs];
-    var metrics: Metrics = undefined;
     const found = cache.findString(hash);
     const cached = found.value;
+    var measured: Metrics = undefined;
     if (found.was_present) {
-        metrics = cached.metrics;
-        metrics.first_run = first_run;
-        metrics.run_widths_pending = cached.run_count > max_cached_runs;
+        measured = cached.metrics;
+        measured.first_run = first_run;
+        measured.run_widths_pending = cached.run_count > max_cached_runs;
         cached_widths.* = cached.run_widths;
         run_count.* += cached.run_count;
     } else {
-        metrics = measureMetrics(measurer, text, wrap, 0, run_widths, run_count);
-        cached.* = .{ .metrics = metrics, .run_count = run_count.* - first_run, .run_widths = cached_widths.* };
+        measured = measureMetrics(measurer, text, wrap, 0, run_widths, run_count);
+        cached.* = .{ .metrics = measured, .run_count = run_count.* - first_run, .run_widths = cached_widths.*, .measured_in = cache.generation };
     }
-    if (line_height_override > 0) metrics.line_height = line_height_override;
-    return metrics;
+    if (line_height_override > 0) measured.line_height = line_height_override;
+    metrics.* = measured;
+    return if (found.was_present) found.index else @TypeOf(cache.*).new_string;
 }
 
 /// Writes the run widths `measureText` left pending, from `metrics.first_run`.
@@ -607,7 +661,21 @@ pub fn wrapLines(
     if (text.len == 0) return true;
     const output: LineOutput = .{ .lines = lines, .count = line_count };
     if (fitsOneLine(wrap, metrics, max_width)) return output.emit(base, base + @as(u32, @intCast(text.len)), metrics.preferred_width);
+    return wrapIntoLines(text, base, wrap, metrics, run_widths, max_width, lines, line_count);
+}
 
+/// `wrapLines` for a text that is not empty and does not fit on one line.
+pub fn wrapIntoLines(
+    text: []const u8,
+    base: u32,
+    wrap: style.TextWrap,
+    metrics: Metrics,
+    run_widths: []const f32,
+    max_width: f32,
+    lines: []Line,
+    line_count: *u32,
+) bool {
+    const output: LineOutput = .{ .lines = lines, .count = line_count };
     switch (wrap) {
         .none => unreachable,
         .newlines => {
@@ -640,6 +708,23 @@ pub fn wrapSegmentedLines(
     line_count: *u32,
 ) bool {
     if (wrap != .words or text.len == 0 or fitsOneLine(wrap, metrics, max_width)) return wrapLines(text, base, wrap, metrics, run_widths, max_width, lines, line_count);
+    return wrapSegments(segmenter.words(text), base, metrics, run_widths, max_width, .{ .lines = lines, .count = line_count });
+}
+
+/// `wrapSegmentedLines` for a text that is not empty and does not fit on
+/// one line.
+pub fn wrapSegmentedIntoLines(
+    segmenter: anytype,
+    text: []const u8,
+    base: u32,
+    wrap: style.TextWrap,
+    metrics: Metrics,
+    run_widths: []const f32,
+    max_width: f32,
+    lines: []Line,
+    line_count: *u32,
+) bool {
+    if (wrap != .words) return wrapIntoLines(text, base, wrap, metrics, run_widths, max_width, lines, line_count);
     return wrapSegments(segmenter.words(text), base, metrics, run_widths, max_width, .{ .lines = lines, .count = line_count });
 }
 

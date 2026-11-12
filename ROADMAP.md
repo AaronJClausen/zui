@@ -54,6 +54,13 @@ is not the first. The machine runs slower than when `a6d8e34` was
 measured at 101.2 µs and 52.2 µs: `afacf87`, before P4, took 111.0 µs
 and 68.5 µs here.
 
+The table was measured with Turbo Boost on. With it off (3.7 GHz, the
+`performance` governor, as `bench-compare` measures from B1 on), after
+the audit's P6 to P9: warm text's `endFrame` 69.6 µs, within its budget,
+where it was 123.0 µs before P9; the box tree's 112.0 µs and declaration
+58.5 µs, over their budgets as they already were at `fb3c7bd` with turbo
+off (110 to 113 µs and 58.5 µs).
+
 ## The queue
 
 Work is taken from the top. The first row whose status is not
@@ -63,8 +70,7 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
-| P9. Wrapped lines kept with the string cache | audit | `src/text.zig`, `src/layout.zig` | | next |
-| P10. Cache probes over keys alone | audit | `src/text.zig`, `src/layout.zig` | | |
+| P10. Cache probes over keys alone | audit | `src/text.zig`, `src/layout.zig` | | next |
 | P11. Flat child lists | audit | `src/context.zig`, `src/layout.zig` | | |
 | G1. Gradients, shadows and glow | 8 | `src/style.zig`, `src/emission.zig`, `zui_testing/` | | |
 | G2. Backdrop blur | 8 | `src/style.zig`, `src/emission.zig`, `zui_testing/` | G1 | |
@@ -140,6 +146,54 @@ Things to know:
 ---
 
 ## Done
+
+### P9. Wrapped lines kept with the string cache
+
+**Grounding.** `wrapTexts` wrapped every text wider than its box from its
+bytes every frame, though a warm hit in the string cache already proved
+the text unchanged. Under Callgrind, `wrapTexts` was 47% of warm text's
+`endFrame`.
+
+**Plan.** Keep the lines of a text's last wrap beside its cache entry.
+**Done when:** warm text is faster by `bench-compare`, cold text no
+slower, and the string cache's growth is recorded.
+
+`measureText` now writes the metrics into the text's record and returns
+the index of its string's entry, or `new_string` for a string it had to
+measure; the record keeps the index in what was padding, so it stays 64
+bytes. `wrapTexts` writes a text that fits on one line itself, without
+calling into the wrap. A text that wraps first looks at its entry: if
+the entry was last wrapped at exactly this width, its lines are copied
+and nothing is measured or walked. Otherwise the text is wrapped and,
+for a string found rather than measured, its lines kept when there are at
+most 4 of a text under 64 KiB. Lines are kept in an array beside the
+entries, so a frame that only measures never touches them. An entry
+records the generation it was measured in, so a text whose entry another
+string takes later in the same frame neither reuses nor keeps lines
+there.
+
+The string cache grows by 8 bytes an entry and 36 bytes of lines an entry,
+44 KiB at the default 1,024 entries; SPEC.md §20.2 has no memory budget.
+
+`zig build bench-compare -- adc5677` (100 rounds over 3 layouts, turbo
+off, pinned): warm text −43.4% (123.0 to 69.6 µs), the documents view
+−12.5%, single-line texts −9.7% (60.8 to 54.9 µs), depth 64 −1.7%. Slower:
+`init` +3.4% (101.6 to 105.2 µs) and `initBuffer` +1.5% (8.4 to 8.5 µs),
+from the larger cache; cold text +0.7% (263.2 to 265.3 µs); new strings
++0.3%, within noise. `zig build counts`: warm text's `endFrame` −36.8%,
+single-line −7.1%, documents view −11.9%; cold text +1.4% and new strings
++1.3%, for the index and the two fields of every string they measure.
+
+Tried and dropped:
+- **looking the string up again by its key in `wrapTexts`,** with an
+  8-byte key in the record: cold text +7.6% instructions;
+- **one flag for a frame in which any entry in use was given up:** the
+  warm text wall fills 98% of the cache, so the flag was set every frame
+  and nothing was reused;
+- **a 4-byte index in the record,** which made it 68 bytes: +2
+  instructions a text in declaration.
+
+**Spec.** §9.3.
 
 ### P8. One hit test per press
 
@@ -2336,31 +2390,15 @@ Done: I5 and I1 are in *Done*.
 `DOD-AUDIT-2026-11-09-5b032b7.md` found the costs next to the layout
 sweeps, in paths no benchmark ran until `db4ea4d` added scenes for them:
 floating layers, ids on every element, and a pointer pressing. The owner
-put its findings ahead of stage 8. P6, the layer sort, P7, the id → rect
-table, and P8, one hit test per press, are in *Done*. Its
+put its findings ahead of stage 8. P6 (the layer sort), P7 (the id → rect
+table), P8 (one hit test per press) and P9 (wrapped lines kept with the
+string cache) are in *Done*. Its
 finding 7, render commands that copy their text style, is not taken: it
 changes every renderer, and no profile shows renderer bandwidth.
 
 Each item is judged by `bench-compare` against its parent, with turbo
 off, and by `counts`; one that costs more elsewhere than it saves in its
 scene does not ship.
-
-### P9. Wrapped lines kept with the string cache
-
-**Grounding.** `wrapTexts` (`src/layout.zig:650`) wraps every text wider
-than its box from its bytes every frame (`wrapLines`, `src/text.zig:597`),
-though a warm hit in the string cache already proves the text unchanged.
-The warm text wall's `endFrame` is about 50 µs more than the single-line
-wall's, which also counts emitting the extra lines.
-
-**Plan.** First measure the `.wrap_text` zone in the warm text wall; if
-it is under about 10 µs, retire this item. Otherwise keep the line breaks
-of texts with few lines, and the width they were wrapped at, beside the
-cached string, and copy them on a hit at the same width.
-
-**Done when:** warm text is faster by `bench-compare`, cold text no
-slower, and the string cache's growth is recorded against SPEC.md
-§20.2's memory.
 
 ### P10. Cache probes over keys alone
 

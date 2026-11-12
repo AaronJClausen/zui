@@ -47,7 +47,7 @@ fn measureTexts(comptime Ui: type, ui: *Ui, frame: *Ui.Frame) void {
             parallel_measure.prefetch(Ui, ui, frame.texts[text_index..frame.text_count], frame.text_bytes[0..frame.text_bytes_used], frame.params.zoom, Ui.limits.parallel_measure_threshold);
         }
         const content = frame.text_bytes[record.bytes_start..][0..record.bytes_len];
-        record.metrics = text.measureText(ui.measurer(record.style, frame.params.zoom), content, record.style.wrap, record.style.line_height, &ui.memory.run_widths, &run_count);
+        record.string_index = @intCast(text.measureText(ui.measurer(record.style, frame.params.zoom), content, record.style.wrap, record.style.line_height, &ui.memory.run_widths, &run_count, &record.metrics));
     }
 }
 
@@ -651,21 +651,52 @@ fn wrapTexts(comptime Ui: type, ui: *Ui, frame: *Ui.Frame) void {
     if (!Ui.has_text) return;
     for (frame.texts[0..frame.text_count]) |*record| {
         const element = record.element;
-        const content = frame.text_bytes[record.bytes_start..][0..record.bytes_len];
-        if (record.metrics.run_widths_pending and !text.fitsOneLine(record.style.wrap, record.metrics, frame.size[element][0])) {
-            text.measurePendingRuns(ui.measurer(record.style, frame.params.zoom), content, record.style.wrap, record.metrics, &ui.memory.run_widths);
-        }
+        const width = frame.size[element][0];
         record.first_line = frame.line_count;
-        const fitted = if (Ui.segments_text)
-            text.wrapSegmentedLines(ui.segmenter(), content, record.bytes_start, record.style.wrap, record.metrics, &ui.memory.run_widths, frame.size[element][0], &frame.lines, &frame.line_count)
+        const fitted = if (record.bytes_len == 0)
+            true
+        else if (text.fitsOneLine(record.style.wrap, record.metrics, width))
+            appendLine(frame, record.bytes_start, record.bytes_start + record.bytes_len, record.metrics.preferred_width)
         else
-            text.wrapLines(content, record.bytes_start, record.style.wrap, record.metrics, &ui.memory.run_widths, frame.size[element][0], &frame.lines, &frame.line_count);
+            wrapOrReuseLines(Ui, ui, frame, record, width);
         record.line_count = frame.line_count - record.first_line;
         if (!fitted) {
             frame.diagnostics.exceeded.insert(.max_render_commands);
             if (frame.diagnostics.first_dropped_id == 0) frame.diagnostics.first_dropped_id = frame.element_id[element];
         }
     }
+}
+
+fn appendLine(frame: anytype, start: u32, end: u32, width: f32) bool {
+    if (frame.line_count >= frame.lines.len) return false;
+    frame.lines[frame.line_count] = .{ .start = start, .end = end, .width = width };
+    frame.line_count += 1;
+    return true;
+}
+
+/// For a text that does not fit on one line: the lines it was wrapped into
+/// at this width before, or else wrapped now, and kept for the next frame.
+fn wrapOrReuseLines(comptime Ui: type, ui: *Ui, frame: *Ui.Frame, record: *const Ui.TextRecord, width: f32) bool {
+    const cache = &ui.memory.cache;
+    const string_index = record.string_index;
+    if (string_index != Ui.Cache.new_string) if (cache.linesWrappedAt(string_index, width)) |lines| if (frame.line_count + lines.len <= frame.lines.len) {
+        for (lines, frame.lines[frame.line_count..][0..lines.len]) |line, *wrapped| {
+            wrapped.* = .{ .start = record.bytes_start + line.start, .end = record.bytes_start + line.end, .width = line.width };
+        }
+        frame.line_count += @intCast(lines.len);
+        return true;
+    };
+    const content = frame.text_bytes[record.bytes_start..][0..record.bytes_len];
+    if (record.metrics.run_widths_pending) {
+        text.measurePendingRuns(ui.measurer(record.style, frame.params.zoom), content, record.style.wrap, record.metrics, &ui.memory.run_widths);
+    }
+    const first_line = frame.line_count;
+    const fitted = if (Ui.segments_text)
+        text.wrapSegmentedIntoLines(ui.segmenter(), content, record.bytes_start, record.style.wrap, record.metrics, &ui.memory.run_widths, width, &frame.lines, &frame.line_count)
+    else
+        text.wrapIntoLines(content, record.bytes_start, record.style.wrap, record.metrics, &ui.memory.run_widths, width, &frame.lines, &frame.line_count);
+    if (fitted and string_index != Ui.Cache.new_string) cache.keepLines(string_index, width, record.bytes_start, content.len, frame.lines[first_line..frame.line_count]);
+    return fitted;
 }
 
 /// Pass 6, one forward pass in declaration order. Parents come before

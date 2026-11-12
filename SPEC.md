@@ -896,7 +896,7 @@ may be reused at once.
 
 | Cache | Key | Holds | Why both |
 |---|---|---|---|
-| strings | `(hash(bytes), MeasureKey, zoom, wrap)` | the whole text's metrics (unwrapped width, widest segment, has break) and the widths of up to 16 segments | a warm text costs one probe, not one per word, even when it wraps |
+| strings | `(hash(bytes), MeasureKey, zoom, wrap)` | the whole text's metrics (unwrapped width, widest segment, has break), the widths of up to 16 segments, and the lines of its last wrap if there were at most 4, with the width it was wrapped at | a warm text costs one probe, not one per word, even when it wraps, and is not wrapped again at the same width |
 | segments | `(hash(bytes), MeasureKey)` | one segment's size | text that changes every frame (`"Frame 1234"`) measures only its new segments |
 
 Both are open-addressed, sized by `Limits`, persistent across frames, and
@@ -905,7 +905,9 @@ wyhash of the bytes, seeded with the key; a string's key also holds the
 zoom and the wrap mode, because its metrics are in layout units and its
 segments depend on how it wraps. A string of more than 16 segments is
 cached by its metrics alone, and its segments are looked up only if it
-wraps. Steady-state frames make almost no calls to the text contract.
+wraps. A string's lines are kept from the second frame that finds it,
+and reused only at exactly the same width. Steady-state frames make
+almost no calls to the text contract.
 
 ### 9.4 The text contract
 

@@ -356,6 +356,7 @@ pub fn Context(comptime config: Config) type {
             bytes_len: u32,
             style: TextStyle,
             metrics: text_layout.Metrics,
+            string_index: if (has_text) Cache.StringIndex else void,
             first_line: u32,
             line_count: u32,
         };
@@ -1112,6 +1113,7 @@ pub fn Context(comptime config: Config) type {
                 .bytes_len = @intCast(content.len),
                 .style = text_style,
                 .metrics = undefined,
+                .string_index = undefined,
                 .first_line = 0,
                 .line_count = 0,
             };
