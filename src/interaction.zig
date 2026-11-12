@@ -150,58 +150,78 @@ pub fn Results(comptime max_regions: u32, comptime table_slots: u32, comptime ha
             hash: u64,
             rect: style.Rect,
             region: u32,
+            /// The region's own, so `regionFlags` reads no region.
+            region_flags: RegionFlags,
         };
 
+        const EntryIndex = std.math.IntFittingRange(0, max_regions);
+        const empty_slot = std.math.maxInt(EntryIndex);
+
         has_frame: bool,
-        entries: [table_slots]Entry,
-        /// The slots of `entries` in use, so `clear` touches only those
-        /// rather than the whole table.
-        used_slots: [max_regions]u32,
-        used_slot_count: u32,
+        /// An index into `entries` per slot, so probing reads a couple of
+        /// bytes a slot rather than a whole entry.
+        entry_of_slot: [table_slots]EntryIndex,
+        /// In emission order; at most one per element.
+        entries: [max_regions]Entry,
+        /// So `clear` empties only the slots in use.
+        slot_of_entry: [max_regions]u32,
+        entry_count: u32,
         regions: [max_regions]Region,
         region_count: u32,
         focusables: [max_regions]Focusable,
         focusable_count: u32,
 
         pub fn reset(self: *Self) void {
-            for (&self.entries) |*entry| entry.hash = 0;
-            self.used_slot_count = 0;
+            @memset(&self.entry_of_slot, empty_slot);
+            self.entry_count = 0;
             self.region_count = 0;
             self.focusable_count = 0;
             self.has_frame = false;
         }
 
         pub fn clear(self: *Self) void {
-            for (self.used_slots[0..self.used_slot_count]) |slot| self.entries[slot].hash = 0;
-            self.used_slot_count = 0;
+            for (self.slot_of_entry[0..self.entry_count]) |slot| self.entry_of_slot[slot] = empty_slot;
+            self.entry_count = 0;
             self.region_count = 0;
             self.focusable_count = 0;
         }
 
-        /// At most one insert per element, so `used_slots` cannot overflow.
+        /// After the region it names, if any, is added.
         pub fn insert(self: *Self, hash: u64, rect: style.Rect, region: u32) void {
+            const entry: Entry = .{
+                .hash = hash,
+                .rect = rect,
+                .region = region,
+                .region_flags = if (region == no_region) .{} else self.regions[region].flags,
+            };
             var slot: usize = @as(usize, @truncate(hash)) & (table_slots - 1);
-            while (self.entries[slot].hash != 0 and self.entries[slot].hash != hash) slot = (slot + 1) & (table_slots - 1);
-            if (self.entries[slot].hash == 0) {
-                self.used_slots[self.used_slot_count] = @intCast(slot);
-                self.used_slot_count += 1;
+            while (true) : (slot = (slot + 1) & (table_slots - 1)) {
+                const index = self.entry_of_slot[slot];
+                if (index == empty_slot) break;
+                if (self.entries[index].hash == hash) {
+                    self.entries[index] = entry;
+                    return;
+                }
             }
-            self.entries[slot] = .{ .hash = hash, .rect = rect, .region = region };
+            self.entry_of_slot[slot] = @intCast(self.entry_count);
+            self.slot_of_entry[self.entry_count] = @intCast(slot);
+            self.entries[self.entry_count] = entry;
+            self.entry_count += 1;
         }
 
         pub fn find(self: *const Self, hash: u64) ?*const Entry {
             if (!self.has_frame or hash == 0) return null;
             var slot: usize = @as(usize, @truncate(hash)) & (table_slots - 1);
-            while (self.entries[slot].hash != 0) : (slot = (slot + 1) & (table_slots - 1)) {
-                if (self.entries[slot].hash == hash) return &self.entries[slot];
+            while (true) : (slot = (slot + 1) & (table_slots - 1)) {
+                const index = self.entry_of_slot[slot];
+                if (index == empty_slot) return null;
+                if (self.entries[index].hash == hash) return &self.entries[index];
             }
-            return null;
         }
 
         pub fn regionFlags(self: *const Self, hash: u64) RegionFlags {
             const entry = self.find(hash) orelse return .{};
-            if (entry.region == no_region) return .{};
-            return self.regions[entry.region].flags;
+            return entry.region_flags;
         }
 
         /// The region the pointer hits: the highest z, and within a layer

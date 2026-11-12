@@ -63,8 +63,7 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
-| P7. A narrow id → rect table | audit | `src/interaction.zig`, `src/emission.zig` | | next |
-| P8. One hit test per press | audit | `src/context.zig` | | |
+| P8. One hit test per press | audit | `src/context.zig` | | next |
 | P9. Wrapped lines kept with the string cache | audit | `src/text.zig`, `src/layout.zig` | | |
 | P10. Cache probes over keys alone | audit | `src/text.zig`, `src/layout.zig` | | |
 | P11. Flat child lists | audit | `src/context.zig`, `src/layout.zig` | | |
@@ -142,6 +141,32 @@ Things to know:
 ---
 
 ## Done
+
+### P7. A narrow id → rect table
+
+**Grounding.** `Results.entries` was `nextPowerOfTwo(2 × max_elements)`
+slots of 32 bytes, 256 KiB at the default limits, written at random once
+per element with an id and read by `widgetState`, `rectOf`, coasting and
+zoom; `regionFlags` then read the region as well.
+
+**Plan.** Slots that index dense entries. **Done when:** the interactive
+scenes are faster by `bench-compare`, and no scenario slower.
+
+Each slot now holds the smallest index type into `entries`, which are
+dense in emission order: 16 KiB of slots at the default limits, 2 bytes
+each. `slot_of_entry` keeps the slot each entry took, so `clear` empties
+only those, and each entry carries its region's flags in what was its
+padding, so `widgetState` reads no region. `Results` is 96 KiB smaller.
+
+`zig build bench-compare -- d0809fd` (100 rounds over 3 layouts, turbo
+off, pinned): `4096 interactive boxes` −5.9% (191.5 to 179.0 µs) and its
+declaration −7.2% (124.8 to 115.2 µs); pressed −5.7% and −8.5%; `init`
+−26.9% (138.3 to 101.0 µs) and `initBuffer` −50.5% (17.0 to 8.4 µs), which
+empty the smaller table; nothing slower. `zig build counts`: the
+interactive scenes' `endFrame` +1.3% instructions, with 3.1% fewer
+simulated D1 misses, and their declaration −0.3%, with 3.2% to 4.1% fewer.
+
+**Spec.** §5, §11.
 
 ### P6. The layer sort
 
@@ -2289,31 +2314,14 @@ Done: I5 and I1 are in *Done*.
 `DOD-AUDIT-2026-11-09-5b032b7.md` found the costs next to the layout
 sweeps, in paths no benchmark ran until `db4ea4d` added scenes for them:
 floating layers, ids on every element, and a pointer pressing. The owner
-put its findings ahead of stage 8. P6, the layer sort, is in *Done*. Its
+put its findings ahead of stage 8. P6, the layer sort, and P7, the id →
+rect table, are in *Done*. Its
 finding 7, render commands that copy their text style, is not taken: it
 changes every renderer, and no profile shows renderer bandwidth.
 
 Each item is judged by `bench-compare` against its parent, with turbo
 off, and by `counts`; one that costs more elsewhere than it saves in its
 scene does not ship.
-
-### P7. A narrow id → rect table
-
-**Grounding.** `Results.entries` (`src/interaction.zig:144-198`) is
-`nextPowerOfTwo(2 × max_elements)` slots of 32 bytes, 256 KiB at the
-default limits, written at random once per element with an id
-(`src/emission.zig`, `results.insert` in `enter`) and read by
-`widgetState`, `rectOf`, coasting and zoom. `regionFlags` then makes a
-second dependent read into `regions`. The audit's standalone model
-measured 4,000 cold inserts at 28.4 µs against 8.9 µs for a table of
-2-byte indices into dense entries.
-
-**Plan.** A table of the smallest index type into `entries`, which are
-dense in emission order, with the slot each entry took so `clear` resets
-only those; the region's flags copied into the entry, in its padding.
-
-**Done when:** `4096 interactive boxes` and `4096 interactive, pressed`
-are faster by `bench-compare`, and no scenario slower.
 
 ### P8. One hit test per press
 
