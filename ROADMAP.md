@@ -2446,15 +2446,20 @@ reshaping these passes cost 3% to 17% before.
 **Done when:** the wide tree is faster by `bench-compare` and the box tree
 no slower; or retired with the profile.
 
-**Status.** Profiled at `85242fc`; nothing built. `perf` is not installed
-on the reference machine, so the cycles are not attributed to lines, but
-the profile does not point at the walks. Under Callgrind, `Children.next`
-takes 24,000 steps a frame in `4000 children of one parent`, 5.5% of its
-`endFrame` instructions. `bench --counters` (turbo off, pinned) counts
-that `endFrame` at 877,162 instructions in 289,703 cycles, 3.0 a cycle,
-with 34 branch misses and no last-level misses: a pass waiting on a chain
-of dependent loads could not keep that rate. The box tree runs 3.1 a
-cycle. Retiring the item is the owner's decision.
+**Status.** Profiled at `85242fc` and `a4dfbf4`; nothing built. Under
+Callgrind, `Children.next` takes 24,000 steps a frame in `4000 children
+of one parent`, 5.5% of its `endFrame` instructions. `bench --counters`
+(turbo off, pinned) counts that `endFrame` at 877,162 instructions in
+289,703 cycles, 3.0 a cycle, with 34 branch misses and no last-level
+misses: a pass waiting on a chain of dependent loads could not keep that
+rate. The box tree runs 3.1 a cycle. `perf record -e cycles:upp` over
+40 runs of the scene (35,520 samples) puts 0.9% of its cycles on the
+walk's lines (`context.zig:489-491`), against 21% in `distribute` and
+`position` as a whole: the time goes to each child's work, most of it
+reading the child's sizing through its `layout` pointer
+(`context.zig:506`, `:517`) and its size, not to finding the next child.
+A flat child list could save at most that 0.9%, and would build two more
+passes every frame. Retiring the item is the owner's decision.
 
 ---
 
