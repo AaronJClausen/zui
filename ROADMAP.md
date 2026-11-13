@@ -2476,8 +2476,9 @@ in its histories and the remote's slots.
 **Done when:** a renderer reading a text-heavy frame's commands is faster
 by `bench-compare`, and no scene is slower.
 
-**Status.** Measured at `9154f3f` in the core alone, then set aside; the
-patch is not kept in the repository. A command becomes 72 bytes, not
+**Status.** Measured at `9154f3f` in the core alone, then set aside on
+the branch `p12-text-style-pointer` (`7e9d2fb`, off `fb3c7bd`), whose
+commit message lists what is left. A command becomes 72 bytes, not
 fewer, since a border's 36-byte payload then sets the union's size, and
 a text payload 32. By `counts`, the text scenes run 0.06% to 0.24% fewer
 instructions and their simulated D1 misses change by under 0.1%, while
