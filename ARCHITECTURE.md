@@ -148,6 +148,7 @@ The stage is the one in SPEC.md §21 that builds it.
 |---|---|---|
 | instruction counts, trace zones | CI; the tracer contract in the core; the Tracy binding in `zui_tracy` | 1 |
 | hardware counters | `bench/counters.zig`, through Linux's `perf_event_open`; read by `bench --counters` and `bench-compare --metric`, never by the core | 1 |
+| trustworthy times: pinned runs, shuffled scenarios, random code and memory layouts, intervals against a noise band; simulated misses; machines side by side | `bench/` (`machine.zig`, `statistics.zig`, `compare.zig`, `counts.zig`, `report.zig`), never the core | 1, redone after 7 |
 | frame record, time as an instant, scale and zoom | core | 2 |
 | input as events, many pointers, environment | host reports; core applies | 2 |
 | outside data, demand, `Status`, `Waker` | core contract; default sources in `zui_async` | 2 |
@@ -177,63 +178,79 @@ The stage is the one in SPEC.md §21 that builds it.
 
 ## 7. From today's code to the spec
 
-What exists today is releases 0.1–0.5, the start of 0.6, stage 1
-(instruction counts in CI, the tracer contract and `zui_tracy`), and
-stage 2: `Context(config)` with `Config.limits` and the text contract,
-the frame record with `now`, scale and zoom, input as an ordered event
-log over a pointer table, `endFrame` that always returns a frame,
-`nextFrame()`, letter spacing through the measurement key, the
-environment and host requests, sources in the core (the contract and its
-checks, swap and injection, demand, `Status` and `Waker`), the default
-sources in `zui_async` with `zui_testing`'s conformance suite for
-sources, and `Element` with `decoration` and `clip: Axes`. `TaskPool` is
-deleted, and the three backends and the demo are on this API. From stage
-3, the renderer contract and the `RenderCommand` union generated from
-`Config.commands` and the payload types have landed, and the three
-backends are renderers; so has the host contract, with `RecordBuilder`
-and the check that a host and a renderer share a surface kind, proven by
-zui-raylib's adapter host (H1); and the conformance
-suites for renderers and hosts in `zui_testing`, whose renderer suite the
-three backends run in CI, and whose host suite raylib's host runs; and `Features`, whose fields gate their APIs
-with compile errors naming them; and `zui_app`, the loop of SPEC.md §6.1 as a
-library, with a render thread, pacing and its reports, tested against an
-offscreen host, and running the demo on raylib's host. From stage 4, the
-Windows host in `zui-host`, with dropped files and lifecycle events in
-the record and the system material reported in the environment, has
-landed, and zui-sokol's renderer draws into its `win32` window, composed
-with alpha. From stage 5, relay has landed: `relayTo` hands a listener
-each applied record with its deliveries; and so has `zui_wire`, which
-writes records and frames, each frame as changes from the last, and reads
-them back; and its wire host, wire renderer and client, which run an
-application in one process and draw it in another, over a `.wire`
-surface. `zui_testing` records a session's records and replays them
-(`Recording`, `Driver.replay`); and so has file watching, a host service
-that publishes `zui.FileChange`s into a source the application chooses,
-which zui-host's Windows host implements. From stage 6, the single-line
-fast path, the whole-string cache and static styles have landed: element
-storage holds config references, pointers into the frame arena or to a
-style made at comptime with `zui.static`; and so has line-break
-segmentation through the text contract's `zuiSegment`, and the grow
-basis: `grow` starts from the content, `grow_from_min` from `min`; and
-the `aspect_ratio` rule, a height from the settled width, and images'
-natural sizes; and dividers between children, `Border.between_children`,
-and images' tint and corner radius in the `image` command, which
-zui-raylib and zui-sokol draw and the renderer suite checks; and the
-floating options: targets declared later, `Floating.capture` and
-`Floating.clip`; and right-to-left layout: `Layout.mirrored`, inherited
-from the environment's direction, and `Direction.right_to_left`; and
-wrapping rows, `ui.wrapChildren()` behind `features.flex_wrap`. From
-stage 7, pans: elements declare `Element.gestures`, and a pointer past
-the touch slop goes to the innermost one that pans on its axis with room
-to move, and two pointers zoom the innermost element that accepts
-`zoom`, both reported by `manipulation`; long presses and double taps,
-timed against the record's `now`; momentum after a fling; custom recognizers over `pointerEvents`,
-`claim` and `decline`, such as `zui_widgets`' lasso; and the intents
-`contextRequested`, `doubleTapped`, `dismissed`, `adjusted` and
-`navigated`; and drag and drop: a source that declares `drag` takes a
-pointer on the axes no region around it pans on, `startDrag` keeps its
-typed payload in the state table, and a target reads it with `dropped`
-or `draggedOver`.
+What exists today, by stage:
+
+- **Releases 0.1 to 0.5, and 0.6 in part:** layout, text, input, state,
+  the modules `zui_widgets`, `zui_reflect` and `zui_testing`, the
+  benchmarks and `bench-compare`.
+- **Stage 1:** instruction counts in CI, the tracer contract and
+  `zui_tracy`.
+- **Stage 2:** `Context(config)` with `Config.limits` and the text
+  contract; the frame record with `now`, scale and zoom; input as an
+  ordered event log over a pointer table; `endFrame` that always returns
+  a frame; `nextFrame()`; letter spacing through the measurement key; the
+  environment and host requests; sources in the core (the contract and
+  its checks, swap and injection, demand, `Status` and `Waker`); the
+  default sources in `zui_async`, with `zui_testing`'s conformance suite
+  for sources; and `Element` with `decoration` and `clip: Axes`.
+  `TaskPool` is deleted, and the three backends and the demo are on this
+  API.
+- **Stage 3:** the renderer contract and the `RenderCommand` union
+  generated from `Config.commands` and the payload types, with the three
+  backends as renderers; the host contract, with `RecordBuilder` and the
+  check that a host and a renderer share a surface kind, proven by
+  zui-raylib's adapter host (H1); the conformance suites for renderers
+  and hosts in `zui_testing`, whose renderer suite the three backends run
+  in CI and whose host suite raylib's host runs; `Features`, whose fields
+  gate their APIs with compile errors naming them; and `zui_app`, the
+  loop of SPEC.md §6.1 as a library, with a render thread, pacing and its
+  reports, running the demo on raylib's host.
+- **Stage 4:** the Windows host in `zui-host`, with dropped files and
+  lifecycle events in the record and the system material reported in the
+  environment; zui-sokol's renderer draws into its `win32` window,
+  composed with alpha.
+- **Stage 5:** relay, `relayTo` handing a listener each applied record
+  with its deliveries; `zui_wire`, which writes records and frames, each
+  frame as changes from the last, and its wire host, wire renderer and
+  client, which run an application in one process and draw it in another
+  over a `.wire` surface; `zui_testing`'s `Recording` and
+  `Driver.replay`; and file watching, a host service that publishes
+  `zui.FileChange`s into a source the application chooses, which
+  zui-host's Windows host implements.
+- **Stage 6:** the single-line fast path, the whole-string cache and
+  static styles: element storage holds config references, pointers into
+  the frame arena or to a style made at comptime with `zui.static`;
+  line-break segmentation through the text contract's `zuiSegment`; the
+  grow basis, `grow` starting from the content and `grow_from_min` from
+  `min`; the `aspect_ratio` rule and images' natural sizes; dividers,
+  `Border.between_children`, and images' tint and corner radius in the
+  `image` command, which zui-raylib and zui-sokol draw and the renderer
+  suite checks; the floating options, targets declared later,
+  `Floating.capture` and `Floating.clip`; right-to-left layout,
+  `Layout.mirrored` inherited from the environment's direction and
+  `Direction.right_to_left`; and wrapping rows, `ui.wrapChildren()`
+  behind `features.flex_wrap`.
+- **Stage 7:** pans, by `Element.gestures`, a pointer past the touch slop
+  going to the innermost element that pans on its axis with room to move;
+  two-pointer zoom of the innermost element that accepts `zoom`, both
+  reported by `manipulation`; long presses and double taps, timed against
+  the record's `now`; momentum after a fling; custom recognizers over
+  `pointerEvents`, `claim` and `decline`, such as `zui_widgets`' lasso;
+  the intents `contextRequested`, `doubleTapped`, `dismissed`, `adjusted`
+  and `navigated`; and drag and drop, a source that declares `drag`
+  taking a pointer on the axes no region around it pans on, `startDrag`
+  keeping its typed payload in the state table, and a target reading it
+  with `dropped` or `draggedOver`.
+- **The foundation, after stage 7:** `bench` and `bench-compare` pin to
+  one core, record the machine, run each scenario alone in a shuffled
+  order over several code and memory layouts, and judge a change by a
+  bootstrap interval against a calibrated noise band; `bench --counters`
+  reads hardware counters; `counts` simulates cache and branch misses;
+  `bench-report` sets machines side by side. In the core, the layer sort
+  moves only the commands outside layer 0; the id-to-rect results are
+  narrow slots indexing dense entries that carry their region's flags; a
+  press hit-tests once; and the string cache keeps a text's wrapped lines
+  beside its entries, and its keys and ages apart from its values.
 
 The code and the spec still differ in these places, each closed by the
 roadmap item named:
@@ -247,8 +264,8 @@ roadmap item named:
 | `Features` has every field and gates its API, but `Frame.semantics()` is always empty and `safety_sweeps` changes nothing | semantics and safety sweeps, each behind its field | `src/context.zig` | V2, V3 |
 
 Unchanged in shape: element storage in pre-order structure-of-arrays, the
-layout passes, the segment and string caches, ids, the state table, the
-frame arenas, parallel measurement and the module boundary.
+layout passes, the segment cache, ids, the state table, the frame arenas,
+parallel measurement and the module boundary.
 
 ## 8. Repositories
 

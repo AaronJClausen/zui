@@ -7,7 +7,7 @@ Everything a zui consumer can build with today, one feature at a time, each show
 - **7** modules beside core
 - **3** renderers + 1 native host
 - **0** allocations after init
-- 4,096 boxes: ~50 µs declare, ~90 µs layout
+- 4,096 boxes: ~57 µs declare, ~109 µs layout, at 3.7 GHz
 
 > **How to read the snippets.** Every zui name and signature is checked against the source at this commit. Application names (`App`, `Photo`, `Fonts`, `decodeThumbnail` and so on) are made up for the example, and the snippets were not compiled as a whole program.
 

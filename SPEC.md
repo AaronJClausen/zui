@@ -2382,7 +2382,7 @@ The order follows the dependencies of the design, not a calendar.
 
 | Stage | Delivers | Done when |
 |---|---|---|
-| 1. Measure | instruction counts in CI; the tracer contract | counts repeat exactly between runners; an off tracer leaves them unchanged |
+| 1. Measure | instruction counts in CI, with simulated cache and branch misses; the tracer contract; comparisons of two commits pinned, one scenario at a time in a shuffled order, over several code and memory layouts, judged by confidence intervals against a calibrated noise band; hardware counters; results that record their machine | counts repeat exactly between runners; an off tracer leaves them unchanged; a commit compared with itself calls nothing, and a change that only moves code is not called |
 | 2. The frame record *(the breaking change, made once)* | `Context(config)` with the text contract; `FrameRecord` with `now`, scale and zoom; input as events with the pointer table; the environment; `endFrame` that always returns a frame; `NextFrame`; sources in the core, `Status`, `Waker`; `zui_async`; `MeasureKey` with letter spacing; `TaskPool` deleted | the interaction, widget and testing suites pass on events; a click inside one frame is kept; the demo's thumbnail grid runs on `KeyedLoads` with no UI-thread wait and idles at 0% CPU; 100 loads between two frames cause one wake |
 | 3. Contracts | renderer, host, surface; the generated command union and lowering; `zui_app`; conformance suites; the raylib adapter | every backend passes its suite and runs the demo through `zui_app` |
 | 4. A native host | Windows, with the system material, per-monitor scale, lifecycle, clipboard and drop | the demo runs unchanged, passes the host suite, and idles at 0% CPU |

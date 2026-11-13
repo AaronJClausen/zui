@@ -4,7 +4,7 @@
 //! zig build bench-compare -- --calibrate        # HEAD against itself: save this machine's noise bands
 //! zig build bench-compare -- main --rounds 20   # a fixed number of rounds
 //! zig build bench-compare -- main --core 7 --require-quiet
-//! zig build bench-compare -- main --layouts 1   # one memory layout, as before B5
+//! zig build bench-compare -- main --layouts 1   # one code and memory layout
 //! zig build bench-compare -- main --metric cycles # core cycles, through hardware counters (Linux)
 //! ```
 

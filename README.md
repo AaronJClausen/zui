@@ -57,6 +57,45 @@ Implemented so far:
   on a single-threaded `Io`. The backends are on this API, and the
   demo's thumbnail grid loads through `KeyedLoads` without the UI thread
   ever waiting, and idles at 0% CPU.
+- **Stage 3:** the renderer contract (`zuiSubmit`, the surfaces
+  it draws into, the optional commands it draws), checked at compile time
+  by `zui.checkRenderer`, and a `RenderCommand` union generated with
+  exactly the variants a renderer draws, so its exhaustive `switch` names
+  nothing else. zui-raylib, zui-sokol and zui-terminal are renderers.
+  The host contract (`zuiPoll`, `zuiWaker`, `zuiWait`, `zuiSurface`,
+  `zuiApply`), checked by `zui.checkHost`, with `zui.RecordBuilder` for
+  the record a host fills and `zui.checkHostAndRenderer` failing to
+  compile when a host and a renderer share no kind of surface. And the
+  conformance suites every implementation runs in its own CI:
+  `zui_testing.expectRendererConforms` draws a reference scene, deep
+  clips and out-of-bounds commands and reads the pixels back, and
+  `zui_testing.expectHostConforms` checks a host's event order, sticky
+  and cross-thread wakes, and waits. All three backends pass the renderer
+  suite in CI. `Config.features` turns semantics, gestures, wrapping and
+  safety sweeps on or off; calling an API whose feature is off fails to
+  compile, naming the field to set. And `zui_app`, which runs the whole
+  loop from one call, `zui_app.run(App, init, .{ .title = "demo" })`,
+  submitting on a render thread when the renderer allows and reporting
+  its capabilities, fallbacks and every exceeded limit once. zui-raylib is
+  the first host: the demo runs through `zui_app` on it, and presents its
+  first frame about 290 ms after the process starts, all but 5 ms of it
+  raylib opening its window.
+- **Stage 4:** the first native host, for Windows, in
+  [zui-host](https://github.com/AaronJClausen/zui-host): its own message
+  loop on a thread of its own, per-monitor scale, the environment
+  (dark mode, high contrast, animations, power), lifecycle events
+  (Ctrl+C and the session ending as a terminate request, sleep, low
+  memory), dropped files, the cursor, the IME window and the clipboard,
+  passing zui's host suite; and the system's material (Mica) behind the
+  window where nothing is drawn, reported as
+  `Environment.system_material`, so the same code draws its own
+  background where there is none. zui-sokol's tour runs on it unchanged,
+  through `zui_app.run`, drawn by zui-sokol's renderer into the native
+  window, and idles at 0% CPU. `zui_app` makes an application's own text
+  contract when the renderer does not measure (`pub const Text`), and
+  lets it set its zoom and add events to each record (`zuiRecord`).
+  The record carries the new events: `ui.filesDropped()` and
+  `ui.lifecycle()`.
 - **Stage 5:** `ui.relayTo(listener)` hands a listener each
   record as applied, with what each source delivered, during
   `beginFrame`; fed back with its deliveries, a relayed session replays
@@ -79,9 +118,10 @@ Implemented so far:
   its window a few milliseconds after its theme file is saved.
 - **Stage 6:** a text that fits is laid out as one line without
   walking its words, and a whole-string cache makes a warm text one probe
-  instead of one per word: 1,000 warm texts lay out in about 91 µs. The
-  box tree of 4,096 boxes declares in about 50 µs and lays out and emits
-  its commands in about 90 µs, both within their budgets. Static styles:
+  instead of one per word: 1,000 warm texts now lay out in about 67 µs. The
+  box tree of 4,096 boxes declares in about 57 µs and lays out and emits
+  its commands in about 109 µs, both within their budgets (on a 2020
+  desktop core at its 3.7 GHz base clock, Turbo Boost off). Static styles:
   `zui.static(zui.Style{ ... })` makes a style at comptime, and
   `.style = toolbar_style` on an element references it instead of
   copying it, so 4,096 styled boxes declare in about 28 µs. A text
@@ -109,46 +149,6 @@ Implemented so far:
   `ui.wrapChildren()` after a row's `open` moves each child that would
   overflow it onto a new line, as CSS `flex-wrap`: each line grows and
   shrinks its children on its own, and is as tall as its tallest child.
-- **Stage 3:** the renderer contract (`zuiSubmit`, the surfaces
-  it draws into, the optional commands it draws), checked at compile time
-  by `zui.checkRenderer`, and a `RenderCommand` union generated with
-  exactly the variants a renderer draws, so its exhaustive `switch` names
-  nothing else. zui-raylib, zui-sokol and zui-terminal are renderers.
-  The host contract (`zuiPoll`, `zuiWaker`, `zuiWait`, `zuiSurface`,
-  `zuiApply`), checked by `zui.checkHost`, with `zui.RecordBuilder` for
-  the record a host fills and `zui.checkHostAndRenderer` failing to
-  compile when a host and a renderer share no kind of surface. And the
-  conformance suites every implementation runs in its own CI:
-  `zui_testing.expectRendererConforms` draws a reference scene, deep
-  clips and out-of-bounds commands and reads the pixels back, and
-  `zui_testing.expectHostConforms` checks a host's event order, sticky
-  and cross-thread wakes, and waits. All three backends pass the renderer
-  suite in CI. `Config.features` turns semantics, gestures, wrapping and
-  safety sweeps on or off; calling an API whose feature is off fails to
-  compile, naming the field to set. And `zui_app`, which runs the whole
-  loop from one call, `zui_app.run(App, init, .{ .title = "demo" })`,
-  submitting on a render thread when the renderer allows and reporting
-  its capabilities, fallbacks and every exceeded limit once. zui-raylib is
-  the first host: the demo runs through `zui_app` on it, and presents its
-  first frame about 290 ms after the process starts, all but 5 ms of it
-  raylib opening its window.
-
-- **Stage 4:** the first native host, for Windows, in
-  [zui-host](https://github.com/AaronJClausen/zui-host): its own message
-  loop on a thread of its own, per-monitor scale, the environment
-  (dark mode, high contrast, animations, power), lifecycle events
-  (Ctrl+C and the session ending as a terminate request, sleep, low
-  memory), dropped files, the cursor, the IME window and the clipboard,
-  passing zui's host suite; and the system's material (Mica) behind the
-  window where nothing is drawn, reported as
-  `Environment.system_material`, so the same code draws its own
-  background where there is none. zui-sokol's tour runs on it unchanged,
-  through `zui_app.run`, drawn by zui-sokol's renderer into the native
-  window, and idles at 0% CPU. `zui_app` makes an application's own text
-  contract when the renderer does not measure (`pub const Text`), and
-  lets it set its zoom and add events to each record (`zuiRecord`).
-  The record carries the new events: `ui.filesDropped()` and
-  `ui.lifecycle()`.
 - **Stage 7:** gestures, and drag and drop. An element declares what it
   accepts, `.gestures = .{ .pan = .horizontal }`, and once a pointer
   moves past the touch slop it goes to the innermost element that pans
@@ -174,6 +174,19 @@ Implemented so far:
   `ui.startDrag(id, payload)` gives it a typed payload, and a target
   reads it with `ui.dropped(id, Payload)`, or `ui.draggedOver` before
   the release, never as another type.
+- **After stage 7, the foundation:** benchmarks that can be trusted.
+  `bench-compare` pins itself to one core, records the machine's state,
+  runs each scenario on its own in a shuffled order over three code and
+  memory layouts, and calls a change only when its 95% interval lies
+  beyond the noise band calibrated for that machine, so a change that
+  only moves code is not called. `bench --counters` counts cycles and
+  cache misses on Linux, `zig build counts` reports Callgrind's simulated
+  misses beside its instructions, and `bench-report` sets machines side
+  by side. Judged by them, the core got faster where no benchmark had
+  looked: a tooltip declared before a 3,000-cell grid no longer sorts
+  every command (671 µs to 79 µs), warm texts that wrap reuse their lines
+  (43% faster), `init` takes 92 µs instead of 138 µs, and the id-to-rect
+  table is 96 KiB smaller.
 
 The reference backend, its adapter host and the demo application live in
 [zui-raylib](https://github.com/AaronJClausen/zui-raylib); the other

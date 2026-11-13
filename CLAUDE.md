@@ -18,6 +18,9 @@ leaves another stale is not done.
 1. **Find it.** Open `ROADMAP.md`, section *The queue*. Take the first row
    whose status is not `waiting`. An `in progress` row is continued, not
    restarted: its item's **Status** says which slice comes next.
+   Work set aside is parked on a branch that the item's **Status**
+   names; read it before starting, and build on `main` unless the Status
+   says to rebase.
 2. **Read it.** Read the item's entry in `ROADMAP.md` (Grounding, Plan,
    Done when), every SPEC.md section it names, and the files in its
    *Where* column. Check the *Waits for* column; if a prerequisite is not
@@ -46,6 +49,10 @@ Stop and ask the user instead of guessing when:
   and say so;
 - the item is in a repository other than this one and the user has not
   said to work there in this session.
+- the item's counts or budgets fail because of code it did not write.
+  Profile where the cost lands and propose an item to fix that code
+  first, rather than building on it: this is how the data-oriented
+  design audit went ahead of stage 8.
 
 ## Where things go
 
@@ -132,6 +139,8 @@ reused (`ROADMAP.md` explains the letters).
   never across runs or runners.
 - A failing check is reported with its output, never skipped or relaxed
   to pass.
+- Shell heredocs mangle `\n` in Zig string literals on this machine;
+  edit Zig files with the Edit or Write tools.
 
 ## Rules the code keeps
 

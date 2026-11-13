@@ -29,6 +29,7 @@ Each item says:
 | stage 5 | relay (F2); `zui_wire` (F3); replay in `zui_testing` (F4); the wire host, renderer and client (F5); file watching as a source (F6) | done; editing a theme file restyles a running window on the Windows host within 4 ms; a recorded session of zui-sokol's tour replays to identical commands without starting any work, zui-sokol's tour goes over the wire at a hundredth of its frames' whole size, but for the screen that moves every box, and it runs in one process and draws in another on the Windows host, its keys going back |
 | stage 6 | the single-line fast path (T1), the whole-string cache (T2), static styles (L8), the box tree's layout and emission (P4) and declaration (P5), line-break segmentation (T4), the grow basis (L1), aspect ratio and natural sizes (L2), dividers and decorated images (L3), floating options (L4), right-to-left layout (L6), wrap (L7); the backends drawing images' tint and corner radius (C10) | done; the box tree's and warm text's budgets met, as they were then judged with Turbo Boost on: the box tree declares in 48.9 µs and lays out and emits in 89.2 µs, warm text in 90.5 µs; a box tree of static styles declares in 28.0 µs; zui-raylib and zui-sokol draw tinted, rounded images and pass the renderer suite that checks them |
 | stage 7 | gestures (I5): arbitration by motion component, zoom, long press, double tap, momentum, the intents and custom recognizers; drag and drop between elements (I1) | done: a carousel in a list, a pinch starting on a list inside a map, a lasso module against a map's pan, and `zui_testing.Driver.drag` moving an item between two lists, out of one that scrolls by dragging |
+| after stage 7: the foundation | G1's first slice ran 5.5% to 7.7% more instructions in scenes that draw no effect, so the work turned to what lay under it: benchmarks that can be trusted (R3 to R8, and R9 in part) and the data-oriented design audit's findings (P6 to P10) | done; a commit compared with itself over three code layouts calls nothing, its intervals 0.52% wide on average, and a change that only moves code is not called; a tooltip declared before a 3,000-cell grid lays out in 79 µs, not 671 µs (P6); warm text −43% (P9); `init` from 138 µs to 92 µs (P7, P10); the budgets judged in benchmarking mode |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
@@ -65,9 +66,10 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
+| R9. Measuring across operating systems and hardware | foundation | `bench/machine.zig`, `bench/report.zig`, `README.md` | | waiting on a run under Windows on the reference machine |
 | P11. Flat child lists | audit | `src/context.zig`, `src/layout.zig` | | waiting on a wide scene whose profile points at the walks; kept by the owner |
 | P12. Text commands that point at their style | audit | `src/commands.zig`, `src/emission.zig`, `zui_wire/`, `../zui-raylib`, `../zui-sokol`, `../zui-terminal` | | waiting on a profile of a renderer reading the commands |
-| G1. Gradients, shadows and glow | 8 | `src/style.zig`, `src/emission.zig`, `zui_testing/` | | |
+| G1. Gradients, shadows and glow | 8 | `src/style.zig`, `src/emission.zig`, `zui_testing/` | | next: start again on `main`, as its **Status** says |
 | G2. Backdrop blur | 8 | `src/style.zig`, `src/emission.zig`, `zui_testing/` | G1 | |
 | G3. Transforms | 8 | `src/style.zig`, `src/emission.zig`, `src/interaction.zig`, `zui_testing/` | G1 | |
 | G5. Materials | 8 | `src/context.zig`, `src/emission.zig`, `zui_testing/`, a renderer | G1 | |
@@ -87,10 +89,18 @@ work is waiting on CI or another repository counts as done for the rows
 that wait for it, as long as what they need from it has landed.
 
 Things to know:
-- **Judge each item against a commit, not a file.** On the machine you
-  measure on, `zig build bench-compare -- a6d8e34` compares the working
-  tree with the last commit before 0.6. Startup times (P1) are new after
-  `a6d8e34`, so compare those against `30b4f73` or later.
+- **Judge each item against its parent commit,** in benchmarking mode:
+  `zig build bench-compare -- HEAD --require-quiet` compares the working
+  tree with the last commit. A base from before `4294abe` (R5) is
+  compared one whole run at a time, and one from before `c24f34b` (R7) in
+  a single code layout, which where the code lands can move by several
+  percent, so older bases such as `a6d8e34` are history, not a judge.
+- **Measure one thing at a time.** Compile nothing while a measurement
+  runs. `bench-compare` writes its progress to stderr, which `zig build`
+  drops once the step succeeds; the report says which mode ran. The
+  noise bands live in `.zig-cache/bench-compare/noise-floor.json`, keyed
+  by the machine's fingerprint; `--calibrate` again after changing the
+  setup.
 - **The spec is already written.** Every item implements sections of
   SPEC.md that exist; an item that finds the spec wrong changes it in the
   same commit, with the reason.
@@ -104,21 +114,31 @@ Things to know:
   `zig fetch --save=zui`. The demo's `--measure-idle` and
   `-Dzui-tracy=true` check the idle budget and the trace there.
 - **`bench --check-targets` checks §20.2's budgets,** including
-  declaration for the box tree. Times vary by machine; instruction counts
-  (`zig build counts`, R1) do not, and CI fails on more than 2% growth
-  over the parent commit. They need Valgrind, so on Windows take them in
-  a Linux container.
-- **Item IDs are stable.** A letter names a series (R regression checks,
-  A async, P profiling, C contracts, T text, S scale, H hosts, F the frame
-  record and the wire, L layout, I interaction, G graphics, V visibility,
-  M motion, E editing, K modules, D developer experience). A new item
-  takes the next number in its series, and numbers are never reused, so a
-  gap is an item that was merged or retired.
+  declaration for the box tree, judged in benchmarking mode (Turbo Boost
+  off, the `performance` governor), the mode `bench-compare` measures in.
+  Times vary by machine; instruction counts (`zig build counts`, R1) do
+  not, and CI fails on more than 2% growth over the parent commit; the
+  simulated misses beside them (R8) show direction and never fail. They
+  need Valgrind, so on Windows take them in a Linux container.
+- **Item IDs are stable.** A letter names a series (R measurement and
+  regression checks, A async, P profiling, C contracts, T text, S scale,
+  H hosts, F the frame record and the wire, L layout, I interaction, G
+  graphics, V visibility, M motion, E editing, K modules, D developer
+  experience). A new item takes the next number in its series, and
+  numbers are never reused, so a gap is an item that was merged or
+  retired.
 
 ## How stages ship
 
-- **Measure first.** Stage 1 gives every later change a trustworthy
-  measure.
+- **Measure first.** Stage 1 gave every later change an instruction
+  count no machine can move. Its times did not hold: unpinned, judged by
+  a hand-set 2%, and in one code layout, they could not tell a change of
+  a few percent from where the code landed. R3 to R8 made them
+  trustworthy before the audit's work was judged by them.
+- **Fix the foundation before building on it.** When an item's counts or
+  budgets fail because of the code under it rather than its own, that
+  code is profiled and fixed first, as items of their own. G1 is why the
+  audit's findings went ahead of stage 8.
 - **One breaking change, made once.** Stage 2 changes the shape of
   `Context`, the frame record, input and outside data together, and
   stage 3 adds the contracts on top, before any native host or wire
@@ -313,6 +333,156 @@ Tried and dropped, each measured by `counts`:
   +3.7%.
 
 **Spec.** §16 (the tracer's zones), §17.2.
+
+### R8. Simulated cache and branch misses in `counts`
+
+**Grounding.** Instruction counts cannot see a change to memory layout,
+which is most of what the audit proposed.
+
+**Plan.** Callgrind's cache and branch simulation under a fixed cache
+geometry, its misses informational. **Done when:** two CI runs give
+identical miss counts, and the job stays within 10 minutes.
+
+`counts` runs Callgrind with `--cache-sim=yes --branch-sim=yes` and a
+fixed 32 KiB 8-way I1 and D1 and an 8 MiB 16-way LL, so the misses do not
+depend on the host. Each `"<scene>, <phase>"` instruction key gains
+`I1 misses`, `D1 misses`, `LL misses` and `branch misses`; only the
+instructions fail `--compare`. Every instruction count moved by 7 to 13
+a frame (at most −0.06%).
+
+The first two CI runs agreed on every count but 21 of 30 D1 misses, by up
+to 0.8%: the simulated cache sees real addresses, and the environment and
+the executable's path are copied onto the initial stack. Each child now
+runs as `./zui-counts` from its own directory with an empty environment
+(`9d0ddac`), and two CI runs then agreed on all 150 counts, in 2.5 to 5
+minutes. This machine still differs from CI on 15 D1 counts by a few
+misses, through Valgrind's version and its preload path; CI only ever
+compares with CI.
+
+**Spec.** §20.3.
+
+### R7. Code and memory layout as a random factor
+
+**Grounding.** In T4, warm text ran the same instructions as `c5b0401`,
+with the same simulated misses, and measured +7.8%: Mytkowicz et al.'s
+layout bias, which one build per commit treats as the truth.
+
+**Plan.** Seeds that move the stack, the `Context`'s memory and the
+code, with the rounds taking turns over several. **Done when:** a change
+that only moves code is reported as within noise.
+
+`ZUI_BENCH_LAYOUT_SEED` moves the stack down by up to 4 KiB in steps of
+64 bytes and starts each `Context` at a multiple of 128 bytes inside an
+allocation 4 KiB larger. `-Dbench-layout-seed` moves every function by
+up to 4080 bytes in steps of 16, through module assembly LLVM emits
+before any function (`nm`: exactly +48 and +1040 bytes). `bench-compare
+--layouts <k>` (3) picks fresh seeds per comparison, builds each side
+once per layout, all builds at once, and on Linux adds 0 to 4 KiB of
+environment padding; the bootstrap resamples layouts, then rounds.
+
+T4's variant was never committed, so the case was built: a commit that
+only pads the code by 864 bytes. Run directly, four code shifts moved
+static-styled boxes from 103.9 to 107.8 µs, against 1.3% between repeats.
+With `--layouts 1`, `bench-compare` called eight changes, static-styled
+boxes +2.6% (+2.5% to +2.7%); with 3 layouts it called none (−1.0%, −2.7%
+to +2.7%), in 364 s with twelve builds. A commit against itself over 3
+layouts calls nothing, its intervals 0.52% wide on average. The price is
+honest width: in the layout-sensitive scenes, a real change under about
+2% is no longer called.
+
+**Spec.** §20.3.
+
+### R6. Hardware counters per phase
+
+**Plan.** Cycles, instructions, branch misses, L1D read misses and
+last-level misses for each phase, through `perf_event_open`. **Done
+when:** on bare-metal Linux, cycles compared with themselves give a noise
+band well under nanoseconds'.
+
+`bench --counters` opens one group of the five events, user mode only,
+refuses multiplexed counts, and keeps each event's fewest per frame
+under keys beside the times; `bench-compare --metric
+cycles|instructions` compares them. The box tree's declaration: 440,424
+instructions in 216,504 cycles, 58.5 µs at 3.7 GHz against 58.7 µs
+timed.
+
+Closed by the owner without the gain the *Done when* expected. With
+turbo off, cycles and nanoseconds are one measurement. With turbo on
+(`abd12ce` against itself, 100 rounds over 3 layouts), the intervals
+reached a median 0.30% from no change in both: each time is a pinned
+run's fastest frame, which runs at the top clock either way. The counters
+stay for explaining a change, since instructions against cycles tells
+more work from more waiting, and nanoseconds stay the default.
+
+Not built: reading the counters through `rdpmc`, which matters less than
+planned, since user-mode counting already leaves the `ioctl`s out.
+
+**Spec.** §20.3.
+
+### R5. Each scenario on its own, in a shuffled order
+
+**Plan.** `bench --scenario <name>` and `--order-seed <n>`, and
+`bench-compare` running one scenario at a time from each side's
+installed benchmark, in a new order every round. **Done when:** a commit
+compared with itself calls nothing.
+
+`bench --list-scenarios` names each scenario as compared, reported or
+startup; startup scenarios always run last, since their page faults are
+part of what they time. `zig build bench-install` installs the
+benchmark. When both sides support it, each round runs one scenario at a
+time, alternating which side goes first; an older base keeps the
+whole-run alternation. `4294abe` against itself (100 rounds, turbo on,
+pinned) called nothing. The report still lists times in the first
+round's order, not the table's.
+
+**Spec.** §20.3.
+
+### R4. Confidence intervals and a measured noise floor
+
+**Grounding.** R2's middle half of 10 ratios is no confidence interval,
+and its 2% threshold was set by hand once.
+
+**Plan.** A bootstrap interval of the median ratio, a noise band
+measured per machine, rounds until the interval is narrow enough.
+**Done when:** a commit compared with itself gives intervals that all
+contain zero, and R2's store-forwarding stall is still called faster.
+
+`bench/statistics.zig` holds the bootstrap (a fixed seed, 10,000
+resamples, two-stage for R7's layouts) and a test for two clusters of
+frames, which `bench` warns about, beside each phase's p95.
+`bench-compare --calibrate` compares a commit with itself and saves each
+time's band by machine fingerprint; without one, a band is 2%. A change
+is called only when its whole interval lies beyond its band. Rounds
+continue until each interval is under `--target-width` (1%) or
+`--time-budget` (420 s) is spent. `bench --compare` is removed.
+
+`--calibrate` at `468ffc8` (61 rounds, turbo on, pinned) called nothing,
+with bands of 0.5% to 0.9%; 29 of 30 intervals contained zero. `946405e~1`
+to `946405e` is still called faster: the box tree's declaration −27.4%
+(−27.5% to −27.4%). On Windows the 0.1 µs clock keeps small scenes'
+intervals in whole steps, so rounds there rarely stop early.
+
+**Spec.** §20.3.
+
+### R3. Pinned runs, with the machine's state recorded
+
+**Plan.** `bench --core <n>` pins to one core at a raised priority and
+`--machine-json` records the machine; `bench-compare` builds unpinned,
+then pins itself, records the state before every run, and warns when it
+changes. **Done when:** a commit compared with itself, pinned and with
+turbo off, is narrower than unpinned.
+
+`bench/machine.zig` reads the power plan, `PROCTHROTTLEMAX`,
+`PERFBOOSTMODE` and the clock on Windows, and the governor, turbo, the
+core's siblings and `randomize_va_space` on Linux. `--require-quiet`
+refuses to run with turbo on or another governor. README's *Quieting the
+machine* gives the setup. On the i9-10900K under bare-metal Linux with
+turbo off, `f099fd1` against itself over 10 rounds: intervals 1.74% wide
+on average pinned (median 0.80%), against 10.65% unpinned (median
+5.25%, widest 78.7%); the clock read 3699 to 3700 MHz pinned. Windows
+reports the base clock as the current one, so it cannot show boosting.
+
+**Spec.** §20.3.
 
 ### I1. Drag and drop between elements
 
@@ -2217,7 +2387,8 @@ ratio and its spread (SPEC.md §20.3). `zig build bench-compare --
 946405e~1 946405e` reports the box tree's declaration −26.4% (middle half
 −27.5% to −26.1%) and calls it faster: the `depth: u16` store-forwarding
 stall, which left the instruction count unchanged. A commit compared with
-itself calls nothing faster or slower.
+itself calls nothing faster or slower. R3 to R7 replaced how it judges a
+change; the alternation of each commit's own benchmarks remains.
 
 ### P1. Startup benchmarks
 
@@ -2416,6 +2587,51 @@ Done: I5 and I1 are in *Done*.
 
 ---
 
+## The foundation, after stage 7
+
+G1's first slice (`80db29e`, on `wip/g1-gradients-shadows-and-glow`)
+passed every test but ran 5.5% more instructions in the box tree's
+declaration and 7.7% more in the wide tree's, scenes that draw no
+effect. Rather than build stage 8 on that, the work turned to the
+measurements and the code under it: a data-oriented design audit, scenes
+for the paths it found unmeasured, benchmarks that could judge its
+changes (R3 to R9, planned in `docs/plans/benchmarking.md` as B1 to B8),
+and the audit's findings (P6 to P12). Stage 8 resumes with G1 once
+these are done or waiting.
+
+### R9. Measuring across operating systems and hardware
+
+**Grounding.** A result in a commit message records neither the OS, the
+CPU nor the power settings it came from, so results from two machines
+cannot be set side by side.
+
+**Plan.** Each result keeps the machine it came from, and a report sets
+machines side by side, each normalized to its own box tree, to show how
+each platform's costs differ rather than which CPU is faster.
+
+**Done when:** one commit's results from two operating systems, or two
+CPU architectures, appear side by side in `bench-report`.
+
+**Status.** Built (`fe4f48e`); the *Done when* waits on a run under
+Windows on the reference machine. `Machine` records the OS and its
+version, the CPU vendor, the physical cores, the L1d, L2 and L3 sizes,
+the target and CPU model built for, and the commit, on Linux, Windows and
+macOS; the commit and the clock stay out of the fingerprint. `bench
+--results-dir <dir>` writes `<dir>/<fingerprint>/<commit>.json`, and
+`zig build bench-report -- <dir> [<commit>]` names the five scenarios
+whose relative cost differs most. README's *Comparing machines* gives the
+recipe, cross-built executables included. Checked on one machine only,
+pinned against unpinned as two setups: the documents view's first frame
+and `init` moved most (1.31× and 1.28×). To finish: boot Windows, run
+`zig build bench -- --core 19 --results-dir <dir>` at the same commit
+there and under Linux, into a directory both can reach, and run
+`bench-report` on it. `--counters` builds for ARM Linux but is
+unverified there; macOS's counters through kperf are not written.
+
+**Spec.** §20.3.
+
+---
+
 ## The data-oriented design audit
 
 `DOD-AUDIT-2026-11-09-5b032b7.md` found the costs next to the layout
@@ -2510,6 +2726,17 @@ passes the suite; for G3, an interaction test clicks a rotated button; for G6, t
 Windows host shows HDR white brighter than SDR white.
 
 **Spec.** §13.1, §13.3, §16.4, §18.
+
+**G1 status.** Starts again on `main`. A first slice is on
+`wip/g1-gradients-shadows-and-glow` (`80db29e`, off `5b032b7`): the
+declaration types in `src/style.zig`, their emission, `src/tests/effects.zig`
+and the renderer suite's reference scene, with every test passing but
+`counts` over the 2% gate (the box tree's declaration +5.5%, the wide
+tree's +7.7%, single-line texts' `endFrame` +1.9%). It predates P6, which
+rewrote how emission orders layers, and the counts it was judged by, so
+it is read as a sketch, not rebased. Its first step on `main` is to find
+where an element that declares no effect pays for them, by Callgrind per
+function against the parent.
 
 ---
 
@@ -2617,6 +2844,10 @@ Only with a measured win or a demonstrated need:
 - **Static subtrees:** pre-recorded element records copied in with one
   `@memcpy` and laid out normally.
 - **P3. SIMD candidates,** each measured by R1 and R2 before it ships.
+- **R10. A dedicated benchmark machine:** a self-hosted, bare-metal CI
+  runner set up as R3 describes, the only way wall-clock times could gate
+  CI. Until then CI reports times and gates on instruction counts. A
+  decision for when the hardware exists.
 
 ## Not taken from Clay
 
@@ -2673,7 +2904,14 @@ Deliberate, and each a reason to choose zui:
 | Pans (I5) | past a touch slop of 8 layout units from the press, the axis locks to the larger component and the innermost region under the press that pans on it with room to move takes the pointer until it lifts, both axes if it pans on both; any other element it pressed loses the press; a scroll container pans on its scrolled axes with touch and pen only, since the mouse has the wheel, unless it declares `pan`, which takes every pointer; declaring a gesture makes an element interactive; `Element.gestures` is ignored without `features.gestures` rather than failing to compile, so widgets declare gestures for every context; `manipulation` reports pans and the wheel, scroll containers included, `translation` moving content with the pointer |
 | Drag and drop (I1) | a source declares `Gestures.drag` and takes a pointer past the slop on the axes no region around it pans on for that pointer, after any region inside it that pans; `startDrag` gives the payload, in the state table under the source as `DragPayload(T)`, or starts the drag with a pointer still pressed on the source, which is how a long press or a recognizer lifts it; the payload is kept while the drag lasts, the source may go undeclared; a target is any element with a hit region the hit test at the pointer passes through; `draggedOver`, which SPEC.md lacked, shows a drop target before the release; a drag released in its starting record, before it had a payload, or cancelled, drops nothing |
 | Custom gestures | code in declaration over `pointerEvents` and `state`, not a registry |
-| Comparing two commits | each commit's own benchmarks, alternated, judged by the middle half beyond 2% (R2) |
+| Comparing two commits | each commit's own benchmarks, alternated (R2), one scenario at a time in a shuffled order (R5), over 3 code and memory layouts (R7), pinned (R3); a change is called when the bootstrap 95% interval of its median ratio lies wholly beyond the machine's calibrated noise band (R4) |
+| Nanoseconds or cycles (R6) | nanoseconds stay `bench-compare`'s default, since cycles proved no narrower; the counters explain a change, more work against more waiting |
+| Simulated misses (R8) | reported beside the instruction counts, never failing CI, since Callgrind's cache model shows direction, not cost |
+| Building on a slow foundation | not done: when an item's counts or budgets fail because of the code under it, the foundation is profiled and fixed first, as items of their own; the audit's findings went ahead of stage 8 for G1 |
+| The benchmarking plan | its steps B1 to B8 became R3 to R10; the plan keeps its motivation and sources |
+| G1's first slice | not rebased: it predates P6's emission and is a sketch for G1 on `main` |
+| Flat child lists (P11) | kept, waiting, though its profile puts 0.9% of the wide tree's cycles on the walk |
+| Text commands that point at their style (P12) | parked on `p12-text-style-pointer` until a scene reads the commands as a renderer does |
 | The inspector | a module over `Frame.inspect` (V1) |
 | Animation | not in the core; `zui_motion` (M1) |
 | Safety checks | built, as `features.safety_sweeps` (V3) |
