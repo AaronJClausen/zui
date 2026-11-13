@@ -107,7 +107,7 @@ reused (`ROADMAP.md` explains the letters).
 | `zig build test -Dzui-sanitize-thread=true` | any change to a source, an atomic or the conformance suite; on Linux only, so here in a container run with `--security-opt seccomp=unconfined` |
 | `zig build test -Dzui-tracy=true` | any change to `zui_tracy` or the trace zones; fetches Tracy |
 | `zig build fmt` | before committing; CI runs `fmt-check` |
-| `zig build bench -- --check-targets` | any change to a hot path |
+| `zig build bench -- --check-targets` | any change to a hot path; in benchmarking mode, as SPEC.md §20.2's budgets are set |
 | `zig build bench-compare -- <base>` | any change claiming a speedup or risking a slowdown |
 | `zig build counts -- --compare <file>` | any change to a hot path; CI compares with the parent commit and fails on more than 2% growth |
 

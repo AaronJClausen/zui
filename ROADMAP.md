@@ -27,39 +27,34 @@ Each item says:
 | stage 3 | the renderer contract and the generated commands (C1); the host contract and `RecordBuilder` (C2); the conformance suites (C3); `Features` (C7); `zui_app` (C4); the raylib adapter host (H1) | done; the backends are renderers and pass the renderer suite in CI, raylib's host passes the host suite, and the demo runs through `zui_app`, presenting its first frame 288 ms after the process starts; lowering comes with stage 8's commands |
 | stage 4 | the Windows host (H2), with dropped files and lifecycle events in the record; the system material (H8); `zui_app` with the application's own text contract (C9) | done; zui-sokol's tour runs on it unchanged, through `zui_app`, and idles at 0% CPU, and the same code shows Mica or a solid background |
 | stage 5 | relay (F2); `zui_wire` (F3); replay in `zui_testing` (F4); the wire host, renderer and client (F5); file watching as a source (F6) | done; editing a theme file restyles a running window on the Windows host within 4 ms; a recorded session of zui-sokol's tour replays to identical commands without starting any work, zui-sokol's tour goes over the wire at a hundredth of its frames' whole size, but for the screen that moves every box, and it runs in one process and draws in another on the Windows host, its keys going back |
-| stage 6 | the single-line fast path (T1), the whole-string cache (T2), static styles (L8), the box tree's layout and emission (P4) and declaration (P5), line-break segmentation (T4), the grow basis (L1), aspect ratio and natural sizes (L2), dividers and decorated images (L3), floating options (L4), right-to-left layout (L6), wrap (L7); the backends drawing images' tint and corner radius (C10) | done; the box tree's and warm text's budgets met: the box tree declares in 48.9 µs and lays out and emits in 89.2 µs, warm text in 90.5 µs; a box tree of static styles declares in 28.0 µs; zui-raylib and zui-sokol draw tinted, rounded images and pass the renderer suite that checks them |
+| stage 6 | the single-line fast path (T1), the whole-string cache (T2), static styles (L8), the box tree's layout and emission (P4) and declaration (P5), line-break segmentation (T4), the grow basis (L1), aspect ratio and natural sizes (L2), dividers and decorated images (L3), floating options (L4), right-to-left layout (L6), wrap (L7); the backends drawing images' tint and corner radius (C10) | done; the box tree's and warm text's budgets met, as they were then judged with Turbo Boost on: the box tree declares in 48.9 µs and lays out and emits in 89.2 µs, warm text in 90.5 µs; a box tree of static styles declares in 28.0 µs; zui-raylib and zui-sokol draw tinted, rounded images and pass the renderer suite that checks them |
 | stage 7 | gestures (I5): arbitration by motion component, zoom, long press, double tap, momentum, the intents and custom recognizers; drag and drop between elements (I1) | done: a carousel in a list, a pinch starting on a list inside a map, a lasso module against a map's pan, and `zui_testing.Driver.drag` moving an item between two lists, out of one that scrolls by dragging |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
 when it is done.
 
-Measured on the reference machine (i9-10900K), the fastest frame after
-P5, against the budgets of SPEC.md §20.2:
+Measured on the reference machine (i9-10900K) in benchmarking mode
+(Turbo Boost off, 3.7 GHz, the `performance` governor), the fastest frame
+at `9154f3f`, after the audit's P6 to P10, against the budgets of SPEC.md
+§20.2:
 
 | Scenario | Declaration | `endFrame` | Budget |
 |---|---|---|---|
-| 4,096 boxes, depth 8 | 48.9 µs | 89.2 µs | layout and emission < 100 µs, declaration < 55 µs: both met |
-| 1,000 texts, warm caches | 15.2 µs | 90.5 µs | < 120 µs: met |
-| 4,096 boxes of static styles | 28.0 µs | 88.2 µs | |
-| 4,000 children of one parent | 54.0 µs | 65.8 µs | |
+| 4,096 boxes, depth 8 | 57.3 µs | 108.6 µs | layout and emission < 125 µs, declaration < 69 µs: both met |
+| 1,000 texts, warm caches | 17.7 µs | 66.5 µs | < 150 µs: met |
+| 4,096 boxes of static styles | 28.5 µs | 104.4 µs | |
+| 4,000 children of one parent | 56.3 µs | 77.1 µs | |
 
-These are the fastest of five settled runs of `zig build bench --
---check-targets`, whose fastest box-tree frames were 48.9 to 50.2 µs for
-declaration and 89.2 to 93.5 µs for layout and emission; warm text's
-row is from L7's runs, after it had drifted to 101.7 µs over L2 to L6 on
-the same instructions. The first run
-after a build is often slower here (68.6 µs once), so judge by a run that
-is not the first. The machine runs slower than when `a6d8e34` was
-measured at 101.2 µs and 52.2 µs: `afacf87`, before P4, took 111.0 µs
-and 68.5 µs here.
-
-The table was measured with Turbo Boost on. With it off (3.7 GHz, the
-`performance` governor, as `bench-compare` measures from B1 on), after
-the audit's P6 to P9: warm text's `endFrame` 69.6 µs, within its budget,
-where it was 123.0 µs before P9; the box tree's 112.0 µs and declaration
-58.5 µs, over their budgets as they already were at `fb3c7bd` with turbo
-off (110 to 113 µs and 58.5 µs).
+These are the fastest of six runs (five for the last two rows) of
+`zui-bench --core 3`, whose fastest box-tree frames were 57.3 to 58.1 µs
+for declaration and 108.6 to 109.0 µs for layout and emission, and warm
+text's 66.5 to 67.4 µs. Until `9154f3f` the budgets were 100 µs, 55 µs
+and 120 µs and were judged with Turbo Boost on, where the box tree had
+measured 48.9 µs and 89.2 µs after P5. The owner moved them to the mode
+`bench-compare` measures in, which is steadier (turbo-on runs had drifted
+by 10% on the same instructions), scaling each by 1.25, the box tree's own
+ratio of turbo-off to turbo-on time.
 
 ## The queue
 
@@ -2662,7 +2657,7 @@ Deliberate, and each a reason to choose zui:
 | Natural sizes (L2) | `Ui.Image` is the declaration's type, apart from the `image` command; a natural size is the content inside the padding, may shrink in a narrower parent, and gives the height its proportions unless the height has a rule of its own |
 | A grow basis (L1) | a rule, `grow_from_min`, not a `basis` field, which would cost declaration; never narrower than the content's minimum, the rest shared by weight |
 | Config references (L8) | pointers in element storage, the default layout one constant; an element's own `layout` or `decoration` replaces the style's whole |
-| Budgets | as in SPEC.md §20.2, including warm text < 120 µs and declaration < 55 µs |
+| Budgets | as in SPEC.md §20.2, judged in benchmarking mode (Turbo Boost off, the `performance` governor) from after the audit's P10: the box tree < 125 µs and its declaration < 69 µs, warm text < 150 µs, each the earlier turbo-on budget × 1.25 |
 | Where the contracts live | in the `zui` repo |
 | Native hosts | one `zui-host` repo, one directory per OS |
 | Who orchestrates | the host, through one contract; adapters for libraries that own their window (H1) |

@@ -2298,13 +2298,16 @@ nothing until it builds with Tracy.
 
 ### 20.2 Budgets
 
-On one 2020-era desktop core (the reference is an i9-10900K):
+On one 2020-era desktop core at its base clock (the reference is an
+i9-10900K at 3.7 GHz, Turbo Boost off and the `performance` governor, the
+mode `bench-compare` measures in), so that a budget is judged on the
+same clock as every comparison:
 
 | Scenario | Budget |
 |---|---|
-| 4,096 boxes, depth 8: layout and emission | < 100 µs |
-| 4,096 boxes, depth 8: declaration | < 55 µs |
-| 1,000 texts of ~40 bytes, warm caches: layout and emission | < 120 µs |
+| 4,096 boxes, depth 8: layout and emission | < 125 µs |
+| 4,096 boxes, depth 8: declaration | < 69 µs |
+| 1,000 texts of ~40 bytes, warm caches: layout and emission | < 150 µs |
 | 133 pointer moves in one frame | one hover hit test per pointer |
 | a frame with 10 idle sources | no more instructions than with none |
 | an idle application | 0% CPU |

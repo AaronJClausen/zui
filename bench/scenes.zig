@@ -23,8 +23,8 @@ pub const GlyphTableText = struct {
 /// parent: the most per-element work a tree of this size can ask for.
 pub const BoxTree = struct {
     pub const name = "4096 boxes, depth 8";
-    pub const layout_target_ns: ?u64 = 100 * std.time.ns_per_us;
-    pub const declare_target_ns: ?u64 = 55 * std.time.ns_per_us;
+    pub const layout_target_ns: ?u64 = 125 * std.time.ns_per_us;
+    pub const declare_target_ns: ?u64 = 69 * std.time.ns_per_us;
     pub const limits: zui.Limits = .{ .max_elements = 4200, .max_render_commands = 8192 };
 
     pub fn declare(_: *BoxTree, ui: anytype, _: usize) void {
@@ -292,7 +292,7 @@ pub const text_limits: zui.Limits = .{ .max_elements = 1200, .max_render_command
 pub const TextWall = struct {
     pub const name = "1000 texts, warm cache";
     pub const limits = text_limits;
-    pub const layout_target_ns: ?u64 = 120 * std.time.ns_per_us;
+    pub const layout_target_ns: ?u64 = 150 * std.time.ns_per_us;
     sentences: Sentences(false) = .{},
 
     pub fn declare(self: *TextWall, ui: anytype, _: usize) void {
