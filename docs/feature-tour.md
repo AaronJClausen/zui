@@ -272,9 +272,9 @@ fn photoCard(app: *App, ui: *Ui, photo: *const Photo, index: usize) void {
 
 <a id="effects"></a>
 
-### Gradients, shadows and glow · *core only*
+### Gradients, shadows and glow · *shipped*
 
-`effects` points at a `zui.Effects`: a linear `gradient`, interpolated in OKLab, and a `shadow`, which with no offset is a glow. They take the shape of the element's decoration and its corner radius, and paint from the bottom up as shadow, background, gradient, then the element's content. The effects are copied when the element is declared, so a pointer to a local works, and an element without effects pays nothing for them, nor does a frame without any. Up to `limits.max_effects` elements a frame keep their effects, 256 by default; past it, an element is drawn without them and the diagnostics name the limit. A renderer that declares `.gradient` and `.shadow` in `zui_commands` gets those commands. For any other renderer, a gradient is lowered to a rectangle in its middle color and a shadow to nothing, and `frame.diagnostics.lowered` names what was lowered. No backend draws them yet, so today you see the lowered forms.
+`effects` points at a `zui.Effects`: a linear `gradient`, interpolated in OKLab, and a `shadow`, which with no offset is a glow. They take the shape of the element's decoration and its corner radius, and paint from the bottom up as shadow, background, gradient, then the element's content. The effects are copied when the element is declared, so a pointer to a local works, and an element without effects pays nothing for them, nor does a frame without any. Up to `limits.max_effects` elements a frame keep their effects, 256 by default; past it, an element is drawn without them and the diagnostics name the limit. A renderer that declares `.gradient` and `.shadow` in `zui_commands` gets those commands. For any other renderer, a gradient is lowered to a rectangle in its middle color and a shadow to nothing, and `frame.diagnostics.lowered` names what was lowered. zui-sokol draws both, and its tour shows them on its Light & Depth screen; zui-raylib and zui-terminal draw the lowered forms.
 
 `src/ui/viewer.zig`
 
@@ -1763,7 +1763,6 @@ Build with `-Dzui-tracy=true` to link Tracy's client, then connect profiler 0.14
 
 These names compile, but they don't do anything yet. This list is from `ARCHITECTURE.md` §7 and the roadmap.
 
-- **Gradients and shadows in a backend** *(core only)*: Elements declare them and the core emits or lowers them, but no backend declares `.gradient` or `.shadow` yet, so every backend draws the lowered forms. Item G1.
 - **Backdrop blur, transforms, materials** *(declared only)*: The variants exist in `RenderCommand` when a renderer declares them, but nothing in declaration produces them, so nothing is emitted or lowered. Items G2–G5, stage 8.
 - **`features.semantics`** *(declared only)*: `Frame.semantics()` is always empty. Accessibility is V2.
 - **`features.safety_sweeps`** *(declared only)*: The flag exists, but it doesn't change behaviour yet. Sweeps are V3.
@@ -1787,5 +1786,5 @@ These names compile, but they don't do anything yet. This list is from `ARCHITEC
 - Writing UI by hand in core is verbose. Nested `.layout = .{ .sizing = .{ .width = ... } }` literals pile up, and static styles are the main relief today.
 - Interactive elements take three steps: declare, query by id, then pick colors from the state yourself. Widgets hide it, but there is nothing in between.
 - `labeledRow` leaves you to close the row, an asymmetry that's easy to get wrong.
-- The visuals stay flat until a backend draws gradients and shadows: today they are lowered to a flat color and to nothing.
+- Only zui-sokol draws gradients and shadows so far; zui-raylib and zui-terminal show a gradient as one flat color and no shadow.
 - There's no examples repository or template yet. The best references are zui-sokol's tour and zui-raylib's demo.

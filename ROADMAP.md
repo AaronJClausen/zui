@@ -30,6 +30,7 @@ Each item says:
 | stage 6 | the single-line fast path (T1), the whole-string cache (T2), static styles (L8), the box tree's layout and emission (P4) and declaration (P5), line-break segmentation (T4), the grow basis (L1), aspect ratio and natural sizes (L2), dividers and decorated images (L3), floating options (L4), right-to-left layout (L6), wrap (L7); the backends drawing images' tint and corner radius (C10) | done; the box tree's and warm text's budgets met, as they were then judged with Turbo Boost on: the box tree declares in 48.9 µs and lays out and emits in 89.2 µs, warm text in 90.5 µs; a box tree of static styles declares in 28.0 µs; zui-raylib and zui-sokol draw tinted, rounded images and pass the renderer suite that checks them |
 | stage 7 | gestures (I5): arbitration by motion component, zoom, long press, double tap, momentum, the intents and custom recognizers; drag and drop between elements (I1) | done: a carousel in a list, a pinch starting on a list inside a map, a lasso module against a map's pan, and `zui_testing.Driver.drag` moving an item between two lists, out of one that scrolls by dragging |
 | after stage 7: the foundation | G1's first slice ran 5.5% to 7.7% more instructions in scenes that draw no effect, so the work turned to what lay under it: benchmarks that can be trusted (R3 to R8, and R9 in part) and the data-oriented design audit's findings (P6 to P10) | done; a commit compared with itself over three code layouts calls nothing, its intervals 0.52% wide on average, and a change that only moves code is not called; a tooltip declared before a 3,000-cell grid lays out in 79 µs, not 671 µs (P6); warm text −43% (P9); `init` from 138 µs to 92 µs (P7, P10); the budgets judged in benchmarking mode |
+| stage 8, begun | gradients, shadows and glow (G1) | G1 done: zui-sokol draws both and passes the renderer suite, and a frame without effects runs no more instructions than before; G2 to G6 queued |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
@@ -69,12 +70,11 @@ green, and its **Status** line below says which slice is next.
 | R9. Measuring across operating systems and hardware | foundation | `bench/machine.zig`, `bench/report.zig`, `README.md` | | waiting on a run under Windows on the reference machine |
 | P11. Flat child lists | audit | `src/context.zig`, `src/layout.zig` | | waiting on a wide scene whose profile points at the walks; kept by the owner |
 | P12. Text commands that point at their style | audit | `src/commands.zig`, `src/emission.zig`, `zui_wire/`, `../zui-raylib`, `../zui-sokol`, `../zui-terminal` | | waiting on a profile of a renderer reading the commands |
-| G1. Gradients, shadows and glow | 8 | `src/style.zig`, `src/emission.zig`, `zui_testing/`, `../zui-sokol` | | in progress: the core is done; a backend that draws them waits on the owner's go-ahead to work in `../zui-sokol` |
-| G2. Backdrop blur | 8 | `src/style.zig`, `src/emission.zig`, `zui_testing/` | G1 | |
-| G3. Transforms | 8 | `src/style.zig`, `src/emission.zig`, `src/interaction.zig`, `zui_testing/` | G1 | |
-| G5. Materials | 8 | `src/context.zig`, `src/emission.zig`, `zui_testing/`, a renderer | G1 | |
-| G6. HDR and wide gamut | 8 | `src/context.zig`, `src/commands.zig`, `../zui-host` | G1 | |
-| V1. `zui_debug` | 9 | `zui_debug/`, `src/context.zig`, `../zui-raylib` | G1 | |
+| G2. Backdrop blur | 8 | `src/style.zig`, `src/emission.zig`, `zui_testing/` | | |
+| G3. Transforms | 8 | `src/style.zig`, `src/emission.zig`, `src/interaction.zig`, `zui_testing/` | | |
+| G5. Materials | 8 | `src/context.zig`, `src/emission.zig`, `zui_testing/`, a renderer | | |
+| G6. HDR and wide gamut | 8 | `src/context.zig`, `src/commands.zig`, `../zui-host` | | |
+| V1. `zui_debug` | 9 | `zui_debug/`, `src/context.zig`, `../zui-raylib` | | |
 | V2. Semantics and accessibility actions | 9 | `src/context.zig`, `zui_widgets/`, `../zui-host` | | |
 | V3. Safety sweeps | 9 | `src/context.zig`, `src/tests/` | | |
 | V4. The demo in a browser | 9 | `../zui-web`, `zui_wire/` | | |
@@ -161,6 +161,50 @@ Things to know:
 ---
 
 ## Done
+
+### G1. Gradients, shadows and glow
+
+**Plan.** Gradients and shadows as optional commands, interpolated in
+OKLab, declared by elements and lowered for renderers that do not draw
+them. **Done when:** snapshot and lowering tests; the renderer suite's
+reference scene declares both, and one renderer that declares the
+commands passes the suite.
+
+Elements declare `.effects = &zui.Effects{ .gradient, .shadow }`, a
+pointer copied when declared; emission paints shadow, background,
+gradient, culls a shadow by what it paints, and for a renderer that does
+not declare them lowers a gradient to its OKLab middle and a shadow to
+nothing, listing both in `Diagnostics.lowered`. `limits.max_effects`
+(256) bounds their copies. The renderer suite's reference scene declares
+both; its pixel renderer passes it drawing them and with them lowered,
+and fails it interpolating in sRGB.
+
+zui-sokol (`e4ed7c5`, pinned to `b4bf610`) declares both and passes the
+suite on Linux, read back by `glReadPixels`: a gradient in bands at most
+4 units long, each vertex its OKLab `colorAt`, so sokol_gl's sRGB blend
+between vertices stays within a step of it; a shadow as its box at the
+offset grown by the spread, then six rings fading out to the blur. Its
+tour shows them on a Light & Depth screen.
+
+Against `c7810b7`, `counts` moves no scene by more than +0.77% (the
+tooltip grids' `endFrame`) and no declaration at all; `bench-compare`,
+turbo off, calls ten scenes faster (the documents view's declaration
+−10.3%, the others −0.9% to −3.0%), none of the frame scenes slower, and
+`init` +1.5% and the documents view's first frame +1.6% for the effects'
+storage. One shadowed element makes the box tree's `endFrame` 3.1% more
+instructions, the walk that looks for them.
+
+Found on the way, each against the parent by `counts`: `Element.effects`
+as a value made the interactive boxes' declaration 22% slower; a
+`Style.effects` cost the static box tree's declaration 3.5%; one compare
+added to the walk moved `endFrame` by up to 3.5%, and a second
+instantiation of the walk stopped `emitText`, `floatingLayer` and
+`sortLayers` being inlined, 4%; storage for every element made `init`
+21% slower.
+
+Not done: zui-raylib and zui-terminal still draw the lowered forms.
+
+**Spec.** §13.1, §13.3, §16.4.
 
 ### P10. The string cache's keys apart from its values
 
@@ -2706,8 +2750,6 @@ put the saving, so the item waits on one that does.
 
 ## Stage 8: effects
 
-- **G1. Gradients, shadows and glow,** as optional commands, interpolated
-  in OKLab.
 - **G2. Backdrop blur** of zui's own content, lowered to a tint.
 - **G3. Transforms,** applied when painting only; hit testing inverts
   them.
@@ -2718,7 +2760,8 @@ put the saving, so the item waits on one that does.
 
 C1 generated the optional commands' variants; each item here adds the
 declaration that produces its command and the lowering for renderers that
-do not declare it, and the first adds `Diagnostics.lowered`.
+do not declare it, listed in `Diagnostics.lowered`, which G1 added (in
+*Done*).
 
 **Done when (each):** snapshot and lowering tests; the renderer suite's
 reference scene declares it, and one renderer that declares the command
@@ -2726,31 +2769,6 @@ passes the suite; for G3, an interaction test clicks a rotated button; for G6, t
 Windows host shows HDR white brighter than SDR white.
 
 **Spec.** §13.1, §13.3, §16.4, §18.
-
-**G1 status.** The core is done; what remains is a backend. Elements
-declare `.effects = &zui.Effects{ .gradient, .shadow }`, a pointer
-copied when declared; emission emits `gradient` under the background
-and over it in paint order shadow, background, gradient, culls a shadow
-by what it paints, and for a renderer that does not declare them lowers
-a gradient to its OKLab middle and a shadow to nothing, listing both in
-`Diagnostics.lowered`. `limits.max_effects` (256) bounds their copies.
-The renderer suite's reference scene declares both, and its pixel
-renderer passes it drawing them and with them lowered, and fails it
-interpolating in sRGB. Against `c7810b7`, `counts` moves no scene by
-more than +0.77% (the tooltip grids' `endFrame`) and no declaration at
-all; `bench-compare`, turbo off, calls ten scenes faster (the documents
-view's declaration −10.3%, the others −0.9% to −3.0%), none of the frame
-scenes slower, and `init` +1.5% and the documents view's first frame
-+1.6% for the effects' storage. One shadowed element makes the box
-tree's `endFrame` 3.1% more instructions, the walk that looks for them.
-Found on the way, each against the parent by `counts`: `Element.effects`
-as a value made the interactive boxes' declaration 22% slower; a
-`Style.effects` cost the static box tree's declaration 3.5%; one compare
-added to the walk moved `endFrame` by up to 3.5%, and a second
-instantiation of the walk stopped `emitText`, `floatingLayer` and
-`sortLayers` being inlined, 4%; storage for every element made `init`
-21% slower. Next: zui-sokol declares `.gradient` and `.shadow`, draws
-them, and passes the suite; the backends' pins move after a push.
 
 ---
 
