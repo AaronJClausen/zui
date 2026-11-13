@@ -84,7 +84,9 @@ pub fn RenderCommand(comptime options: CommandOptions) type {
         /// One wrapped line. Renderers never wrap text themselves.
         pub const Text = struct {
             content: []const u8,
-            style: options.TextStyle,
+            /// Shared by every line of the text, and held by the frame
+            /// until it is released, as `content` is.
+            style: *const options.TextStyle,
             line: u32,
         };
 

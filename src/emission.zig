@@ -236,7 +236,7 @@ fn Emitter(comptime Ui: type) type {
 
         fn emitText(self: *Self, element: Ui.Index, element_id: u64, level: Level) void {
             const frame = self.frame;
-            const record = frame.texts[frame.content_index[element]];
+            const record = &frame.texts[frame.content_index[element]];
             const line_height = record.metrics.line_height;
             const alignment = record.style.alignment.fraction();
             for (frame.lines[record.first_line..][0..record.line_count], 0..) |line, line_number| {
@@ -250,7 +250,7 @@ fn Emitter(comptime Ui: type) type {
                 if (line_bounds.intersect(level.clip).isEmpty()) continue;
                 self.push(.{ .bounds = self.snap(line_bounds), .id = element_id, .z = level.z, .payload = .{ .text = .{
                     .content = frame.text_bytes[line.start..line.end],
-                    .style = record.style,
+                    .style = &record.style,
                     .line = @intCast(line_number),
                 } } });
             }

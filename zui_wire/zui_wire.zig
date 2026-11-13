@@ -111,10 +111,15 @@ pub const Deserializer = struct {
     }
 };
 
-/// Fixed memory that decoded slices are placed in.
+/// Fixed memory that decoded slices, and what single pointers point at,
+/// are placed in.
 pub const Storage = struct {
     bytes: []u8,
     used: usize = 0,
+    /// Kept apart from `bytes`, so that `Capacity.frame_bytes` stays the
+    /// text alone.
+    pointees: []u8 = &.{},
+    pointees_used: usize = 0,
 
     fn take(self: *Storage, comptime T: type, count: usize) ReadError![]T {
         if (@sizeOf(T) == 0) {
@@ -128,6 +133,15 @@ pub const Storage = struct {
         self.used = start + size;
         const items: [*]T = @ptrCast(@alignCast(self.bytes.ptr + start));
         return items[0..count];
+    }
+
+    fn takeOne(self: *Storage, comptime T: type) ReadError!*T {
+        if (@sizeOf(T) == 0) return @ptrFromInt(@alignOf(T));
+        const base = @intFromPtr(self.pointees.ptr);
+        const start = std.mem.alignForward(usize, base + self.pointees_used, @alignOf(T)) - base;
+        if (start > self.pointees.len or @sizeOf(T) > self.pointees.len - start) return error.CapacityExceeded;
+        self.pointees_used = start + @sizeOf(T);
+        return @ptrCast(@alignCast(self.pointees.ptr + start));
     }
 };
 
@@ -699,6 +713,7 @@ fn encodeValue(writer: *std.Io.Writer, value: anytype) WriteError!void {
         .array => |array| if (array.child == u8) try writer.writeAll(&value) else for (value) |item| try encodeValue(writer, item),
         .vector => |vector| for (0..vector.len) |index| try encodeValue(writer, value[index]),
         .pointer => |pointer| {
+            if (pointer.size == .one) return encodeValue(writer, value.*);
             if (pointer.size != .slice) @compileError("zui_wire: cannot send " ++ @typeName(T) ++ ", a pointer; declare zuiSerialize on the type holding it");
             try writer.writeUleb128(value.len);
             if (pointer.child == u8) try writer.writeAll(value) else for (value) |item| try encodeValue(writer, item);
@@ -780,6 +795,12 @@ fn decodeInto(comptime T: type, value: *T, reader: *std.Io.Reader, storage: *Sto
             value[index] = try decodeValue(vector.child, reader, storage);
         },
         .pointer => |pointer| {
+            if (pointer.size == .one) {
+                const pointee = try storage.takeOne(pointer.child);
+                try decodeInto(pointer.child, pointee, reader, storage);
+                value.* = pointee;
+                return;
+            }
             if (pointer.size != .slice) @compileError("zui_wire: cannot receive " ++ @typeName(T) ++ ", a pointer; declare zuiDeserialize on the type holding it");
             const items = try storage.take(pointer.child, try readLength(reader));
             if (pointer.child == u8) {
@@ -863,6 +884,7 @@ fn deepEqual(a: anytype, b: @TypeOf(a)) bool {
             return true;
         },
         .pointer => |pointer| {
+            if (pointer.size == .one) return a == b or deepEqual(a.*, b.*);
             if (pointer.size != .slice) return a == b;
             if (a.len != b.len) return false;
             if (pointer.child == u8) return std.mem.eql(u8, a, b);
