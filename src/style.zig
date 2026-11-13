@@ -64,8 +64,73 @@ pub const Color = extern struct {
         return @intFromFloat(@round(from_float + (to_float - from_float) * amount));
     }
 
+    /// Interpolated in OKLab, where equal steps look equally far apart, so
+    /// the middle of a mix is neither muddy nor too dark; alpha is
+    /// interpolated linearly. `amount` 0 is `self`, 1 is `other`.
+    ///
+    /// ```zig
+    /// const middle = Color.black.mixOklab(.white, 0.5); // #636363, where `mix` gives #808080
+    /// ```
+    pub fn mixOklab(self: Color, other: Color, amount: f32) Color {
+        const clamped = std.math.clamp(amount, 0, 1);
+        const from: Oklab = .fromColor(self);
+        const to: Oklab = .fromColor(other);
+        const mixed: Oklab = .{
+            .lightness = from.lightness + (to.lightness - from.lightness) * clamped,
+            .green_red = from.green_red + (to.green_red - from.green_red) * clamped,
+            .blue_yellow = from.blue_yellow + (to.blue_yellow - from.blue_yellow) * clamped,
+        };
+        return mixed.toColor(mixChannel(self.a, other.a, clamped));
+    }
+
     pub fn eql(self: Color, other: Color) bool {
         return std.meta.eql(self, other);
+    }
+};
+
+const Oklab = struct {
+    lightness: f32,
+    green_red: f32,
+    blue_yellow: f32,
+
+    fn fromColor(color: Color) Oklab {
+        const red = linearFromSrgb(color.r);
+        const green = linearFromSrgb(color.g);
+        const blue = linearFromSrgb(color.b);
+        const long = std.math.cbrt(0.4122214708 * red + 0.5363325363 * green + 0.0514459929 * blue);
+        const medium = std.math.cbrt(0.2119034982 * red + 0.6806995451 * green + 0.1073969566 * blue);
+        const short = std.math.cbrt(0.0883024619 * red + 0.2817188376 * green + 0.6299787005 * blue);
+        return .{
+            .lightness = 0.2104542553 * long + 0.7936177850 * medium - 0.0040720468 * short,
+            .green_red = 1.9779984951 * long - 2.4285922050 * medium + 0.4505937099 * short,
+            .blue_yellow = 0.0259040371 * long + 0.7827717662 * medium - 0.8086757660 * short,
+        };
+    }
+
+    fn toColor(self: Oklab, alpha: u8) Color {
+        const long_root = self.lightness + 0.3963377774 * self.green_red + 0.2158037573 * self.blue_yellow;
+        const medium_root = self.lightness - 0.1055613458 * self.green_red - 0.0638541728 * self.blue_yellow;
+        const short_root = self.lightness - 0.0894841775 * self.green_red - 1.2914855480 * self.blue_yellow;
+        const long = long_root * long_root * long_root;
+        const medium = medium_root * medium_root * medium_root;
+        const short = short_root * short_root * short_root;
+        return .{
+            .r = srgbFromLinear(4.0767416621 * long - 3.3077115913 * medium + 0.2309699292 * short),
+            .g = srgbFromLinear(-1.2684380046 * long + 2.6097574011 * medium - 0.3413193965 * short),
+            .b = srgbFromLinear(-0.0041960863 * long - 0.7034186147 * medium + 1.7076147010 * short),
+            .a = alpha,
+        };
+    }
+
+    fn linearFromSrgb(channel: u8) f32 {
+        const encoded = @as(f32, @floatFromInt(channel)) / 255;
+        return if (encoded <= 0.04045) encoded / 12.92 else std.math.pow(f32, (encoded + 0.055) / 1.055, 2.4);
+    }
+
+    fn srgbFromLinear(linear: f32) u8 {
+        const clamped = std.math.clamp(linear, 0, 1);
+        const encoded = if (clamped <= 0.0031308) clamped * 12.92 else 1.055 * std.math.pow(f32, clamped, 1.0 / 2.4) - 0.055;
+        return @intFromFloat(@round(encoded * 255));
     }
 };
 
@@ -310,12 +375,97 @@ pub const Axes = enum(u8) {
     }
 };
 
+/// A linear gradient from one color to another across an element,
+/// interpolated in OKLab. Its line runs through the element's center at
+/// `angle`, just long enough that the two corners farthest along it take
+/// `from` and `to`, so no angle leaves a band of one color. Physical, as a
+/// border's widths are: a mirrored element keeps its angle.
+///
+/// ```zig
+/// .effects = &.{ .gradient = .{ .from = .rgb(0x3a1c71), .to = .rgb(0xffaf7b), .angle = std.math.pi / 2 } },
+/// ```
+pub const Gradient = struct {
+    from: Color,
+    to: Color,
+    /// Radians clockwise from left to right: 0 runs from the left edge to
+    /// the right, pi / 2 from the top to the bottom.
+    angle: f32 = 0,
+
+    /// How far along the gradient `point` lies: 0 takes `from`, 1 takes `to`.
+    pub fn amountAt(self: Gradient, bounds: Rect, point: [2]f32) f32 {
+        const along: [2]f32 = .{ @cos(self.angle), @sin(self.angle) };
+        const length = @abs(bounds.width * along[0]) + @abs(bounds.height * along[1]);
+        if (length == 0) return 0.5;
+        const from_center: [2]f32 = .{ point[0] - (bounds.x + bounds.width / 2), point[1] - (bounds.y + bounds.height / 2) };
+        return std.math.clamp((from_center[0] * along[0] + from_center[1] * along[1]) / length + 0.5, 0, 1);
+    }
+
+    pub fn colorAt(self: Gradient, bounds: Rect, point: [2]f32) Color {
+        return self.from.mixOklab(self.to, self.amountAt(bounds, point));
+    }
+
+    /// The gradient's average over the element it covers, which is its
+    /// middle at any angle: the gradient is symmetric about the center.
+    pub fn meanColor(self: Gradient) Color {
+        return self.from.mixOklab(self.to, 0.5);
+    }
+};
+
+/// A shadow cast beneath an element in the shape of its rounded box, or
+/// with no offset, a glow around it. In layout units.
+///
+/// ```zig
+/// .effects = &.{ .shadow = .{ .color = .rgba(0x00000060), .offset = .{ 0, 4 }, .blur = 12 } },
+/// .effects = &.{ .shadow = .glow(.rgba(0x4080ff80), 16) },
+/// ```
+pub const Shadow = struct {
+    color: Color,
+    /// Right and down from the element.
+    offset: [2]f32 = .{ 0, 0 },
+    /// How far the edge fades, outward from where it would end unblurred.
+    blur: f32 = 0,
+    /// How far the shape grows on every side before it is blurred.
+    spread: f32 = 0,
+
+    pub fn glow(color: Color, radius: f32) Shadow {
+        return .{ .color = color, .blur = radius };
+    }
+
+    /// Everything the shadow may paint, for an element at `bounds`.
+    pub fn paintedBounds(self: Shadow, bounds: Rect) Rect {
+        const reach = larger(0, self.spread + self.blur);
+        return .{
+            .x = bounds.x + self.offset[0] - reach,
+            .y = bounds.y + self.offset[1] - reach,
+            .width = bounds.width + 2 * reach,
+            .height = bounds.height + 2 * reach,
+        };
+    }
+};
+
 /// Background, border and corner radius: what an element draws behind and
 /// around its children.
 pub const Decoration = struct {
     background: ?Color = null,
     border: ?Border = null,
     corner_radius: CornerRadius = .zero,
+};
+
+/// What an element draws with the optional commands, in the shape of its
+/// decoration's corner radius: from the bottom, its shadow, its
+/// background, then its gradient. An element points at its effects
+/// rather than holding them, so that declaring one without any copies
+/// nothing more.
+///
+/// ```zig
+/// const card_effects: zui.Effects = .{ .shadow = .{ .color = .rgba(0x00000060), .offset = .{ 0, 4 }, .blur = 12 } };
+///
+/// ui.box(.{ .style = styles.card, .effects = &card_effects });
+/// ```
+pub const Effects = struct {
+    /// Painted over the background, so a translucent gradient tints it.
+    gradient: ?Gradient = null,
+    shadow: ?Shadow = null,
 };
 
 /// An element's layout and decoration together, made once at comptime with

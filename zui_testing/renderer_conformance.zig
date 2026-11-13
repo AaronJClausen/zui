@@ -32,7 +32,16 @@ pub const scene_colors = struct {
     /// draws as `tinted_image`: `image` multiplied by the tint.
     pub const image_tint: zui.Color = .rgb(0xffff80);
     pub const tinted_image: zui.Color = .rgb(0x00ff80);
+    /// Far enough apart that the gradient's middle in OKLab, #8c53a2, is
+    /// beyond any sensible tolerance of sRGB's, #800080.
+    pub const gradient_from: zui.Color = .rgb(0xff0000);
+    pub const gradient_to: zui.Color = .rgb(0x0000ff);
+    pub const raised: zui.Color = .rgb(0xffffff);
+    pub const shadow: zui.Color = .rgb(0x000000);
 };
+
+/// The raised box's shadow is cast this far right and down, unblurred.
+pub const shadow_offset: f32 = 16;
 
 /// The reference scene's image is rounded by this much, so a pixel just
 /// inside its bounding corner lies outside the curve.
@@ -43,7 +52,9 @@ pub const image_corner_radius: f32 = 12;
 /// - a reference scene of the base commands (a fill, a border, text, and
 ///   a clip inside a clip, each cutting off a child larger than itself),
 ///   with `image` and `custom` when the renderer has their payload types,
-///   the image tinted and with rounded corners;
+///   the image tinted and with rounded corners, and a gradient and a box
+///   casting a shadow, which the core lowers unless the renderer declares
+///   `.gradient` or `.shadow`;
 /// - clips nested 100 deep, then a fill drawn after all of them ended;
 /// - commands of no size, and far outside the viewport;
 /// - an empty frame;
@@ -53,7 +64,10 @@ pub const image_corner_radius: f32 = 12;
 /// With `pixel`, every frame is read back: each clip cuts off exactly what
 /// lies outside it and is restored when the clip inside it ends, the
 /// scene's colors are where its layout put them, the image's tint is
-/// multiplied into its pixels, and its corners are left undrawn. Without it, the suite
+/// multiplied into its pixels, and its corners are left undrawn; a
+/// declared gradient runs from one color to the other through their middle
+/// in OKLab and a lowered one is that middle throughout; a declared shadow
+/// is drawn and a lowered one is not. Without it, the suite
 /// checks only that each frame is drawn without an error.
 ///
 /// `harness` is a pointer to a value that declares:
@@ -102,7 +116,7 @@ const Scene = enum {
 const scenes = [_]Scene{ .reference, .deep_clips, .out_of_bounds, .empty, .reference };
 const deep_clip_count = 100;
 
-const ids = zui.ids(.{ "panel", "fill", "frame", "outer", "inner", "picture", "custom", "nest", "after_nest" });
+const ids = zui.ids(.{ "panel", "fill", "frame", "outer", "inner", "picture", "custom", "gradient", "raised", "nest", "after_nest" });
 
 fn suiteConfig(comptime backend: zui.Config) zui.Config {
     var config = backend;
@@ -159,7 +173,7 @@ pub fn findRendererViolation(comptime Renderer: type, harness: anytype, conforma
 
         const pixels: PixelCheck(Harness) = .{ .harness = harness, .tolerance = conformance.tolerance, .scene = scene };
         const found = switch (scene) {
-            .reference => pixels.reference(frame, config.ImageHandle != void),
+            .reference => pixels.reference(frame, config),
             .deep_clips => pixels.deepClips(frame),
             .out_of_bounds, .empty => null,
         };
@@ -205,6 +219,15 @@ fn declareReference(ui: anytype, comptime config: zui.Config, payloads: anytype)
         }, .{ .id = ids.picture, .layout = .{ .sizing = fixedSize(32, 32) } });
         if (config.CustomData != void) ui.custom(payloads.custom, .{ .id = ids.custom, .layout = .{ .sizing = fixedSize(32, 32) } });
         if (config.Text != void) ui.text("MMMM", .{ .color = scene_colors.text });
+        ui.box(.{ .id = ids.gradient, .layout = .{ .sizing = fixedSize(64, 32) }, .effects = &.{
+            .gradient = .{ .from = scene_colors.gradient_from, .to = scene_colors.gradient_to },
+        } });
+        ui.box(.{
+            .id = ids.raised,
+            .layout = .{ .sizing = fixedSize(32, 32) },
+            .decoration = .{ .background = scene_colors.raised },
+            .effects = &.{ .shadow = .{ .color = scene_colors.shadow, .offset = .{ shadow_offset, shadow_offset } } },
+        });
         ui.close();
     }
     ui.close();
@@ -239,7 +262,7 @@ fn PixelCheck(comptime Harness: type) type {
         tolerance: u8,
         scene: Scene,
 
-        fn reference(self: Self, frame: anytype, has_image: bool) ?RendererViolation {
+        fn reference(self: Self, frame: anytype, comptime config: zui.Config) ?RendererViolation {
             const fill = frame.rectOf(ids.fill).?;
             const bordered = frame.rectOf(ids.frame).?;
             const outer = frame.rectOf(ids.outer).?;
@@ -260,7 +283,8 @@ fn PixelCheck(comptime Harness: type) type {
             for (expectations) |expectation| {
                 if (self.expect(expectation)) |violation| return violation;
             }
-            if (has_image) {
+            if (self.effects(frame, config)) |violation| return violation;
+            if (config.ImageHandle != void) {
                 const picture = frame.rectOf(ids.picture).?;
                 const image_expectations = [_]Expectation{
                     .{ .at = center(picture), .color = scene_colors.tinted_image, .what = "a tinted image of one color" },
@@ -273,6 +297,37 @@ fn PixelCheck(comptime Harness: type) type {
             }
             for (frame.commands()) |command| {
                 if (command.payload == .text) return self.expectTextDrawn(command.bounds);
+            }
+            return null;
+        }
+
+        fn effects(self: Self, frame: anytype, comptime config: zui.Config) ?RendererViolation {
+            const gradient = frame.rectOf(ids.gradient).?;
+            const raised = frame.rectOf(ids.raised).?;
+            const middle = scene_colors.gradient_from.mixOklab(scene_colors.gradient_to, 0.5);
+            const draws_gradient = comptime config.commands.contains(.gradient);
+            const draws_shadow = comptime config.commands.contains(.shadow);
+            const across_gradient = gradient.y + gradient.height / 2;
+            const beyond_raised = raised.x + raised.width + shadow_offset / 2;
+            const expectations = [_]Expectation{
+                .{ .at = center(gradient), .color = middle, .what = "the middle of a gradient, in OKLab," },
+                if (draws_gradient)
+                    .{ .at = .{ gradient.x + 1, across_gradient }, .color = scene_colors.gradient_from, .what = "the start of a gradient" }
+                else
+                    .{ .at = .{ gradient.x + 1, across_gradient }, .color = middle, .what = "the start of a lowered gradient, its mean color," },
+                if (draws_gradient)
+                    .{ .at = .{ gradient.x + gradient.width - 2, across_gradient }, .color = scene_colors.gradient_to, .what = "the end of a gradient" }
+                else
+                    .{ .at = .{ gradient.x + gradient.width - 2, across_gradient }, .color = middle, .what = "the end of a lowered gradient, its mean color," },
+                .{ .at = center(raised), .color = scene_colors.raised, .what = "a box over its own shadow" },
+                if (draws_shadow)
+                    .{ .at = .{ beyond_raised, raised.y + raised.height + shadow_offset / 2 }, .color = scene_colors.shadow, .what = "a shadow cast right and down" }
+                else
+                    .{ .at = .{ beyond_raised, raised.y + raised.height + shadow_offset / 2 }, .color = scene_colors.background, .what = "where a lowered shadow draws nothing" },
+                .{ .at = .{ beyond_raised, raised.y + shadow_offset / 2 }, .color = scene_colors.background, .what = "above where a shadow is offset to" },
+            };
+            for (expectations) |expectation| {
+                if (self.expect(expectation)) |violation| return violation;
             }
             return null;
         }
@@ -330,13 +385,14 @@ fn hex(color: zui.Color) u24 {
     return @as(u24, color.r) << 16 | @as(u24, color.g) << 8 | color.b;
 }
 
-const Flaw = enum { none, forgets_enclosing_clip, ignores_image_decoration };
+const Flaw = enum { none, forgets_enclosing_clip, ignores_image_decoration, interpolates_gradient_in_srgb };
 
 /// A software renderer into its own pixels, the plainest that conforms:
-/// fills ignore corner radii, text fills its bounds, and an image is its
-/// handle's color times its tint, inside its rounded corners. Each `Flaw`
-/// is a mistake the suite must catch.
-fn PixelRenderer(comptime flaw: Flaw) type {
+/// fills ignore corner radii, text fills its bounds, an image is its
+/// handle's color times its tint, inside its rounded corners, a gradient
+/// is each pixel's `colorAt`, and a shadow is unblurred. Each `Flaw` is a
+/// mistake the suite must catch.
+fn PixelRenderer(comptime flaw: Flaw, comptime commands: zui.CommandSet) type {
     return struct {
         const Self = @This();
         const width = renderer_viewport[0];
@@ -345,6 +401,7 @@ fn PixelRenderer(comptime flaw: Flaw) type {
         const height_units: f32 = height;
 
         pub const zui_surfaces: zui.SurfaceKinds = .initOne(.offscreen);
+        pub const zui_commands = commands;
         pub const ImageHandle = zui.Color;
 
         pixels: [width * height]zui.Color = undefined,
@@ -367,15 +424,27 @@ fn PixelRenderer(comptime flaw: Flaw) type {
                         self.fill(.{ .x = bounds.x + bounds.width - widths.right, .y = bounds.y, .width = widths.right, .height = bounds.height }, clip, border.color);
                     },
                     .text => |text| self.fill(bounds, clip, text.style.color),
-                    .image => |image| if (flaw == .ignores_image_decoration)
-                        self.fill(bounds, clip, image.handle)
-                    else
-                        self.fillRounded(bounds, clip, multiply(image.handle, image.tint), image.corner_radius),
                     .clip_begin => |rect| {
                         clips[depth] = rect;
                         depth += 1;
                     },
                     .clip_end => depth = if (flaw == .forgets_enclosing_clip) 0 else depth - 1,
+                    inline else => |payload, kind| if (comptime std.mem.eql(u8, @tagName(kind), "image")) {
+                        if (flaw == .ignores_image_decoration)
+                            self.fill(bounds, clip, payload.handle)
+                        else
+                            self.fillRounded(bounds, clip, multiply(payload.handle, payload.tint), payload.corner_radius);
+                    } else if (comptime std.mem.eql(u8, @tagName(kind), "gradient")) {
+                        self.fillGradient(bounds, clip, payload);
+                    } else if (comptime std.mem.eql(u8, @tagName(kind), "shadow")) {
+                        const shape: zui.Rect = .{
+                            .x = bounds.x + payload.offset[0] - payload.spread,
+                            .y = bounds.y + payload.offset[1] - payload.spread,
+                            .width = bounds.width + 2 * payload.spread,
+                            .height = bounds.height + 2 * payload.spread,
+                        };
+                        self.fillRounded(shape, clip, payload.color, payload.corner_radius);
+                    } else comptime unreachable,
                 }
             }
         }
@@ -395,6 +464,17 @@ fn PixelRenderer(comptime flaw: Flaw) type {
             for (0..height) |y| for (0..width) |x| {
                 const at: [2]f32 = .{ @as(f32, @floatFromInt(x)) + 0.5, @as(f32, @floatFromInt(y)) + 0.5 };
                 if (contains(clip, at) and insideRounded(rect, radius, at)) self.pixels[y * width + x] = color;
+            };
+        }
+
+        fn fillGradient(self: *Self, rect: zui.Rect, clip: zui.Rect, gradient: anytype) void {
+            for (0..height) |y| for (0..width) |x| {
+                const at: [2]f32 = .{ @as(f32, @floatFromInt(x)) + 0.5, @as(f32, @floatFromInt(y)) + 0.5 };
+                if (!contains(clip, at) or !insideRounded(rect, gradient.corner_radius, at)) continue;
+                self.pixels[y * width + x] = if (flaw == .interpolates_gradient_in_srgb)
+                    gradient.from.mix(gradient.to, (zui.Gradient{ .from = gradient.from, .to = gradient.to, .angle = gradient.angle }).amountAt(rect, at))
+                else
+                    gradient.colorAt(rect, at);
             };
         }
     };
@@ -437,7 +517,7 @@ fn multiplyChannel(a: u8, b: u8) u8 {
 fn PixelHarness(comptime Renderer: type) type {
     return struct {
         const Self = @This();
-        pub const config: zui.Config = .{ .Text = FixedText, .ImageHandle = zui.Color };
+        pub const config: zui.Config = .{ .Text = FixedText, .ImageHandle = zui.Color, .commands = Renderer.zui_commands };
 
         drawn: Renderer = .{},
         text_contract: FixedText = .{},
@@ -471,14 +551,20 @@ const FixedText = struct {
     }
 };
 
-test "a renderer that draws every frame right passes the suite" {
-    var harness: PixelHarness(PixelRenderer(.none)) = .{};
-    try expectRendererConforms(PixelRenderer(.none), &harness, .{ .gpa = std.testing.allocator, .io = std.testing.io, .tolerance = 0 });
+const draws_effects: zui.CommandSet = .initMany(&.{ .gradient, .shadow });
+
+test "a renderer that draws every frame right passes the suite, with gradients and shadows drawn or lowered" {
+    inline for (comptime .{ draws_effects, zui.CommandSet.initEmpty() }) |commands| {
+        const Renderer = PixelRenderer(.none, commands);
+        var harness: PixelHarness(Renderer) = .{};
+        try expectRendererConforms(Renderer, &harness, .{ .gpa = std.testing.allocator, .io = std.testing.io });
+    }
 }
 
 test "a renderer that forgets the enclosing clip when a clip ends fails the suite" {
-    var harness: PixelHarness(PixelRenderer(.forgets_enclosing_clip)) = .{};
-    const violation = (try findRendererViolation(PixelRenderer(.forgets_enclosing_clip), &harness, .{ .gpa = std.testing.allocator, .io = std.testing.io })).?;
+    const Renderer = PixelRenderer(.forgets_enclosing_clip, draws_effects);
+    var harness: PixelHarness(Renderer) = .{};
+    const violation = (try findRendererViolation(Renderer, &harness, .{ .gpa = std.testing.allocator, .io = std.testing.io })).?;
     try std.testing.expectEqual(error.WrongColor, violation.kind);
     try std.testing.expectEqualStrings(
         "drew #0040ff at (248, 64) in the reference scene, where what the outer clip cut off should be #203040",
@@ -487,11 +573,23 @@ test "a renderer that forgets the enclosing clip when a clip ends fails the suit
 }
 
 test "a renderer that draws an image untinted and square fails the suite" {
-    var harness: PixelHarness(PixelRenderer(.ignores_image_decoration)) = .{};
-    const violation = (try findRendererViolation(PixelRenderer(.ignores_image_decoration), &harness, .{ .gpa = std.testing.allocator, .io = std.testing.io })).?;
+    const Renderer = PixelRenderer(.ignores_image_decoration, draws_effects);
+    var harness: PixelHarness(Renderer) = .{};
+    const violation = (try findRendererViolation(Renderer, &harness, .{ .gpa = std.testing.allocator, .io = std.testing.io })).?;
     try std.testing.expectEqual(error.WrongColor, violation.kind);
     try std.testing.expectEqualStrings(
         "drew #00ffff at (32, 112) in the reference scene, where a tinted image of one color should be #00ff80",
+        violation.description(),
+    );
+}
+
+test "a renderer that interpolates a gradient in sRGB fails the suite" {
+    const Renderer = PixelRenderer(.interpolates_gradient_in_srgb, draws_effects);
+    var harness: PixelHarness(Renderer) = .{};
+    const violation = (try findRendererViolation(Renderer, &harness, .{ .gpa = std.testing.allocator, .io = std.testing.io })).?;
+    try std.testing.expectEqual(error.WrongColor, violation.kind);
+    try std.testing.expectEqualStrings(
+        "drew #7e0081 at (144, 112) in the reference scene, where the middle of a gradient, in OKLab, should be #8c53a2",
         violation.description(),
     );
 }

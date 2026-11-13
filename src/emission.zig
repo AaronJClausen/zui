@@ -32,10 +32,26 @@ pub fn EmitLevel(comptime Index: type) type {
 /// they paint over the element's children. Elements entirely outside the clip
 /// are not drawn.
 pub fn run(comptime Ui: type, ui: *Ui, frame: *Ui.Frame) void {
+    if (frame.effect_count == 0) emit(Ui, ui, frame, .without_effects) else @call(.never_inline, emit, .{ Ui, ui, frame, .with_effects });
+}
+
+/// A frame with effects is emitted by its own copy of the walk, so that
+/// one without them runs code that never looks for any: any change to
+/// the walk moves how the compiler allocates its registers, by up to 5% of
+/// `endFrame`. The helpers both copies call are `inline` because with two
+/// callers the compiler stopped inlining them, which cost the walk 4%.
+const Walk = enum { without_effects, with_effects };
+
+fn emit(comptime Ui: type, ui: *Ui, frame: *Ui.Frame, comptime walk: Walk) void {
     const emitting = Ui.Tracing.begin(.emit);
     const results = &ui.memory.results;
     results.clear();
-    var emitter: Emitter(Ui) = .{ .frame = frame, .results = results, .pixels_per_unit = frame.pixels_per_unit, .units_per_pixel = 1 / frame.pixels_per_unit };
+    var emitter: Emitter(Ui) = .{
+        .frame = frame,
+        .results = results,
+        .pixels_per_unit = frame.pixels_per_unit,
+        .units_per_pixel = 1 / frame.pixels_per_unit,
+    };
 
     const viewport: style.Rect = .{ .width = frame.params.viewport[0], .height = frame.params.viewport[1] };
     const levels = &ui.emit_levels;
@@ -52,11 +68,19 @@ pub fn run(comptime Ui: type, ui: *Ui, frame: *Ui.Frame) void {
     results.insert(frame.element_id[Ui.root_index], emitter.rectOf(Ui.root_index), interaction.no_region);
 
     var depth: usize = 0;
+    var next_effect: u32 = 0;
+    var next_effect_element: Ui.Index = if (walk == .with_effects) frame.effect_elements[0] else Ui.none_index;
     for (1..frame.element_count) |index| {
         const element: Ui.Index = @intCast(index);
         while (levels[depth].subtree_end <= element) : (depth -= 1) emitter.leave(&levels[depth], levels[depth - 1].z);
-        if (!frame.flags[element].emits() and frame.decorationOf(element) == null and frame.kindOf(element) == .none) continue;
-        if (emitter.enter(element, levels[depth], viewport)) |level| {
+        const effects: ?*const style.Effects = if (walk == .with_effects and element == next_effect_element) taken: {
+            const effects = &frame.effects[next_effect];
+            next_effect += 1;
+            next_effect_element = if (next_effect < frame.effect_count) frame.effect_elements[next_effect] else Ui.none_index;
+            break :taken effects;
+        } else null;
+        if (!frame.flags[element].emits() and frame.decorationOf(element) == null and frame.kindOf(element) == .none and effects == null) continue;
+        if (emitter.enter(element, levels[depth], viewport, effects)) |level| {
             depth += 1;
             levels[depth] = level;
         }
@@ -176,7 +200,7 @@ fn Emitter(comptime Ui: type) type {
         /// layered runs are gathered in the unused end of the commands, so
         /// layer 0's commands each move at most once, and not at all when
         /// they all come before every layered run.
-        fn sortLayers(self: *Self) void {
+        inline fn sortLayers(self: *Self) void {
             const frame = self.frame;
             const commands = frame.render_commands[0..frame.command_count];
             const runs = self.layered_runs[0..self.layered_run_count];
@@ -207,7 +231,7 @@ fn Emitter(comptime Ui: type) type {
 
         /// Returns the level the element's subtree is drawn in, or null if
         /// that is the parent's level unchanged.
-        fn enter(self: *Self, element: Ui.Index, parent: Level, viewport: style.Rect) ?Level {
+        inline fn enter(self: *Self, element: Ui.Index, parent: Level, viewport: style.Rect, effects: ?*const style.Effects) ?Level {
             const frame = self.frame;
             const flags = frame.flags[element];
             const floating = flags.floating;
@@ -229,9 +253,11 @@ fn Emitter(comptime Ui: type) type {
             const visible = bounds.intersect(outer_clip);
             const drawn = !visible.isEmpty();
 
+            if (effects) |declared| if (declared.shadow) |*shadow| self.emitShadow(element, bounds, outer_clip, level.z, shadow);
             if (drawn) if (frame.decorationOf(element)) |decoration| if (decoration.background) |color| {
                 self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = level.z, .payload = .{ .rectangle = .{ .color = color, .corner_radius = decoration.corner_radius } } });
             };
+            if (drawn) if (effects) |declared| if (declared.gradient) |*gradient| self.emitGradient(element, bounds, level.z, gradient);
 
             switch (frame.kindOf(element)) {
                 .none => {},
@@ -264,12 +290,50 @@ fn Emitter(comptime Ui: type) type {
             return level;
         }
 
+        fn cornerRadiusOf(self: *const Self, element: Ui.Index) style.CornerRadius {
+            const decoration = self.frame.decorationOf(element) orelse return .zero;
+            return decoration.corner_radius;
+        }
+
+        /// Culled by what it paints rather than by the element's box, so the
+        /// shadow of an element just outside the clip still shows inside it.
+        fn emitShadow(self: *Self, element: Ui.Index, bounds: style.Rect, clip: style.Rect, z: i16, shadow: *const style.Shadow) void {
+            if (comptime !Ui.RenderCommand.commands.contains(.shadow)) {
+                self.frame.diagnostics.lowered.insert(.shadow);
+                return;
+            }
+            if (shadow.paintedBounds(bounds).intersect(clip).isEmpty()) return;
+            self.push(.{ .bounds = self.snap(bounds), .id = self.frame.element_id[element], .z = z, .payload = .{ .shadow = .{
+                .color = shadow.color,
+                .offset = shadow.offset,
+                .blur = shadow.blur,
+                .spread = shadow.spread,
+                .corner_radius = self.cornerRadiusOf(element),
+            } } });
+        }
+
+        fn emitGradient(self: *Self, element: Ui.Index, bounds: style.Rect, z: i16, gradient: *const style.Gradient) void {
+            const element_id = self.frame.element_id[element];
+            const corner_radius = self.cornerRadiusOf(element);
+            if (comptime !Ui.RenderCommand.commands.contains(.gradient)) {
+                self.frame.diagnostics.lowered.insert(.gradient);
+                self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = z, .payload = .{ .rectangle = .{ .color = gradient.meanColor(), .corner_radius = corner_radius } } });
+                return;
+            }
+            self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = z, .payload = .{ .gradient = .{
+                .from = gradient.from,
+                .to = gradient.to,
+                .angle = gradient.angle,
+                .corner_radius = corner_radius,
+            } } });
+        }
+
         const Layer = struct { clip: style.Rect, z: i16 };
 
         /// A floating element's layer and clip. Cut off by its target's
         /// clip, it pushes that clip merged with its own before it draws:
         /// its own box holds everything it draws itself.
-        fn floatingLayer(self: *Self, floating: Ui.Index, parent_clip: style.Rect, viewport: style.Rect) Layer {
+        inline fn floatingLayer(self: *Self, floating: Ui.Index, parent_clip: style.Rect, viewport: style.Rect) Layer {
             const frame = self.frame;
             const config = frame.floatingOf(floating);
             self.switchLayer(config.z);
@@ -311,7 +375,7 @@ fn Emitter(comptime Ui: type) type {
             return index;
         }
 
-        fn emitText(self: *Self, element: Ui.Index, element_id: u64, level: Level) void {
+        inline fn emitText(self: *Self, element: Ui.Index, element_id: u64, level: Level) void {
             const frame = self.frame;
             const record = frame.texts[frame.content_index[element]];
             const line_height = record.metrics.line_height;

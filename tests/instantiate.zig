@@ -31,6 +31,8 @@ var memory: [Ui.required_bytes]u8 align(Ui.buffer_alignment) = undefined;
 
 const Expanded = struct { open: bool };
 
+const check_effects: zui.Effects = .{ .gradient = .{ .from = .black, .to = .white, .angle = 1 }, .shadow = .glow(.black, 4) };
+
 const check_style = zui.static(zui.Style{ .layout = .{ .sizing = .{ .width = .fixed(8), .height = .fixed(8) } }, .decoration = .{ .background = .white } });
 
 export fn zuiCheckFrame(width: f32, height: f32, pointer_x: f32, pointer_y: f32) usize {
@@ -73,6 +75,7 @@ export fn zuiCheckFrame(width: f32, height: f32, pointer_x: f32, pointer_y: f32)
     ui.box(.{ .clip = .both, .disabled = ui.clicked(save) or ui.pressed(save) or ui.focused(save), .layout = .{ .sizing = .{ .width = .fixed(80), .height = .fixed(80) } } });
     ui.box(.{ .floating = .{ .attach_to = .{ .element = save }, .anchor = .center, .z = 2, .capture = false, .clip = .target }, .interactive = true });
     ui.box(.{ .style = check_style, .decoration = if (ui.hovered(save)) .{ .background = .black } else null });
+    ui.box(.{ .style = check_style, .effects = &check_effects });
     ui.close();
     ui.close();
     ui.state(save, Expanded).open = ui.keyPressed(.enter) and ui.chordPressed(.{ .key = .tab, .modifiers = .{ .shift = true } }) and ui.typedText().len == 1 and ui.keyEvents().len == 2;
@@ -191,7 +194,8 @@ const EveryCommandRenderer = struct {
             self.drawn += switch (command.payload) {
                 .rectangle, .border, .text, .clip_begin, .clip_end => 1,
                 .image, .custom => 2,
-                .gradient, .shadow, .backdrop_blur, .transform_begin, .transform_end, .material => 3,
+                .gradient => |gradient| gradient.colorAt(command.bounds, .{ 0, 0 }).r,
+                .shadow, .backdrop_blur, .transform_begin, .transform_end, .material => 3,
             };
         }
     }
@@ -216,6 +220,7 @@ export fn zuiCheckRenderer() usize {
     ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 100, 100 } } });
     ui.image(.{ .handle = 7 }, .{ .decoration = .{ .background = .black } });
     ui.custom(3, .{});
+    ui.box(.{ .layout = .{ .sizing = .grow_both }, .effects = &check_effects });
     const frame = ui.endFrame();
     defer ui.release(frame);
     var renderer: EveryCommandRenderer = .{};

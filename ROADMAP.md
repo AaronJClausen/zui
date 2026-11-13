@@ -69,7 +69,7 @@ green, and its **Status** line below says which slice is next.
 | R9. Measuring across operating systems and hardware | foundation | `bench/machine.zig`, `bench/report.zig`, `README.md` | | waiting on a run under Windows on the reference machine |
 | P11. Flat child lists | audit | `src/context.zig`, `src/layout.zig` | | waiting on a wide scene whose profile points at the walks; kept by the owner |
 | P12. Text commands that point at their style | audit | `src/commands.zig`, `src/emission.zig`, `zui_wire/`, `../zui-raylib`, `../zui-sokol`, `../zui-terminal` | | waiting on a profile of a renderer reading the commands |
-| G1. Gradients, shadows and glow | 8 | `src/style.zig`, `src/emission.zig`, `zui_testing/` | | next: start again on `main`, as its **Status** says |
+| G1. Gradients, shadows and glow | 8 | `src/style.zig`, `src/emission.zig`, `zui_testing/`, `../zui-sokol` | | in progress: the core is done; a backend that draws them waits on the owner's go-ahead to work in `../zui-sokol` |
 | G2. Backdrop blur | 8 | `src/style.zig`, `src/emission.zig`, `zui_testing/` | G1 | |
 | G3. Transforms | 8 | `src/style.zig`, `src/emission.zig`, `src/interaction.zig`, `zui_testing/` | G1 | |
 | G5. Materials | 8 | `src/context.zig`, `src/emission.zig`, `zui_testing/`, a renderer | G1 | |
@@ -2727,16 +2727,30 @@ Windows host shows HDR white brighter than SDR white.
 
 **Spec.** §13.1, §13.3, §16.4, §18.
 
-**G1 status.** Starts again on `main`. A first slice is on
-`wip/g1-gradients-shadows-and-glow` (`80db29e`, off `5b032b7`): the
-declaration types in `src/style.zig`, their emission, `src/tests/effects.zig`
-and the renderer suite's reference scene, with every test passing but
-`counts` over the 2% gate (the box tree's declaration +5.5%, the wide
-tree's +7.7%, single-line texts' `endFrame` +1.9%). It predates P6, which
-rewrote how emission orders layers, and the counts it was judged by, so
-it is read as a sketch, not rebased. Its first step on `main` is to find
-where an element that declares no effect pays for them, by Callgrind per
-function against the parent.
+**G1 status.** The core is done; what remains is a backend. Elements
+declare `.effects = &zui.Effects{ .gradient, .shadow }`, a pointer
+copied when declared; emission emits `gradient` under the background
+and over it in paint order shadow, background, gradient, culls a shadow
+by what it paints, and for a renderer that does not declare them lowers
+a gradient to its OKLab middle and a shadow to nothing, listing both in
+`Diagnostics.lowered`. `limits.max_effects` (256) bounds their copies.
+The renderer suite's reference scene declares both, and its pixel
+renderer passes it drawing them and with them lowered, and fails it
+interpolating in sRGB. Against `c7810b7`, `counts` moves no scene by
+more than +0.77% (the tooltip grids' `endFrame`) and no declaration at
+all; `bench-compare`, turbo off, calls ten scenes faster (the documents
+view's declaration −10.3%, the others −0.9% to −3.0%), none of the frame
+scenes slower, and `init` +1.5% and the documents view's first frame
++1.6% for the effects' storage. One shadowed element makes the box
+tree's `endFrame` 3.1% more instructions, the walk that looks for them.
+Found on the way, each against the parent by `counts`: `Element.effects`
+as a value made the interactive boxes' declaration 22% slower; a
+`Style.effects` cost the static box tree's declaration 3.5%; one compare
+added to the walk moved `endFrame` by up to 3.5%, and a second
+instantiation of the walk stopped `emitText`, `floatingLayer` and
+`sortLayers` being inlined, 4%; storage for every element made `init`
+21% slower. Next: zui-sokol declares `.gradient` and `.shadow`, draws
+them, and passes the suite; the backends' pins move after a push.
 
 ---
 
@@ -2883,6 +2897,7 @@ Deliberate, and each a reason to choose zui:
 | Right-to-left layout (L6) | `Layout.mirrored: zui.Mirrored` (`.inherit`, `.yes`, `.no`), one byte rather than a `?bool`, which would make every `Layout` four bytes larger; inherited, the root's from the environment's `direction`; a mirrored or `right_to_left` element, not both, reflects its children across its box, so padding's `left` is the start side, alignment and floating anchors and offsets mirror, and a text's `.start` and `.end` swap; `right_to_left` covers the element's own children only, as `row-reverse`; a reversed scroller's offset grows to the left and takes the wheel's physical delta reversed; positions and borders stay physical; found by the position pass, which starts again mirroring at the first parent that mirrors, so other frames pay nothing |
 | Floating options (L4) | `capture = false` gives the floating element no hit region of its own, while interactive elements inside it keep theirs; `.clip = .target` cuts it off where its target's children are, merged with its own clip into one pair pushed in its layer before it draws; a later target places the subtree again after pass 6, in declaration order, and a target inside the subtree falls back to the parent; `capture` and `clip` are copied into the element's flags, so emission reads no floating config for other elements |
 | A border inside its element's clip (L4) | emitted before the element's own `clip_end`, which leaves it whole since it lies in the element's box, so a floating element's merged clip also cuts off its border with one clip pair |
+| Effects (G1) | `Element.effects: ?*const zui.Effects`, copied when declared, not a value in `Element` (interactive boxes' declaration +22%) or `Decoration` (every decorated element copies it), and not in `Style` (+3.5% of the static box tree's declaration); in the shape of the decoration's corners; painted shadow, background, gradient; a gradient in OKLab along a line through the center, long enough that the far corners take its ends; a shadow culled by what it paints; bounded by `limits.max_effects`; a frame without effects is emitted by a walk that never looks for them |
 | Dividers (L3) | `Border.between_children`, emitted as `rectangle` commands in the border's color, so no renderer breaks; centered in the gap, spanning the element inside its widths; inside the element's clip, after its children and before its border; a border of zero widths emits no `border` command |
 | Images' tint and corner radius (L3) | declared on `Ui.Image` and carried by the `image` command with defaults (white, square), so existing renderers and their tests still compile; drawing them is the backends' (C10) |
 | Drawing images' tint and corner radius (C10) | the tint multiplies the texels as the vertex color; a rounded image is a fan of textured triangles from its center, each corner with its own radius, in zui-raylib too, whose rectangles keep raylib's one radius; the renderer suite checks the tinted color at the image's center and the background just inside two of its corners |

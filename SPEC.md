@@ -214,6 +214,7 @@ pub const Limits = struct {
     max_depth: u16 = 64,                    // nesting of `open` inside `open`
     max_text_bytes: u32 = 64 * 1024,        // UTF-8 bytes of all `text` content per frame
     max_render_commands: u32 = 8192,        // per frame
+    max_effects: u32 = 256,                 // elements with effects per frame; past it, drawn without them
     state_slots: u32 = 1024,                // persistent `(id, type)` entries (§12); a power of two
     state_frames_until_eviction: u8 = 2,    // counted from the last frame its element was declared
     measure_cache_entries: u32 = 4096,      // the segment cache (§9.3); a power of two
@@ -981,7 +982,8 @@ pub const Element = struct {
     id: Id = .none,                     // needed for queries, state, scrolling and focus
     style: ?Static(Style) = null,       // comptime-built, zero-copy (§10.3)
     layout: ?Layout = null,             // overrides style.layout
-    decoration: ?Decoration = null,     // background, border, corner radius, material, effects
+    decoration: ?Decoration = null,     // background, border, corner radius, material
+    effects: ?*const Effects = null,    // gradient and shadow, copied when declared
     clip: Axes = .none,                 // the axes on which descendants are cut off, e.g. .vertical
     scroll: ?Scroll = null,
     floating: ?Floating = null,
@@ -1009,6 +1011,42 @@ pub const Border = struct {
     between_children: f32 = 0,   // a divider of this width between each two adjacent children in the flow
 };
 ```
+
+```zig
+pub const Effects = struct {
+    gradient: ?Gradient = null,   // painted over the background
+    shadow: ?Shadow = null,       // painted under it; with no offset, a glow
+};
+
+pub const Gradient = struct {
+    from: config.Color,
+    to: config.Color,
+    angle: f32 = 0,               // radians clockwise from left to right
+};
+
+pub const Shadow = struct {
+    color: config.Color,
+    offset: [2]f32 = .{ 0, 0 },   // right and down
+    blur: f32 = 0,                // how far the edge fades, outward
+    spread: f32 = 0,              // how far the shape grows before it is blurred
+};
+```
+
+Effects take the shape of the element's box and its decoration's
+corner radius, and paint from the bottom as shadow, background,
+gradient, then the element's content. A gradient is interpolated in
+OKLab along a line through the element's center at `angle`, just long
+enough that the two corners farthest along it take `from` and `to`. A
+shadow is culled by what it paints, not by its element's box. Effects
+are a pointer, not a value in `Element` or `Decoration`, and not part
+of a static `Style`: as a value in `Element`, every declaration copied
+them and the interactive box tree's declaration was 22% slower; in
+`Decoration`, every decorated element copied them; in `Style`, every
+styled element looked for them, 3.5% of the static box tree's
+declaration. Their copies have a limit of their own, `max_effects`,
+since one for every element made each frame 160 KiB larger and `init`
+21% slower. A frame that declares no effects is emitted by a walk that
+never looks for them; one that does pays for the look at every element.
 
 A divider is centered in the gap between two children and spans the
 element across its flow, inside the border's widths. Floating children

@@ -82,6 +82,9 @@ pub const Limits = struct {
     max_text_bytes: u32 = 64 * 1024,
     /// Per frame. Each wrapped line of text is one.
     max_render_commands: u32 = 8192,
+    /// Elements with effects, per frame. Past it, an element is declared
+    /// and drawn without its effects.
+    max_effects: u32 = 256,
     /// Persistent `(id, type)` entries. A power of two.
     state_slots: u32 = 1024,
     /// Counted from the last frame its element was declared.
@@ -125,6 +128,10 @@ pub const Diagnostics = struct {
     /// The `Sources` field that refused first, e.g. "quotes": the one
     /// whose capacity to raise. Empty when none refused.
     first_refusing_source: []const u8 = "",
+    /// Optional commands this frame declared but the renderer does not
+    /// draw, so emission replaced them: a gradient by a rectangle in its
+    /// mean color, a shadow by nothing. Not a failure, so `ok` ignores it.
+    lowered: command_types.CommandSet = .initEmpty(),
 
     pub fn ok(self: Diagnostics) bool {
         return self.exceeded.count() == 0 and self.duplicate_ids == 0 and !self.unbalanced and self.refused_publishes == 0;
@@ -155,6 +162,9 @@ pub const Element = struct {
     style: ?style.Static(style.Style) = null,
     layout: ?style.Layout = null,
     decoration: ?style.Decoration = null,
+    /// Gradients and shadows, in the shape of the decoration's corners.
+    /// Copied when the element is declared, so it may point at a local.
+    effects: ?*const style.Effects = null,
     /// The axes on which descendants are cut off.
     clip: style.Axes = .none,
     scroll: ?style.Scroll = null,
@@ -414,6 +424,11 @@ pub fn Context(comptime config: Config) type {
             next_layout: [*]style.Layout,
             decorations: [max_elements]Decoration,
             next_decoration: [*]Decoration,
+            /// In declaration order, each beside `effects` at the same index,
+            /// so emission finds the next one by comparing a single index.
+            effect_elements: [limits.max_effects]Index,
+            effects: [limits.max_effects]style.Effects,
+            effect_count: u32,
             texts: [if (has_text) max_elements else 0]TextRecord,
             text_count: u32,
             images: [if (has_image) max_elements else 0]Image,
@@ -540,6 +555,7 @@ pub fn Context(comptime config: Config) type {
                 self.element_count = 0;
                 self.next_layout = &self.layouts;
                 self.next_decoration = &self.decorations;
+                self.effect_count = 0;
                 self.text_count = 0;
                 self.image_count = 0;
                 self.custom_count = 0;
@@ -840,6 +856,7 @@ pub fn Context(comptime config: Config) type {
             const needed = &frame.diagnostics.needed;
             needed.set(.max_elements, needed.get(.max_elements) + frame.element_count);
             needed.set(.max_text_bytes, needed.get(.max_text_bytes) + frame.text_bytes_used);
+            needed.set(.max_effects, needed.get(.max_effects) + frame.effect_count);
 
             layout.run(Self, self, frame);
             @call(.never_inline, emission.run, .{ Self, self, frame });
@@ -1211,6 +1228,17 @@ pub fn Context(comptime config: Config) type {
                     frame.decoration[index] = &copied_decoration[0];
                 } else frame.decoration[index] = null;
             } else frame.decoration[index] = if (element.style) |static_style| drawnDecoration(&static_style.value.decoration) else null;
+
+            if (element.effects) |effects| {
+                if (frame.effect_count < limits.max_effects) {
+                    frame.effect_elements[frame.effect_count] = index;
+                    frame.effects[frame.effect_count] = effects.*;
+                    frame.effect_count += 1;
+                } else {
+                    self.recordOverflow(frame, .max_effects, hash);
+                    self.countDropped(frame, .max_effects);
+                }
+            }
 
             if (!is_root) {
                 if (element.floating == null) frame.child_counts[parent].count(false) else frame.child_counts[parent].count(true);

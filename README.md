@@ -187,6 +187,14 @@ Implemented so far:
   every command (671 µs to 79 µs), warm texts that wrap reuse their lines
   (43% faster), `init` takes 92 µs instead of 138 µs, and the id-to-rect
   table is 96 KiB smaller.
+- **Stage 8, begun:** effects. `.effects = &.{ .gradient = ..., .shadow
+  = ... }` gives an element a linear gradient, interpolated in OKLab,
+  and a shadow, which with no offset is a glow, both in the shape of its
+  rounded box. A renderer that declares `.gradient` and `.shadow` gets
+  those commands; for any other, the core lowers a gradient to its
+  middle color and a shadow to nothing, and `frame.diagnostics.lowered`
+  says so. No backend draws them yet. An element or frame without
+  effects pays nothing for them.
 
 The reference backend, its adapter host and the demo application live in
 [zui-raylib](https://github.com/AaronJClausen/zui-raylib); the other
@@ -198,8 +206,9 @@ hosts live in [zui-host](https://github.com/AaronJClausen/zui-host).
 shipped feature in the code a consumer writes, with semantic highlighting;
 open it in a browser, or read [docs/feature-tour.md](docs/feature-tour.md).
 
-Next, in the order of SPEC.md §21: effects, an inspector and
-accessibility, more hosts, motion and text editing.
+Next, in the order of SPEC.md §21: a backend that draws gradients and
+shadows, then the rest of the effects, an inspector and accessibility,
+more hosts, motion and text editing.
 [ROADMAP.md](ROADMAP.md) keeps the queue of work in order, and
 [ARCHITECTURE.md](ARCHITECTURE.md) shows how the pieces connect.
 

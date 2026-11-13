@@ -257,7 +257,8 @@ roadmap item named:
 
 | Today | The spec | Where today | Item |
 |---|---|---|---|
-| optional commands have variants, but nothing in declaration produces one, so nothing is lowered and `Diagnostics` lists no lowerings | `Decoration` and `Element` carry gradients, shadows, blur, transforms and materials, each lowered for a renderer that does not declare it | `src/style.zig`, `src/emission.zig` | G1, G2, G3, G5 |
+| `Element.effects` emits gradients and shadows, lowered and listed in `Diagnostics.lowered` for a renderer that does not declare them, but no backend declares them, so none draws them | a renderer that declares `.gradient` and `.shadow` draws them and passes the renderer suite | `../zui-sokol` | G1 |
+| nothing in declaration produces backdrop blur, transforms or materials | `Element` carries them, each lowered for a renderer that does not declare it | `src/style.zig`, `src/emission.zig` | G2, G3, G5 |
 | no `Config.Color`; colors are RGBA8 only | `zui.Color` or `zui.ExtendedColor`, clamped for a renderer without `zui_extended_color` | `src/context.zig`, `src/commands.zig` | G6 |
 | `Widgets(Ui)` with a `Theme` struct | `Widgets(Ui, Skin)` | `zui_widgets/` | K5 |
 | `Frame` exposes its storage arrays and `rectOf` | `Frame.inspect(index)` | `src/context.zig` | V1 |

@@ -460,6 +460,17 @@ pub fn snapshot(writer: *std.Io.Writer, commands: anytype, names: anytype) std.I
                 try writeHandle(writer, payload.handle);
                 if (!payload.tint.eql(.white)) try writer.print(" tint=#{x:0>2}{x:0>2}{x:0>2}{x:0>2}", .{ payload.tint.r, payload.tint.g, payload.tint.b, payload.tint.a });
                 try writeCorners(writer, payload.corner_radius);
+            } else if (comptime std.mem.eql(u8, @tagName(kind), "gradient")) {
+                try writeNamedColor(writer, "from", payload.from);
+                try writeNamedColor(writer, "to", payload.to);
+                if (payload.angle != 0) try writer.print(" angle={d}", .{payload.angle});
+                try writeCorners(writer, payload.corner_radius);
+            } else if (comptime std.mem.eql(u8, @tagName(kind), "shadow")) {
+                try writeColor(writer, payload.color);
+                if (payload.offset[0] != 0 or payload.offset[1] != 0) try writer.print(" offset={d},{d}", .{ payload.offset[0], payload.offset[1] });
+                if (payload.blur != 0) try writer.print(" blur={d}", .{payload.blur});
+                if (payload.spread != 0) try writer.print(" spread={d}", .{payload.spread});
+                try writeCorners(writer, payload.corner_radius);
             },
         }
         try writer.writeByte('\n');
@@ -488,7 +499,11 @@ fn writeRect(writer: *std.Io.Writer, rect: zui.Rect) !void {
 }
 
 fn writeColor(writer: *std.Io.Writer, color: zui.Color) !void {
-    try writer.print(" color=#{x:0>2}{x:0>2}{x:0>2}", .{ color.r, color.g, color.b });
+    try writeNamedColor(writer, "color", color);
+}
+
+fn writeNamedColor(writer: *std.Io.Writer, name: []const u8, color: zui.Color) !void {
+    try writer.print(" {s}=#{x:0>2}{x:0>2}{x:0>2}", .{ name, color.r, color.g, color.b });
     if (color.a != 255) try writer.print("{x:0>2}", .{color.a});
 }
 
@@ -870,6 +885,21 @@ test "snapshots write an image's handle, tint and corner radius" {
     try expectSnapshot(&commands, .{},
         \\image x=0 y=0 w=8 h=8 handle=7
         \\image x=0 y=0 w=8 h=8 handle=8 tint=#ff800080 radius=4
+        \\
+    );
+}
+
+test "snapshots write a gradient's ends and angle and a shadow's offset, blur and spread" {
+    const Command = zui.Context(.{ .limits = .{ .max_elements = 8 }, .commands = .initMany(&.{ .gradient, .shadow }) }).RenderCommand;
+    const commands = [_]Command{
+        .{ .bounds = .{ .width = 8, .height = 8 }, .id = 1, .payload = .{ .shadow = .{ .color = .rgba(0x00000060), .offset = .{ 0, 4 }, .blur = 12, .spread = 2, .corner_radius = .all(4) } } },
+        .{ .bounds = .{ .width = 8, .height = 8 }, .id = 1, .payload = .{ .shadow = .{ .color = .white } } },
+        .{ .bounds = .{ .width = 8, .height = 8 }, .id = 1, .payload = .{ .gradient = .{ .from = .rgb(0x3a1c71), .to = .rgb(0xffaf7b), .angle = 1.5 } } },
+    };
+    try expectSnapshot(&commands, .{},
+        \\shadow x=0 y=0 w=8 h=8 color=#00000060 offset=0,4 blur=12 spread=2 radius=4
+        \\shadow x=0 y=0 w=8 h=8 color=#ffffff
+        \\gradient x=0 y=0 w=8 h=8 from=#3a1c71 to=#ffaf7b angle=1.5
         \\
     );
 }
