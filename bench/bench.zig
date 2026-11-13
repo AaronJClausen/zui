@@ -38,6 +38,7 @@ const DocumentsView = scenes.DocumentsView;
 const GridWithTooltip = scenes.GridWithTooltip;
 const InteractiveBoxTree = scenes.InteractiveBoxTree;
 const PressedInteractiveBoxTree = scenes.PressedInteractiveBoxTree;
+const ClickedInteractiveBoxTree = scenes.ClickedInteractiveBoxTree;
 const eventsOf = scenes.eventsOf;
 
 /// Text measurement with the cost profile of a shaping engine: about a
@@ -509,6 +510,7 @@ const entries = [_]Entry{
     frames(.compared_frames, GridWithTooltip(.last).limits, GlyphTableText, GridWithTooltip(.last)),
     frames(.compared_frames, InteractiveBoxTree.limits, GlyphTableText, InteractiveBoxTree),
     frames(.compared_frames, PressedInteractiveBoxTree.limits, GlyphTableText, PressedInteractiveBoxTree),
+    frames(.compared_frames, ClickedInteractiveBoxTree.limits, GlyphTableText, ClickedInteractiveBoxTree),
     frames(.reported_frames, shaping_limits, ShapingText(false), ShapedTextWall(false)),
     frames(.reported_frames, shaping_limits, ShapingText(true), ShapedTextWall(true)),
     .{ .name = "render thread", .kind = .render_thread, .run = timeRenderThread },

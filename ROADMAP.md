@@ -70,7 +70,8 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
-| P11. Flat child lists | audit | `src/context.zig`, `src/layout.zig` | | waiting on the owner: retire it on the profile below? |
+| P11. Flat child lists | audit | `src/context.zig`, `src/layout.zig` | | waiting on a wide scene whose profile points at the walks; kept by the owner |
+| P12. Text commands that point at their style | audit | `src/commands.zig`, `src/emission.zig`, `zui_wire/`, `../zui-raylib`, `../zui-sokol`, `../zui-terminal` | | waiting on a profile of a renderer reading the commands |
 | G1. Gradients, shadows and glow | 8 | `src/style.zig`, `src/emission.zig`, `zui_testing/` | | |
 | G2. Backdrop blur | 8 | `src/style.zig`, `src/emission.zig`, `zui_testing/` | G1 | |
 | G3. Transforms | 8 | `src/style.zig`, `src/emission.zig`, `src/interaction.zig`, `zui_testing/` | G1 | |
@@ -246,7 +247,10 @@ with 10.3% fewer simulated D1 misses; nothing else changed.
 `zig build bench-compare -- b0106bd` calls nothing faster or slower: the
 scene presses on every other frame, and `bench` keeps each scene's
 fastest frame, which is always a release, so the clock cannot see a
-press.
+press. `4096 interactive, clicked every frame` was added after it to
+time one: with that scene on both, `bench-compare` (100 rounds over 3
+layouts, turbo off) times its declaration 3.9% faster (137.3 µs to
+131.9 µs, 95% interval −4.5% to −3.1%) and calls nothing slower.
 
 **Spec.** §11.
 
@@ -2424,9 +2428,8 @@ sweeps, in paths no benchmark ran until `db4ea4d` added scenes for them:
 floating layers, ids on every element, and a pointer pressing. The owner
 put its findings ahead of stage 8. P6 (the layer sort), P7 (the id → rect
 table), P8 (one hit test per press), P9 (wrapped lines kept with the string
-cache) and P10 (the string cache's keys apart) are in *Done*. Its
-finding 7, render commands that copy their text style, is not taken: it
-changes every renderer, and no profile shows renderer bandwidth.
+cache) and P10 (the string cache's keys apart) are in *Done*. P11 and
+P12 wait on profiles that point at them.
 
 Each item is judged by `bench-compare` against its parent, with turbo
 off, and by `counts`; one that costs more elsewhere than it saves in its
@@ -2459,7 +2462,33 @@ walk's lines (`context.zig:489-491`), against 21% in `distribute` and
 reading the child's sizing through its `layout` pointer
 (`context.zig:506`, `:517`) and its size, not to finding the next child.
 A flat child list could save at most that 0.9%, and would build two more
-passes every frame. Retiring the item is the owner's decision.
+passes every frame. The owner keeps the item waiting rather than
+retiring it.
+
+### P12. Text commands that point at their style
+
+**Grounding.** `RenderCommand.Text` (`src/commands.zig:85`) holds a copy
+of its `TextStyle`, 20 bytes of its 40, and `emitText`
+(`src/emission.zig:330`) copies the record's style into every line. A
+command is 80 bytes.
+
+**Plan.** `style: *const TextStyle`, pointing at the text record's style,
+which the frame holds until it is released as it holds `content`.
+Renderers read `text.style.size` unchanged. `zui_wire` sends a single
+pointer as what it points at, and keeps a copy beside the command's text
+in its histories and the remote's slots.
+
+**Done when:** a renderer reading a text-heavy frame's commands is faster
+by `bench-compare`, and no scene is slower.
+
+**Status.** Measured at `9154f3f` in the core alone, then set aside; the
+patch is not kept in the repository. A command becomes 72 bytes, not
+fewer, since a border's 36-byte payload then sets the union's size, and
+a text payload 32. By `counts`, the text scenes run 0.06% to 0.24% fewer
+instructions and their simulated D1 misses change by under 0.1%, while
+`4096 interactive boxes`, which draws no text, runs 1.17% more. No
+scene reads the commands as a renderer does, which is where the audit
+put the saving, so the item waits on one that does.
 
 ---
 

@@ -166,6 +166,28 @@ pub const PressedInteractiveBoxTree = struct {
     }
 };
 
+/// `InteractiveBoxTree` under a mouse that clicks, pressing and releasing,
+/// on every frame. `bench` keeps each scene's fastest frame, which in
+/// `PressedInteractiveBoxTree` is always a release; here every frame pays
+/// for a press.
+pub const ClickedInteractiveBoxTree = struct {
+    pub const name = "4096 interactive, clicked every frame";
+    pub const layout_target_ns: ?u64 = null;
+    pub const limits = interactive_limits;
+    tree: InteractiveBoxTree = .{},
+    click: [2]zui.Event = undefined,
+
+    pub fn declare(self: *ClickedInteractiveBoxTree, ui: anytype, frame_index: usize) void {
+        self.tree.declare(ui, frame_index);
+    }
+
+    pub fn events(self: *ClickedInteractiveBoxTree, _: usize) []const zui.Event {
+        const mouse: zui.Pointer = .{ .id = .mouse, .kind = .mouse, .position = .{ 400, 300 }, .at = .zero };
+        self.click = .{ .{ .pointer_down = .{ .pointer = mouse } }, .{ .pointer_up = .{ .pointer = mouse } } };
+        return &self.click;
+    }
+};
+
 /// The box tree with each element's layout and decoration in one of 32
 /// static styles, so declaration stores a reference and copies no config.
 pub const StaticBoxTree = struct {
