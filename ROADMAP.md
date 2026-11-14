@@ -70,8 +70,8 @@ green, and its **Status** line below says which slice is next.
 | R9. Measuring across operating systems and hardware | foundation | `bench/machine.zig`, `bench/report.zig`, `README.md` | | waiting on a run under Windows on the reference machine |
 | P11. Flat child lists | audit | `src/context.zig`, `src/layout.zig` | | waiting on a wide scene whose profile points at the walks; kept by the owner |
 | P12. Text commands that point at their style | audit | `src/commands.zig`, `src/emission.zig`, `zui_wire/`, `../zui-raylib`, `../zui-sokol`, `../zui-terminal` | | waiting on a profile of a renderer reading the commands |
-| G2. Backdrop blur | 8 | `src/style.zig`, `src/emission.zig`, `zui_testing/` | | |
-| G3. Transforms | 8 | `src/style.zig`, `src/emission.zig`, `src/interaction.zig`, `zui_testing/` | | |
+| G2. Backdrop blur | 8 | `src/style.zig`, `src/emission.zig`, `zui_testing/`, `../zui-sokol` | | next |
+| G3. Transforms | 8 | `src/style.zig`, `src/emission.zig`, `src/interaction.zig`, `zui_testing/`, `../zui-sokol` | | |
 | G5. Materials | 8 | `src/context.zig`, `src/emission.zig`, `zui_testing/`, a renderer | | |
 | G6. HDR and wide gamut | 8 | `src/context.zig`, `src/commands.zig`, `../zui-host` | | |
 | V1. `zui_debug` | 9 | `zui_debug/`, `src/context.zig`, `../zui-raylib` | | |
@@ -2640,8 +2640,8 @@ effect. Rather than build stage 8 on that, the work turned to the
 measurements and the code under it: a data-oriented design audit, scenes
 for the paths it found unmeasured, benchmarks that could judge its
 changes (R3 to R9, planned in `docs/plans/benchmarking.md` as B1 to B8),
-and the audit's findings (P6 to P12). Stage 8 resumes with G1 once
-these are done or waiting.
+and the audit's findings (P6 to P12). With these done or waiting, stage
+8 resumed, and G1 landed on `main` (in *Done*).
 
 ### R9. Measuring across operating systems and hardware
 
@@ -2761,7 +2761,11 @@ put the saving, so the item waits on one that does.
 C1 generated the optional commands' variants; each item here adds the
 declaration that produces its command and the lowering for renderers that
 do not declare it, listed in `Diagnostics.lowered`, which G1 added (in
-*Done*).
+*Done*). The renderer that declares each command is zui-sokol, as for
+G1: the command joins `Renderer.zui_commands`, gets an arm in
+`Renderer.draw`, and is shown on its tour (G1's is the Light & Depth
+screen). Develop it with `--fork=../zui`; once the user has the zui
+change pushed, move the pin with `zig fetch --save=zui`.
 
 **Done when (each):** snapshot and lowering tests; the renderer suite's
 reference scene declares it, and one renderer that declares the command
@@ -2942,7 +2946,7 @@ Deliberate, and each a reason to choose zui:
 | Simulated misses (R8) | reported beside the instruction counts, never failing CI, since Callgrind's cache model shows direction, not cost |
 | Building on a slow foundation | not done: when an item's counts or budgets fail because of the code under it, the foundation is profiled and fixed first, as items of their own; the audit's findings went ahead of stage 8 for G1 |
 | The benchmarking plan | its steps B1 to B8 became R3 to R10; the plan keeps its motivation and sources |
-| G1's first slice | not rebased: it predates P6's emission and is a sketch for G1 on `main` |
+| G1's first slice | not rebased, and superseded by G1 on `main`; `wip/g1-gradients-shadows-and-glow` is history, not work to resume |
 | Flat child lists (P11) | kept, waiting, though its profile puts 0.9% of the wide tree's cycles on the walk |
 | Text commands that point at their style (P12) | parked on `p12-text-style-pointer` until a scene reads the commands as a renderer does |
 | The inspector | a module over `Frame.inspect` (V1) |
