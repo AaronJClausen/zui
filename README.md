@@ -195,8 +195,8 @@ Implemented so far:
   middle color and a shadow to nothing, and `frame.diagnostics.lowered`
   says so. zui-sokol draws both, on its tour's Light & Depth screen.
   `.backdrop_blur = .{ .radius = ..., .tint = ... }` is frosted glass
-  over what zui drew beneath the element; no backend blurs it yet, so
-  each draws the tint it is lowered to.
+  over what zui drew beneath the element; zui-sokol blurs it, and the
+  other backends draw the tint it is lowered to.
   An element or frame without effects pays nothing for them.
 
 The reference backend, its adapter host and the demo application live in

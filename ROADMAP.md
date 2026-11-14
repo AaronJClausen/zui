@@ -30,7 +30,7 @@ Each item says:
 | stage 6 | the single-line fast path (T1), the whole-string cache (T2), static styles (L8), the box tree's layout and emission (P4) and declaration (P5), line-break segmentation (T4), the grow basis (L1), aspect ratio and natural sizes (L2), dividers and decorated images (L3), floating options (L4), right-to-left layout (L6), wrap (L7); the backends drawing images' tint and corner radius (C10) | done; the box tree's and warm text's budgets met, as they were then judged with Turbo Boost on: the box tree declares in 48.9 µs and lays out and emits in 89.2 µs, warm text in 90.5 µs; a box tree of static styles declares in 28.0 µs; zui-raylib and zui-sokol draw tinted, rounded images and pass the renderer suite that checks them |
 | stage 7 | gestures (I5): arbitration by motion component, zoom, long press, double tap, momentum, the intents and custom recognizers; drag and drop between elements (I1) | done: a carousel in a list, a pinch starting on a list inside a map, a lasso module against a map's pan, and `zui_testing.Driver.drag` moving an item between two lists, out of one that scrolls by dragging |
 | after stage 7: the foundation | G1's first slice ran 5.5% to 7.7% more instructions in scenes that draw no effect, so the work turned to what lay under it: benchmarks that can be trusted (R3 to R8, and R9 in part) and the data-oriented design audit's findings (P6 to P10) | done; a commit compared with itself over three code layouts calls nothing, its intervals 0.52% wide on average, and a change that only moves code is not called; a tooltip declared before a 3,000-cell grid lays out in 79 µs, not 671 µs (P6); warm text −43% (P9); `init` from 138 µs to 92 µs (P7, P10); the budgets judged in benchmarking mode |
-| stage 8, begun | gradients, shadows and glow (G1) | G1 done: zui-sokol draws both and passes the renderer suite, and a frame without effects runs no more instructions than before; G2 to G6 queued |
+| stage 8, begun | gradients, shadows and glow (G1); backdrop blur (G2) | G1 and G2 done: zui-sokol draws gradients, shadows and backdrop blurs and passes the renderer suite, and a frame without effects runs no more instructions than before; G3 to G6 queued |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
@@ -70,7 +70,6 @@ green, and its **Status** line below says which slice is next.
 | R9. Measuring across operating systems and hardware | foundation | `bench/machine.zig`, `bench/report.zig`, `README.md` | | waiting on a run under Windows on the reference machine |
 | P11. Flat child lists | audit | `src/context.zig`, `src/layout.zig` | | waiting on a wide scene whose profile points at the walks; kept by the owner |
 | P12. Text commands that point at their style | audit | `src/commands.zig`, `src/emission.zig`, `zui_wire/`, `../zui-raylib`, `../zui-sokol`, `../zui-terminal` | | waiting on a profile of a renderer reading the commands |
-| G2. Backdrop blur | 8 | `src/style.zig`, `src/emission.zig`, `zui_testing/`, `../zui-sokol` | | in progress: zui-sokol's arm is next |
 | G3. Transforms | 8 | `src/style.zig`, `src/emission.zig`, `src/interaction.zig`, `zui_testing/`, `../zui-sokol` | | |
 | G5. Materials | 8 | `src/context.zig`, `src/emission.zig`, `zui_testing/`, a renderer | | |
 | G6. HDR and wide gamut | 8 | `src/context.zig`, `src/commands.zig`, `../zui-host` | | |
@@ -161,6 +160,62 @@ Things to know:
 ---
 
 ## Done
+
+### G2. Backdrop blur
+
+**Plan.** Backdrop blur of zui's own content, lowered to a tint.
+**Done when:** snapshot and lowering tests; the renderer suite's
+reference scene declares it, and one renderer that declares the command
+passes the suite.
+
+`Effects.backdrop_blur` (`zui.BackdropBlur`, a radius as CSS's standard
+deviation and one tint) is emitted over the shadow and under the
+background, in the decoration's corners, culled with its element, and
+lowered to a rectangle in its tint, listed in `Diagnostics.lowered`
+(`43e3d8f`). The renderer suite's viewport is 320 by 192 for a third
+row: a blur floating over eight stripes, which a declared blur averages
+under its tint and a lowered one tints stripe by stripe; its pixel
+renderer passes both ways, box-averaging, and fails tinting without
+blurring. zui-raylib and zui-terminal pass it lowered.
+
+zui-sokol (`0526510`, pinned to `43e3d8f`) declares it and passes the
+suite on Windows, read back by `glReadPixels`, and fails it drawing only
+the tint. A frame with a blur is drawn into an offscreen target made
+like the swapchain, so sokol_gl's and sokol_debugtext's pipelines draw
+into it unchanged, and copied to the swapchain at the end; at each blur
+the scene's pass ends, a Gaussian runs along x then y into two RGBA16F
+targets, its neighbouring pixels paired into one filtered sample and the
+element's edge pixels repeated, and the pass resumes with the result
+inside the rounded outline and the tint over it. sokol_gl's vertex
+colors are 8-bit, so each weight is drawn as a coarse part and a
+remainder scaled by a pipeline's fixed blend color of 1/255, which sums
+the widest blur's weights to one within a quarter of a color step. A
+frame without a blur is drawn as before. Its tour shows a frosted pane
+drifting over the Light & Depth card, and on D3D11 the title under it
+blurs in place, not mirrored.
+
+Measured: the core's `counts` were unchanged in every scene, and
+`bench-compare`, turbo off, called the box trees' `endFrame` 0.8% to
+1.3% slower in the same instructions and simulated misses, `Effects`
+having grown 12 bytes; moving the effects' storage last instead made
+declaration 1% to 5% slower in most scenes, so it stays where G1 put it.
+In zui-sokol, one D3D11 sample of the Light & Depth screen at 144 Hz
+reads "sokol submit" 5.7 ms against 3.9 ms before, both holding 141 to
+144 fps; the GPU's cost is not timed.
+
+Found on the way: an element whose decoration has a corner radius but
+no background or border keeps no decoration (`src/context.zig:1223`,
+`drawnDecoration`), so its effects are drawn square. Both the tour's
+gradient card (G1) and its frosted pane show it; it is in ARCHITECTURE.md
+§7, not yet an item.
+
+Not done: zui-raylib and zui-terminal draw the tint alone. zui-sokol
+stops a blur's standard deviation at about 42 physical pixels (129 taps
+per axis) and a frame at 16 blurs, drawing the rest as their tint and
+counting them in `Renderer.backdrop_blurs.lowered`; downsampling would
+lift the first.
+
+**Spec.** §13.1, §13.3, §16.4.
 
 ### G1. Gradients, shadows and glow
 
@@ -2750,24 +2805,6 @@ put the saving, so the item waits on one that does.
 
 ## Stage 8: effects
 
-- **G2. Backdrop blur** of zui's own content, lowered to a tint.
-  **Status.** The core and the suite have landed: `Effects.backdrop_blur`
-  (`zui.BackdropBlur`, a radius as CSS's standard deviation and one tint)
-  is emitted over the shadow and under the background, in the
-  decoration's corners, culled with its element, and lowered to a
-  rectangle in its tint, listed in `Diagnostics.lowered`. The renderer
-  suite's viewport is 320 by 192 for a third row: a blur floating over
-  eight stripes, which a declared blur averages under its tint and a
-  lowered one tints stripe by stripe; its pixel renderer passes both ways,
-  box-averaging, and fails tinting without blurring. zui-raylib and
-  zui-terminal pass it lowered with `--fork=../zui`. `counts` is unchanged
-  in every scene; `bench-compare`, turbo off, twice called the box trees'
-  `endFrame` 0.8% to 1.3% slower in the same instructions and simulated
-  misses: `Effects` grew 12 bytes, so the frame's storage after its 256
-  copies moved 3 KiB. Moving that storage last instead made declaration
-  1% to 5% slower in most scenes, so it stays where G1 put it. Next:
-  zui-sokol declares `.backdrop_blur`, drawing what it has drawn into a
-  target it can sample, and passes the suite.
 - **G3. Transforms,** applied when painting only; hit testing inverts
   them.
 - **G5. Materials,** the renderer's own typed `MaterialHandle`.
@@ -2779,9 +2816,9 @@ C1 generated the optional commands' variants; each item here adds the
 declaration that produces its command and the lowering for renderers that
 do not declare it, listed in `Diagnostics.lowered`, which G1 added (in
 *Done*). The renderer that declares each command is zui-sokol, as for
-G1: the command joins `Renderer.zui_commands`, gets an arm in
-`Renderer.draw`, and is shown on its tour (G1's is the Light & Depth
-screen). Develop it with `--fork=../zui`; once the user has the zui
+G1 and G2: the command joins `Renderer.zui_commands`, gets an arm in
+`Renderer.record`, and is shown on its tour (G1's and G2's are on the
+Light & Depth screen). Develop it with `--fork=../zui`; once the user has the zui
 change pushed, move the pin with `zig fetch --save=zui`.
 
 **Done when (each):** snapshot and lowering tests; the renderer suite's
