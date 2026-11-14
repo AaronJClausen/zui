@@ -30,7 +30,7 @@ Each item says:
 | stage 6 | the single-line fast path (T1), the whole-string cache (T2), static styles (L8), the box tree's layout and emission (P4) and declaration (P5), line-break segmentation (T4), the grow basis (L1), aspect ratio and natural sizes (L2), dividers and decorated images (L3), floating options (L4), right-to-left layout (L6), wrap (L7); the backends drawing images' tint and corner radius (C10) | done; the box tree's and warm text's budgets met, as they were then judged with Turbo Boost on: the box tree declares in 48.9 µs and lays out and emits in 89.2 µs, warm text in 90.5 µs; a box tree of static styles declares in 28.0 µs; zui-raylib and zui-sokol draw tinted, rounded images and pass the renderer suite that checks them |
 | stage 7 | gestures (I5): arbitration by motion component, zoom, long press, double tap, momentum, the intents and custom recognizers; drag and drop between elements (I1) | done: a carousel in a list, a pinch starting on a list inside a map, a lasso module against a map's pan, and `zui_testing.Driver.drag` moving an item between two lists, out of one that scrolls by dragging |
 | after stage 7: the foundation | G1's first slice ran 5.5% to 7.7% more instructions in scenes that draw no effect, so the work turned to what lay under it: benchmarks that can be trusted (R3 to R8, and R9 in part) and the data-oriented design audit's findings (P6 to P10) | done; a commit compared with itself over three code layouts calls nothing, its intervals 0.52% wide on average, and a change that only moves code is not called; a tooltip declared before a 3,000-cell grid lays out in 79 µs, not 671 µs (P6); warm text −43% (P9); `init` from 138 µs to 92 µs (P7, P10); the budgets judged in benchmarking mode |
-| stage 8, begun | gradients, shadows and glow (G1); backdrop blur (G2) | G1 and G2 done: zui-sokol draws gradients, shadows and backdrop blurs and passes the renderer suite, and a frame without effects runs no more instructions than before; G7's fix landed, its pin waiting on a push; G3 to G6 queued |
+| stage 8, begun | gradients, shadows and glow (G1); backdrop blur (G2); effects in the corners of a decoration that draws nothing (G7) | G1, G2 and G7 done: zui-sokol draws gradients, shadows and backdrop blurs and passes the renderer suite, its effects rounded by a decoration that draws nothing, and a frame without effects runs no more instructions than before; G3 to G6 queued |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
@@ -70,7 +70,6 @@ green, and its **Status** line below says which slice is next.
 | R9. Measuring across operating systems and hardware | foundation | `bench/machine.zig`, `bench/report.zig`, `README.md` | | waiting on a run under Windows on the reference machine |
 | P11. Flat child lists | audit | `src/context.zig`, `src/layout.zig` | | waiting on a wide scene whose profile points at the walks; kept by the owner |
 | P12. Text commands that point at their style | audit | `src/commands.zig`, `src/emission.zig`, `zui_wire/`, `../zui-raylib`, `../zui-sokol`, `../zui-terminal` | | waiting on a profile of a renderer reading the commands |
-| G7. Effects in the corners of a decoration that draws nothing | 8 | `src/context.zig`, `src/tests/`, `../zui-sokol` | | waiting on a push of zui, then zui-sokol's pin |
 | G3. Transforms | 8 | `src/style.zig`, `src/emission.zig`, `src/interaction.zig`, `zui_testing/`, `../zui-sokol` | | next |
 | G5. Materials | 8 | `src/context.zig`, `src/emission.zig`, `zui_testing/`, a renderer | | |
 | G6. HDR and wide gamut | 8 | `src/context.zig`, `src/commands.zig`, `../zui-host` | | |
@@ -161,6 +160,33 @@ Things to know:
 ---
 
 ## Done
+
+### G7. Effects in the corners of a decoration that draws nothing
+
+**Plan.** Keep the decoration of an element that declares effects even
+when it draws nothing itself, declared or through a static style, and
+every other decoration as before.
+**Done when:** a test finds the radius on each effect's command and its
+lowered form, both ways; `counts` moves no scene by more than the noise;
+zui-sokol's tour, pinned to the fix, shows the card and the pane rounded.
+
+Declaration stored a decoration only when it had a background or a
+border, so an element with a corner radius and effects alone drew them
+square; G2 found it on zui-sokol's tour. It now keeps the decoration
+whenever the element declares effects (`keepsDecoration`, `62a21d2`),
+and emission draws nothing for it but the effects' corners. Two tests in
+`src/tests/effects.zig` find the radius on the `shadow`,
+`backdrop_blur` and `gradient` commands and on the lowered rectangles,
+declared and static, and fail without the fix. zui-sokol (`b7c885d`,
+pinned to `62a21d2`) draws the Light & Depth card's gradient and shadow
+and the frosted pane rounded.
+
+Measured: `counts` against the parent moved one scene, which declares no
+effects: the documents view's declaration ran 40 fewer instructions
+(30,567 to 30,527, −0.13%), the code generated for declaration having
+changed; every other scene and phase was unchanged.
+
+**Spec.** §13.1.
 
 ### G2. Backdrop blur
 
@@ -2805,50 +2831,6 @@ put the saving, so the item waits on one that does.
 ---
 
 ## Stage 8: effects
-
-### G7. Effects in the corners of a decoration that draws nothing
-
-**Grounding.** Declaration keeps an element's decoration only when it
-has a background or a border (`src/context.zig:1223` for a declared
-one, `drawnDecoration` at `src/context.zig:1272` for a static style's),
-so one with only a corner radius is stored as none. Emission takes every
-effect's corners from the stored decoration (`cornerRadiusOf`,
-`src/emission.zig:294`) and falls back to `.zero`. So an element that
-declares `.decoration = .{ .corner_radius = ... }` and effects, with no
-background, draws its gradient, shadow and backdrop blur square, against
-SPEC.md §13.1. zui-sokol's tour shows it on the Light & Depth screen:
-the gradient card (G1) and the frosted pane (G2). Found by G2.
-
-**Plan.** Keep the decoration of an element that declares effects even
-when it draws nothing itself, in both paths, and leave every other
-decoration as it is stored now, so a frame without effects copies and
-walks nothing more. Emission already skips a decoration without a
-background or border, so it draws nothing for it.
-
-**Done when:** a test declares an element with a corner radius, no
-background and each effect, and finds the radius on its `gradient`,
-`shadow` and `backdrop_blur` commands and on their lowered forms, both
-declared and through a static style; `counts` moves no scene by more
-than the noise against the parent, and none that declares no effects at
-all; zui-sokol's tour, pinned to the fix, shows the card and the pane
-rounded.
-
-**Status.** The fix has landed. Declaration keeps the decoration of an
-element that declares effects, declared or through a static style
-(`keepsDecoration`), and every other decoration as before; two tests in
-`src/tests/effects.zig` find the radius on the `shadow`,
-`backdrop_blur` and `gradient` commands and on the lowered rectangles,
-both ways, and fail without the fix. `counts` against the parent moved
-one scene, none of which declares effects: the documents view's
-declaration ran 40 fewer instructions (30,567 to 30,527, −0.13%), the
-code generated for declaration having changed; every other scene and
-phase was unchanged. zui-sokol passes its tests against this checkout
-(`--fork=../zui`) and its tour draws the gradient card, its shadow and
-the frosted pane rounded. Remaining: once zui is pushed, move
-zui-sokol's pin with `zig fetch --save=zui`, then move this item to
-*Done*.
-
-**Spec.** §13.1.
 
 - **G3. Transforms,** applied when painting only; hit testing inverts
   them.
