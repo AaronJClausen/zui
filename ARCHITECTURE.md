@@ -258,7 +258,6 @@ roadmap item named:
 | Today | The spec | Where today | Item |
 |---|---|---|---|
 | nothing in declaration produces transforms or materials | `Element` carries them, each lowered for a renderer that does not declare it | `src/style.zig`, `src/emission.zig` | G3, G5 |
-| an element whose decoration has a corner radius but no background or border keeps no decoration, so its effects are drawn square | effects take the decoration's corner radius | `src/context.zig` | G7 |
 | no `Config.Color`; colors are RGBA8 only | `zui.Color` or `zui.ExtendedColor`, clamped for a renderer without `zui_extended_color` | `src/context.zig`, `src/commands.zig` | G6 |
 | `Widgets(Ui)` with a `Theme` struct | `Widgets(Ui, Skin)` | `zui_widgets/` | K5 |
 | `Frame` exposes its storage arrays and `rectOf` | `Frame.inspect(index)` | `src/context.zig` | V1 |

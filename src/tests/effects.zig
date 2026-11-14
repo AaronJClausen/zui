@@ -230,3 +230,57 @@ test "a backdrop blur wholly outside the clip is not emitted" {
 
     for (frame.commands()) |command| try testing.expect(command.payload != .backdrop_blur);
 }
+
+const corners_only: zui.Decoration = .{ .corner_radius = .all(6) };
+const corners_only_style = zui.static(zui.Style{ .layout = .{ .sizing = card_size }, .decoration = corners_only });
+const every_effect: zui.Effects = .{ .gradient = dusk, .shadow = card_shadow, .backdrop_blur = frost };
+
+fn declareCornersOnlyCards(ui: anytype) void {
+    ui.open(.{ .layout = .{ .direction = .top_to_bottom } });
+    ui.box(.{ .layout = .{ .sizing = card_size }, .decoration = corners_only, .effects = &every_effect });
+    ui.box(.{ .style = corners_only_style, .effects = &every_effect });
+    ui.close();
+}
+
+test "effects take the corners of a decoration that draws nothing, declared or static" {
+    var ui: GlassUi = try .init(testing.allocator, testing.io);
+    defer ui.deinit(testing.allocator);
+    beginFrame(&ui);
+    declareCornersOnlyCards(&ui);
+    const frame = ui.endFrame();
+    defer ui.release(frame);
+    try frame.diagnostics.check();
+
+    const commands = frame.commands();
+    try testing.expectEqual(6, commands.len);
+    for (0..2) |card| {
+        const card_commands = commands[card * 3 ..][0..3];
+        try testing.expectEqual(GlassUi.RenderCommand.Payload{ .shadow = .{
+            .color = card_shadow.color,
+            .offset = card_shadow.offset,
+            .blur = card_shadow.blur,
+            .corner_radius = .all(6),
+        } }, card_commands[0].payload);
+        try testing.expectEqual(GlassUi.RenderCommand.Payload{ .backdrop_blur = .{ .radius = 12, .tint = frost.tint, .corner_radius = .all(6) } }, card_commands[1].payload);
+        try testing.expectEqual(GlassUi.RenderCommand.Payload{ .gradient = .{ .from = dusk.from, .to = dusk.to, .corner_radius = .all(6) } }, card_commands[2].payload);
+    }
+}
+
+test "lowered effects take the corners of a decoration that draws nothing, declared or static" {
+    var ui: BaseUi = try .init(testing.allocator, testing.io);
+    defer ui.deinit(testing.allocator);
+    beginFrame(&ui);
+    declareCornersOnlyCards(&ui);
+    const frame = ui.endFrame();
+    defer ui.release(frame);
+    try testing.expect(frame.diagnostics.ok());
+
+    const commands = frame.commands();
+    try testing.expectEqual(4, commands.len);
+    for (0..2) |card| {
+        const card_commands = commands[card * 2 ..][0..2];
+        try testing.expectEqual(BaseUi.RenderCommand.Payload{ .rectangle = .{ .color = frost.tint, .corner_radius = .all(6) } }, card_commands[0].payload);
+        try testing.expectEqual(BaseUi.RenderCommand.Payload{ .rectangle = .{ .color = dusk.meanColor(), .corner_radius = .all(6) } }, card_commands[1].payload);
+    }
+    try testing.expectEqual(zui.CommandSet.initMany(&.{ .gradient, .shadow, .backdrop_blur }), frame.diagnostics.lowered);
+}

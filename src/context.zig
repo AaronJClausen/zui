@@ -1220,14 +1220,15 @@ pub fn Context(comptime config: Config) type {
                 frame.layout[index] = &copied_layout[0];
             } else frame.layout[index] = if (element.style) |static_style| &static_style.value.layout else &default_layout;
 
+            const declares_effects = element.effects != null;
             if (element.decoration) |decoration| {
-                if (decoration.background != null or decoration.border != null) {
+                if (keepsDecoration(&decoration, declares_effects)) {
                     const copied_decoration = frame.next_decoration;
                     frame.next_decoration = copied_decoration + 1;
                     copied_decoration[0] = decoration;
                     frame.decoration[index] = &copied_decoration[0];
                 } else frame.decoration[index] = null;
-            } else frame.decoration[index] = if (element.style) |static_style| drawnDecoration(&static_style.value.decoration) else null;
+            } else frame.decoration[index] = if (element.style) |static_style| keptStaticDecoration(&static_style.value.decoration, declares_effects) else null;
 
             if (element.effects) |effects| {
                 if (frame.effect_count < limits.max_effects) {
@@ -1267,10 +1268,15 @@ pub fn Context(comptime config: Config) type {
             return default_layout.direction;
         }
 
-        /// A static decoration that draws nothing is stored as none, so
-        /// emission skips it as it skips an element without one.
-        inline fn drawnDecoration(decoration: *const Decoration) ?*const Decoration {
-            return if (decoration.background != null or decoration.border != null) decoration else null;
+        /// A decoration that draws nothing is stored as none, so emission
+        /// skips it as it skips an element without one, unless the element's
+        /// effects need its corners.
+        inline fn keepsDecoration(decoration: *const Decoration, declares_effects: bool) bool {
+            return decoration.background != null or decoration.border != null or declares_effects;
+        }
+
+        inline fn keptStaticDecoration(decoration: *const Decoration, declares_effects: bool) ?*const Decoration {
+            return if (keepsDecoration(decoration, declares_effects)) decoration else null;
         }
 
         inline fn flagsFor(element_id: Id, element: Element) ElementFlags {
