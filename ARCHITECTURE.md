@@ -257,7 +257,8 @@ roadmap item named:
 
 | Today | The spec | Where today | Item |
 |---|---|---|---|
-| nothing in declaration produces backdrop blur, transforms or materials | `Element` carries them, each lowered for a renderer that does not declare it | `src/style.zig`, `src/emission.zig` | G2, G3, G5 |
+| nothing in declaration produces transforms or materials | `Element` carries them, each lowered for a renderer that does not declare it | `src/style.zig`, `src/emission.zig` | G3, G5 |
+| no renderer draws `backdrop_blur`; every one gets the tint it is lowered to | zui-sokol declares it and passes the renderer suite | `../zui-sokol` | G2 |
 | no `Config.Color`; colors are RGBA8 only | `zui.Color` or `zui.ExtendedColor`, clamped for a renderer without `zui_extended_color` | `src/context.zig`, `src/commands.zig` | G6 |
 | `Widgets(Ui)` with a `Theme` struct | `Widgets(Ui, Skin)` | `zui_widgets/` | K5 |
 | `Frame` exposes its storage arrays and `rectOf` | `Frame.inspect(index)` | `src/context.zig` | V1 |

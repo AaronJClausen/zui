@@ -70,7 +70,7 @@ green, and its **Status** line below says which slice is next.
 | R9. Measuring across operating systems and hardware | foundation | `bench/machine.zig`, `bench/report.zig`, `README.md` | | waiting on a run under Windows on the reference machine |
 | P11. Flat child lists | audit | `src/context.zig`, `src/layout.zig` | | waiting on a wide scene whose profile points at the walks; kept by the owner |
 | P12. Text commands that point at their style | audit | `src/commands.zig`, `src/emission.zig`, `zui_wire/`, `../zui-raylib`, `../zui-sokol`, `../zui-terminal` | | waiting on a profile of a renderer reading the commands |
-| G2. Backdrop blur | 8 | `src/style.zig`, `src/emission.zig`, `zui_testing/`, `../zui-sokol` | | next |
+| G2. Backdrop blur | 8 | `src/style.zig`, `src/emission.zig`, `zui_testing/`, `../zui-sokol` | | in progress: zui-sokol's arm is next |
 | G3. Transforms | 8 | `src/style.zig`, `src/emission.zig`, `src/interaction.zig`, `zui_testing/`, `../zui-sokol` | | |
 | G5. Materials | 8 | `src/context.zig`, `src/emission.zig`, `zui_testing/`, a renderer | | |
 | G6. HDR and wide gamut | 8 | `src/context.zig`, `src/commands.zig`, `../zui-host` | | |
@@ -2751,6 +2751,23 @@ put the saving, so the item waits on one that does.
 ## Stage 8: effects
 
 - **G2. Backdrop blur** of zui's own content, lowered to a tint.
+  **Status.** The core and the suite have landed: `Effects.backdrop_blur`
+  (`zui.BackdropBlur`, a radius as CSS's standard deviation and one tint)
+  is emitted over the shadow and under the background, in the
+  decoration's corners, culled with its element, and lowered to a
+  rectangle in its tint, listed in `Diagnostics.lowered`. The renderer
+  suite's viewport is 320 by 192 for a third row: a blur floating over
+  eight stripes, which a declared blur averages under its tint and a
+  lowered one tints stripe by stripe; its pixel renderer passes both ways,
+  box-averaging, and fails tinting without blurring. zui-raylib and
+  zui-terminal pass it lowered with `--fork=../zui`. `counts` is unchanged
+  in every scene; `bench-compare`, turbo off, twice called the box trees'
+  `endFrame` 0.8% to 1.3% slower in the same instructions and simulated
+  misses: `Effects` grew 12 bytes, so the frame's storage after its 256
+  copies moved 3 KiB. Moving that storage last instead made declaration
+  1% to 5% slower in most scenes, so it stays where G1 put it. Next:
+  zui-sokol declares `.backdrop_blur`, drawing what it has drawn into a
+  target it can sample, and passes the suite.
 - **G3. Transforms,** applied when painting only; hit testing inverts
   them.
 - **G5. Materials,** the renderer's own typed `MaterialHandle`.

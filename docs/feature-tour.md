@@ -272,9 +272,9 @@ fn photoCard(app: *App, ui: *Ui, photo: *const Photo, index: usize) void {
 
 <a id="effects"></a>
 
-### Gradients, shadows and glow · *shipped*
+### Gradients, shadows, glow and backdrop blur · *shipped*
 
-`effects` points at a `zui.Effects`: a linear `gradient`, interpolated in OKLab, and a `shadow`, which with no offset is a glow. They take the shape of the element's decoration and its corner radius, and paint from the bottom up as shadow, background, gradient, then the element's content. The effects are copied when the element is declared, so a pointer to a local works, and an element without effects pays nothing for them, nor does a frame without any. Up to `limits.max_effects` elements a frame keep their effects, 256 by default; past it, an element is drawn without them and the diagnostics name the limit. A renderer that declares `.gradient` and `.shadow` in `zui_commands` gets those commands. For any other renderer, a gradient is lowered to a rectangle in its middle color and a shadow to nothing, and `frame.diagnostics.lowered` names what was lowered. zui-sokol draws both, and its tour shows them on its Light & Depth screen; zui-raylib and zui-terminal draw the lowered forms.
+`effects` points at a `zui.Effects`: a linear `gradient`, interpolated in OKLab, and a `shadow`, which with no offset is a glow. They take the shape of the element's decoration and its corner radius, and paint from the bottom up as shadow, background, gradient, then the element's content. A `backdrop_blur` is frosted glass: it blurs what zui drew beneath the element, within its rounded box, and lays its `tint` over it, painted between the shadow and the background. A renderer that does not declare `.backdrop_blur` draws the tint alone, so pick a tint that reads well unblurred; no backend blurs yet, so today every one draws the tint. The effects are copied when the element is declared, so a pointer to a local works, and an element without effects pays nothing for them, nor does a frame without any. Up to `limits.max_effects` elements a frame keep their effects, 256 by default; past it, an element is drawn without them and the diagnostics name the limit. A renderer that declares `.gradient` and `.shadow` in `zui_commands` gets those commands. For any other renderer, a gradient is lowered to a rectangle in its middle color and a shadow to nothing, and `frame.diagnostics.lowered` names what was lowered. zui-sokol draws both, and its tour shows them on its Light & Depth screen; zui-raylib and zui-terminal draw the lowered forms.
 
 `src/ui/viewer.zig`
 
@@ -294,6 +294,18 @@ fn exposureBar(ui: *Ui, selected: bool) void {
         .decoration = .{ .corner_radius = .all(6) },
         .effects = &highlight,
     });
+}
+
+const frosted: zui.Effects = .{ .backdrop_blur = .{ .radius = 12, .tint = .rgba(0x1c1c24c0) } };
+
+fn filmstripOverlay(ui: *Ui) void {
+    ui.open(.{
+        .floating = .{ .attach_point = .bottom_left, .anchor = .bottom_left },
+        .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(72) } },
+        .decoration = .{ .corner_radius = .all(8) },
+        .effects = &frosted,
+    });
+    defer ui.close();
 }
 
 fn photoCard(ui: *Ui, photo: *const Photo) void {
@@ -1429,7 +1441,7 @@ pub fn config(overrides: zui.Config) zui.Config {
 }
 ```
 
-Declaring `pub const zui_commands: zui.CommandSet = .initMany(&.{ .gradient, .shadow })` adds `gradient` and `shadow` arms to that switch, for the [effects](#effects) elements declare. A gradient's `colorAt` gives its color at any point, in OKLab, for a renderer that draws it in strips.
+Declaring `pub const zui_commands: zui.CommandSet = .initMany(&.{ .gradient, .shadow, .backdrop_blur })` adds `gradient`, `shadow` and `backdrop_blur` arms to that switch, for the [effects](#effects) elements declare. A backdrop blur averages the pixels as the target stores them, sampling only inside its bounds. A gradient's `colorAt` gives its color at any point, in OKLab, for a renderer that draws it in strips.
 
 <a id="host"></a>
 
@@ -1763,7 +1775,7 @@ Build with `-Dzui-tracy=true` to link Tracy's client, then connect profiler 0.14
 
 These names compile, but they don't do anything yet. This list is from `ARCHITECTURE.md` §7 and the roadmap.
 
-- **Backdrop blur, transforms, materials** *(declared only)*: The variants exist in `RenderCommand` when a renderer declares them, but nothing in declaration produces them, so nothing is emitted or lowered. Items G2–G5, stage 8.
+- **Transforms, materials** *(declared only)*: The variants exist in `RenderCommand` when a renderer declares them, but nothing in declaration produces them, so nothing is emitted or lowered. Items G3 and G5, stage 8.
 - **`features.semantics`** *(declared only)*: `Frame.semantics()` is always empty. Accessibility is V2.
 - **`features.safety_sweeps`** *(declared only)*: The flag exists, but it doesn't change behaviour yet. Sweeps are V3.
 - **Extended color**: Colors are RGBA8 only. `zui.ExtendedColor` for HDR is G6.
@@ -1786,5 +1798,5 @@ These names compile, but they don't do anything yet. This list is from `ARCHITEC
 - Writing UI by hand in core is verbose. Nested `.layout = .{ .sizing = .{ .width = ... } }` literals pile up, and static styles are the main relief today.
 - Interactive elements take three steps: declare, query by id, then pick colors from the state yourself. Widgets hide it, but there is nothing in between.
 - `labeledRow` leaves you to close the row, an asymmetry that's easy to get wrong.
-- Only zui-sokol draws gradients and shadows so far; zui-raylib and zui-terminal show a gradient as one flat color and no shadow.
+- Only zui-sokol draws gradients and shadows so far; zui-raylib and zui-terminal show a gradient as one flat color and no shadow. No backend blurs a backdrop yet; each draws its tint.
 - There's no examples repository or template yet. The best references are zui-sokol's tour and zui-raylib's demo.

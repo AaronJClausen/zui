@@ -254,6 +254,7 @@ fn Emitter(comptime Ui: type) type {
             const drawn = !visible.isEmpty();
 
             if (effects) |declared| if (declared.shadow) |*shadow| self.emitShadow(element, bounds, outer_clip, level.z, shadow);
+            if (drawn) if (effects) |declared| if (declared.backdrop_blur) |*blur| self.emitBackdropBlur(element, bounds, level.z, blur);
             if (drawn) if (frame.decorationOf(element)) |decoration| if (decoration.background) |color| {
                 self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = level.z, .payload = .{ .rectangle = .{ .color = color, .corner_radius = decoration.corner_radius } } });
             };
@@ -324,6 +325,21 @@ fn Emitter(comptime Ui: type) type {
                 .from = gradient.from,
                 .to = gradient.to,
                 .angle = gradient.angle,
+                .corner_radius = corner_radius,
+            } } });
+        }
+
+        fn emitBackdropBlur(self: *Self, element: Ui.Index, bounds: style.Rect, z: i16, blur: *const style.BackdropBlur) void {
+            const element_id = self.frame.element_id[element];
+            const corner_radius = self.cornerRadiusOf(element);
+            if (comptime !Ui.RenderCommand.commands.contains(.backdrop_blur)) {
+                self.frame.diagnostics.lowered.insert(.backdrop_blur);
+                self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = z, .payload = .{ .rectangle = .{ .color = blur.tint, .corner_radius = corner_radius } } });
+                return;
+            }
+            self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = z, .payload = .{ .backdrop_blur = .{
+                .radius = blur.radius,
+                .tint = blur.tint,
                 .corner_radius = corner_radius,
             } } });
         }

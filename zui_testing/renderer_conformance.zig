@@ -14,7 +14,7 @@ pub const RendererViolation = DescribedViolation(RendererError);
 
 /// Every frame the suite draws is this size, in layout units at a scale
 /// and zoom of 1, so one unit is one pixel.
-pub const renderer_viewport: [2]u32 = .{ 320, 160 };
+pub const renderer_viewport: [2]u32 = .{ 320, 192 };
 
 /// The colors of the reference scene, far enough apart that a renderer
 /// within any sensible tolerance tells them apart.
@@ -38,6 +38,12 @@ pub const scene_colors = struct {
     pub const gradient_to: zui.Color = .rgb(0x0000ff);
     pub const raised: zui.Color = .rgb(0xffffff);
     pub const shadow: zui.Color = .rgb(0x000000);
+    /// The stripes a backdrop blur is drawn over, alternating, so blurred
+    /// they average to their middle.
+    pub const stripe_even: zui.Color = .rgb(0x00ff00);
+    pub const stripe_odd: zui.Color = .rgb(0xff00ff);
+    /// Drawn over the blurred stripes, and alone where the blur is lowered.
+    pub const frost: zui.Color = .rgba(0xffffff80);
 };
 
 /// The raised box's shadow is cast this far right and down, unblurred.
@@ -47,14 +53,20 @@ pub const shadow_offset: f32 = 16;
 /// inside its bounding corner lies outside the curve.
 pub const image_corner_radius: f32 = 12;
 
+/// Each stripe beneath the backdrop blur is this wide, and the blur's
+/// radius is the same, enough to average them.
+pub const stripe_width: f32 = 8;
+pub const stripe_count = 8;
+
 /// Draws frames that every renderer must draw the same way, and fails on
 /// the first thing it drew wrong:
 /// - a reference scene of the base commands (a fill, a border, text, and
 ///   a clip inside a clip, each cutting off a child larger than itself),
 ///   with `image` and `custom` when the renderer has their payload types,
 ///   the image tinted and with rounded corners, and a gradient and a box
-///   casting a shadow, which the core lowers unless the renderer declares
-///   `.gradient` or `.shadow`;
+///   casting a shadow, and a backdrop blur over stripes, which the core
+///   lowers unless the renderer declares `.gradient`, `.shadow` or
+///   `.backdrop_blur`;
 /// - clips nested 100 deep, then a fill drawn after all of them ended;
 /// - commands of no size, and far outside the viewport;
 /// - an empty frame;
@@ -67,7 +79,9 @@ pub const image_corner_radius: f32 = 12;
 /// multiplied into its pixels, and its corners are left undrawn; a
 /// declared gradient runs from one color to the other through their middle
 /// in OKLab and a lowered one is that middle throughout; a declared shadow
-/// is drawn and a lowered one is not. Without it, the suite
+/// is drawn and a lowered one is not; a declared backdrop blur averages the
+/// stripes beneath it under its tint, a lowered one is its tint over each
+/// stripe, and neither reaches beyond its bounds. Without it, the suite
 /// checks only that each frame is drawn without an error.
 ///
 /// `harness` is a pointer to a value that declares:
@@ -116,7 +130,7 @@ const Scene = enum {
 const scenes = [_]Scene{ .reference, .deep_clips, .out_of_bounds, .empty, .reference };
 const deep_clip_count = 100;
 
-const ids = zui.ids(.{ "panel", "fill", "frame", "outer", "inner", "picture", "custom", "gradient", "raised", "nest", "after_nest" });
+const ids = zui.ids(.{ "panel", "fill", "frame", "outer", "inner", "picture", "custom", "gradient", "raised", "stripes", "nest", "after_nest" });
 
 fn suiteConfig(comptime backend: zui.Config) zui.Config {
     var config = backend;
@@ -230,6 +244,18 @@ fn declareReference(ui: anytype, comptime config: zui.Config, payloads: anytype)
         });
         ui.close();
     }
+    {
+        const stripes_size = fixedSize(stripe_width * stripe_count, 32);
+        ui.open(.{ .id = ids.stripes, .layout = .{ .sizing = stripes_size } });
+        for (0..stripe_count) |stripe| ui.box(.{
+            .decoration = .{ .background = if (stripe % 2 == 0) scene_colors.stripe_even else scene_colors.stripe_odd },
+            .layout = .{ .sizing = fixedSize(stripe_width, 32) },
+        });
+        ui.box(.{ .floating = .{}, .layout = .{ .sizing = stripes_size }, .effects = &.{
+            .backdrop_blur = .{ .radius = stripe_width, .tint = scene_colors.frost },
+        } });
+        ui.close();
+    }
     ui.close();
 }
 
@@ -329,6 +355,29 @@ fn PixelCheck(comptime Harness: type) type {
             for (expectations) |expectation| {
                 if (self.expect(expectation)) |violation| return violation;
             }
+            return self.backdropBlur(frame, config);
+        }
+
+        fn backdropBlur(self: Self, frame: anytype, comptime config: zui.Config) ?RendererViolation {
+            const stripes = frame.rectOf(ids.stripes).?;
+            const across_stripes = stripes.y + stripes.height / 2;
+            const odd_stripe = stripes.x + stripe_width * 3.5;
+            const even_stripe = stripes.x + stripe_width * 4.5;
+            const blurred = blend(scene_colors.stripe_even.mix(scene_colors.stripe_odd, 0.5), scene_colors.frost);
+            const expectations = [_]Expectation{
+                if (comptime config.commands.contains(.backdrop_blur))
+                    .{ .at = .{ odd_stripe, across_stripes }, .color = blurred, .what = "a backdrop blur, the stripes beneath it averaged under its tint," }
+                else
+                    .{ .at = .{ odd_stripe, across_stripes }, .color = blend(scene_colors.stripe_odd, scene_colors.frost), .what = "a lowered backdrop blur, its tint over a stripe," },
+                if (comptime config.commands.contains(.backdrop_blur))
+                    .{ .at = .{ even_stripe, across_stripes }, .color = blurred, .what = "a backdrop blur, the stripes beneath it averaged under its tint," }
+                else
+                    .{ .at = .{ even_stripe, across_stripes }, .color = blend(scene_colors.stripe_even, scene_colors.frost), .what = "a lowered backdrop blur, its tint over a stripe," },
+                .{ .at = .{ stripes.x + stripes.width + 8, across_stripes }, .color = scene_colors.background, .what = "beside a backdrop blur, which stays inside its bounds," },
+            };
+            for (expectations) |expectation| {
+                if (self.expect(expectation)) |violation| return violation;
+            }
             return null;
         }
 
@@ -381,16 +430,24 @@ fn near(found: zui.Color, expected: zui.Color, tolerance: u8) bool {
     return true;
 }
 
+/// `above` drawn over `below` by its alpha, as a renderer blends a
+/// translucent fill.
+fn blend(below: zui.Color, above: zui.Color) zui.Color {
+    if (above.a == 255) return above;
+    return below.mix(.{ .r = above.r, .g = above.g, .b = above.b }, @as(f32, @floatFromInt(above.a)) / 255);
+}
+
 fn hex(color: zui.Color) u24 {
     return @as(u24, color.r) << 16 | @as(u24, color.g) << 8 | color.b;
 }
 
-const Flaw = enum { none, forgets_enclosing_clip, ignores_image_decoration, interpolates_gradient_in_srgb };
+const Flaw = enum { none, forgets_enclosing_clip, ignores_image_decoration, interpolates_gradient_in_srgb, tints_without_blurring };
 
 /// A software renderer into its own pixels, the plainest that conforms:
 /// fills ignore corner radii, text fills its bounds, an image is its
 /// handle's color times its tint, inside its rounded corners, a gradient
-/// is each pixel's `colorAt`, and a shadow is unblurred. Each `Flaw` is a
+/// is each pixel's `colorAt`, a shadow is unblurred, and a backdrop blur
+/// is a box average as wide as its radius each way. Each `Flaw` is a
 /// mistake the suite must catch.
 fn PixelRenderer(comptime flaw: Flaw, comptime commands: zui.CommandSet) type {
     return struct {
@@ -405,6 +462,7 @@ fn PixelRenderer(comptime flaw: Flaw, comptime commands: zui.CommandSet) type {
         pub const ImageHandle = zui.Color;
 
         pixels: [width * height]zui.Color = undefined,
+        beneath_blur: [width * height]zui.Color = undefined,
 
         pub fn zuiSubmit(self: *Self, surface: zui.Surface, frame: anytype) !void {
             if (surface != .offscreen) return error.UnsupportedSurface;
@@ -444,6 +502,9 @@ fn PixelRenderer(comptime flaw: Flaw, comptime commands: zui.CommandSet) type {
                             .height = bounds.height + 2 * payload.spread,
                         };
                         self.fillRounded(shape, clip, payload.color, payload.corner_radius);
+                    } else if (comptime std.mem.eql(u8, @tagName(kind), "backdrop_blur")) {
+                        if (flaw != .tints_without_blurring) self.blurBeneath(bounds, clip, payload.radius, payload.corner_radius);
+                        self.fillRounded(bounds, clip, payload.tint, payload.corner_radius);
                     } else comptime unreachable,
                 }
             }
@@ -456,14 +517,44 @@ fn PixelRenderer(comptime flaw: Flaw, comptime commands: zui.CommandSet) type {
             const bottom = std.math.clamp(@min(rect.y + rect.height, clip.y + clip.height), 0, height_units);
             if (right <= left or bottom <= top) return;
             for (@intFromFloat(top)..@intFromFloat(bottom)) |y| {
-                @memset(self.pixels[y * width ..][@intFromFloat(left)..@intFromFloat(right)], color);
+                for (self.pixels[y * width ..][@intFromFloat(left)..@intFromFloat(right)]) |*pixel| pixel.* = blend(pixel.*, color);
             }
         }
 
         fn fillRounded(self: *Self, rect: zui.Rect, clip: zui.Rect, color: zui.Color, radius: zui.CornerRadius) void {
             for (0..height) |y| for (0..width) |x| {
                 const at: [2]f32 = .{ @as(f32, @floatFromInt(x)) + 0.5, @as(f32, @floatFromInt(y)) + 0.5 };
-                if (contains(clip, at) and insideRounded(rect, radius, at)) self.pixels[y * width + x] = color;
+                if (contains(clip, at) and insideRounded(rect, radius, at)) self.pixels[y * width + x] = blend(self.pixels[y * width + x], color);
+            };
+        }
+
+        fn blurBeneath(self: *Self, rect: zui.Rect, clip: zui.Rect, radius: f32, corner_radius: zui.CornerRadius) void {
+            const left: usize = @intFromFloat(std.math.clamp(rect.x, 0, width_units));
+            const top: usize = @intFromFloat(std.math.clamp(rect.y, 0, height_units));
+            const right: usize = @intFromFloat(std.math.clamp(rect.x + rect.width, 0, width_units));
+            const bottom: usize = @intFromFloat(std.math.clamp(rect.y + rect.height, 0, height_units));
+            if (right <= left or bottom <= top) return;
+            const reach: isize = @intFromFloat(@ceil(radius));
+            self.beneath_blur = self.pixels;
+            for (top..bottom) |y| for (left..right) |x| {
+                const at: [2]f32 = .{ @as(f32, @floatFromInt(x)) + 0.5, @as(f32, @floatFromInt(y)) + 0.5 };
+                if (!contains(clip, at) or !insideRounded(rect, corner_radius, at)) continue;
+                var sums: [3]u32 = .{ 0, 0, 0 };
+                var count: u32 = 0;
+                var dy: isize = -reach;
+                while (dy <= reach) : (dy += 1) {
+                    var dx: isize = -reach;
+                    while (dx <= reach) : (dx += 1) {
+                        const sample_x = std.math.clamp(@as(isize, @intCast(x)) + dx, @as(isize, @intCast(left)), @as(isize, @intCast(right - 1)));
+                        const sample_y = std.math.clamp(@as(isize, @intCast(y)) + dy, @as(isize, @intCast(top)), @as(isize, @intCast(bottom - 1)));
+                        const sample = self.beneath_blur[@as(usize, @intCast(sample_y)) * width + @as(usize, @intCast(sample_x))];
+                        sums[0] += sample.r;
+                        sums[1] += sample.g;
+                        sums[2] += sample.b;
+                        count += 1;
+                    }
+                }
+                self.pixels[y * width + x] = .{ .r = @intCast(sums[0] / count), .g = @intCast(sums[1] / count), .b = @intCast(sums[2] / count) };
             };
         }
 
@@ -551,9 +642,9 @@ const FixedText = struct {
     }
 };
 
-const draws_effects: zui.CommandSet = .initMany(&.{ .gradient, .shadow });
+const draws_effects: zui.CommandSet = .initMany(&.{ .gradient, .shadow, .backdrop_blur });
 
-test "a renderer that draws every frame right passes the suite, with gradients and shadows drawn or lowered" {
+test "a renderer that draws every frame right passes the suite, with gradients, shadows and backdrop blurs drawn or lowered" {
     inline for (comptime .{ draws_effects, zui.CommandSet.initEmpty() }) |commands| {
         const Renderer = PixelRenderer(.none, commands);
         var harness: PixelHarness(Renderer) = .{};
@@ -590,6 +681,17 @@ test "a renderer that interpolates a gradient in sRGB fails the suite" {
     try std.testing.expectEqual(error.WrongColor, violation.kind);
     try std.testing.expectEqualStrings(
         "drew #7e0081 at (144, 112) in the reference scene, where the middle of a gradient, in OKLab, should be #8c53a2",
+        violation.description(),
+    );
+}
+
+test "a renderer that draws a backdrop blur's tint without blurring fails the suite" {
+    const Renderer = PixelRenderer(.tints_without_blurring, draws_effects);
+    var harness: PixelHarness(Renderer) = .{};
+    const violation = (try findRendererViolation(Renderer, &harness, .{ .gpa = std.testing.allocator, .io = std.testing.io })).?;
+    try std.testing.expectEqual(error.WrongColor, violation.kind);
+    try std.testing.expectEqualStrings(
+        "drew #ff80ff at (44, 160) in the reference scene, where a backdrop blur, the stripes beneath it averaged under its tint, should be #c0c0c0",
         violation.description(),
     );
 }

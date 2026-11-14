@@ -983,7 +983,7 @@ pub const Element = struct {
     style: ?Static(Style) = null,       // comptime-built, zero-copy (§10.3)
     layout: ?Layout = null,             // overrides style.layout
     decoration: ?Decoration = null,     // background, border, corner radius, material
-    effects: ?*const Effects = null,    // gradient and shadow, copied when declared
+    effects: ?*const Effects = null,    // gradient, shadow and backdrop blur, copied when declared
     clip: Axes = .none,                 // the axes on which descendants are cut off, e.g. .vertical
     scroll: ?Scroll = null,
     floating: ?Floating = null,
@@ -1016,6 +1016,7 @@ pub const Border = struct {
 pub const Effects = struct {
     gradient: ?Gradient = null,   // painted over the background
     shadow: ?Shadow = null,       // painted under it; with no offset, a glow
+    backdrop_blur: ?BackdropBlur = null, // over the shadow, under the background
 };
 
 pub const Gradient = struct {
@@ -1030,11 +1031,20 @@ pub const Shadow = struct {
     blur: f32 = 0,                // how far the edge fades, outward
     spread: f32 = 0,              // how far the shape grows before it is blurred
 };
+
+pub const BackdropBlur = struct {
+    radius: f32,                  // the blur's standard deviation, as CSS's blur() takes it
+    tint: config.Color,           // drawn over the blurred backdrop, and alone where it is lowered
+};
 ```
 
 Effects take the shape of the element's box and its decoration's
-corner radius, and paint from the bottom as shadow, background,
-gradient, then the element's content. A gradient is interpolated in
+corner radius, and paint from the bottom as shadow, backdrop blur,
+background, gradient, then the element's content. A backdrop blur blurs
+what zui drew beneath the element, averaging the pixels as the target
+stores them and sampling only inside the element's box, its edges
+extended, then draws its tint over them; it has one tint, which is also
+what a renderer without blur draws. A gradient is interpolated in
 OKLab along a line through the element's center at `angle`, just long
 enough that the two corners farthest along it take `from` and `to`. A
 shadow is culled by what it paints, not by its element's box. Effects
@@ -1404,7 +1414,7 @@ never sees it:
 |---|---|
 | gradient | a rectangle in its mean color, in OKLab |
 | shadow, glow | nothing |
-| backdrop blur | a rectangle in its fallback tint |
+| backdrop blur | a rectangle in its tint |
 | transform | the untransformed element; its hit region stays untransformed |
 | material | the element's fallback background |
 | `ExtendedColor` without `.extended_color` | the color clamped to `Color` |

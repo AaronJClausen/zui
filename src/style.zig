@@ -443,6 +443,21 @@ pub const Shadow = struct {
     }
 };
 
+/// Frosted glass: what zui drew beneath an element, blurred within its
+/// rounded box, then `tint` over it. A renderer that does not blur draws
+/// the tint alone, so a tint that reads well unblurred is the safe choice.
+///
+/// ```zig
+/// .effects = &.{ .backdrop_blur = .{ .radius = 12, .tint = .rgba(0xffffff40) } },
+/// ```
+pub const BackdropBlur = struct {
+    /// The blur's standard deviation in layout units, as CSS's `blur()`
+    /// takes it. Only what lies within the element is sampled, its edges
+    /// extended, so nothing outside it bleeds in.
+    radius: f32,
+    tint: Color,
+};
+
 /// Background, border and corner radius: what an element draws behind and
 /// around its children.
 pub const Decoration = struct {
@@ -452,8 +467,8 @@ pub const Decoration = struct {
 };
 
 /// What an element draws with the optional commands, in the shape of its
-/// decoration's corner radius: from the bottom, its shadow, its
-/// background, then its gradient. An element points at its effects
+/// decoration's corner radius: from the bottom, its shadow, its backdrop
+/// blur, its background, then its gradient. An element points at its effects
 /// rather than holding them, so that declaring one without any copies
 /// nothing more.
 ///
@@ -466,6 +481,8 @@ pub const Effects = struct {
     /// Painted over the background, so a translucent gradient tints it.
     gradient: ?Gradient = null,
     shadow: ?Shadow = null,
+    /// Painted under the background, so only a translucent one shows it.
+    backdrop_blur: ?BackdropBlur = null,
 };
 
 /// An element's layout and decoration together, made once at comptime with

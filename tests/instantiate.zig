@@ -31,7 +31,7 @@ var memory: [Ui.required_bytes]u8 align(Ui.buffer_alignment) = undefined;
 
 const Expanded = struct { open: bool };
 
-const check_effects: zui.Effects = .{ .gradient = .{ .from = .black, .to = .white, .angle = 1 }, .shadow = .glow(.black, 4) };
+const check_effects: zui.Effects = .{ .gradient = .{ .from = .black, .to = .white, .angle = 1 }, .shadow = .glow(.black, 4), .backdrop_blur = .{ .radius = 4, .tint = .rgba(0xffffff40) } };
 
 const check_style = zui.static(zui.Style{ .layout = .{ .sizing = .{ .width = .fixed(8), .height = .fixed(8) } }, .decoration = .{ .background = .white } });
 

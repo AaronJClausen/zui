@@ -129,6 +129,7 @@ pub const Border = style.Border;
 pub const Decoration = style.Decoration;
 pub const Gradient = style.Gradient;
 pub const Shadow = style.Shadow;
+pub const BackdropBlur = style.BackdropBlur;
 pub const Effects = style.Effects;
 pub const Style = style.Style;
 pub const Static = style.Static;

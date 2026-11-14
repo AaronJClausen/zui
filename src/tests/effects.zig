@@ -162,3 +162,71 @@ test "past max_effects, an element is drawn without its effects, and the limit s
     try testing.expect(commands[0].payload == .shadow);
     try testing.expectEqual(zui.Color.black, commands[1].payload.rectangle.color);
 }
+
+const GlassUi = zui.Context(.{
+    .limits = .{ .max_elements = 32, .max_render_commands = 64 },
+    .commands = .initMany(&.{ .gradient, .shadow, .backdrop_blur }),
+});
+
+const frost: zui.BackdropBlur = .{ .radius = 12, .tint = .rgba(0xffffff40) };
+
+fn declareGlassCard(ui: anytype) void {
+    ui.open(.{ .layout = .{ .padding = .all(20) } });
+    ui.box(.{
+        .layout = .{ .sizing = card_size },
+        .decoration = .{ .background = .rgba(0x10203040), .corner_radius = .all(6) },
+        .effects = &.{ .gradient = dusk, .shadow = card_shadow, .backdrop_blur = frost },
+    });
+    ui.close();
+}
+
+test "a backdrop blur is painted over the shadow and under the background, in the decoration's corners" {
+    var ui: GlassUi = try .init(testing.allocator, testing.io);
+    defer ui.deinit(testing.allocator);
+    beginFrame(&ui);
+    declareGlassCard(&ui);
+    const frame = ui.endFrame();
+    defer ui.release(frame);
+    try frame.diagnostics.check();
+
+    const commands = frame.commands();
+    try testing.expectEqual(4, commands.len);
+    try testing.expect(commands[0].payload == .shadow);
+    try testing.expectEqual(GlassUi.RenderCommand.Payload{ .backdrop_blur = .{ .radius = 12, .tint = frost.tint, .corner_radius = .all(6) } }, commands[1].payload);
+    try testing.expectEqual(zui.Color.rgba(0x10203040), commands[2].payload.rectangle.color);
+    try testing.expect(commands[3].payload == .gradient);
+    try testing.expectEqual(zui.Rect{ .x = 20, .y = 20, .width = 100, .height = 40 }, commands[1].bounds);
+    try testing.expect(frame.diagnostics.lowered.count() == 0);
+}
+
+test "for a renderer that does not blur, a backdrop blur is lowered to a rectangle in its tint" {
+    var ui: EffectsUi = try .init(testing.allocator, testing.io);
+    defer ui.deinit(testing.allocator);
+    beginFrame(&ui);
+    declareGlassCard(&ui);
+    const frame = ui.endFrame();
+    defer ui.release(frame);
+    try testing.expect(frame.diagnostics.ok());
+
+    const commands = frame.commands();
+    try testing.expectEqual(4, commands.len);
+    try testing.expect(commands[0].payload == .shadow);
+    try testing.expectEqual(EffectsUi.RenderCommand.Payload{ .rectangle = .{ .color = frost.tint, .corner_radius = .all(6) } }, commands[1].payload);
+    try testing.expectEqual(zui.Color.rgba(0x10203040), commands[2].payload.rectangle.color);
+    try testing.expect(commands[3].payload == .gradient);
+    try testing.expectEqual(zui.CommandSet.initOne(.backdrop_blur), frame.diagnostics.lowered);
+}
+
+test "a backdrop blur wholly outside the clip is not emitted" {
+    var ui: GlassUi = try .init(testing.allocator, testing.io);
+    defer ui.deinit(testing.allocator);
+    beginFrame(&ui);
+    ui.open(.{ .clip = .both, .layout = .{ .sizing = card_size, .direction = .top_to_bottom } });
+    ui.box(.{ .layout = .{ .sizing = card_size } });
+    ui.box(.{ .layout = .{ .sizing = card_size }, .effects = &.{ .backdrop_blur = frost } });
+    ui.close();
+    const frame = ui.endFrame();
+    defer ui.release(frame);
+
+    for (frame.commands()) |command| try testing.expect(command.payload != .backdrop_blur);
+}

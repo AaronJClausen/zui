@@ -471,6 +471,10 @@ pub fn snapshot(writer: *std.Io.Writer, commands: anytype, names: anytype) std.I
                 if (payload.blur != 0) try writer.print(" blur={d}", .{payload.blur});
                 if (payload.spread != 0) try writer.print(" spread={d}", .{payload.spread});
                 try writeCorners(writer, payload.corner_radius);
+            } else if (comptime std.mem.eql(u8, @tagName(kind), "backdrop_blur")) {
+                try writer.print(" blur={d}", .{payload.radius});
+                try writeNamedColor(writer, "tint", payload.tint);
+                try writeCorners(writer, payload.corner_radius);
             },
         }
         try writer.writeByte('\n');
@@ -900,6 +904,17 @@ test "snapshots write a gradient's ends and angle and a shadow's offset, blur an
         \\shadow x=0 y=0 w=8 h=8 color=#00000060 offset=0,4 blur=12 spread=2 radius=4
         \\shadow x=0 y=0 w=8 h=8 color=#ffffff
         \\gradient x=0 y=0 w=8 h=8 from=#3a1c71 to=#ffaf7b angle=1.5
+        \\
+    );
+}
+
+test "snapshots write a backdrop blur's radius as its blur, beside its tint and corners" {
+    const Command = zui.Context(.{ .limits = .{ .max_elements = 8 }, .commands = .initOne(.backdrop_blur) }).RenderCommand;
+    const commands = [_]Command{
+        .{ .bounds = .{ .width = 8, .height = 8 }, .id = 1, .payload = .{ .backdrop_blur = .{ .radius = 12, .tint = .rgba(0xffffff40), .corner_radius = .all(4) } } },
+    };
+    try expectSnapshot(&commands, .{},
+        \\backdrop_blur x=0 y=0 w=8 h=8 blur=12 tint=#ffffff40 radius=4
         \\
     );
 }

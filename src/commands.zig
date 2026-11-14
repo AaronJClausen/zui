@@ -123,8 +123,9 @@ pub fn RenderCommand(comptime options: CommandOptions) type {
             corner_radius: style.CornerRadius = .zero,
         };
 
-        /// Blurs what zui drew below, within the bounds; lowered to a
-        /// rectangle in `tint`.
+        /// Blurs what zui drew below within the rounded bounds, as
+        /// `zui.BackdropBlur` describes it, averaging the pixels as stored,
+        /// then draws `tint` over it; lowered to a rectangle in `tint`.
         pub const BackdropBlur = struct {
             radius: f32,
             tint: style.Color,
