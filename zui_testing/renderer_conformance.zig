@@ -44,6 +44,10 @@ pub const scene_colors = struct {
     pub const stripe_odd: zui.Color = .rgb(0xff00ff);
     /// Drawn over the blurred stripes, and alone where the blur is lowered.
     pub const frost: zui.Color = .rgba(0xffffff80);
+    /// The two halves of a box turned a quarter clockwise, which brings its
+    /// start to the top.
+    pub const turned_start: zui.Color = .rgb(0xff8080);
+    pub const turned_end: zui.Color = .rgb(0x8080ff);
 };
 
 /// The raised box's shadow is cast this far right and down, unblurred.
@@ -58,15 +62,19 @@ pub const image_corner_radius: f32 = 12;
 pub const stripe_width: f32 = 8;
 pub const stripe_count = 8;
 
+/// The turned box's size as laid out, before its quarter turn.
+pub const turned_size: [2]f32 = .{ 48, 16 };
+
 /// Draws frames that every renderer must draw the same way, and fails on
 /// the first thing it drew wrong:
 /// - a reference scene of the base commands (a fill, a border, text, and
 ///   a clip inside a clip, each cutting off a child larger than itself),
 ///   with `image` and `custom` when the renderer has their payload types,
 ///   the image tinted and with rounded corners, and a gradient and a box
-///   casting a shadow, and a backdrop blur over stripes, which the core
-///   lowers unless the renderer declares `.gradient`, `.shadow` or
-///   `.backdrop_blur`;
+///   casting a shadow, a backdrop blur over stripes, and a box of two
+///   halves turned a quarter clockwise, which the core lowers unless the
+///   renderer declares `.gradient`, `.shadow`, `.backdrop_blur` or
+///   `.transform`;
 /// - clips nested 100 deep, then a fill drawn after all of them ended;
 /// - commands of no size, and far outside the viewport;
 /// - an empty frame;
@@ -81,7 +89,9 @@ pub const stripe_count = 8;
 /// in OKLab and a lowered one is that middle throughout; a declared shadow
 /// is drawn and a lowered one is not; a declared backdrop blur averages the
 /// stripes beneath it under its tint, a lowered one is its tint over each
-/// stripe, and neither reaches beyond its bounds. Without it, the suite
+/// stripe, and neither reaches beyond its bounds; a declared transform
+/// stands the turned box up with its start at the top, and a lowered one
+/// leaves it as laid out. Without it, the suite
 /// checks only that each frame is drawn without an error.
 ///
 /// `harness` is a pointer to a value that declares:
@@ -130,7 +140,7 @@ const Scene = enum {
 const scenes = [_]Scene{ .reference, .deep_clips, .out_of_bounds, .empty, .reference };
 const deep_clip_count = 100;
 
-const ids = zui.ids(.{ "panel", "fill", "frame", "outer", "inner", "picture", "custom", "gradient", "raised", "stripes", "nest", "after_nest" });
+const ids = zui.ids(.{ "panel", "fill", "frame", "outer", "inner", "picture", "custom", "gradient", "raised", "stripes", "turned", "nest", "after_nest" });
 
 fn suiteConfig(comptime backend: zui.Config) zui.Config {
     var config = backend;
@@ -245,6 +255,7 @@ fn declareReference(ui: anytype, comptime config: zui.Config, payloads: anytype)
         ui.close();
     }
     {
+        ui.open(.{ .layout = .{ .child_gap = 16 } });
         const stripes_size = fixedSize(stripe_width * stripe_count, 32);
         ui.open(.{ .id = ids.stripes, .layout = .{ .sizing = stripes_size } });
         for (0..stripe_count) |stripe| ui.box(.{
@@ -254,6 +265,14 @@ fn declareReference(ui: anytype, comptime config: zui.Config, payloads: anytype)
         ui.box(.{ .floating = .{}, .layout = .{ .sizing = stripes_size }, .effects = &.{
             .backdrop_blur = .{ .radius = stripe_width, .tint = scene_colors.frost },
         } });
+        ui.close();
+        ui.open(.{ .id = ids.turned, .layout = .{ .sizing = fixedSize(turned_size[0], turned_size[1]) }, .effects = &.{
+            .transform = .{ .rotation = std.math.pi / 2.0 },
+        } });
+        const half = fixedSize(turned_size[0] / 2, turned_size[1]);
+        ui.box(.{ .decoration = .{ .background = scene_colors.turned_start }, .layout = .{ .sizing = half } });
+        ui.box(.{ .decoration = .{ .background = scene_colors.turned_end }, .layout = .{ .sizing = half } });
+        ui.close();
         ui.close();
     }
     ui.close();
@@ -378,6 +397,25 @@ fn PixelCheck(comptime Harness: type) type {
             for (expectations) |expectation| {
                 if (self.expect(expectation)) |violation| return violation;
             }
+            return self.transform(frame, config);
+        }
+
+        fn transform(self: Self, frame: anytype, comptime config: zui.Config) ?RendererViolation {
+            const turned = frame.rectOf(ids.turned).?;
+            const middle = center(turned);
+            const quarter = turned_size[0] / 4;
+            const expectations = if (comptime config.commands.contains(.transform)) [_]Expectation{
+                .{ .at = .{ middle[0], middle[1] - quarter }, .color = scene_colors.turned_start, .what = "the start of a box turned a quarter clockwise, now at its top," },
+                .{ .at = .{ middle[0], middle[1] + quarter }, .color = scene_colors.turned_end, .what = "the end of a box turned a quarter clockwise, now at its bottom," },
+                .{ .at = .{ middle[0] - quarter, middle[1] }, .color = scene_colors.background, .what = "where a turned box was laid out, which it no longer covers," },
+            } else [_]Expectation{
+                .{ .at = .{ middle[0] - quarter, middle[1] }, .color = scene_colors.turned_start, .what = "the start of a box whose lowered transform leaves it as laid out" },
+                .{ .at = .{ middle[0] + quarter, middle[1] }, .color = scene_colors.turned_end, .what = "the end of a box whose lowered transform leaves it as laid out" },
+                .{ .at = .{ middle[0], middle[1] - quarter }, .color = scene_colors.background, .what = "above a box whose lowered transform leaves it as laid out" },
+            };
+            for (expectations) |expectation| {
+                if (self.expect(expectation)) |violation| return violation;
+            }
             return null;
         }
 
@@ -441,13 +479,14 @@ fn hex(color: zui.Color) u24 {
     return @as(u24, color.r) << 16 | @as(u24, color.g) << 8 | color.b;
 }
 
-const Flaw = enum { none, forgets_enclosing_clip, ignores_image_decoration, interpolates_gradient_in_srgb, tints_without_blurring };
+const Flaw = enum { none, forgets_enclosing_clip, ignores_image_decoration, interpolates_gradient_in_srgb, tints_without_blurring, turns_the_wrong_way };
 
 /// A software renderer into its own pixels, the plainest that conforms:
 /// fills ignore corner radii, text fills its bounds, an image is its
 /// handle's color times its tint, inside its rounded corners, a gradient
-/// is each pixel's `colorAt`, a shadow is unblurred, and a backdrop blur
-/// is a box average as wide as its radius each way. Each `Flaw` is a
+/// is each pixel's `colorAt`, a shadow is unblurred, a backdrop blur is a
+/// box average as wide as its radius each way, and each pixel is drawn
+/// from where its center lies in the transforms' units. Each `Flaw` is a
 /// mistake the suite must catch.
 fn PixelRenderer(comptime flaw: Flaw, comptime commands: zui.CommandSet) type {
     return struct {
@@ -463,37 +502,59 @@ fn PixelRenderer(comptime flaw: Flaw, comptime commands: zui.CommandSet) type {
 
         pixels: [width * height]zui.Color = undefined,
         beneath_blur: [width * height]zui.Color = undefined,
+        /// Each clip in effect, with the transforms in effect where it began.
+        clips: [128]Clip = undefined,
+        clip_depth: usize = 0,
+        /// From the window to the units of the innermost transform, and
+        /// back, for each transform in effect and the window's own first.
+        to_local: [32]zui.Affine = .{zui.Affine.identity} ** 32,
+        from_local: [32]zui.Affine = .{zui.Affine.identity} ** 32,
+        transform_depth: usize = 0,
+
+        const Clip = struct { rect: zui.Rect, to_local: zui.Affine };
+
+        /// Where a transform that flattens its subtree sends each pixel, so
+        /// that none of it is drawn.
+        const nowhere: zui.Affine = .{ .x_axis = .{ 0, 0 }, .y_axis = .{ 0, 0 }, .offset = .{ std.math.inf(f32), 0 } };
 
         pub fn zuiSubmit(self: *Self, surface: zui.Surface, frame: anytype) !void {
             if (surface != .offscreen) return error.UnsupportedSurface;
-            var clips: [128]zui.Rect = undefined;
-            var depth: usize = 0;
-            const whole: zui.Rect = .{ .width = width, .height = height };
+            self.clip_depth = 0;
+            self.transform_depth = 0;
             for (frame.commands()) |command| {
-                const clip = if (depth == 0) whole else clips[depth - 1];
                 const bounds = command.bounds;
                 switch (command.payload) {
-                    .rectangle => |rectangle| self.fill(bounds, clip, rectangle.color),
+                    .rectangle => |rectangle| self.fill(bounds, rectangle.color),
                     .border => |border| {
                         const widths = border.widths;
-                        self.fill(.{ .x = bounds.x, .y = bounds.y, .width = bounds.width, .height = widths.top }, clip, border.color);
-                        self.fill(.{ .x = bounds.x, .y = bounds.y + bounds.height - widths.bottom, .width = bounds.width, .height = widths.bottom }, clip, border.color);
-                        self.fill(.{ .x = bounds.x, .y = bounds.y, .width = widths.left, .height = bounds.height }, clip, border.color);
-                        self.fill(.{ .x = bounds.x + bounds.width - widths.right, .y = bounds.y, .width = widths.right, .height = bounds.height }, clip, border.color);
+                        self.fill(.{ .x = bounds.x, .y = bounds.y, .width = bounds.width, .height = widths.top }, border.color);
+                        self.fill(.{ .x = bounds.x, .y = bounds.y + bounds.height - widths.bottom, .width = bounds.width, .height = widths.bottom }, border.color);
+                        self.fill(.{ .x = bounds.x, .y = bounds.y, .width = widths.left, .height = bounds.height }, border.color);
+                        self.fill(.{ .x = bounds.x + bounds.width - widths.right, .y = bounds.y, .width = widths.right, .height = bounds.height }, border.color);
                     },
-                    .text => |text| self.fill(bounds, clip, text.style.color),
+                    .text => |text| self.fill(bounds, text.style.color),
                     .clip_begin => |rect| {
-                        clips[depth] = rect;
-                        depth += 1;
+                        self.clips[self.clip_depth] = .{ .rect = rect, .to_local = self.to_local[self.transform_depth] };
+                        self.clip_depth += 1;
                     },
-                    .clip_end => depth = if (flaw == .forgets_enclosing_clip) 0 else depth - 1,
-                    inline else => |payload, kind| if (comptime std.mem.eql(u8, @tagName(kind), "image")) {
+                    .clip_end => self.clip_depth = if (flaw == .forgets_enclosing_clip) 0 else self.clip_depth - 1,
+                    inline else => |payload, kind| if (comptime std.mem.eql(u8, @tagName(kind), "transform_begin")) {
+                        var turned = payload;
+                        if (flaw == .turns_the_wrong_way) turned.rotation = -turned.rotation;
+                        const affine = turned.affine(bounds);
+                        const depth = self.transform_depth;
+                        self.to_local[depth + 1] = (affine.inverse() orelse nowhere).after(self.to_local[depth]);
+                        self.from_local[depth + 1] = self.from_local[depth].after(affine);
+                        self.transform_depth += 1;
+                    } else if (comptime std.mem.eql(u8, @tagName(kind), "transform_end")) {
+                        self.transform_depth -= 1;
+                    } else if (comptime std.mem.eql(u8, @tagName(kind), "image")) {
                         if (flaw == .ignores_image_decoration)
-                            self.fill(bounds, clip, payload.handle)
+                            self.fill(bounds, payload.handle)
                         else
-                            self.fillRounded(bounds, clip, multiply(payload.handle, payload.tint), payload.corner_radius);
+                            self.fillRounded(bounds, multiply(payload.handle, payload.tint), payload.corner_radius);
                     } else if (comptime std.mem.eql(u8, @tagName(kind), "gradient")) {
-                        self.fillGradient(bounds, clip, payload);
+                        self.fillGradient(bounds, payload);
                     } else if (comptime std.mem.eql(u8, @tagName(kind), "shadow")) {
                         const shape: zui.Rect = .{
                             .x = bounds.x + payload.offset[0] - payload.spread,
@@ -501,34 +562,77 @@ fn PixelRenderer(comptime flaw: Flaw, comptime commands: zui.CommandSet) type {
                             .width = bounds.width + 2 * payload.spread,
                             .height = bounds.height + 2 * payload.spread,
                         };
-                        self.fillRounded(shape, clip, payload.color, payload.corner_radius);
+                        self.fillRounded(shape, payload.color, payload.corner_radius);
                     } else if (comptime std.mem.eql(u8, @tagName(kind), "backdrop_blur")) {
-                        if (flaw != .tints_without_blurring) self.blurBeneath(bounds, clip, payload.radius, payload.corner_radius);
-                        self.fillRounded(bounds, clip, payload.tint, payload.corner_radius);
+                        if (flaw != .tints_without_blurring) self.blurBeneath(bounds, payload.radius, payload.corner_radius);
+                        self.fillRounded(bounds, payload.tint, payload.corner_radius);
                     } else comptime unreachable,
                 }
             }
         }
 
-        fn fill(self: *Self, rect: zui.Rect, clip: zui.Rect, color: zui.Color) void {
-            const left = std.math.clamp(@max(rect.x, clip.x), 0, width_units);
-            const top = std.math.clamp(@max(rect.y, clip.y), 0, height_units);
-            const right = std.math.clamp(@min(rect.x + rect.width, clip.x + clip.width), 0, width_units);
-            const bottom = std.math.clamp(@min(rect.y + rect.height, clip.y + clip.height), 0, height_units);
-            if (right <= left or bottom <= top) return;
-            for (@intFromFloat(top)..@intFromFloat(bottom)) |y| {
-                for (self.pixels[y * width ..][@intFromFloat(left)..@intFromFloat(right)]) |*pixel| pixel.* = blend(pixel.*, color);
-            }
-        }
-
-        fn fillRounded(self: *Self, rect: zui.Rect, clip: zui.Rect, color: zui.Color, radius: zui.CornerRadius) void {
-            for (0..height) |y| for (0..width) |x| {
-                const at: [2]f32 = .{ @as(f32, @floatFromInt(x)) + 0.5, @as(f32, @floatFromInt(y)) + 0.5 };
-                if (contains(clip, at) and insideRounded(rect, radius, at)) self.pixels[y * width + x] = blend(self.pixels[y * width + x], color);
+        /// The pixels whose centers may lie in `rect`, in the innermost
+        /// transform's units, each with where its center lies in them, if
+        /// every clip in effect holds it.
+        fn covered(self: *const Self, rect: zui.Rect) Covered {
+            const around = self.from_local[self.transform_depth].boundsOf(rect);
+            return .{
+                .renderer = self,
+                .left = @intFromFloat(std.math.clamp(@floor(around.x), 0, width_units)),
+                .right = @intFromFloat(std.math.clamp(@ceil(around.x + around.width), 0, width_units)),
+                .bottom = @intFromFloat(std.math.clamp(@ceil(around.y + around.height), 0, height_units)),
+                .x = @intFromFloat(std.math.clamp(@floor(around.x), 0, width_units)),
+                .y = @intFromFloat(std.math.clamp(@floor(around.y), 0, height_units)),
             };
         }
 
-        fn blurBeneath(self: *Self, rect: zui.Rect, clip: zui.Rect, radius: f32, corner_radius: zui.CornerRadius) void {
+        const Covered = struct {
+            renderer: *const Self,
+            left: usize,
+            right: usize,
+            bottom: usize,
+            x: usize,
+            y: usize,
+
+            const Pixel = struct { index: usize, at: [2]f32 };
+
+            fn next(self: *Covered) ?Pixel {
+                while (self.y < self.bottom) {
+                    if (self.x >= self.right) {
+                        self.x = self.left;
+                        self.y += 1;
+                        continue;
+                    }
+                    const x = self.x;
+                    self.x += 1;
+                    const in_window: [2]f32 = .{ @as(f32, @floatFromInt(x)) + 0.5, @as(f32, @floatFromInt(self.y)) + 0.5 };
+                    if (!self.renderer.insideClips(in_window)) continue;
+                    return .{ .index = self.y * width + x, .at = self.renderer.to_local[self.renderer.transform_depth].apply(in_window) };
+                }
+                return null;
+            }
+        };
+
+        fn insideClips(self: *const Self, in_window: [2]f32) bool {
+            for (self.clips[0..self.clip_depth]) |clip| {
+                if (!contains(clip.rect, clip.to_local.apply(in_window))) return false;
+            }
+            return true;
+        }
+
+        fn fill(self: *Self, rect: zui.Rect, color: zui.Color) void {
+            self.fillRounded(rect, color, .zero);
+        }
+
+        fn fillRounded(self: *Self, rect: zui.Rect, color: zui.Color, radius: zui.CornerRadius) void {
+            var pixels = self.covered(rect);
+            while (pixels.next()) |pixel| {
+                if (insideRounded(rect, radius, pixel.at)) self.pixels[pixel.index] = blend(self.pixels[pixel.index], color);
+            }
+        }
+
+        /// Untransformed, as the reference scene draws it.
+        fn blurBeneath(self: *Self, rect: zui.Rect, radius: f32, corner_radius: zui.CornerRadius) void {
             const left: usize = @intFromFloat(std.math.clamp(rect.x, 0, width_units));
             const top: usize = @intFromFloat(std.math.clamp(rect.y, 0, height_units));
             const right: usize = @intFromFloat(std.math.clamp(rect.x + rect.width, 0, width_units));
@@ -538,7 +642,7 @@ fn PixelRenderer(comptime flaw: Flaw, comptime commands: zui.CommandSet) type {
             self.beneath_blur = self.pixels;
             for (top..bottom) |y| for (left..right) |x| {
                 const at: [2]f32 = .{ @as(f32, @floatFromInt(x)) + 0.5, @as(f32, @floatFromInt(y)) + 0.5 };
-                if (!contains(clip, at) or !insideRounded(rect, corner_radius, at)) continue;
+                if (!self.insideClips(at) or !insideRounded(rect, corner_radius, at)) continue;
                 var sums: [3]u32 = .{ 0, 0, 0 };
                 var count: u32 = 0;
                 var dy: isize = -reach;
@@ -558,15 +662,15 @@ fn PixelRenderer(comptime flaw: Flaw, comptime commands: zui.CommandSet) type {
             };
         }
 
-        fn fillGradient(self: *Self, rect: zui.Rect, clip: zui.Rect, gradient: anytype) void {
-            for (0..height) |y| for (0..width) |x| {
-                const at: [2]f32 = .{ @as(f32, @floatFromInt(x)) + 0.5, @as(f32, @floatFromInt(y)) + 0.5 };
-                if (!contains(clip, at) or !insideRounded(rect, gradient.corner_radius, at)) continue;
-                self.pixels[y * width + x] = if (flaw == .interpolates_gradient_in_srgb)
-                    gradient.from.mix(gradient.to, (zui.Gradient{ .from = gradient.from, .to = gradient.to, .angle = gradient.angle }).amountAt(rect, at))
+        fn fillGradient(self: *Self, rect: zui.Rect, gradient: anytype) void {
+            var pixels = self.covered(rect);
+            while (pixels.next()) |pixel| {
+                if (!insideRounded(rect, gradient.corner_radius, pixel.at)) continue;
+                self.pixels[pixel.index] = if (flaw == .interpolates_gradient_in_srgb)
+                    gradient.from.mix(gradient.to, (zui.Gradient{ .from = gradient.from, .to = gradient.to, .angle = gradient.angle }).amountAt(rect, pixel.at))
                 else
-                    gradient.colorAt(rect, at);
-            };
+                    gradient.colorAt(rect, pixel.at);
+            }
         }
     };
 }
@@ -642,9 +746,9 @@ const FixedText = struct {
     }
 };
 
-const draws_effects: zui.CommandSet = .initMany(&.{ .gradient, .shadow, .backdrop_blur });
+const draws_effects: zui.CommandSet = .initMany(&.{ .gradient, .shadow, .backdrop_blur, .transform });
 
-test "a renderer that draws every frame right passes the suite, with gradients, shadows and backdrop blurs drawn or lowered" {
+test "a renderer that draws every frame right passes the suite, with gradients, shadows, backdrop blurs and transforms drawn or lowered" {
     inline for (comptime .{ draws_effects, zui.CommandSet.initEmpty() }) |commands| {
         const Renderer = PixelRenderer(.none, commands);
         var harness: PixelHarness(Renderer) = .{};
@@ -692,6 +796,17 @@ test "a renderer that draws a backdrop blur's tint without blurring fails the su
     try std.testing.expectEqual(error.WrongColor, violation.kind);
     try std.testing.expectEqualStrings(
         "drew #ff80ff at (44, 160) in the reference scene, where a backdrop blur, the stripes beneath it averaged under its tint, should be #c0c0c0",
+        violation.description(),
+    );
+}
+
+test "a renderer that turns a transform the wrong way fails the suite" {
+    const Renderer = PixelRenderer(.turns_the_wrong_way, draws_effects);
+    var harness: PixelHarness(Renderer) = .{};
+    const violation = (try findRendererViolation(Renderer, &harness, .{ .gpa = std.testing.allocator, .io = std.testing.io })).?;
+    try std.testing.expectEqual(error.WrongColor, violation.kind);
+    try std.testing.expectEqualStrings(
+        "drew #8080ff at (120, 140) in the reference scene, where the start of a box turned a quarter clockwise, now at its top, should be #ff8080",
         violation.description(),
     );
 }

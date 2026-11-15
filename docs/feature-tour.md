@@ -315,6 +315,34 @@ fn photoCard(ui: *Ui, photo: *const Photo) void {
 }
 ```
 
+<a id="transforms"></a>
+
+### Transforms · *shipped*
+
+`effects` can also hold a `transform`: a translation, a scale and a rotation about an `origin` inside the element's box, applied to the element, its other effects and everything inside it as they are painted. Layout ignores it, so `rectOf` is still the box the element was laid out in and its neighbours stay put, which suits animation: a dialog that grows in, a card that tilts while dragged. A pointer hits a transformed element where it is drawn, through nested transforms and the clips around them. A renderer that declares `.transform` gets `transform_begin` and `transform_end` around the element's commands, and `affine(bounds)` maps its units to its parent's; for any other, the element is drawn and hit as laid out, and `frame.diagnostics.lowered` names `.transform`. No backend draws transforms yet, so today every one draws the element as laid out.
+
+`src/ui/import.zig`
+
+```zig
+const std = @import("std");
+const zui = @import("zui");
+
+fn importDialog(app: *App, ui: *Ui) void {
+    const appearing = app.dialog_shown.progress(app.now);
+    const grow_in: zui.Effects = .{ .transform = .{ .scale = @splat(0.92 + 0.08 * appearing), .origin = .{ 0.5, 0 } } };
+    ui.open(.{ .id = ids.import, .floating = .{ .attach_to = .root, .attach_point = .center, .anchor = .center }, .style = styles.dialog, .effects = &grow_in });
+    defer ui.close();
+    ui.text("Import photos", .{ .size = 16 });
+}
+
+fn draggedCard(ui: *Ui, photo: *const Photo, drag: zui.Drag) void {
+    const tilted: zui.Effects = .{ .transform = .{ .rotation = std.math.clamp(drag.translation[0] / 400, -0.1, 0.1) } };
+    ui.open(.{ .style = styles.card, .effects = &tilted });
+    defer ui.close();
+    ui.text(photo.file_name, .{ .size = 12, .wrap = .none });
+}
+```
+
 <a id="ids"></a>
 
 ### Ids · *shipped*
@@ -1775,7 +1803,7 @@ Build with `-Dzui-tracy=true` to link Tracy's client, then connect profiler 0.14
 
 These names compile, but they don't do anything yet. This list is from `ARCHITECTURE.md` §7 and the roadmap.
 
-- **Transforms, materials** *(declared only)*: The variants exist in `RenderCommand` when a renderer declares them, but nothing in declaration produces them, so nothing is emitted or lowered. Items G3 and G5, stage 8.
+- **Materials** *(declared only)*: The variant exists in `RenderCommand` when a renderer declares it, but nothing in declaration produces it, so nothing is emitted or lowered. Item G5, stage 8.
 - **`features.semantics`** *(declared only)*: `Frame.semantics()` is always empty. Accessibility is V2.
 - **`features.safety_sweeps`** *(declared only)*: The flag exists, but it doesn't change behaviour yet. Sweeps are V3.
 - **Extended color**: Colors are RGBA8 only. `zui.ExtendedColor` for HDR is G6.
@@ -1798,5 +1826,5 @@ These names compile, but they don't do anything yet. This list is from `ARCHITEC
 - Writing UI by hand in core is verbose. Nested `.layout = .{ .sizing = .{ .width = ... } }` literals pile up, and static styles are the main relief today.
 - Interactive elements take three steps: declare, query by id, then pick colors from the state yourself. Widgets hide it, but there is nothing in between.
 - `labeledRow` leaves you to close the row, an asymmetry that's easy to get wrong.
-- Only zui-sokol draws gradients and shadows so far; zui-raylib and zui-terminal show a gradient as one flat color and no shadow. Only zui-sokol blurs a backdrop; the others draw its tint.
+- Only zui-sokol draws gradients and shadows so far; zui-raylib and zui-terminal show a gradient as one flat color and no shadow. Only zui-sokol blurs a backdrop; the others draw its tint. No backend draws a transform yet; each draws the element as laid out.
 - There's no examples repository or template yet. The best references are zui-sokol's tour and zui-raylib's demo.

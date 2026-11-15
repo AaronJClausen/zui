@@ -257,7 +257,8 @@ roadmap item named:
 
 | Today | The spec | Where today | Item |
 |---|---|---|---|
-| nothing in declaration produces transforms or materials | `Element` carries them, each lowered for a renderer that does not declare it | `src/style.zig`, `src/emission.zig` | G3, G5 |
+| nothing in declaration produces materials | `Element` carries them, lowered for a renderer that does not declare them | `src/style.zig`, `src/emission.zig` | G5 |
+| no renderer draws `transform_begin`; every one gets the element as laid out | zui-sokol declares it and passes the renderer suite | `../zui-sokol` | G3 |
 | no `Config.Color`; colors are RGBA8 only | `zui.Color` or `zui.ExtendedColor`, clamped for a renderer without `zui_extended_color` | `src/context.zig`, `src/commands.zig` | G6 |
 | `Widgets(Ui)` with a `Theme` struct | `Widgets(Ui, Skin)` | `zui_widgets/` | K5 |
 | `Frame` exposes its storage arrays and `rectOf` | `Frame.inspect(index)` | `src/context.zig` | V1 |

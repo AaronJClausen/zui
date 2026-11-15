@@ -983,7 +983,7 @@ pub const Element = struct {
     style: ?Static(Style) = null,       // comptime-built, zero-copy (§10.3)
     layout: ?Layout = null,             // overrides style.layout
     decoration: ?Decoration = null,     // background, border, corner radius, material
-    effects: ?*const Effects = null,    // gradient, shadow and backdrop blur, copied when declared
+    effects: ?*const Effects = null,    // gradient, shadow, backdrop blur and transform, copied when declared
     clip: Axes = .none,                 // the axes on which descendants are cut off, e.g. .vertical
     scroll: ?Scroll = null,
     floating: ?Floating = null,
@@ -1017,6 +1017,7 @@ pub const Effects = struct {
     gradient: ?Gradient = null,   // painted over the background
     shadow: ?Shadow = null,       // painted under it; with no offset, a glow
     backdrop_blur: ?BackdropBlur = null, // over the shadow, under the background
+    transform: ?Transform = null, // moves the element, its effects and its subtree as painted
 };
 
 pub const Gradient = struct {
@@ -1035,6 +1036,14 @@ pub const Shadow = struct {
 pub const BackdropBlur = struct {
     radius: f32,                  // the blur's standard deviation, as CSS's blur() takes it
     tint: config.Color,           // drawn over the blurred backdrop, and alone where it is lowered
+};
+
+pub const Transform = struct {
+    translation: [2]f32 = .{ 0, 0 }, // layout units, right and down
+    scale: [2]f32 = .{ 1, 1 },
+    rotation: f32 = 0,                // radians clockwise
+    origin: [2]f32 = .{ 0.5, 0.5 },   // a fraction of the element's box
+    pub fn affine(self: Transform, bounds: Rect) Affine; // scale, then rotate, about the origin, then translate
 };
 ```
 
@@ -1057,6 +1066,21 @@ declaration. Their copies have a limit of their own, `max_effects`,
 since one for every element made each frame 160 KiB larger and `init`
 21% slower. A frame that declares no effects is emitted by a walk that
 never looks for them; one that does pays for the look at every element.
+
+A transform applies when painting only: layout, `rectOf` and the
+element's neighbours are as if it were absent. Its `transform_begin`
+comes before the element's shadow and its `transform_end` after its
+subtree, border and clip, so the element's own clip is transformed with
+it; a floating element's clip, which holds its target's, comes first
+and is not. A floating element on another layer than its parent's
+begins every transform around it again on its own layer, outermost
+first, since the layer sort moves its commands out of theirs. Culling
+inside a transform uses the box around the clip in the element's units,
+so an element laid out outside the clip but moved into it is drawn.
+Hit testing inverts it: each transformed element enters a space, a
+region inside it is hit where the pointer lands in that space's units,
+and only inside the clip around every transformed element enclosing it.
+A transform that scales to nothing draws nothing and is never hit.
 
 A divider is centered in the gap between two children and spans the
 element across its flow, inside the border's widths. Floating children
@@ -2127,7 +2151,7 @@ edit (the message quotes the `.hidden = true` line that fixes it).
 - **`snapshot` / `expectSnapshot`**: one line per command, for named ids
   only, defaults omitted, identical in debug and release.
 - **`checkCommands`**: finite bounds, nondecreasing layers, balanced
-  clips and transforms.
+  clips and transforms, each ending inside what it began inside.
 - **Conformance suites**, which every implementation runs in its own CI.
   Each takes a harness that does what only the implementation can: make
   a drawing target and read it back, make the OS report an event, or

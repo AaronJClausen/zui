@@ -458,6 +458,106 @@ pub const BackdropBlur = struct {
     tint: Color,
 };
 
+/// A map of the plane that keeps straight lines straight: `point` goes to
+/// `x_axis * point[0] + y_axis * point[1] + offset`.
+pub const Affine = struct {
+    x_axis: [2]f32 = .{ 1, 0 },
+    y_axis: [2]f32 = .{ 0, 1 },
+    offset: [2]f32 = .{ 0, 0 },
+
+    pub const identity: Affine = .{};
+
+    pub fn apply(self: Affine, point: [2]f32) [2]f32 {
+        const moved = self.applyLinear(point);
+        return .{ moved[0] + self.offset[0], moved[1] + self.offset[1] };
+    }
+
+    fn applyLinear(self: Affine, vector: [2]f32) [2]f32 {
+        return .{
+            self.x_axis[0] * vector[0] + self.y_axis[0] * vector[1],
+            self.x_axis[1] * vector[0] + self.y_axis[1] * vector[1],
+        };
+    }
+
+    /// `first`, then `self`.
+    pub fn after(self: Affine, first: Affine) Affine {
+        return .{ .x_axis = self.applyLinear(first.x_axis), .y_axis = self.applyLinear(first.y_axis), .offset = self.apply(first.offset) };
+    }
+
+    /// Null when the map flattens the plane onto a line or a point, as a
+    /// scale of 0 does.
+    pub fn inverse(self: Affine) ?Affine {
+        const determinant = self.x_axis[0] * self.y_axis[1] - self.y_axis[0] * self.x_axis[1];
+        if (determinant == 0 or !std.math.isFinite(determinant)) return null;
+        const linear: Affine = .{
+            .x_axis = .{ self.y_axis[1] / determinant, -self.x_axis[1] / determinant },
+            .y_axis = .{ -self.y_axis[0] / determinant, self.x_axis[0] / determinant },
+        };
+        const moved_offset = linear.applyLinear(self.offset);
+        return .{ .x_axis = linear.x_axis, .y_axis = linear.y_axis, .offset = .{ -moved_offset[0], -moved_offset[1] } };
+    }
+
+    /// The smallest rectangle holding all of `rect` once mapped.
+    pub fn boundsOf(self: Affine, rect: Rect) Rect {
+        const corners = [_][2]f32{
+            self.apply(.{ rect.x, rect.y }),
+            self.apply(.{ rect.x + rect.width, rect.y }),
+            self.apply(.{ rect.x, rect.y + rect.height }),
+            self.apply(.{ rect.x + rect.width, rect.y + rect.height }),
+        };
+        var low = corners[0];
+        var high = corners[0];
+        for (corners[1..]) |corner| for (0..2) |axis| {
+            low[axis] = smaller(low[axis], corner[axis]);
+            high[axis] = larger(high[axis], corner[axis]);
+        };
+        return .{ .x = low[0], .y = low[1], .width = high[0] - low[0], .height = high[1] - low[1] };
+    }
+};
+
+/// Moves, scales and rotates an element and everything inside it as they
+/// are painted, leaving layout as it was: `rectOf` is still the box it was
+/// laid out in, and its neighbours do not move. A pointer hits it where it
+/// is drawn. A renderer that does not declare `.transform` draws it, and
+/// hit-tests it, untransformed.
+///
+/// ```zig
+/// .effects = &.{ .transform = .{ .rotation = std.math.pi / 12.0 } },
+/// .effects = &.{ .transform = .{ .scale = @splat(0.9 + 0.1 * app.dialog_shown), .origin = .{ 0.5, 0 } } },
+/// ```
+///
+/// A floating element is cut off by its target's clip, and by its own box
+/// when it clips, before its own transform applies, so it clips to its box
+/// as laid out.
+pub const Transform = struct {
+    /// In layout units, right and down.
+    translation: [2]f32 = .{ 0, 0 },
+    scale: [2]f32 = .{ 1, 1 },
+    /// Radians clockwise, as a gradient's angle is.
+    rotation: f32 = 0,
+    /// A fraction of the element's box: `.{ 0.5, 0.5 }` is its center and
+    /// `.{ 0, 0 }` its top-left corner.
+    origin: [2]f32 = .{ 0.5, 0.5 },
+
+    /// From the element laid out at `bounds` to where it is painted:
+    /// scaled, then rotated, about the origin, then translated.
+    pub fn affine(self: Transform, bounds: Rect) Affine {
+        const cosine = @cos(self.rotation);
+        const sine = @sin(self.rotation);
+        const pivot: [2]f32 = .{ bounds.x + self.origin[0] * bounds.width, bounds.y + self.origin[1] * bounds.height };
+        const turned: Affine = .{
+            .x_axis = .{ cosine * self.scale[0], sine * self.scale[0] },
+            .y_axis = .{ -sine * self.scale[1], cosine * self.scale[1] },
+        };
+        const turned_pivot = turned.applyLinear(pivot);
+        return .{
+            .x_axis = turned.x_axis,
+            .y_axis = turned.y_axis,
+            .offset = .{ pivot[0] + self.translation[0] - turned_pivot[0], pivot[1] + self.translation[1] - turned_pivot[1] },
+        };
+    }
+};
+
 /// Background, border and corner radius: what an element draws behind and
 /// around its children.
 pub const Decoration = struct {
@@ -468,9 +568,9 @@ pub const Decoration = struct {
 
 /// What an element draws with the optional commands, in the shape of its
 /// decoration's corner radius: from the bottom, its shadow, its backdrop
-/// blur, its background, then its gradient. An element points at its effects
-/// rather than holding them, so that declaring one without any copies
-/// nothing more.
+/// blur, its background, then its gradient, all moved by its transform.
+/// An element points at its effects rather than holding them, so that
+/// declaring one without any copies nothing more.
 ///
 /// ```zig
 /// const card_effects: zui.Effects = .{ .shadow = .{ .color = .rgba(0x00000060), .offset = .{ 0, 4 }, .blur = 12 } };
@@ -483,6 +583,8 @@ pub const Effects = struct {
     shadow: ?Shadow = null,
     /// Painted under the background, so only a translucent one shows it.
     backdrop_blur: ?BackdropBlur = null,
+    /// Applies to the element's children and other effects too.
+    transform: ?Transform = null,
 };
 
 /// An element's layout and decoration together, made once at comptime with

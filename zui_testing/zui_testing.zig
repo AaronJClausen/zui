@@ -436,7 +436,7 @@ pub fn snapshot(writer: *std.Io.Writer, commands: anytype, names: anytype) std.I
         switch (command.payload) {
             .clip_begin => |clip| try writeRect(writer, clip),
             .clip_end => {},
-            else => try writeRect(writer, command.bounds),
+            inline else => |_, kind| if (comptime !std.mem.eql(u8, @tagName(kind), "transform_end")) try writeRect(writer, command.bounds),
         }
         switch (command.payload) {
             .rectangle => |rectangle| {
@@ -475,6 +475,11 @@ pub fn snapshot(writer: *std.Io.Writer, commands: anytype, names: anytype) std.I
                 try writer.print(" blur={d}", .{payload.radius});
                 try writeNamedColor(writer, "tint", payload.tint);
                 try writeCorners(writer, payload.corner_radius);
+            } else if (comptime std.mem.eql(u8, @tagName(kind), "transform_begin")) {
+                if (payload.translation[0] != 0 or payload.translation[1] != 0) try writer.print(" translate={d},{d}", .{ payload.translation[0], payload.translation[1] });
+                if (payload.scale[0] != 1 or payload.scale[1] != 1) try writer.print(" scale={d},{d}", .{ payload.scale[0], payload.scale[1] });
+                if (payload.rotation != 0) try writer.print(" rotate={d}", .{payload.rotation});
+                if (payload.origin[0] != 0.5 or payload.origin[1] != 0.5) try writer.print(" origin={d},{d}", .{ payload.origin[0], payload.origin[1] });
             },
         }
         try writer.writeByte('\n');
@@ -540,11 +545,11 @@ fn writeHandle(writer: *std.Io.Writer, handle: anytype) !void {
     }
 }
 
-pub const CommandError = error{ InvalidBounds, ZOrderDecreases, UnbalancedClip };
+pub const CommandError = error{ InvalidBounds, ZOrderDecreases, UnbalancedClip, UnbalancedTransform };
 
 pub const Violation = struct {
     kind: CommandError,
-    /// `commands.len` for a clip that is never ended.
+    /// `commands.len` for a clip or transform that is never ended.
     command_index: usize,
     reason: []const u8,
 };
@@ -552,7 +557,9 @@ pub const Violation = struct {
 /// Checks what every frame's commands must satisfy, whatever the UI:
 /// - bounds are finite and not negative in size;
 /// - z never decreases;
-/// - every `clip_begin` has a matching `clip_end`.
+/// - every `clip_begin` has a matching `clip_end`, and every
+///   `transform_begin` a matching `transform_end`, each ending inside
+///   whatever it began inside.
 /// The first violation is printed with its command index.
 pub fn checkCommands(commands: anytype) CommandError!void {
     const found = findViolation(commands) orelse return;
@@ -561,7 +568,7 @@ pub fn checkCommands(commands: anytype) CommandError!void {
 }
 
 pub fn findViolation(commands: anytype) ?Violation {
-    var open_clips: usize = 0;
+    var opened: OpenedSpans = .{};
     var previous_z: i16 = std.math.minInt(i16);
     for (commands, 0..) |command, index| {
         const bounds = switch (command.payload) {
@@ -575,17 +582,51 @@ pub fn findViolation(commands: anytype) ?Violation {
         if (command.z < previous_z) return .{ .kind = error.ZOrderDecreases, .command_index = index, .reason = "z is lower than the previous command's" };
         previous_z = command.z;
         switch (command.payload) {
-            .clip_begin => open_clips += 1,
-            .clip_end => {
-                if (open_clips == 0) return .{ .kind = error.UnbalancedClip, .command_index = index, .reason = "clip_end without clip_begin" };
-                open_clips -= 1;
+            .clip_begin => if (!opened.begin(.clip)) return .{ .kind = error.UnbalancedClip, .command_index = index, .reason = "clips and transforms nest deeper than zui_testing checks" },
+            .clip_end => switch (opened.end()) {
+                .clip => {},
+                .transform => return .{ .kind = error.UnbalancedClip, .command_index = index, .reason = "clip_end inside a transform begun after its clip_begin" },
+                .nothing => return .{ .kind = error.UnbalancedClip, .command_index = index, .reason = "clip_end without clip_begin" },
             },
-            else => {},
+            inline else => |_, kind| if (comptime std.mem.eql(u8, @tagName(kind), "transform_begin")) {
+                if (!opened.begin(.transform)) return .{ .kind = error.UnbalancedTransform, .command_index = index, .reason = "clips and transforms nest deeper than zui_testing checks" };
+            } else if (comptime std.mem.eql(u8, @tagName(kind), "transform_end")) switch (opened.end()) {
+                .transform => {},
+                .clip => return .{ .kind = error.UnbalancedTransform, .command_index = index, .reason = "transform_end inside a clip begun after its transform_begin" },
+                .nothing => return .{ .kind = error.UnbalancedTransform, .command_index = index, .reason = "transform_end without transform_begin" },
+            },
         }
     }
-    if (open_clips != 0) return .{ .kind = error.UnbalancedClip, .command_index = commands.len, .reason = "a clip_begin is never ended" };
-    return null;
+    return switch (opened.end()) {
+        .nothing => null,
+        .clip => .{ .kind = error.UnbalancedClip, .command_index = commands.len, .reason = "a clip_begin is never ended" },
+        .transform => .{ .kind = error.UnbalancedTransform, .command_index = commands.len, .reason = "a transform_begin is never ended" },
+    };
 }
+
+/// The clips and transforms begun and not yet ended, innermost last.
+const OpenedSpans = struct {
+    const Span = enum(u1) { clip, transform };
+    const capacity = 4096;
+
+    kinds: std.StaticBitSet(capacity) = .initEmpty(),
+    depth: usize = 0,
+
+    fn begin(self: *OpenedSpans, span: Span) bool {
+        if (self.depth == capacity) return false;
+        self.kinds.setValue(self.depth, span == .transform);
+        self.depth += 1;
+        return true;
+    }
+
+    const Ended = enum { nothing, clip, transform };
+
+    fn end(self: *OpenedSpans) Ended {
+        if (self.depth == 0) return .nothing;
+        self.depth -= 1;
+        return if (self.kinds.isSet(self.depth)) .transform else .clip;
+    }
+};
 
 /// How a source's items survive between swaps, for `expectSourceConforms`.
 pub const SourceOrder = enum {
@@ -919,6 +960,24 @@ test "snapshots write a backdrop blur's radius as its blur, beside its tint and 
     );
 }
 
+test "snapshots write what a transform changes from its defaults, and its end alone" {
+    const Command = zui.Context(.{ .limits = .{ .max_elements = 8 }, .commands = .initOne(.transform) }).RenderCommand;
+    const bounds: zui.Rect = .{ .width = 8, .height = 8 };
+    const commands = [_]Command{
+        .{ .bounds = bounds, .id = 1, .payload = .{ .transform_begin = .{ .translation = .{ 2, -3 }, .scale = .{ 2, 1 }, .rotation = 0.5, .origin = .{ 0, 1 } } } },
+        .{ .bounds = bounds, .id = 1, .payload = .{ .transform_begin = .{} } },
+        .{ .bounds = bounds, .id = 1, .payload = .transform_end },
+        .{ .bounds = bounds, .id = 1, .payload = .transform_end },
+    };
+    try expectSnapshot(&commands, .{},
+        \\transform_begin x=0 y=0 w=8 h=8 translate=2,-3 scale=2,1 rotate=0.5 origin=0,1
+        \\transform_begin x=0 y=0 w=8 h=8
+        \\transform_end
+        \\transform_end
+        \\
+    );
+}
+
 test "typeText splits long input at UTF-8 boundaries" {
     const Recorder = struct {
         received: [512]u8 = undefined,
@@ -1065,6 +1124,29 @@ test "findViolation rejects broken command lists" {
     try expectViolation(error.ZOrderDecreases, 1, &.{ .{ .bounds = rect, .id = 1, .z = 2, .payload = fill }, .{ .bounds = rect, .id = 2, .z = 1, .payload = fill } });
     try expectViolation(error.InvalidBounds, 0, &.{.{ .bounds = .{ .width = -1 }, .id = 1, .payload = fill }});
     try expectViolation(error.InvalidBounds, 0, &.{.{ .bounds = .{ .x = std.math.nan(f32) }, .id = 1, .payload = fill }});
+}
+
+test "findViolation rejects transforms that are not ended, or not ended inside what they began in" {
+    const Command = zui.Context(.{ .limits = .{ .max_elements = 8 }, .commands = .initOne(.transform) }).RenderCommand;
+    const rect: zui.Rect = .{ .width = 10, .height = 10 };
+    const begin_clip: Command = .{ .bounds = rect, .id = 1, .payload = .{ .clip_begin = rect } };
+    const end_clip: Command = .{ .bounds = rect, .id = 1, .payload = .clip_end };
+    const begin_transform: Command = .{ .bounds = rect, .id = 1, .payload = .{ .transform_begin = .{ .rotation = 1 } } };
+    const end_transform: Command = .{ .bounds = rect, .id = 1, .payload = .transform_end };
+
+    try checkCommands(&[_]Command{ begin_transform, begin_clip, end_clip, end_transform });
+    try checkCommands(&[_]Command{ begin_clip, begin_transform, end_transform, end_clip });
+    const cases = [_]struct { commands: []const Command, kind: CommandError, at: usize }{
+        .{ .commands = &.{begin_transform}, .kind = error.UnbalancedTransform, .at = 1 },
+        .{ .commands = &.{end_transform}, .kind = error.UnbalancedTransform, .at = 0 },
+        .{ .commands = &.{ begin_transform, begin_clip, end_transform, end_clip }, .kind = error.UnbalancedTransform, .at = 2 },
+        .{ .commands = &.{ begin_clip, begin_transform, end_clip, end_transform }, .kind = error.UnbalancedClip, .at = 2 },
+    };
+    for (cases) |case| {
+        const found = findViolation(case.commands) orelse return error.TestExpectedViolation;
+        try std.testing.expectEqual(case.kind, found.kind);
+        try std.testing.expectEqual(case.at, found.command_index);
+    }
 }
 
 fn expectViolation(kind: CommandError, command_index: usize, commands: []const TestUi.RenderCommand) !void {

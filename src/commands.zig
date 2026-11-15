@@ -132,15 +132,10 @@ pub fn RenderCommand(comptime options: CommandOptions) type {
             corner_radius: style.CornerRadius = .zero,
         };
 
-        /// Applies to the commands up to the matching `transform_end`, when
-        /// painting only; lowered to the untransformed commands.
-        pub const Transform = struct {
-            translation: [2]f32 = .{ 0, 0 },
-            scale: [2]f32 = .{ 1, 1 },
-            rotation: f32 = 0,
-            /// A fraction of the bounds: `.{ 0.5, 0.5 }` is the center.
-            origin: [2]f32 = .{ 0.5, 0.5 },
-        };
+        /// Applies `affine(bounds)` to every command up to the matching
+        /// `transform_end`, clips included, after any transform it lies
+        /// inside; lowered to the untransformed commands.
+        pub const Transform = style.Transform;
 
         /// The renderer's own shader or material over the bounds; lowered to
         /// a rectangle in `fallback`.

@@ -30,7 +30,7 @@ Each item says:
 | stage 6 | the single-line fast path (T1), the whole-string cache (T2), static styles (L8), the box tree's layout and emission (P4) and declaration (P5), line-break segmentation (T4), the grow basis (L1), aspect ratio and natural sizes (L2), dividers and decorated images (L3), floating options (L4), right-to-left layout (L6), wrap (L7); the backends drawing images' tint and corner radius (C10) | done; the box tree's and warm text's budgets met, as they were then judged with Turbo Boost on: the box tree declares in 48.9 µs and lays out and emits in 89.2 µs, warm text in 90.5 µs; a box tree of static styles declares in 28.0 µs; zui-raylib and zui-sokol draw tinted, rounded images and pass the renderer suite that checks them |
 | stage 7 | gestures (I5): arbitration by motion component, zoom, long press, double tap, momentum, the intents and custom recognizers; drag and drop between elements (I1) | done: a carousel in a list, a pinch starting on a list inside a map, a lasso module against a map's pan, and `zui_testing.Driver.drag` moving an item between two lists, out of one that scrolls by dragging |
 | after stage 7: the foundation | G1's first slice ran 5.5% to 7.7% more instructions in scenes that draw no effect, so the work turned to what lay under it: benchmarks that can be trusted (R3 to R8, and R9 in part) and the data-oriented design audit's findings (P6 to P10) | done; a commit compared with itself over three code layouts calls nothing, its intervals 0.52% wide on average, and a change that only moves code is not called; a tooltip declared before a 3,000-cell grid lays out in 79 µs, not 671 µs (P6); warm text −43% (P9); `init` from 138 µs to 92 µs (P7, P10); the budgets judged in benchmarking mode |
-| stage 8, begun | gradients, shadows and glow (G1); backdrop blur (G2); effects in the corners of a decoration that draws nothing (G7) | G1, G2 and G7 done: zui-sokol draws gradients, shadows and backdrop blurs and passes the renderer suite, its effects rounded by a decoration that draws nothing, and a frame without effects runs no more instructions than before; G3 to G6 queued |
+| stage 8, begun | gradients, shadows and glow (G1); backdrop blur (G2); effects in the corners of a decoration that draws nothing (G7) | G1, G2 and G7 done: zui-sokol draws gradients, shadows and backdrop blurs and passes the renderer suite, its effects rounded by a decoration that draws nothing, and a frame without effects runs no more instructions than before; G3 in progress, G5 and G6 queued |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
@@ -70,7 +70,7 @@ green, and its **Status** line below says which slice is next.
 | R9. Measuring across operating systems and hardware | foundation | `bench/machine.zig`, `bench/report.zig`, `README.md` | | waiting on a run under Windows on the reference machine |
 | P11. Flat child lists | audit | `src/context.zig`, `src/layout.zig` | | waiting on a wide scene whose profile points at the walks; kept by the owner |
 | P12. Text commands that point at their style | audit | `src/commands.zig`, `src/emission.zig`, `zui_wire/`, `../zui-raylib`, `../zui-sokol`, `../zui-terminal` | | waiting on a profile of a renderer reading the commands |
-| G3. Transforms | 8 | `src/style.zig`, `src/emission.zig`, `src/interaction.zig`, `zui_testing/`, `../zui-sokol` | | next |
+| G3. Transforms | 8 | `src/style.zig`, `src/emission.zig`, `src/interaction.zig`, `zui_testing/`, `../zui-sokol` | | in progress |
 | G5. Materials | 8 | `src/context.zig`, `src/emission.zig`, `zui_testing/`, a renderer | | |
 | G6. HDR and wide gamut | 8 | `src/context.zig`, `src/commands.zig`, `../zui-host` | | |
 | V1. `zui_debug` | 9 | `zui_debug/`, `src/context.zig`, `../zui-raylib` | | |
@@ -2834,6 +2834,31 @@ put the saving, so the item waits on one that does.
 
 - **G3. Transforms,** applied when painting only; hit testing inverts
   them.
+
+  **Status.** The core landed: `Effects.transform` (`zui.Transform`,
+  its `affine(bounds)` and `zui.Affine`), emitted as `transform_begin`
+  before the element's shadow and `transform_end` after its subtree and
+  clip, begun again on a floating element's own layer, culled through
+  the box around the clip in the element's units, and lowered to the
+  element as laid out, listed in `Diagnostics.lowered`. Each transformed
+  element enters a space in the hit results, and every hit test goes
+  through `Results.hits`, which maps the pointer into the region's space
+  and checks the clip around each transform. `src/tests/transforms.zig`
+  clicks a rotated button where it is drawn and not where it was laid
+  out, and through nested transforms up to the clip around them.
+  `checkCommands` checks transforms and clips nest; snapshots write a
+  transform's fields. The renderer suite's reference scene turns a box
+  of two halves a quarter, and its pixel renderer passes drawing it and
+  with it lowered, and fails turning it the wrong way; zui-raylib,
+  zui-sokol and zui-terminal pass it lowered with `--fork=../zui`.
+  Against `cceecfa`, `counts` moved no declaration and every `endFrame`
+  by −0.04% to −0.39%; `bench-compare`, turbo off, called no frame
+  scene slower and `init` 2.9% slower (+1.0% to +6.6%), `Effects`
+  having grown 32 bytes for each of its 256 copies a frame.
+  Next: zui-sokol declares `.transform`, passes the suite and shows a
+  transform on its tour. A pan or wheel over a transformed scroll
+  container still moves it along the window's axes, and `Drag` and the
+  pointer events report window units.
 - **G5. Materials,** the renderer's own typed `MaterialHandle`.
 - **G6. HDR and wide gamut:** `Config.Color = zui.ExtendedColor`, clamped
   for renderers without `zui_extended_color`; headroom from the

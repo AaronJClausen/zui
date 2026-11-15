@@ -27,6 +27,18 @@ pub const RegionFlags = packed struct(u8) {
 };
 
 pub const no_region = std.math.maxInt(u32);
+pub const no_space = std.math.maxInt(u32);
+
+/// The units a transformed element's subtree was laid out in, for finding
+/// where a pointer lands in them.
+pub const Space = struct {
+    /// From the window to the space's own layout units.
+    from_window: style.Affine,
+    /// What cut off the transformed element, in its parent space's units.
+    /// Empty when the transform flattens it, so nothing in it is hit.
+    clip: style.Rect,
+    parent: u32,
+};
 
 /// What an element accepts from pointers. When elements are nested, a
 /// pointer goes to the innermost one that accepts what it does:
@@ -95,11 +107,14 @@ pub const Gestures = packed struct(u8) {
 };
 
 /// A part of the last frame the pointer can hit, in paint order.
-pub fn RegionOf(comptime has_gestures: bool) type {
+pub fn RegionOf(comptime has_gestures: bool, comptime has_spaces: bool) type {
     return struct {
         hash: u64,
-        /// The element's rectangle, clipped by its ancestors.
+        /// The element's rectangle, clipped by its ancestors, in its space's
+        /// units.
         bounds: style.Rect,
+        /// The innermost transformed element's space around it, or `no_space`.
+        space: if (has_spaces) u32 else void,
         z: i16,
         /// The nearest enclosing region in the tree, or `no_region`.
         parent: u32,
@@ -141,10 +156,10 @@ pub const Focusable = struct {
 /// What zui keeps of the previous frame for interaction queries. It lives in
 /// the Context, not in a frame, because with `frames_in_flight = 1` the
 /// previous frame's memory is reused before the queries run.
-pub fn Results(comptime max_regions: u32, comptime table_slots: u32, comptime has_gestures: bool) type {
+pub fn Results(comptime max_regions: u32, comptime table_slots: u32, comptime has_gestures: bool, comptime max_spaces: u32) type {
     return struct {
         const Self = @This();
-        pub const Region = RegionOf(has_gestures);
+        pub const Region = RegionOf(has_gestures, max_spaces != 0);
 
         pub const Entry = struct {
             hash: u64,
@@ -170,12 +185,15 @@ pub fn Results(comptime max_regions: u32, comptime table_slots: u32, comptime ha
         region_count: u32,
         focusables: [max_regions]Focusable,
         focusable_count: u32,
+        spaces: [max_spaces]Space,
+        space_count: u32,
 
         pub fn reset(self: *Self) void {
             @memset(&self.entry_of_slot, empty_slot);
             self.entry_count = 0;
             self.region_count = 0;
             self.focusable_count = 0;
+            self.space_count = 0;
             self.has_frame = false;
         }
 
@@ -184,6 +202,24 @@ pub fn Results(comptime max_regions: u32, comptime table_slots: u32, comptime ha
             self.entry_count = 0;
             self.region_count = 0;
             self.focusable_count = 0;
+            self.space_count = 0;
+        }
+
+        /// Whether `point`, in the window, lies on the region where it was
+        /// drawn: inside its bounds in its own space, and inside the clip
+        /// of every transformed element around it.
+        pub fn hits(self: *const Self, region: *const Region, point: [2]f32) bool {
+            if (comptime max_spaces == 0) return region.bounds.contains(point);
+            if (region.space == no_space) return region.bounds.contains(point);
+            if (!region.bounds.contains(self.spaces[region.space].from_window.apply(point))) return false;
+            var space = region.space;
+            while (space != no_space) {
+                const entered = &self.spaces[space];
+                const in_parent = if (entered.parent == no_space) point else self.spaces[entered.parent].from_window.apply(point);
+                if (!entered.clip.contains(in_parent)) return false;
+                space = entered.parent;
+            }
+            return true;
         }
 
         /// After the region it names, if any, is added.
@@ -228,8 +264,8 @@ pub fn Results(comptime max_regions: u32, comptime table_slots: u32, comptime ha
         /// the last painted.
         pub fn topmostAt(self: *const Self, point: [2]f32) ?u32 {
             var top: ?u32 = null;
-            for (self.regions[0..self.region_count], 0..) |region, index| {
-                if (!region.bounds.contains(point)) continue;
+            for (self.regions[0..self.region_count], 0..) |*region, index| {
+                if (!self.hits(region, point)) continue;
                 if (top == null or region.z >= self.regions[top.?].z) top = @intCast(index);
             }
             return top;

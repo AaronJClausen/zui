@@ -162,8 +162,9 @@ pub const Element = struct {
     style: ?style.Static(style.Style) = null,
     layout: ?style.Layout = null,
     decoration: ?style.Decoration = null,
-    /// Gradients and shadows, in the shape of the decoration's corners.
-    /// Copied when the element is declared, so it may point at a local.
+    /// Gradients, shadows and backdrop blur, in the shape of the
+    /// decoration's corners, and a transform. Copied when the element is
+    /// declared, so it may point at a local.
     effects: ?*const style.Effects = null,
     /// The axes on which descendants are cut off.
     clip: style.Axes = .none,
@@ -354,7 +355,11 @@ pub fn Context(comptime config: Config) type {
         const MeasureBatch = if (measures_in_parallel) parallel_measure.MeasureBatch(MeasureKey, TextContract, limits.parallel_measure_capacity) else void;
         const run_width_capacity = if (has_text) text_layout.maxRuns(limits.max_text_bytes, limits.max_elements) else 0;
         pub const States = state_table.StateTable(limits.state_slots);
-        pub const Results = interaction.Results(limits.max_elements, id_table_slots, features.gestures);
+        /// Each element that transforms enters a space of its own, which a
+        /// renderer drawing transforms is hit-tested through.
+        pub const draws_transforms = config.commands.contains(.transform) and limits.max_effects != 0;
+        pub const max_spaces = if (draws_transforms) limits.max_effects else 0;
+        pub const Results = interaction.Results(limits.max_elements, id_table_slots, features.gestures, max_spaces);
         const InputState = interaction.State(limits.max_input_contacts, limits.max_depth + 1, limits.max_events_per_frame, limits.max_text_input_bytes, limits.max_dropped_path_bytes, features.gestures);
 
         pub const Decoration = style.Decoration;
@@ -613,7 +618,11 @@ pub fn Context(comptime config: Config) type {
         dropped_depth: u32 = 0,
 
         /// Scratch for the emission pass, kept here so frames stay plain data.
-        emit_levels: [max_depth + 1]emission.EmitLevel(Index) = undefined,
+        emit_levels: [max_depth + 1]emission.EmitLevel(Index, draws_transforms) = undefined,
+        /// The effects whose transform made each space, so a floating
+        /// element on another layer can begin its ancestors' transforms
+        /// again there.
+        emit_space_effects: [max_spaces]u32 = undefined,
 
         frame_released: std.Io.Event = .unset,
         now_instant: Instant = .zero,
@@ -1529,7 +1538,7 @@ pub fn Context(comptime config: Config) type {
             var hot: ?u32 = null;
             while (region_index != interaction.no_region) : (region_index = results.regions[region_index].parent) {
                 const region = results.regions[region_index];
-                if (!region.flags.interactive or !region.bounds.contains(point)) continue;
+                if (!region.flags.interactive or !results.hits(&region, point)) continue;
                 if (hot == null) hot = region_index;
                 if (contact.hovers() and contact.hover_count < contact.hover_chain.len) {
                     contact.hover_chain[contact.hover_count] = region.hash;
@@ -1566,7 +1575,7 @@ pub fn Context(comptime config: Config) type {
                 var region_index = innermost;
                 while (region_index != interaction.no_region) : (region_index = results.regions[region_index].parent) {
                     const region = results.regions[region_index];
-                    if (!region.bounds.contains(wheel.position)) continue;
+                    if (!results.hits(&region, wheel.position)) continue;
                     if (features.gestures and !region.flags.scrolls(axis) and region.pans(axis, .mouse)) {
                         self.memory.input.manipulate(region.hash).translation[axis] -= wheel.delta[axis];
                         break;
@@ -1681,7 +1690,7 @@ pub fn Context(comptime config: Config) type {
             var index: usize = 0;
             while (index < input_state.coasting_count) {
                 const entry = results.find(input_state.coasting[index]);
-                const under = if (entry) |found| found.region != interaction.no_region and results.regions[found.region].bounds.contains(position) else false;
+                const under = if (entry) |found| found.region != interaction.no_region and results.hits(&results.regions[found.region], position) else false;
                 if (under) {
                     input_state.coasting_count -= 1;
                     input_state.coasting[index] = input_state.coasting[input_state.coasting_count];
@@ -1694,7 +1703,7 @@ pub fn Context(comptime config: Config) type {
             var region_index = topmost orelse return 0;
             while (region_index != interaction.no_region) : (region_index = results.regions[region_index].parent) {
                 const region = &results.regions[region_index];
-                if (region.gestures.custom and !region.flags.disabled and region.bounds.contains(position)) return region.hash;
+                if (region.gestures.custom and !region.flags.disabled and results.hits(region, position)) return region.hash;
             }
             return 0;
         }
@@ -1735,7 +1744,7 @@ pub fn Context(comptime config: Config) type {
             var region_index = topmost orelse return 0;
             while (region_index != interaction.no_region) : (region_index = results.regions[region_index].parent) {
                 const region = &results.regions[region_index];
-                if (region.gestures.long_press and !region.flags.disabled and region.bounds.contains(position)) return region.hash;
+                if (region.gestures.long_press and !region.flags.disabled and results.hits(region, position)) return region.hash;
             }
             return 0;
         }
@@ -1788,7 +1797,7 @@ pub fn Context(comptime config: Config) type {
             var region_index = topmost orelse return;
             const owner = while (region_index != interaction.no_region) : (region_index = results.regions[region_index].parent) {
                 const region = &results.regions[region_index];
-                if (region.zooms() and region.bounds.contains(position) and region.bounds.contains(partner.pointer.position)) break region;
+                if (region.zooms() and results.hits(region, position) and results.hits(region, partner.pointer.position)) break region;
             } else return;
             for ([_]*InputState.Slot{ contact, partner }) |zooming| {
                 zooming.gesture.pan_owner = owner.hash;
@@ -1851,7 +1860,7 @@ pub fn Context(comptime config: Config) type {
             var region_index = results.topmostAt(press_position) orelse return null;
             while (region_index != interaction.no_region) : (region_index = results.regions[region_index].parent) {
                 const region = &results.regions[region_index];
-                if (!region.bounds.contains(press_position)) continue;
+                if (!results.hits(region, press_position)) continue;
                 if (region.pans(axis, kind) and self.canFollow(region, axis, motion)) return region;
                 if (region.drags() and !region.pans(axis, kind) and !self.enclosingRegionPans(region, axis, kind)) return region;
             }
@@ -1916,7 +1925,7 @@ pub fn Context(comptime config: Config) type {
             var region_index = results.topmostAt(position) orelse return false;
             while (region_index != interaction.no_region) : (region_index = results.regions[region_index].parent) {
                 const region = &results.regions[region_index];
-                if (region.hash == hash and region.bounds.contains(position)) return true;
+                if (region.hash == hash and results.hits(region, position)) return true;
             }
             return false;
         }

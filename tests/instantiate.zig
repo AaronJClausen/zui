@@ -31,7 +31,7 @@ var memory: [Ui.required_bytes]u8 align(Ui.buffer_alignment) = undefined;
 
 const Expanded = struct { open: bool };
 
-const check_effects: zui.Effects = .{ .gradient = .{ .from = .black, .to = .white, .angle = 1 }, .shadow = .glow(.black, 4), .backdrop_blur = .{ .radius = 4, .tint = .rgba(0xffffff40) } };
+const check_effects: zui.Effects = .{ .gradient = .{ .from = .black, .to = .white, .angle = 1 }, .shadow = .glow(.black, 4), .backdrop_blur = .{ .radius = 4, .tint = .rgba(0xffffff40) }, .transform = .{ .rotation = 0.5 } };
 
 const check_style = zui.static(zui.Style{ .layout = .{ .sizing = .{ .width = .fixed(8), .height = .fixed(8) } }, .decoration = .{ .background = .white } });
 
@@ -195,7 +195,8 @@ const EveryCommandRenderer = struct {
                 .rectangle, .border, .text, .clip_begin, .clip_end => 1,
                 .image, .custom => 2,
                 .gradient => |gradient| gradient.colorAt(command.bounds, .{ 0, 0 }).r,
-                .shadow, .backdrop_blur, .transform_begin, .transform_end, .material => 3,
+                .transform_begin => |transform| @intFromFloat(@abs(transform.affine(command.bounds).apply(.{ 1, 1 })[0])),
+                .shadow, .backdrop_blur, .transform_end, .material => 3,
             };
         }
     }
@@ -220,7 +221,9 @@ export fn zuiCheckRenderer() usize {
     ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 100, 100 } } });
     ui.image(.{ .handle = 7 }, .{ .decoration = .{ .background = .black } });
     ui.custom(3, .{});
-    ui.box(.{ .layout = .{ .sizing = .grow_both }, .effects = &check_effects });
+    ui.open(.{ .layout = .{ .sizing = .grow_both }, .effects = &check_effects });
+    ui.box(.{ .floating = .{ .z = 1 }, .interactive = true, .decoration = .{ .background = .white } });
+    ui.close();
     const frame = ui.endFrame();
     defer ui.release(frame);
     var renderer: EveryCommandRenderer = .{};

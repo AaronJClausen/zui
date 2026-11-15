@@ -5,8 +5,8 @@ const layout = @import("layout.zig");
 
 /// An open element whose subtree is drawn differently from its parent's:
 /// it clips, has a border to draw after its children, floats, is a hit
-/// region, or is a focus scope. Other elements open no level.
-pub fn EmitLevel(comptime Index: type) type {
+/// region, is a focus scope, or transforms. Other elements open no level.
+pub fn EmitLevel(comptime Index: type, comptime draws_transforms: bool) type {
     return struct {
         element: Index,
         /// One past the last element of the subtree.
@@ -21,8 +21,26 @@ pub fn EmitLevel(comptime Index: type) type {
         z: i16,
         region: u32,
         focus_scope: u64,
+        /// The space its subtree is hit-tested in.
+        space: if (draws_transforms) u32 else void,
+        transform_ends: if (draws_transforms) TransformEnds else void,
     };
 }
+
+/// The `transform_end`s a level pushes when its subtree ends.
+pub const TransformEnds = struct {
+    own: OwnTransform = .none,
+    /// Its ancestors' transforms, begun again on a floating element's layer.
+    reopened: u16 = 0,
+
+    pub const OwnTransform = enum(u8) {
+        none,
+        /// Begun after the element's clip, as a floating element's is: its
+        /// clip, holding its target's, is not transformed.
+        inside_clip,
+        around_clip,
+    };
+};
 
 /// Pass 7: render commands in paint order, plus the hit regions, the
 /// id → rect results and the focus order that the next frame's
@@ -49,6 +67,7 @@ fn emit(comptime Ui: type, ui: *Ui, frame: *Ui.Frame, comptime walk: Walk) void 
     var emitter: Emitter(Ui) = .{
         .frame = frame,
         .results = results,
+        .space_effects = &ui.emit_space_effects,
         .pixels_per_unit = frame.pixels_per_unit,
         .units_per_pixel = 1 / frame.pixels_per_unit,
     };
@@ -64,6 +83,8 @@ fn emit(comptime Ui: type, ui: *Ui, frame: *Ui.Frame, comptime walk: Walk) void 
         .z = 0,
         .region = interaction.no_region,
         .focus_scope = 0,
+        .space = if (Ui.draws_transforms) interaction.no_space else {},
+        .transform_ends = if (Ui.draws_transforms) .{} else {},
     };
     results.insert(frame.element_id[Ui.root_index], emitter.rectOf(Ui.root_index), interaction.no_region);
 
@@ -73,6 +94,7 @@ fn emit(comptime Ui: type, ui: *Ui, frame: *Ui.Frame, comptime walk: Walk) void 
     for (1..frame.element_count) |index| {
         const element: Ui.Index = @intCast(index);
         while (levels[depth].subtree_end <= element) : (depth -= 1) emitter.leave(&levels[depth], levels[depth - 1].z);
+        const effect_index = next_effect;
         const effects: ?*const style.Effects = if (walk == .with_effects and element == next_effect_element) taken: {
             const effects = &frame.effects[next_effect];
             next_effect += 1;
@@ -80,7 +102,7 @@ fn emit(comptime Ui: type, ui: *Ui, frame: *Ui.Frame, comptime walk: Walk) void 
             break :taken effects;
         } else null;
         if (!frame.flags[element].emits() and frame.decorationOf(element) == null and frame.kindOf(element) == .none and effects == null) continue;
-        if (emitter.enter(element, levels[depth], viewport, effects)) |level| {
+        if (emitter.enter(element, levels[depth], viewport, effects, effect_index)) |level| {
             depth += 1;
             levels[depth] = level;
         }
@@ -110,10 +132,12 @@ fn lowerLayer(comptime Ui: type) fn (void, Ui.RenderCommand, Ui.RenderCommand) b
 fn Emitter(comptime Ui: type) type {
     return struct {
         const Self = @This();
-        const Level = EmitLevel(Ui.Index);
+        const Level = EmitLevel(Ui.Index, Ui.draws_transforms);
+        const no_space = interaction.no_space;
 
         frame: *Ui.Frame,
         results: *Ui.Results,
+        space_effects: *[Ui.max_spaces]u32,
         pixels_per_unit: f32,
         /// Multiplied rather than dividing by `pixels_per_unit`: snapping
         /// runs for every command, and a division costs several multiplies.
@@ -231,15 +255,25 @@ fn Emitter(comptime Ui: type) type {
 
         /// Returns the level the element's subtree is drawn in, or null if
         /// that is the parent's level unchanged.
-        inline fn enter(self: *Self, element: Ui.Index, parent: Level, viewport: style.Rect, effects: ?*const style.Effects) ?Level {
+        inline fn enter(self: *Self, element: Ui.Index, parent: Level, viewport: style.Rect, effects: ?*const style.Effects, effect_index: u32) ?Level {
             const frame = self.frame;
             const flags = frame.flags[element];
             const floating = flags.floating;
             const element_id = frame.element_id[element];
             const bounds = self.rectOf(element);
             var layer: Layer = .{ .clip = parent.clip, .z = parent.z };
-            if (floating) layer = self.floatingLayer(element, parent.clip, viewport);
-            const outer_clip = layer.clip;
+            if (floating) layer = self.floatingLayer(element, parent, viewport);
+            var outer_clip = layer.clip;
+            var space = if (Ui.draws_transforms) parent.space else {};
+            var transform_ends: if (Ui.draws_transforms) TransformEnds else void = if (Ui.draws_transforms) .{ .reopened = layer.reopened } else {};
+            if (effects) |declared| if (declared.transform) |*transform| {
+                if (comptime Ui.draws_transforms) {
+                    const begun = self.beginTransform(element, bounds, transform, effect_index, parent.space, layer.z, outer_clip);
+                    outer_clip = begun.clip;
+                    space = begun.space;
+                    transform_ends.own = if (flags.clips_to_target) .inside_clip else .around_clip;
+                } else frame.diagnostics.lowered.insert(.transform);
+            };
             var level: Level = .{
                 .element = element,
                 .subtree_end = frame.subtree_end[element],
@@ -249,6 +283,8 @@ fn Emitter(comptime Ui: type) type {
                 .z = layer.z,
                 .region = parent.region,
                 .focus_scope = if (flags.focus_scope) element_id else parent.focus_scope,
+                .space = space,
+                .transform_ends = transform_ends,
             };
             const visible = bounds.intersect(outer_clip);
             const drawn = !visible.isEmpty();
@@ -271,7 +307,7 @@ fn Emitter(comptime Ui: type) type {
             }
 
             if (flags.interactive or flags.scroll_x or flags.scroll_y or flags.disabled or flags.captures_pointer) {
-                level.region = self.addRegion(element, visible, level.z, parent.region);
+                level.region = self.addRegion(element, visible, &level, parent.region);
             }
             if (flags.explicit_id) self.results.insert(element_id, bounds, if (level.region != parent.region) level.region else interaction.no_region);
             if (flags.focusable and !flags.disabled) {
@@ -287,8 +323,47 @@ fn Emitter(comptime Ui: type) type {
                 }
             }
             const has_border = if (frame.decorationOf(element)) |decoration| decoration.border != null else false;
-            if (!level.pushed_clip and !has_border and !floating and level.region == parent.region and !flags.focus_scope) return null;
+            const transforms = if (comptime Ui.draws_transforms) transform_ends.own != .none else false;
+            if (!level.pushed_clip and !has_border and !floating and level.region == parent.region and !flags.focus_scope and !transforms) return null;
             return level;
+        }
+
+        const TransformBegun = struct { clip: style.Rect, space: u32 };
+
+        /// Begins the element's transform and enters its space, whose clip,
+        /// for culling, is the box around `clip` in the space's own units.
+        fn beginTransform(self: *Self, element: Ui.Index, bounds: style.Rect, transform: *const style.Transform, effect_index: u32, parent_space: u32, z: i16, clip: style.Rect) TransformBegun {
+            self.push(.{ .bounds = self.snap(bounds), .id = self.frame.element_id[element], .z = z, .payload = .{ .transform_begin = transform.* } });
+            const results = self.results;
+            const space = results.space_count;
+            results.space_count += 1;
+            self.space_effects[space] = effect_index;
+            const parent_from_window: style.Affine = if (parent_space == no_space) .identity else results.spaces[parent_space].from_window;
+            const to_local = transform.affine(bounds).inverse() orelse {
+                results.spaces[space] = .{ .from_window = .identity, .clip = .{}, .parent = parent_space };
+                return .{ .clip = .{}, .space = space };
+            };
+            results.spaces[space] = .{ .from_window = to_local.after(parent_from_window), .clip = clip, .parent = parent_space };
+            return .{ .clip = to_local.boundsOf(clip), .space = space };
+        }
+
+        /// A floating element on another layer than its parent's is sorted
+        /// away from the transforms around it, so it begins each again, the
+        /// outermost first.
+        fn reopenTransforms(self: *Self, innermost: u32, z: i16) u16 {
+            const spaces = &self.results.spaces;
+            var count: u16 = 0;
+            var space = innermost;
+            while (space != no_space) : (space = spaces[space].parent) count += 1;
+            var still_to_begin = count;
+            while (still_to_begin != 0) : (still_to_begin -= 1) {
+                var outermost_left = innermost;
+                for (1..still_to_begin) |_| outermost_left = spaces[outermost_left].parent;
+                const effect_index = self.space_effects[outermost_left];
+                const element = self.frame.effect_elements[effect_index];
+                self.push(.{ .bounds = self.snap(self.rectOf(element)), .id = self.frame.element_id[element], .z = z, .payload = .{ .transform_begin = self.frame.effects[effect_index].transform.? } });
+            }
+            return count;
         }
 
         fn cornerRadiusOf(self: *const Self, element: Ui.Index) style.CornerRadius {
@@ -344,33 +419,45 @@ fn Emitter(comptime Ui: type) type {
             } } });
         }
 
-        const Layer = struct { clip: style.Rect, z: i16 };
+        const Layer = struct {
+            clip: style.Rect,
+            z: i16,
+            reopened: if (Ui.draws_transforms) u16 else void = if (Ui.draws_transforms) 0 else {},
+        };
 
         /// A floating element's layer and clip. Cut off by its target's
         /// clip, it pushes that clip merged with its own before it draws:
         /// its own box holds everything it draws itself.
-        inline fn floatingLayer(self: *Self, floating: Ui.Index, parent_clip: style.Rect, viewport: style.Rect) Layer {
+        inline fn floatingLayer(self: *Self, floating: Ui.Index, parent: Level, window: style.Rect) Layer {
             const frame = self.frame;
             const config = frame.floatingOf(floating);
             self.switchLayer(config.z);
-            if (config.clip == .none) return .{ .clip = viewport, .z = config.z };
-            const target_clip = self.floatingTargetClip(floating, parent_clip, viewport);
-            const clip = target_clip.intersect(clipBox(frame.flags[floating], self.rectOf(floating), target_clip));
-            self.push(.{ .bounds = self.snap(clip), .id = frame.element_id[floating], .z = config.z, .payload = .{ .clip_begin = self.snap(clip) } });
-            return .{ .clip = clip, .z = config.z };
+            var layer: Layer = .{ .clip = window, .z = config.z };
+            var viewport = window;
+            if (comptime Ui.draws_transforms) if (parent.space != no_space) {
+                if (config.z != parent.z) layer.reopened = self.reopenTransforms(parent.space, config.z);
+                viewport = self.results.spaces[parent.space].from_window.boundsOf(window);
+                layer.clip = viewport;
+            };
+            if (config.clip == .none) return layer;
+            const target_clip = self.floatingTargetClip(floating, parent.clip, viewport);
+            layer.clip = target_clip.intersect(clipBox(frame.flags[floating], self.rectOf(floating), target_clip));
+            self.push(.{ .bounds = self.snap(layer.clip), .id = frame.element_id[floating], .z = config.z, .payload = .{ .clip_begin = self.snap(layer.clip) } });
+            return layer;
         }
 
         /// A floating element that captures gets a region even when it is
         /// not interactive: on a higher layer, it wins the hit test over
         /// whatever it covers.
-        fn addRegion(self: *Self, element: Ui.Index, visible: style.Rect, z: i16, parent_region: u32) u32 {
+        fn addRegion(self: *Self, element: Ui.Index, visible: style.Rect, level: *const Level, parent_region: u32) u32 {
             const frame = self.frame;
             const flags = frame.flags[element];
             const index = self.results.region_count;
             self.results.regions[index] = .{
                 .hash = frame.element_id[element],
                 .bounds = visible,
-                .z = z,
+                .space = level.space,
+                .z = level.z,
                 .parent = parent_region,
                 .flags = .{
                     .interactive = flags.interactive or flags.disabled,
@@ -415,8 +502,17 @@ fn Emitter(comptime Ui: type) type {
 
         fn leave(self: *Self, level: *const Level, outer_z: i16) void {
             self.closeSubtree(level);
+            if (comptime Ui.draws_transforms) if (level.transform_ends.own == .inside_clip) self.pushTransformEnd(level);
             if (level.pushed_clip) self.push(.{ .bounds = self.snap(level.clip), .id = self.frame.element_id[level.element], .z = level.z, .payload = .clip_end });
+            if (comptime Ui.draws_transforms) {
+                if (level.transform_ends.own == .around_clip) self.pushTransformEnd(level);
+                for (0..level.transform_ends.reopened) |_| self.pushTransformEnd(level);
+            }
             if (level.z != outer_z) self.switchLayer(outer_z);
+        }
+
+        fn pushTransformEnd(self: *Self, level: *const Level) void {
+            self.push(.{ .bounds = self.snap(self.rectOf(level.element)), .id = self.frame.element_id[level.element], .z = level.z, .payload = .transform_end });
         }
 
         /// Dividers and the border. Both lie inside the element's box, so

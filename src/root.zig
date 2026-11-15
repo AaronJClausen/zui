@@ -130,6 +130,8 @@ pub const Decoration = style.Decoration;
 pub const Gradient = style.Gradient;
 pub const Shadow = style.Shadow;
 pub const BackdropBlur = style.BackdropBlur;
+pub const Transform = style.Transform;
+pub const Affine = style.Affine;
 pub const Effects = style.Effects;
 pub const Style = style.Style;
 pub const Static = style.Static;
@@ -182,4 +184,5 @@ test {
     _ = @import("tests/gestures.zig");
     _ = @import("tests/drag_drop.zig");
     _ = @import("tests/effects.zig");
+    _ = @import("tests/transforms.zig");
 }
