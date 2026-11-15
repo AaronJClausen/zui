@@ -199,8 +199,9 @@ Implemented so far:
   other backends draw the tint it is lowered to.
   `.transform = .{ .translation, .scale, .rotation, .origin }` moves an
   element and its subtree as painted, leaving layout alone, and a
-  pointer hits it where it is drawn; no backend draws it yet, so each
-  draws and hit-tests the element as laid out.
+  pointer hits it where it is drawn; zui-sokol draws it, on its tour's
+  Transforms screen, and the other backends draw and hit-test the
+  element as laid out.
   An element or frame without effects pays nothing for them.
 
 The reference backend, its adapter host and the demo application live in

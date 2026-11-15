@@ -319,7 +319,7 @@ fn photoCard(ui: *Ui, photo: *const Photo) void {
 
 ### Transforms · *shipped*
 
-`effects` can also hold a `transform`: a translation, a scale and a rotation about an `origin` inside the element's box, applied to the element, its other effects and everything inside it as they are painted. Layout ignores it, so `rectOf` is still the box the element was laid out in and its neighbours stay put, which suits animation: a dialog that grows in, a card that tilts while dragged. A pointer hits a transformed element where it is drawn, through nested transforms and the clips around them. A renderer that declares `.transform` gets `transform_begin` and `transform_end` around the element's commands, and `affine(bounds)` maps its units to its parent's; for any other, the element is drawn and hit as laid out, and `frame.diagnostics.lowered` names `.transform`. No backend draws transforms yet, so today every one draws the element as laid out.
+`effects` can also hold a `transform`: a translation, a scale and a rotation about an `origin` inside the element's box, applied to the element, its other effects and everything inside it as they are painted. Layout ignores it, so `rectOf` is still the box the element was laid out in and its neighbours stay put, which suits animation: a dialog that grows in, a card that tilts while dragged. A pointer hits a transformed element where it is drawn, through nested transforms and the clips around them. A renderer that declares `.transform` gets `transform_begin` and `transform_end` around the element's commands, and `affine(bounds)` maps its units to its parent's; for any other, the element is drawn and hit as laid out, and `frame.diagnostics.lowered` names `.transform`. zui-sokol draws transforms, on its tour's Transforms screen; zui-raylib and zui-terminal draw the element as laid out.
 
 `src/ui/import.zig`
 
@@ -1826,5 +1826,5 @@ These names compile, but they don't do anything yet. This list is from `ARCHITEC
 - Writing UI by hand in core is verbose. Nested `.layout = .{ .sizing = .{ .width = ... } }` literals pile up, and static styles are the main relief today.
 - Interactive elements take three steps: declare, query by id, then pick colors from the state yourself. Widgets hide it, but there is nothing in between.
 - `labeledRow` leaves you to close the row, an asymmetry that's easy to get wrong.
-- Only zui-sokol draws gradients and shadows so far; zui-raylib and zui-terminal show a gradient as one flat color and no shadow. Only zui-sokol blurs a backdrop; the others draw its tint. No backend draws a transform yet; each draws the element as laid out.
+- Only zui-sokol draws gradients and shadows so far; zui-raylib and zui-terminal show a gradient as one flat color and no shadow. Only zui-sokol blurs a backdrop; the others draw its tint. Only zui-sokol draws a transform; the others draw the element as laid out.
 - There's no examples repository or template yet. The best references are zui-sokol's tour and zui-raylib's demo.
