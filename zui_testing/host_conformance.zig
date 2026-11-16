@@ -23,6 +23,7 @@ pub const HostError = error{
     ZoomNotKept,
     NoViewport,
     SurfaceNotDeclared,
+    OutputFormatNotDeclared,
     EventLost,
     ImmediateWaited,
     WakeNotSticky,
@@ -41,7 +42,8 @@ const other_thread_wake_ns = 20 * std.time.ns_per_ms;
 /// and fails on the first thing it did differently from the host contract:
 /// - `zuiPoll` keeps the application's zoom, reports a viewport, and gives
 ///   back what the harness posted in the order it was posted;
-/// - `zuiSurface` gives a kind its `zui_surfaces` names;
+/// - `zuiSurface` gives a kind its `zui_surfaces` names, in an output format
+///   its `zui_output_formats` names;
 /// - `zuiWait` returns at once for `.immediately`;
 /// - a wake before an `.on_event` wait ends it at once, and is then
 ///   cleared, so the next `.at` wait lasts until its instant;
@@ -91,9 +93,13 @@ pub fn findHostViolation(comptime Host: type, harness: anytype, conformance: Hos
     }
     const viewport = builder.params.viewport;
     if (!(viewport[0] > 0 and viewport[1] > 0)) return .init(error.NoViewport, "reported a viewport of {d} by {d}", .{ viewport[0], viewport[1] });
-    const surface_kind = std.meta.activeTag(host.zuiSurface(window));
+    const surface = host.zuiSurface(window);
+    const surface_kind = std.meta.activeTag(surface);
     if (!Host.zui_surfaces.contains(surface_kind)) {
         return .init(error.SurfaceNotDeclared, "gave a .{t} surface, which its zui_surfaces does not name", .{surface_kind});
+    }
+    if (!zui.declaredOutputFormats(Host).contains(surface.outputFormat())) {
+        return .init(error.OutputFormatNotDeclared, "gave a surface in .{t}, which its zui_output_formats does not name", .{surface.outputFormat()});
     }
 
     if (try expectPostedEvents(host, harness, &builder, conformance)) |violation| return violation;
@@ -256,10 +262,17 @@ const OtherThreadWaker = struct {
     }
 };
 
+/// A mistake `QueueHost` makes, which the suite must catch.
+const QueueHostFlaw = enum {
+    none,
+    /// A wake that arrives before a wait is lost.
+    clears_wake_before_waiting,
+    gives_undeclared_hdr_surface,
+};
+
 /// Reports what its harness posts, and waits on an `Io.Event` for the
-/// awake clock. With `clears_wake_before_waiting`, a wake that arrives
-/// before a wait is lost, which the suite must catch.
-fn QueueHost(comptime clears_wake_before_waiting: bool) type {
+/// awake clock.
+fn QueueHost(comptime flaw: QueueHostFlaw) type {
     return struct {
         const Self = @This();
         pub const zui_surfaces: zui.SurfaceKinds = .initOne(.offscreen);
@@ -290,7 +303,7 @@ fn QueueHost(comptime clears_wake_before_waiting: bool) type {
         }
 
         pub fn zuiWait(self: *Self, next: zui.NextFrame) void {
-            if (clears_wake_before_waiting) self.woken.reset();
+            if (flaw == .clears_wake_before_waiting) self.woken.reset();
             const deadline: zui.Instant = switch (next) {
                 .immediately => now(self.io),
                 .at => |instant| instant,
@@ -305,7 +318,8 @@ fn QueueHost(comptime clears_wake_before_waiting: bool) type {
 
         pub fn zuiSurface(_: *Self, window: zui.WindowId) zui.Surface {
             std.debug.assert(window == .main);
-            return .{ .offscreen = .{ .size = .{ 1600, 1200 } } };
+            const format: zui.OutputFormat = if (flaw == .gives_undeclared_hdr_surface) .scrgb_fp16 else .sdr;
+            return .{ .offscreen = .{ .size = .{ 1600, 1200 }, .format = format } };
         }
 
         pub fn zuiApply(self: *Self, window: zui.WindowId, requests: zui.HostRequests) void {
@@ -344,15 +358,23 @@ fn QueueHostHarness(comptime Host: type) type {
 }
 
 test "a host that keeps the contract passes the suite" {
-    var harness: QueueHostHarness(QueueHost(false)) = .{ .queue_host = .{ .io = std.testing.io } };
-    try expectHostConforms(QueueHost(false), &harness, .{ .io = std.testing.io });
+    var harness: QueueHostHarness(QueueHost(.none)) = .{ .queue_host = .{ .io = std.testing.io } };
+    try expectHostConforms(QueueHost(.none), &harness, .{ .io = std.testing.io });
     try std.testing.expectEqual(zui.Cursor.default, harness.queue_host.applied.cursor);
 }
 
 test "a host that clears a wake before waiting fails the suite" {
-    var harness: QueueHostHarness(QueueHost(true)) = .{ .queue_host = .{ .io = std.testing.io } };
-    const violation = (try findHostViolation(QueueHost(true), &harness, .{ .io = std.testing.io, .prompt_ns = 100 * std.time.ns_per_ms, .lost_wake_ns = 300 * std.time.ns_per_ms })).?;
+    var harness: QueueHostHarness(QueueHost(.clears_wake_before_waiting)) = .{ .queue_host = .{ .io = std.testing.io } };
+    const violation = (try findHostViolation(QueueHost(.clears_wake_before_waiting), &harness, .{ .io = std.testing.io, .prompt_ns = 100 * std.time.ns_per_ms, .lost_wake_ns = 300 * std.time.ns_per_ms })).?;
     try std.testing.expectEqual(error.WakeNotSticky, violation.kind);
     try std.testing.expect(std.mem.startsWith(u8, violation.description(), "took "));
     try std.testing.expect(std.mem.endsWith(u8, violation.description(), " ms to end an .on_event wait woken before it began"));
+}
+
+test "a host that gives a surface in an output format it does not declare fails the suite" {
+    const Host = QueueHost(.gives_undeclared_hdr_surface);
+    var harness: QueueHostHarness(Host) = .{ .queue_host = .{ .io = std.testing.io } };
+    const violation = (try findHostViolation(Host, &harness, .{ .io = std.testing.io })).?;
+    try std.testing.expectEqual(error.OutputFormatNotDeclared, violation.kind);
+    try std.testing.expectEqualStrings("gave a surface in .scrgb_fp16, which its zui_output_formats does not name", violation.description());
 }

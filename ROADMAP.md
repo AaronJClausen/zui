@@ -2992,10 +2992,22 @@ put the saving, so the item waits on one that does.
   point it is drawn, as `toColor` does, from either color the
   application declares; it passes the suite in its sokol_app window, and
   fails it when the channels are encoded linearly instead.
-  Next: `Surface` negotiates an FP16 output, the suite reads
-  HDR white back brighter than SDR white from a harness that can, and
-  zui-host's Windows host reports `hdr_headroom`, whose *Done when*
-  needs a run on Windows with an HDR display.
+  The fourth slice negotiates the output format: `zui.OutputFormat`
+  (`.sdr`, `.scrgb_fp16`) and a host's and a renderer's optional
+  `zui_output_formats`, which must include `.sdr`, and in a renderer
+  names `.scrgb_fp16` only beside `zui_extended_color`, each a compile
+  error. `zui_app` opens the window with the formats both declare,
+  `zui.sharedOutputFormats`, in `WindowOptions.output_formats`, and
+  reports them; each native `Surface` carries the format the host chose,
+  `.sdr` by default, so the backends compile unchanged, and
+  `surface.outputFormat()` reads it. The host suite fails a surface in a
+  format the host does not declare. The core's hot paths are untouched;
+  zui-raylib, zui-sokol and zui-terminal pass against this checkout.
+  Next: the renderer suite reads HDR white back brighter than SDR white
+  from a harness with an `.scrgb_fp16` target (its test renderer
+  first, then zui-sokol), and zui-host's Windows host opens an FP16
+  swapchain and reports `hdr_headroom`, whose *Done when* needs a run on
+  Windows with an HDR display.
 
 C1 generated the optional commands' variants; each item here adds the
 declaration that produces its command and the lowering for renderers that

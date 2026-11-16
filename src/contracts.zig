@@ -15,8 +15,8 @@ const known_declarations = text_declarations ++ source_declarations ++ renderer_
 
 const text_declarations = [_][]const u8{ "zuiMeasure", "zuiSegment", "zui_thread_safe", "zuiFingerprint" };
 const source_declarations = [_][]const u8{ "zuiSwap", "zuiView", "zuiDelivery", "zuiInject", "zuiPending", "zuiEndFrame", "zuiRefusedCount" };
-const renderer_declarations = [_][]const u8{ "zuiSubmit", "zui_surfaces", "zui_commands", "zui_extended_color", "zui_render_thread" };
-const host_declarations = [_][]const u8{ "zuiPoll", "zuiWaker", "zuiWait", "zuiSurface", "zuiApply", "zui_capabilities" } ++ host_services;
+const renderer_declarations = [_][]const u8{ "zuiSubmit", "zui_surfaces", "zui_commands", "zui_extended_color", "zui_render_thread", "zui_output_formats" };
+const host_declarations = [_][]const u8{ "zuiPoll", "zuiWaker", "zuiWait", "zuiSurface", "zuiApply", "zui_capabilities", "zui_output_formats" } ++ host_services;
 const host_services = [_][]const u8{ "zuiClipboard", "zuiNotifications", "zuiFileDialogs", "zuiOpenUrl", "zuiMenus", "zuiFileWatch" };
 const tracer_declarations = [_][]const u8{ "zuiBegin", "zuiEnd" };
 const skin_declarations = [_][]const u8{"zuiStyle"};
@@ -58,6 +58,10 @@ pub fn checkRenderer(comptime Renderer: type) void {
     if (@hasDecl(Renderer, "zui_commands")) expectDeclarationType(Renderer, "zui_commands", commands.CommandSet, "zui.CommandSet");
     if (@hasDecl(Renderer, "zui_extended_color")) expectDeclarationType(Renderer, "zui_extended_color", bool, "bool");
     if (@hasDecl(Renderer, "zui_render_thread")) expectDeclarationType(Renderer, "zui_render_thread", bool, "bool");
+    checkOutputFormats(Renderer);
+    if (surface.declaredOutputFormats(Renderer).contains(.scrgb_fp16) and !(@hasDecl(Renderer, "zui_extended_color") and Renderer.zui_extended_color)) {
+        @compileError("zui: " ++ name ++ ".zui_output_formats includes .scrgb_fp16 but " ++ name ++ ".zui_extended_color is not true, so it would be given only clamped colors");
+    }
     for ([_][]const u8{ "ImageHandle", "MaterialHandle", "CustomData", "FontId" }) |payload_type| {
         if (@hasDecl(Renderer, payload_type)) expectDeclarationType(Renderer, payload_type, type, "type");
     }
@@ -89,6 +93,7 @@ pub fn checkHost(comptime Host: type) void {
     expectDeclarationType(Host, "zui_surfaces", surface.SurfaceKinds, "zui.SurfaceKinds");
     if (Host.zui_surfaces.count() == 0) @compileError("zui: " ++ name ++ ".zui_surfaces names no surface kind, so no renderer can draw into it");
     if (@hasDecl(Host, "zui_capabilities")) expectDeclarationType(Host, "zui_capabilities", host.HostCapabilities, "zui.HostCapabilities");
+    checkOutputFormats(Host);
     for (host_services) |service| {
         if (@hasDecl(Host, service)) expectDeclarationType(Host, service, type, "type");
     }
@@ -100,6 +105,14 @@ pub fn checkHost(comptime Host: type) void {
     expectHostCall(Host, "zuiSurface", fn (*Host, host.WindowId) surface.Surface, "fn (" ++ host_pointer ++ ", zui.WindowId) zui.Surface");
     expectHostCall(Host, "zuiApply", fn (*Host, host.WindowId, record.HostRequests) void, "fn (" ++ host_pointer ++ ", zui.WindowId, zui.HostRequests) void");
     if (@hasDecl(Host, "zuiFileWatch")) checkFileWatch(Host);
+}
+
+fn checkOutputFormats(comptime Party: type) void {
+    if (!@hasDecl(Party, "zui_output_formats")) return;
+    expectDeclarationType(Party, "zui_output_formats", surface.OutputFormats, "zui.OutputFormats");
+    if (!Party.zui_output_formats.contains(.sdr)) {
+        @compileError("zui: " ++ @typeName(Party) ++ ".zui_output_formats does not include .sdr, which every window falls back to");
+    }
 }
 
 fn checkFileWatch(comptime Host: type) void {

@@ -105,6 +105,9 @@ pub const Report = struct {
     renderer: []const u8,
     /// The kinds of surface both give and draw into.
     surfaces: zui.SurfaceKinds,
+    /// The output formats both support, which the window was opened with;
+    /// its surface says which one the host chose.
+    output_formats: zui.OutputFormats,
     capabilities: zui.HostCapabilities,
     submission: Submission,
     /// Optional commands the renderer does not draw, which zui lowers.
@@ -119,6 +122,7 @@ pub const Report = struct {
             .render_thread => try writer.writeAll("; submitting on a render thread"),
             .ui_thread => |reason| try writer.print("; submitting on the UI thread, since {s}", .{reason.describe()}),
         }
+        try writeSet(writer, "; output: ", self.output_formats);
         try writeSet(writer, "; lowered: ", self.lowered);
         try writeSet(writer, "; no host ", self.missing_services);
     }
@@ -280,7 +284,7 @@ pub fn Runner(comptime App: type) type {
             self.render_task = .init;
 
             setFieldDefaults(Host, &self.host);
-            try self.host.init(setup.io, .{ .title = options.title, .size = options.size, .visible = options.visible, .resizable = options.resizable, .material = options.material });
+            try self.host.init(setup.io, .{ .title = options.title, .size = options.size, .visible = options.visible, .resizable = options.resizable, .material = options.material, .output_formats = output_formats });
             errdefer self.host.deinit();
             if (Text != void) {
                 if (@hasDecl(Text, "init")) {
@@ -323,6 +327,7 @@ pub fn Runner(comptime App: type) type {
                 .host = @typeName(Host),
                 .renderer = @typeName(Renderer),
                 .surfaces = Host.zui_surfaces.intersectWith(Renderer.zui_surfaces),
+                .output_formats = output_formats,
                 .capabilities = if (@hasDecl(Host, "zui_capabilities")) Host.zui_capabilities else .{},
                 .submission = self.startRenderThread(options),
                 .lowered = lowered,
@@ -331,6 +336,7 @@ pub fn Runner(comptime App: type) type {
             self.notify(.{ .started = self.report });
         }
 
+        const output_formats = zui.sharedOutputFormats(Host, Renderer);
         const lowered = if (@hasDecl(Renderer, "zui_commands")) Renderer.zui_commands.complement() else zui.CommandSet.initFull();
         const missing_services = blk: {
             var missing: Services = .initEmpty();

@@ -1,4 +1,5 @@
 const Wake = @import("sources.zig").Wake;
+const OutputFormats = @import("surface.zig").OutputFormats;
 
 /// One of a host's windows. A host with one window calls it `.main`.
 pub const WindowId = enum(u32) {
@@ -32,6 +33,11 @@ pub const WindowOptions = struct {
     /// host whose `zui_capabilities.system_material` is true. Whether it
     /// shows on this machine arrives as `Environment.system_material`.
     material: SystemMaterial = .none,
+    /// The formats the host may open the window's surface in: those it
+    /// and the renderer share, `zui.sharedOutputFormats`. It picks the
+    /// best its display shows, such as `.scrgb_fp16` on an HDR display,
+    /// and falls back to `.sdr`.
+    output_formats: OutputFormats = .initOne(.sdr),
 };
 
 /// The system's backdrop for a window, by role; each host maps it to the

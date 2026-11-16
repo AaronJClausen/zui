@@ -6,10 +6,12 @@ const testing = std.testing;
 const frame_interval_ns = 16 * std.time.ns_per_ms;
 
 /// An offscreen window whose OS events are scripted, one list per poll, on
-/// a clock that advances a frame per poll. Its waits only record what they
-/// were asked, so a test never sleeps.
+/// a clock that advances a frame per poll, opened in HDR when the renderer
+/// draws it. Its waits only record what they were asked, so a test never
+/// sleeps.
 const TestHost = struct {
     pub const zui_surfaces: zui.SurfaceKinds = .initOne(.offscreen);
+    pub const zui_output_formats: zui.OutputFormats = .initMany(&.{ .sdr, .scrgb_fp16 });
     pub const zuiClipboard = struct {};
 
     window: zui.WindowOptions,
@@ -54,8 +56,9 @@ const TestHost = struct {
         self.wait_count += 1;
     }
 
-    pub fn zuiSurface(_: *TestHost, _: zui.WindowId) zui.Surface {
-        return .{ .offscreen = .{ .size = .{ 800, 600 } } };
+    pub fn zuiSurface(self: *TestHost, _: zui.WindowId) zui.Surface {
+        const format: zui.OutputFormat = if (self.window.output_formats.contains(.scrgb_fp16)) .scrgb_fp16 else .sdr;
+        return .{ .offscreen = .{ .size = .{ 800, 600 }, .format = format } };
     }
 
     pub fn zuiApply(self: *TestHost, _: zui.WindowId, requests: zui.HostRequests) void {
@@ -270,10 +273,38 @@ test "the start reports the host's capabilities, where frames are drawn, and eve
     try testing.expect(!report.missing_services.contains(.clipboard) and report.missing_services.contains(.file_dialogs));
     try testing.expectEqual(zui.SurfaceKinds.initOne(.offscreen), report.surfaces);
     try testing.expectEqual(zui.HostCapabilities{}, report.capabilities);
+    try testing.expectEqual(zui.OutputFormats.initOne(.sdr), report.output_formats);
+    try testing.expectEqual(zui.OutputFormats.initOne(.sdr), runner.host.window.output_formats);
 
     const described = try std.fmt.allocPrint(testing.allocator, "{f}", .{Notices.first(.started)});
     defer testing.allocator.free(described);
-    try testing.expect(std.mem.endsWith(u8, described, "; one window; no system material, so the root draws its own background; submitting on the UI thread, since the renderer does not declare zui_render_thread; lowered: gradient, backdrop_blur, transform, material; no host notifications, file_dialogs, open_url, menus, file_watch"));
+    try testing.expect(std.mem.endsWith(u8, described, "; one window; no system material, so the root draws its own background; submitting on the UI thread, since the renderer does not declare zui_render_thread; output: sdr; lowered: gradient, backdrop_blur, transform, material; no host notifications, file_dialogs, open_url, menus, file_watch"));
+}
+
+/// Draws HDR, and keeps the output format of the last surface it was given.
+const HdrRenderer = struct {
+    pub const zui_surfaces: zui.SurfaceKinds = .initOne(.offscreen);
+    pub const zui_extended_color = true;
+    pub const zui_output_formats: zui.OutputFormats = .initMany(&.{ .sdr, .scrgb_fp16 });
+
+    drawn_in: ?zui.OutputFormat = null,
+
+    pub fn zuiSubmit(self: *HdrRenderer, surface: zui.Surface, _: anytype) !void {
+        self.drawn_in = surface.outputFormat();
+    }
+};
+
+test "a host and a renderer that both draw HDR open the window in it" {
+    const App = FramesApp(HdrRenderer, 1, 2);
+    var runner: zui_app.Runner(App) = undefined;
+    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+    defer runner.stop();
+
+    const both: zui.OutputFormats = .initMany(&.{ .sdr, .scrgb_fp16 });
+    try testing.expectEqual(both, runner.host.window.output_formats);
+    try testing.expectEqual(both, runner.report.output_formats);
+    _ = try runToClose(&runner);
+    try testing.expectEqual(@as(?zui.OutputFormat, .scrgb_fp16), runner.renderer.drawn_in);
 }
 
 const FloodApp = struct {

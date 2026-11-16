@@ -271,12 +271,14 @@ export fn zuiCheckExtendedColor() usize {
 const OffscreenHost = struct {
     pub const zui_surfaces: zui.SurfaceKinds = .initOne(.offscreen);
     pub const zui_capabilities: zui.HostCapabilities = .{ .windows = .many };
+    pub const zui_output_formats: zui.OutputFormats = .initMany(&.{ .sdr, .scrgb_fp16 });
 
     polls: u32 = 0,
     applied: zui.HostRequests = .{},
+    format: zui.OutputFormat = .sdr,
 
-    pub fn init(self: *OffscreenHost, _: std.Io, _: zui.WindowOptions) !void {
-        self.* = .{};
+    pub fn init(self: *OffscreenHost, _: std.Io, window: zui.WindowOptions) !void {
+        self.* = .{ .format = if (window.output_formats.contains(.scrgb_fp16)) .scrgb_fp16 else .sdr };
     }
 
     pub fn deinit(_: *OffscreenHost) void {}
@@ -294,8 +296,8 @@ const OffscreenHost = struct {
 
     pub fn zuiWait(_: *OffscreenHost, _: zui.NextFrame) void {}
 
-    pub fn zuiSurface(_: *OffscreenHost, _: zui.WindowId) zui.Surface {
-        return .{ .offscreen = .{ .size = .{ 100, 100 } } };
+    pub fn zuiSurface(self: *OffscreenHost, _: zui.WindowId) zui.Surface {
+        return .{ .offscreen = .{ .size = .{ 100, 100 }, .format = self.format } };
     }
 
     pub fn zuiApply(self: *OffscreenHost, _: zui.WindowId, requests: zui.HostRequests) void {
@@ -321,7 +323,8 @@ export fn zuiCheckHost() usize {
         host.zuiWait(ui.nextFrame());
     }
     host.zuiWaker().wake();
-    return renderer.drawn;
+    const shared = comptime zui.sharedOutputFormats(OffscreenHost, EveryCommandRenderer);
+    return renderer.drawn + shared.count() + @intFromEnum(host.zuiSurface(.main).outputFormat());
 }
 
 const CheckApp = struct {

@@ -29,13 +29,18 @@ pub const CommandSet = commands.CommandSet;
 pub const Surface = surface.Surface;
 pub const SurfaceKind = surface.SurfaceKind;
 pub const SurfaceKinds = surface.SurfaceKinds;
+pub const OutputFormat = surface.OutputFormat;
+pub const OutputFormats = surface.OutputFormats;
+pub const declaredOutputFormats = surface.declaredOutputFormats;
+pub const sharedOutputFormats = surface.sharedOutputFormats;
 
 /// Fails to compile, with a message naming the declaration, unless
 /// `Renderer` implements the renderer contract: `zuiSubmit` and
 /// `zui_surfaces`, and optionally `zui_commands`, `zui_extended_color`,
 /// `zui_render_thread` (`zuiSubmit` may run on a thread other than the
-/// one that made the renderer) and the payload types `ImageHandle`, `MaterialHandle`, `CustomData` and
-/// `FontId`.
+/// one that made the renderer), `zui_output_formats` (with `.sdr`, and
+/// `.scrgb_fp16` only beside `zui_extended_color`) and the payload types
+/// `ImageHandle`, `MaterialHandle`, `CustomData` and `FontId`.
 ///
 /// ```zig
 /// pub fn config(overrides: zui.Config) zui.Config {
@@ -58,7 +63,7 @@ pub const FileWatchError = host.FileWatchError;
 /// Fails to compile, with a message naming the declaration, unless `Host`
 /// implements the host contract: `zuiPoll`, `zuiWaker`, `zuiWait`,
 /// `zuiSurface`, `zuiApply` and `zui_surfaces`, and optionally
-/// `zui_capabilities` and the services (`zuiClipboard`, `zuiFileDialogs`
+/// `zui_capabilities`, `zui_output_formats` (with `.sdr`) and the services (`zuiClipboard`, `zuiFileDialogs`
 /// and the rest), each a type. `zuiFileWatch` declares
 /// `watch(host, directory, sink) zui.FileWatchError!void`. A host's `zuiWaker` must be sticky: a wake
 /// that arrives while the loop is not waiting ends its next wait.

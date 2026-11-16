@@ -1760,6 +1760,7 @@ const SokolRenderer = struct {
     pub const zui_commands: zui.CommandSet = .initMany(&.{ .gradient, .shadow });              // optional commands it draws
     pub const zui_surfaces: zui.SurfaceKinds = .initMany(&.{ .win32, .cocoa, .wayland, .x11 }); // native windows it can draw into
     pub const zui_extended_color = false;                                                      // accepts HDR colors
+    pub const zui_output_formats: zui.OutputFormats = .initOne(.sdr);                          // targets it draws into; .scrgb_fp16 needs zui_extended_color
     pub const zui_render_thread = true;                                                        // zuiSubmit may run on zui_app's render thread
     pub const ImageHandle = Texture;
     pub const MaterialHandle = void;
@@ -1792,6 +1793,7 @@ never disagree.
 const Win32Host = struct {
     pub const zui_capabilities: zui.HostCapabilities = .{ .windows = .many, .system_material = true }; // material: Mica, vibrancy
     pub const zui_surfaces: zui.SurfaceKinds = .initOne(.win32);
+    pub const zui_output_formats: zui.OutputFormats = .initMany(&.{ .sdr, .scrgb_fp16 });         // an FP16 swapchain on an HDR display
 
     pub fn zuiPoll(self: *Win32Host, window: zui.WindowId, record: *zui.RecordBuilder) bool { ... } // false: the window closed
     pub fn zuiWaker(self: *Win32Host) zui.Waker { ... }
@@ -1906,7 +1908,14 @@ process that `zui_wire`'s host makes and only its renderer writes into
 `zui_surfaces` share no kind are a compile error naming both, from
 `checkHostAndRenderer` (§16.3). Output
 formats (an FP16 swapchain for HDR) are negotiated through it, and fall
-back to SDR unless both sides support them.
+back to SDR unless both sides support them: a host and a renderer each
+declare `zui_output_formats: zui.OutputFormats`, which must include
+`.sdr` (SDR alone when left out), and a renderer that names
+`.scrgb_fp16` must also declare `zui_extended_color`, each a compile
+error. The window is opened with `WindowOptions.output_formats`, the
+formats both declare (`zui.sharedOutputFormats(Host, Renderer)`); the
+host picks the best its display shows, and a native surface carries the
+one it chose, which the renderer reads with `surface.outputFormat()`.
 
 ### 16.5 Tracer
 

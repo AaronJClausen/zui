@@ -296,3 +296,40 @@ test "a record builder makes the record of a context with sources" {
     try testing.expectEqual(@as(usize, 1), record.events.len);
     try testing.expectEqual(@as(?*const Deliveries, null), record.deliveries);
 }
+
+const sdr_and_hdr: zui.OutputFormats = .initMany(&.{ .sdr, .scrgb_fp16 });
+
+test "a host and a renderer share SDR output, and HDR only when both declare it" {
+    const sdr: zui.OutputFormats = .initOne(.sdr);
+    const HdrRenderer = struct {
+        pub const zui_surfaces: zui.SurfaceKinds = .initOne(.offscreen);
+        pub const zui_extended_color = true;
+        pub const zui_output_formats = sdr_and_hdr;
+
+        pub fn zuiSubmit(_: *@This(), _: zui.Surface, _: anytype) !void {}
+    };
+    const HdrHost = struct {
+        pub const zui_output_formats = sdr_and_hdr;
+    };
+    const SdrRenderer = struct {
+        pub const zui_surfaces: zui.SurfaceKinds = .initOne(.offscreen);
+
+        pub fn zuiSubmit(_: *@This(), _: zui.Surface, _: anytype) !void {}
+    };
+    comptime zui.checkHostAndRenderer(TestHost, HdrRenderer);
+
+    try testing.expectEqual(sdr, zui.sharedOutputFormats(TestHost, HdrRenderer));
+    try testing.expectEqual(sdr, zui.sharedOutputFormats(HdrHost, SdrRenderer));
+    try testing.expectEqual(sdr_and_hdr, zui.sharedOutputFormats(HdrHost, HdrRenderer));
+    try testing.expectEqual(sdr, (zui.WindowOptions{}).output_formats);
+}
+
+test "a native surface carries its output format, and every other surface is SDR" {
+    const hdr_surface: zui.Surface = .{ .offscreen = .{ .size = .{ 4, 4 }, .format = .scrgb_fp16 } };
+    const default_surface: zui.Surface = .{ .offscreen = .{ .size = .{ 4, 4 } } };
+    const grid: zui.Surface = .{ .terminal = .{ .columns = 80, .rows = 24 } };
+    try testing.expectEqual(zui.OutputFormat.scrgb_fp16, hdr_surface.outputFormat());
+    try testing.expectEqual(zui.OutputFormat.sdr, default_surface.outputFormat());
+    try testing.expectEqual(zui.OutputFormat.sdr, grid.outputFormat());
+    try testing.expectEqual(zui.OutputFormat.sdr, (zui.Surface{ .library = {} }).outputFormat());
+}
