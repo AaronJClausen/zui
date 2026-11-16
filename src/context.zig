@@ -47,6 +47,13 @@ pub const Config = struct {
     /// The renderer's font identifier, passed back in `MeasureKey`. An
     /// integer or enum type.
     FontId: type = u16,
+    /// The colors the application declares: `zui.Color`, or
+    /// `zui.ExtendedColor` for HDR and wide gamut.
+    Color: type = style.Color,
+    /// The renderer draws `ExtendedColor`, its `zui_extended_color`.
+    /// Without it, an `ExtendedColor` is clamped to a `Color` as it is
+    /// emitted, and the commands carry `Color`.
+    extended_color: bool = false,
 
     features: Features = .{},
     /// Frames alive at once: one being declared plus those a renderer holds.
@@ -120,7 +127,10 @@ pub const Diagnostics = struct {
     needed: std.EnumArray(Limit, u32) = .initFill(0),
     /// The first element dropped because a limit was reached.
     first_dropped_id: u64 = 0,
-    duplicate_ids: u32 = 0,
+    /// Saturates at 65535, which keeps `Diagnostics` within 96 bytes: one
+    /// byte more moved every array of the frame after it, and made
+    /// declaration up to 3.4% slower.
+    duplicate_ids: u16 = 0,
     unbalanced: bool = false,
     /// Publishes that full sources refused since their previous swap,
     /// summed over every source. Each refused item stayed its producer's.
@@ -132,6 +142,9 @@ pub const Diagnostics = struct {
     /// draw, so emission replaced them: a gradient by a rectangle in its
     /// mean color, a shadow by nothing. Not a failure, so `ok` ignores it.
     lowered: command_types.CommandSet = .initEmpty(),
+    /// A declared `ExtendedColor` lay outside SDR or sRGB's gamut, and the
+    /// renderer draws only `Color`, so emission clamped it. Not a failure.
+    clamped_colors: bool = false,
 
     pub fn ok(self: Diagnostics) bool {
         return self.exceeded.count() == 0 and self.duplicate_ids == 0 and !self.unbalanced and self.refused_publishes == 0;
@@ -175,7 +188,7 @@ pub fn ElementWith(comptime ContextDecoration: type) type {
         /// Gradients, shadows and backdrop blur, in the shape of the
         /// decoration's corners, and a transform. Copied when the element is
         /// declared, so it may point at a local.
-        effects: ?*const style.Effects = null,
+        effects: ?*const style.EffectsWith(ColorOf(ContextDecoration)) = null,
         /// The axes on which descendants are cut off.
         clip: style.Axes = .none,
         scroll: ?style.Scroll = null,
@@ -209,6 +222,14 @@ pub fn ElementWith(comptime ContextDecoration: type) type {
         /// them for every context.
         gestures: interaction.Gestures = .{},
     };
+}
+
+fn ColorOf(comptime ContextDecoration: type) type {
+    return @typeInfo(@FieldType(ContextDecoration, "background")).optional.child;
+}
+
+fn checkColor(comptime Color: type) void {
+    if (Color != style.Color and Color != style.ExtendedColor) @compileError("zui: Color must be zui.Color or zui.ExtendedColor, got " ++ @typeName(Color));
 }
 
 const ContentKind = enum(u8) { none, text, image, custom };
@@ -302,13 +323,21 @@ pub fn Context(comptime config: Config) type {
         pub const Tracing = trace.Tracing(config.features.Tracer);
         pub const has_text = config.Text != void;
         pub const FontId = config.FontId;
-        pub const TextStyle = style.TextStyle(config.FontId);
+        /// What the application declares colors in, `config.Color`.
+        pub const Color = config.Color;
+        /// What the commands carry: `Color`, unless it is `ExtendedColor`
+        /// and the renderer does not draw it.
+        pub const CommandColor = if (config.extended_color) Color else style.Color;
+        /// Emission converts each declared color into a `CommandColor`.
+        pub const clamps_colors = Color != CommandColor;
+        pub const TextStyle = style.TextStyleWith(config.FontId, Color);
         pub const MeasureKey = style.MeasureKey(config.FontId);
         /// Generated from `config.commands` and the payload types: a
         /// renderer's exhaustive `switch` over `payload` covers exactly what
         /// it draws.
         pub const RenderCommand = command_types.RenderCommand(.{
-            .TextStyle = TextStyle,
+            .TextStyle = style.TextStyleWith(config.FontId, CommandColor),
+            .Color = CommandColor,
             .ImageHandle = config.ImageHandle,
             .CustomData = config.CustomData,
             .MaterialHandle = config.MaterialHandle,
@@ -324,7 +353,7 @@ pub fn Context(comptime config: Config) type {
             /// `percent`. Padding goes around it.
             natural_size: ?[2]f32 = null,
             /// Multiplied into the image's pixels; white leaves them unchanged.
-            tint: style.Color = .white,
+            tint: Color = .white,
             corner_radius: style.CornerRadius = .zero,
         };
         /// Rounded up to a whole number of bytes: a `u13` is stored in 16
@@ -373,7 +402,12 @@ pub fn Context(comptime config: Config) type {
         pub const Results = interaction.Results(limits.max_elements, id_table_slots, features.gestures, max_spaces);
         const InputState = interaction.State(limits.max_input_contacts, limits.max_depth + 1, limits.max_events_per_frame, limits.max_text_input_bytes, limits.max_dropped_path_bytes, features.gestures);
 
-        pub const Decoration = style.DecorationWith(config.MaterialHandle);
+        pub const Decoration = style.DecorationWith(Color, config.MaterialHandle);
+        pub const Border = style.BorderWith(Color);
+        pub const Gradient = style.GradientWith(Color);
+        pub const Shadow = style.ShadowWith(Color);
+        pub const BackdropBlur = style.BackdropBlurWith(Color);
+        pub const Effects = style.EffectsWith(Color);
         pub const Style = style.StyleWith(Decoration);
         pub const Element = ElementWith(Decoration);
         const default_layout: style.Layout = .{};
@@ -445,7 +479,7 @@ pub fn Context(comptime config: Config) type {
             /// In declaration order, each beside `effects` at the same index,
             /// so emission finds the next one by comparing a single index.
             effect_elements: [limits.max_effects]Index,
-            effects: [limits.max_effects]style.Effects,
+            effects: [limits.max_effects]Effects,
             effect_count: u32,
             texts: [if (has_text) max_elements else 0]TextRecord,
             text_count: u32,
@@ -1343,7 +1377,7 @@ pub fn Context(comptime config: Config) type {
                     if (std.debug.runtime_safety) {
                         std.debug.panic("zui: duplicate id {f} in one frame", .{nameOf(frame, index)});
                     }
-                    frame.diagnostics.duplicate_ids += 1;
+                    frame.diagnostics.duplicate_ids +|= 1;
                     return false;
                 }
             }
@@ -2339,6 +2373,7 @@ fn validateConfig(comptime config: Config) void {
     if (limits.max_elements < 2) @compileError("zui: limits.max_elements must be at least 2 (zui's root plus one element)");
     if (limits.max_depth < 2) @compileError("zui: limits.max_depth must be at least 2 (zui's root plus one level)");
     if (limits.max_render_commands < 1) @compileError("zui: limits.max_render_commands must be at least 1");
+    checkColor(config.Color);
     switch (@typeInfo(config.FontId)) {
         .int, .@"enum" => {},
         else => @compileError("zui: FontId must be an integer or enum type, got " ++ @typeName(config.FontId)),

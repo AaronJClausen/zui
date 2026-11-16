@@ -232,6 +232,42 @@ export fn zuiCheckRenderer() usize {
     return renderer.drawn;
 }
 
+fn ExtendedColorUi(comptime renderer_draws_extended_color: bool) type {
+    return zui.Context(.{
+        .limits = .{ .max_elements = 16 },
+        .commands = .initFull(),
+        .ImageHandle = u32,
+        .MaterialHandle = u8,
+        .Color = zui.ExtendedColor,
+        .extended_color = renderer_draws_extended_color,
+    });
+}
+const ClampingColorUi = ExtendedColorUi(false);
+const DrawingColorUi = ExtendedColorUi(true);
+
+var clamping_color_memory: [ClampingColorUi.required_bytes]u8 align(ClampingColorUi.buffer_alignment) = undefined;
+var drawing_color_memory: [DrawingColorUi.required_bytes]u8 align(DrawingColorUi.buffer_alignment) = undefined;
+
+fn declareExtendedColors(comptime ColorUi: type, buffer: *[ColorUi.required_bytes]u8) usize {
+    const hdr_white: zui.ExtendedColor = .linear(4, 4, 4, 1);
+    const effects: ColorUi.Effects = .{
+        .gradient = .{ .from = .rgb(0x3366ff), .to = hdr_white },
+        .shadow = .glow(hdr_white, 8),
+        .backdrop_blur = .{ .radius = 4, .tint = .rgba(0xffffff40) },
+    };
+    var ui = ColorUi.initBuffer(@alignCast(buffer), undefined) catch return 0;
+    ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 100, 100 } } });
+    ui.image(.{ .handle = 7, .tint = hdr_white }, .{});
+    ui.box(.{ .decoration = .{ .background = hdr_white, .material = 2, .border = .{ .color = .linear(1.2, -0.1, 0, 1), .widths = .all(1) } }, .effects = &effects });
+    const frame = ui.endFrame();
+    defer ui.release(frame);
+    return frame.commands().len + @intFromBool(frame.diagnostics.clamped_colors);
+}
+
+export fn zuiCheckExtendedColor() usize {
+    return declareExtendedColors(ClampingColorUi, &clamping_color_memory) + declareExtendedColors(DrawingColorUi, &drawing_color_memory);
+}
+
 const OffscreenHost = struct {
     pub const zui_surfaces: zui.SurfaceKinds = .initOne(.offscreen);
     pub const zui_capabilities: zui.HostCapabilities = .{ .windows = .many };

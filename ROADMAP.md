@@ -30,7 +30,7 @@ Each item says:
 | stage 6 | the single-line fast path (T1), the whole-string cache (T2), static styles (L8), the box tree's layout and emission (P4) and declaration (P5), line-break segmentation (T4), the grow basis (L1), aspect ratio and natural sizes (L2), dividers and decorated images (L3), floating options (L4), right-to-left layout (L6), wrap (L7); the backends drawing images' tint and corner radius (C10) | done; the box tree's and warm text's budgets met, as they were then judged with Turbo Boost on: the box tree declares in 48.9 µs and lays out and emits in 89.2 µs, warm text in 90.5 µs; a box tree of static styles declares in 28.0 µs; zui-raylib and zui-sokol draw tinted, rounded images and pass the renderer suite that checks them |
 | stage 7 | gestures (I5): arbitration by motion component, zoom, long press, double tap, momentum, the intents and custom recognizers; drag and drop between elements (I1) | done: a carousel in a list, a pinch starting on a list inside a map, a lasso module against a map's pan, and `zui_testing.Driver.drag` moving an item between two lists, out of one that scrolls by dragging |
 | after stage 7: the foundation | G1's first slice ran 5.5% to 7.7% more instructions in scenes that draw no effect, so the work turned to what lay under it: benchmarks that can be trusted (R3 to R8, and R9 in part) and the data-oriented design audit's findings (P6 to P10) | done; a commit compared with itself over three code layouts calls nothing, its intervals 0.52% wide on average, and a change that only moves code is not called; a tooltip declared before a 3,000-cell grid lays out in 79 µs, not 671 µs (P6); warm text −43% (P9); `init` from 138 µs to 92 µs (P7, P10); the budgets judged in benchmarking mode |
-| stage 8, begun | gradients, shadows and glow (G1); backdrop blur (G2); effects in the corners of a decoration that draws nothing (G7); transforms with hit inversion (G3); materials (G5) | G1, G2, G7, G3 and G5 done: zui-sokol draws gradients, shadows, backdrop blurs, transforms and materials through a shader of its own and passes the renderer suite, its effects rounded by a decoration that draws nothing, a pointer hits a turned button where it is drawn, and a frame without effects runs no more instructions than before; G6 queued |
+| stage 8, begun | gradients, shadows and glow (G1); backdrop blur (G2); effects in the corners of a decoration that draws nothing (G7); transforms with hit inversion (G3); materials (G5) | G1, G2, G7, G3 and G5 done: zui-sokol draws gradients, shadows, backdrop blurs, transforms and materials through a shader of its own and passes the renderer suite, its effects rounded by a decoration that draws nothing, a pointer hits a turned button where it is drawn, and a frame without effects runs no more instructions than before; G6 begun: `zui.ExtendedColor` is declared and clamped for a renderer that draws only `Color` |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
@@ -70,7 +70,7 @@ green, and its **Status** line below says which slice is next.
 | R9. Measuring across operating systems and hardware | foundation | `bench/machine.zig`, `bench/report.zig`, `README.md` | | waiting on a run under Windows on the reference machine |
 | P11. Flat child lists | audit | `src/context.zig`, `src/layout.zig` | | waiting on a wide scene whose profile points at the walks; kept by the owner |
 | P12. Text commands that point at their style | audit | `src/commands.zig`, `src/emission.zig`, `zui_wire/`, `../zui-raylib`, `../zui-sokol`, `../zui-terminal` | | waiting on a profile of a renderer reading the commands |
-| G6. HDR and wide gamut | 8 | `src/context.zig`, `src/commands.zig`, `../zui-host` | | next |
+| G6. HDR and wide gamut | 8 | `src/context.zig`, `src/commands.zig`, `src/surface.zig`, `zui_wire/`, `zui_testing/`, `../zui-sokol`, `../zui-host` | | in progress |
 | V1. `zui_debug` | 9 | `zui_debug/`, `src/context.zig`, `../zui-raylib` | | |
 | V2. Semantics and accessibility actions | 9 | `src/context.zig`, `zui_widgets/`, `../zui-host` | | |
 | V3. Safety sweeps | 9 | `src/context.zig`, `src/tests/` | | |
@@ -2936,6 +2936,28 @@ put the saving, so the item waits on one that does.
 - **G6. HDR and wide gamut:** `Config.Color = zui.ExtendedColor`, clamped
   for renderers without `zui_extended_color`; headroom from the
   environment; the output format negotiated through `Surface`.
+
+  **Status.** The first slice landed the core: `zui.ExtendedColor`
+  (4×f16 linear scRGB, with `Color`'s helpers), `Config.Color` and its
+  compile error, and `Config.extended_color`, which `zui_app.contextConfig`
+  takes from the renderer. Every type that holds a color is generic over
+  it (`zui.BorderWith`, `EffectsWith`, `GradientWith`, `ShadowWith`,
+  `BackdropBlurWith`, `DecorationWith(Color, MaterialHandle)`,
+  `TextStyleWith`), named by the context as `Ui.Border` and the rest, and
+  `zui`'s own unless `Color` is `ExtendedColor`. The commands carry
+  `Ui.CommandColor`: emission clamps each color for a renderer that draws
+  only `Color` and sets `Diagnostics.clamped_colors` when that changed
+  one. A context in `Color` runs the same instructions as before in
+  every `counts` scenario, and `bench-compare` against `2ac7223` calls
+  no scenario slower. The flag first made `Diagnostics` 104 bytes, which
+  moved every array of the frame after it by 8 and made the box tree's
+  declaration 3.4% slower (2.8% for the documents view);
+  `duplicate_ids` became a saturating `u16`, so it stays 96.
+  Next: the renderer suite's reference scene declares an HDR color,
+  `zui_wire`'s renderer declares `zui_extended_color`, and zui-sokol
+  draws it; then `Surface` negotiates an FP16 output and zui-host's
+  Windows host reports `hdr_headroom`, whose *Done when* needs a run on
+  Windows with an HDR display.
 
 C1 generated the optional commands' variants; each item here adds the
 declaration that produces its command and the lowering for renderers that

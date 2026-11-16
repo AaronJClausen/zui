@@ -257,7 +257,8 @@ roadmap item named:
 
 | Today | The spec | Where today | Item |
 |---|---|---|---|
-| no `Config.Color`; colors are RGBA8 only | `zui.Color` or `zui.ExtendedColor`, clamped for a renderer without `zui_extended_color` | `src/context.zig`, `src/commands.zig` | G6 |
+| `zui.ExtendedColor` is declared and clamped for a renderer without `zui_extended_color`, but no renderer draws it, `zui_wire`'s renderer does not declare it, and the renderer suite's reference scene does not declare it | one renderer draws it and passes the suite | `zui_wire/`, `zui_testing/`, `../zui-sokol` | G6 |
+| no output format is negotiated, and no host reports `hdr_headroom` | an FP16 swapchain through `Surface` when both sides support it; headroom from the display | `src/surface.zig`, `../zui-host` | G6 |
 | `Widgets(Ui)` with a `Theme` struct | `Widgets(Ui, Skin)` | `zui_widgets/` | K5 |
 | `Frame` exposes its storage arrays and `rectOf` | `Frame.inspect(index)` | `src/context.zig` | V1 |
 | `Features` has every field and gates its API, but `Frame.semantics()` is always empty and `safety_sweeps` changes nothing | semantics and safety sweeps, each behind its field | `src/context.zig` | V2, V3 |

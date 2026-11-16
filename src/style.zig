@@ -73,18 +73,105 @@ pub const Color = extern struct {
     /// ```
     pub fn mixOklab(self: Color, other: Color, amount: f32) Color {
         const clamped = std.math.clamp(amount, 0, 1);
-        const from: Oklab = .fromColor(self);
-        const to: Oklab = .fromColor(other);
-        const mixed: Oklab = .{
-            .lightness = from.lightness + (to.lightness - from.lightness) * clamped,
-            .green_red = from.green_red + (to.green_red - from.green_red) * clamped,
-            .blue_yellow = from.blue_yellow + (to.blue_yellow - from.blue_yellow) * clamped,
+        const mixed = Oklab.fromLinear(linearOf(self)).mix(.fromLinear(linearOf(other)), clamped).toLinear();
+        return .{
+            .r = srgbFromLinear(mixed[0]),
+            .g = srgbFromLinear(mixed[1]),
+            .b = srgbFromLinear(mixed[2]),
+            .a = mixChannel(self.a, other.a, clamped),
         };
-        return mixed.toColor(mixChannel(self.a, other.a, clamped));
     }
 
     pub fn eql(self: Color, other: Color) bool {
         return std.meta.eql(self, other);
+    }
+
+    fn linearOf(color: Color) [3]f32 {
+        return .{ linearFromSrgb(color.r), linearFromSrgb(color.g), linearFromSrgb(color.b) };
+    }
+};
+
+/// A color for HDR and wide-gamut displays: linear scRGB in half floats,
+/// where 1 is SDR white, a channel above 1 is brighter than SDR white, and
+/// one below 0 or above 1 reaches outside sRGB's gamut. Alpha is straight,
+/// 0 to 1. A context takes it in place of `Color` with
+/// `Config.Color = zui.ExtendedColor`; its helpers match `Color`'s, so a
+/// theme written with `.rgb(0x3366ff)` compiles with either.
+///
+/// ```zig
+/// const hdr_white: zui.ExtendedColor = .linear(4, 4, 4, 1); // four times SDR white, on a display with the headroom
+/// const brand: zui.ExtendedColor = .rgb(0x3366ff);          // the sRGB color, exactly
+/// ```
+pub const ExtendedColor = extern struct {
+    r: f16,
+    g: f16,
+    b: f16,
+    a: f16 = 1,
+
+    pub const black: ExtendedColor = .{ .r = 0, .g = 0, .b = 0 };
+    pub const white: ExtendedColor = .{ .r = 1, .g = 1, .b = 1 };
+    pub const transparent: ExtendedColor = .{ .r = 0, .g = 0, .b = 0, .a = 0 };
+
+    pub fn linear(red: f32, green: f32, blue: f32, alpha: f32) ExtendedColor {
+        return .{ .r = @floatCast(red), .g = @floatCast(green), .b = @floatCast(blue), .a = @floatCast(alpha) };
+    }
+
+    /// The sRGB color `.rgb(0x3366ff)` names, decoded to linear.
+    pub fn rgb(hex: u24) ExtendedColor {
+        return .fromColor(.rgb(hex));
+    }
+
+    /// `.rgba(0x3366ff80)`
+    pub fn rgba(hex: u32) ExtendedColor {
+        return .fromColor(.rgba(hex));
+    }
+
+    pub fn fromColor(color: Color) ExtendedColor {
+        return .linear(linearFromSrgb(color.r), linearFromSrgb(color.g), linearFromSrgb(color.b), @as(f32, @floatFromInt(color.a)) / 255);
+    }
+
+    /// Clamped into SDR and sRGB's gamut, then encoded: what a renderer
+    /// that draws only `Color` is given.
+    pub fn toColor(self: ExtendedColor) Color {
+        return .{
+            .r = srgbFromLinear(self.r),
+            .g = srgbFromLinear(self.g),
+            .b = srgbFromLinear(self.b),
+            .a = @intFromFloat(@round(std.math.clamp(@as(f32, self.a), 0, 1) * 255)),
+        };
+    }
+
+    /// Every channel within 0 to 1, so `toColor` loses only precision.
+    pub fn isStandard(self: ExtendedColor) bool {
+        const all = self.channels();
+        return @reduce(.And, all >= @as(@Vector(4, f32), @splat(0))) and @reduce(.And, all <= @as(@Vector(4, f32), @splat(1)));
+    }
+
+    /// Linear interpolation per channel; `amount` 0 is `self`, 1 is `other`.
+    pub fn mix(self: ExtendedColor, other: ExtendedColor, amount: f32) ExtendedColor {
+        const clamped = std.math.clamp(amount, 0, 1);
+        const from = self.channels();
+        const to = other.channels();
+        const mixed = from + (to - from) * @as(@Vector(4, f32), @splat(clamped));
+        return .linear(mixed[0], mixed[1], mixed[2], mixed[3]);
+    }
+
+    /// As `Color.mixOklab`, without clamping: the middle of two HDR colors
+    /// stays HDR.
+    pub fn mixOklab(self: ExtendedColor, other: ExtendedColor, amount: f32) ExtendedColor {
+        const clamped = std.math.clamp(amount, 0, 1);
+        const from = self.channels();
+        const to = other.channels();
+        const mixed = Oklab.fromLinear(.{ from[0], from[1], from[2] }).mix(.fromLinear(.{ to[0], to[1], to[2] }), clamped).toLinear();
+        return .linear(mixed[0], mixed[1], mixed[2], from[3] + (to[3] - from[3]) * clamped);
+    }
+
+    pub fn eql(self: ExtendedColor, other: ExtendedColor) bool {
+        return std.meta.eql(self, other);
+    }
+
+    fn channels(self: ExtendedColor) @Vector(4, f32) {
+        return .{ self.r, self.g, self.b, self.a };
     }
 };
 
@@ -93,10 +180,8 @@ const Oklab = struct {
     green_red: f32,
     blue_yellow: f32,
 
-    fn fromColor(color: Color) Oklab {
-        const red = linearFromSrgb(color.r);
-        const green = linearFromSrgb(color.g);
-        const blue = linearFromSrgb(color.b);
+    fn fromLinear(rgb: [3]f32) Oklab {
+        const red, const green, const blue = rgb;
         const long = std.math.cbrt(0.4122214708 * red + 0.5363325363 * green + 0.0514459929 * blue);
         const medium = std.math.cbrt(0.2119034982 * red + 0.6806995451 * green + 0.1073969566 * blue);
         const short = std.math.cbrt(0.0883024619 * red + 0.2817188376 * green + 0.6299787005 * blue);
@@ -107,7 +192,15 @@ const Oklab = struct {
         };
     }
 
-    fn toColor(self: Oklab, alpha: u8) Color {
+    fn mix(self: Oklab, other: Oklab, amount: f32) Oklab {
+        return .{
+            .lightness = self.lightness + (other.lightness - self.lightness) * amount,
+            .green_red = self.green_red + (other.green_red - self.green_red) * amount,
+            .blue_yellow = self.blue_yellow + (other.blue_yellow - self.blue_yellow) * amount,
+        };
+    }
+
+    fn toLinear(self: Oklab) [3]f32 {
         const long_root = self.lightness + 0.3963377774 * self.green_red + 0.2158037573 * self.blue_yellow;
         const medium_root = self.lightness - 0.1055613458 * self.green_red - 0.0638541728 * self.blue_yellow;
         const short_root = self.lightness - 0.0894841775 * self.green_red - 1.2914855480 * self.blue_yellow;
@@ -115,24 +208,23 @@ const Oklab = struct {
         const medium = medium_root * medium_root * medium_root;
         const short = short_root * short_root * short_root;
         return .{
-            .r = srgbFromLinear(4.0767416621 * long - 3.3077115913 * medium + 0.2309699292 * short),
-            .g = srgbFromLinear(-1.2684380046 * long + 2.6097574011 * medium - 0.3413193965 * short),
-            .b = srgbFromLinear(-0.0041960863 * long - 0.7034186147 * medium + 1.7076147010 * short),
-            .a = alpha,
+            4.0767416621 * long - 3.3077115913 * medium + 0.2309699292 * short,
+            -1.2684380046 * long + 2.6097574011 * medium - 0.3413193965 * short,
+            -0.0041960863 * long - 0.7034186147 * medium + 1.7076147010 * short,
         };
     }
-
-    fn linearFromSrgb(channel: u8) f32 {
-        const encoded = @as(f32, @floatFromInt(channel)) / 255;
-        return if (encoded <= 0.04045) encoded / 12.92 else std.math.pow(f32, (encoded + 0.055) / 1.055, 2.4);
-    }
-
-    fn srgbFromLinear(linear: f32) u8 {
-        const clamped = std.math.clamp(linear, 0, 1);
-        const encoded = if (clamped <= 0.0031308) clamped * 12.92 else 1.055 * std.math.pow(f32, clamped, 1.0 / 2.4) - 0.055;
-        return @intFromFloat(@round(encoded * 255));
-    }
 };
+
+fn linearFromSrgb(channel: u8) f32 {
+    const encoded = @as(f32, @floatFromInt(channel)) / 255;
+    return if (encoded <= 0.04045) encoded / 12.92 else std.math.pow(f32, (encoded + 0.055) / 1.055, 2.4);
+}
+
+fn srgbFromLinear(linear: f32) u8 {
+    const clamped = std.math.clamp(linear, 0, 1);
+    const encoded = if (clamped <= 0.0031308) clamped * 12.92 else 1.055 * std.math.pow(f32, clamped, 1.0 / 2.4) - 0.055;
+    return @intFromFloat(@round(encoded * 255));
+}
 
 /// As padding, logical: `left` is the start side and `right` the end,
 /// so a mirrored element puts `left` on its right. As a border's widths,
@@ -197,22 +289,27 @@ pub const Rect = struct {
 };
 
 /// Drawn over the element's children, after its subtree.
-pub const Border = struct {
-    color: Color,
-    /// All zero: no outline, so a border can draw only its dividers.
-    widths: Edges = .zero,
-    /// The width of a divider between each two adjacent children in the
-    /// flow, centered in the gap between them and spanning the element
-    /// inside its `widths`. Dividers scroll and clip with the children.
-    ///
-    /// ```zig
-    /// ui.open(.{
-    ///     .layout = .{ .direction = .top_to_bottom, .child_gap = 9 },
-    ///     .decoration = .{ .border = .{ .color = .rgb(0x2c2c38), .between_children = 1 } },
-    /// });
-    /// ```
-    between_children: f32 = 0,
-};
+pub const Border = BorderWith(Color);
+
+/// `Border` in a context's own color type, `Ui.Border`.
+pub fn BorderWith(comptime ColorType: type) type {
+    return struct {
+        color: ColorType,
+        /// All zero: no outline, so a border can draw only its dividers.
+        widths: Edges = .zero,
+        /// The width of a divider between each two adjacent children in the
+        /// flow, centered in the gap between them and spanning the element
+        /// inside its `widths`. Dividers scroll and clip with the children.
+        ///
+        /// ```zig
+        /// ui.open(.{
+        ///     .layout = .{ .direction = .top_to_bottom, .child_gap = 9 },
+        ///     .decoration = .{ .border = .{ .color = .rgb(0x2c2c38), .between_children = 1 } },
+        /// });
+        /// ```
+        between_children: f32 = 0,
+    };
+}
 
 /// How an element's size along one axis is decided. A struct with
 /// declarations rather than a tagged union, because Zig forbids a field and
@@ -384,32 +481,39 @@ pub const Axes = enum(u8) {
 /// ```zig
 /// .effects = &.{ .gradient = .{ .from = .rgb(0x3a1c71), .to = .rgb(0xffaf7b), .angle = std.math.pi / 2 } },
 /// ```
-pub const Gradient = struct {
-    from: Color,
-    to: Color,
-    /// Radians clockwise from left to right: 0 runs from the left edge to
-    /// the right, pi / 2 from the top to the bottom.
-    angle: f32 = 0,
+pub const Gradient = GradientWith(Color);
 
-    /// How far along the gradient `point` lies: 0 takes `from`, 1 takes `to`.
-    pub fn amountAt(self: Gradient, bounds: Rect, point: [2]f32) f32 {
-        const along: [2]f32 = .{ @cos(self.angle), @sin(self.angle) };
-        const length = @abs(bounds.width * along[0]) + @abs(bounds.height * along[1]);
-        if (length == 0) return 0.5;
-        const from_center: [2]f32 = .{ point[0] - (bounds.x + bounds.width / 2), point[1] - (bounds.y + bounds.height / 2) };
-        return std.math.clamp((from_center[0] * along[0] + from_center[1] * along[1]) / length + 0.5, 0, 1);
-    }
+/// `Gradient` in a context's own color type, `Ui.Gradient`.
+pub fn GradientWith(comptime ColorType: type) type {
+    return struct {
+        const Self = @This();
 
-    pub fn colorAt(self: Gradient, bounds: Rect, point: [2]f32) Color {
-        return self.from.mixOklab(self.to, self.amountAt(bounds, point));
-    }
+        from: ColorType,
+        to: ColorType,
+        /// Radians clockwise from left to right: 0 runs from the left edge to
+        /// the right, pi / 2 from the top to the bottom.
+        angle: f32 = 0,
 
-    /// The gradient's average over the element it covers, which is its
-    /// middle at any angle: the gradient is symmetric about the center.
-    pub fn meanColor(self: Gradient) Color {
-        return self.from.mixOklab(self.to, 0.5);
-    }
-};
+        /// How far along the gradient `point` lies: 0 takes `from`, 1 takes `to`.
+        pub fn amountAt(self: Self, bounds: Rect, point: [2]f32) f32 {
+            const along: [2]f32 = .{ @cos(self.angle), @sin(self.angle) };
+            const length = @abs(bounds.width * along[0]) + @abs(bounds.height * along[1]);
+            if (length == 0) return 0.5;
+            const from_center: [2]f32 = .{ point[0] - (bounds.x + bounds.width / 2), point[1] - (bounds.y + bounds.height / 2) };
+            return std.math.clamp((from_center[0] * along[0] + from_center[1] * along[1]) / length + 0.5, 0, 1);
+        }
+
+        pub fn colorAt(self: Self, bounds: Rect, point: [2]f32) ColorType {
+            return self.from.mixOklab(self.to, self.amountAt(bounds, point));
+        }
+
+        /// The gradient's average over the element it covers, which is its
+        /// middle at any angle: the gradient is symmetric about the center.
+        pub fn meanColor(self: Self) ColorType {
+            return self.from.mixOklab(self.to, 0.5);
+        }
+    };
+}
 
 /// A shadow cast beneath an element in the shape of its rounded box, or
 /// with no offset, a glow around it. In layout units.
@@ -418,30 +522,37 @@ pub const Gradient = struct {
 /// .effects = &.{ .shadow = .{ .color = .rgba(0x00000060), .offset = .{ 0, 4 }, .blur = 12 } },
 /// .effects = &.{ .shadow = .glow(.rgba(0x4080ff80), 16) },
 /// ```
-pub const Shadow = struct {
-    color: Color,
-    /// Right and down from the element.
-    offset: [2]f32 = .{ 0, 0 },
-    /// How far the edge fades, outward from where it would end unblurred.
-    blur: f32 = 0,
-    /// How far the shape grows on every side before it is blurred.
-    spread: f32 = 0,
+pub const Shadow = ShadowWith(Color);
 
-    pub fn glow(color: Color, radius: f32) Shadow {
-        return .{ .color = color, .blur = radius };
-    }
+/// `Shadow` in a context's own color type, `Ui.Shadow`.
+pub fn ShadowWith(comptime ColorType: type) type {
+    return struct {
+        const Self = @This();
 
-    /// Everything the shadow may paint, for an element at `bounds`.
-    pub fn paintedBounds(self: Shadow, bounds: Rect) Rect {
-        const reach = larger(0, self.spread + self.blur);
-        return .{
-            .x = bounds.x + self.offset[0] - reach,
-            .y = bounds.y + self.offset[1] - reach,
-            .width = bounds.width + 2 * reach,
-            .height = bounds.height + 2 * reach,
-        };
-    }
-};
+        color: ColorType,
+        /// Right and down from the element.
+        offset: [2]f32 = .{ 0, 0 },
+        /// How far the edge fades, outward from where it would end unblurred.
+        blur: f32 = 0,
+        /// How far the shape grows on every side before it is blurred.
+        spread: f32 = 0,
+
+        pub fn glow(color: ColorType, radius: f32) Self {
+            return .{ .color = color, .blur = radius };
+        }
+
+        /// Everything the shadow may paint, for an element at `bounds`.
+        pub fn paintedBounds(self: Self, bounds: Rect) Rect {
+            const reach = larger(0, self.spread + self.blur);
+            return .{
+                .x = bounds.x + self.offset[0] - reach,
+                .y = bounds.y + self.offset[1] - reach,
+                .width = bounds.width + 2 * reach,
+                .height = bounds.height + 2 * reach,
+            };
+        }
+    };
+}
 
 /// Frosted glass: what zui drew beneath an element, blurred within its
 /// rounded box, then `tint` over it. A renderer that does not blur draws
@@ -450,13 +561,18 @@ pub const Shadow = struct {
 /// ```zig
 /// .effects = &.{ .backdrop_blur = .{ .radius = 12, .tint = .rgba(0xffffff40) } },
 /// ```
-pub const BackdropBlur = struct {
-    /// The blur's standard deviation in layout units, as CSS's `blur()`
-    /// takes it. Only what lies within the element is sampled, its edges
-    /// extended, so nothing outside it bleeds in.
-    radius: f32,
-    tint: Color,
-};
+pub const BackdropBlur = BackdropBlurWith(Color);
+
+/// `BackdropBlur` in a context's own color type, `Ui.BackdropBlur`.
+pub fn BackdropBlurWith(comptime ColorType: type) type {
+    return struct {
+        /// The blur's standard deviation in layout units, as CSS's `blur()`
+        /// takes it. Only what lies within the element is sampled, its edges
+        /// extended, so nothing outside it bleeds in.
+        radius: f32,
+        tint: ColorType,
+    };
+}
 
 /// A map of the plane that keeps straight lines straight: `point` goes to
 /// `x_axis * point[0] + y_axis * point[1] + offset`.
@@ -560,20 +676,20 @@ pub const Transform = struct {
 
 /// Background, border and corner radius: what an element draws behind and
 /// around its children.
-pub const Decoration = DecorationWith(void);
+pub const Decoration = DecorationWith(Color, void);
 
-/// `Decoration` with a `material`, the renderer's own shader drawn in
-/// place of the background, for a context whose `MaterialHandle` is not
-/// `void`; with `void` it is `Decoration`. A context names it
+/// `Decoration` in a context's own color type, and with a `material`, the
+/// renderer's own shader drawn in place of the background, for a context
+/// whose `MaterialHandle` is not `void`. A context names it
 /// `Ui.Decoration`.
 ///
 /// ```zig
 /// ui.open(.{ .decoration = .{ .background = .rgb(0x202830), .material = .frosted_glass, .corner_radius = .all(8) } });
 /// ```
-pub fn DecorationWith(comptime MaterialHandle: type) type {
+pub fn DecorationWith(comptime ColorType: type, comptime MaterialHandle: type) type {
     return struct {
-        background: ?Color = null,
-        border: ?Border = null,
+        background: ?ColorType = null,
+        border: ?BorderWith(ColorType) = null,
         corner_radius: CornerRadius = .zero,
         /// Drawn over the bounds, in the corners, by a renderer that
         /// declares `.material`. Any other draws `background` instead, so
@@ -599,15 +715,20 @@ pub fn DecorationWith(comptime MaterialHandle: type) type {
 ///
 /// ui.box(.{ .style = styles.card, .effects = &card_effects });
 /// ```
-pub const Effects = struct {
-    /// Painted over the background, so a translucent gradient tints it.
-    gradient: ?Gradient = null,
-    shadow: ?Shadow = null,
-    /// Painted under the background, so only a translucent one shows it.
-    backdrop_blur: ?BackdropBlur = null,
-    /// Applies to the element's children and other effects too.
-    transform: ?Transform = null,
-};
+pub const Effects = EffectsWith(Color);
+
+/// `Effects` in a context's own color type, `Ui.Effects`.
+pub fn EffectsWith(comptime ColorType: type) type {
+    return struct {
+        /// Painted over the background, so a translucent gradient tints it.
+        gradient: ?GradientWith(ColorType) = null,
+        shadow: ?ShadowWith(ColorType) = null,
+        /// Painted under the background, so only a translucent one shows it.
+        backdrop_blur: ?BackdropBlurWith(ColorType) = null,
+        /// Applies to the element's children and other effects too.
+        transform: ?Transform = null,
+    };
+}
 
 /// An element's layout and decoration together, made once at comptime with
 /// `zui.static` and referenced by every element that uses it.
@@ -733,6 +854,11 @@ pub fn MeasureKey(comptime FontId: type) type {
 }
 
 pub fn TextStyle(comptime FontId: type) type {
+    return TextStyleWith(FontId, Color);
+}
+
+/// `TextStyle` in a context's own color type, `Ui.TextStyle`.
+pub fn TextStyleWith(comptime FontId: type, comptime ColorType: type) type {
     return struct {
         font: FontId = std.mem.zeroes(FontId),
         /// Layout units, not points.
@@ -741,7 +867,7 @@ pub fn TextStyle(comptime FontId: type) type {
         letter_spacing: f32 = 0,
         /// 0 means the height the text contract measures for the font.
         line_height: f32 = 0,
-        color: Color = .black,
+        color: ColorType = .black,
         wrap: TextWrap = .words,
         alignment: Alignment = .start,
     };

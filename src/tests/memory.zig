@@ -231,7 +231,7 @@ test "ids from an earlier use of the same frame memory are forgotten" {
         ui.box(.{ .id = .indexed("later", 0) });
         const frame = ui.endFrame();
         defer ui.release(frame);
-        try testing.expectEqual(@as(u32, 0), frame.diagnostics.duplicate_ids);
+        try testing.expectEqual(@as(u16, 0), frame.diagnostics.duplicate_ids);
         try testing.expect(frame.rectOf(.indexed("earlier", 150)) != null);
         try testing.expectEqual(@as(?zui.Rect, null), frame.rectOf(.indexed("earlier", 1)));
         try testing.expectEqual(@as(?zui.Rect, null), frame.rectOf(.indexed("earlier", 199)));
@@ -249,5 +249,5 @@ test "release builds count duplicate ids" {
     ui.box(.{ .id = .of("twice") });
     const frame = ui.endFrame();
     defer ui.release(frame);
-    try testing.expectEqual(@as(u32, 1), frame.diagnostics.duplicate_ids);
+    try testing.expectEqual(@as(u16, 1), frame.diagnostics.duplicate_ids);
 }

@@ -203,6 +203,7 @@ pub const Config = struct {
     MaterialHandle: type = void,  // the renderer's shader or material
     FontId: type = u16,           // the renderer's font identifier, passed back in `MeasureKey`
     Color: type = zui.Color,      // `zui.Color` (RGBA8) or `zui.ExtendedColor` (HDR)
+    extended_color: bool = false, // the renderer's `zui_extended_color`; without it the commands carry `zui.Color`
 
     features: Features = .{},
     /// Frames alive at once: one being declared plus those a renderer holds.
@@ -1016,8 +1017,11 @@ pub const Border = struct {
 `Element`, `Decoration` and `Style` are each context's own,
 `Ui.Element`, `Ui.Decoration` and `Ui.Style`, and are the same types as
 `zui.Element`, `zui.Decoration` and `zui.Style` unless the config's
-`MaterialHandle` is set. Without a handle `material` is `void`, so every
+`MaterialHandle` or `Color` is set. Without a handle `material` is `void`, so every
 context without materials shares one set of types and stores nothing more.
+So are the types that hold a color, `Ui.Border`, `Ui.Effects`,
+`Ui.Gradient`, `Ui.Shadow`, `Ui.BackdropBlur` and `Ui.TextStyle`, each
+`zui`'s own unless `Color` is `ExtendedColor`.
 A helper that builds an element for a context with materials names
 `Ui.Element`, since a literal passed through `anytype` is not converted to it.
 
@@ -1450,7 +1454,7 @@ never sees it:
 | backdrop blur | a rectangle in its tint |
 | transform | the untransformed element; its hit region stays untransformed |
 | material | the element's fallback background |
-| `ExtendedColor` without `.extended_color` | the color clamped to `Color` |
+| `ExtendedColor` without `zui_extended_color` | the color clamped to `Color`, and `Diagnostics.clamped_colors` set when that changed it |
 
 Capabilities are comptime-known, so lowering costs nothing when the
 renderer supports everything, and each lowering is listed in the frame's
@@ -1982,8 +1986,10 @@ way:
 - **`Color`** is RGBA8, with `.rgb(0x3366ff)`, `.rgba`, `.mix`, and
   comptime conversion from hex. **`ExtendedColor`** is 4×f16 linear
   scRGB, where 1.0 is SDR white; values above it are HDR, values outside
-  0–1 are wide gamut. `Config.Color` picks one, so an SDR application
-  keeps 4-byte colors.
+  0–1 are wide gamut. It has `Color`'s helpers, `.rgb` and `.rgba`
+  decoding sRGB, so a theme compiles with either, plus `.linear(r, g, b,
+  a)` and `toColor`, which clamps. `Config.Color` picks one, so an SDR
+  application keeps 4-byte colors.
 - **A theme is the application's struct.** zui has no theme registry, no
   inheritance and no cascade. Switching theme passes a different value,
   and costs a field read.

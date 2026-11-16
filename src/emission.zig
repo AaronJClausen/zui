@@ -95,7 +95,7 @@ fn emit(comptime Ui: type, ui: *Ui, frame: *Ui.Frame, comptime walk: Walk) void 
         const element: Ui.Index = @intCast(index);
         while (levels[depth].subtree_end <= element) : (depth -= 1) emitter.leave(&levels[depth], levels[depth - 1].z);
         const effect_index = next_effect;
-        const effects: ?*const style.Effects = if (walk == .with_effects and element == next_effect_element) taken: {
+        const effects: ?*const Ui.Effects = if (walk == .with_effects and element == next_effect_element) taken: {
             const effects = &frame.effects[next_effect];
             next_effect += 1;
             next_effect_element = if (next_effect < frame.effect_count) frame.effect_elements[next_effect] else Ui.none_index;
@@ -174,6 +174,27 @@ fn Emitter(comptime Ui: type) type {
             const right = @round((rect.x + rect.width) * scale) * inverse;
             const bottom = @round((rect.y + rect.height) * scale) * inverse;
             return .{ .x = left, .y = top, .width = right - left, .height = bottom - top };
+        }
+
+        /// `color` itself, unless the renderer draws only `Color`, when an
+        /// `ExtendedColor` is clamped and the frame told if that changed it.
+        inline fn commandColor(self: *Self, color: Ui.Color) Ui.CommandColor {
+            if (comptime !Ui.clamps_colors) return color;
+            if (!color.isStandard()) self.frame.diagnostics.clamped_colors = true;
+            return color.toColor();
+        }
+
+        inline fn commandTextStyle(self: *Self, text_style: Ui.TextStyle) @FieldType(Ui.RenderCommand.Text, "style") {
+            if (comptime !Ui.clamps_colors) return text_style;
+            return .{
+                .font = text_style.font,
+                .size = text_style.size,
+                .letter_spacing = text_style.letter_spacing,
+                .line_height = text_style.line_height,
+                .color = self.commandColor(text_style.color),
+                .wrap = text_style.wrap,
+                .alignment = text_style.alignment,
+            };
         }
 
         fn push(self: *Self, command: Ui.RenderCommand) void {
@@ -255,7 +276,7 @@ fn Emitter(comptime Ui: type) type {
 
         /// Returns the level the element's subtree is drawn in, or null if
         /// that is the parent's level unchanged.
-        inline fn enter(self: *Self, element: Ui.Index, parent: Level, viewport: style.Rect, effects: ?*const style.Effects, effect_index: u32) ?Level {
+        inline fn enter(self: *Self, element: Ui.Index, parent: Level, viewport: style.Rect, effects: ?*const Ui.Effects, effect_index: u32) ?Level {
             const frame = self.frame;
             const flags = frame.flags[element];
             const floating = flags.floating;
@@ -298,7 +319,7 @@ fn Emitter(comptime Ui: type) type {
                 .none => {},
                 .image => if (Ui.RenderCommand.has_image and drawn) {
                     const image = frame.imageOf(element);
-                    self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = level.z, .payload = .{ .image = .{ .handle = image.handle, .tint = image.tint, .corner_radius = image.corner_radius } } });
+                    self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = level.z, .payload = .{ .image = .{ .handle = image.handle, .tint = self.commandColor(image.tint), .corner_radius = image.corner_radius } } });
                 },
                 .custom => if (Ui.RenderCommand.has_custom and drawn) self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = level.z, .payload = .{ .custom = frame.customs[frame.content_index[element]] } }),
                 .text => if (Ui.has_text) self.emitText(element, element_id, level),
@@ -371,14 +392,14 @@ fn Emitter(comptime Ui: type) type {
 
         /// Culled by what it paints rather than by the element's box, so the
         /// shadow of an element just outside the clip still shows inside it.
-        fn emitShadow(self: *Self, element: Ui.Index, bounds: style.Rect, clip: style.Rect, z: i16, shadow: *const style.Shadow) void {
+        fn emitShadow(self: *Self, element: Ui.Index, bounds: style.Rect, clip: style.Rect, z: i16, shadow: *const Ui.Shadow) void {
             if (comptime !Ui.RenderCommand.commands.contains(.shadow)) {
                 self.frame.diagnostics.lowered.insert(.shadow);
                 return;
             }
             if (shadow.paintedBounds(bounds).intersect(clip).isEmpty()) return;
             self.push(.{ .bounds = self.snap(bounds), .id = self.frame.element_id[element], .z = z, .payload = .{ .shadow = .{
-                .color = shadow.color,
+                .color = self.commandColor(shadow.color),
                 .offset = shadow.offset,
                 .blur = shadow.blur,
                 .spread = shadow.spread,
@@ -386,17 +407,17 @@ fn Emitter(comptime Ui: type) type {
             } } });
         }
 
-        fn emitGradient(self: *Self, element: Ui.Index, bounds: style.Rect, z: i16, gradient: *const style.Gradient) void {
+        fn emitGradient(self: *Self, element: Ui.Index, bounds: style.Rect, z: i16, gradient: *const Ui.Gradient) void {
             const element_id = self.frame.element_id[element];
             const corner_radius = self.cornerRadiusOf(element);
             if (comptime !Ui.RenderCommand.commands.contains(.gradient)) {
                 self.frame.diagnostics.lowered.insert(.gradient);
-                self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = z, .payload = .{ .rectangle = .{ .color = gradient.meanColor(), .corner_radius = corner_radius } } });
+                self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = z, .payload = .{ .rectangle = .{ .color = self.commandColor(gradient.meanColor()), .corner_radius = corner_radius } } });
                 return;
             }
             self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = z, .payload = .{ .gradient = .{
-                .from = gradient.from,
-                .to = gradient.to,
+                .from = self.commandColor(gradient.from),
+                .to = self.commandColor(gradient.to),
                 .angle = gradient.angle,
                 .corner_radius = corner_radius,
             } } });
@@ -407,7 +428,7 @@ fn Emitter(comptime Ui: type) type {
                 if (comptime Ui.RenderCommand.commands.contains(.material)) {
                     self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = z, .payload = .{ .material = .{
                         .handle = material,
-                        .fallback = decoration.background orelse .transparent,
+                        .fallback = self.commandColor(decoration.background orelse .transparent),
                         .corner_radius = decoration.corner_radius,
                     } } });
                     return;
@@ -415,21 +436,21 @@ fn Emitter(comptime Ui: type) type {
                 self.frame.diagnostics.lowered.insert(.material);
             }
             if (decoration.background) |color| {
-                self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = z, .payload = .{ .rectangle = .{ .color = color, .corner_radius = decoration.corner_radius } } });
+                self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = z, .payload = .{ .rectangle = .{ .color = self.commandColor(color), .corner_radius = decoration.corner_radius } } });
             }
         }
 
-        fn emitBackdropBlur(self: *Self, element: Ui.Index, bounds: style.Rect, z: i16, blur: *const style.BackdropBlur) void {
+        fn emitBackdropBlur(self: *Self, element: Ui.Index, bounds: style.Rect, z: i16, blur: *const Ui.BackdropBlur) void {
             const element_id = self.frame.element_id[element];
             const corner_radius = self.cornerRadiusOf(element);
             if (comptime !Ui.RenderCommand.commands.contains(.backdrop_blur)) {
                 self.frame.diagnostics.lowered.insert(.backdrop_blur);
-                self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = z, .payload = .{ .rectangle = .{ .color = blur.tint, .corner_radius = corner_radius } } });
+                self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = z, .payload = .{ .rectangle = .{ .color = self.commandColor(blur.tint), .corner_radius = corner_radius } } });
                 return;
             }
             self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = z, .payload = .{ .backdrop_blur = .{
                 .radius = blur.radius,
-                .tint = blur.tint,
+                .tint = self.commandColor(blur.tint),
                 .corner_radius = corner_radius,
             } } });
         }
@@ -509,7 +530,7 @@ fn Emitter(comptime Ui: type) type {
                 if (line_bounds.intersect(level.clip).isEmpty()) continue;
                 self.push(.{ .bounds = self.snap(line_bounds), .id = element_id, .z = level.z, .payload = .{ .text = .{
                     .content = frame.text_bytes[line.start..line.end],
-                    .style = record.style,
+                    .style = self.commandTextStyle(record.style),
                     .line = @intCast(line_number),
                 } } });
             }
@@ -544,7 +565,7 @@ fn Emitter(comptime Ui: type) type {
             const bounds = self.rectOf(element);
             if (bounds.intersect(level.outer_clip).isEmpty()) return;
             self.push(.{ .bounds = self.snap(bounds), .id = frame.element_id[element], .z = level.z, .payload = .{ .border = .{
-                .color = border.color,
+                .color = self.commandColor(border.color),
                 .widths = widths,
                 .corner_radius = found.corner_radius,
             } } });
@@ -580,7 +601,7 @@ fn Emitter(comptime Ui: type) type {
         /// with the children they separate. The gap between two children is
         /// from the later start to the earlier end, so a reversed row's
         /// dividers sit in its gaps too.
-        fn emitDividers(self: *Self, element: Ui.Index, border: *const style.Border, level: *const Level) void {
+        fn emitDividers(self: *Self, element: Ui.Index, border: *const Ui.Border, level: *const Level) void {
             if (layout.wraps(Ui, self.frame, element)) return self.emitLineDividers(element, border, level);
             const frame = self.frame;
             const along: usize = @intFromEnum(frame.layoutOf(element).direction.axis());
@@ -610,7 +631,7 @@ fn Emitter(comptime Ui: type) type {
 
         /// In a wrapping row, a divider between two children of a line is
         /// as tall as the line, and one between two lines spans the row.
-        fn emitLineDividers(self: *Self, element: Ui.Index, border: *const style.Border, level: *const Level) void {
+        fn emitLineDividers(self: *Self, element: Ui.Index, border: *const Ui.Border, level: *const Level) void {
             const frame = self.frame;
             const bounds = self.rectOf(element);
             const widths = border.widths;
@@ -653,9 +674,9 @@ fn Emitter(comptime Ui: type) type {
             return (gap_start + gap_end - thickness) / 2;
         }
 
-        fn pushDivider(self: *Self, element: Ui.Index, border: *const style.Border, level: *const Level, divider: style.Rect) void {
+        fn pushDivider(self: *Self, element: Ui.Index, border: *const Ui.Border, level: *const Level, divider: style.Rect) void {
             if (divider.intersect(level.clip).isEmpty()) return;
-            self.push(.{ .bounds = self.snap(divider), .id = self.frame.element_id[element], .z = level.z, .payload = .{ .rectangle = .{ .color = border.color, .corner_radius = .zero } } });
+            self.push(.{ .bounds = self.snap(divider), .id = self.frame.element_id[element], .z = level.z, .payload = .{ .rectangle = .{ .color = self.commandColor(border.color), .corner_radius = .zero } } });
         }
     };
 }

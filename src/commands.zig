@@ -18,6 +18,8 @@ pub const CommandSet = std.EnumSet(OptionalCommand);
 /// What a `RenderCommand`'s payload union is generated from.
 pub const CommandOptions = struct {
     TextStyle: type,
+    /// `zui.Color`, or `zui.ExtendedColor` for a renderer that draws HDR.
+    Color: type = style.Color,
     /// `void` leaves out the `image` command.
     ImageHandle: type = void,
     /// `void` leaves out the `custom` command.
@@ -71,12 +73,12 @@ pub fn RenderCommand(comptime options: CommandOptions) type {
         pub const commands = options.commands;
 
         pub const Rectangle = struct {
-            color: style.Color,
+            color: options.Color,
             corner_radius: style.CornerRadius,
         };
 
         pub const Border = struct {
-            color: style.Color,
+            color: options.Color,
             widths: style.Edges,
             corner_radius: style.CornerRadius,
         };
@@ -91,7 +93,7 @@ pub fn RenderCommand(comptime options: CommandOptions) type {
         pub const Image = struct {
             handle: options.ImageHandle,
             /// Multiplied into the image's pixels; white leaves them unchanged.
-            tint: style.Color = .white,
+            tint: options.Color = .white,
             corner_radius: style.CornerRadius = .zero,
         };
 
@@ -100,14 +102,14 @@ pub fn RenderCommand(comptime options: CommandOptions) type {
         /// color. A renderer that interpolates in sRGB draws it in strips,
         /// each its `colorAt`.
         pub const Gradient = struct {
-            from: style.Color,
-            to: style.Color,
+            from: options.Color,
+            to: options.Color,
             /// Radians clockwise from left to right.
             angle: f32 = 0,
             corner_radius: style.CornerRadius = .zero,
 
-            pub fn colorAt(self: Gradient, bounds: style.Rect, point: [2]f32) style.Color {
-                const gradient: style.Gradient = .{ .from = self.from, .to = self.to, .angle = self.angle };
+            pub fn colorAt(self: Gradient, bounds: style.Rect, point: [2]f32) options.Color {
+                const gradient: style.GradientWith(options.Color) = .{ .from = self.from, .to = self.to, .angle = self.angle };
                 return gradient.colorAt(bounds, point);
             }
         };
@@ -116,7 +118,7 @@ pub fn RenderCommand(comptime options: CommandOptions) type {
         /// at the bounds, as `zui.Shadow` describes it; lowered to nothing.
         /// It paints outside the bounds, by its offset, spread and blur.
         pub const Shadow = struct {
-            color: style.Color,
+            color: options.Color,
             offset: [2]f32 = .{ 0, 0 },
             blur: f32 = 0,
             spread: f32 = 0,
@@ -128,7 +130,7 @@ pub fn RenderCommand(comptime options: CommandOptions) type {
         /// then draws `tint` over it; lowered to a rectangle in `tint`.
         pub const BackdropBlur = struct {
             radius: f32,
-            tint: style.Color,
+            tint: options.Color,
             corner_radius: style.CornerRadius = .zero,
         };
 
@@ -141,7 +143,7 @@ pub fn RenderCommand(comptime options: CommandOptions) type {
         /// a rectangle in `fallback`.
         pub const Material = struct {
             handle: options.MaterialHandle,
-            fallback: style.Color,
+            fallback: options.Color,
             corner_radius: style.CornerRadius = .zero,
         };
     };

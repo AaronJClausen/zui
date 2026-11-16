@@ -1983,7 +1983,7 @@ fn present(renderer: *Renderer, surface: zui.Surface, frame: *const Ui.Frame) !v
       <ul class="gap-list">
         <li><b><code class="z">features.semantics</code> <span class="pill partial">Declared only</span></b><span><code class="z">Frame.semantics()</code> is always empty. Accessibility is V2.</span></li>
         <li><b><code class="z">features.safety_sweeps</code> <span class="pill partial">Declared only</span></b><span>The flag exists, but it doesn't change behaviour yet. Sweeps are V3.</span></li>
-        <li><b>Extended color</b><span>Colors are RGBA8 only. <code class="z">zui.ExtendedColor</code> for HDR is G6.</span></li>
+        <li><b>Extended color <span class="pill partial">Clamped only</span></b><span><code class="z">Config.Color = zui.ExtendedColor</code> declares colors brighter than SDR white or outside sRGB, as <code class="z">.linear(4, 4, 4, 1)</code> or with <code class="z">Color</code>'s own <code class="z">.rgb(0x3366ff)</code>, and every type that holds a color follows it: <code class="z">Ui.Decoration</code>, <code class="z">Ui.Border</code>, <code class="z">Ui.Effects</code>, <code class="z">Ui.TextStyle</code>. No renderer draws them yet, so each is clamped to <code class="z">zui.Color</code> as it is emitted, and <code class="z">frame.diagnostics.clamped_colors</code> says when that changed one. A renderer that draws them, and an FP16 output, are the rest of G6.</span></li>
         <li><b>Still to come</b><span>A visual inspector <code>zui_debug</code> (V1), motion, multi-line text editing, skins, and more hosts (macOS, Linux, web).</span></li>
       </ul>
     </section>

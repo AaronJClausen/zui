@@ -399,6 +399,19 @@ test "contextConfig takes the renderer's commands, payload types and text contra
     try testing.expect(config.ImageHandle == u32 and config.MaterialHandle == u8 and config.CustomData == void);
     try testing.expect(config.FontId == Renderer.FontId and config.Text == Renderer);
     try testing.expectEqual(@as(u32, 32), config.limits.max_elements);
+    try testing.expect(!config.extended_color);
+}
+
+test "contextConfig takes the renderer's extended color, and keeps the colors the overrides declare in" {
+    const Renderer = struct {
+        pub const zui_surfaces: zui.SurfaceKinds = .initOne(.offscreen);
+        pub const zui_extended_color = true;
+
+        pub fn zuiSubmit(_: *@This(), _: zui.Surface, _: anytype) !void {}
+    };
+    const config = zui_app.contextConfig(Renderer, .{ .Color = zui.ExtendedColor });
+    try testing.expect(config.extended_color and config.Color == zui.ExtendedColor);
+    try testing.expect(zui.Context(config).CommandColor == zui.ExtendedColor);
 }
 
 /// Fonts that are not the renderer, at 6 by 12 units a byte.
