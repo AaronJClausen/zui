@@ -215,7 +215,9 @@ Implemented so far:
   and zui-sokol takes them as declared and encodes them into its 8-bit
   sRGB target. A host and a renderer that both declare `.scrgb_fp16`
   in `zui_output_formats` open the window in it, and its surface says
-  which format the host chose; none draws FP16 yet, so no output is HDR.
+  which format the host chose. The renderer suite reads an FP16 target
+  back and checks HDR white there, but no backend draws FP16 yet, so no
+  output is HDR.
   An element or frame without effects pays nothing for them.
 
 The reference backend, its adapter host and the demo application live in

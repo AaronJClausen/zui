@@ -2193,7 +2193,10 @@ edit (the message quotes the `.hidden = true` line that fixes it).
     that produces it (§13.3). The scene is declared in `ExtendedColor`,
     with a box of HDR white: a renderer that declares
     `zui_extended_color` is given each color as declared and must encode
-    it for its target, and any other is given it clamped (§13.3).
+    it for its target, and any other is given it clamped (§13.3). A
+    harness that opens a `.scrgb_fp16` target reads it back as
+    `ExtendedColor`, where HDR white must read back as declared, brighter
+    than SDR white, and translucent colors blend in linear light.
   - `expectHostConforms(Host, harness, .{ .io })` checks that a poll
     keeps the application's zoom and reports posted events in order,
     that `.immediately` does not wait, that a wake before a wait ends it

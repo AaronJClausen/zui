@@ -3003,11 +3003,18 @@ put the saving, so the item waits on one that does.
   `surface.outputFormat()` reads it. The host suite fails a surface in a
   format the host does not declare. The core's hot paths are untouched;
   zui-raylib, zui-sokol and zui-terminal pass against this checkout.
-  Next: the renderer suite reads HDR white back brighter than SDR white
-  from a harness with an `.scrgb_fp16` target (its test renderer
-  first, then zui-sokol), and zui-host's Windows host opens an FP16
-  swapchain and reports `hdr_headroom`, whose *Done when* needs a run on
-  Windows with an HDR display.
+  The fifth slice reads an `.scrgb_fp16` target back: a harness whose
+  `beginDraw` returns a surface in that format is read through its
+  optional `extendedPixel`, HDR white must read back as `hdr_white`
+  (four times SDR white, within the tolerance's share of it), and a
+  translucent color is expected to blend, and a blur to average, in
+  linear light there. The suite's own test renderer draws into either
+  target and passes in both; one that clamps HDR into its FP16 target
+  fails, reading back SDR white. Nothing outside `zui_testing` changed.
+  Next: zui-sokol draws into an FP16 target and passes the suite there,
+  and zui-host's Windows host opens an FP16 swapchain and reports
+  `hdr_headroom`, whose *Done when* needs a run on Windows with an HDR
+  display.
 
 C1 generated the optional commands' variants; each item here adds the
 declaration that produces its command and the lowering for renderers that
