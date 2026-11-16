@@ -1832,7 +1832,7 @@ These names compile, but they don't do anything yet. This list is from `ARCHITEC
 
 - **`features.semantics`** *(declared only)*: `Frame.semantics()` is always empty. Accessibility is V2.
 - **`features.safety_sweeps`** *(declared only)*: The flag exists, but it doesn't change behaviour yet. Sweeps are V3.
-- **Extended color** *(clamped only)*: `Config.Color = zui.ExtendedColor` declares colors brighter than SDR white or outside sRGB, as `.linear(4, 4, 4, 1)` or with `Color`'s own `.rgb(0x3366ff)`, and every type that holds a color follows it: `Ui.Decoration`, `Ui.Border`, `Ui.Effects`, `Ui.TextStyle`. No renderer draws them yet, so each is clamped to `zui.Color` as it is emitted, and `frame.diagnostics.clamped_colors` says when that changed one. A renderer that draws them, and an FP16 output, are the rest of G6.
+- **Extended color** *(clamped only)*: `Config.Color = zui.ExtendedColor` declares colors brighter than SDR white or outside sRGB, as `.linear(4, 4, 4, 1)` or with `Color`'s own `.rgb(0x3366ff)`, and every type that holds a color follows it: `Ui.Decoration`, `Ui.Border`, `Ui.Effects`, `Ui.TextStyle`. No renderer draws them yet, so each is clamped to `zui.Color` as it is emitted, and `frame.diagnostics.clamped_colors` says when that changed one. `zui_wire` carries them unclamped when its context's renderer draws them, and the renderer suite declares its scene in them, with a box of HDR white. A renderer that draws them, and an FP16 output, are the rest of G6.
 - **Still to come**: A visual inspector `zui_debug` (V1), motion, multi-line text editing, skins, and more hosts (macOS, Linux, web).
 
 <a id="dx"></a>

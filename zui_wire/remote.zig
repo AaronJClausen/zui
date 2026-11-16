@@ -319,15 +319,16 @@ pub fn Host(comptime Ui: type) type {
 
 /// The renderer for a `Host(Ui)`: it draws nothing itself, but writes each
 /// frame to the client, whose own renderer draws it. It declares the
-/// commands `Ui` generates, so `zui_app` reports what the client's
-/// renderer lowers, and takes the application's text contract to put its
-/// fingerprint in the stream's header.
+/// commands and colors `Ui` generates, so `zui_app` reports what the
+/// client's renderer lowers and clamps, and takes the application's text
+/// contract to put its fingerprint in the stream's header.
 pub fn Renderer(comptime Ui: type) type {
     return struct {
         const Self = @This();
 
         pub const zui_surfaces: zui.SurfaceKinds = .initOne(.wire);
         pub const zui_commands: zui.CommandSet = Ui.RenderCommand.commands;
+        pub const zui_extended_color = Ui.CommandColor == zui.ExtendedColor;
         pub const zui_render_thread = true;
 
         /// `init(self, surface, text)` when `Ui` measures text, so the

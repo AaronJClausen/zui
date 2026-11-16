@@ -29,6 +29,11 @@ fn declareScene(ui: anytype) void {
 test "ExtendedColor names sRGB colors exactly, and clamps HDR and wide gamut into Color" {
     try testing.expectEqual(zui.Color.rgb(0x202830), panel.toColor());
     try testing.expectEqual(zui.Color.rgba(0x3366ff80), zui.ExtendedColor.rgba(0x3366ff80).toColor());
+    for (0..256) |channel| {
+        const level: u8 = @intCast(channel);
+        const gray: zui.Color = .{ .r = level, .g = level, .b = level, .a = level };
+        try testing.expectEqual(gray, zui.ExtendedColor.fromColor(gray).toColor());
+    }
     try testing.expectEqual(zui.Color.white, hdr_white.toColor());
     try testing.expectEqual(zui.Color.rgb(0xff0000), wide_red.toColor());
     try testing.expect(panel.isStandard());

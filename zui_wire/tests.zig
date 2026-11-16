@@ -224,82 +224,107 @@ test "a delivery's own decoding error means the stream is malformed" {
     try testing.expectError(error.Malformed, decoder.next(&reader));
 }
 
-const EveryCommandUi = zui.Context(.{
-    .limits = small_limits,
-    .Text = Text,
-    .ImageHandle = u32,
-    .CustomData = struct { camera: [3]f32, layer: u8 },
-    .MaterialHandle = enum(u8) { glass, frost },
-    .commands = .initFull(),
-});
-const Command = EveryCommandUi.RenderCommand;
+fn EveryCommandUiIn(comptime Color: type) type {
+    return zui.Context(.{
+        .limits = small_limits,
+        .Text = Text,
+        .ImageHandle = u32,
+        .CustomData = struct { camera: [3]f32, layer: u8 },
+        .MaterialHandle = enum(u8) { glass, frost },
+        .commands = .initFull(),
+        .Color = Color,
+        .extended_color = Color == zui.ExtendedColor,
+    });
+}
+const EveryCommandUi = EveryCommandUiIn(zui.Color);
 
 /// What an encoder reads of a frame, as a decoded frame provides it.
-const ListedFrame = struct {
-    number: u64,
-    params: zui.FrameParams,
-    host_requests: zui.HostRequests = .{},
-    list: []const Command,
+fn ListedFrame(comptime ListedCommand: type) type {
+    return struct {
+        number: u64,
+        params: zui.FrameParams,
+        host_requests: zui.HostRequests = .{},
+        list: []const ListedCommand,
 
-    pub fn commands(self: *const ListedFrame) []const Command {
-        return self.list;
-    }
+        pub fn commands(self: *const @This()) []const ListedCommand {
+            return self.list;
+        }
 
-    pub fn requests(self: *const ListedFrame) zui.HostRequests {
-        return self.host_requests;
-    }
-};
+        pub fn requests(self: *const @This()) zui.HostRequests {
+            return self.host_requests;
+        }
+    };
+}
 
 const rounded: zui.CornerRadius = .all(4);
-const text_style: EveryCommandUi.TextStyle = .{ .size = 14, .color = .white, .letter_spacing = 0.5 };
-const every_command = [_]Command{
-    .{ .bounds = .{ .x = 0, .y = 0, .width = 100, .height = 50 }, .id = 1, .payload = .{ .rectangle = .{ .color = .rgb(0x202020), .corner_radius = rounded } } },
-    .{ .bounds = .{ .x = 0, .y = 0, .width = 100, .height = 50 }, .id = 1, .payload = .{ .clip_begin = .{ .x = 0, .y = 0, .width = 100, .height = 50 } } },
-    .{ .bounds = .{ .x = 4, .y = 4, .width = 60, .height = 14 }, .id = 2, .payload = .{ .text = .{ .content = "first line", .style = text_style, .line = 0 } } },
-    .{ .bounds = .{ .x = 4, .y = 18, .width = 60, .height = 14 }, .id = 2, .payload = .{ .text = .{ .content = "second", .style = text_style, .line = 1 } } },
-    .{ .bounds = .{ .x = 70, .y = 4, .width = 20, .height = 20 }, .id = 3, .payload = .{ .image = .{ .handle = 42 } } },
-    .{ .bounds = .{ .x = 0, .y = 30, .width = 50, .height = 20 }, .id = 4, .payload = .{ .custom = .{ .camera = .{ 1, 2, 3 }, .layer = 2 } } },
-    .{ .bounds = .{ .x = 0, .y = 0, .width = 100, .height = 50 }, .id = 5, .z = 3, .payload = .{ .gradient = .{ .from = .black, .to = .white, .angle = 1.5, .corner_radius = rounded } } },
-    .{ .bounds = .{ .x = 0, .y = 0, .width = 100, .height = 50 }, .id = 5, .z = 3, .payload = .{ .shadow = .{ .color = .rgba(0x00000080), .offset = .{ 0, 2 }, .blur = 8, .spread = 1 } } },
-    .{ .bounds = .{ .x = 0, .y = 0, .width = 100, .height = 50 }, .id = 6, .z = -1, .payload = .{ .backdrop_blur = .{ .radius = 12, .tint = .rgba(0xffffff40) } } },
-    .{ .bounds = .{ .x = 0, .y = 0, .width = 100, .height = 50 }, .id = 7, .payload = .{ .transform_begin = .{ .translation = .{ 5, 5 }, .scale = .{ 2, 2 }, .rotation = 0.3 } } },
-    .{ .bounds = .{ .x = 0, .y = 0, .width = 100, .height = 50 }, .id = 7, .payload = .{ .material = .{ .handle = .frost, .fallback = .white } } },
-    .{ .bounds = .{ .x = 0, .y = 0, .width = 100, .height = 50 }, .id = 7, .payload = .transform_end },
-    .{ .bounds = .{ .x = 0, .y = 0, .width = 100, .height = 50 }, .id = 1, .payload = .clip_end },
-    .{ .bounds = .{ .x = 0, .y = 0, .width = 100, .height = 50 }, .id = 1, .payload = .{ .border = .{ .color = .black, .widths = .all(1), .corner_radius = rounded } } },
-};
 
-/// `every_command` after a frame of changes: scrolled, retitled, an
-/// element added at the front and the image removed.
-const changed_commands = changed: {
-    var commands: [every_command.len]Command = every_command;
-    commands[2].bounds.y -= 10;
-    commands[2].payload.text.content = "first line, edited";
-    commands[3].bounds.y -= 10;
-    commands[6].z = 4;
-    const added: Command = .{ .bounds = .{ .x = 0, .y = 0, .width = 10, .height = 10 }, .id = 99, .payload = .{ .rectangle = .{ .color = .white, .corner_radius = .zero } } };
-    break :changed [_]Command{added} ++ commands[0..4] ++ commands[5..];
-};
+fn CommandsFor(comptime Ui: type) type {
+    return struct {
+        const RenderCommand = Ui.RenderCommand;
+        const text_style: Ui.TextStyle = .{ .size = 14, .color = .white, .letter_spacing = 0.5 };
+        const brightest: Ui.CommandColor = if (Ui.CommandColor == zui.ExtendedColor) .linear(4, 2, -0.25, 1) else .white;
 
-test "every kind of command round-trips, whole and as changes from the frame before" {
-    for (std.meta.tags(std.meta.Tag(Command.Payload))) |kind| {
-        for (every_command) |command| {
+        const every = [_]RenderCommand{
+            .{ .bounds = .{ .x = 0, .y = 0, .width = 100, .height = 50 }, .id = 1, .payload = .{ .rectangle = .{ .color = .rgb(0x202020), .corner_radius = rounded } } },
+            .{ .bounds = .{ .x = 0, .y = 0, .width = 100, .height = 50 }, .id = 1, .payload = .{ .clip_begin = .{ .x = 0, .y = 0, .width = 100, .height = 50 } } },
+            .{ .bounds = .{ .x = 4, .y = 4, .width = 60, .height = 14 }, .id = 2, .payload = .{ .text = .{ .content = "first line", .style = text_style, .line = 0 } } },
+            .{ .bounds = .{ .x = 4, .y = 18, .width = 60, .height = 14 }, .id = 2, .payload = .{ .text = .{ .content = "second", .style = text_style, .line = 1 } } },
+            .{ .bounds = .{ .x = 70, .y = 4, .width = 20, .height = 20 }, .id = 3, .payload = .{ .image = .{ .handle = 42 } } },
+            .{ .bounds = .{ .x = 0, .y = 30, .width = 50, .height = 20 }, .id = 4, .payload = .{ .custom = .{ .camera = .{ 1, 2, 3 }, .layer = 2 } } },
+            .{ .bounds = .{ .x = 0, .y = 0, .width = 100, .height = 50 }, .id = 5, .z = 3, .payload = .{ .gradient = .{ .from = .black, .to = brightest, .angle = 1.5, .corner_radius = rounded } } },
+            .{ .bounds = .{ .x = 0, .y = 0, .width = 100, .height = 50 }, .id = 5, .z = 3, .payload = .{ .shadow = .{ .color = .rgba(0x00000080), .offset = .{ 0, 2 }, .blur = 8, .spread = 1 } } },
+            .{ .bounds = .{ .x = 0, .y = 0, .width = 100, .height = 50 }, .id = 6, .z = -1, .payload = .{ .backdrop_blur = .{ .radius = 12, .tint = .rgba(0xffffff40) } } },
+            .{ .bounds = .{ .x = 0, .y = 0, .width = 100, .height = 50 }, .id = 7, .payload = .{ .transform_begin = .{ .translation = .{ 5, 5 }, .scale = .{ 2, 2 }, .rotation = 0.3 } } },
+            .{ .bounds = .{ .x = 0, .y = 0, .width = 100, .height = 50 }, .id = 7, .payload = .{ .material = .{ .handle = .frost, .fallback = .white } } },
+            .{ .bounds = .{ .x = 0, .y = 0, .width = 100, .height = 50 }, .id = 7, .payload = .transform_end },
+            .{ .bounds = .{ .x = 0, .y = 0, .width = 100, .height = 50 }, .id = 1, .payload = .clip_end },
+            .{ .bounds = .{ .x = 0, .y = 0, .width = 100, .height = 50 }, .id = 1, .payload = .{ .border = .{ .color = .black, .widths = .all(1), .corner_radius = rounded } } },
+        };
+
+        /// `every` after a frame of changes: scrolled, retitled, an element
+        /// added at the front and the image removed.
+        const changed = changed: {
+            var commands: [every.len]RenderCommand = every;
+            commands[2].bounds.y -= 10;
+            commands[2].payload.text.content = "first line, edited";
+            commands[3].bounds.y -= 10;
+            commands[6].z = 4;
+            const added: RenderCommand = .{ .bounds = .{ .x = 0, .y = 0, .width = 10, .height = 10 }, .id = 99, .payload = .{ .rectangle = .{ .color = .white, .corner_radius = .zero } } };
+            break :changed [_]RenderCommand{added} ++ commands[0..4] ++ commands[5..];
+        };
+    };
+}
+
+const Command = EveryCommandUi.RenderCommand;
+const ListedCommands = ListedFrame(Command);
+const every_command = CommandsFor(EveryCommandUi).every;
+const changed_commands = CommandsFor(EveryCommandUi).changed;
+
+test "every kind of command round-trips, whole and as changes from the frame before, in either color" {
+    inline for (.{ zui.Color, zui.ExtendedColor }) |Color| try expectCommandsRoundTrip(EveryCommandUiIn(Color));
+}
+
+fn expectCommandsRoundTrip(comptime Ui: type) !void {
+    const fixtures = CommandsFor(Ui);
+    for (std.meta.tags(std.meta.Tag(fixtures.RenderCommand.Payload))) |kind| {
+        for (fixtures.every) |command| {
             if (std.meta.activeTag(command.payload) == kind) break;
         } else return error.CommandKindNotCovered;
     }
 
     const params: zui.FrameParams = .{ .now = at(16), .viewport = .{ 100, 50 }, .scale = 2 };
-    const frames = [_]ListedFrame{
-        .{ .number = 10, .params = params, .list = &every_command },
-        .{ .number = 11, .params = params, .list = changed_commands, .host_requests = .{ .cursor = .text, .text_input = .{ .caret = .{ .x = 4, .y = 8, .width = 1, .height = 14 } } } },
-        .{ .number = 12, .params = params, .list = changed_commands, .host_requests = .{ .cursor = .text, .text_input = .{ .caret = .{ .x = 4, .y = 8, .width = 1, .height = 14 } } } },
-        .{ .number = 14, .params = .{ .now = at(48), .viewport = .{ 120, 50 }, .scale = 2 }, .list = &every_command },
+    const typing: zui.HostRequests = .{ .cursor = .text, .text_input = .{ .caret = .{ .x = 4, .y = 8, .width = 1, .height = 14 } } };
+    const frames = [_]ListedFrame(fixtures.RenderCommand){
+        .{ .number = 10, .params = params, .list = &fixtures.every },
+        .{ .number = 11, .params = params, .list = fixtures.changed, .host_requests = typing },
+        .{ .number = 12, .params = params, .list = fixtures.changed, .host_requests = typing },
+        .{ .number = 14, .params = .{ .now = at(48), .viewport = .{ 120, 50 }, .scale = 2 }, .list = &fixtures.every },
         .{ .number = 15, .params = params, .list = &.{} },
-        .{ .number = 3, .params = params, .list = every_command[0..3] },
+        .{ .number = 3, .params = params, .list = fixtures.every[0..3] },
     };
     var stream: Stream = .init();
     defer stream.deinit();
-    var encoder: zui_wire.Encoder(EveryCommandUi) = try .init(testing.allocator);
+    var encoder: zui_wire.Encoder(Ui) = try .init(testing.allocator);
     defer encoder.deinit(testing.allocator);
     var sizes: [frames.len]usize = undefined;
     for (&frames, &sizes) |*frame, *size| {
@@ -312,7 +337,7 @@ test "every kind of command round-trips, whole and as changes from the frame bef
     try testing.expect(sizes[3] < sizes[0] / 2);
 
     var reader = stream.reader();
-    var decoder: zui_wire.Decoder(EveryCommandUi) = try .init(testing.allocator, .of(EveryCommandUi));
+    var decoder: zui_wire.Decoder(Ui) = try .init(testing.allocator, .of(Ui));
     defer decoder.deinit(testing.allocator);
     for (&frames) |*frame| {
         const decoded = (try decoder.next(&reader)).?.frame;
@@ -323,16 +348,21 @@ test "every kind of command round-trips, whole and as changes from the frame bef
     }
 }
 
+test "the wire's renderer declares the colors its context's commands carry" {
+    try testing.expect(!zui_wire.Renderer(EveryCommandUiIn(zui.Color)).zui_extended_color);
+    try testing.expect(zui_wire.Renderer(EveryCommandUiIn(zui.ExtendedColor)).zui_extended_color);
+}
+
 test "a key frame lets a reader join a stream, and a change before any frame is malformed" {
     var stream: Stream = .init();
     defer stream.deinit();
     var encoder: zui_wire.Encoder(EveryCommandUi) = try .init(testing.allocator);
     defer encoder.deinit(testing.allocator);
     const params: zui.FrameParams = .{ .now = at(16), .viewport = .{ 100, 50 } };
-    try encoder.writeFrame(stream.writer(), &ListedFrame{ .number = 0, .params = params, .list = &every_command });
+    try encoder.writeFrame(stream.writer(), &ListedCommands{ .number = 0, .params = params, .list = &every_command });
     const joined_at = stream.out.written().len;
-    try encoder.writeKeyFrame(stream.writer(), &ListedFrame{ .number = 1, .params = params, .list = changed_commands });
-    try encoder.writeFrame(stream.writer(), &ListedFrame{ .number = 2, .params = params, .list = &every_command });
+    try encoder.writeKeyFrame(stream.writer(), &ListedCommands{ .number = 1, .params = params, .list = changed_commands });
+    try encoder.writeFrame(stream.writer(), &ListedCommands{ .number = 2, .params = params, .list = &every_command });
 
     var decoder: zui_wire.Decoder(EveryCommandUi) = try .init(testing.allocator, .of(EveryCommandUi));
     defer decoder.deinit(testing.allocator);
@@ -355,7 +385,7 @@ test "a message beyond the decoder's capacity fails instead of overrunning it" {
     defer stream.deinit();
     var encoder: zui_wire.Encoder(EveryCommandUi) = try .init(testing.allocator);
     defer encoder.deinit(testing.allocator);
-    try encoder.writeFrame(stream.writer(), &ListedFrame{ .number = 0, .params = .{ .now = at(0), .viewport = .{ 1, 1 } }, .list = &every_command });
+    try encoder.writeFrame(stream.writer(), &ListedCommands{ .number = 0, .params = .{ .now = at(0), .viewport = .{ 1, 1 } }, .list = &every_command });
     try encoder.writeRecord(stream.writer(), &.{ .params = .{ .now = at(0), .viewport = .{ 1, 1 } }, .events = &every_event });
 
     var capacity: zui_wire.Capacity = .of(EveryCommandUi);

@@ -2181,7 +2181,10 @@ edit (the message quotes the `.hidden = true` line that fixes it).
     an earlier frame set outlives it, and the scene's colors within a
     tolerance, an image's tint multiplied into it and its corners left
     undrawn. An optional command joins the scene with the declaration
-    that produces it (§13.3).
+    that produces it (§13.3). The scene is declared in `ExtendedColor`,
+    with a box of HDR white: a renderer that declares
+    `zui_extended_color` is given each color as declared and must encode
+    it for its target, and any other is given it clamped (§13.3).
   - `expectHostConforms(Host, harness, .{ .io })` checks that a poll
     keeps the application's zoom and reports posted events in order,
     that `.immediately` does not wait, that a wake before a wait ends it

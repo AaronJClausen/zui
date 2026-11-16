@@ -54,6 +54,11 @@ pub const scene_colors = struct {
     pub const material_fallback: zui.Color = .rgb(0x008080);
 };
 
+/// Four times SDR white, declared on a box of its own. A renderer that
+/// draws only `Color` is given it clamped, and an SDR target holds no more
+/// than SDR white, so either way it reads back as `Color.white`.
+pub const hdr_white: zui.ExtendedColor = .linear(4, 4, 4, 1);
+
 /// The raised box's shadow is cast this far right and down, unblurred.
 pub const shadow_offset: f32 = 16;
 
@@ -79,7 +84,7 @@ pub const turned_size: [2]f32 = .{ 48, 16 };
 ///   halves turned a quarter clockwise, which the core lowers unless the
 ///   renderer declares `.gradient`, `.shadow`, `.backdrop_blur` or
 ///   `.transform`, and a material when it has a `MaterialHandle`, lowered
-///   unless it declares `.material`;
+///   unless it declares `.material`, and a box of `hdr_white`;
 /// - clips nested 100 deep, then a fill drawn after all of them ended;
 /// - commands of no size, and far outside the viewport;
 /// - an empty frame;
@@ -97,12 +102,19 @@ pub const turned_size: [2]f32 = .{ 48, 16 };
 /// stripe, and neither reaches beyond its bounds; a declared transform
 /// stands the turned box up with its start at the top, and a lowered one
 /// leaves it as laid out; a declared material is drawn in place of its
-/// fallback background and a lowered one is that background. Without it, the suite
-/// checks only that each frame is drawn without an error.
+/// fallback background and a lowered one is that background; HDR white is
+/// at least SDR white. Without it, the suite checks only that each frame is
+/// drawn without an error.
+///
+/// The scene is declared in `zui.ExtendedColor`. A renderer that declares
+/// `zui_extended_color` is given it as declared, and must encode it for its
+/// target as `ExtendedColor.toColor` does; any other is given it clamped
+/// to `zui.Color`.
 ///
 /// `harness` is a pointer to a value that declares:
 /// - `pub const config: zui.Config`, the backend's own (its `Text`,
-///   commands and payload types); the suite sets the limits and `Sources`;
+///   commands and payload types); the suite sets the limits, `Sources`,
+///   `Color` and `extended_color`;
 /// - `fn renderer(self) *Renderer`;
 /// - `fn text(self) *config.Text`, when `config.Text` is not `void`;
 /// - `fn beginDraw(self, size: [2]u32) zui.Surface`: prepare a target of
@@ -149,10 +161,12 @@ const Scene = enum {
 const scenes = [_]Scene{ .reference, .deep_clips, .out_of_bounds, .empty, .reference };
 const deep_clip_count = 100;
 
-const ids = zui.ids(.{ "panel", "fill", "frame", "outer", "inner", "picture", "custom", "gradient", "raised", "stripes", "turned", "material", "nest", "after_nest" });
+const ids = zui.ids(.{ "panel", "fill", "frame", "outer", "inner", "picture", "custom", "gradient", "raised", "stripes", "turned", "material", "hdr", "nest", "after_nest" });
 
-fn suiteConfig(comptime backend: zui.Config) zui.Config {
+fn suiteConfig(comptime Renderer: type, comptime backend: zui.Config) zui.Config {
     var config = backend;
+    config.Color = zui.ExtendedColor;
+    config.extended_color = @hasDecl(Renderer, "zui_extended_color") and Renderer.zui_extended_color;
     config.limits = .{
         .max_elements = 256,
         .max_depth = deep_clip_count + 16,
@@ -170,7 +184,7 @@ fn suiteConfig(comptime backend: zui.Config) zui.Config {
 pub fn findRendererViolation(comptime Renderer: type, harness: anytype, conformance: RendererConformance) !?RendererViolation {
     comptime zui.checkRenderer(Renderer);
     const Harness = @typeInfo(@TypeOf(harness)).pointer.child;
-    const config = suiteConfig(Harness.config);
+    const config = suiteConfig(Renderer, Harness.config);
     const Ui = zui.Context(config);
     const Payloads = struct { image: config.ImageHandle, custom: config.CustomData, material: config.MaterialHandle };
 
@@ -223,7 +237,7 @@ fn fixedSize(width: f32, height: f32) zui.Sizing2 {
 /// Laid out at 16-unit steps, so that a renderer drawing cells of 8 by 16,
 /// as a terminal does, covers whole cells.
 fn declareReference(ui: anytype, comptime config: zui.Config, payloads: anytype) void {
-    ui.open(.{ .id = ids.panel, .decoration = .{ .background = scene_colors.background }, .layout = .{
+    ui.open(.{ .id = ids.panel, .decoration = .{ .background = declared(scene_colors.background) }, .layout = .{
         .sizing = fixedSize(renderer_viewport[0], renderer_viewport[1]),
         .padding = .all(16),
         .child_gap = 16,
@@ -231,36 +245,36 @@ fn declareReference(ui: anytype, comptime config: zui.Config, payloads: anytype)
     } });
     {
         ui.open(.{ .layout = .{ .child_gap = 16 } });
-        ui.box(.{ .id = ids.fill, .decoration = .{ .background = scene_colors.fill }, .layout = .{ .sizing = fixedSize(64, 48) } });
-        ui.box(.{ .id = ids.frame, .decoration = .{ .border = .{ .color = scene_colors.border, .widths = .all(4) } }, .layout = .{ .sizing = fixedSize(64, 64) } });
+        ui.box(.{ .id = ids.fill, .decoration = .{ .background = declared(scene_colors.fill) }, .layout = .{ .sizing = fixedSize(64, 48) } });
+        ui.box(.{ .id = ids.frame, .decoration = .{ .border = .{ .color = declared(scene_colors.border), .widths = .all(4) } }, .layout = .{ .sizing = fixedSize(64, 64) } });
         ui.open(.{ .id = ids.outer, .clip = .both, .layout = .{ .sizing = fixedSize(64, 64), .direction = .top_to_bottom } });
         {
             ui.open(.{ .id = ids.inner, .clip = .both, .layout = .{ .sizing = fixedSize(32, 32) } });
-            ui.box(.{ .decoration = .{ .background = scene_colors.inner_clip }, .layout = .{ .sizing = fixedSize(128, 128) } });
+            ui.box(.{ .decoration = .{ .background = declared(scene_colors.inner_clip) }, .layout = .{ .sizing = fixedSize(128, 128) } });
             ui.close();
-            ui.box(.{ .decoration = .{ .background = scene_colors.outer_clip }, .layout = .{ .sizing = fixedSize(128, 128) } });
+            ui.box(.{ .decoration = .{ .background = declared(scene_colors.outer_clip) }, .layout = .{ .sizing = fixedSize(128, 128) } });
         }
         ui.close();
-        ui.box(.{ .id = ids.after_nest, .decoration = .{ .background = scene_colors.after_clips }, .layout = .{ .sizing = fixedSize(32, 32) } });
+        ui.box(.{ .id = ids.after_nest, .decoration = .{ .background = declared(scene_colors.after_clips) }, .layout = .{ .sizing = fixedSize(32, 32) } });
         ui.close();
     }
     {
         ui.open(.{ .layout = .{ .child_gap = 16 } });
         if (config.ImageHandle != void) ui.image(.{
             .handle = payloads.image,
-            .tint = scene_colors.image_tint,
+            .tint = declared(scene_colors.image_tint),
             .corner_radius = .all(image_corner_radius),
         }, .{ .id = ids.picture, .layout = .{ .sizing = fixedSize(32, 32) } });
         if (config.CustomData != void) ui.custom(payloads.custom, .{ .id = ids.custom, .layout = .{ .sizing = fixedSize(32, 32) } });
-        if (config.Text != void) ui.text("MMMM", .{ .color = scene_colors.text });
+        if (config.Text != void) ui.text("MMMM", .{ .color = declared(scene_colors.text) });
         ui.box(.{ .id = ids.gradient, .layout = .{ .sizing = fixedSize(64, 32) }, .effects = &.{
-            .gradient = .{ .from = scene_colors.gradient_from, .to = scene_colors.gradient_to },
+            .gradient = .{ .from = declared(scene_colors.gradient_from), .to = declared(scene_colors.gradient_to) },
         } });
         ui.box(.{
             .id = ids.raised,
             .layout = .{ .sizing = fixedSize(32, 32) },
-            .decoration = .{ .background = scene_colors.raised },
-            .effects = &.{ .shadow = .{ .color = scene_colors.shadow, .offset = .{ shadow_offset, shadow_offset } } },
+            .decoration = .{ .background = declared(scene_colors.raised) },
+            .effects = &.{ .shadow = .{ .color = declared(scene_colors.shadow), .offset = .{ shadow_offset, shadow_offset } } },
         });
         ui.close();
     }
@@ -269,48 +283,53 @@ fn declareReference(ui: anytype, comptime config: zui.Config, payloads: anytype)
         const stripes_size = fixedSize(stripe_width * stripe_count, 32);
         ui.open(.{ .id = ids.stripes, .layout = .{ .sizing = stripes_size } });
         for (0..stripe_count) |stripe| ui.box(.{
-            .decoration = .{ .background = if (stripe % 2 == 0) scene_colors.stripe_even else scene_colors.stripe_odd },
+            .decoration = .{ .background = declared(if (stripe % 2 == 0) scene_colors.stripe_even else scene_colors.stripe_odd) },
             .layout = .{ .sizing = fixedSize(stripe_width, 32) },
         });
         ui.box(.{ .floating = .{}, .layout = .{ .sizing = stripes_size }, .effects = &.{
-            .backdrop_blur = .{ .radius = stripe_width, .tint = scene_colors.frost },
+            .backdrop_blur = .{ .radius = stripe_width, .tint = declared(scene_colors.frost) },
         } });
         ui.close();
         ui.open(.{ .id = ids.turned, .layout = .{ .sizing = fixedSize(turned_size[0], turned_size[1]) }, .effects = &.{
             .transform = .{ .rotation = std.math.pi / 2.0 },
         } });
         const half = fixedSize(turned_size[0] / 2, turned_size[1]);
-        ui.box(.{ .decoration = .{ .background = scene_colors.turned_start }, .layout = .{ .sizing = half } });
-        ui.box(.{ .decoration = .{ .background = scene_colors.turned_end }, .layout = .{ .sizing = half } });
+        ui.box(.{ .decoration = .{ .background = declared(scene_colors.turned_start) }, .layout = .{ .sizing = half } });
+        ui.box(.{ .decoration = .{ .background = declared(scene_colors.turned_end) }, .layout = .{ .sizing = half } });
         ui.close();
         if (config.MaterialHandle != void) ui.box(.{
             .id = ids.material,
             .layout = .{ .sizing = fixedSize(32, 32) },
-            .decoration = .{ .background = scene_colors.material_fallback, .material = payloads.material },
+            .decoration = .{ .background = declared(scene_colors.material_fallback), .material = payloads.material },
         });
+        ui.box(.{ .id = ids.hdr, .layout = .{ .sizing = fixedSize(32, 32) }, .decoration = .{ .background = hdr_white } });
         ui.close();
     }
     ui.close();
 }
 
+fn declared(color: zui.Color) zui.ExtendedColor {
+    return .fromColor(color);
+}
+
 fn declareDeepClips(ui: anytype) void {
     const half: zui.Sizing2 = fixedSize(renderer_viewport[0], renderer_viewport[1] / 2);
-    ui.open(.{ .id = ids.panel, .decoration = .{ .background = scene_colors.background }, .layout = .{ .direction = .top_to_bottom } });
+    ui.open(.{ .id = ids.panel, .decoration = .{ .background = declared(scene_colors.background) }, .layout = .{ .direction = .top_to_bottom } });
     for (0..deep_clip_count) |depth| ui.open(.{ .id = if (depth == 0) ids.nest else .none, .clip = .both, .layout = .{ .sizing = half } });
-    ui.box(.{ .decoration = .{ .background = scene_colors.inner_clip }, .layout = .{ .sizing = half } });
+    ui.box(.{ .decoration = .{ .background = declared(scene_colors.inner_clip) }, .layout = .{ .sizing = half } });
     for (0..deep_clip_count) |_| ui.close();
-    ui.box(.{ .id = ids.after_nest, .decoration = .{ .background = scene_colors.after_clips }, .layout = .{ .sizing = half } });
+    ui.box(.{ .id = ids.after_nest, .decoration = .{ .background = declared(scene_colors.after_clips) }, .layout = .{ .sizing = half } });
     ui.close();
 }
 
 fn declareOutOfBounds(ui: anytype) void {
-    ui.open(.{ .decoration = .{ .background = scene_colors.background }, .layout = .{ .child_gap = 16 } });
-    ui.box(.{ .decoration = .{ .background = scene_colors.fill }, .layout = .{ .sizing = fixedSize(0, 0) } });
+    ui.open(.{ .decoration = .{ .background = declared(scene_colors.background) }, .layout = .{ .child_gap = 16 } });
+    ui.box(.{ .decoration = .{ .background = declared(scene_colors.fill) }, .layout = .{ .sizing = fixedSize(0, 0) } });
     ui.open(.{ .clip = .both, .layout = .{ .sizing = fixedSize(0, 0) } });
-    ui.box(.{ .decoration = .{ .background = scene_colors.fill }, .layout = .{ .sizing = fixedSize(48, 48) } });
+    ui.box(.{ .decoration = .{ .background = declared(scene_colors.fill) }, .layout = .{ .sizing = fixedSize(48, 48) } });
     ui.close();
-    ui.box(.{ .decoration = .{ .background = scene_colors.fill, .border = .{ .color = scene_colors.border, .widths = .all(2) } }, .layout = .{ .sizing = fixedSize(100_000, 24) } });
-    ui.box(.{ .decoration = .{ .background = scene_colors.fill }, .layout = .{ .sizing = fixedSize(48, 48) } });
+    ui.box(.{ .decoration = .{ .background = declared(scene_colors.fill), .border = .{ .color = declared(scene_colors.border), .widths = .all(2) } }, .layout = .{ .sizing = fixedSize(100_000, 24) } });
+    ui.box(.{ .decoration = .{ .background = declared(scene_colors.fill) }, .layout = .{ .sizing = fixedSize(48, 48) } });
     ui.close();
 }
 
@@ -431,7 +450,8 @@ fn PixelCheck(comptime Harness: type) type {
             for (expectations) |expectation| {
                 if (self.expect(expectation)) |violation| return violation;
             }
-            return self.material(frame, config);
+            if (self.material(frame, config)) |violation| return violation;
+            return self.expect(.{ .at = center(frame.rectOf(ids.hdr).?), .color = .white, .what = "HDR white, at least SDR white," });
         }
 
         fn material(self: Self, frame: anytype, comptime config: zui.Config) ?RendererViolation {
@@ -503,17 +523,17 @@ fn hex(color: zui.Color) u24 {
     return @as(u24, color.r) << 16 | @as(u24, color.g) << 8 | color.b;
 }
 
-const Flaw = enum { none, forgets_enclosing_clip, ignores_image_decoration, interpolates_gradient_in_srgb, tints_without_blurring, turns_the_wrong_way, draws_material_fallback };
+const Flaw = enum { none, forgets_enclosing_clip, ignores_image_decoration, interpolates_gradient_in_srgb, tints_without_blurring, turns_the_wrong_way, draws_material_fallback, skips_srgb_encoding };
 
 /// A software renderer into its own pixels, the plainest that conforms:
 /// fills ignore corner radii, text fills its bounds, an image is its
 /// handle's color times its tint, inside its rounded corners, a gradient
 /// is each pixel's `colorAt`, a shadow is unblurred, a backdrop blur is a
 /// box average as wide as its radius each way, and each pixel is drawn
-/// from where its center lies in the transforms' units, and a material is
-/// its handle's color. Each `Flaw` is a
-/// mistake the suite must catch.
-fn PixelRenderer(comptime flaw: Flaw, comptime commands: zui.CommandSet) type {
+/// from where its center lies in the transforms' units, a material is its
+/// handle's color, and with `extended_color` each color is encoded into
+/// its pixels' `Color`. Each `Flaw` is a mistake the suite must catch.
+fn PixelRenderer(comptime flaw: Flaw, comptime commands: zui.CommandSet, comptime extended_color: bool) type {
     return struct {
         const Self = @This();
         const width = renderer_viewport[0];
@@ -523,6 +543,7 @@ fn PixelRenderer(comptime flaw: Flaw, comptime commands: zui.CommandSet) type {
 
         pub const zui_surfaces: zui.SurfaceKinds = .initOne(.offscreen);
         pub const zui_commands = commands;
+        pub const zui_extended_color = extended_color;
         pub const ImageHandle = zui.Color;
         pub const MaterialHandle = zui.Color;
 
@@ -550,15 +571,15 @@ fn PixelRenderer(comptime flaw: Flaw, comptime commands: zui.CommandSet) type {
             for (frame.commands()) |command| {
                 const bounds = command.bounds;
                 switch (command.payload) {
-                    .rectangle => |rectangle| self.fill(bounds, rectangle.color),
+                    .rectangle => |rectangle| self.fill(bounds, encoded(rectangle.color)),
                     .border => |border| {
                         const widths = border.widths;
-                        self.fill(.{ .x = bounds.x, .y = bounds.y, .width = bounds.width, .height = widths.top }, border.color);
-                        self.fill(.{ .x = bounds.x, .y = bounds.y + bounds.height - widths.bottom, .width = bounds.width, .height = widths.bottom }, border.color);
-                        self.fill(.{ .x = bounds.x, .y = bounds.y, .width = widths.left, .height = bounds.height }, border.color);
-                        self.fill(.{ .x = bounds.x + bounds.width - widths.right, .y = bounds.y, .width = widths.right, .height = bounds.height }, border.color);
+                        self.fill(.{ .x = bounds.x, .y = bounds.y, .width = bounds.width, .height = widths.top }, encoded(border.color));
+                        self.fill(.{ .x = bounds.x, .y = bounds.y + bounds.height - widths.bottom, .width = bounds.width, .height = widths.bottom }, encoded(border.color));
+                        self.fill(.{ .x = bounds.x, .y = bounds.y, .width = widths.left, .height = bounds.height }, encoded(border.color));
+                        self.fill(.{ .x = bounds.x + bounds.width - widths.right, .y = bounds.y, .width = widths.right, .height = bounds.height }, encoded(border.color));
                     },
-                    .text => |text| self.fill(bounds, text.style.color),
+                    .text => |text| self.fill(bounds, encoded(text.style.color)),
                     .clip_begin => |rect| {
                         self.clips[self.clip_depth] = .{ .rect = rect, .to_local = self.to_local[self.transform_depth] };
                         self.clip_depth += 1;
@@ -578,7 +599,7 @@ fn PixelRenderer(comptime flaw: Flaw, comptime commands: zui.CommandSet) type {
                         if (flaw == .ignores_image_decoration)
                             self.fill(bounds, payload.handle)
                         else
-                            self.fillRounded(bounds, multiply(payload.handle, payload.tint), payload.corner_radius);
+                            self.fillRounded(bounds, multiply(payload.handle, encoded(payload.tint)), payload.corner_radius);
                     } else if (comptime std.mem.eql(u8, @tagName(kind), "gradient")) {
                         self.fillGradient(bounds, payload);
                     } else if (comptime std.mem.eql(u8, @tagName(kind), "shadow")) {
@@ -588,12 +609,12 @@ fn PixelRenderer(comptime flaw: Flaw, comptime commands: zui.CommandSet) type {
                             .width = bounds.width + 2 * payload.spread,
                             .height = bounds.height + 2 * payload.spread,
                         };
-                        self.fillRounded(shape, payload.color, payload.corner_radius);
+                        self.fillRounded(shape, encoded(payload.color), payload.corner_radius);
                     } else if (comptime std.mem.eql(u8, @tagName(kind), "backdrop_blur")) {
                         if (flaw != .tints_without_blurring) self.blurBeneath(bounds, payload.radius, payload.corner_radius);
-                        self.fillRounded(bounds, payload.tint, payload.corner_radius);
+                        self.fillRounded(bounds, encoded(payload.tint), payload.corner_radius);
                     } else if (comptime std.mem.eql(u8, @tagName(kind), "material")) {
-                        self.fillRounded(bounds, if (flaw == .draws_material_fallback) payload.fallback else payload.handle, payload.corner_radius);
+                        self.fillRounded(bounds, if (flaw == .draws_material_fallback) encoded(payload.fallback) else payload.handle, payload.corner_radius);
                     } else comptime unreachable,
                 }
             }
@@ -648,6 +669,17 @@ fn PixelRenderer(comptime flaw: Flaw, comptime commands: zui.CommandSet) type {
             return true;
         }
 
+        fn encoded(color: anytype) zui.Color {
+            if (@TypeOf(color) == zui.Color) return color;
+            if (flaw == .skips_srgb_encoding) return .{
+                .r = @intFromFloat(std.math.clamp(@as(f32, color.r), 0, 1) * 255),
+                .g = @intFromFloat(std.math.clamp(@as(f32, color.g), 0, 1) * 255),
+                .b = @intFromFloat(std.math.clamp(@as(f32, color.b), 0, 1) * 255),
+                .a = @intFromFloat(std.math.clamp(@as(f32, color.a), 0, 1) * 255),
+            };
+            return color.toColor();
+        }
+
         fn fill(self: *Self, rect: zui.Rect, color: zui.Color) void {
             self.fillRounded(rect, color, .zero);
         }
@@ -695,9 +727,9 @@ fn PixelRenderer(comptime flaw: Flaw, comptime commands: zui.CommandSet) type {
             while (pixels.next()) |pixel| {
                 if (!insideRounded(rect, gradient.corner_radius, pixel.at)) continue;
                 self.pixels[pixel.index] = if (flaw == .interpolates_gradient_in_srgb)
-                    gradient.from.mix(gradient.to, (zui.Gradient{ .from = gradient.from, .to = gradient.to, .angle = gradient.angle }).amountAt(rect, pixel.at))
+                    encoded(gradient.from).mix(encoded(gradient.to), (zui.Gradient{ .from = encoded(gradient.from), .to = encoded(gradient.to), .angle = gradient.angle }).amountAt(rect, pixel.at))
                 else
-                    gradient.colorAt(rect, pixel.at);
+                    encoded(gradient.colorAt(rect, pixel.at));
             }
         }
     };
@@ -780,16 +812,18 @@ const FixedText = struct {
 
 const draws_effects: zui.CommandSet = .initMany(&.{ .gradient, .shadow, .backdrop_blur, .transform, .material });
 
-test "a renderer that draws every frame right passes the suite, with gradients, shadows, backdrop blurs, transforms and materials drawn or lowered" {
+test "a renderer that draws every frame right passes the suite, with gradients, shadows, backdrop blurs, transforms and materials drawn or lowered, and HDR colors drawn or clamped" {
     inline for (comptime .{ draws_effects, zui.CommandSet.initEmpty() }) |commands| {
-        const Renderer = PixelRenderer(.none, commands);
-        var harness: PixelHarness(Renderer) = .{};
-        try expectRendererConforms(Renderer, &harness, .{ .gpa = std.testing.allocator, .io = std.testing.io });
+        inline for (.{ false, true }) |extended_color| {
+            const Renderer = PixelRenderer(.none, commands, extended_color);
+            var harness: PixelHarness(Renderer) = .{};
+            try expectRendererConforms(Renderer, &harness, .{ .gpa = std.testing.allocator, .io = std.testing.io });
+        }
     }
 }
 
 test "a renderer that forgets the enclosing clip when a clip ends fails the suite" {
-    const Renderer = PixelRenderer(.forgets_enclosing_clip, draws_effects);
+    const Renderer = PixelRenderer(.forgets_enclosing_clip, draws_effects, false);
     var harness: PixelHarness(Renderer) = .{};
     const violation = (try findRendererViolation(Renderer, &harness, .{ .gpa = std.testing.allocator, .io = std.testing.io })).?;
     try std.testing.expectEqual(error.WrongColor, violation.kind);
@@ -800,7 +834,7 @@ test "a renderer that forgets the enclosing clip when a clip ends fails the suit
 }
 
 test "a renderer that draws an image untinted and square fails the suite" {
-    const Renderer = PixelRenderer(.ignores_image_decoration, draws_effects);
+    const Renderer = PixelRenderer(.ignores_image_decoration, draws_effects, false);
     var harness: PixelHarness(Renderer) = .{};
     const violation = (try findRendererViolation(Renderer, &harness, .{ .gpa = std.testing.allocator, .io = std.testing.io })).?;
     try std.testing.expectEqual(error.WrongColor, violation.kind);
@@ -811,7 +845,7 @@ test "a renderer that draws an image untinted and square fails the suite" {
 }
 
 test "a renderer that interpolates a gradient in sRGB fails the suite" {
-    const Renderer = PixelRenderer(.interpolates_gradient_in_srgb, draws_effects);
+    const Renderer = PixelRenderer(.interpolates_gradient_in_srgb, draws_effects, false);
     var harness: PixelHarness(Renderer) = .{};
     const violation = (try findRendererViolation(Renderer, &harness, .{ .gpa = std.testing.allocator, .io = std.testing.io })).?;
     try std.testing.expectEqual(error.WrongColor, violation.kind);
@@ -822,7 +856,7 @@ test "a renderer that interpolates a gradient in sRGB fails the suite" {
 }
 
 test "a renderer that draws a backdrop blur's tint without blurring fails the suite" {
-    const Renderer = PixelRenderer(.tints_without_blurring, draws_effects);
+    const Renderer = PixelRenderer(.tints_without_blurring, draws_effects, false);
     var harness: PixelHarness(Renderer) = .{};
     const violation = (try findRendererViolation(Renderer, &harness, .{ .gpa = std.testing.allocator, .io = std.testing.io })).?;
     try std.testing.expectEqual(error.WrongColor, violation.kind);
@@ -833,7 +867,7 @@ test "a renderer that draws a backdrop blur's tint without blurring fails the su
 }
 
 test "a renderer that turns a transform the wrong way fails the suite" {
-    const Renderer = PixelRenderer(.turns_the_wrong_way, draws_effects);
+    const Renderer = PixelRenderer(.turns_the_wrong_way, draws_effects, false);
     var harness: PixelHarness(Renderer) = .{};
     const violation = (try findRendererViolation(Renderer, &harness, .{ .gpa = std.testing.allocator, .io = std.testing.io })).?;
     try std.testing.expectEqual(error.WrongColor, violation.kind);
@@ -844,12 +878,23 @@ test "a renderer that turns a transform the wrong way fails the suite" {
 }
 
 test "a renderer that draws a material's fallback in its place fails the suite" {
-    const Renderer = PixelRenderer(.draws_material_fallback, draws_effects);
+    const Renderer = PixelRenderer(.draws_material_fallback, draws_effects, false);
     var harness: PixelHarness(Renderer) = .{};
     const violation = (try findRendererViolation(Renderer, &harness, .{ .gpa = std.testing.allocator, .io = std.testing.io })).?;
     try std.testing.expectEqual(error.WrongColor, violation.kind);
     try std.testing.expectEqualStrings(
         "drew #008080 at (176, 160) in the reference scene, where a material, drawn in place of its fallback background, should be #c08000",
+        violation.description(),
+    );
+}
+
+test "a renderer that draws ExtendedColor's linear channels without encoding them fails the suite" {
+    const Renderer = PixelRenderer(.skips_srgb_encoding, draws_effects, true);
+    var harness: PixelHarness(Renderer) = .{};
+    const violation = (try findRendererViolation(Renderer, &harness, .{ .gpa = std.testing.allocator, .io = std.testing.io })).?;
+    try std.testing.expectEqual(error.WrongColor, violation.kind);
+    try std.testing.expectEqualStrings(
+        "drew #ff3700 at (98, 48) in the reference scene, where a border's left edge should be #ff8000",
         violation.description(),
     );
 }

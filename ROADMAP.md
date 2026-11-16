@@ -2953,11 +2953,21 @@ put the saving, so the item waits on one that does.
   moved every array of the frame after it by 8 and made the box tree's
   declaration 3.4% slower (2.8% for the documents view);
   `duplicate_ids` became a saturating `u16`, so it stays 96.
-  Next: the renderer suite's reference scene declares an HDR color,
-  `zui_wire`'s renderer declares `zui_extended_color`, and zui-sokol
-  draws it; then `Surface` negotiates an FP16 output and zui-host's
-  Windows host reports `hdr_headroom`, whose *Done when* needs a run on
-  Windows with an HDR display.
+  The second slice declares the renderer suite's reference scene in
+  `ExtendedColor`, with a box of HDR white, and takes the suite's
+  `extended_color` from the renderer, so one that declares
+  `zui_extended_color` is given every color as declared and must encode
+  it as `toColor` does (a test renderer that skips the encoding fails);
+  `zui_wire.Renderer(Ui)` declares `zui_extended_color` when `Ui`'s
+  commands carry `ExtendedColor`, and its commands round-trip in either
+  color. `toColor(fromColor(c))` is `c` for every 8-bit channel, so
+  zui-terminal still passes at a tolerance of 0, and zui-raylib and
+  zui-sokol pass unchanged against this checkout.
+  Next: zui-sokol declares `zui_extended_color` and draws it into its
+  SDR target; then `Surface` negotiates an FP16 output, the suite reads
+  HDR white back brighter than SDR white from a harness that can, and
+  zui-host's Windows host reports `hdr_headroom`, whose *Done when*
+  needs a run on Windows with an HDR display.
 
 C1 generated the optional commands' variants; each item here adds the
 declaration that produces its command and the lowering for renderers that

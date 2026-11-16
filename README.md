@@ -210,7 +210,8 @@ Implemented so far:
   `Config.Color = zui.ExtendedColor` declares HDR and wide-gamut colors
   in linear scRGB; until a renderer declares `zui_extended_color` they
   are clamped to `zui.Color` as they are emitted, and
-  `frame.diagnostics.clamped_colors` says when that changed one.
+  `frame.diagnostics.clamped_colors` says when that changed one;
+  `zui_wire` carries them as declared when its context's commands do.
   An element or frame without effects pays nothing for them.
 
 The reference backend, its adapter host and the demo application live in
