@@ -30,7 +30,7 @@ Each item says:
 | stage 6 | the single-line fast path (T1), the whole-string cache (T2), static styles (L8), the box tree's layout and emission (P4) and declaration (P5), line-break segmentation (T4), the grow basis (L1), aspect ratio and natural sizes (L2), dividers and decorated images (L3), floating options (L4), right-to-left layout (L6), wrap (L7); the backends drawing images' tint and corner radius (C10) | done; the box tree's and warm text's budgets met, as they were then judged with Turbo Boost on: the box tree declares in 48.9 µs and lays out and emits in 89.2 µs, warm text in 90.5 µs; a box tree of static styles declares in 28.0 µs; zui-raylib and zui-sokol draw tinted, rounded images and pass the renderer suite that checks them |
 | stage 7 | gestures (I5): arbitration by motion component, zoom, long press, double tap, momentum, the intents and custom recognizers; drag and drop between elements (I1) | done: a carousel in a list, a pinch starting on a list inside a map, a lasso module against a map's pan, and `zui_testing.Driver.drag` moving an item between two lists, out of one that scrolls by dragging |
 | after stage 7: the foundation | G1's first slice ran 5.5% to 7.7% more instructions in scenes that draw no effect, so the work turned to what lay under it: benchmarks that can be trusted (R3 to R8, and R9 in part) and the data-oriented design audit's findings (P6 to P10) | done; a commit compared with itself over three code layouts calls nothing, its intervals 0.52% wide on average, and a change that only moves code is not called; a tooltip declared before a 3,000-cell grid lays out in 79 µs, not 671 µs (P6); warm text −43% (P9); `init` from 138 µs to 92 µs (P7, P10); the budgets judged in benchmarking mode |
-| stage 8, begun | gradients, shadows and glow (G1); backdrop blur (G2); effects in the corners of a decoration that draws nothing (G7); transforms with hit inversion (G3) | G1, G2, G7 and G3 done: zui-sokol draws gradients, shadows, backdrop blurs and transforms and passes the renderer suite, its effects rounded by a decoration that draws nothing, a pointer hits a turned button where it is drawn, and a frame without effects runs no more instructions than before; G5 and G6 queued |
+| stage 8, begun | gradients, shadows and glow (G1); backdrop blur (G2); effects in the corners of a decoration that draws nothing (G7); transforms with hit inversion (G3); materials (G5) | G1, G2, G7, G3 and G5 done: zui-sokol draws gradients, shadows, backdrop blurs, transforms and materials through a shader of its own and passes the renderer suite, its effects rounded by a decoration that draws nothing, a pointer hits a turned button where it is drawn, and a frame without effects runs no more instructions than before; G6 queued |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
@@ -70,8 +70,7 @@ green, and its **Status** line below says which slice is next.
 | R9. Measuring across operating systems and hardware | foundation | `bench/machine.zig`, `bench/report.zig`, `README.md` | | waiting on a run under Windows on the reference machine |
 | P11. Flat child lists | audit | `src/context.zig`, `src/layout.zig` | | waiting on a wide scene whose profile points at the walks; kept by the owner |
 | P12. Text commands that point at their style | audit | `src/commands.zig`, `src/emission.zig`, `zui_wire/`, `../zui-raylib`, `../zui-sokol`, `../zui-terminal` | | waiting on a profile of a renderer reading the commands |
-| G5. Materials | 8 | `src/context.zig`, `src/emission.zig`, `zui_testing/`, `../zui-sokol` | | in progress: zui-sokol declares `.material` next |
-| G6. HDR and wide gamut | 8 | `src/context.zig`, `src/commands.zig`, `../zui-host` | | |
+| G6. HDR and wide gamut | 8 | `src/context.zig`, `src/commands.zig`, `../zui-host` | | next |
 | V1. `zui_debug` | 9 | `zui_debug/`, `src/context.zig`, `../zui-raylib` | | |
 | V2. Semantics and accessibility actions | 9 | `src/context.zig`, `zui_widgets/`, `../zui-host` | | |
 | V3. Safety sweeps | 9 | `src/context.zig`, `src/tests/` | | |
@@ -159,6 +158,55 @@ Things to know:
 ---
 
 ## Done
+
+### G5. Materials
+
+**Plan.** The decoration's `material`, typed by the renderer's
+`MaterialHandle`, emitted in place of the background and lowered to it.
+**Done when:** snapshot and lowering tests; the renderer suite's
+reference scene declares it, and one renderer that declares the command
+passes the suite; `counts` moves no scene beyond the noise.
+
+`style.DecorationWith(MaterialHandle)`, `StyleWith` and `ElementWith`
+make a context's types, `Ui.Decoration`, `Ui.Style` and `Ui.Element`,
+identical to `zui.Decoration`, `zui.Style` and `zui.Element` when the
+handle is `void` (`7af04c6`). A decoration with a material is kept even
+without a background, and emission draws the `material` command over
+the shadow and backdrop blur and under the gradient, its fallback the
+background or transparent; for a renderer without `.material` it draws
+the background and lists `.material` in `Diagnostics.lowered`.
+`src/tests/materials.zig` tests both ways, a static style's material and
+the order; snapshots write a material. The renderer suite's reference
+scene declares a material when the harness gives one
+(`harness.material(color)`), and its pixel renderer passes drawing it
+and with it lowered, and fails drawing the fallback in its place.
+
+zui-sokol (`69c6617`, pinned to `7af04c6`) declares it with
+`zui_sokol.Material`, a pattern between two colors (`solid`, `sheen`,
+`aurora`) moved by a phase the application turns, and passes the suite
+on Linux with `Material.solid` drawn through its shader, in a frame that
+also blurs a backdrop. sokol_gl takes no shader of its own, so a
+material is a triangle fan drawn with sokol_gfx at the start of its own
+layer, before that layer's sokol_gl shapes; the shader is written in
+GLSL and checked in as sokol-shdc's translation to GLSL 410, HLSL 5 and
+Metal. Its tour gains a Materials screen: a card drawn by the shader
+with every field on a slider, each pattern, a material beside its
+fallback, and a shadow beneath one with a border and button over it.
+The tour's helpers that build elements now name `Ui.Element`.
+
+Measured: `counts` against `613760e` moved one scene, the documents
+view's declaration, by 40 instructions (30,527 to 30,567, +0.13%), every
+other scene and phase unchanged; `materialOf` is `inline`, since out of
+line its `null` for a `void` handle was not folded and declaration grew
+up to 6.3%. zui-sokol's Materials screen held 144 fps at 144 Hz on
+Linux, its "sokol submit" reading 2.3 ms in one sample; the GPU's cost
+is not timed.
+
+Not done: zui-sokol has been drawn only with OpenGL; its HLSL and Metal
+are sokol-shdc's and compile only when the tour runs on Windows or macOS.
+zui-raylib and zui-terminal draw the fallback.
+
+**Spec.** §10.1, §13.1, §13.3.
 
 ### G3. Transforms
 
@@ -2885,7 +2933,6 @@ put the saving, so the item waits on one that does.
 
 ## Stage 8: effects
 
-- **G5. Materials,** the renderer's own typed `MaterialHandle`; below.
 - **G6. HDR and wide gamut:** `Config.Color = zui.ExtendedColor`, clamped
   for renderers without `zui_extended_color`; headroom from the
   environment; the output format negotiated through `Surface`.
@@ -2896,7 +2943,7 @@ do not declare it, listed in `Diagnostics.lowered`, which G1 added (in
 *Done*). The renderer that declares each command is zui-sokol, as for
 G1 and G2: the command joins `Renderer.zui_commands`, gets an arm in
 `Renderer.record`, and is shown on its tour (G1's and G2's are on the
-Light & Depth screen, G3's on the Transforms screen). Develop it with `--fork=../zui`; once the user has the zui
+Light & Depth screen, G3's on the Transforms screen, G5's on the Materials screen). Develop it with `--fork=../zui`; once the user has the zui
 change pushed, move the pin with `zig fetch --save=zui`.
 
 **Done when (each):** snapshot and lowering tests; the renderer suite's
@@ -2905,45 +2952,6 @@ passes the suite; for G6, the Windows host shows HDR white brighter than
 SDR white.
 
 **Spec.** §13.1, §13.3, §16.4, §18.
-
-### G5. Materials
-
-**Grounding.** C1 generated the `material` command
-(`src/commands.zig:142`, a handle, a fallback color and a corner radius)
-and the compile errors for `.material` without a `MaterialHandle`
-(`src/context.zig`, `validateConfig`; `src/contracts.zig:64`), but
-`Decoration` (`src/style.zig`) was one type for every context and had
-no field to hold a handle.
-**Plan.** The decoration's `material`, typed by the renderer's
-`MaterialHandle`, emitted in place of the background and lowered to it.
-`Ui.Element`, `Ui.Decoration` and `Ui.Style` are the context's own,
-and zui's own without a handle (*Decisions → Made*). Then zui-sokol
-declares `.material` and shows one on its tour.
-**Done when:** snapshot and lowering tests; the renderer suite's
-reference scene declares it, and one renderer that declares the command
-passes the suite; `counts` moves no scene beyond the noise.
-
-**Status.** The core is done: `style.DecorationWith(MaterialHandle)`,
-`StyleWith` and `ElementWith` make a context's types, identical to
-`zui.Decoration`, `zui.Style` and `zui.Element` when the handle is
-`void`; a decoration with a material is kept even without a background,
-and emission draws the `material` command over the shadow and backdrop
-blur and under the gradient, its fallback the background or
-transparent, or, for a renderer without `.material`, the background,
-listing `.material` in `Diagnostics.lowered`. `src/tests/materials.zig`
-tests both ways, a static style's material and the order; snapshots
-write a material. The renderer suite's reference scene declares a
-material when the harness gives one (`harness.material(color)`), and its
-pixel renderer passes drawing it and with it lowered, and fails drawing
-the fallback in its place. Measured: `counts` against `613760e` moved
-one scene, the documents view's declaration, by 40 instructions
-(30,527 to 30,567, +0.13%), every other scene and phase unchanged;
-`materialOf` is `inline`, since out of line its `null` for a `void`
-handle was not folded and declaration grew up to 6.3%. Next: zui-sokol declares `.material` with a
-shader or two and passes the suite, and its tour's helpers move to
-`Ui.Element` where they meet a material.
-
-**Spec.** §10.1, §13.1, §13.3.
 
 ---
 

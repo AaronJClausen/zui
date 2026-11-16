@@ -204,8 +204,9 @@ Implemented so far:
   element as laid out.
   A renderer with a `MaterialHandle` gives the decoration a `material`,
   its own shader drawn in place of the background, which is the
-  fallback a renderer without `.material` draws; no backend draws one
-  yet.
+  fallback a renderer without `.material` draws; zui-sokol draws its
+  own (`zui_sokol.Material`), on its tour's Materials screen, and the
+  other backends draw the fallback.
   An element or frame without effects pays nothing for them.
 
 The reference backend, its adapter host and the demo application live in
