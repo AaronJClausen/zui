@@ -202,6 +202,10 @@ Implemented so far:
   pointer hits it where it is drawn; zui-sokol draws it, on its tour's
   Transforms screen, and the other backends draw and hit-test the
   element as laid out.
+  A renderer with a `MaterialHandle` gives the decoration a `material`,
+  its own shader drawn in place of the background, which is the
+  fallback a renderer without `.material` draws; no backend draws one
+  yet.
   An element or frame without effects pays nothing for them.
 
 The reference backend, its adapter host and the demo application live in

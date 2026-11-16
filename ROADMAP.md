@@ -70,7 +70,7 @@ green, and its **Status** line below says which slice is next.
 | R9. Measuring across operating systems and hardware | foundation | `bench/machine.zig`, `bench/report.zig`, `README.md` | | waiting on a run under Windows on the reference machine |
 | P11. Flat child lists | audit | `src/context.zig`, `src/layout.zig` | | waiting on a wide scene whose profile points at the walks; kept by the owner |
 | P12. Text commands that point at their style | audit | `src/commands.zig`, `src/emission.zig`, `zui_wire/`, `../zui-raylib`, `../zui-sokol`, `../zui-terminal` | | waiting on a profile of a renderer reading the commands |
-| G5. Materials | 8 | `src/context.zig`, `src/emission.zig`, `zui_testing/`, a renderer | | next |
+| G5. Materials | 8 | `src/context.zig`, `src/emission.zig`, `zui_testing/`, `../zui-sokol` | | in progress: zui-sokol declares `.material` next |
 | G6. HDR and wide gamut | 8 | `src/context.zig`, `src/commands.zig`, `../zui-host` | | |
 | V1. `zui_debug` | 9 | `zui_debug/`, `src/context.zig`, `../zui-raylib` | | |
 | V2. Semantics and accessibility actions | 9 | `src/context.zig`, `zui_widgets/`, `../zui-host` | | |
@@ -2885,7 +2885,7 @@ put the saving, so the item waits on one that does.
 
 ## Stage 8: effects
 
-- **G5. Materials,** the renderer's own typed `MaterialHandle`.
+- **G5. Materials,** the renderer's own typed `MaterialHandle`; below.
 - **G6. HDR and wide gamut:** `Config.Color = zui.ExtendedColor`, clamped
   for renderers without `zui_extended_color`; headroom from the
   environment; the output format negotiated through `Surface`.
@@ -2905,6 +2905,45 @@ passes the suite; for G6, the Windows host shows HDR white brighter than
 SDR white.
 
 **Spec.** §13.1, §13.3, §16.4, §18.
+
+### G5. Materials
+
+**Grounding.** C1 generated the `material` command
+(`src/commands.zig:142`, a handle, a fallback color and a corner radius)
+and the compile errors for `.material` without a `MaterialHandle`
+(`src/context.zig`, `validateConfig`; `src/contracts.zig:64`), but
+`Decoration` (`src/style.zig`) was one type for every context and had
+no field to hold a handle.
+**Plan.** The decoration's `material`, typed by the renderer's
+`MaterialHandle`, emitted in place of the background and lowered to it.
+`Ui.Element`, `Ui.Decoration` and `Ui.Style` are the context's own,
+and zui's own without a handle (*Decisions → Made*). Then zui-sokol
+declares `.material` and shows one on its tour.
+**Done when:** snapshot and lowering tests; the renderer suite's
+reference scene declares it, and one renderer that declares the command
+passes the suite; `counts` moves no scene beyond the noise.
+
+**Status.** The core is done: `style.DecorationWith(MaterialHandle)`,
+`StyleWith` and `ElementWith` make a context's types, identical to
+`zui.Decoration`, `zui.Style` and `zui.Element` when the handle is
+`void`; a decoration with a material is kept even without a background,
+and emission draws the `material` command over the shadow and backdrop
+blur and under the gradient, its fallback the background or
+transparent, or, for a renderer without `.material`, the background,
+listing `.material` in `Diagnostics.lowered`. `src/tests/materials.zig`
+tests both ways, a static style's material and the order; snapshots
+write a material. The renderer suite's reference scene declares a
+material when the harness gives one (`harness.material(color)`), and its
+pixel renderer passes drawing it and with it lowered, and fails drawing
+the fallback in its place. Measured: `counts` against `613760e` moved
+one scene, the documents view's declaration, by 40 instructions
+(30,527 to 30,567, +0.13%), every other scene and phase unchanged;
+`materialOf` is `inline`, since out of line its `null` for a `void`
+handle was not folded and declaration grew up to 6.3%. Next: zui-sokol declares `.material` with a
+shader or two and passes the suite, and its tour's helpers move to
+`Ui.Element` where they meet a material.
+
+**Spec.** §10.1, §13.1, §13.3.
 
 ---
 
@@ -3142,6 +3181,7 @@ Deliberate, and each a reason to choose zui:
 | How a remote client joins (F5) | `zui_wire.Host` and `Renderer` where the application runs, over a stream the application attaches; `zui_wire.Client` over any host and renderer where it draws; a `wire` surface kind between the two halves |
 | Time on the wire (F5) | the client's host's clock, counted on by the wire host between records, so records are sent only for events or a new viewport or scale |
 | Watching files (F6) | `zuiFileWatch.watch(host, directory, sink)` until `deinit`, subdirectories included; the host publishes `zui.FileChange`s into a `zui.FileChangeSink` made from a source the application chooses, and the loader reads the files |
+| Where an element declares its material (G5) | `Ui.Decoration.material`, typed by the renderer's `MaterialHandle`: `Ui.Element`, `Ui.Decoration` and `Ui.Style` are the context's own, and are `zui.Element`, `zui.Decoration` and `zui.Style` without a handle, so no existing code changes. `open` taking `anytype` to accept both was rejected: a literal passed through `anytype` is not converted to `Ui.Element` |
 
 ### Open
 

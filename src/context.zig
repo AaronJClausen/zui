@@ -154,51 +154,62 @@ pub const Diagnostics = struct {
     }
 };
 
-pub const Element = struct {
-    /// Needed for queries, state, scrolling and focus.
-    id: Id = .none,
-    /// Made at comptime with `zui.static` and referenced, not copied.
-    /// `layout` and `decoration` set here replace the style's.
-    style: ?style.Static(style.Style) = null,
-    layout: ?style.Layout = null,
-    decoration: ?style.Decoration = null,
-    /// Gradients, shadows and backdrop blur, in the shape of the
-    /// decoration's corners, and a transform. Copied when the element is
-    /// declared, so it may point at a local.
-    effects: ?*const style.Effects = null,
-    /// The axes on which descendants are cut off.
-    clip: style.Axes = .none,
-    scroll: ?style.Scroll = null,
-    floating: ?style.Floating = null,
-    /// Takes hover, press and click, and blocks them below it.
-    ///
-    /// This and the three switches after it are `?bool`, null meaning
-    /// false, because Zig stores a `bool` field as one bit and loads it as
-    /// a byte: LLVM cannot see through that, so every `open` stored and
-    /// reloaded the four defaults. An optional's defaults fold away. They
-    /// are written as booleans:
-    ///
-    /// ```zig
-    /// ui.open(.{ .id = .of("save"), .focusable = true, .disabled = !app.dirty });
-    /// ```
-    interactive: ?bool = null,
-    /// Reachable with Tab; implies `interactive`.
-    focusable: ?bool = null,
-    /// Tab cycles inside this subtree, as in a dialog.
-    focus_scope: ?bool = null,
-    /// Still hit-tested, so it blocks what is beneath it, but never pressed,
-    /// clicked or focused, and its widget state is `.disabled`.
-    disabled: ?bool = null,
-    /// The pointer's shape while this element is the innermost one under
-    /// the hovering pointer that sets a cursor. Only an interactive
-    /// element is hit-tested, so on any other this has no effect.
-    cursor: ?Cursor = null,
-    /// What it accepts from pointers, which decides which of nested
-    /// elements a pointer goes to. Declaring any makes it interactive.
-    /// Ignored without `Config.features.gestures`, so a widget can declare
-    /// them for every context.
-    gestures: interaction.Gestures = .{},
-};
+/// `zui.Element` with a context's own decoration, `Ui.Element`; it is
+/// `zui.Element` unless the context has a `MaterialHandle`. A helper that
+/// builds elements for such a context names `Ui.Element`:
+///
+/// ```zig
+/// fn card(ui: *Ui, id: zui.Id) Ui.Element {
+///     return .{ .id = id, .decoration = .{ .background = .rgb(0x202830), .material = .frosted_glass } };
+/// }
+/// ```
+pub fn ElementWith(comptime ContextDecoration: type) type {
+    return struct {
+        /// Needed for queries, state, scrolling and focus.
+        id: Id = .none,
+        /// Made at comptime with `zui.static` and referenced, not copied.
+        /// `layout` and `decoration` set here replace the style's.
+        style: ?style.Static(style.StyleWith(ContextDecoration)) = null,
+        layout: ?style.Layout = null,
+        decoration: ?ContextDecoration = null,
+        /// Gradients, shadows and backdrop blur, in the shape of the
+        /// decoration's corners, and a transform. Copied when the element is
+        /// declared, so it may point at a local.
+        effects: ?*const style.Effects = null,
+        /// The axes on which descendants are cut off.
+        clip: style.Axes = .none,
+        scroll: ?style.Scroll = null,
+        floating: ?style.Floating = null,
+        /// Takes hover, press and click, and blocks them below it.
+        ///
+        /// This and the three switches after it are `?bool`, null meaning
+        /// false, because Zig stores a `bool` field as one bit and loads it as
+        /// a byte: LLVM cannot see through that, so every `open` stored and
+        /// reloaded the four defaults. An optional's defaults fold away. They
+        /// are written as booleans:
+        ///
+        /// ```zig
+        /// ui.open(.{ .id = .of("save"), .focusable = true, .disabled = !app.dirty });
+        /// ```
+        interactive: ?bool = null,
+        /// Reachable with Tab; implies `interactive`.
+        focusable: ?bool = null,
+        /// Tab cycles inside this subtree, as in a dialog.
+        focus_scope: ?bool = null,
+        /// Still hit-tested, so it blocks what is beneath it, but never pressed,
+        /// clicked or focused, and its widget state is `.disabled`.
+        disabled: ?bool = null,
+        /// The pointer's shape while this element is the innermost one under
+        /// the hovering pointer that sets a cursor. Only an interactive
+        /// element is hit-tested, so on any other this has no effect.
+        cursor: ?Cursor = null,
+        /// What it accepts from pointers, which decides which of nested
+        /// elements a pointer goes to. Declaring any makes it interactive.
+        /// Ignored without `Config.features.gestures`, so a widget can declare
+        /// them for every context.
+        gestures: interaction.Gestures = .{},
+    };
+}
 
 const ContentKind = enum(u8) { none, text, image, custom };
 
@@ -362,7 +373,9 @@ pub fn Context(comptime config: Config) type {
         pub const Results = interaction.Results(limits.max_elements, id_table_slots, features.gestures, max_spaces);
         const InputState = interaction.State(limits.max_input_contacts, limits.max_depth + 1, limits.max_events_per_frame, limits.max_text_input_bytes, limits.max_dropped_path_bytes, features.gestures);
 
-        pub const Decoration = style.Decoration;
+        pub const Decoration = style.DecorationWith(config.MaterialHandle);
+        pub const Style = style.StyleWith(Decoration);
+        pub const Element = ElementWith(Decoration);
         const default_layout: style.Layout = .{};
 
         pub const TextRecord = struct {
@@ -1281,7 +1294,7 @@ pub fn Context(comptime config: Config) type {
         /// skips it as it skips an element without one, unless the element's
         /// effects need its corners.
         inline fn keepsDecoration(decoration: *const Decoration, declares_effects: bool) bool {
-            return decoration.background != null or decoration.border != null or declares_effects;
+            return decoration.background != null or decoration.border != null or decoration.materialOf() != null or declares_effects;
         }
 
         inline fn keptStaticDecoration(decoration: *const Decoration, declares_effects: bool) ?*const Decoration {

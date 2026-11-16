@@ -48,6 +48,10 @@ pub const scene_colors = struct {
     /// start to the top.
     pub const turned_start: zui.Color = .rgb(0xff8080);
     pub const turned_end: zui.Color = .rgb(0x8080ff);
+    /// `harness.material` is asked for a material that draws this one
+    /// color, and the box declaring it falls back to `material_fallback`.
+    pub const material: zui.Color = .rgb(0xc08000);
+    pub const material_fallback: zui.Color = .rgb(0x008080);
 };
 
 /// The raised box's shadow is cast this far right and down, unblurred.
@@ -74,7 +78,8 @@ pub const turned_size: [2]f32 = .{ 48, 16 };
 ///   casting a shadow, a backdrop blur over stripes, and a box of two
 ///   halves turned a quarter clockwise, which the core lowers unless the
 ///   renderer declares `.gradient`, `.shadow`, `.backdrop_blur` or
-///   `.transform`;
+///   `.transform`, and a material when it has a `MaterialHandle`, lowered
+///   unless it declares `.material`;
 /// - clips nested 100 deep, then a fill drawn after all of them ended;
 /// - commands of no size, and far outside the viewport;
 /// - an empty frame;
@@ -91,7 +96,8 @@ pub const turned_size: [2]f32 = .{ 48, 16 };
 /// stripes beneath it under its tint, a lowered one is its tint over each
 /// stripe, and neither reaches beyond its bounds; a declared transform
 /// stands the turned box up with its start at the top, and a lowered one
-/// leaves it as laid out. Without it, the suite
+/// leaves it as laid out; a declared material is drawn in place of its
+/// fallback background and a lowered one is that background. Without it, the suite
 /// checks only that each frame is drawn without an error.
 ///
 /// `harness` is a pointer to a value that declares:
@@ -106,7 +112,10 @@ pub const turned_size: [2]f32 = .{ 48, 16 };
 ///   at that pixel, counted from the top left, after `endDraw`;
 /// - `fn image(self, color: zui.Color) config.ImageHandle`: an image of one
 ///   color, when `config.ImageHandle` is not `void`;
-/// - `fn custom(self) config.CustomData`, when `config.CustomData` is not `void`.
+/// - `fn custom(self) config.CustomData`, when `config.CustomData` is not `void`;
+/// - `fn material(self, color: zui.Color) config.MaterialHandle`: a
+///   material that draws one opaque color, when `config.MaterialHandle` is
+///   not `void`.
 ///
 /// ```zig
 /// test "the renderer conforms" {
@@ -140,7 +149,7 @@ const Scene = enum {
 const scenes = [_]Scene{ .reference, .deep_clips, .out_of_bounds, .empty, .reference };
 const deep_clip_count = 100;
 
-const ids = zui.ids(.{ "panel", "fill", "frame", "outer", "inner", "picture", "custom", "gradient", "raised", "stripes", "turned", "nest", "after_nest" });
+const ids = zui.ids(.{ "panel", "fill", "frame", "outer", "inner", "picture", "custom", "gradient", "raised", "stripes", "turned", "material", "nest", "after_nest" });
 
 fn suiteConfig(comptime backend: zui.Config) zui.Config {
     var config = backend;
@@ -163,13 +172,14 @@ pub fn findRendererViolation(comptime Renderer: type, harness: anytype, conforma
     const Harness = @typeInfo(@TypeOf(harness)).pointer.child;
     const config = suiteConfig(Harness.config);
     const Ui = zui.Context(config);
-    const Payloads = struct { image: config.ImageHandle, custom: config.CustomData };
+    const Payloads = struct { image: config.ImageHandle, custom: config.CustomData, material: config.MaterialHandle };
 
     var ui: Ui = if (Ui.has_text) try .init(conformance.gpa, conformance.io, harness.text()) else try .init(conformance.gpa, conformance.io);
     defer ui.deinit(conformance.gpa);
     const payloads: Payloads = .{
         .image = if (config.ImageHandle == void) {} else harness.image(scene_colors.image),
         .custom = if (config.CustomData == void) {} else harness.custom(),
+        .material = if (config.MaterialHandle == void) {} else harness.material(scene_colors.material),
     };
     const renderer: *Renderer = harness.renderer();
 
@@ -273,6 +283,11 @@ fn declareReference(ui: anytype, comptime config: zui.Config, payloads: anytype)
         ui.box(.{ .decoration = .{ .background = scene_colors.turned_start }, .layout = .{ .sizing = half } });
         ui.box(.{ .decoration = .{ .background = scene_colors.turned_end }, .layout = .{ .sizing = half } });
         ui.close();
+        if (config.MaterialHandle != void) ui.box(.{
+            .id = ids.material,
+            .layout = .{ .sizing = fixedSize(32, 32) },
+            .decoration = .{ .background = scene_colors.material_fallback, .material = payloads.material },
+        });
         ui.close();
     }
     ui.close();
@@ -416,7 +431,16 @@ fn PixelCheck(comptime Harness: type) type {
             for (expectations) |expectation| {
                 if (self.expect(expectation)) |violation| return violation;
             }
-            return null;
+            return self.material(frame, config);
+        }
+
+        fn material(self: Self, frame: anytype, comptime config: zui.Config) ?RendererViolation {
+            if (config.MaterialHandle == void) return null;
+            const box = frame.rectOf(ids.material).?;
+            return self.expect(if (comptime config.commands.contains(.material))
+                .{ .at = center(box), .color = scene_colors.material, .what = "a material, drawn in place of its fallback background," }
+            else
+                .{ .at = center(box), .color = scene_colors.material_fallback, .what = "a lowered material, its fallback background," });
         }
 
         fn deepClips(self: Self, frame: anytype) ?RendererViolation {
@@ -479,14 +503,15 @@ fn hex(color: zui.Color) u24 {
     return @as(u24, color.r) << 16 | @as(u24, color.g) << 8 | color.b;
 }
 
-const Flaw = enum { none, forgets_enclosing_clip, ignores_image_decoration, interpolates_gradient_in_srgb, tints_without_blurring, turns_the_wrong_way };
+const Flaw = enum { none, forgets_enclosing_clip, ignores_image_decoration, interpolates_gradient_in_srgb, tints_without_blurring, turns_the_wrong_way, draws_material_fallback };
 
 /// A software renderer into its own pixels, the plainest that conforms:
 /// fills ignore corner radii, text fills its bounds, an image is its
 /// handle's color times its tint, inside its rounded corners, a gradient
 /// is each pixel's `colorAt`, a shadow is unblurred, a backdrop blur is a
 /// box average as wide as its radius each way, and each pixel is drawn
-/// from where its center lies in the transforms' units. Each `Flaw` is a
+/// from where its center lies in the transforms' units, and a material is
+/// its handle's color. Each `Flaw` is a
 /// mistake the suite must catch.
 fn PixelRenderer(comptime flaw: Flaw, comptime commands: zui.CommandSet) type {
     return struct {
@@ -499,6 +524,7 @@ fn PixelRenderer(comptime flaw: Flaw, comptime commands: zui.CommandSet) type {
         pub const zui_surfaces: zui.SurfaceKinds = .initOne(.offscreen);
         pub const zui_commands = commands;
         pub const ImageHandle = zui.Color;
+        pub const MaterialHandle = zui.Color;
 
         pixels: [width * height]zui.Color = undefined,
         beneath_blur: [width * height]zui.Color = undefined,
@@ -566,6 +592,8 @@ fn PixelRenderer(comptime flaw: Flaw, comptime commands: zui.CommandSet) type {
                     } else if (comptime std.mem.eql(u8, @tagName(kind), "backdrop_blur")) {
                         if (flaw != .tints_without_blurring) self.blurBeneath(bounds, payload.radius, payload.corner_radius);
                         self.fillRounded(bounds, payload.tint, payload.corner_radius);
+                    } else if (comptime std.mem.eql(u8, @tagName(kind), "material")) {
+                        self.fillRounded(bounds, if (flaw == .draws_material_fallback) payload.fallback else payload.handle, payload.corner_radius);
                     } else comptime unreachable,
                 }
             }
@@ -712,7 +740,7 @@ fn multiplyChannel(a: u8, b: u8) u8 {
 fn PixelHarness(comptime Renderer: type) type {
     return struct {
         const Self = @This();
-        pub const config: zui.Config = .{ .Text = FixedText, .ImageHandle = zui.Color, .commands = Renderer.zui_commands };
+        pub const config: zui.Config = .{ .Text = FixedText, .ImageHandle = zui.Color, .MaterialHandle = zui.Color, .commands = Renderer.zui_commands };
 
         drawn: Renderer = .{},
         text_contract: FixedText = .{},
@@ -737,6 +765,10 @@ fn PixelHarness(comptime Renderer: type) type {
         pub fn image(_: *Self, color: zui.Color) zui.Color {
             return color;
         }
+
+        pub fn material(_: *Self, color: zui.Color) zui.Color {
+            return color;
+        }
     };
 }
 
@@ -746,9 +778,9 @@ const FixedText = struct {
     }
 };
 
-const draws_effects: zui.CommandSet = .initMany(&.{ .gradient, .shadow, .backdrop_blur, .transform });
+const draws_effects: zui.CommandSet = .initMany(&.{ .gradient, .shadow, .backdrop_blur, .transform, .material });
 
-test "a renderer that draws every frame right passes the suite, with gradients, shadows, backdrop blurs and transforms drawn or lowered" {
+test "a renderer that draws every frame right passes the suite, with gradients, shadows, backdrop blurs, transforms and materials drawn or lowered" {
     inline for (comptime .{ draws_effects, zui.CommandSet.initEmpty() }) |commands| {
         const Renderer = PixelRenderer(.none, commands);
         var harness: PixelHarness(Renderer) = .{};
@@ -807,6 +839,17 @@ test "a renderer that turns a transform the wrong way fails the suite" {
     try std.testing.expectEqual(error.WrongColor, violation.kind);
     try std.testing.expectEqualStrings(
         "drew #8080ff at (120, 140) in the reference scene, where the start of a box turned a quarter clockwise, now at its top, should be #ff8080",
+        violation.description(),
+    );
+}
+
+test "a renderer that draws a material's fallback in its place fails the suite" {
+    const Renderer = PixelRenderer(.draws_material_fallback, draws_effects);
+    var harness: PixelHarness(Renderer) = .{};
+    const violation = (try findRendererViolation(Renderer, &harness, .{ .gpa = std.testing.allocator, .io = std.testing.io })).?;
+    try std.testing.expectEqual(error.WrongColor, violation.kind);
+    try std.testing.expectEqualStrings(
+        "drew #008080 at (176, 160) in the reference scene, where a material, drawn in place of its fallback background, should be #c08000",
         violation.description(),
     );
 }

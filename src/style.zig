@@ -560,11 +560,33 @@ pub const Transform = struct {
 
 /// Background, border and corner radius: what an element draws behind and
 /// around its children.
-pub const Decoration = struct {
-    background: ?Color = null,
-    border: ?Border = null,
-    corner_radius: CornerRadius = .zero,
-};
+pub const Decoration = DecorationWith(void);
+
+/// `Decoration` with a `material`, the renderer's own shader drawn in
+/// place of the background, for a context whose `MaterialHandle` is not
+/// `void`; with `void` it is `Decoration`. A context names it
+/// `Ui.Decoration`.
+///
+/// ```zig
+/// ui.open(.{ .decoration = .{ .background = .rgb(0x202830), .material = .frosted_glass, .corner_radius = .all(8) } });
+/// ```
+pub fn DecorationWith(comptime MaterialHandle: type) type {
+    return struct {
+        background: ?Color = null,
+        border: ?Border = null,
+        corner_radius: CornerRadius = .zero,
+        /// Drawn over the bounds, in the corners, by a renderer that
+        /// declares `.material`. Any other draws `background` instead, so
+        /// the background is the material's fallback.
+        material: if (MaterialHandle == void) void else ?MaterialHandle = if (MaterialHandle == void) {} else null,
+
+        const has_material = MaterialHandle != void;
+
+        pub inline fn materialOf(self: *const @This()) ?MaterialHandle {
+            return if (comptime has_material) self.material else null;
+        }
+    };
+}
 
 /// What an element draws with the optional commands, in the shape of its
 /// decoration's corner radius: from the bottom, its shadow, its backdrop
@@ -589,10 +611,16 @@ pub const Effects = struct {
 
 /// An element's layout and decoration together, made once at comptime with
 /// `zui.static` and referenced by every element that uses it.
-pub const Style = struct {
-    layout: Layout = .{},
-    decoration: Decoration = .{},
-};
+pub const Style = StyleWith(Decoration);
+
+/// `Style` with a context's own decoration, `Ui.Style`; it is `Style`
+/// unless the context has a `MaterialHandle`.
+pub fn StyleWith(comptime ContextDecoration: type) type {
+    return struct {
+        layout: Layout = .{},
+        decoration: ContextDecoration = .{},
+    };
+}
 
 /// A value in read-only memory for the life of the program, which an
 /// element references instead of copying. Only `zui.static` makes one, at

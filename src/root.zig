@@ -18,7 +18,8 @@ pub const Config = context.Config;
 pub const Limits = context.Limits;
 pub const Features = context.Features;
 pub const Limit = context.Limit;
-pub const Element = context.Element;
+pub const Element = context.ElementWith(style.Decoration);
+pub const ElementWith = context.ElementWith;
 pub const Diagnostics = context.Diagnostics;
 
 pub const TraceZone = trace.TraceZone;
@@ -127,6 +128,7 @@ pub const CornerRadius = style.CornerRadius;
 pub const Rect = style.Rect;
 pub const Border = style.Border;
 pub const Decoration = style.Decoration;
+pub const DecorationWith = style.DecorationWith;
 pub const Gradient = style.Gradient;
 pub const Shadow = style.Shadow;
 pub const BackdropBlur = style.BackdropBlur;
@@ -134,6 +136,7 @@ pub const Transform = style.Transform;
 pub const Affine = style.Affine;
 pub const Effects = style.Effects;
 pub const Style = style.Style;
+pub const StyleWith = style.StyleWith;
 pub const Static = style.Static;
 pub const static = style.static;
 pub const Sizing = style.Sizing;
@@ -184,5 +187,6 @@ test {
     _ = @import("tests/gestures.zig");
     _ = @import("tests/drag_drop.zig");
     _ = @import("tests/effects.zig");
+    _ = @import("tests/materials.zig");
     _ = @import("tests/transforms.zig");
 }

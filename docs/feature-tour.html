@@ -681,6 +681,29 @@ fn draggedCard(ui: *Ui, photo: *const Photo, drag: zui.Drag) void {
 </script>
       </article>
 
+      <article class="feature" id="materials" data-title="Materials">
+        <div class="feature-head"><h3>Materials</h3><span class="pill shipped">Shipped</span></div>
+        <p>A renderer with shaders of its own names them in <code class="z">MaterialHandle</code>, an enum or an id, and the context's decoration gains a <code class="z">material</code>: drawn over the element's box, in its corners, in place of its <code class="z">background</code>. The background is the material's fallback, so a renderer that does not declare <code class="z">.material</code> draws the background instead and <code class="z">frame.diagnostics.lowered</code> names <code class="z">.material</code>. A material sits under the gradient and over the shadow and backdrop blur, and a static style can carry one. Without a <code class="z">MaterialHandle</code> the field is <code class="z">void</code> and <code class="z">Ui.Element</code>, <code class="z">Ui.Decoration</code> and <code class="z">Ui.Style</code> are <code class="z">zui.Element</code>, <code class="z">zui.Decoration</code> and <code class="z">zui.Style</code>; with one they are the context's own, so a helper that returns an element names <code class="z">Ui.Element</code>. No renderer draws a material yet; zui-sokol is next, and the others draw the fallback.</p>
+<script type="text/x-zig" data-file="src/ui/panels.zig">
+const Ui = zui.Context(zui_app.contextConfig(Renderer, .{}));
+
+const sidebar_style = zui.static(Ui.Style{
+    .layout = .{ .sizing = .{ .width = .fixed(240), .height = .grow }, .direction = .top_to_bottom },
+    .decoration = .{ .background = .rgb(0x1c1c24), .material = .brushed_metal },
+});
+
+fn histogramPanel(ui: *Ui, photo: *const Photo) void {
+    ui.open(panelFor(.of("histogram")));
+    defer ui.close();
+    ui.text(photo.file_name, .{ .size = 12, .wrap = .none });
+}
+
+fn panelFor(id: zui.Id) Ui.Element {
+    return .{ .id = id, .decoration = .{ .background = .rgba(0x1c1c24e0), .material = .frosted_glass, .corner_radius = .all(8) } };
+}
+</script>
+      </article>
+
       <article class="feature" id="ids" data-title="Ids">
         <div class="feature-head"><h3>Ids</h3><span class="pill shipped">Shipped</span></div>
         <p>Ids are hashes, built at comptime where they can be. <code class="z">.of</code> names one element, <code class="z">.indexed</code> names one per list item, <code class="z">child</code> and <code class="z">indexedChild</code> scope ids under a parent so two dropdowns' options never collide, and <code class="z">.dynamic</code> hashes a runtime string. <code class="z">zui.ids</code> builds a struct of ids and fails to compile on a repeated name or a hash collision. Build with <code class="z">-Dzui-debug=true</code> and duplicate-id panics name the element.</p>
@@ -1660,7 +1683,7 @@ pub fn config(overrides: zui.Config) zui.Config {
     return result;
 }
 </script>
-        <p>Declaring <code class="z">pub const zui_commands: zui.CommandSet = .initMany(&.{ .gradient, .shadow, .backdrop_blur })</code> adds <code class="z">gradient</code>, <code class="z">shadow</code> and <code class="z">backdrop_blur</code> arms to that switch, for the <a href="#effects">effects</a> elements declare. A backdrop blur averages the pixels as the target stores them, sampling only inside its bounds. A gradient's <code class="z">colorAt</code> gives its color at any point, in OKLab, for a renderer that draws it in strips.</p>
+        <p>Declaring <code class="z">pub const zui_commands: zui.CommandSet = .initMany(&.{ .gradient, .shadow, .backdrop_blur })</code> adds <code class="z">gradient</code>, <code class="z">shadow</code> and <code class="z">backdrop_blur</code> arms to that switch, for the <a href="#effects">effects</a> elements declare. A backdrop blur averages the pixels as the target stores them, sampling only inside its bounds. A gradient's <code class="z">colorAt</code> gives its color at any point, in OKLab, for a renderer that draws it in strips. A renderer with shaders of its own sets <code class="z">pub const MaterialHandle</code> and declares <code class="z">.material</code>; its <code class="z">material</code> arm gets the handle, the fallback color and the corner radius, for the <a href="#materials">materials</a> elements declare.</p>
       </article>
 
       <article class="feature" id="host" data-title="Writing a host">
@@ -1958,7 +1981,6 @@ fn present(renderer: *Renderer, surface: zui.Surface, frame: *const Ui.Frame) !v
       <div class="group-head"><span class="group-index">08</span><h2>Declared but not working yet</h2></div>
       <p class="group-intro">These names compile, but they don't do anything yet. This list is from <code>ARCHITECTURE.md</code> §7 and the roadmap.</p>
       <ul class="gap-list">
-        <li><b>Materials <span class="pill partial">Declared only</span></b><span>The variant exists in <code class="z">RenderCommand</code> when a renderer declares it, but nothing in declaration produces it, so nothing is emitted or lowered. Item G5, stage 8.</span></li>
         <li><b><code class="z">features.semantics</code> <span class="pill partial">Declared only</span></b><span><code class="z">Frame.semantics()</code> is always empty. Accessibility is V2.</span></li>
         <li><b><code class="z">features.safety_sweeps</code> <span class="pill partial">Declared only</span></b><span>The flag exists, but it doesn't change behaviour yet. Sweeps are V3.</span></li>
         <li><b>Extended color</b><span>Colors are RGBA8 only. <code class="z">zui.ExtendedColor</code> for HDR is G6.</span></li>
@@ -1985,7 +2007,7 @@ fn present(renderer: *Renderer, surface: zui.Surface, frame: *const Ui.Frame) !v
             <li>Writing UI by hand in core is verbose. Nested <code class="z">.layout = .{ .sizing = .{ .width = ... } }</code> literals pile up, and static styles are the main relief today.</li>
             <li>Interactive elements take three steps: declare, query by id, then pick colors from the state yourself. Widgets hide it, but there is nothing in between.</li>
             <li><code class="z">labeledRow</code> leaves you to close the row, an asymmetry that's easy to get wrong.</li>
-            <li>Only zui-sokol draws gradients and shadows so far; zui-raylib and zui-terminal show a gradient as one flat color and no shadow. Only zui-sokol blurs a backdrop; the others draw its tint. Only zui-sokol draws a transform; the others draw the element as laid out.</li>
+            <li>Only zui-sokol draws gradients and shadows so far; zui-raylib and zui-terminal show a gradient as one flat color and no shadow. Only zui-sokol blurs a backdrop; the others draw its tint. Only zui-sokol draws a transform; the others draw the element as laid out. No renderer draws a material yet; each draws its fallback background.</li>
             <li>There's no examples repository or template yet. The best references are zui-sokol's tour and zui-raylib's demo.</li>
           </ul>
         </div>

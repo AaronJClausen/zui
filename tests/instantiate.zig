@@ -221,6 +221,7 @@ export fn zuiCheckRenderer() usize {
     ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 100, 100 } } });
     ui.image(.{ .handle = 7 }, .{ .decoration = .{ .background = .black } });
     ui.custom(3, .{});
+    ui.box(.{ .decoration = .{ .background = .black, .material = 2 } });
     ui.open(.{ .layout = .{ .sizing = .grow_both }, .effects = &check_effects });
     ui.box(.{ .floating = .{ .z = 1 }, .interactive = true, .decoration = .{ .background = .white } });
     ui.close();
@@ -389,6 +390,10 @@ const EveryCommandHarness = struct {
 
     pub fn custom(_: *EveryCommandHarness) u16 {
         return 1;
+    }
+
+    pub fn material(_: *EveryCommandHarness, color: zui.Color) u8 {
+        return color.g;
     }
 
     pub fn host(self: *EveryCommandHarness) *OffscreenHost {

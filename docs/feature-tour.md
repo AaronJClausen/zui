@@ -343,6 +343,33 @@ fn draggedCard(ui: *Ui, photo: *const Photo, drag: zui.Drag) void {
 }
 ```
 
+<a id="materials"></a>
+
+### Materials · *shipped*
+
+A renderer with shaders of its own names them in `MaterialHandle`, an enum or an id, and the context's decoration gains a `material`: drawn over the element's box, in its corners, in place of its `background`. The background is the material's fallback, so a renderer that does not declare `.material` draws the background instead and `frame.diagnostics.lowered` names `.material`. A material sits under the gradient and over the shadow and backdrop blur, and a static style can carry one. Without a `MaterialHandle` the field is `void` and `Ui.Element`, `Ui.Decoration` and `Ui.Style` are `zui.Element`, `zui.Decoration` and `zui.Style`; with one they are the context's own, so a helper that returns an element names `Ui.Element`. No renderer draws a material yet; zui-sokol is next, and the others draw the fallback.
+
+`src/ui/panels.zig`
+
+```zig
+const Ui = zui.Context(zui_app.contextConfig(Renderer, .{}));
+
+const sidebar_style = zui.static(Ui.Style{
+    .layout = .{ .sizing = .{ .width = .fixed(240), .height = .grow }, .direction = .top_to_bottom },
+    .decoration = .{ .background = .rgb(0x1c1c24), .material = .brushed_metal },
+});
+
+fn histogramPanel(ui: *Ui, photo: *const Photo) void {
+    ui.open(panelFor(.of("histogram")));
+    defer ui.close();
+    ui.text(photo.file_name, .{ .size = 12, .wrap = .none });
+}
+
+fn panelFor(id: zui.Id) Ui.Element {
+    return .{ .id = id, .decoration = .{ .background = .rgba(0x1c1c24e0), .material = .frosted_glass, .corner_radius = .all(8) } };
+}
+```
+
 <a id="ids"></a>
 
 ### Ids · *shipped*
@@ -1469,7 +1496,7 @@ pub fn config(overrides: zui.Config) zui.Config {
 }
 ```
 
-Declaring `pub const zui_commands: zui.CommandSet = .initMany(&.{ .gradient, .shadow, .backdrop_blur })` adds `gradient`, `shadow` and `backdrop_blur` arms to that switch, for the [effects](#effects) elements declare. A backdrop blur averages the pixels as the target stores them, sampling only inside its bounds. A gradient's `colorAt` gives its color at any point, in OKLab, for a renderer that draws it in strips.
+Declaring `pub const zui_commands: zui.CommandSet = .initMany(&.{ .gradient, .shadow, .backdrop_blur })` adds `gradient`, `shadow` and `backdrop_blur` arms to that switch, for the [effects](#effects) elements declare. A backdrop blur averages the pixels as the target stores them, sampling only inside its bounds. A gradient's `colorAt` gives its color at any point, in OKLab, for a renderer that draws it in strips. A renderer with shaders of its own sets `pub const MaterialHandle` and declares `.material`; its `material` arm gets the handle, the fallback color and the corner radius, for the [materials](#materials) elements declare.
 
 <a id="host"></a>
 
@@ -1803,7 +1830,6 @@ Build with `-Dzui-tracy=true` to link Tracy's client, then connect profiler 0.14
 
 These names compile, but they don't do anything yet. This list is from `ARCHITECTURE.md` §7 and the roadmap.
 
-- **Materials** *(declared only)*: The variant exists in `RenderCommand` when a renderer declares it, but nothing in declaration produces it, so nothing is emitted or lowered. Item G5, stage 8.
 - **`features.semantics`** *(declared only)*: `Frame.semantics()` is always empty. Accessibility is V2.
 - **`features.safety_sweeps`** *(declared only)*: The flag exists, but it doesn't change behaviour yet. Sweeps are V3.
 - **Extended color**: Colors are RGBA8 only. `zui.ExtendedColor` for HDR is G6.
@@ -1826,5 +1852,5 @@ These names compile, but they don't do anything yet. This list is from `ARCHITEC
 - Writing UI by hand in core is verbose. Nested `.layout = .{ .sizing = .{ .width = ... } }` literals pile up, and static styles are the main relief today.
 - Interactive elements take three steps: declare, query by id, then pick colors from the state yourself. Widgets hide it, but there is nothing in between.
 - `labeledRow` leaves you to close the row, an asymmetry that's easy to get wrong.
-- Only zui-sokol draws gradients and shadows so far; zui-raylib and zui-terminal show a gradient as one flat color and no shadow. Only zui-sokol blurs a backdrop; the others draw its tint. Only zui-sokol draws a transform; the others draw the element as laid out.
+- Only zui-sokol draws gradients and shadows so far; zui-raylib and zui-terminal show a gradient as one flat color and no shadow. Only zui-sokol blurs a backdrop; the others draw its tint. Only zui-sokol draws a transform; the others draw the element as laid out. No renderer draws a material yet; each draws its fallback background.
 - There's no examples repository or template yet. The best references are zui-sokol's tour and zui-raylib's demo.

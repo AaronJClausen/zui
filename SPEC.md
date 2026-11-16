@@ -1000,9 +1000,10 @@ pub const Element = struct {
 
 ```zig
 pub const Decoration = struct {
-    background: ?config.Color = null,
+    background: ?config.Color = null,  // also the material's fallback
     border: ?Border = null,
     corner_radius: CornerRadius = .{},
+    material: ?config.MaterialHandle = null, // drawn in place of the background; `void` without a handle
 };
 
 pub const Border = struct {
@@ -1011,6 +1012,14 @@ pub const Border = struct {
     between_children: f32 = 0,   // a divider of this width between each two adjacent children in the flow
 };
 ```
+
+`Element`, `Decoration` and `Style` are each context's own,
+`Ui.Element`, `Ui.Decoration` and `Ui.Style`, and are the same types as
+`zui.Element`, `zui.Decoration` and `zui.Style` unless the config's
+`MaterialHandle` is set. Without a handle `material` is `void`, so every
+context without materials shares one set of types and stores nothing more.
+A helper that builds an element for a context with materials names
+`Ui.Element`, since a literal passed through `anytype` is not converted to it.
 
 ```zig
 pub const Effects = struct {

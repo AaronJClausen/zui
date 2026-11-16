@@ -291,9 +291,7 @@ fn Emitter(comptime Ui: type) type {
 
             if (effects) |declared| if (declared.shadow) |*shadow| self.emitShadow(element, bounds, outer_clip, level.z, shadow);
             if (drawn) if (effects) |declared| if (declared.backdrop_blur) |*blur| self.emitBackdropBlur(element, bounds, level.z, blur);
-            if (drawn) if (frame.decorationOf(element)) |decoration| if (decoration.background) |color| {
-                self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = level.z, .payload = .{ .rectangle = .{ .color = color, .corner_radius = decoration.corner_radius } } });
-            };
+            if (drawn) if (frame.decorationOf(element)) |decoration| self.emitBackground(element_id, bounds, level.z, decoration);
             if (drawn) if (effects) |declared| if (declared.gradient) |*gradient| self.emitGradient(element, bounds, level.z, gradient);
 
             switch (frame.kindOf(element)) {
@@ -402,6 +400,23 @@ fn Emitter(comptime Ui: type) type {
                 .angle = gradient.angle,
                 .corner_radius = corner_radius,
             } } });
+        }
+
+        inline fn emitBackground(self: *Self, element_id: u64, bounds: style.Rect, z: i16, decoration: *const Ui.Decoration) void {
+            if (decoration.materialOf()) |material| {
+                if (comptime Ui.RenderCommand.commands.contains(.material)) {
+                    self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = z, .payload = .{ .material = .{
+                        .handle = material,
+                        .fallback = decoration.background orelse .transparent,
+                        .corner_radius = decoration.corner_radius,
+                    } } });
+                    return;
+                }
+                self.frame.diagnostics.lowered.insert(.material);
+            }
+            if (decoration.background) |color| {
+                self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = z, .payload = .{ .rectangle = .{ .color = color, .corner_radius = decoration.corner_radius } } });
+            }
         }
 
         fn emitBackdropBlur(self: *Self, element: Ui.Index, bounds: style.Rect, z: i16, blur: *const style.BackdropBlur) void {

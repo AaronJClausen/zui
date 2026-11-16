@@ -475,6 +475,10 @@ pub fn snapshot(writer: *std.Io.Writer, commands: anytype, names: anytype) std.I
                 try writer.print(" blur={d}", .{payload.radius});
                 try writeNamedColor(writer, "tint", payload.tint);
                 try writeCorners(writer, payload.corner_radius);
+            } else if (comptime std.mem.eql(u8, @tagName(kind), "material")) {
+                try writeHandle(writer, payload.handle);
+                try writeNamedColor(writer, "fallback", payload.fallback);
+                try writeCorners(writer, payload.corner_radius);
             } else if (comptime std.mem.eql(u8, @tagName(kind), "transform_begin")) {
                 if (payload.translation[0] != 0 or payload.translation[1] != 0) try writer.print(" translate={d},{d}", .{ payload.translation[0], payload.translation[1] });
                 if (payload.scale[0] != 1 or payload.scale[1] != 1) try writer.print(" scale={d},{d}", .{ payload.scale[0], payload.scale[1] });
@@ -956,6 +960,19 @@ test "snapshots write a backdrop blur's radius as its blur, beside its tint and 
     };
     try expectSnapshot(&commands, .{},
         \\backdrop_blur x=0 y=0 w=8 h=8 blur=12 tint=#ffffff40 radius=4
+        \\
+    );
+}
+
+test "snapshots write a material's handle beside its fallback and corners" {
+    const Command = zui.Context(.{ .limits = .{ .max_elements = 8 }, .commands = .initOne(.material), .MaterialHandle = enum(u8) { frosted_glass } }).RenderCommand;
+    const commands = [_]Command{
+        .{ .bounds = .{ .width = 8, .height = 8 }, .id = 1, .payload = .{ .material = .{ .handle = .frosted_glass, .fallback = .rgb(0x202830), .corner_radius = .all(4) } } },
+        .{ .bounds = .{ .width = 8, .height = 8 }, .id = 1, .payload = .{ .material = .{ .handle = .frosted_glass, .fallback = .transparent } } },
+    };
+    try expectSnapshot(&commands, .{},
+        \\material x=0 y=0 w=8 h=8 handle=frosted_glass fallback=#202830 radius=4
+        \\material x=0 y=0 w=8 h=8 handle=frosted_glass fallback=#00000000
         \\
     );
 }
