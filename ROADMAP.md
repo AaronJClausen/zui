@@ -75,6 +75,7 @@ green, and its **Status** line below says which slice is next.
 | V2. Semantics and accessibility actions | 9 | `src/context.zig`, `zui_widgets/`, `../zui-host` | | |
 | V3. Safety sweeps | 9 | `src/context.zig`, `src/tests/` | | |
 | V4. The demo in a browser | 9 | `../zui-web`, `zui_wire/` | | |
+| F7. The wire's renderer declares its context's payload types | 5 | `zui_wire/remote.zig`, `zui_wire/tests.zig` | | |
 
 After the queue come stages 10 and 11 in the order of SPEC.md §21. They join the queue as it runs short.
 
@@ -2798,6 +2799,28 @@ Done: H2 and H8 are in *Done*.
 
 F1, feeds, is retired: sources (A3) are the mechanism for outside data.
 Done: F2, F3, F4, F5 and F6 are in *Done*.
+
+### F7. The wire's renderer declares its context's payload types
+
+**Grounding.** `zui_wire.Renderer(Ui)` (`zui_wire/remote.zig:325`)
+declares `zui_commands` as `Ui.RenderCommand.commands` (`:330`) and
+`zui_extended_color` from `Ui.CommandColor`, but none of `Ui`'s payload
+types. For a `Ui` with a `MaterialHandle`, whose commands include
+`.material`, `zui.checkRenderer` fails (`src/contracts.zig:64`): "zui:
+remote.Renderer(…).zui_commands includes .material but
+remote.Renderer(…).MaterialHandle is void". `zui_app.contextConfig`
+takes `ImageHandle`, `CustomData` and `MaterialHandle` from the renderer
+(`zui_app/zui_app.zig:37`), so an application served over the wire under
+`zui_app` loses its images, custom payloads and materials. Found while
+G6's second slice tested the wire's renderer with every command.
+
+**Plan.** `Renderer(Ui)` declares `ImageHandle`, `CustomData`,
+`MaterialHandle` and `FontId` as `Ui`'s, each only when it is not
+`void`, as a renderer without one leaves it undeclared.
+
+**Done when:** `zui.checkRenderer` accepts `zui_wire.Renderer` of the
+tests' every-command context, and `zui_app.contextConfig` of it gives
+back that context's payload types.
 
 ---
 
