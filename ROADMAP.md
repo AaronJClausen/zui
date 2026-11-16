@@ -2986,8 +2986,13 @@ put the saving, so the item waits on one that does.
   color. `toColor(fromColor(c))` is `c` for every 8-bit channel, so
   zui-terminal still passes at a tolerance of 0, and zui-raylib and
   zui-sokol pass unchanged against this checkout.
-  Next: zui-sokol declares `zui_extended_color` and draws it into its
-  SDR target; then `Surface` negotiates an FP16 output, the suite reads
+  The third slice, in zui-sokol (`64737d9`, pinned to `b6d3086`):
+  its renderer declares `zui_extended_color`, so `zui_sokol.config`
+  sets `extended_color`, and it encodes each command's color at the
+  point it is drawn, as `toColor` does, from either color the
+  application declares; it passes the suite in its sokol_app window, and
+  fails it when the channels are encoded linearly instead.
+  Next: `Surface` negotiates an FP16 output, the suite reads
   HDR white back brighter than SDR white from a harness that can, and
   zui-host's Windows host reports `hdr_headroom`, whose *Done when*
   needs a run on Windows with an HDR display.

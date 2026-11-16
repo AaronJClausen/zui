@@ -257,7 +257,6 @@ roadmap item named:
 
 | Today | The spec | Where today | Item |
 |---|---|---|---|
-| `zui.ExtendedColor` is declared, clamped for a renderer without `zui_extended_color`, carried by `zui_wire` and declared by the renderer suite's reference scene, but no renderer draws it | one renderer draws it and passes the suite | `../zui-sokol` | G6 |
 | no output format is negotiated, and no host reports `hdr_headroom` | an FP16 swapchain through `Surface` when both sides support it; headroom from the display | `src/surface.zig`, `../zui-host` | G6 |
 | `Widgets(Ui)` with a `Theme` struct | `Widgets(Ui, Skin)` | `zui_widgets/` | K5 |
 | `Frame` exposes its storage arrays and `rectOf` | `Frame.inspect(index)` | `src/context.zig` | V1 |
