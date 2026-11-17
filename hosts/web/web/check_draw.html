@@ -19,6 +19,7 @@
     if (wasm.zuiWebAddTrueTypeFont(font.length) < 0) throw new Error(`${url}: ${errorName()}`);
   }
   const drawer = new FrameDrawer(document.getElementById("frame"), wasm);
+  window.blurAccumulationFormat = drawer.blurAccumulationFormat?.name ?? null;
   const stream = new Uint8Array(await (await fetch("tour.zuiw")).arrayBuffer());
   let streamed = 0;
   const pieceBytes = 64 * 1024;

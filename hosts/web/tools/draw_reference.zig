@@ -103,6 +103,11 @@ const Harness = struct {
         }
         try out.flush();
         if (self.renderer.glyph_overflows != 0) return error.GlyphAtlasOverflowed;
+        const blurs = &self.renderer.backdrop_blurs;
+        if (blurs.created and blurs.accumulation_format != .RGBA32F) {
+            std.debug.print("draw-reference: this GPU sums backdrop blurs in {t}, not RGBA32F, so they are not comparable with the browser's\n", .{blurs.accumulation_format});
+            return error.BlursNotSummedInRgba32f;
+        }
     }
 };
 

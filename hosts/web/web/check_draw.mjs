@@ -216,6 +216,11 @@ async function directoryForFailedImages() {
   return named;
 }
 
+const blurAccumulationFormat = await evaluate("window.blurAccumulationFormat");
+if (blurAccumulationFormat !== "RGBA32F") {
+  await fail(`the page sums backdrop blurs in ${blurAccumulationFormat ?? "nothing, drawing their tint alone"}, not RGBA32F as the reference does, so they cannot be compared`);
+}
+
 const reference = readReference(await readFile(referencePath));
 // A step that succeeds has its output dropped by `zig build`, and one that
 // fails shows only its stderr.

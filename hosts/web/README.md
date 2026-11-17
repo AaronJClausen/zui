@@ -23,15 +23,19 @@ glyphs are rasterized by stb_truetype, compiled into the client without a
 C library, into an atlas packed as zui-sokol packs its own; bitmap text
 uses sokol_debugtext's six fonts. A backdrop blur copies what was drawn
 beneath it and blurs it as zui-sokol does, along x and then y into two
-half-float targets, before the pane is drawn from them; a material is drawn
-by zui-sokol's material shader, ported to GLSL ES. Without
+float targets, before the pane is drawn from them; a material is drawn
+by zui-sokol's material shader, ported to GLSL ES. The blur is summed in
+RGBA32F where WebGL can render, blend and filter it
+(`EXT_color_buffer_float`, `EXT_float_blend`, `OES_texture_float_linear`),
+as zui-sokol sums it where its GPU can, and otherwise in RGBA16F, whose
+rounding differs between drivers by several color steps; without
 `EXT_color_buffer_float`, blurs are drawn as their tint alone. Images are
 not drawn yet, and there is no page. `zig build test-draw` draws a frame of
 each of the tour's screens with zui-sokol's renderer and with the client in
 headless Chromium, and checks that every pixel matches, within 2 of each
-color or a pixel's neighbor: shapes, text, blurs and materials alike. A
-frame may have one
-pixel that matches nothing nearby: a glyph's partial coverage at its edge
+color or a pixel's neighbor: shapes, text, blurs and materials alike. It
+fails, rather than compare them, if either side cannot sum blurs in
+RGBA32F. A frame may have one pixel that matches nothing nearby: a glyph's partial coverage at its edge
 is a color no neighbor has, and the two rasterizers decide a pixel that
 close to a turned glyph's edge differently. Of the 13 frames, only the
 Transforms screen's has such a pixel.

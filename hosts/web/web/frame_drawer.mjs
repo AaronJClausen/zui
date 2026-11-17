@@ -166,15 +166,29 @@ function uniformsOf(gl, program, names) {
 }
 
 /**
+ * The float format backdrop blurs are summed in, as zui-sokol's renderer
+ * chooses it: the first the context can render, blend and filter. Each tap
+ * is added by blending and rounded to the format, and drivers round half
+ * floats differently, so RGBA16F is only the fallback.
+ * @returns {{ name: string, internalFormat: number } | null}
+ */
+function blurAccumulationFormat(gl) {
+  if (!gl.getExtension("EXT_color_buffer_float")) return null;
+  if (gl.getExtension("EXT_float_blend") && gl.getExtension("OES_texture_float_linear")) return { name: "RGBA32F", internalFormat: gl.RGBA32F };
+  return { name: "RGBA16F", internalFormat: gl.RGBA16F };
+}
+
+/**
  * Where a frame's backdrop blurs run: a copy of what was drawn, and the
- * two RGBA16F targets that zui-sokol's renderer blurs into, along x and
+ * two float targets that zui-sokol's renderer blurs into, along x and
  * then along y, sized to the canvas.
  */
 class BlurTargets {
-  constructor(gl, width, height) {
+  constructor(gl, width, height, accumulationFormat) {
     this.gl = gl;
     this.width = width;
     this.height = height;
+    this.accumulationFormat = accumulationFormat;
     this.scene = makeTexture(gl, blurSourceUnit, gl.LINEAR);
     // The canvas has no alpha, and a copy may only take channels its source has.
     gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGB8, width, height);
@@ -185,7 +199,7 @@ class BlurTargets {
   makeFloatTarget(unit) {
     const { gl } = this;
     const texture = makeTexture(gl, unit, gl.LINEAR);
-    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA16F, this.width, this.height);
+    gl.texStorage2D(gl.TEXTURE_2D, 1, this.accumulationFormat.internalFormat, this.width, this.height);
     const framebuffer = gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
@@ -212,7 +226,8 @@ export class FrameDrawer {
    * @param {HTMLCanvasElement} canvas sized to each frame as it is drawn
    * @param {WebAssembly.Exports} wasm the client's exports, after `zuiWebInit`
    *   and, if bitmap text is to be drawn, `zuiWebLoadBitmapFonts`. Without
-   *   float render targets, backdrop blurs are drawn as their tint alone.
+   *   float render targets, backdrop blurs are drawn as their tint alone,
+   *   and `blurAccumulationFormat` is null.
    */
   constructor(canvas, wasm) {
     // Edges are not smoothed and nothing is composed with the page's
@@ -223,7 +238,8 @@ export class FrameDrawer {
     this.gl = gl;
     this.wasm = wasm;
 
-    if (!gl.getExtension("EXT_color_buffer_float")) wasm.zuiWebDrawBackdropBlursAsTints();
+    this.blurAccumulationFormat = blurAccumulationFormat(gl);
+    if (!this.blurAccumulationFormat) wasm.zuiWebDrawBackdropBlursAsTints();
     this.blurTargets = null;
 
     const blurProgram = link(gl, blurVertexShaderSource, blurFragmentShaderSource);
@@ -286,7 +302,7 @@ export class FrameDrawer {
     const { gl } = this;
     if (this.blurTargets?.width !== width || this.blurTargets?.height !== height) {
       this.blurTargets?.delete();
-      this.blurTargets = new BlurTargets(gl, width, height);
+      this.blurTargets = new BlurTargets(gl, width, height, this.blurAccumulationFormat);
     }
     const targets = this.blurTargets;
     gl.activeTexture(gl.TEXTURE0 + blurSourceUnit);
