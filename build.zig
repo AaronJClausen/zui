@@ -84,6 +84,8 @@ const compile_error_cases = [_]struct { name: []const u8, expected_error: []cons
     .{ .name = "wire_serialize_without_deserialize", .expected_error = "zui_wire: wire_serialize_without_deserialize.Handle declares zuiSerialize but not zuiDeserialize" },
     .{ .name = "debug_without_text", .expected_error = "zui_debug: Inspector needs a context with Config.Text, which draws its panel" },
     .{ .name = "debug_zone_timer_inner_not_tracer", .expected_error = "zui_debug: ZoneTimer passes its zones on to a tracer or to void, got debug_zone_timer_inner_not_tracer.Fonts" },
+    .{ .name = "debug_theme_changes_not_file_changes", .expected_error = "zui_debug: Sources.theme_files is not a stream of zui.FileChange, such as zui_async.Stream(zui.FileChange, ...)" },
+    .{ .name = "debug_theme_source_not_theme", .expected_error = "zui_debug: Sources.theme does not hold the panel's theme, as a zui_async.Latest(zui_debug.PanelTheme(FontId, Color)) does" },
     .{ .name = "text_fingerprint_wrong_signature", .expected_error = "zui: text_fingerprint_wrong_signature.Text.zuiFingerprint must be fn (*const text_fingerprint_wrong_signature.Text) u64, found fn (*text_fingerprint_wrong_signature.Text) u32" },
     .{ .name = "text_segment_wrong_signature", .expected_error = "zui: text_segment_wrong_signature.Text.zuiSegment must be fn (*text_segment_wrong_signature.Text, []const u8, *text.BreakSink) void, found fn (*text_segment_wrong_signature.Text, []const u8, []u32) void" },
 };
@@ -187,6 +189,7 @@ pub fn build(b: *std.Build) void {
     }
     wire_module.addImport("zui_async", async_module);
     wire_module.addImport("zui_app", app_module);
+    debug_module.addImport("zui_async", async_module);
 
     for (compile_error_cases) |case| {
         const failing_object = b.addObject(.{

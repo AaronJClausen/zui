@@ -130,6 +130,97 @@ pub const ZoneHistory = struct {
     }
 };
 
+/// A theme file, and the directory whose file watch names its changes.
+pub const ThemeFile = struct {
+    directory: std.Io.Dir,
+    /// Relative to `directory` and `/`-separated, as `zui.FileChange`
+    /// names it.
+    name: []const u8,
+};
+
+/// Why a theme file did not load; the panel keeps the theme it has.
+pub const LoadThemeError = std.Io.Dir.ReadFileError || error{
+    /// Longer than `max_theme_file_bytes`.
+    ThemeFileTooLarge,
+    /// Not a theme in ZON, or one too large to parse in the loader's memory.
+    ParseZon,
+    OutOfMemory,
+};
+
+/// The longest theme file `PanelTheme.read` takes.
+pub const max_theme_file_bytes = 2048;
+const theme_parse_memory_bytes = 32 * 1024;
+
+/// How the inspector's panel looks, in a context's `FontId` and `Color`;
+/// `font` and `text_size` apply to every line. It does not name the
+/// context, so a `zui_async.Latest` of it can be one of that context's
+/// sources.
+pub fn PanelTheme(comptime FontId: type, comptime Color: type) type {
+    return struct {
+        const Self = @This();
+
+        width: f32 = 360,
+        font: FontId = std.mem.zeroes(FontId),
+        text_size: f32 = 12,
+        text: Color = .rgb(0xd4d4d4),
+        heading: Color = .rgb(0x9cdcfe),
+        background: Color = .rgba(0x1e1e1ef0),
+        hovered_row: Color = .rgb(0x264f78),
+
+        /// The theme as a ZON file writes it: each color as `0xrrggbbaa`,
+        /// and a field left out keeps its default.
+        ///
+        /// ```zig
+        /// .{ .width = 420, .background = 0x101010e0, .heading = 0xffcc66ff }
+        /// ```
+        pub const Zon = zon: {
+            const fields = @typeInfo(Self).@"struct".fields;
+            var names: [fields.len][]const u8 = undefined;
+            var types: [fields.len]type = undefined;
+            var attributes: [fields.len]std.builtin.Type.StructField.Attributes = undefined;
+            for (fields, &names, &types, &attributes) |field, *name, *Type, *attribute| {
+                name.* = field.name;
+                if (field.type == Color) {
+                    Type.* = u32;
+                    attribute.* = .{ .default_value_ptr = &@as(u32, rgbaHexOf(field.defaultValue().?)) };
+                } else {
+                    Type.* = field.type;
+                    attribute.* = .{ .default_value_ptr = field.default_value_ptr };
+                }
+            }
+            break :zon @Struct(.auto, null, &names, &types, &attributes);
+        };
+
+        /// The theme a file's `Zon` names, its colors in `Color`.
+        pub fn fromZon(zon: Zon) Self {
+            var theme: Self = undefined;
+            inline for (@typeInfo(Self).@"struct".fields) |field| {
+                const written = @field(zon, field.name);
+                @field(theme, field.name) = if (field.type == Color) .rgba(written) else written;
+            }
+            return theme;
+        }
+
+        /// Reads and parses `file`, with no allocation: the file and its
+        /// parse fit in fixed memory on the stack.
+        pub fn read(io: std.Io, file: ThemeFile) LoadThemeError!Self {
+            var source: [max_theme_file_bytes + 2]u8 = undefined;
+            const bytes = try file.directory.readFile(io, file.name, source[0 .. max_theme_file_bytes + 1]);
+            if (bytes.len > max_theme_file_bytes) return error.ThemeFileTooLarge;
+            source[bytes.len] = 0;
+            var parse_memory: [theme_parse_memory_bytes]u8 = undefined;
+            var parse_allocator: std.heap.FixedBufferAllocator = .init(&parse_memory);
+            const zon = try std.zon.parse.fromSlice(Zon, parse_allocator.allocator(), source[0..bytes.len :0], null, .{});
+            return .fromZon(zon);
+        }
+
+        fn rgbaHexOf(color: Color) u32 {
+            const srgb: zui.Color = if (Color == zui.Color) color else color.toColor();
+            return @as(u32, srgb.r) << 24 | @as(u32, srgb.g) << 16 | @as(u32, srgb.b) << 8 | srgb.a;
+        }
+    };
+}
+
 /// Whether `Tracer` keeps the frame's zone times, as `ZoneTimer` does.
 fn timesZones(comptime Tracer: type) bool {
     return Tracer != void and @hasDecl(Tracer, "frameTimes") and @TypeOf(Tracer.frameTimes) == fn () ZoneTimes;
@@ -159,15 +250,18 @@ pub fn Inspector(comptime Ui: type) type {
         const max_indented_depth = 32;
         const max_run_report_bytes = 1024;
 
-        /// How the panel looks; `font` and `text_size` apply to every line.
-        pub const Theme = struct {
-            width: f32 = 360,
-            font: Ui.FontId = std.mem.zeroes(Ui.FontId),
-            text_size: f32 = 12,
-            text: Ui.Color = .rgb(0xd4d4d4),
-            heading: Ui.Color = .rgb(0x9cdcfe),
-            background: Ui.Color = .rgba(0x1e1e1ef0),
-            hovered_row: Ui.Color = .rgb(0x264f78),
+        /// How the panel looks, in this context's font and colors.
+        pub const Theme = PanelTheme(Ui.FontId, Ui.Color);
+
+        /// Where `declareWithThemeFrom` finds the panel's theme among the
+        /// context's sources.
+        pub const ThemeSources = struct {
+            /// A `zui_async.Stream(zui.FileChange, ...)` that the host's
+            /// file watch of `theme_file.directory` publishes into.
+            file_changes: Ui.SourceField,
+            /// A `zui_async.Latest(Theme)` that the loader publishes what
+            /// `loadTheme` read into.
+            theme: Ui.SourceField,
         };
 
         /// What an element holds. The root is told apart from other boxes.
@@ -236,6 +330,10 @@ pub fn Inspector(comptime Ui: type) type {
         /// lists its own rows.
         panel_id: zui.Id = default_panel_id,
         theme: Theme = .{},
+        /// The file `loadTheme` reads `theme` from, if any.
+        theme_file: ?ThemeFile = null,
+        /// Set by a change to `theme_file`, and true until it is first read.
+        theme_file_changed: bool = true,
         row_storage: [Ui.max_elements]Row = undefined,
         row_count: u32 = 0,
         hovered: ?Hovered = null,
@@ -399,6 +497,81 @@ pub fn Inspector(comptime Ui: type) type {
                 if (is_hovered) ui.close();
             }
             ui.close();
+        }
+
+        /// `declare`, with the panel in the theme last published into
+        /// `sources.theme`, which a replay delivers as the live run did.
+        /// A change to `theme_file` among `sources.file_changes`, or a
+        /// `.rescan`, has the next `loadTheme` read it again.
+        ///
+        /// ```zig
+        /// const Sources = struct {
+        ///     debug_theme_files: zui_async.Stream(zui.FileChange, .{ .capacity = 32 }) = .{},
+        ///     debug_theme: zui_async.Latest(zui_debug.PanelTheme(u16, zui.Color)) = .{},
+        /// };
+        ///
+        /// app.inspector.theme_file = .{ .directory = themes, .name = "debug.zon" };
+        /// try Host.zuiFileWatch.watch(host, "themes", .of(&app.sources.debug_theme_files));
+        /// // declaring, last:
+        /// app.inspector.declareWithThemeFrom(ui, .{ .file_changes = .debug_theme_files, .theme = .debug_theme });
+        /// // between frames:
+        /// if (app.inspector.loadTheme(io)) |loaded| {
+        ///     if (loaded) |theme| waker.wakeIf(app.sources.debug_theme.publish(theme));
+        /// } else |err| std.log.warn("zui_debug kept its theme: {t}", .{err});
+        /// ```
+        pub fn declareWithThemeFrom(self: *Self, ui: *Ui, comptime sources: ThemeSources) void {
+            comptime checkThemeSources(sources);
+            var changes = ui.source(sources.file_changes).items();
+            while (changes.next()) |change| {
+                if (self.changesThemeFile(change)) self.theme_file_changed = true;
+            }
+            if (ui.source(sources.theme).get()) |theme| self.theme = theme;
+            self.declare(ui);
+        }
+
+        /// Between frames: reads `theme_file` when it changed since it was
+        /// last read, for the loader to publish into the source
+        /// `declareWithThemeFrom` reads. Null when there is nothing new to
+        /// read. A file that does not load, such as one caught half
+        /// written, is not read again until it changes again.
+        pub fn loadTheme(self: *Self, io: std.Io) LoadThemeError!?Theme {
+            const file = self.theme_file orelse return null;
+            if (!self.theme_file_changed) return null;
+            self.theme_file_changed = false;
+            return try Theme.read(io, file);
+        }
+
+        fn changesThemeFile(self: *const Self, change: *const zui.FileChange) bool {
+            const file = self.theme_file orelse return false;
+            return switch (change.kind) {
+                .rescan => true,
+                .added, .modified, .renamed_to => std.mem.eql(u8, change.pathBytes(), file.name),
+                .removed, .renamed_from => false,
+            };
+        }
+
+        fn checkThemeSources(comptime sources: ThemeSources) void {
+            if (!yieldsFileChanges(Ui.SourceView(sources.file_changes))) {
+                @compileError("zui_debug: Sources." ++ @tagName(sources.file_changes) ++ " is not a stream of zui.FileChange, such as zui_async.Stream(zui.FileChange, ...)");
+            }
+            if (!holdsTheme(Ui.SourceView(sources.theme))) {
+                @compileError("zui_debug: Sources." ++ @tagName(sources.theme) ++ " does not hold the panel's theme, as a zui_async.Latest(zui_debug.PanelTheme(FontId, Color)) does");
+            }
+        }
+
+        fn yieldsFileChanges(comptime View: type) bool {
+            if (!@hasDecl(View, "items")) return false;
+            const Iterator = ReturnType(View.items);
+            if (!@hasDecl(Iterator, "next")) return false;
+            return ReturnType(Iterator.next) == ?*const zui.FileChange;
+        }
+
+        fn holdsTheme(comptime View: type) bool {
+            return @hasDecl(View, "get") and ReturnType(View.get) == ?Theme;
+        }
+
+        fn ReturnType(comptime function: anytype) type {
+            return @typeInfo(@TypeOf(function)).@"fn".return_type.?;
         }
 
         fn declareHovered(self: *const Self, ui: *Ui, hovered: *const Hovered) void {

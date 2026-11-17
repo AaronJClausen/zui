@@ -1400,7 +1400,7 @@ fn debugPanel(app: *App, ui: *Ui) void {
 
 ### `zui_debug`: the element tree and what's under the pointer · *shipped*
 
-`zui_debug.Inspector(Ui)` is a panel over `Frame.inspect`, floating at the right edge of the window. It opens with the frame's diagnostics: each limit exceeded, named by its `limits` field with what the frame needed, the first element past it, repeated ids, an unbalanced tree and refused publishes. Then come the fallbacks in effect: each optional command the renderer does not draw and what was drawn instead, colors clamped for a renderer without `zui_extended_color`, and whatever you hand `reportRun`, such as `zui_app`'s `Report` of what the host and renderer lack. Below them it lists the element tree, one row per element, indented by depth, with its name (its id in a build without `-Dzui-debug`), kind and size, and above it the element under the pointer: its rectangle, flags, and each field of its layout, decoration, effects, floating and text style that differs from the default. `observe` copies what it shows out of a frame after `endFrame`, so the frame is released as usual, and `declare` declares the panel in the next frame. Its own rows never appear in the tree, and while the pointer is over the panel, the element it showed stays. It sits in your application's state, sized by `limits.max_elements`, and allocates nothing. Make `zui_debug.ZoneTimer(Inner)` the context's tracer and hand it a clock with `useClock(io)`, and the panel adds a *Performance* section: each zone that ran, the steps of `beginFrame` and `endFrame` indented under them, with its time in the last frame and its mean and peak over the last 60, in milliseconds. The timer passes every zone on to `Inner`, so `zui_tracy.Tracer` still sees them, or to nothing for `void`; with any other tracer the inspector keeps no times. Its theme reloading from a file comes next (V1).
+`zui_debug.Inspector(Ui)` is a panel over `Frame.inspect`, floating at the right edge of the window. It opens with the frame's diagnostics: each limit exceeded, named by its `limits` field with what the frame needed, the first element past it, repeated ids, an unbalanced tree and refused publishes. Then come the fallbacks in effect: each optional command the renderer does not draw and what was drawn instead, colors clamped for a renderer without `zui_extended_color`, and whatever you hand `reportRun`, such as `zui_app`'s `Report` of what the host and renderer lack. Below them it lists the element tree, one row per element, indented by depth, with its name (its id in a build without `-Dzui-debug`), kind and size, and above it the element under the pointer: its rectangle, flags, and each field of its layout, decoration, effects, floating and text style that differs from the default. `observe` copies what it shows out of a frame after `endFrame`, so the frame is released as usual, and `declare` declares the panel in the next frame. Its own rows never appear in the tree, and while the pointer is over the panel, the element it showed stays. It sits in your application's state, sized by `limits.max_elements`, and allocates nothing. Make `zui_debug.ZoneTimer(Inner)` the context's tracer and hand it a clock with `useClock(io)`, and the panel adds a *Performance* section: each zone that ran, the steps of `beginFrame` and `endFrame` indented under them, with its time in the last frame and its mean and peak over the last 60, in milliseconds. The timer passes every zone on to `Inner`, so `zui_tracy.Tracer` still sees them, or to nothing for `void`; with any other tracer the inspector keeps no times.
 
 `src/app.zig`
 
@@ -1433,6 +1433,40 @@ const App = struct {
         try app.renderer.zuiSubmit(app.host.zuiSurface(.main), frame);
     }
 };
+```
+
+The panel's theme is a `zui_debug.PanelTheme(FontId, Color)`, and it reloads from a ZON file while the application runs. Set the inspector's `theme_file` to a directory and a file name within it, have the host's file watch publish that directory's changes into a `zui_async.Stream(zui.FileChange, ...)` among your sources, and keep a `zui_async.Latest` of the theme beside it. `declareWithThemeFrom` takes their field names: it notes a change to the file, or a `.rescan`, and draws the panel in the theme the `Latest` last delivered. Between frames, `loadTheme(io)` reads and parses the file when it changed and hands you the theme to publish, with no allocation; a file that does not parse, as one caught half written, is an error you can log, and the panel keeps its theme until the file changes again. In the file each color is a `0xrrggbbaa` and every field is optional. A replay restyles from the delivered theme without reading a file.
+
+`src/debug_theme.zig`
+
+```zig
+const DebugTheme = zui_debug.PanelTheme(u16, zui.Color);
+
+const Sources = struct {
+    debug_theme_files: zui_async.Stream(zui.FileChange, .{ .capacity = 32 }) = .{},
+    debug_theme: zui_async.Latest(DebugTheme) = .{},
+};
+
+fn watchDebugTheme(app: *App, io: std.Io) !void {
+    app.inspector.theme_file = .{ .directory = try std.Io.Dir.cwd().openDir(io, "themes", .{}), .name = "debug.zon" };
+    try Host.zuiFileWatch.watch(app.host, "themes", .of(&app.sources.debug_theme_files));
+}
+
+fn declareInspector(app: *App, ui: *Ui) void {
+    app.inspector.declareWithThemeFrom(ui, .{ .file_changes = .debug_theme_files, .theme = .debug_theme });
+}
+
+fn loadBetweenFrames(app: *App, io: std.Io, waker: zui.Waker) void {
+    if (app.inspector.loadTheme(io)) |loaded| {
+        if (loaded) |theme| waker.wakeIf(app.sources.debug_theme.publish(theme));
+    } else |err| std.log.warn("themes/debug.zon did not load: {t}", .{err});
+}
+```
+
+`themes/debug.zon`
+
+```zig
+.{ .width = 420, .background = 0x101820e8, .heading = 0xffcc66ff }
 ```
 
 <a id="zui-app"></a>
@@ -1885,7 +1919,7 @@ These names compile, but they don't do anything yet. This list is from `ARCHITEC
 - **`features.semantics`** *(declared only)*: `Frame.semantics()` is always empty. Accessibility is V2.
 - **`features.safety_sweeps`** *(declared only)*: The flag exists, but it doesn't change behaviour yet. Sweeps are V3.
 - **Extended color** *(clamped only)*: `Config.Color = zui.ExtendedColor` declares colors brighter than SDR white or outside sRGB, as `.linear(4, 4, 4, 1)` or with `Color`'s own `.rgb(0x3366ff)`, and every type that holds a color follows it: `Ui.Decoration`, `Ui.Border`, `Ui.Effects`, `Ui.TextStyle`. For a renderer that draws only `zui.Color`, each is clamped as it is emitted, and `frame.diagnostics.clamped_colors` says when that changed one. zui-sokol declares `zui_extended_color`, so it is given them as declared, and encodes them into its 8-bit sRGB target; `zui_wire` carries them unclamped when its context's renderer draws them, and the renderer suite declares its scene in them, with a box of HDR white. A host and a renderer that both declare `.scrgb_fp16` in `zui_output_formats` open the window with it in `WindowOptions.output_formats`, and the host's surface says which format it chose, `surface.outputFormat()`; SDR otherwise. The renderer suite reads an FP16 target back through a harness's `extendedPixel` and expects HDR white there at four times SDR white. zui-sokol draws an `.offscreen` surface in `.scrgb_fp16`, in linear light, and passes the suite there, reading HDR white back at four times SDR white. No host opens an FP16 window yet, so no window is brighter than SDR white: that, and the host's headroom, are the rest of G6.
-- **Still to come**: The rest of `zui_debug` (V1): its theme reloading; motion, multi-line text editing, skins, and more hosts (macOS, Linux, web).
+- **Still to come**: The demo's key for `zui_debug` (V1); motion, multi-line text editing, skins, and more hosts (macOS, Linux, web).
 
 <a id="dx"></a>
 

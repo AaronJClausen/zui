@@ -550,6 +550,32 @@ export fn zuiCheckZoneTimer() u32 {
     return @intCast(CheckZoneTimer.frameTimes().ran.count() + timed_inspector.zones.count);
 }
 
+const CheckPanelTheme = zui_debug.PanelTheme(u16, zui.Color);
+const PanelThemeSources = struct {
+    theme_files: zui_async.Stream(zui.FileChange, .{ .capacity = 4 }) = .{},
+    theme: zui_async.Latest(CheckPanelTheme) = .{},
+};
+const ThemedUi = zui.Context(.{ .limits = .{ .max_elements = 64 }, .Text = CheckText, .Sources = PanelThemeSources });
+
+var themed_memory: [ThemedUi.required_bytes]u8 align(ThemedUi.buffer_alignment) = undefined;
+var themed_inspector: zui_debug.Inspector(ThemedUi) = .{};
+var panel_theme_sources: PanelThemeSources = .{};
+/// A freestanding target has no current directory, so the check reads from
+/// a directory it never opens.
+var panel_theme_directory: std.Io.Dir = undefined;
+
+export fn zuiCheckPanelThemeReload() u32 {
+    var ui = ThemedUi.initBuffer(&themed_memory, undefined, &check_text) catch return 0;
+    themed_inspector.theme_file = .{ .directory = panel_theme_directory, .name = "debug.zon" };
+    _ = panel_theme_sources.theme_files.publish(.of(.modified, "debug.zon")) catch return 0;
+    ui.tryBeginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 100, 100 } } }, &panel_theme_sources) catch return 0;
+    themed_inspector.declareWithThemeFrom(&ui, .{ .file_changes = .theme_files, .theme = .theme });
+    ui.release(ui.endFrame());
+    const loaded = themed_inspector.loadTheme(ui.io) catch return 1;
+    if (loaded) |theme| _ = panel_theme_sources.theme.publish(theme);
+    return 2;
+}
+
 const CheckSource = struct {
     pub const Delivery = ?u64;
     pub const View = zui.StatusWithProgress(error{Timeout}!u64, f32);

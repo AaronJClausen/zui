@@ -232,6 +232,10 @@ Implemented so far:
   panel also shows each zone's time in the last frame and its mean and
   peak over the last 60, while passing the zones on to `Inner`, such as
   `zui_tracy.Tracer`.
+  `declareWithThemeFrom` draws the panel in a theme read from a ZON
+  file: the host's file watch publishes the file's changes into a
+  source, and the loader's `loadTheme(io)` reads it again into another,
+  so a replay restyles as the live run did.
 
 The reference backend, its adapter host and the demo application live in
 [zui-raylib](https://github.com/AaronJClausen/zui-raylib); the other

@@ -1,6 +1,7 @@
 const std = @import("std");
 const zui = @import("zui");
 const zui_testing = @import("zui_testing");
+const zui_async = @import("zui_async");
 const zui_debug = @import("zui_debug.zig");
 
 const testing = std.testing;
@@ -444,4 +445,159 @@ test "the zone history keeps the last frames, and a zone's mean counts only the 
     try testing.expectEqual(@as(u64, (5 + zui_debug.ZoneHistory.frames_kept + 4) / 2), history.mean(.emit));
     try testing.expectEqual(@as(u64, 10), history.mean(.sort_layers));
     try testing.expect(!history.ran(.relay));
+}
+
+const UiTheme = zui_debug.PanelTheme(u16, zui.Color);
+
+const ThemeSources = struct {
+    theme_files: zui_async.Stream(zui.FileChange, .{ .capacity = 8 }) = .{},
+    theme: zui_async.Latest(UiTheme) = .{},
+};
+
+const ThemedUi = zui.Context(.{
+    .limits = .{ .max_elements = 64, .max_text_bytes = 4096, .max_render_commands = 256, .measure_cache_entries = 64 },
+    .Text = Text,
+    .Sources = ThemeSources,
+});
+
+const ThemedApp = struct {
+    text: Text = .{},
+    ui: ThemedUi = undefined,
+    driver: zui_testing.Driver(ThemedUi) = undefined,
+    sources: ThemeSources = .{},
+    inspector: zui_debug.Inspector(ThemedUi) = .{},
+
+    fn create(theme_directory: std.Io.Dir) !*ThemedApp {
+        const app = try testing.allocator.create(ThemedApp);
+        errdefer testing.allocator.destroy(app);
+        app.* = .{};
+        app.inspector.theme_file = .{ .directory = theme_directory, .name = "themes/debug.zon" };
+        app.ui = try .init(testing.allocator, testing.io, &app.text);
+        app.driver = .{ .ui = &app.ui, .sources = &app.sources };
+        return app;
+    }
+
+    fn destroy(app: *ThemedApp) void {
+        app.ui.deinit(testing.allocator);
+        testing.allocator.destroy(app);
+    }
+
+    fn declare(app: *ThemedApp, ui: *ThemedUi) void {
+        ui.text("themed", .{});
+        app.inspector.declareWithThemeFrom(ui, .{ .file_changes = .theme_files, .theme = .theme });
+    }
+
+    fn frame(app: *ThemedApp) !*const ThemedUi.Frame {
+        return app.driver.frame(app, declare, &.{});
+    }
+
+    fn fileChanged(app: *ThemedApp, change: zui.FileChange) !void {
+        _ = try app.sources.theme_files.publish(change);
+        _ = try app.frame();
+    }
+
+    /// What the loader does between frames; true when it published a theme.
+    fn load(app: *ThemedApp) !bool {
+        const theme = try app.inspector.loadTheme(testing.io) orelse return false;
+        _ = app.sources.theme.publish(theme);
+        return true;
+    }
+
+    fn panelBackground(app: *ThemedApp) !zui.Color {
+        const frame_drawn = try app.frame();
+        const panel = frame_drawn.lookup(zui_debug.Inspector(ThemedUi).default_panel_id.hash).?;
+        return frame_drawn.inspect(panel).decoration.?.background.?;
+    }
+};
+
+fn writeThemeFile(directory: std.Io.Dir, zon: []const u8) !void {
+    try directory.createDirPath(testing.io, "themes");
+    try directory.writeFile(testing.io, .{ .sub_path = "themes/debug.zon", .data = zon });
+}
+
+test "the panel takes its theme from a file, and reads it again when the watch says it changed" {
+    var temporary = testing.tmpDir(.{});
+    defer temporary.cleanup();
+    const app = try ThemedApp.create(temporary.dir);
+    defer app.destroy();
+
+    try writeThemeFile(temporary.dir, ".{ .background = 0x102030ff, .width = 200 }");
+    try testing.expect(try app.load());
+    try testing.expect(!try app.load());
+    try testing.expectEqual(zui.Color.rgb(0x102030), try app.panelBackground());
+    try testing.expectEqual(@as(f32, 200), app.inspector.theme.width);
+    try testing.expectEqual((UiTheme{}).heading, app.inspector.theme.heading);
+
+    try writeThemeFile(temporary.dir, ".{ .background = 0x40506080 }");
+    try testing.expect(!try app.load());
+    try app.fileChanged(.of(.modified, "themes/debug.zon"));
+    try testing.expect(try app.load());
+    try testing.expectEqual(zui.Color.rgba(0x40506080), try app.panelBackground());
+    try testing.expectEqual((UiTheme{}).width, app.inspector.theme.width);
+}
+
+test "a change to another file or the theme file's removal reads nothing, and a rescan reads it again" {
+    var temporary = testing.tmpDir(.{});
+    defer temporary.cleanup();
+    const app = try ThemedApp.create(temporary.dir);
+    defer app.destroy();
+
+    try writeThemeFile(temporary.dir, ".{ .text = 0xffffffff }");
+    try testing.expect(try app.load());
+    try app.fileChanged(.of(.modified, "themes/other.zon"));
+    try app.fileChanged(.of(.removed, "themes/debug.zon"));
+    try app.fileChanged(.of(.renamed_from, "themes/debug.zon"));
+    try testing.expect(!try app.load());
+    try app.fileChanged(.of(.renamed_to, "themes/debug.zon"));
+    try testing.expect(try app.load());
+    try app.fileChanged(.{ .kind = .rescan });
+    try testing.expect(try app.load());
+}
+
+test "a theme file that does not load is an error, and the panel keeps its theme until the file changes" {
+    var temporary = testing.tmpDir(.{});
+    defer temporary.cleanup();
+    const app = try ThemedApp.create(temporary.dir);
+    defer app.destroy();
+
+    try writeThemeFile(temporary.dir, ".{ .background = 0x102030ff }");
+    try testing.expect(try app.load());
+    try testing.expectEqual(zui.Color.rgb(0x102030), try app.panelBackground());
+
+    try writeThemeFile(temporary.dir, ".{ .background = 0x");
+    try app.fileChanged(.of(.modified, "themes/debug.zon"));
+    try testing.expectError(error.ParseZon, app.inspector.loadTheme(testing.io));
+    try testing.expect(!try app.load());
+    try testing.expectEqual(zui.Color.rgb(0x102030), try app.panelBackground());
+
+    try writeThemeFile(temporary.dir, ".{ .backgrund = 0x405060ff }");
+    try app.fileChanged(.of(.modified, "themes/debug.zon"));
+    try testing.expectError(error.ParseZon, app.inspector.loadTheme(testing.io));
+
+    try writeThemeFile(temporary.dir, ".{ .width = 300 }" ++ " " ** zui_debug.max_theme_file_bytes);
+    try app.fileChanged(.of(.modified, "themes/debug.zon"));
+    try testing.expectError(error.ThemeFileTooLarge, app.inspector.loadTheme(testing.io));
+
+    try temporary.dir.deleteFile(testing.io, "themes/debug.zon");
+    try app.fileChanged(.{ .kind = .rescan });
+    try testing.expectError(error.FileNotFound, app.inspector.loadTheme(testing.io));
+    try testing.expectEqual(zui.Color.rgb(0x102030), try app.panelBackground());
+}
+
+test "a delivered theme restyles the panel as the live run did, with no file read" {
+    var temporary = testing.tmpDir(.{});
+    defer temporary.cleanup();
+    const app = try ThemedApp.create(temporary.dir);
+    defer app.destroy();
+
+    const replayed: UiTheme = .{ .background = .rgb(0x335577) };
+    _ = try app.driver.frameDelivering(app, ThemedApp.declare, .{ .theme = @as(?UiTheme, replayed) });
+    try testing.expectEqual(zui.Color.rgb(0x335577), try app.panelBackground());
+}
+
+test "a theme with no field written is the default, in either kind of color" {
+    try testing.expectEqual(UiTheme{}, UiTheme.fromZon(.{}));
+    const ExtendedTheme = zui_debug.PanelTheme(u16, zui.ExtendedColor);
+    try testing.expectEqual(ExtendedTheme{}, ExtendedTheme.fromZon(.{}));
+    try testing.expectEqual(@as(u32, 0x1e1e1ef0), (UiTheme.Zon{}).background);
 }
