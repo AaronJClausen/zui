@@ -73,7 +73,7 @@ green, and its **Status** line below says which slice is next.
 | P12. Text commands that point at their style | audit | `src/commands.zig`, `src/emission.zig`, `zui_wire/`, `../zui-raylib`, `../zui-sokol`, `../zui-terminal` | | waiting on a profile of a renderer reading the commands |
 | G6. HDR and wide gamut | 8 | `src/context.zig`, `src/commands.zig`, `src/surface.zig`, `zui_wire/`, `zui_testing/`, `../zui-sokol`, `../zui-host` | | waiting on a session under Windows with an HDR display: zui-sokol's FP16 `.win32` swapchain and zui-host's `.scrgb_fp16` window |
 | V2. Semantics and accessibility actions | 9 | `src/context.zig`, `zui_widgets/`, `../zui-host` | | in progress; the UI Automation bridge waits on a session under Windows |
-| V4. The demo in a browser | 9 | `../zui-web`, `zui_wire/` | | in progress; the client draws shapes and text, both compared with zui-sokol's; backdrop blurs and materials are next |
+| V4. The demo in a browser | 9 | `../zui-web`, `zui_wire/` | | in progress; the client draws every command the tour does, compared with zui-sokol's; input (slice 3) is next |
 | F7. The wire's renderer declares its context's payload types | 5 | `zui_wire/remote.zig`, `zui_wire/tests.zig` | | |
 
 After the queue come stages 10 and 11 in the order of SPEC.md §21. They join the queue as it runs short.
@@ -3269,9 +3269,33 @@ published from CI.
      the neighbor rule absorbs the shift elsewhere. CI's first `test-draw`
      with text, its reference drawn by Mesa under Xvfb rather than this
      machine's NVIDIA driver, is to be confirmed once zui-web is pushed.
-   - **Backdrop blurs and materials:** the blur as zui-sokol's passes
-     run it, sampling what was drawn before into a texture, and the three
-     material patterns in its shader, ported to GLSL ES.
+   - **Backdrop blurs and materials** (done). A blur starts a batch, and
+     before it the page copies the canvas into a texture and runs
+     zui-sokol's two passes: each Gaussian tap, split into the coarse and
+     fine weights zui-sokol's 8-bit vertex colors add, is an instance of a
+     quad over the blur's whole pixels, adding its linearly filtered
+     sample into an RGBA16F target along x, then from that into another
+     along y, the sample clamped per pixel to the region's edge pixels,
+     which is what zui-sokol's three quads per tap draw. The batch's fan
+     then takes the blurred texel at each pixel, under the tint. A
+     material is a batch of its own, its uniforms zui-sokol's, its
+     pattern found at each vertex's place in the element by zui-sokol's
+     material shader ported to GLSL ES. Without `EXT_color_buffer_float`
+     a blur is its tint alone; past 16 blurs or 256 materials a frame
+     draws the tint or the fallback, counted, as zui-sokol does. The client
+     is 66 KB in ReleaseSmall and still reserves 35 MiB. `test-draw` now
+     keeps every command but `image`, which the tour never draws. In
+     Debug and ReleaseSafe alike, 1 to 16,682 of each frame's 1,296,000
+     pixels differ at all and 1 to 2,872 by more than 2 (at most 231),
+     each matching a neighbor, and frame 252 keeps its one unmatched pixel;
+     inside the frosted pane on Light & Depth (frame 228) and the material
+     cards on Materials (frame 276) no pixel differs by more than 1.
+     Blurring with a radius of 8 instead of 10 fails frame 228 (550
+     unmatched pixels), and turning every material's phase by 0.02 more
+     fails frame 276 (48,254). The check's removal of Chromium's profile
+     now retries, since a child process could still be writing to it.
+     CI's first `test-draw` with blurs, whose reference Mesa draws into
+     RGBA16F targets under Xvfb, is to be confirmed once zui-web is pushed.
 3. **Input.** The page turns pointer, wheel, key and text events, the
    canvas's size and `devicePixelRatio` into records written by
    `zui_wire`'s `Encoder` in the client, sent only when they hold events
