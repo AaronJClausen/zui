@@ -6,6 +6,8 @@ pub const FrameStream = @import("frame_stream.zig").FrameStream;
 pub const DemoUi = @import("demo_ui.zig").DemoUi;
 pub const DrawList = @import("draw_list.zig").DrawList;
 pub const Text = @import("text.zig").Text;
+pub const RecordStream = @import("record_stream.zig").RecordStream;
+const browser_input = @import("browser_input.zig");
 
 const testing = std.testing;
 
@@ -151,6 +153,154 @@ test "the demo's context decodes a stream" {
     var stream: FrameStream(DemoUi) = try .init(testing.allocator, .{});
     defer stream.deinit(testing.allocator);
     try testing.expectEqual(null, try stream.nextFrame());
+}
+
+/// What a `zui_wire.Host` reads of the records a `RecordStream` sent.
+const RecordReader = struct {
+    decoder: zui_wire.Decoder(SmallUi),
+    header_read: bool = false,
+
+    fn init() !RecordReader {
+        return .{ .decoder = try .init(testing.allocator, .of(SmallUi)) };
+    }
+
+    fn deinit(self: *RecordReader) void {
+        self.decoder.deinit(testing.allocator);
+    }
+
+    fn read(self: *RecordReader, bytes: []const u8) !*const SmallUi.FrameRecord {
+        var reader: std.Io.Reader = .fixed(bytes);
+        if (!self.header_read) {
+            try zui_wire.readHeader(&reader, null);
+            self.header_read = true;
+        }
+        const message = (try self.decoder.next(&reader)).?;
+        try testing.expectEqual(bytes.len, reader.seek);
+        return message.record;
+    }
+};
+
+test "a record goes back only with events, or when the canvas's size or scale changed" {
+    var records: RecordStream(SmallUi) = try .init(testing.allocator, .{});
+    defer records.deinit(testing.allocator);
+    var reader: RecordReader = try .init();
+    defer reader.deinit();
+
+    records.measure(.{ 1280, 800 }, 1.5);
+    const first = try reader.read((try records.take(at(10))).?);
+    try testing.expectEqualDeep(zui.FrameParams{ .now = at(10), .viewport = .{ 1280, 800 }, .scale = 1.5 }, first.params);
+    try testing.expectEqual(0, first.events.len);
+    try testing.expectEqual(null, try records.take(at(26)));
+
+    const mouse: zui.Pointer = .{ .id = .mouse, .kind = .mouse, .position = .{ 40, 30 }, .at = at(30) };
+    records.builder.append(.{ .pointer_down = .{ .pointer = mouse } });
+    records.builder.appendText("é");
+    const pressed = try reader.read((try records.take(at(42))).?);
+    try testing.expectEqual(at(42), pressed.params.now);
+    try testing.expectEqualDeep(&[_]zui.Event{ .{ .pointer_down = .{ .pointer = mouse } }, .{ .text = "é" } }, pressed.events);
+    try testing.expectEqual(null, try records.take(at(58)));
+
+    records.measure(.{ 1280, 800 }, 2);
+    const rescaled = try reader.read((try records.take(at(74))).?);
+    try testing.expectEqualDeep(zui.FrameParams{ .now = at(74), .viewport = .{ 1280, 800 }, .scale = 2 }, rescaled.params);
+    records.measure(.{ 1024, 768 }, 2);
+    const resized = try reader.read((try records.take(at(90))).?);
+    try testing.expectEqualDeep([2]f32{ 1024, 768 }, resized.params.viewport);
+    try testing.expectEqual(0, records.dropped_events);
+}
+
+/// A source of the kind the tour declares, which delivers values.
+const Counter = struct {
+    count: ?u32 = null,
+
+    pub const Delivery = ?u32;
+    pub const View = ?u32;
+
+    pub fn zuiSwap(_: *Counter) void {}
+    pub fn zuiView(self: *Counter) ?u32 {
+        return self.count;
+    }
+    pub fn zuiDelivery(self: *const Counter, delivery: *?u32) void {
+        delivery.* = self.count;
+    }
+    pub fn zuiInject(self: *Counter, delivery: *const ?u32) void {
+        self.count = delivery.*;
+    }
+};
+
+const CountingUi = zui.Context(.{ .Sources = struct { counter: Counter = .{} } });
+
+test "the demo's records are read by an application with sources of its own" {
+    var records: RecordStream(DemoUi) = try .init(testing.allocator, .{});
+    defer records.deinit(testing.allocator);
+    var decoder: zui_wire.Decoder(CountingUi) = try .init(testing.allocator, .of(CountingUi));
+    defer decoder.deinit(testing.allocator);
+
+    records.measure(.{ 640, 480 }, 1);
+    records.builder.append(.{ .key_down = .{ .key = .tab, .at = at(4) } });
+    var reader: std.Io.Reader = .fixed((try records.take(at(5))).?);
+    try zui_wire.readHeader(&reader, null);
+    const record = (try decoder.next(&reader)).?.record;
+    try testing.expectEqual(reader.end, reader.seek);
+    try testing.expectEqual(null, record.deliveries);
+    try testing.expectEqualDeep(&[_]zui.Event{.{ .key_down = .{ .key = .tab, .at = at(4) } }}, record.events);
+}
+
+test "a record of every event the demo's records hold, each as large as it is written, fits" {
+    var records: RecordStream(DemoUi) = try .init(testing.allocator, .{ .fingerprint = std.math.maxInt(u64) });
+    defer records.deinit(testing.allocator);
+    const farthest: zui.Instant = .fromNanoseconds(std.math.maxInt(u64));
+    const widest: zui.Pointer = .{ .id = @enumFromInt(std.math.maxInt(u32)), .kind = .pen, .position = .{ -1e30, 1e30 }, .at = farthest, .pressure = 0.5, .tilt = .{ 1, -1 } };
+    const largest = [_]zui.Event{
+        .{ .pointer_down = .{ .pointer = widest, .button = .middle } },
+        .{ .key_down = .{ .key = .unidentified, .modifiers = .{ .shift = true, .super = true }, .repeat = true, .scancode = std.math.maxInt(u32), .at = farthest } },
+        .{ .environment = .{ .locale = comptime zui.Locale.parse("x" ** zui.Locale.capacity) catch unreachable } },
+        .{ .wheel = .{ .position = .{ 1, 2 }, .delta = .{ 3, 4 }, .at = farthest } },
+    };
+    records.builder.appendText("x" ** DemoUi.limits.max_text_input_bytes);
+    while (records.builder.event_count < records.builder.event_buffer.len) {
+        records.builder.append(largest[records.builder.event_count % largest.len]);
+    }
+    records.measure(.{ 1e30, 1e30 }, 3);
+    try testing.expect(try records.take(farthest) != null);
+    try testing.expectEqual(0, records.dropped_events);
+}
+
+test "a browser's key is the one its name or its place on the keyboard means" {
+    try testing.expectEqual(zui.Key.a, browser_input.logicalKey("a", "KeyA"));
+    try testing.expectEqual(zui.Key.a, browser_input.logicalKey("A", "KeyA"));
+    try testing.expectEqual(zui.Key.q, browser_input.logicalKey("q", "KeyA"));
+    try testing.expectEqual(zui.Key.digit_1, browser_input.logicalKey("!", "Digit1"));
+    try testing.expectEqual(zui.Key.digit_2, browser_input.logicalKey("é", "Digit2"));
+    try testing.expectEqual(zui.Key.apostrophe, browser_input.logicalKey("Dead", "Quote"));
+    try testing.expectEqual(zui.Key.page_down, browser_input.logicalKey("PageDown", "PageDown"));
+    try testing.expectEqual(zui.Key.space, browser_input.logicalKey(" ", "Space"));
+    try testing.expectEqual(zui.Key.super, browser_input.logicalKey("Meta", "MetaLeft"));
+    try testing.expectEqual(zui.Key.unidentified, browser_input.logicalKey("AudioVolumeUp", "AudioVolumeUp"));
+    try testing.expectEqual(0, browser_input.scancode(""));
+    try testing.expect(browser_input.scancode("KeyA") != browser_input.scancode("KeyB"));
+    try testing.expectEqual(zui.Modifiers{ .control = true, .super = true }, browser_input.modifiers(0b1010));
+}
+
+test "a browser's pointers, buttons and wheel are zui's" {
+    try testing.expectEqual(zui.PointerId.mouse, browser_input.pointerId(.mouse, 1));
+    try testing.expect(browser_input.pointerId(.touch, 0) != .mouse);
+    try testing.expect(browser_input.pointerId(.pen, std.math.maxInt(u32)) != .mouse);
+    try testing.expectEqual(zui.PointerKind.touch, browser_input.pointerKind(1));
+    try testing.expectEqual(zui.Button.secondary, browser_input.button(2));
+    try testing.expectEqual(null, browser_input.button(3));
+    try testing.expectEqualDeep([2]f32{ 0, 40 }, browser_input.wheelDelta(.{ 0, 3 }, 1, .{ 800, 600 }));
+    try testing.expectEqualDeep([2]f32{ -800, 600 }, browser_input.wheelDelta(.{ -1, 1 }, 2, .{ 800, 600 }));
+    try testing.expectEqualDeep([2]f32{ 2.5, 120 }, browser_input.wheelDelta(.{ 2.5, 120 }, 0, .{ 800, 600 }));
+}
+
+test "every cursor has a CSS name of its own" {
+    const cursors = std.enums.values(zui.Cursor);
+    for (cursors, 0..) |cursor, index| {
+        try testing.expect(browser_input.cursorName(cursor).len > 0);
+        for (cursors[0..index]) |earlier| try testing.expect(!std.mem.eql(u8, browser_input.cursorName(earlier), browser_input.cursorName(cursor)));
+    }
+    try testing.expectEqualStrings("not-allowed", browser_input.cursorName(.not_allowed));
 }
 
 const DemoCommand = DemoUi.RenderCommand;

@@ -2,12 +2,11 @@
 // Each frame that fails is written there as PPM, drawn and reference;
 // without it, to a new temporary directory.
 
-import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { createServer } from "node:http";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { openHeadlessPage } from "./headless_page.mjs";
 
 // A pixel matches when each of its colors is within `tolerance` of the
 // reference's, or of a reference neighbor's within `edgeReach` pixels,
@@ -37,20 +36,10 @@ const trueTypeFontUrls = trueTypeFontPaths.map((path, index) => {
 });
 served["/truetype-fonts.json"] = { body: JSON.stringify(trueTypeFontUrls), type: "application/json" };
 
-let chromium = null;
-let profileDirectory = null;
-let server = null;
+let page = null;
 
 async function cleanUp() {
-  if (chromium && chromium.exitCode === null && chromium.signalCode === null) {
-    const exited = new Promise((resolve) => chromium.once("exit", resolve));
-    chromium.kill("SIGKILL");
-    await exited;
-  }
-  server?.close();
-  // Chromium's child processes outlive the one killed, and may still be
-  // writing to the profile as it is removed.
-  if (profileDirectory) await rm(profileDirectory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  await page?.close();
 }
 
 async function fail(message) {
@@ -124,90 +113,12 @@ async function writePortablePixmap(path, pixels, width, height) {
   await writeFile(path, Buffer.concat([header, body]));
 }
 
-server = createServer(async (request, response) => {
-  const file = served[new URL(request.url, "http://localhost").pathname];
-  if (!file) {
-    response.writeHead(404).end();
-    return;
-  }
-  const body = file.path ? await readFile(file.path) : file.body;
-  response.writeHead(200, { "content-type": file.type }).end(body);
-});
-await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-const pageUrl = `http://127.0.0.1:${server.address().port}/`;
-
-profileDirectory = await mkdtemp(join(tmpdir(), "zui-web-chromium-"));
-chromium = spawn(chromiumPath, [
-  "--headless",
-  `--user-data-dir=${profileDirectory}`,
-  "--remote-debugging-port=0",
-  // The same software rasterizer on every machine, whatever its GPU.
-  "--use-angle=swiftshader",
-  "--enable-unsafe-swiftshader",
-  "--no-first-run",
-  "--no-default-browser-check",
-  "--disable-extensions",
-  "about:blank",
-], { stdio: ["ignore", "ignore", "pipe"] });
-chromium.on("error", (error) => fail(`${chromiumPath} did not start: ${error.message}`));
-
-const debuggerUrl = await new Promise((resolve) => {
-  let output = "";
-  const exitedEarly = (code) => fail(`${chromiumPath} exited with ${code} before it listened:\n${output}`);
-  chromium.once("exit", exitedEarly);
-  chromium.stderr.on("data", (chunk) => {
-    output += chunk;
-    const announced = output.match(/DevTools listening on (ws:\S+)/);
-    if (!announced) return;
-    chromium.off("exit", exitedEarly);
-    output = "";
-    resolve(announced[1]);
-  });
-});
-
-const socket = new WebSocket(debuggerUrl);
-await new Promise((resolve, reject) => {
-  socket.onopen = resolve;
-  socket.onerror = () => reject(new Error("the DevTools socket did not open"));
-});
-let nextRequestId = 1;
-const pending = new Map();
-const pageErrors = [];
-socket.onmessage = ({ data }) => {
-  const message = JSON.parse(data);
-  if (message.id && pending.has(message.id)) {
-    const { resolve, reject } = pending.get(message.id);
-    pending.delete(message.id);
-    if (message.error) reject(new Error(message.error.message));
-    else resolve(message.result);
-  } else if (message.method === "Runtime.exceptionThrown") {
-    pageErrors.push(message.params.exceptionDetails.exception?.description ?? message.params.exceptionDetails.text);
-  }
-};
-
-function send(method, params = {}, sessionId = undefined) {
-  const id = nextRequestId;
-  nextRequestId += 1;
-  socket.send(JSON.stringify({ id, method, params, sessionId }));
-  return new Promise((resolve, reject) => pending.set(id, { resolve, reject }));
+try {
+  page = await openHeadlessPage(chromiumPath, served);
+} catch (error) {
+  await fail(error.message);
 }
-
-const { targetId } = await send("Target.createTarget", { url: "about:blank" });
-const { sessionId } = await send("Target.attachToTarget", { targetId, flatten: true });
-await send("Runtime.enable", {}, sessionId);
-await send("Page.navigate", { url: pageUrl }, sessionId);
-
-async function evaluate(expression) {
-  const { result, exceptionDetails } = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, sessionId);
-  if (exceptionDetails) throw new Error(exceptionDetails.exception?.description ?? exceptionDetails.text);
-  return result.value;
-}
-
-for (let attempt = 0; !(await evaluate("window.ready === true").catch(() => false)); attempt += 1) {
-  if (pageErrors.length > 0) await fail(`the page failed: ${pageErrors.join("\n")}`);
-  if (attempt === 600) await fail("the page did not load within 30 s");
-  await new Promise((resolve) => setTimeout(resolve, 50));
-}
+const { evaluate } = page;
 
 async function directoryForFailedImages() {
   const named = process.env.ZUI_WEB_DRAW_FAILURES;
@@ -247,7 +158,6 @@ for (const expected of reference) {
 }
 
 clearTimeout(watchdog);
-socket.close();
 await cleanUp();
 if (failedFrameLines.length > 0) {
   for (const line of failedFrameLines) console.error(line);

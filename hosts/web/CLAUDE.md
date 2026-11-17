@@ -37,6 +37,7 @@ Run each with `timeout 590` in front:
 | `zig build check` | always; it also compiles the client for `wasm32-freestanding`, so a browser break fails here and in CI |
 | `zig build test-demo` | any change to the client, `src/demo_ui.zig` or the zui pin; needs Node, and in CI runs on Linux |
 | `zig build test-draw` | any change to how the client lays frames out or the page draws them, or to the zui or zui-sokol pin; needs Node, Chromium (`-Dbrowser=<path>` names another) and a display, and in CI runs on Linux under Xvfb. Agents may run Chromium headless here, under `timeout`, leaving no Chromium process behind |
+| `zig build test-input` | any change to how the client writes records or the page reads input or applies host requests, or to the zui or zui-sokol pin; needs Node and Chromium, run headless, and no display; in CI runs on Linux with Google Chrome |
 | `zig build fmt` | before committing; CI runs `fmt-check` |
 
 - Every command, test run and CI job has a hard limit of 10 minutes

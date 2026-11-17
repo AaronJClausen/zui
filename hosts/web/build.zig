@@ -17,6 +17,7 @@ pub fn build(b: *std.Build) void {
 
     const test_demo = b.step("test-demo", "Stream zui-sokol's tour, headless, to the browser's client under Node, and check every frame decodes to what was drawn");
     const test_draw = b.step("test-draw", "Draw frames of zui-sokol's tour in headless Chromium and check each against zui-sokol's renderer drawing it; needs a display");
+    const test_input = b.step("test-input", "Give the client input in headless Chromium, run zui-sokol's tour on the records it writes, and check the tour took them and the page shows its cursor");
     const browser = b.option([]const u8, "browser", "The Chromium that `test-draw` runs headless (default: chromium)") orelse "chromium";
     if (b.lazyDependency("zui_sokol", .{ .target = target, .optimize = optimize })) |zui_sokol_dependency| {
         const tour_imports: []const std.Build.Module.Import = &.{
@@ -56,9 +57,19 @@ pub fn build(b: *std.Build) void {
         draw_in_browser.addFileArg(reference);
         draw_in_browser.addFileArg(bitmap_font_rows);
         for (tour_truetype_fonts) |font| draw_in_browser.addFileArg(zui_sokol_dependency.path(font));
-        for ([_][]const u8{ "web/check_draw.html", "web/frame_drawer.mjs" }) |page_file| draw_in_browser.addFileInput(b.path(page_file));
+        for ([_][]const u8{ "web/check_draw.html", "web/frame_drawer.mjs", "web/headless_page.mjs" }) |page_file| draw_in_browser.addFileInput(b.path(page_file));
         draw_in_browser.expectExitCode(0);
         test_draw.dependOn(&draw_in_browser.step);
+
+        const replay_input = tourTool(b, "replay-input", "tools/replay_input.zig", tour_imports, target, optimize);
+        const input_in_browser = b.addSystemCommand(&.{"node"});
+        input_in_browser.addFileArg(b.path("web/check_input.mjs"));
+        input_in_browser.addArg(browser);
+        input_in_browser.addArtifactArg(client);
+        input_in_browser.addArtifactArg(replay_input);
+        for ([_][]const u8{ "web/check_input.html", "web/input_recorder.mjs", "web/headless_page.mjs" }) |page_file| input_in_browser.addFileInput(b.path(page_file));
+        input_in_browser.expectExitCode(0);
+        test_input.dependOn(&input_in_browser.step);
     }
 
     const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "tools" };
