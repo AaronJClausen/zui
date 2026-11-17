@@ -13,8 +13,8 @@
             .hash = "N-V-__8AAFRGTgBWHIQULKwDqlrvga2AR9enp42AsQ7z-yXN",
         },
         .zui_sokol = .{
-            .url = "git+https://github.com/AaronJClausen/zui-sokol#3931162f888c8112051c12c4e5021b46da043c0b",
-            .hash = "zui_sokol-0.2.0-LHR9oZJrCQBhZGdf2i6pYo9Xxwklmt75R_a4ufhLSz6h",
+            .url = "git+https://github.com/AaronJClausen/zui-sokol#cac68e4123b11bd184e42c4d35cc4e4b914267ca",
+            .hash = "zui_sokol-0.2.0-LHR9oT5sCQAgjJfKf4riZ0l9A_KjAFsbI3CfxEJC01Bd",
             .lazy = true,
         },
     },
