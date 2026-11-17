@@ -73,7 +73,7 @@ green, and its **Status** line below says which slice is next.
 | P12. Text commands that point at their style | audit | `src/commands.zig`, `src/emission.zig`, `zui_wire/`, `../zui-raylib`, `../zui-sokol`, `../zui-terminal` | | waiting on a profile of a renderer reading the commands |
 | G6. HDR and wide gamut | 8 | `src/context.zig`, `src/commands.zig`, `src/surface.zig`, `zui_wire/`, `zui_testing/`, `../zui-sokol`, `../zui-host` | | waiting on a session under Windows with an HDR display: zui-sokol's FP16 `.win32` swapchain and zui-host's `.scrgb_fp16` window |
 | V2. Semantics and accessibility actions | 9 | `src/context.zig`, `zui_widgets/`, `../zui-host` | | in progress; the UI Automation bridge waits on a session under Windows |
-| V4. The demo in a browser | 9 | `../zui-web`, `zui_wire/` | | in progress; the client draws shapes, and text is next |
+| V4. The demo in a browser | 9 | `../zui-web`, `zui_wire/` | | in progress; the client draws text, and comparing it waits on Decisions, Open #3 (zui-web's `v4-text-comparison`); backdrop blurs and materials are next |
 | F7. The wire's renderer declares its context's payload types | 5 | `zui_wire/remote.zig`, `zui_wire/tests.zig` | | |
 
 After the queue come stages 10 and 11 in the order of SPEC.md §21. They join the queue as it runs short.
@@ -3237,11 +3237,32 @@ published from CI.
      bytes on every run. Drawing the shadows with five rings instead of
      six fails it. CI runs it on Linux under Xvfb with Google Chrome; its
      first run there is to be confirmed once zui-web is pushed.
-   - **Text** (next): TrueType text in the tour's fonts, rasterized as
-     zui-sokol does, by stb_truetype compiled into the client, into an
-     atlas the page uploads as a texture, so the glyphs match the
-     reference's; and sokol_debugtext's six bitmap fonts, from its font
-     data. The vertices gain texture coordinates.
+   - **Text** (drawn; its comparison waits on Decisions, Open #3). The
+     page hands the client the stream's fonts: the TrueType ones, which
+     follow the six bitmap fonts' ids in the order the host added them,
+     and sokol_debugtext's six. stb_truetype, at zui-sokol's commit, is
+     compiled into the client without a C library, allocating from a
+     scratch reserved at init, and rasterizes into a 1024² RG8 atlas
+     packed as zui-sokol packs its RGBA one, so a glyph sampled at its
+     edge blends with the same neighbors; bitmap glyphs are an R8 texture
+     sampled at the nearest texel. A vertex grows from 12 bytes to 56: an
+     atlas glyph carries the map from a pixel's position to its texture
+     coordinates, and its texel bounds, and the page finds both pixel by
+     pixel, since SwiftShader snaps vertices to a sixteenth of a pixel
+     and coordinates interpolated across a turned glyph differed from
+     the reference by up to 31 at 237 pixels of the Transforms screen.
+     The client is 63 KB in ReleaseSmall and reserves 35 MiB, 14 of them
+     for 2^18 vertices (6.7 times the busiest compared frame's 38,790).
+     `test-draw` on `main` still compares only shapes, unchanged; the
+     comparison with text is parked on zui-web's `v4-text-comparison`
+     branch (501cd96): 12 of the 13 frames match, and frame 252 has one
+     pixel matching nothing within 1, its centre 0.0002 texels inside a
+     glyph's right edge, drawn by the client (75, 75, 85) and left as
+     the button's background (35, 35, 50) by zui-sokol's OpenGL capture.
+     Next: the owner settles #3, then the branch is finished on `main`
+     (no zui pin moves; the stb pin is zui-sokol's), and CI's first
+     `test-draw` with text is confirmed, its reference drawn by Mesa
+     under Xvfb rather than this machine's NVIDIA driver.
    - **Backdrop blurs and materials:** the blur as zui-sokol's passes
      run it, sampling what was drawn before into a texture, and the three
      material patterns in its shader, ported to GLSL ES.
@@ -3460,3 +3481,14 @@ the spec.
 1. **Physical keys.** Planned: logical keys plus the opaque scancode.
 2. **V4, a web renderer or a thin client over the wire?** Planned: the
    wire client first, since F5 builds it anyway.
+3. **V4, a pixel on a turned glyph's edge.** `test-draw` matches a pixel
+   within 2 of the reference's, or of a neighbor's. A pixel whose centre
+   lies within a rasterizer's precision of a turned glyph's edge is drawn
+   by one renderer and not the other, and its partial coverage matches no
+   neighbor: one pixel of 1,296,000 in frame 252. Options: (a) accept a
+   frame with at most one such pixel; (b) leave text drawn inside a
+   turning transform out of the comparison; (c) have the client leave out
+   a pixel within 1/256 pixel of a glyph's edge, which matches this
+   machine's reference but is tuned to it. Planned: none, unlike the
+   others; the owner chooses, and zui-web's `v4-text-comparison` holds
+   the comparison until then.
