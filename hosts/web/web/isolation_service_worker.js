@@ -1,7 +1,3 @@
-// Serves the page and everything it loads again with the headers that make
-// it cross-origin isolated, for a host such as GitHub Pages that cannot set
-// them, so the page may share memory with its workers.
-
 const isolationHeaders = {
   "Cross-Origin-Opener-Policy": "same-origin",
   "Cross-Origin-Embedder-Policy": "require-corp",
