@@ -21,6 +21,8 @@ pub const Limit = context.Limit;
 pub const Element = context.ElementWith(style.Decoration);
 pub const ElementWith = context.ElementWith;
 pub const Diagnostics = context.Diagnostics;
+/// What `Frame.inspect` reports of an element's declaration and layout.
+pub const ElementFlags = context.ElementFlags;
 
 pub const TraceZone = trace.TraceZone;
 
@@ -201,4 +203,5 @@ test {
     _ = @import("tests/materials.zig");
     _ = @import("tests/transforms.zig");
     _ = @import("tests/colors.zig");
+    _ = @import("tests/inspection.zig");
 }

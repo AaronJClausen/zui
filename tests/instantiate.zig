@@ -104,7 +104,9 @@ export fn zuiCheckFrame(width: f32, height: f32, pointer_x: f32, pointer_y: f32)
     const failed_check = @intFromBool(std.meta.isError(frame.diagnostics.check()));
     const requests = frame.requests();
     const host_requests = @intFromEnum(requests.cursor) + @intFromBool(requests.text_input != null);
-    return frame.commands().len + @intFromBool(ui.nextFrame() == .immediately) + violation_count + failed_check + frame.elementCount() + host_requests + frame.semantics().len;
+    const inspected = frame.inspect(frame.elementCount() - 1);
+    const inspected_content = @intFromEnum(inspected.content) + @intFromBool(inspected.effects != null and inspected.floating != null);
+    return frame.commands().len + @intFromBool(ui.nextFrame() == .immediately) + violation_count + failed_check + frame.elementCount() + host_requests + frame.semantics().len + inspected_content;
 }
 
 const Settings = struct {

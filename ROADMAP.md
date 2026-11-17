@@ -71,7 +71,7 @@ green, and its **Status** line below says which slice is next.
 | P11. Flat child lists | audit | `src/context.zig`, `src/layout.zig` | | waiting on a wide scene whose profile points at the walks; kept by the owner |
 | P12. Text commands that point at their style | audit | `src/commands.zig`, `src/emission.zig`, `zui_wire/`, `../zui-raylib`, `../zui-sokol`, `../zui-terminal` | | waiting on a profile of a renderer reading the commands |
 | G6. HDR and wide gamut | 8 | `src/context.zig`, `src/commands.zig`, `src/surface.zig`, `zui_wire/`, `zui_testing/`, `../zui-sokol`, `../zui-host` | | waiting on a session under Windows with an HDR display: zui-sokol's FP16 `.win32` swapchain and zui-host's `.scrgb_fp16` window |
-| V1. `zui_debug` | 9 | `zui_debug/`, `src/context.zig`, `../zui-raylib` | | |
+| V1. `zui_debug` | 9 | `zui_debug/`, `src/context.zig`, `../zui-raylib` | | in progress |
 | V2. Semantics and accessibility actions | 9 | `src/context.zig`, `zui_widgets/`, `../zui-host` | | |
 | V3. Safety sweeps | 9 | `src/context.zig`, `src/tests/` | | |
 | V4. The demo in a browser | 9 | `../zui-web`, `zui_wire/` | | |
@@ -3061,6 +3061,17 @@ source of the parsed theme, as zui-host's `theme` example does.
 demo toggles it with a key.
 
 **Spec.** §19.7.
+
+**Status.** The first slice landed: `Frame.inspect(index)` returns an
+`ElementView` of every element the frame kept, its id and debug name,
+parent, subtree end, rectangle, minimum and content sizes, flags,
+layout, decoration, effects (found by a binary search of the effect
+elements), floating and content, and `zui.ElementFlags` is exported for
+it. Next comes the `zui_debug` module with its element tree and the
+hovered element's configs over `inspect`; then the diagnostics,
+lowerings and fallbacks; the tracer's performance overlay; reloading its
+theme through a `Stream(zui.FileChange)`; and last the demo's key in
+`../zui-raylib`.
 
 ### V2. Semantics and accessibility actions
 

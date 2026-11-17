@@ -423,6 +423,39 @@ pub fn Context(comptime config: Config) type {
             line_count: u32,
         };
 
+        /// One element as `Frame.inspect` reports it, valid until the
+        /// frame is released.
+        pub const ElementView = struct {
+            id: u64,
+            /// The name its `Id` was made from, kept only in a debug build;
+            /// empty for an id made with `dynamic` or none.
+            name: id_module.DebugName,
+            /// Null for the root.
+            parent: ?Index,
+            /// One past the last element of its subtree, which is also its
+            /// next sibling, if it has one.
+            subtree_end: Index,
+            /// As laid out, untransformed.
+            rect: style.Rect,
+            min_size: [2]f32,
+            /// The extent of its children plus padding, which it scrolls over.
+            content_size: [2]f32,
+            flags: ElementFlags,
+            layout: *const style.Layout,
+            /// Null for an element that draws no background or border.
+            decoration: ?*const Decoration,
+            effects: ?*const Effects,
+            floating: ?style.Floating,
+            content: ElementContent,
+        };
+
+        pub const ElementContent = union(enum) {
+            none,
+            text: struct { bytes: []const u8, style: TextStyle },
+            image: Image,
+            custom: config.CustomData,
+        };
+
         /// One frame's memory. Only its methods and `diagnostics` and
         /// `number` are API; the other fields are the structure-of-arrays
         /// storage the layout passes stream through.
@@ -527,6 +560,62 @@ pub fn Context(comptime config: Config) type {
 
             pub fn elementCount(self: *const Frame) Index {
                 return @intCast(self.element_count);
+            }
+
+            /// Everything the frame keeps of the element at `index`, in
+            /// declaration order from the root at 0, for an inspector:
+            ///
+            /// ```zig
+            /// for (0..frame.elementCount()) |index| {
+            ///     const element = frame.inspect(@intCast(index));
+            ///     if (element.rect.contains(pointer)) hovered = @intCast(index);
+            /// }
+            /// ```
+            pub fn inspect(self: *const Frame, index: Index) ElementView {
+                std.debug.assert(index < self.element_count);
+                const flags = self.flags[index];
+                return .{
+                    .id = self.element_id[index],
+                    .name = self.element_name[index],
+                    .parent = if (index == root_index) null else self.parent[index],
+                    .subtree_end = self.subtree_end[index],
+                    .rect = .{
+                        .x = self.position[index][0],
+                        .y = self.position[index][1],
+                        .width = self.size[index][0],
+                        .height = self.size[index][1],
+                    },
+                    .min_size = self.min_size[index],
+                    .content_size = self.content_size[index],
+                    .flags = flags,
+                    .layout = self.layout[index],
+                    .decoration = self.decoration[index],
+                    .effects = self.effectsOf(index),
+                    .floating = if (flags.floating) self.floatingOf(index) else null,
+                    .content = self.contentOf(index),
+                };
+            }
+
+            fn effectsOf(self: *const Frame, index: Index) ?*const Effects {
+                const found = std.sort.binarySearch(Index, self.effect_elements[0..self.effect_count], index, struct {
+                    fn order(wanted: Index, element: Index) std.math.Order {
+                        return std.math.order(wanted, element);
+                    }
+                }.order) orelse return null;
+                return &self.effects[found];
+            }
+
+            fn contentOf(self: *const Frame, index: Index) ElementContent {
+                const record_index = self.content_index[index];
+                return switch (self.content_kind[index]) {
+                    .none => .none,
+                    .text => if (has_text) text: {
+                        const record = &self.texts[record_index];
+                        break :text .{ .text = .{ .bytes = self.text_bytes[record.bytes_start..][0..record.bytes_len], .style = record.style } };
+                    } else unreachable,
+                    .image => if (has_image) .{ .image = self.images[record_index] } else unreachable,
+                    .custom => .{ .custom = self.customs[record_index] },
+                };
             }
 
             /// The laid-out rectangle of the element with `element_id`, if it was declared.

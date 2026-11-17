@@ -1027,7 +1027,20 @@ fn cropOverlay(app: *App, ui: *Ui) void {
 }
 ```
 
-After `endFrame`, the frame has its own `rectOf`, `commands()` and `elementCount()`.
+After `endFrame`, the frame has its own `rectOf`, `commands()` and `elementCount()`, and `inspect(index)` reports everything it kept of one element, in declaration order from the root at 0: its id and debug name, parent, laid-out rectangle, flags, layout, decoration, effects, floating and its text, image or custom content. That is enough to build your own inspector or a debug overlay.
+
+`src/debug/outline.zig`
+
+```zig
+fn outlineHovered(frame: *const Ui.Frame, pointer: [2]f32) ?zui.Rect {
+    var hovered: ?zui.Rect = null;
+    for (0..frame.elementCount()) |index| {
+        const element = frame.inspect(@intCast(index));
+        if (element.content != .none and element.rect.contains(pointer)) hovered = element.rect;
+    }
+    return hovered;
+}
+```
 
 <a id="compile-errors"></a>
 

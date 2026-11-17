@@ -259,7 +259,6 @@ roadmap item named:
 |---|---|---|---|
 | output formats are negotiated through `Surface`, and zui-sokol draws an `.scrgb_fp16` offscreen image, but no host or renderer declares `.scrgb_fp16` for a window, and no host reports `hdr_headroom` | an FP16 swapchain when both sides support it; headroom from the display | `../zui-sokol`, `../zui-host` | G6 |
 | `Widgets(Ui)` with a `Theme` struct | `Widgets(Ui, Skin)` | `zui_widgets/` | K5 |
-| `Frame` exposes its storage arrays and `rectOf` | `Frame.inspect(index)` | `src/context.zig` | V1 |
 | `Features` has every field and gates its API, but `Frame.semantics()` is always empty and `safety_sweeps` changes nothing | semantics and safety sweeps, each behind its field | `src/context.zig` | V2, V3 |
 
 Unchanged in shape: element storage in pre-order structure-of-arrays, the
