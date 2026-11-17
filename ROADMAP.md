@@ -73,7 +73,7 @@ green, and its **Status** line below says which slice is next.
 | P12. Text commands that point at their style | audit | `src/commands.zig`, `src/emission.zig`, `zui_wire/`, `../zui-raylib`, `../zui-sokol`, `../zui-terminal` | | waiting on a profile of a renderer reading the commands |
 | G6. HDR and wide gamut | 8 | `src/context.zig`, `src/commands.zig`, `src/surface.zig`, `zui_wire/`, `zui_testing/`, `../zui-sokol`, `../zui-host` | | waiting on a session under Windows with an HDR display: zui-sokol's FP16 `.win32` swapchain and zui-host's `.scrgb_fp16` window |
 | V2. Semantics and accessibility actions | 9 | `src/context.zig`, `zui_widgets/`, `../zui-host` | | in progress; the UI Automation bridge waits on a session under Windows |
-| V4. The demo in a browser | 9 | `../zui-web`, `zui_wire/` | | in progress; the client draws every command the tour does, compared with zui-sokol's, and writes the page's input as records the tour takes; the tour builds without sokol for `wasm32-freestanding`; the Web Worker that runs it (slice 4) is next |
+| V4. The demo in a browser | 9 | `../zui-web`, `zui_wire/` | | in progress; the client draws every command the tour does, compared with zui-sokol's, and writes the page's input as records the tour takes; the tour runs in a Web Worker on an `Io` of its own, frame for frame as natively (waiting on zui-sokol `cac68e4`'s push and zui-web's zui-sokol pin moving to it); publishing from CI (slice 5) is next |
 | F7. The wire's renderer declares its context's payload types | 5 | `zui_wire/remote.zig`, `zui_wire/tests.zig` | | |
 
 After the queue come stages 10 and 11 in the order of SPEC.md §21. They join the queue as it runs short.
@@ -3192,8 +3192,17 @@ frames hold only plain data (the `Image`'s two sokol ids, the
 tasks with `Io.Group.concurrent` (`examples/screens/gallery.zig`,
 `mission_control.zig`), and an `Io` without concurrency fails them:
 a tile fails as `NoThreadAvailable`, and the telemetry and chatter
-producers do not run. zui-sokol's `Text` declares no `zuiFingerprint`, so its streams
-carry none, and nothing is checked of the fonts.
+producers do not run. Those tasks sleep partway through, and WebAssembly
+cannot switch stacks, so each needs a thread to sleep on; in a browser a
+thread is a worker, which blocks only on `memory.atomic.wait32` over
+memory a page shares with its workers only when it is cross-origin
+isolated (served with `Cross-Origin-Opener-Policy: same-origin` and
+`Cross-Origin-Embedder-Policy: require-corp`). The tour drew the
+Gallery's corner radii and Mission Control's chatter with
+`uintLessThan(usize, ...)`, so a 32-bit target drew other tiles than a
+64-bit one; since zui-sokol `cac68e4` it draws a `u32`. zui-sokol's
+`Text` declares no `zuiFingerprint`, so its streams carry none, and
+nothing is checked of the fonts.
 
 **Plan.** The demo streaming over the wire (F5) to a thin browser client,
 published from CI.
@@ -3360,20 +3369,52 @@ published from CI.
      declared the frame. The tour's frames are unchanged: with
      `--fork=../zui-sokol`, zui-web's `test-demo` writes the same stream
      byte for byte, its reference for `test-draw` is the same, and
-     `test-input` passes. zui-web's zui-sokol pin moves to that commit
-     (`3931162`) once it is pushed, with the worker.
-   - **The worker** (next, in zui-web): `zui_sokol_tour` built for
-     `wasm32-freestanding`, declaring its frames on an `Io` a worker can
-     run, its clock the page's, writing them through `zui_wire`'s
-     `Encoder` into bytes posted to the page and reading the page's
-     records. On `std.Io.failing` the tour's loaders find no thread, so
-     the Gallery's tiles fail and Mission Control's producers stand
-     still; the worker's `Io` runs them, or they run in workers of their
-     own, which the part decides and records. Its check runs the worker
-     under Node or headless Chromium and compares its frames with the
-     native tour's, as `test-demo` does.
+     `test-input` passes. zui-web's zui-sokol pin moved to that commit
+     (`3931162`) with the worker.
+   - **The worker** (done, in zui-web; waiting on zui-sokol `cac68e4`
+     being pushed and zui-web's zui-sokol pin moving to it). `zig build`
+     writes `zui-web-tour.wasm`, `zui_sokol_tour` built for
+     `wasm32-freestanding` with atomics and bulk memory, on memory it
+     imports shared: 793 KB in ReleaseSmall, 8.0 MB in Debug, and about
+     49 MiB once `zuiTourInit` reserves it (the tour, 16 thread stacks of
+     256 KiB and 4 MiB for a frame's bytes). zui-web's `TourSession`
+     runs the tour as a loop that owns its clock: each frame it steps the
+     tour's `Io` to the page's instant, takes the records that arrived
+     whole, declares the frame and writes it through `zui_wire`'s
+     `Encoder`, and `web/tour_worker.mjs` posts those bytes to the page.
+     The tour's tasks run on an `Io` of the worker's own, `SteppedIo`
+     (Decisions, Made: how the tour's tasks run in the worker): its
+     clocks read the page's instant, and its tasks take turns on 16
+     threads, each a worker on the tour's memory (`web/tour_thread.mjs`,
+     setting its own stack pointer and thread-local storage), one at a
+     time and only while the frame waits for them; a task runs as it
+     starts until it first waits, and waits for a thread while all 16
+     are taken. `test-demo` now also runs the tour in that worker under
+     Node, on the records the client wrote of the mouse crossing each of
+     the thirteen screens and Ctrl+PageDown between them, 312 frames at
+     60 Hz on the page's clock, and runs it natively on the same ticks
+     (`tools/tour_frames.zig`, the same `SteppedIo` on 16 native threads):
+     every frame is the same bytes (2,628,746 in all), the tour started
+     and finished 66 tasks and was refused none on both, and the client
+     decodes every frame. In the worker the 312 frames take 0.9 s in
+     Debug and 0.1 to 0.2 s in ReleaseSafe, ReleaseFast and ReleaseSmall,
+     starting the threads included; three runs of each agree. A worker
+     refusing every task, as `std.Io.failing` does, fails it (no task
+     finished), and so does a worker on 4 threads (frame 76 differs), and
+     at zui-sokol `3931162`, where the Gallery's tiles depended on the
+     pointer width, frame 88 differs. By hand, in headless Chromium
+     serving the page cross-origin isolated, the worker drew 312 frames
+     in 115 ms in ReleaseSmall, after 28 ms starting its threads, and ran
+     the same 66 tasks; served without those headers, the page cannot
+     post shared memory to its worker, so slice 5 must serve it isolated,
+     which GitHub Pages cannot set headers for: a service worker that
+     adds them, or another host. Until the pin moves, `test-demo` passes
+     only with `--fork=../zui-sokol`.
 5. **Published from CI:** a Pages workflow in zui-web that builds the
-   client and the page. Only the owner, in a browser, can check the Done
+   client, the tour's worker and the page, which draws the worker's
+   frames on the canvas and sends it the canvas's input, served
+   cross-origin isolated so the page can share the tour's memory with its
+   workers. Only the owner, in a browser, can check the Done
    when: that the tour keeps the display's frame rate there.
 
 ---
@@ -3566,6 +3607,7 @@ Deliberate, and each a reason to choose zui:
 | Watching files (F6) | `zuiFileWatch.watch(host, directory, sink)` until `deinit`, subdirectories included; the host publishes `zui.FileChange`s into a `zui.FileChangeSink` made from a source the application chooses, and the loader reads the files |
 | Where the demo runs behind the published page (V4, open decision 3) | in a Web Worker, settled by the owner: the tour built for `wasm32-freestanding`, its frames posted to the page as wire bytes, since a page CI publishes has no server to reach. A native process behind a WebSocket was the other option |
 | A pixel on a glyph's edge (V4, open decision 3) | `test-draw` passes a frame with at most one pixel that matches no reference pixel within 1, settled by the owner: a glyph's partial coverage near its edge is a color no neighbor has, and two rasterizers decide a pixel whose centre lies that close to the edge differently. The tolerance of 2 and the neighbor rule are unchanged. Leaving text inside a turning transform out of the comparison, or having the client drop a pixel within 1/256 pixel of a glyph's edge, which is tuned to one machine's reference, were the other options |
+| How the tour's tasks run in the browser's worker (V4) | on an `Io` of the worker's own, `SteppedIo`, chosen in V4's worker part: its clocks read the page's instant, and the tour's tasks take turns on a fixed set of threads, each a worker on the tour's shared memory, one at a time and only while the frame waits for them, so the worker draws on the page's clock exactly the frames the tour draws natively on the same ticks, which `test-demo` checks byte for byte. A worker per loader was the other option: without shared memory it cannot reach the sources and loads the loaders write, so the tour's loaders would have been rewritten around messages, and with it, it is the same threads without the turns that keep frames alike. Its cost is a page served cross-origin isolated |
 | How the browser draws (V4) | the client lays every command out as zui-sokol's renderer does, triangle for triangle, and the page draws the triangles through WebGL 2 with one sample per pixel. A 2D canvas smooths every edge and cannot fade a shadow's rings vertex by vertex, so its frames could not be compared with zui-sokol's pixel by pixel |
 | Where an element declares its material (G5) | `Ui.Decoration.material`, typed by the renderer's `MaterialHandle`: `Ui.Element`, `Ui.Decoration` and `Ui.Style` are the context's own, and are `zui.Element`, `zui.Decoration` and `zui.Style` without a handle, so no existing code changes. `open` taking `anytype` to accept both was rejected: a literal passed through `anytype` is not converted to `Ui.Element` |
 
