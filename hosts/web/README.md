@@ -61,6 +61,11 @@ See [zui's ROADMAP.md](https://github.com/AaronJClausen/zui/blob/main/ROADMAP.md
 | `zig build fmt-check` | fail if a Zig source is not formatted (CI) |
 | `zig build test --fork=../zui` | build against a local zui checkout instead of the pin |
 
+When `test-draw` fails, it prints each failing frame's numbers and writes
+the frame drawn and its reference as PPM images to a new temporary
+directory, or to the one `ZUI_WEB_DRAW_FAILURES` names; CI uploads them as
+the `draw-failures` artifact.
+
 To move the pin, push the zui change and run
 `zig fetch --save=zui git+https://github.com/AaronJClausen/zui#<commit>`.
 Keep zui's pin the one zui-sokol's pin names, and move the two together,

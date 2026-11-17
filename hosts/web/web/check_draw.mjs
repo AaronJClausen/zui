@@ -1,7 +1,9 @@
-// node check_draw.mjs <chromium> <client wasm> <stream> <reference> <bitmap fonts> <TrueType font>...
+// [ZUI_WEB_DRAW_FAILURES=<directory>] node check_draw.mjs <chromium> <client wasm> <stream> <reference> <bitmap fonts> <TrueType font>...
+// Each frame that fails is written there as PPM, drawn and reference;
+// without it, to a new temporary directory.
 
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -207,8 +209,17 @@ for (let attempt = 0; !(await evaluate("window.ready === true").catch(() => fals
   await new Promise((resolve) => setTimeout(resolve, 50));
 }
 
+async function directoryForFailedImages() {
+  const named = process.env.ZUI_WEB_DRAW_FAILURES;
+  if (!named) return mkdtemp(join(tmpdir(), "zui-web-draw-"));
+  await mkdir(named, { recursive: true });
+  return named;
+}
+
 const reference = readReference(await readFile(referencePath));
-let failures = 0;
+// A step that succeeds has its output dropped by `zig build`, and one that
+// fails shows only its stderr.
+const failedFrameLines = [];
 let failedImages = null;
 for (const expected of reference) {
   const drawn = await evaluate(`drawFrame(${expected.number})`).catch((error) => fail(`frame ${expected.number}: ${error.message}`));
@@ -220,10 +231,11 @@ for (const expected of reference) {
   const pixels = Buffer.from(drawn.pixels, "base64");
   const result = compare(pixels, expected.pixels, expected.width, expected.height);
   const total = expected.width * expected.height;
-  console.log(`check_draw: frame ${expected.number}: ${result.differing} of ${total} pixels differ, by at most ${result.largestDifference}; ${result.beyondTolerance} by more than ${tolerance}, ${result.unmatched} of them matching no reference pixel within ${edgeReach} (at most ${maxUnmatchedPixelsPerFrame} allowed)`);
+  const line = `check_draw: frame ${expected.number}: ${result.differing} of ${total} pixels differ, by at most ${result.largestDifference}; ${result.beyondTolerance} by more than ${tolerance}, ${result.unmatched} of them matching no reference pixel within ${edgeReach} (at most ${maxUnmatchedPixelsPerFrame} allowed)`;
+  console.log(line);
   if (result.unmatched > maxUnmatchedPixelsPerFrame) {
-    failures += 1;
-    failedImages ??= await mkdtemp(join(tmpdir(), "zui-web-draw-"));
+    failedFrameLines.push(line);
+    failedImages ??= await directoryForFailedImages();
     await writePortablePixmap(join(failedImages, `${expected.number}-drawn.ppm`), pixels, expected.width, expected.height);
     await writePortablePixmap(join(failedImages, `${expected.number}-reference.ppm`), expected.pixels, expected.width, expected.height);
   }
@@ -232,8 +244,9 @@ for (const expected of reference) {
 clearTimeout(watchdog);
 socket.close();
 await cleanUp();
-if (failures > 0) {
-  console.error(`check_draw: ${failures} of ${reference.length} frames do not match zui-sokol's; each frame drawn and its reference are in ${failedImages}`);
+if (failedFrameLines.length > 0) {
+  for (const line of failedFrameLines) console.error(line);
+  console.error(`check_draw: ${failedFrameLines.length} of ${reference.length} frames do not match zui-sokol's; each frame drawn and its reference are in ${failedImages}`);
   process.exit(1);
 }
 console.log(`check_draw: ${reference.length} frames drawn in Chromium match zui-sokol's renderer`);

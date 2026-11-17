@@ -75,3 +75,12 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libx11-dev libxi-dev libxcursor-dev libgl1-mesa-dev libpulse-dev xvfb
       - run: google-chrome --version
       - run: xvfb-run --auto-servernum zig build test-draw -Dbrowser=google-chrome
+        env:
+          ZUI_WEB_DRAW_FAILURES: ${{ runner.temp }}/draw-failures
+      - name: Upload each frame that did not match, drawn and reference
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: draw-failures
+          path: ${{ runner.temp }}/draw-failures
+          if-no-files-found: ignore
