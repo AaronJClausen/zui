@@ -30,7 +30,7 @@ RGBA32F where WebGL can render, blend and filter it
 as zui-sokol sums it where its GPU can, and otherwise in RGBA16F, whose
 rounding differs between drivers by several color steps; without
 `EXT_color_buffer_float`, blurs are drawn as their tint alone. Images are
-not drawn yet, and there is no page yet that puts it all together. `zig build test-draw` draws a frame of
+not drawn yet. `zig build test-draw` draws a frame of
 each of the tour's screens with zui-sokol's renderer and with the client in
 headless Chromium, and checks that every pixel matches, within 2 of each
 color or a pixel's neighbor: shapes, text, blurs and materials alike. It
@@ -75,6 +75,25 @@ Ctrl+PageDown between them, and checks that each of the 312 frames is,
 byte for byte, the frame the tour draws natively on the same ticks
 (`tools/tour_frames.zig`), that its tasks ran alike, and that the client
 decodes every frame.
+
+The published page puts it all together: `web/index.html` starts the
+tour's worker, draws each frame it sends on the canvas, a frame for each
+of the display's, and sends it the canvas's input as records. GitHub
+Pages cannot send the headers that make a page cross-origin isolated, so
+the page registers a service worker of its own,
+`web/isolation_service_worker.js`, which serves the page and everything
+it loads again with them, and reloads once. `zig build site` writes the
+page, the client, the tour's worker and the tour's fonts to
+`zig-out/site`, and CI's Pages workflow (`.github/workflows/pages.yml`)
+builds it in ReleaseSmall and publishes it from `main`, to
+<https://aaronjclausen.github.io/zui-web/> once the repository's Pages
+source is GitHub Actions.
+`zig build test-site` serves that site without the isolation headers,
+as GitHub Pages does, opens it in headless Chromium, and checks that the
+service worker isolated it after one reload, that the page draws the
+worker's frames, and that its input reaches the tour: the mouse over the
+rail shows the pointer cursor the tour asks for, and a click on Mission
+Control starts its producers' tasks.
 See [zui's ROADMAP.md](https://github.com/AaronJClausen/zui/blob/main/ROADMAP.md).
 
 ## Requirements
@@ -86,6 +105,9 @@ See [zui's ROADMAP.md](https://github.com/AaronJClausen/zui/blob/main/ROADMAP.md
   which holds the tour, is fetched automatically, pinned as zui is
 - for `zig build test-input`, also Chromium or Google Chrome (`chromium`
   on the `PATH`, or `-Dbrowser=<path>`), run headless
+- for `zig build site`, sokol's X11, OpenGL and PulseAudio headers on
+  Linux, since the tool that writes sokol_debugtext's fonts links them;
+  for `zig build test-site`, also Node and Chromium, run headless
 - for `zig build test-draw`, also Chromium or Google Chrome, and a display
   for zui-sokol's OpenGL window: on Linux CI, Xvfb
 
@@ -99,6 +121,8 @@ See [zui's ROADMAP.md](https://github.com/AaronJClausen/zui/blob/main/ROADMAP.md
 | `zig build test-demo` | stream zui-sokol's tour to the client under Node, and check every frame decodes to what was drawn; run the tour in a worker under Node, and check every frame is the one the tour draws natively |
 | `zig build test-draw` | draw a frame of each of the tour's screens in headless Chromium, and check each against zui-sokol's renderer drawing it |
 | `zig build test-input` | give the page input in headless Chromium, run the tour on the records the client wrote of it, and check the tour took them and the page shows the cursor it asks for |
+| `zig build site` | write the published page, the client, the tour's worker and its fonts to `zig-out/site`; serve that directory over HTTP (or HTTPS, off `localhost`) to run the tour in a browser |
+| `zig build test-site` | serve the site without isolation headers, open it in headless Chromium, and check its service worker isolates it, it draws the tour's frames and its input reaches the tour |
 | `zig build fmt` | format the Zig sources |
 | `zig build fmt-check` | fail if a Zig source is not formatted (CI) |
 | `zig build test --fork=../zui` | build against a local zui checkout instead of the pin |

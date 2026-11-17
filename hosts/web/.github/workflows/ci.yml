@@ -48,7 +48,7 @@ jobs:
         run: zig build check
 
   demo:
-    name: The tour's stream decoded, and its input written, by the browser's client, and the tour run in a worker (Linux, Node, headless Chrome)
+    name: The tour's stream decoded, and its input written, by the browser's client, the tour run in a worker, and its published page (Linux, Node, headless Chrome)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -63,6 +63,7 @@ jobs:
       - run: zig build test-demo -Doptimize=ReleaseSafe
       - run: google-chrome --version
       - run: zig build test-input -Dbrowser=google-chrome
+      - run: zig build test-site -Dbrowser=google-chrome
 
   draw:
     name: The tour's frames drawn in headless Chrome, against zui-sokol's renderer (Linux, Xvfb)

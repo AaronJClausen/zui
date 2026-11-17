@@ -24,6 +24,7 @@ const webDirectory = dirname(fileURLToPath(import.meta.url));
 
 const served = {
   "/": { path: join(webDirectory, "check_draw.html"), type: "text/html" },
+  "/client.mjs": { path: join(webDirectory, "client.mjs"), type: "text/javascript" },
   "/frame_drawer.mjs": { path: join(webDirectory, "frame_drawer.mjs"), type: "text/javascript" },
   "/zui-web.wasm": { path: wasmPath, type: "application/wasm" },
   "/tour.zuiw": { path: streamPath, type: "application/octet-stream" },

@@ -3,32 +3,15 @@
 <title>zui-web drawing check</title>
 <canvas id="frame"></canvas>
 <script type="module">
+  import { startClient } from "./client.mjs";
   import { FrameDrawer } from "./frame_drawer.mjs";
 
-  const { instance } = await WebAssembly.instantiateStreaming(fetch("zui-web.wasm"), {});
-  const wasm = instance.exports;
-  if (!wasm.zuiWebInit()) throw new Error("the client could not reserve its memory");
-  const bitmapFontRows = new Uint8Array(await (await fetch("bitmap.fonts")).arrayBuffer());
-  new Uint8Array(wasm.memory.buffer, wasm.zuiWebBitmapFontRows() >>> 0, bitmapFontRows.length).set(bitmapFontRows);
-  wasm.zuiWebLoadBitmapFonts();
-  for (const url of await (await fetch("truetype-fonts.json")).json()) {
-    const font = new Uint8Array(await (await fetch(url)).arrayBuffer());
-    const room = wasm.zuiWebRoomForFont(font.length) >>> 0;
-    if (room === 0) throw new Error(`no room for ${url}`);
-    new Uint8Array(wasm.memory.buffer, room, font.length).set(font);
-    if (wasm.zuiWebAddTrueTypeFont(font.length) < 0) throw new Error(`${url}: ${errorName()}`);
-  }
+  const { wasm, errorName } = await startClient();
   const drawer = new FrameDrawer(document.getElementById("frame"), wasm);
   window.blurAccumulationFormat = drawer.blurAccumulationFormat?.name ?? null;
   const stream = new Uint8Array(await (await fetch("tour.zuiw")).arrayBuffer());
   let streamed = 0;
   const pieceBytes = 64 * 1024;
-
-  function errorName() {
-    const memory = new Uint8Array(wasm.memory.buffer);
-    const start = wasm.zuiWebErrorName();
-    return new TextDecoder().decode(memory.subarray(start, memory.indexOf(0, start)));
-  }
 
   function receiveNextPiece() {
     if (streamed === stream.length) throw new Error("the stream ended");
