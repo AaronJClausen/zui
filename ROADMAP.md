@@ -31,7 +31,7 @@ Each item says:
 | stage 7 | gestures (I5): arbitration by motion component, zoom, long press, double tap, momentum, the intents and custom recognizers; drag and drop between elements (I1) | done: a carousel in a list, a pinch starting on a list inside a map, a lasso module against a map's pan, and `zui_testing.Driver.drag` moving an item between two lists, out of one that scrolls by dragging |
 | after stage 7: the foundation | G1's first slice ran 5.5% to 7.7% more instructions in scenes that draw no effect, so the work turned to what lay under it: benchmarks that can be trusted (R3 to R8, and R9 in part) and the data-oriented design audit's findings (P6 to P10) | done; a commit compared with itself over three code layouts calls nothing, its intervals 0.52% wide on average, and a change that only moves code is not called; a tooltip declared before a 3,000-cell grid lays out in 79 µs, not 671 µs (P6); warm text −43% (P9); `init` from 138 µs to 92 µs (P7, P10); the budgets judged in benchmarking mode |
 | stage 8, begun | gradients, shadows and glow (G1); backdrop blur (G2); effects in the corners of a decoration that draws nothing (G7); transforms with hit inversion (G3); materials (G5) | G1, G2, G7, G3 and G5 done: zui-sokol draws gradients, shadows, backdrop blurs, transforms and materials through a shader of its own and passes the renderer suite, its effects rounded by a decoration that draws nothing, a pointer hits a turned button where it is drawn, and a frame without effects runs no more instructions than before; G6 begun: `zui.ExtendedColor` is declared and clamped for a renderer that draws only `Color`, and zui-sokol draws it into an scRGB FP16 offscreen image and passes the renderer suite there |
-| stage 9, begun | `zui_debug` (V1) | `Frame.inspect` and the inspector's diagnostics, fallbacks, zone times from its `ZoneTimer` tracer, element tree and hovered element's configs, and its theme reloaded from a watched file; the demo's key to come |
+| stage 9, begun | `zui_debug` (V1) | V1 done: `Frame.inspect` and the inspector's diagnostics, fallbacks, zone times from its `ZoneTimer` tracer, element tree and hovered element's configs, and its theme reloaded from a watched file; zui-raylib's tour opens it with F12 through `zui_app`'s `zuiObserve`, and draws every screen with it open within its limits |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
@@ -72,7 +72,6 @@ green, and its **Status** line below says which slice is next.
 | P11. Flat child lists | audit | `src/context.zig`, `src/layout.zig` | | waiting on a wide scene whose profile points at the walks; kept by the owner |
 | P12. Text commands that point at their style | audit | `src/commands.zig`, `src/emission.zig`, `zui_wire/`, `../zui-raylib`, `../zui-sokol`, `../zui-terminal` | | waiting on a profile of a renderer reading the commands |
 | G6. HDR and wide gamut | 8 | `src/context.zig`, `src/commands.zig`, `src/surface.zig`, `zui_wire/`, `zui_testing/`, `../zui-sokol`, `../zui-host` | | waiting on a session under Windows with an HDR display: zui-sokol's FP16 `.win32` swapchain and zui-host's `.scrgb_fp16` window |
-| V1. `zui_debug` | 9 | `zui_debug/`, `zui_app/`, `src/context.zig`, `../zui-raylib` | | in progress |
 | V2. Semantics and accessibility actions | 9 | `src/context.zig`, `zui_widgets/`, `../zui-host` | | |
 | V3. Safety sweeps | 9 | `src/context.zig`, `src/tests/` | | |
 | V4. The demo in a browser | 9 | `../zui-web`, `zui_wire/` | | |
@@ -160,6 +159,52 @@ Things to know:
 ---
 
 ## Done
+
+### V1. `zui_debug`
+
+**Plan.** An inspector over `Frame.inspect`: the element tree, the
+hovered element and its configs, diagnostics, lowerings and fallbacks,
+and a performance overlay from the tracer, its theme reloaded when its
+file changes. **Done when:** `zui_testing` drives it over the Documents
+view, and the demo toggles it with a key.
+
+`Frame.inspect(index)` returns an `ElementView` of every element a frame
+kept (`046724e`). The `zui_debug` module's `Inspector(Ui)` copies a
+frame's tree out of it in `observe(frame, pointer)`, leaving out its own
+panel, and `declare(ui)` floats a panel at the viewport's right edge
+(`858acf3`): the frame's `Diagnostics`, each exceeded limit named by its
+`limits` field, and the fallbacks in effect, with a line for each part
+of what `reportRun` was handed, such as `zui_app`'s `Report`
+(`5ee8be5`); each zone's time in the last frame, its mean and peak over
+the last 60, from `zui_debug.ZoneTimer(Inner)`, a tracer that passes
+each zone on to `Inner` (`54c97ac`); then the element under the pointer,
+every field of its configs that differs from the default, and a row per
+element, indented by depth. Its theme, `PanelTheme(FontId, Color)`, is
+read from a ZON file when the host's file watch says it changed, with
+no allocation, through a `Stream(zui.FileChange)` and a `Latest` of the
+theme among the context's sources, so a replay restyles without reading
+a file (`389e497`). `zui_app`'s optional `zuiObserve(app, ui, frame)`
+hook hands the application each frame on the UI thread before it is
+submitted, and `zui_testing`'s driver runs the inspector over the
+Documents view of `bench/scenes.zig`: a row per element, and the sixth
+document under the pointer with its rectangle, flags and hovered
+background (`676799c`).
+
+zui-raylib (`d3afdb1`, pinned to `676799c`) toggles the panel with F12,
+or opens it with `--zui-debug`, observing frames only while it is open;
+its tracer is `ZoneTimer(zui_tracy.Tracer)`, and its fallbacks list the
+`Report` `zui_app` started with. Its theme does not reload there, since
+raylib's host has no file watch. `test-tour` opens the panel with F12
+over the Classic screen and checks it lists the frame's elements with
+every limit held.
+
+Measured: `src/` gained only `Frame.inspect`, which no frame calls, so
+no hot path or instruction count moved. The hidden demo drew 480 frames
+across every screen with the panel open, every limit held; the panel
+lists a row per element, so a Box Storm raised to 14,000 boxes would
+exceed `max_elements` with it open and say so in its diagnostics. The
+idle budget was not measured again, since the machine was not in
+benchmarking mode; a closed panel adds one branch per frame.
 
 ### G5. Materials
 
@@ -1629,8 +1674,8 @@ Decided here:
   its own, since declaration does no I/O; declaration only sees which
   files changed.
 
-What remains: `zui_debug` (V1) reloads its own themes and assets this
-way; the demo is a zui-host example rather than zui-sokol's tour, whose
+Since then, `zui_debug` (V1) reloads its theme this way (`389e497`).
+The demo is a zui-host example rather than zui-sokol's tour, whose
 working tree another session is changing.
 
 ### F5. Rendering somewhere else
@@ -1801,8 +1846,8 @@ check, so instruction counts and budgets are as they were.
 Decided here:
 - **What a frame on the wire holds:** what a renderer and a host need
   (number, parameters, host requests, commands). Hit regions and
-  semantics stay with the context; the inspector over the wire (V1) adds
-  what it needs then.
+  semantics stay with the context; the inspector over the wire, which
+  V1 left unqueued, adds what it needs then.
 - **A message that does not fit the decoder** fails with
   `error.CapacityExceeded` rather than keeping what fits, since a delta
   applied in part would corrupt every frame after it.
@@ -3048,82 +3093,6 @@ SDR white.
 ---
 
 ## Stage 9: seeing the UI
-
-### V1. `zui_debug`
-
-**Plan.** An inspector over `Frame.inspect`: the element tree, the
-hovered element and its configs, diagnostics, lowerings and fallbacks,
-and a performance overlay from the tracer. Its themes and assets reload
-when their files change, through the host's file watch (F6): a
-`Stream(zui.FileChange)` among its sources, read by the loader into a
-source of the parsed theme, as zui-host's `theme` example does.
-
-**Done when:** `zui_testing` drives it over the Documents view, and the
-demo toggles it with a key.
-
-**Spec.** §19.7.
-
-**Status.** Six slices landed. The first: `Frame.inspect(index)`
-returns an `ElementView` of every element the frame kept, its id and
-debug name, parent, subtree end, rectangle, minimum and content sizes,
-flags, layout, decoration, effects (found by a binary search of the
-effect elements), floating and content, and `zui.ElementFlags` is
-exported for it. The second: the `zui_debug` module, whose
-`Inspector(Ui)` copies a frame's tree out of `inspect` in
-`observe(frame, pointer)`, leaving out its own panel's subtree, and finds
-the innermost element under the pointer, keeping the last one while the
-pointer is over the panel; `declare(ui)` floats a panel at the
-viewport's right edge with that element's rectangle, flags and every
-field of its layout, decoration, effects, floating and text style that
-differs from the default, then a row per element, indented by depth,
-the hovered one highlighted. Its `Theme` is a struct for now. The
-third: `observe` copies the frame's `Diagnostics`, and the panel opens
-with them, each exceeded limit named by its `limits` field with its
-value and what the frame needed, the first element past a limit (by
-name in a `-Dzui-debug` build), repeated ids, an unbalanced tree and
-refused publishes with the first refusing `Sources` field, or "every
-limit held"; then the fallbacks in effect: each command in
-`diagnostics.lowered` with what §13.3 draws instead and the renderer's
-`zui_commands` that leaves it out, `clamped_colors` against
-`zui_extended_color`, and a line for each `; `-separated part of what
-`reportRun(report)` was handed, such as `zui_app`'s `Report` of what
-the host and renderer lack, which no frame carries. The fourth: the
-performance overlay. `zui_debug.ZoneTimer(Inner)` is a tracer that times
-each zone with the monotonic clock of the `Io` handed to its
-`useClock(io)`, summing a frame's times per zone in a thread-local
-`ZoneTimes` that `begin_frame` clears, and passes each zone on to
-`Inner`, such as `zui_tracy.Tracer`, or to nothing for `void`. An
-`Inspector` over a context whose `Config.features.Tracer` is one keeps
-the last 60 frames' times, recorded by `observe`, and lists under
-*Performance* each zone that ran, the steps indented under
-`begin_frame` and `end_frame`: its time in the last frame and its mean
-(over the frames it ran in) and peak, in milliseconds. Any other context
-keeps no history and says it is untimed. The fifth: the theme reloads
-from its file. The panel's theme is `zui_debug.PanelTheme(FontId,
-Color)`, which does not name the context, so a `zui_async.Latest` of it
-can be one of that context's sources; its `Zon` is the file's form, each
-color a `0xrrggbbaa` and every field defaulted. An application sets
-`theme_file` (a directory and a name within it) and has the host watch
-that directory into a `Stream(zui.FileChange)`;
-`declareWithThemeFrom(ui, .{ .file_changes, .theme })` notes an added,
-modified or renamed-to change naming the file, or a `.rescan`, and draws
-the panel in the theme last delivered by the `Latest`; between frames,
-`loadTheme(io)` reads and parses the file, when it changed, into a
-`Theme` for the loader to publish, with no allocation (the file, up to
-2 KiB, and its parse fit in stack memory), or returns why it did not
-load and keeps the theme until the file changes again. A replay restyles
-from the delivered theme without reading a file. Sources of the wrong
-kind are compile errors. The panel draws no image, so its theme is the
-only file it reloads. Nothing in `src/` changed. The sixth: `zui_app`'s
-optional `zuiObserve(app, ui, frame)` hook runs on the UI thread with
-each frame `endFrame` returns, before it is submitted or handed to the
-render thread, so an application on `zui_app` can call `observe`; a
-wrong signature is a compile error. `zui_testing`'s driver runs the
-inspector over the Documents view (`bench/scenes.zig`, the zui-raylib
-demo's, which `zui_debug`'s tests import as `zui_bench_scenes`): a row
-for each of its elements, and the sixth document under the pointer with
-its rectangle, flags and hovered background. Last comes the demo's key
-in `../zui-raylib`, which waits on this commit's push for its pin.
 
 ### V2. Semantics and accessibility actions
 

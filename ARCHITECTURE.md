@@ -255,7 +255,8 @@ What exists today, by stage:
   the frame's diagnostics and fallbacks, the zone times its
   `ZoneTimer` tracer takes, the element tree and the hovered element's
   configs, in a theme reloaded from its file through the host's file
-  watch.
+  watch; `zui_app` hands it each frame through `zuiObserve`, and
+  zui-raylib's tour opens it with F12.
 
 The code and the spec still differ in these places, each closed by the
 roadmap item named:
@@ -264,6 +265,7 @@ roadmap item named:
 |---|---|---|---|
 | output formats are negotiated through `Surface`, and zui-sokol draws an `.scrgb_fp16` offscreen image, but no host or renderer declares `.scrgb_fp16` for a window, and no host reports `hdr_headroom` | an FP16 swapchain when both sides support it; headroom from the display | `../zui-sokol`, `../zui-host` | G6 |
 | `Widgets(Ui)` with a `Theme` struct | `Widgets(Ui, Skin)` | `zui_widgets/` | K5 |
+| `zui_debug`'s inspector runs in the application's process; a frame on the wire carries no elements for it | over the wire, the inspector runs in another process (SPEC.md §19.7) | `zui_debug/`, `zui_wire/` | not yet queued |
 | `Features` has every field and gates its API, but `Frame.semantics()` is always empty and `safety_sweeps` changes nothing | semantics and safety sweeps, each behind its field | `src/context.zig` | V2, V3 |
 
 Unchanged in shape: element storage in pre-order structure-of-arrays, the
