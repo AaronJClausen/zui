@@ -1955,14 +1955,14 @@ const RemoteApp = struct {
 
 ### Running in a browser · *shipped*
 
-zui-web runs an application in a browser over `zui_wire`, as zui-sokol's tour runs at <https://aaronjclausen.github.io/zui-web/>. The application is built for `wasm32-freestanding` and runs in a Web Worker on an `Io` that steps to the page's clock; each display frame, the page sends it that instant and the records its canvas's input wrote, and draws the frame bytes it answers with through WebGL 2, with four samples per pixel, as a native window with `sample_count = 4` smooths its edges, and with the cursor the frame asks for. A worker shares its memory with its threads only on a cross-origin isolated page, so the published page isolates itself with a service worker. Durations inside a frame are timed on the worker's `performance.now()`, imported by the module, since the stepped `Io` holds one instant for the whole frame.
+zui-web runs an application in a browser over `zui_wire`, as zui-sokol's tour runs at <https://aaronjclausen.github.io/zui-web/>. The application is built for `wasm32-freestanding` and runs in a Web Worker on an `Io` that steps to the page's clock. The page sleeps between frames as a native host does: it steps the application when its `ui.nextFrame()` says, at once or at a deadline, or when the canvas's input, a resize or a change of `devicePixelRatio` arrives, sending it that instant and the records its canvas's input wrote, and draws the frame bytes it answers with through WebGL 2, with four samples per pixel, as a native window with `sample_count = 4` smooths its edges, and with the cursor the frame asks for. A worker shares its memory with its threads only on a cross-origin isolated page, so the published page isolates itself with a service worker. Durations inside a frame are timed on the worker's `performance.now()`, imported by the module, since the stepped `Io` holds one instant for the whole frame. Its tasks run only while a frame waits for them, so the page also wakes when the earliest of their sleeps ends, where a native host is woken by a task's thread.
 
 `src/browser_worker.zig`
 
 ```zig
 // Built for wasm32-freestanding and run in a Web Worker: zui-web's page
-// passes each display frame's instant and its canvas's records, and draws
-// the bytes this writes.
+// passes the instant it woke at and its canvas's records, draws the bytes
+// this writes, and sleeps until `darkroomNextWake`.
 var ui: Ui = undefined;
 var app: App = undefined;
 var fonts: Fonts = .{};
@@ -1996,6 +1996,15 @@ export fn darkroomFrame(now_milliseconds: f64, records: [*]const u8, record_coun
     encoder.writeFrame(&writer, frame) catch return 0;
     header_written = true;
     return writer.end;
+}
+
+/// On the page's clock, in milliseconds: 0 for at once, infinity for on input.
+export fn darkroomNextWake() f64 {
+    return switch (ui.nextFrame(&app.sources)) {
+        .immediately => 0,
+        .at => |deadline| @as(f64, @floatFromInt(deadline.nanoseconds)) / std.time.ns_per_ms,
+        .on_event => std.math.inf(f64),
+    };
 }
 ```
 

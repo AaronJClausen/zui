@@ -31,7 +31,7 @@ Each item says:
 | stage 7 | gestures (I5): arbitration by motion component, zoom, long press, double tap, momentum, the intents and custom recognizers; drag and drop between elements (I1) | done: a carousel in a list, a pinch starting on a list inside a map, a lasso module against a map's pan, and `zui_testing.Driver.drag` moving an item between two lists, out of one that scrolls by dragging |
 | after stage 7: the foundation | G1's first slice ran 5.5% to 7.7% more instructions in scenes that draw no effect, so the work turned to what lay under it: benchmarks that can be trusted (R3 to R8, and R9 in part) and the data-oriented design audit's findings (P6 to P10) | done; a commit compared with itself over three code layouts calls nothing, its intervals 0.52% wide on average, and a change that only moves code is not called; a tooltip declared before a 3,000-cell grid lays out in 79 µs, not 671 µs (P6); warm text −43% (P9); `init` from 138 µs to 92 µs (P7, P10); the budgets judged in benchmarking mode |
 | stage 8, begun | gradients, shadows and glow (G1); backdrop blur (G2); effects in the corners of a decoration that draws nothing (G7); transforms with hit inversion (G3); materials (G5) | G1, G2, G7, G3 and G5 done: zui-sokol draws gradients, shadows, backdrop blurs, transforms and materials through a shader of its own and passes the renderer suite, its effects rounded by a decoration that draws nothing, a pointer hits a turned button where it is drawn, and a frame without effects runs no more instructions than before; G6 begun: `zui.ExtendedColor` is declared and clamped for a renderer that draws only `Color`, and zui-sokol draws it into an scRGB FP16 offscreen image and passes the renderer suite there |
-| stage 9, begun | `zui_debug` (V1); the demo in a browser (V4) | V4 done: zui-sokol's tour runs in a browser at the display's frame rate, from <https://aaronjclausen.github.io/zui-web/>, in a Web Worker behind a page that draws its frames over `zui_wire`; V1 done: `Frame.inspect` and the inspector's diagnostics, fallbacks, zone times from its `ZoneTimer` tracer, element tree and hovered element's configs, and its theme reloaded from a watched file; zui-raylib's tour opens it with F12 through `zui_app`'s `zuiObserve`, and draws every screen with it open within its limits |
+| stage 9, begun | `zui_debug` (V1); the demo in a browser (V4) | V4 done: zui-sokol's tour runs in a browser at the display's frame rate, from <https://aaronjclausen.github.io/zui-web/>, in a Web Worker behind a page that draws its frames over `zui_wire` and sleeps between the frames the tour needs; V1 done: `Frame.inspect` and the inspector's diagnostics, fallbacks, zone times from its `ZoneTimer` tracer, element tree and hovered element's configs, and its theme reloaded from a watched file; zui-raylib's tour opens it with F12 through `zui_app`'s `zuiObserve`, and draws every screen with it open within its limits |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
@@ -298,6 +298,29 @@ materials look right. They found two defects, fixed before V4 closed:
   at most 2 pixels a frame matching nothing. Its run in CI, its reference
   drawn by llvmpipe, is to be confirmed once zui-sokol and then zui-web
   are pushed.
+
+After V4 closed, the owner found the page never slept: it stepped the
+tour and drew a frame at every `requestAnimationFrame`, and the worker
+asked `ui.nextFrame()` only to label those frames "requested". zui-web
+(`a533fd0`) now sleeps as native hosts do. Each answer from the worker
+carries when to step the tour again: its `nextFrame`, or sooner when one
+of its tasks' sleeps ends, since under `SteppedIo` tasks run only while a
+frame waits for them, and while a Gallery tile loads or a Mission Control
+producer sleeps, `nextFrame` says `.on_event`. The page asks for an
+animation frame at once, sets a timer for a deadline, or waits for the
+canvas's input, a resize or a change of `devicePixelRatio`. A step
+declares a frame only when one is due, for the reasons zui-sokol's demo
+declares one, and `test-demo`'s byte-for-byte run still declares one
+every tick. `test-site` now checks that the idle page draws only the
+tour's heartbeat while the display runs on, that input wakes it and is
+drawn, that Mission Control's producers keep drawing and every Gallery
+tile loads without input, and that the page then sleeps again. Idle on
+Welcome in headless Chromium, the page drew 19 frames a second before,
+every animation frame it had (drawing each held SwiftShader there), and
+1 after, the tour's heartbeat, while the display ran at 60. Box Storm,
+Typography, Light and Depth, Transforms and Materials animate and still
+ask for every frame, as natively, where zui-sokol's demo declares all
+300 of 300 display frames on each, against 4 on Welcome.
 
 It landed in five slices, in zui-web unless one says otherwise:
 1. **The client's decoder in WebAssembly.** zui-web's
