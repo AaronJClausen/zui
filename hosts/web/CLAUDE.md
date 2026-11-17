@@ -17,7 +17,7 @@ you declare); they hold here too.
 | Change | Goes in |
 |---|---|
 | the client and, later, the host | `src/<topic>.zig`, reached from `src/root.zig` |
-| what the browser runs | reached from `src/browser.zig`, the client's WebAssembly exports, which `zig build check` compiles for `wasm32-freestanding` |
+| what the browser runs | reached from `src/browser.zig`, the client's WebAssembly exports, or `src/tour_worker.zig`, the tour's in a worker, which `zig build check` compiles for `wasm32-freestanding` |
 | what only a check needs in the browser | `src/browser_wire_check.zig`, which adds exports to the client's for `zig build test-demo`; `web/check_*`, the pages and Node scripts the checks run |
 | native programs the checks run, such as the tour's stream | `tools/` |
 | JavaScript and HTML glue | `web/` |
@@ -35,7 +35,7 @@ Run each with `timeout 590` in front:
 | `zig build test` | always |
 | `zig build test -Doptimize=ReleaseSafe` and `-Doptimize=ReleaseFast` | before committing; CI runs all three |
 | `zig build check` | always; it also compiles the client for `wasm32-freestanding`, so a browser break fails here and in CI |
-| `zig build test-demo` | any change to the client, `src/demo_ui.zig` or the zui pin; needs Node, and in CI runs on Linux |
+| `zig build test-demo` | any change to the client, `src/demo_ui.zig`, the tour's worker (`src/tour_*.zig`, `src/stepped_io.zig`, `web/tour_*.mjs`), or the zui or zui-sokol pin; needs Node, and in CI runs on Linux |
 | `zig build test-draw` | any change to how the client lays frames out or the page draws them, or to the zui or zui-sokol pin; needs Node, Chromium (`-Dbrowser=<path>` names another) and a display, and in CI runs on Linux under Xvfb. Agents may run Chromium headless here, under `timeout`, leaving no Chromium process behind |
 | `zig build test-input` | any change to how the client writes records or the page reads input or applies host requests, or to the zui or zui-sokol pin; needs Node and Chromium, run headless, and no display; in CI runs on Linux with Google Chrome |
 | `zig build fmt` | before committing; CI runs `fmt-check` |

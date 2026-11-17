@@ -15,10 +15,21 @@ pub fn build(b: *std.Build) void {
     check_step.dependOn(&unit_tests.step);
     check_step.dependOn(&client.step);
 
-    const test_demo = b.step("test-demo", "Stream zui-sokol's tour, headless, to the browser's client under Node, and check every frame decodes to what was drawn");
+    const test_demo = b.step("test-demo", "Stream zui-sokol's tour, headless, to the browser's client under Node, and check every frame decodes to what was drawn; run the tour in a worker under Node, and check every frame is the one it draws natively");
     const test_draw = b.step("test-draw", "Draw frames of zui-sokol's tour in headless Chromium and check each against zui-sokol's renderer drawing it; needs a display");
     const test_input = b.step("test-input", "Give the client input in headless Chromium, run zui-sokol's tour on the records it writes, and check the tour took them and the page shows its cursor");
     const browser = b.option([]const u8, "browser", "The Chromium that `test-draw` runs headless (default: chromium)") orelse "chromium";
+    const worker_target = b.resolveTargetQuery(.{
+        .cpu_arch = .wasm32,
+        .os_tag = .freestanding,
+        .cpu_features_add = std.Target.wasm.featureSet(&.{ .atomics, .bulk_memory }),
+    });
+    const tour_worker = if (b.lazyDependency("zui_sokol", .{ .target = worker_target, .optimize = optimize })) |worker_zui_sokol| tour_worker: {
+        const tour_worker = tourWorker(b, worker_zui_sokol, worker_target, optimize);
+        b.getInstallStep().dependOn(&b.addInstallArtifact(tour_worker, .{ .dest_dir = .{ .override = .{ .custom = "web" } } }).step);
+        check_step.dependOn(&tour_worker.step);
+        break :tour_worker tour_worker;
+    } else null;
     if (b.lazyDependency("zui_sokol", .{ .target = target, .optimize = optimize })) |zui_sokol_dependency| {
         const tour_imports: []const std.Build.Module.Import = &.{
             .{ .name = "zui_sokol", .module = zui_sokol_dependency.module("zui_sokol") },
@@ -38,6 +49,19 @@ pub fn build(b: *std.Build) void {
         decode_in_client.addFileArg(expected);
         decode_in_client.expectExitCode(0);
         test_demo.dependOn(&decode_in_client.step);
+
+        if (tour_worker) |worker| {
+            const tour_session = b.createModule(.{ .root_source_file = b.path("src/tour_session.zig"), .target = target, .optimize = optimize, .imports = tourSessionImports(b, zui_sokol_dependency, target, optimize) });
+            const tour_frames = tourTool(b, "tour-frames", "tools/tour_frames.zig", &.{.{ .name = "tour_session", .module = tour_session }}, target, optimize);
+            const run_in_worker = b.addSystemCommand(&.{"node"});
+            run_in_worker.addFileArg(b.path("web/check_worker.mjs"));
+            run_in_worker.addArtifactArg(client);
+            run_in_worker.addArtifactArg(worker);
+            run_in_worker.addArtifactArg(tour_frames);
+            for ([_][]const u8{ "web/tour_worker.mjs", "web/tour_thread.mjs", "web/worker_port.mjs" }) |worker_file| run_in_worker.addFileInput(b.path(worker_file));
+            run_in_worker.expectExitCode(0);
+            test_demo.dependOn(&run_in_worker.step);
+        }
 
         const draw_reference = tourTool(b, "draw-reference", "tools/draw_reference.zig", tour_imports, target, optimize);
         const write_reference = b.addRunArtifact(draw_reference);
@@ -121,6 +145,36 @@ const tour_truetype_fonts = [_][]const u8{
     "examples/fonts/AtkinsonHyperlegible-Regular.ttf",
     "examples/fonts/AtkinsonHyperlegible-Bold.ttf",
 };
+
+fn tourSessionImports(b: *std.Build, zui_sokol_dependency: *std.Build.Dependency, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) []const std.Build.Module.Import {
+    return b.allocator.dupe(std.Build.Module.Import, &.{
+        .{ .name = "zui_sokol_ui", .module = zui_sokol_dependency.module("zui_sokol_ui") },
+        .{ .name = "zui_sokol_tour", .module = zui_sokol_dependency.module("zui_sokol_tour") },
+        .{ .name = "zui_wire", .module = b.dependency("zui", .{ .target = target, .optimize = optimize }).module("zui_wire") },
+    }) catch @panic("out of memory");
+}
+
+/// zui-sokol's tour for a Web Worker: WebAssembly on memory the page
+/// shares with the workers the tour's tasks run on, each of which sets its
+/// own stack pointer and thread-local storage.
+fn tourWorker(b: *std.Build, zui_sokol_dependency: *std.Build.Dependency, worker_target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Step.Compile {
+    const module = b.createModule(.{
+        .root_source_file = b.path("src/tour_worker.zig"),
+        .target = worker_target,
+        .optimize = optimize,
+        .single_threaded = false,
+        .imports = tourSessionImports(b, zui_sokol_dependency, worker_target, optimize),
+    });
+    module.export_symbol_names = &.{ "__stack_pointer", "__wasm_init_tls" };
+    const worker = b.addExecutable(.{ .name = "zui-web-tour", .root_module = module });
+    worker.entry = .disabled;
+    worker.rdynamic = true;
+    worker.import_memory = true;
+    worker.shared_memory = true;
+    worker.stack_size = 4 << 20;
+    worker.max_memory = 1 << 30;
+    return worker;
+}
 
 /// A native program that runs zui-sokol's tour.
 fn tourTool(b: *std.Build, name: []const u8, root_source_file: []const u8, imports: []const std.Build.Module.Import, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Step.Compile {

@@ -54,13 +54,34 @@ runs zui-sokol's tour on the records the client wrote, checks that each
 holds what the page was given and that the tour moved between screens on
 the click and the shortcuts, and sends the tour's frames back to the page,
 which must show the pointer cursor over the rail.
+
+The tour itself runs in the browser too, in a Web Worker behind the page:
+`zig build` also writes `zig-out/web/zui-web-tour.wasm`, zui-sokol's tour
+built for `wasm32-freestanding` with shared memory (793 KB in
+ReleaseSmall, about 49 MiB of memory once `zuiTourInit` reserves it).
+`web/tour_worker.mjs` takes the page's clock and records each frame and
+posts back the frame's wire bytes. The tour's loaders, the Gallery's
+tiles and Mission Control's producers, run on an `Io` of the worker's own,
+`SteppedIo`: its clocks read the page's instant, and its tasks take turns
+on 16 threads, each a worker of its own on the same memory
+(`web/tour_thread.mjs`), one at a time and only while the frame waits for
+them, so the tour draws the same frames for the same clock and input
+wherever it runs. A worker can share its memory only on a page that is
+cross-origin isolated, served with `Cross-Origin-Opener-Policy:
+same-origin` and `Cross-Origin-Embedder-Policy: require-corp`.
+`zig build test-demo` also runs the tour in that worker under Node, on the
+records the client wrote of the mouse crossing each screen and
+Ctrl+PageDown between them, and checks that each of the 312 frames is,
+byte for byte, the frame the tour draws natively on the same ticks
+(`tools/tour_frames.zig`), that its tasks ran alike, and that the client
+decodes every frame.
 See [zui's ROADMAP.md](https://github.com/AaronJClausen/zui/blob/main/ROADMAP.md).
 
 ## Requirements
 
 - Zig **0.16.0**
 - zui, fetched automatically (pinned by commit in `build.zig.zon`)
-- for `zig build test-demo`: Node on the `PATH`, and on Linux sokol's X11,
+- for `zig build test-demo`: Node on the `PATH`, with `worker_threads`, and on Linux sokol's X11,
   OpenGL and PulseAudio headers, since the tour links them; zui-sokol,
   which holds the tour, is fetched automatically, pinned as zui is
 - for `zig build test-input`, also Chromium or Google Chrome (`chromium`
@@ -73,9 +94,9 @@ See [zui's ROADMAP.md](https://github.com/AaronJClausen/zui/blob/main/ROADMAP.md
 | Command | Does |
 |---|---|
 | `zig build test` | run the tests; CI also runs `-Doptimize=ReleaseSafe` and `-Doptimize=ReleaseFast` |
-| `zig build` | write the client, `zig-out/web/zui-web.wasm` |
-| `zig build check` | compile without running, and compile the client for `wasm32-freestanding` |
-| `zig build test-demo` | stream zui-sokol's tour to the client under Node, and check every frame decodes to what was drawn |
+| `zig build` | write the client, `zig-out/web/zui-web.wasm`, and the tour for a worker, `zig-out/web/zui-web-tour.wasm` |
+| `zig build check` | compile without running, and compile the client and the tour's worker for `wasm32-freestanding` |
+| `zig build test-demo` | stream zui-sokol's tour to the client under Node, and check every frame decodes to what was drawn; run the tour in a worker under Node, and check every frame is the one the tour draws natively |
 | `zig build test-draw` | draw a frame of each of the tour's screens in headless Chromium, and check each against zui-sokol's renderer drawing it |
 | `zig build test-input` | give the page input in headless Chromium, run the tour on the records the client wrote of it, and check the tour took them and the page shows the cursor it asks for |
 | `zig build fmt` | format the Zig sources |
