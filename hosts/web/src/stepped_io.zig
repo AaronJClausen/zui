@@ -121,6 +121,20 @@ pub const SteppedIo = struct {
         self.takeTurns();
     }
 
+    /// The instant the next `step` must reach for a task to take its turn:
+    /// now if a task was woken since the last, else the earliest a sleep or
+    /// a wait with a timeout ends; null if every task waits on another, or
+    /// none is left. Tasks run only inside a step, so a loop that sleeps
+    /// between steps must wake by then.
+    pub fn nextWakeNanoseconds(self: *const SteppedIo) ?i96 {
+        var earliest: i96 = never;
+        for (self.tasks) |*task| {
+            if (task.runnable(self.clock_nanoseconds)) return self.clock_nanoseconds;
+            if (task.state == .sleeping or task.state == .waiting) earliest = @min(earliest, task.wake_at);
+        }
+        return if (earliest == never) null else earliest;
+    }
+
     /// The body of the thread the owner started for `index`: it runs each
     /// task given to it, in turns, until `stopThreads`.
     pub fn runThread(self: *SteppedIo, index: usize) void {
@@ -469,6 +483,41 @@ test "more tasks than threads wait for one, and more than the slots are refused"
     harness.stepped.step(20 * milliseconds);
     try testing.expectEqualStrings("ab", marks.items);
     try testing.expectEqual(SteppedIo.Counts{ .started = 2, .finished = 2, .refused = 1 }, harness.stepped.counts);
+}
+
+test "the next wake is a sleeping task's, or now once a task is woken" {
+    var harness: TestThreads = undefined;
+    try harness.start(2, 8);
+    defer harness.stop();
+    const io = harness.stepped.io();
+    try testing.expectEqual(null, harness.stepped.nextWakeNanoseconds());
+    var buffer: [16]u8 = undefined;
+    var marks: std.ArrayList(u8) = .initBuffer(&buffer);
+    var group: Io.Group = .init;
+    try group.concurrent(io, markEachWake, .{ io, &marks, 'a', 2, 30 * milliseconds });
+    try group.concurrent(io, markEachWake, .{ io, &marks, 'b', 1, 20 * milliseconds });
+    try testing.expectEqual(20 * milliseconds, harness.stepped.nextWakeNanoseconds());
+    harness.stepped.step(25 * milliseconds);
+    try testing.expectEqualStrings("b", marks.items);
+    try testing.expectEqual(30 * milliseconds, harness.stepped.nextWakeNanoseconds());
+
+    var tally: Tally = .{};
+    try tally.mutex.lock(io);
+    var waiting: Io.Group = .init;
+    try waiting.concurrent(io, Tally.countWhileAsleep, .{ &tally, io });
+    try testing.expectEqual(30 * milliseconds, harness.stepped.nextWakeNanoseconds());
+    tally.mutex.unlock(io);
+    try testing.expectEqual(25 * milliseconds, harness.stepped.nextWakeNanoseconds());
+
+    harness.stepped.step(60 * milliseconds);
+    try testing.expectEqualStrings("ba", marks.items);
+    try testing.expectEqual(61 * milliseconds, harness.stepped.nextWakeNanoseconds());
+    harness.stepped.step(90 * milliseconds);
+    try testing.expectEqualStrings("baa", marks.items);
+    try testing.expectEqual(null, harness.stepped.nextWakeNanoseconds());
+    try group.await(io);
+    try waiting.await(io);
+    try testing.expectEqual(1, tally.count);
 }
 
 fn sleepUntilCanceled(io: Io, outcome: *?Io.Cancelable!void) void {

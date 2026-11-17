@@ -85,16 +85,28 @@ export fn zuiTourReceivedRecords(count: usize) void {
 
 var frame_bytes: []const u8 = &.{};
 
-/// Declares the frame at `now_milliseconds` on the page's clock, after the
-/// page took `previous_draw_milliseconds` to draw the one before: the count
-/// of wire bytes at `zuiTourFrameBytes`, 0 before the first record, or -1
-/// with `zuiTourErrorName` saying why.
-export fn zuiTourFrame(now_milliseconds: f64, previous_draw_milliseconds: f64) i32 {
-    frame_bytes = (session.frame(now_milliseconds, previous_draw_milliseconds) catch |err| {
+/// Steps the tour to `now_milliseconds` on the page's clock, after the page
+/// took `previous_draw_milliseconds` to draw the frame before, and declares
+/// a frame, or with `only_when_due` only if one is due: the count of wire
+/// bytes at `zuiTourFrameBytes`, 0 before the first record or when no
+/// frame was declared, or -1 with `zuiTourErrorName` saying why.
+export fn zuiTourFrame(now_milliseconds: f64, previous_draw_milliseconds: f64, only_when_due: bool) i32 {
+    const declaring: TourSession.Declaring = if (only_when_due) .when_due else .every_call;
+    frame_bytes = (session.frame(declaring, now_milliseconds, previous_draw_milliseconds) catch |err| {
         error_name = @errorName(err);
         return -1;
     }) orelse &.{};
     return @intCast(frame_bytes.len);
+}
+
+/// The instant on the page's clock, in milliseconds, by which the page must
+/// step the tour again: 0 for at once, or infinity if not before input.
+export fn zuiTourNextWakeMilliseconds() f64 {
+    return switch (session.nextWake()) {
+        .immediately => 0,
+        .at => |deadline| @as(f64, @floatFromInt(deadline.nanoseconds)) / std.time.ns_per_ms,
+        .on_event => std.math.inf(f64),
+    };
 }
 
 export fn zuiTourFrameBytes() usize {

@@ -2,7 +2,7 @@
 // `devicePixelRatio` into the records the client writes for the
 // application, and applies the newest frame's host requests to the canvas.
 //
-//   const recorder = new InputRecorder(canvas, wasm);
+//   const recorder = new InputRecorder(canvas, wasm, () => wake());
 //   const record = recorder.takeRecord(); // once a frame
 //   if (record) socket.send(record);
 //   recorder.applyHostRequests(); // after a frame is decoded
@@ -26,9 +26,10 @@ function typedCharacter(event) {
 }
 
 export class InputRecorder {
-  constructor(canvas, wasm) {
+  constructor(canvas, wasm, onEventHeard = () => {}) {
     this.canvas = canvas;
     this.wasm = wasm;
+    this.onEventHeard = onEventHeard;
     this.listeners = [];
     if (canvas.tabIndex < 0) canvas.tabIndex = 0;
     canvas.style.touchAction = "none";
@@ -58,8 +59,12 @@ export class InputRecorder {
   }
 
   listen(type, handle) {
-    this.canvas.addEventListener(type, handle, { passive: false });
-    this.listeners.push([type, handle]);
+    const handleAndTell = (event) => {
+      handle(event);
+      this.onEventHeard();
+    };
+    this.canvas.addEventListener(type, handleAndTell, { passive: false });
+    this.listeners.push([type, handleAndTell]);
   }
 
   detach() {

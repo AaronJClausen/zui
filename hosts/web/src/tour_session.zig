@@ -15,14 +15,16 @@ pub const Ui = tour.kit.Ui;
 /// frame, times it on the session's `Stopwatch` for the tour's strip, and
 /// writes it as the wire renderer sends it, the stream's header before the
 /// first. Given the same instants, records and draw times, and a `.steady`
-/// stopwatch, it writes the same bytes in a worker as natively. Memory is
-/// reserved by `init`.
+/// stopwatch, it writes the same bytes in a worker as natively. A page that
+/// sleeps between frames, as a native host does, declares one only
+/// `.when_due` and wakes when `nextWake` says. Memory is reserved by `init`.
 ///
 /// ```zig
 /// try session.init(gpa, &stepped, .{ .stopwatch = .{ .clock = performanceNow } });
 /// @memcpy(try session.roomForRecords(bytes.len), bytes);
 /// session.receivedRecords(bytes.len);
-/// if (try session.frame(page_milliseconds, last_draw_milliseconds)) |wire_bytes| post(wire_bytes);
+/// if (try session.frame(.when_due, page_milliseconds, last_draw_milliseconds)) |wire_bytes| post(wire_bytes);
+/// sleepUntil(session.nextWake());
 /// ```
 pub const TourSession = struct {
     /// The threads the tour's tasks take turns on, the same wherever it
@@ -154,13 +156,23 @@ pub const TourSession = struct {
         self.pending_end += count;
     }
 
+    pub const Declaring = enum {
+        /// A frame at every call, whether one is due or not.
+        every_call,
+        /// Only when a host that sleeps between frames would declare one:
+        /// on input, a resize, a source that delivered, a requested frame
+        /// or a deadline that came due.
+        when_due,
+    };
+
     /// Steps the tour's tasks to `now_milliseconds` on the page's clock,
     /// declares a frame with the events of every record that has arrived
     /// whole, and returns it as wire bytes, valid until the next call; null
-    /// until the first record has measured the canvas. The tour's strip
-    /// shows `previous_draw_milliseconds`, how long the page took to draw
-    /// the frame before, as its renderer's submit time.
-    pub fn frame(self: *TourSession, now_milliseconds: f64, previous_draw_milliseconds: f64) FrameError!?[]const u8 {
+    /// until the first record has measured the canvas, or `.when_due` while
+    /// none is. The tour's strip shows `previous_draw_milliseconds`, how
+    /// long the page took to draw the frame before, as its renderer's
+    /// submit time.
+    pub fn frame(self: *TourSession, declaring: Declaring, now_milliseconds: f64, previous_draw_milliseconds: f64) FrameError!?[]const u8 {
         const now: zui.Instant = .fromNanoseconds(@intFromFloat(@max(0, now_milliseconds) * std.time.ns_per_ms));
         self.stepped.step(now.nanoseconds);
 
@@ -173,7 +185,11 @@ pub const TourSession = struct {
         builder.params.viewport = measured.viewport;
         builder.params.scale = measured.scale;
 
-        const reason = self.frameReason(builder.params, builder.events().len);
+        const due_reason = self.frameReason(builder.params, builder.events().len);
+        const reason = switch (declaring) {
+            .every_call => due_reason orelse .requested,
+            .when_due => due_reason orelse return null,
+        };
         const measure_calls_before = self.ui.measureCalls();
         const started = self.readStopwatch();
         self.ui.beginFrame(&.{ .params = builder.params, .events = builder.events() }, &app.sources);
@@ -222,10 +238,24 @@ pub const TourSession = struct {
         return writer.buffered();
     }
 
+    /// When the page should next call `frame(.when_due, ...)`, on its
+    /// clock: the tour's `nextFrame`, or sooner, when one of its tasks
+    /// wakes. Tasks run only inside a frame, so where a native host sleeps
+    /// until a task's thread wakes it, the page wakes the task instead.
+    pub fn nextWake(self: *const TourSession) zui.NextFrame {
+        const tour_next = self.ui.nextFrame(&self.app.sources);
+        const task_nanoseconds = self.stepped.nextWakeNanoseconds() orelse return tour_next;
+        const task_wake: zui.Instant = .fromNanoseconds(@intCast(@max(0, task_nanoseconds)));
+        return switch (tour_next) {
+            .immediately => .immediately,
+            .at => |deadline| .{ .at = if (task_wake.isBefore(deadline)) task_wake else deadline },
+            .on_event => .{ .at = task_wake },
+        };
+    }
+
     /// Why the tour declares this frame, as a host that declares only the
-    /// frames zui needs would tell it; the page asks for one at every
-    /// display frame, which the tour sees as a requested frame.
-    fn frameReason(self: *const TourSession, params: zui.FrameParams, event_count: usize) FrameReason {
+    /// frames zui needs would tell it, or null if it would not declare one.
+    fn frameReason(self: *const TourSession, params: zui.FrameParams, event_count: usize) ?FrameReason {
         const previous = self.previous_params orelse return .first;
         if (event_count != 0) return .input;
         if (!std.meta.eql(params.viewport, previous.viewport) or params.scale != previous.scale or params.zoom != previous.zoom) return .resize;
@@ -233,8 +263,9 @@ pub const TourSession = struct {
             if (@field(&self.app.sources, field.name).zuiPending()) return .source;
         }
         return switch (self.ui.nextFrame(&self.app.sources)) {
-            .at => |deadline| if (params.now.isBefore(deadline)) .requested else .timer,
-            .immediately, .on_event => .requested,
+            .immediately => .requested,
+            .at => |deadline| if (params.now.isBefore(deadline)) null else .timer,
+            .on_event => null,
         };
     }
 

@@ -55,7 +55,7 @@ pub fn main(init: std.process.Init) !void {
         const record_count = try ticks.takeInt(u32, .little);
         try ticks.readSliceAll(try session.roomForRecords(record_count));
         session.receivedRecords(record_count);
-        if (try session.frame(now_milliseconds, previous_draw_milliseconds)) |wire_bytes| try stream_writer.interface.writeAll(wire_bytes);
+        if (try session.frame(.every_call, now_milliseconds, previous_draw_milliseconds)) |wire_bytes| try stream_writer.interface.writeAll(wire_bytes);
     }
     try stream_writer.interface.flush();
     std.debug.print("{d} {d} {d}\n", .{ stepped.counts.started, stepped.counts.finished, stepped.counts.refused });

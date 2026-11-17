@@ -91,8 +91,18 @@ decodes every frame. Real timings differ from run to run, so there both
 time frames on a steady stopwatch, 1 µs a reading.
 
 The published page puts it all together: `web/index.html` starts the
-tour's worker, draws each frame it sends on the canvas, a frame for each
-of the display's, and sends it the canvas's input as records. GitHub
+tour's worker, draws each frame it sends on the canvas, and sends it the
+canvas's input as records. It sleeps between frames as a native host
+does: each answer from the worker carries when to step the tour again,
+which is the tour's `ui.nextFrame()`, at once, at a deadline or on input,
+or sooner, when one of its tasks' sleeps ends, since under `SteppedIo`
+tasks run only while a frame waits for them. The page then asks for an
+animation frame at once, sets a timer for the deadline, or waits for the
+canvas's input, a resize or a change of `devicePixelRatio`, and a step
+that finds no frame due declares none. Idle, the tour draws only its
+heartbeat, once a second; the Box Storm, Typography, Light and Depth,
+Transforms and Materials screens animate, and ask for every frame, as
+they do natively. GitHub
 Pages cannot send the headers that make a page cross-origin isolated, so
 the page registers a service worker of its own,
 `web/isolation_service_worker.js`, which serves the page and everything
@@ -105,9 +115,13 @@ source is GitHub Actions.
 `zig build test-site` serves that site without the isolation headers,
 as GitHub Pages does, opens it in headless Chromium, and checks that the
 service worker isolated it after one reload, that the page draws the
-worker's frames, timed above 0 µs, and that its input reaches the tour: the mouse over the
-rail shows the pointer cursor the tour asks for, and a click on Mission
-Control starts its producers' tasks.
+worker's frames, timed above 0 µs, that it sleeps while idle, drawing
+1 frame a second on Welcome while the display runs at 60, and that input
+wakes it and reaches the tour: the mouse over the
+rail shows the pointer cursor the tour asks for, Ctrl+PageDown draws the
+next screen, and a click on Mission Control starts its producers' tasks,
+whose frames keep coming without input. Then, on the Gallery, every
+tile's load must finish without input, and the page sleep again.
 See [zui's ROADMAP.md](https://github.com/AaronJClausen/zui/blob/main/ROADMAP.md).
 
 ## Requirements
@@ -136,7 +150,7 @@ See [zui's ROADMAP.md](https://github.com/AaronJClausen/zui/blob/main/ROADMAP.md
 | `zig build test-draw` | draw a frame of each of the tour's screens in headless Chromium, with one sample per pixel and with four, and check each against zui-sokol's renderer drawing it alike |
 | `zig build test-input` | give the page input in headless Chromium, run the tour on the records the client wrote of it, and check the tour took them and the page shows the cursor it asks for |
 | `zig build site` | write the published page, the client, the tour's worker and its fonts to `zig-out/site`; serve that directory over HTTP (or HTTPS, off `localhost`) to run the tour in a browser |
-| `zig build test-site` | serve the site without isolation headers, open it in headless Chromium, and check its service worker isolates it, it draws the tour's frames and its input reaches the tour |
+| `zig build test-site` | serve the site without isolation headers, open it in headless Chromium, and check its service worker isolates it, it draws the tour's frames, sleeps while idle, and its input wakes it and reaches the tour |
 | `zig build fmt` | format the Zig sources |
 | `zig build fmt-check` | fail if a Zig source is not formatted (CI) |
 | `zig build test --fork=../zui` | build against a local zui checkout instead of the pin |

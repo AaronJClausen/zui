@@ -19,7 +19,7 @@ pub fn build(b: *std.Build) void {
     const test_draw = b.step("test-draw", "Draw frames of zui-sokol's tour in headless Chromium, with one sample per pixel and with four, and check each against zui-sokol's renderer drawing it alike; needs a display");
     const test_input = b.step("test-input", "Give the client input in headless Chromium, run zui-sokol's tour on the records it writes, and check the tour took them and the page shows its cursor");
     const site_step = b.step("site", "Write the published page, the client, the tour's worker and the tour's fonts to zig-out/site");
-    const test_site = b.step("test-site", "Serve the published page without isolation headers, open it in headless Chromium, and check its service worker isolates it, it draws the tour's frames and its input reaches the tour");
+    const test_site = b.step("test-site", "Serve the published page without isolation headers, open it in headless Chromium, and check its service worker isolates it, it draws the tour's frames, sleeps while idle, and its input wakes it and reaches the tour");
     const browser = b.option([]const u8, "browser", "The Chromium that `test-draw` runs headless (default: chromium)") orelse "chromium";
     const worker_target = b.resolveTargetQuery(.{
         .cpu_arch = .wasm32,
