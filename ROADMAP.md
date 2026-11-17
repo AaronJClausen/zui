@@ -74,7 +74,6 @@ green, and its **Status** line below says which slice is next.
 | G6. HDR and wide gamut | 8 | `src/context.zig`, `src/commands.zig`, `src/surface.zig`, `zui_wire/`, `zui_testing/`, `../zui-sokol`, `../zui-host` | | waiting on a session under Windows with an HDR display: zui-sokol's FP16 `.win32` swapchain and zui-host's `.scrgb_fp16` window |
 | V2. Semantics and accessibility actions | 9 | `src/context.zig`, `zui_widgets/`, `../zui-host` | | in progress; the UI Automation bridge waits on a session under Windows |
 | V4. The demo in a browser | 9 | `../zui-web`, `zui_wire/` | | waiting on the owner: setting zui-web's Pages source to GitHub Actions, the Pages workflow's first deploy, and the tour keeping the display's frame rate on the published page in a browser (V4's Status, slice 5) |
-| F7. The wire's renderer declares its context's payload types | 5 | `zui_wire/remote.zig`, `zui_wire/tests.zig` | | |
 
 After the queue come stages 10 and 11 in the order of SPEC.md §21. They join the queue as it runs short.
 
@@ -158,6 +157,35 @@ Things to know:
 ---
 
 ## Done
+
+### F7. The wire's renderer declares its context's payload types
+
+**Plan.** `zui_wire.Renderer(Ui)` declares `Ui`'s `ImageHandle`,
+`CustomData`, `MaterialHandle` and `FontId`. **Done when:**
+`zui.checkRenderer` accepts `zui_wire.Renderer` of the tests'
+every-command context, and `zui_app.contextConfig` of it gives back
+that context's payload types.
+
+The renderer declared `zui_commands` from `Ui` but none of its payload
+types, so for a `Ui` with `.material` among its commands
+`zui.checkRenderer` failed ("… .zui_commands includes .material but
+… .MaterialHandle is void"), and `zui_app.contextConfig` of it lost a
+`Ui`'s images, custom payloads and materials. It now takes each from
+`Ui.RenderCommand`: the image's and the material's handle types, the
+`custom` payload's type when there is one, and `Ui.FontId`. The plan
+said to declare each only when it is not `void`, but Zig cannot declare
+conditionally, and a `void` declaration is what `checkRenderer` and
+`contextConfig` already take for an absent one. A test checks the
+renderer of the every-command context and that `zui.Context` of
+`contextConfig` of it is that context again; it fails to compile
+without the change with the message above.
+
+zui-host's `remote` example, `zui.checkRenderer` of
+`zui_wire.Renderer(tour.kit.Ui)`, fails the same way once zui-host
+builds against zui-sokol `cac68e4`, whose tour has a Materials screen;
+with this commit it compiles (`zig build check -Dtarget=x86_64-windows`
+with zui and zui-sokol as path dependencies), and needs no change of its
+own, only its pins moved. Nothing on a hot path changed.
 
 ### V3. Safety sweeps
 
@@ -2885,29 +2913,7 @@ Done: H2 and H8 are in *Done*.
 ## Stage 5: the wire
 
 F1, feeds, is retired: sources (A3) are the mechanism for outside data.
-Done: F2, F3, F4, F5 and F6 are in *Done*.
-
-### F7. The wire's renderer declares its context's payload types
-
-**Grounding.** `zui_wire.Renderer(Ui)` (`zui_wire/remote.zig:325`)
-declares `zui_commands` as `Ui.RenderCommand.commands` (`:330`) and
-`zui_extended_color` from `Ui.CommandColor`, but none of `Ui`'s payload
-types. For a `Ui` with a `MaterialHandle`, whose commands include
-`.material`, `zui.checkRenderer` fails (`src/contracts.zig:64`): "zui:
-remote.Renderer(…).zui_commands includes .material but
-remote.Renderer(…).MaterialHandle is void". `zui_app.contextConfig`
-takes `ImageHandle`, `CustomData` and `MaterialHandle` from the renderer
-(`zui_app/zui_app.zig:37`), so an application served over the wire under
-`zui_app` loses its images, custom payloads and materials. Found while
-G6's second slice tested the wire's renderer with every command.
-
-**Plan.** `Renderer(Ui)` declares `ImageHandle`, `CustomData`,
-`MaterialHandle` and `FontId` as `Ui`'s, each only when it is not
-`void`, as a renderer without one leaves it undeclared.
-
-**Done when:** `zui.checkRenderer` accepts `zui_wire.Renderer` of the
-tests' every-command context, and `zui_app.contextConfig` of it gives
-back that context's payload types.
+Done: F2, F3, F4, F5, F6 and F7 are in *Done*.
 
 ---
 

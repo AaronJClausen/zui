@@ -2366,8 +2366,10 @@ while (try client.frame(&host, &renderer)) {}
   host to apply.
 - **The wire renderer** writes each frame as changes from the last, after
   a header with the application's fonts' fingerprint, and declares the
-  commands `Ui` generates, so `zui_app` reports what the client's
-  renderer lowers. It may submit on a render thread.
+  commands, colors and payload types `Ui` generates, so `zui_app`
+  reports what the client's renderer lowers and `zui_app.contextConfig`
+  of it gives back `Ui`'s images, custom payloads, materials and fonts.
+  It may submit on a render thread.
 - **The client** polls its own host, sends a record when it holds events
   or the viewport or scale changed (not for time passing alone), and
   presents the newest frame that arrived with its own renderer, applying

@@ -2055,7 +2055,7 @@ fn playBack(gpa: std.mem.Allocator, reader: *std.Io.Reader, renderer: *Renderer,
 
       <article class="feature" id="remote" data-title="Remote rendering">
         <div class="feature-head"><h3>Running in one process, drawing in another</h3><span class="pill shipped">Shipped</span></div>
-        <p><code class="z">zui_wire.Host(Ui)</code> is a host whose surface is a socket, and <code class="z">zui_wire.Renderer(Ui)</code> writes frames into it. On the other end, <code class="z">zui_wire.Client(Ui)</code> joins any real host and renderer to the socket, sending input one way and drawing frames that come back. zui-host's <code class="z">zig build remote</code> runs zui-sokol's tour this way. The wire host passes the host conformance suite.</p>
+        <p><code class="z">zui_wire.Host(Ui)</code> is a host whose surface is a socket, and <code class="z">zui_wire.Renderer(Ui)</code> writes frames into it. On the other end, <code class="z">zui_wire.Client(Ui)</code> joins any real host and renderer to the socket, sending input one way and drawing frames that come back. zui-host's <code class="z">zig build remote</code> runs zui-sokol's tour this way. The wire renderer declares <code class="z">Ui</code>'s commands, colors and payload types, so an application with images, custom payloads or materials runs over the wire unchanged. The wire host passes the host conformance suite.</p>
 <script type="text/x-zig" data-file="tools/remote_viewer.zig">
 pub fn main(init: std.process.Init) !void {
     var host: NativeHost = undefined;

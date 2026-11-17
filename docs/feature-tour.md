@@ -1919,7 +1919,7 @@ fn playBack(gpa: std.mem.Allocator, reader: *std.Io.Reader, renderer: *Renderer,
 
 ### Running in one process, drawing in another · *shipped*
 
-`zui_wire.Host(Ui)` is a host whose surface is a socket, and `zui_wire.Renderer(Ui)` writes frames into it. On the other end, `zui_wire.Client(Ui)` joins any real host and renderer to the socket, sending input one way and drawing frames that come back. zui-host's `zig build remote` runs zui-sokol's tour this way. The wire host passes the host conformance suite.
+`zui_wire.Host(Ui)` is a host whose surface is a socket, and `zui_wire.Renderer(Ui)` writes frames into it. On the other end, `zui_wire.Client(Ui)` joins any real host and renderer to the socket, sending input one way and drawing frames that come back. zui-host's `zig build remote` runs zui-sokol's tour this way. The wire renderer declares `Ui`'s commands, colors and payload types, so an application with images, custom payloads or materials runs over the wire unchanged. The wire host passes the host conformance suite.
 
 `tools/remote_viewer.zig`
 

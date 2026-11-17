@@ -1,5 +1,6 @@
 const std = @import("std");
 const zui = @import("zui");
+const zui_app = @import("zui_app");
 const zui_async = @import("zui_async");
 const zui_testing = @import("zui_testing");
 const zui_wire = @import("zui_wire.zig");
@@ -225,13 +226,16 @@ test "a delivery's own decoding error means the stream is malformed" {
     try testing.expectError(error.Malformed, decoder.next(&reader));
 }
 
+const CameraLayer = struct { camera: [3]f32, layer: u8 };
+const GlassMaterial = enum(u8) { glass, frost };
+
 fn EveryCommandUiIn(comptime Color: type) type {
     return zui.Context(.{
         .limits = small_limits,
         .Text = Text,
         .ImageHandle = u32,
-        .CustomData = struct { camera: [3]f32, layer: u8 },
-        .MaterialHandle = enum(u8) { glass, frost },
+        .CustomData = CameraLayer,
+        .MaterialHandle = GlassMaterial,
         .commands = .initFull(),
         .Color = Color,
         .extended_color = Color == zui.ExtendedColor,
@@ -352,6 +356,17 @@ fn expectCommandsRoundTrip(comptime Ui: type) !void {
 test "the wire's renderer declares the colors its context's commands carry" {
     try testing.expect(!zui_wire.Renderer(EveryCommandUiIn(zui.Color)).zui_extended_color);
     try testing.expect(zui_wire.Renderer(EveryCommandUiIn(zui.ExtendedColor)).zui_extended_color);
+}
+
+test "the wire's renderer declares its context's payload types, so zui_app gives them back" {
+    const WireRenderer = zui_wire.Renderer(EveryCommandUi);
+    comptime zui.checkRenderer(WireRenderer);
+    const config = zui_app.contextConfig(WireRenderer, .{ .limits = small_limits, .Text = Text });
+    try testing.expectEqual(u32, config.ImageHandle);
+    try testing.expectEqual(CameraLayer, config.CustomData);
+    try testing.expectEqual(GlassMaterial, config.MaterialHandle);
+    try testing.expectEqual(EveryCommandUi.FontId, config.FontId);
+    try testing.expectEqual(EveryCommandUi, zui.Context(config));
 }
 
 test "a key frame lets a reader join a stream, and a change before any frame is malformed" {
