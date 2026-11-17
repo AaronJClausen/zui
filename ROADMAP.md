@@ -73,7 +73,7 @@ green, and its **Status** line below says which slice is next.
 | P12. Text commands that point at their style | audit | `src/commands.zig`, `src/emission.zig`, `zui_wire/`, `../zui-raylib`, `../zui-sokol`, `../zui-terminal` | | waiting on a profile of a renderer reading the commands |
 | G6. HDR and wide gamut | 8 | `src/context.zig`, `src/commands.zig`, `src/surface.zig`, `zui_wire/`, `zui_testing/`, `../zui-sokol`, `../zui-host` | | waiting on a session under Windows with an HDR display: zui-sokol's FP16 `.win32` swapchain and zui-host's `.scrgb_fp16` window |
 | V2. Semantics and accessibility actions | 9 | `src/context.zig`, `zui_widgets/`, `../zui-host` | | in progress; the UI Automation bridge waits on a session under Windows |
-| V4. The demo in a browser | 9 | `../zui-web`, `zui_wire/` | | in progress; the client draws every command the tour does, compared with zui-sokol's; input (slice 3) is next |
+| V4. The demo in a browser | 9 | `../zui-web`, `zui_wire/` | | in progress; the client draws every command the tour does, compared with zui-sokol's, and writes the page's input as records the tour takes; the demo in a Web Worker (slice 4) is next |
 | F7. The wire's renderer declares its context's payload types | 5 | `zui_wire/remote.zig`, `zui_wire/tests.zig` | | |
 
 After the queue come stages 10 and 11 in the order of SPEC.md §21. They join the queue as it runs short.
@@ -3308,11 +3308,35 @@ published from CI.
      frame's pixels differ at all on NVIDIA, 5,516 to 22,905 on llvmpipe.
      Its run in CI is to be confirmed once zui-sokol and then zui-web are
      pushed.
-3. **Input.** The page turns pointer, wheel, key and text events, the
-   canvas's size and `devicePixelRatio` into records written by
-   `zui_wire`'s `Encoder` in the client, sent only when they hold events
-   or the viewport or scale changed, as F5's client sends; host requests
-   (the cursor) are applied to the canvas.
+3. **Input** (done). `web/input_recorder.mjs` turns a canvas's pointer,
+   wheel, key and text events, its size and `devicePixelRatio` into calls
+   the client makes records of: zui-web's `RecordStream(Ui)` fills a
+   `RecordBuilder` and writes, through `zui_wire`'s `Encoder`, the
+   stream's header and then a record only when it holds events or the
+   viewport or scale changed, as F5's client sends. Its message buffer is
+   reserved at init for every event the builder holds at twice its size
+   in memory, which a test fills with the largest events. A key is the
+   one `KeyboardEvent.key` names, or for a digit or a mark the one its
+   `code` places, so Ctrl+2 is Ctrl+2 on any layout, and a key that types
+   a character without Ctrl or Meta sends it as text; a wheel's lines are
+   40/3 units, a notch of three as far as the Windows host scrolls. The
+   newest frame's cursor is set on the canvas by its CSS name. The tour
+   has sources, so its records end with their deliveries, which a live
+   record writes as none whatever the sources: `DemoUi` declares one that
+   delivers nothing, without which the tour's host read past the end of
+   the browser's records. `zig build test-input` gives the page a mouse
+   move and a click on the rail, Ctrl+3, Ctrl+PageDown, two typed keys,
+   the wheel, a touch and a resize through headless Chromium's DevTools
+   protocol, runs the tour on the 9 records (429 bytes) the client wrote,
+   checks each against what the page was given and that the tour moved
+   to Mission Control, Box Storm and the Gallery and asked for the
+   pointer cursor over the rail, and sends its frames back to the page,
+   which must show that cursor. Dropping `ctrlKey` from the page's
+   modifiers fails record 3, positions in device pixels fail record 1,
+   and not setting the cursor fails frame 0. The client is 75 KB in
+   ReleaseSmall and still reserves 35 MiB. The IME's text input area, and
+   composed text, wait for E1; CI's first `test-input` is to be confirmed
+   once zui-web is pushed.
 4. **The demo behind the page, in a Web Worker** (Decisions, Made): the
    tour built for `wasm32-freestanding`, its frames posted to the page as
    wire bytes and the page's records posted back. It needs zui-sokol's
