@@ -429,6 +429,122 @@ test "a focused text field asks for text input at its caret" {
     try testing.expect(area.caret.x > frame.rectOf(Form.ids.name).?.x);
 }
 
+const AccessibleUi = zui.Context(.{
+    .limits = .{ .max_elements = 256, .max_text_bytes = 4096, .max_depth = 16, .max_render_commands = 512, .state_slots = 256, .measure_cache_entries = 1024 },
+    .Text = Text,
+    .features = .{ .semantics = true },
+});
+const accessible_widgets: zui_widgets.Widgets(AccessibleUi) = .{};
+
+const AccessibleForm = struct {
+    const ids = zui.ids(.{ "save", "autosave", "advanced", "volume", "name", "quality" });
+
+    clicks: u32 = 0,
+    autosave: bool = true,
+    advanced: bool = false,
+    volume: u8 = 4,
+    name_bytes: [16]u8 = undefined,
+    name: zui_widgets.EditableText = undefined,
+    quality: enum { low, medium, high_quality } = .medium,
+
+    fn declare(form: *AccessibleForm, ui: *AccessibleUi) void {
+        ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(400) }, .child_gap = 10 } });
+        if (accessible_widgets.button(ui, ids.save, "Save", .{})) form.clicks += 1;
+        _ = accessible_widgets.checkbox(ui, ids.autosave, "Autosave", &form.autosave, .{});
+        _ = accessible_widgets.disclosure(ui, ids.advanced, "Advanced", &form.advanced);
+        _ = accessible_widgets.slider(ui, ids.volume, &form.volume, .{ .max = 10, .label = "Volume" });
+        _ = accessible_widgets.textField(ui, ids.name, &form.name, .{ .placeholder = "Name" });
+        _ = accessible_widgets.dropdownEnum(ui, ids.quality, &form.quality, .{ .label = "Quality" });
+        ui.close();
+    }
+
+    fn node(frame: *const AccessibleUi.Frame, id: zui.Id) !zui.SemanticNode {
+        for (frame.semantics()) |listed| {
+            if (listed.id == id.hash) return listed;
+        }
+        return error.NotListed;
+    }
+};
+
+test "each control lists what it is, and answers the actions it lists" {
+    var text: Text = .{};
+    var ui: AccessibleUi = try .init(testing.allocator, testing.io, &text);
+    defer ui.deinit(testing.allocator);
+    var driver: zui_testing.Driver(AccessibleUi) = .{ .ui = &ui };
+    var form: AccessibleForm = .{};
+    form.name = .init(&form.name_bytes, "Ada");
+    const ids = AccessibleForm.ids;
+    const node = AccessibleForm.node;
+
+    var frame = try driver.frame(&form, AccessibleForm.declare, &.{});
+    try testing.expectEqual(@as(usize, 6), frame.semantics().len);
+
+    const save = try node(frame, ids.save);
+    try testing.expectEqual(zui.SemanticRole.button, save.role);
+    try testing.expectEqualStrings("Save", save.label);
+    try testing.expect(save.actions.contains(.invoke));
+
+    const autosave = try node(frame, ids.autosave);
+    try testing.expectEqual(zui.SemanticRole.checkbox, autosave.role);
+    try testing.expectEqualStrings("Autosave", autosave.label);
+    try testing.expectEqual(@as(?bool, true), autosave.state.checked);
+
+    const advanced = try node(frame, ids.advanced);
+    try testing.expectEqual(zui.SemanticRole.button, advanced.role);
+    try testing.expectEqual(@as(?bool, false), advanced.state.expanded);
+
+    const volume = try node(frame, ids.volume);
+    try testing.expectEqual(zui.SemanticRole.slider, volume.role);
+    try testing.expectEqualStrings("Volume", volume.label);
+    try testing.expectEqual(zui.SemanticRange{ .value = 4, .min = 0, .max = 10, .step = 1 }, volume.value.range);
+    try testing.expect(volume.actions.contains(.adjust));
+
+    const name = try node(frame, ids.name);
+    try testing.expectEqual(zui.SemanticRole.text_field, name.role);
+    try testing.expectEqualStrings("Name", name.label);
+    try testing.expectEqualStrings("Ada", name.value.text);
+
+    const quality = try node(frame, ids.quality);
+    try testing.expectEqual(zui.SemanticRole.combo_box, quality.role);
+    try testing.expectEqualStrings("Quality", quality.label);
+    try testing.expectEqualStrings("Medium", quality.value.text);
+    try testing.expectEqual(@as(?bool, false), quality.state.expanded);
+
+    _ = try driver.action(&form, AccessibleForm.declare, ids.save, .invoke);
+    try testing.expectEqual(@as(u32, 1), form.clicks);
+    frame = try driver.action(&form, AccessibleForm.declare, ids.autosave, .invoke);
+    try testing.expect(!form.autosave);
+    try testing.expectEqual(@as(?bool, false), (try node(frame, ids.autosave)).state.checked);
+    frame = try driver.action(&form, AccessibleForm.declare, ids.advanced, .invoke);
+    try testing.expectEqual(@as(?bool, true), (try node(frame, ids.advanced)).state.expanded);
+    frame = try driver.action(&form, AccessibleForm.declare, ids.volume, .{ .adjust = 3 });
+    try testing.expectEqual(@as(u8, 7), form.volume);
+    try testing.expectEqual(@as(f64, 7), (try node(frame, ids.volume)).value.range.value);
+    frame = try driver.action(&form, AccessibleForm.declare, ids.name, .focus);
+    try testing.expect((try node(frame, ids.name)).state.focused);
+
+    frame = try driver.action(&form, AccessibleForm.declare, ids.quality, .invoke);
+    try testing.expectEqual(@as(?bool, true), (try node(frame, ids.quality)).state.expanded);
+    const popup = try node(frame, ids.quality.child("popup"));
+    try testing.expectEqual(zui.SemanticRole.list_box, popup.role);
+    try testing.expect(popup.actions.contains(.dismiss));
+    const third = try node(frame, ids.quality.indexedChild("option", 2));
+    try testing.expectEqual(zui.SemanticRole.option, third.role);
+    try testing.expectEqualStrings("High quality", third.label);
+    try testing.expect((try node(frame, ids.quality.indexedChild("option", 1))).state.selected);
+    try testing.expect(!third.state.selected);
+
+    frame = try driver.action(&form, AccessibleForm.declare, ids.quality.child("popup"), .dismiss);
+    try testing.expectError(error.NotListed, node(frame, ids.quality.child("popup")));
+    try testing.expectEqual(.medium, form.quality);
+
+    _ = try driver.action(&form, AccessibleForm.declare, ids.quality, .invoke);
+    frame = try driver.action(&form, AccessibleForm.declare, ids.quality.indexedChild("option", 2), .invoke);
+    try testing.expectEqual(.high_quality, form.quality);
+    try testing.expectEqualStrings("High quality", (try node(frame, ids.quality)).value.text);
+    try testing.expect(frame.diagnostics.ok());
+}
+
 test "labels from identifiers" {
     try testing.expectEqualStrings("Max fps", zui_widgets.labelFromIdentifier("max_fps"));
     try testing.expectEqualStrings("X", zui_widgets.labelFromIdentifier("x"));

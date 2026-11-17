@@ -61,6 +61,9 @@ export fn zuiCheckFrame(width: f32, height: f32, pointer_x: f32, pointer_y: f32)
             .{ .text = "x" },
             .{ .environment = .{ .theme = .dark } },
             .{ .environment = .{ .locale = zui.Locale.parse("fr-CA") catch .default } },
+            .{ .action = .{ .target = zui.Id.of("save").hash, .action = .invoke } },
+            .{ .action = .{ .target = zui.Id.of("list").hash, .action = .{ .scroll = .{ 0, 4 } } } },
+            .{ .action = .{ .target = zui.Id.of("save").hash, .action = .{ .adjust = -1 } } },
         },
     });
     const save: zui.Id = .of("save");
@@ -71,8 +74,8 @@ export fn zuiCheckFrame(width: f32, height: f32, pointer_x: f32, pointer_y: f32)
     ui.image(.{ .handle = 1, .natural_size = .{ 16, 9 } }, .{ .layout = .{ .sizing = .{ .width = .grow } } });
     ui.box(.{ .layout = .{ .sizing = .{ .width = .grow, .height = .aspectRatio(16.0 / 9.0) } } });
     ui.custom(2, .{ .id = .indexed("cell", 3) });
-    ui.box(.{ .id = save, .focusable = true, .cursor = if (ui.environment().theme == .dark) .pointer else null, .decoration = .{ .background = if (ui.widgetState(save) == .hovered) .black else .white }, .layout = .{ .sizing = .{ .width = .{ .rule = .grow, .amount = 1, .max = 40 } } } });
-    ui.open(.{ .id = list, .scroll = .both, .focus_scope = true, .gestures = .{ .pan = if (ui.hovered(list)) .both else .vertical, .zoom = true, .drag = ui.pressed(list), .long_press = true, .double_tap = ui.focused(list), .custom = true }, .layout = .{ .sizing = .{ .width = .fixed(50), .height = .fixed(20) } } });
+    ui.box(.{ .id = save, .focusable = true, .cursor = if (ui.environment().theme == .dark) .pointer else null, .decoration = .{ .background = if (ui.widgetState(save) == .hovered) .black else .white }, .layout = .{ .sizing = .{ .width = .{ .rule = .grow, .amount = 1, .max = 40 } } }, .semantics = .{ .role = .button, .label = "Save", .state = .{ .checked = ui.clicked(save) } } });
+    ui.open(.{ .id = list, .scroll = .both, .focus_scope = true, .gestures = .{ .pan = if (ui.hovered(list)) .both else .vertical, .zoom = true, .drag = ui.pressed(list), .long_press = true, .double_tap = ui.focused(list), .custom = true }, .layout = .{ .sizing = .{ .width = .fixed(50), .height = .fixed(20) } }, .semantics = .{ .role = .list_box, .value = .{ .range = .{ .value = 0.5 } }, .actions = .initOne(.dismiss) } });
     ui.wrapChildren();
     ui.box(.{ .clip = .both, .disabled = ui.clicked(save) or ui.pressed(save) or ui.focused(save), .layout = .{ .sizing = .{ .width = .fixed(80), .height = .fixed(80) } } });
     ui.box(.{ .floating = .{ .attach_to = .{ .element = save }, .anchor = .center, .z = 2, .capture = false, .clip = .target }, .interactive = true });
@@ -484,6 +487,7 @@ export fn zuiCheckDriver() u32 {
     _ = driver.dragFingers(&clicks, declareButton, .of("button"), &.{ .{ .from = .{ 0, 0 }, .to = .{ 1, 1 } }, .{ .from = .{ 1, 1 }, .to = .{ 0, 0 } } }) catch return 0;
     _ = driver.hover(&clicks, declareButton, .of("button")) catch return 0;
     _ = driver.focus(&clicks, declareButton, .of("button")) catch return 0;
+    _ = driver.action(&clicks, declareButton, .of("button"), .show_menu) catch return 0;
     _ = driver.pressKeys(&clicks, declareButton, &.{.enter}) catch return 0;
     _ = driver.typeText(&clicks, declareButton, "typed") catch return 0;
     return clicks + replayDriven();

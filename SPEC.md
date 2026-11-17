@@ -213,7 +213,7 @@ pub const Config = struct {
 pub const Limits = struct {
     max_elements: u32 = 4096,               // declared per frame
     max_depth: u16 = 64,                    // nesting of `open` inside `open`
-    max_text_bytes: u32 = 64 * 1024,        // UTF-8 bytes of all `text` content per frame
+    max_text_bytes: u32 = 64 * 1024,        // UTF-8 bytes of all `text` content, and of semantic labels and values, per frame
     max_render_commands: u32 = 8192,        // per frame
     max_effects: u32 = 256,                 // elements with effects per frame; past it, drawn without them
     state_slots: u32 = 1024,                // persistent `(id, type)` entries (§12); a power of two
@@ -533,7 +533,7 @@ pub const Event = union(enum) {
     text: []const u8,               // committed UTF-8
     composition: Composition,       // IME preedit text and caret
     os_gesture: OsGesture,          // pinch, rotate, swipe the OS recognized
-    action: AccessibilityAction,    // invoke, set value, scroll, focus, naming an element id
+    action: ActionEvent,            // invoke, focus, adjust, scroll, show_menu or dismiss, naming an element id
     environment: EnvironmentChange,
     files_dropped: FilesDropped,
     lifecycle: Lifecycle,           // suspend, resume, terminate request, low memory
@@ -1250,10 +1250,10 @@ Queries that merge devices into what the user meant:
 |---|---|
 | `clicked(id)` | click, tap, Enter/Space, `invoke` action |
 | `manipulation(id) ?Manipulation` | drag, pinch, rotate, wheel, momentum, `scroll` action: translation, scale, rotation and pivot, summed over the frame; `translation` moves the content with the pointer, and against the wheel |
-| `contextRequested(id)` | right click, long press, the menu key on the focused element |
+| `contextRequested(id)` | right click, long press, the menu key on the focused element, `show_menu` action |
 | `doubleTapped(id)` | a second tap within the double-tap window, on an element with `double_tap` |
-| `dismissed(id)` | Escape, back, gamepad B, while `id` or an element in its focus scope is focused |
-| `adjusted(id) ?i32` | arrows on a focused slider, a dial, `set_value` action: right and up +1, left and down −1 |
+| `dismissed(id)` | Escape, back, gamepad B, while `id` or an element in its focus scope is focused; a `dismiss` action naming one of them |
+| `adjusted(id) ?i32` | arrows on a focused slider, a dial, `adjust` action: right and up +1, left and down −1, and an action's own steps |
 | `navigated(id) ?NavigationDirection` | arrows, D-pad, on the focused element: `left`, `right`, `up` or `down`, the last this frame |
 
 `navigated` returns a `NavigationDirection`, not `Layout`'s `Direction`,
@@ -1474,10 +1474,32 @@ bar still lets the OS move, resize and snap the window.
 
 `.semantics = .{ .role = .button, .label = "Save" }` adds an entry to
 `Frame.semantics()`: id, role, label, value, bounds, state and supported
-actions, in tree order. A host bridges it to the platform's accessibility
-API, and actions come back as `action` events naming the id, answered by
-the same queries as other input (§11.3). An element's gestures are the
-actions it reports. Without the feature, none of this is compiled.
+actions, in tree order, each with the index of the nearest entry around
+it. A host bridges it to the platform's accessibility API, and actions
+come back as `action` events naming the id, answered by the same queries
+as other input (§11.3). An element's flags and gestures are the actions
+it reports, beyond those it declares: `invoke` when it is interactive,
+`focus` when focusable, `scroll` when it scrolls or pans, `show_menu`
+when it takes a long press; a disabled element reports and takes none.
+
+```zig
+pub const Semantics = struct {
+    role: SemanticRole,            // button, checkbox, slider, text_field, combo_box, option, dialog, ...
+    label: []const u8 = "",        // copied
+    value: SemanticValue = .none,  // .text (copied), or .range: value, min, max, step
+    state: SemanticState = .{},    // checked, expanded, selected; zui adds disabled and focused
+    actions: Actions = .initEmpty(),
+};
+pub const Action = union(ActionKind) { invoke, focus, adjust: i32, scroll: [2]f32, show_menu, dismiss };
+```
+
+`invoke` is a click, `focus` moves focus as Tab would, `adjust` adds its
+steps to `adjusted`, `scroll` moves a scroll container as the wheel does
+and is reported by `manipulation`, `show_menu` is a context request and
+`dismiss` a dismissal. Labels and text values are copied into the frame,
+counted against `max_text_bytes`; one that does not fit is cut at a
+character and reported (§17.2). Without the feature, `Element.semantics`
+is ignored, `action` events are dropped, and none of this is compiled.
 
 ---
 

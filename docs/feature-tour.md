@@ -897,6 +897,49 @@ const requests = frame.requests();
 host.zuiApply(.main, requests);
 ```
 
+<a id="semantics"></a>
+
+### Semantics and accessibility actions · *shipped*
+
+With `features.semantics`, an element's `semantics` says what it is to an assistive technology: a role, a label, a value (text, or a position in a range), a state (checked, expanded, selected), and the actions it takes beyond those its flags and gestures already report. `frame.semantics()` lists every element that declares it, in tree order, each with its id, its laid-out bounds and the index of the node around it, its labels copied into the frame. A host bridges the list to the platform's accessibility API and reports what the screen reader asks as `action` events; each one is answered by the query of the input it stands in for, so `invoke` is a `clicked`, `adjust` an `adjusted`, `scroll` a `manipulation` and a scroll, `show_menu` a `contextRequested` and `dismiss` a `dismissed`. Every `zui_widgets` control declares its own. Without the feature, `semantics` is ignored and none of it is compiled. No host bridges the list yet: the Windows host's UI Automation bridge is next.
+
+`src/ui/toolbar.zig`
+
+```zig
+fn saveButton(app: *App, ui: *Ui) void {
+    const save: zui.Id = .of("save");
+    ui.open(.{
+        .id = save,
+        .focusable = true,
+        .disabled = !app.dirty,
+        .semantics = .{ .role = .button, .label = "Save" },
+    });
+    defer ui.close();
+    ui.text("Save", .{ .size = 13 });
+    if (ui.clicked(save)) app.save(); // a click, Enter, or an invoke action
+}
+
+fn zoomSlider(app: *App, ui: *Ui) void {
+    const zoom: zui.Id = .of("zoom");
+    if (ui.adjusted(zoom)) |steps| app.zoom_percent +|= 10 * steps; // arrows, or adjust actions
+    ui.box(.{
+        .id = zoom,
+        .focusable = true,
+        .semantics = .{
+            .role = .slider,
+            .label = "Zoom",
+            .value = .{ .range = .{ .value = @floatFromInt(app.zoom_percent), .min = 10, .max = 400, .step = 10 } },
+            .actions = .initOne(.adjust),
+        },
+    });
+}
+
+// a host's accessibility bridge, after endFrame:
+for (frame.semantics()) |node| bridge.update(node.id, node.role, node.label, node.value, node.bounds, node.state, node.actions);
+// and when the screen reader asks, in the next record:
+builder.append(.{ .action = .{ .target = node_id, .action = .invoke } });
+```
+
 <a id="loop"></a>
 
 ## 03. The frame loop, timing and diagnostics
@@ -1916,7 +1959,7 @@ Build with `-Dzui-tracy=true` to link Tracy's client, then connect profiler 0.14
 
 These names compile, but they don't do anything yet. This list is from `ARCHITECTURE.md` §7 and the roadmap.
 
-- **`features.semantics`** *(declared only)*: `Frame.semantics()` is always empty. Accessibility is V2.
+- **Accessibility on a platform** *(no host bridge yet)*: `Frame.semantics()` lists each element's role, label, value, state and actions, and `action` events are answered, but no host bridges them to a platform's accessibility API yet. The Windows host's UI Automation bridge is the rest of V2.
 - **`features.safety_sweeps`** *(declared only)*: The flag exists, but it doesn't change behaviour yet. Sweeps are V3.
 - **Extended color** *(clamped only)*: `Config.Color = zui.ExtendedColor` declares colors brighter than SDR white or outside sRGB, as `.linear(4, 4, 4, 1)` or with `Color`'s own `.rgb(0x3366ff)`, and every type that holds a color follows it: `Ui.Decoration`, `Ui.Border`, `Ui.Effects`, `Ui.TextStyle`. For a renderer that draws only `zui.Color`, each is clamped as it is emitted, and `frame.diagnostics.clamped_colors` says when that changed one. zui-sokol declares `zui_extended_color`, so it is given them as declared, and encodes them into its 8-bit sRGB target; `zui_wire` carries them unclamped when its context's renderer draws them, and the renderer suite declares its scene in them, with a box of HDR white. A host and a renderer that both declare `.scrgb_fp16` in `zui_output_formats` open the window with it in `WindowOptions.output_formats`, and the host's surface says which format it chose, `surface.outputFormat()`; SDR otherwise. The renderer suite reads an FP16 target back through a harness's `extendedPixel` and expects HDR white there at four times SDR white. zui-sokol draws an `.offscreen` surface in `.scrgb_fp16`, in linear light, and passes the suite there, reading HDR white back at four times SDR white. No host opens an FP16 window yet, so no window is brighter than SDR white: that, and the host's headroom, are the rest of G6.
 - **Still to come**: Motion, multi-line text editing, skins, the inspector over the wire, and more hosts (macOS, Linux, web).

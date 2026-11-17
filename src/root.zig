@@ -12,6 +12,7 @@ const commands = @import("commands.zig");
 const surface = @import("surface.zig");
 const host = @import("host.zig");
 const contracts = @import("contracts.zig");
+const semantics = @import("semantics.zig");
 
 pub const Context = context.Context;
 pub const Config = context.Config;
@@ -97,7 +98,17 @@ pub const NextFrame = record.NextFrame;
 pub const HostRequests = record.HostRequests;
 pub const Cursor = record.Cursor;
 pub const TextInputArea = record.TextInputArea;
-pub const SemanticNode = record.SemanticNode;
+
+pub const SemanticNode = semantics.SemanticNode;
+pub const Semantics = semantics.Semantics;
+pub const SemanticRole = semantics.Role;
+pub const SemanticValue = semantics.Value;
+pub const SemanticRange = semantics.Range;
+pub const SemanticState = semantics.State;
+pub const Action = semantics.Action;
+pub const ActionKind = semantics.ActionKind;
+pub const Actions = semantics.Actions;
+pub const ActionEvent = semantics.ActionEvent;
 
 pub const Event = input.Event;
 pub const Pointer = input.Pointer;
@@ -204,4 +215,5 @@ test {
     _ = @import("tests/transforms.zig");
     _ = @import("tests/colors.zig");
     _ = @import("tests/inspection.zig");
+    _ = @import("tests/semantics.zig");
 }

@@ -101,19 +101,19 @@ fn inspectField(
     if (Field == zui_widgets.EditableText) {
         widgets.labeledRow(ui, label);
         defer ui.close();
-        return widgets.textField(ui, id, field, .{ .placeholder = options.placeholder }).changed;
+        return widgets.textField(ui, id, field, .{ .placeholder = options.placeholder, .label = label }).changed;
     }
     switch (@typeInfo(Field)) {
         .bool => {
             widgets.labeledRow(ui, label);
             defer ui.close();
-            return widgets.checkbox(ui, id, "", field, .{});
+            return widgets.checkbox(ui, id, "", field, .{ .label = label });
         },
         .int, .float => {
             widgets.labeledRow(ui, label);
             defer ui.close();
             if (options.min != null and options.max != null) {
-                const changed = widgets.slider(ui, id, field, .{ .min = options.min.?, .max = options.max.?, .step = options.step });
+                const changed = widgets.slider(ui, id, field, .{ .min = options.min.?, .max = options.max.?, .step = options.step, .label = label });
                 numberLabel(widgets, ui, field.*);
                 return changed;
             }
@@ -122,7 +122,7 @@ fn inspectField(
         .@"enum" => {
             widgets.labeledRow(ui, label);
             defer ui.close();
-            return widgets.dropdownEnum(ui, id, field, .{});
+            return widgets.dropdownEnum(ui, id, field, .{ .label = label });
         },
         .pointer => {
             widgets.labeledRow(ui, label);

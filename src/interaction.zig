@@ -2,6 +2,7 @@ const std = @import("std");
 const style = @import("style.zig");
 const input = @import("input.zig");
 const Instant = @import("record.zig").Instant;
+const semantics = @import("semantics.zig");
 
 pub const WidgetState = enum { idle, hovered, pressed, focused, disabled };
 
@@ -464,7 +465,7 @@ pub fn Contact(comptime max_chain: usize, comptime has_gestures: bool) type {
 
 /// The pointer table plus what this frame's events delivered, which the
 /// interaction queries read until the next `beginFrame`.
-pub fn State(comptime max_contacts: u8, comptime max_chain: usize, comptime max_events: u16, comptime max_text_bytes: u16, comptime max_path_bytes: u32, comptime has_gestures: bool) type {
+pub fn State(comptime max_contacts: u8, comptime max_chain: usize, comptime max_events: u16, comptime max_text_bytes: u16, comptime max_path_bytes: u32, comptime has_gestures: bool, comptime has_semantics: bool) type {
     return struct {
         const Self = @This();
         pub const Slot = Contact(max_chain, has_gestures);
@@ -543,6 +544,11 @@ pub fn State(comptime max_contacts: u8, comptime max_chain: usize, comptime max_
         /// looks for those that are due; otherwise it looks at nothing.
         timers_armed: bool,
 
+        /// This frame's `adjust` and `dismiss` actions, which the queries
+        /// look through. Each is one of the record's events.
+        kept_actions: [if (has_semantics) max_events else 0]semantics.ActionEvent,
+        kept_action_count: if (has_semantics) u16 else void,
+
         focus: u64,
         pending_focus: ?u64,
 
@@ -576,6 +582,16 @@ pub fn State(comptime max_contacts: u8, comptime max_chain: usize, comptime max_
             self.double_tap_count = 0;
             self.recognized_count = 0;
             self.dropped_drag_count = 0;
+            if (has_semantics) self.kept_action_count = 0;
+        }
+
+        pub fn keepAction(self: *Self, request: semantics.ActionEvent) void {
+            self.kept_actions[self.kept_action_count] = request;
+            self.kept_action_count += 1;
+        }
+
+        pub fn actions(self: *const Self) []const semantics.ActionEvent {
+            return self.kept_actions[0..self.kept_action_count];
         }
 
         /// Each recognized event is one of the record's, so this cannot

@@ -254,6 +254,16 @@ pub fn Driver(comptime Ui: type) type {
             }
         }
 
+        /// One frame in which an assistive technology asks `element_id` for
+        /// `requested`, as a host's accessibility bridge reports it:
+        ///
+        /// ```zig
+        /// _ = try driver.action(&app, App.declare, .of("volume"), .{ .adjust = 1 });
+        /// ```
+        pub fn action(self: *Self, app: anytype, comptime declare: anytype, element_id: zui.Id, requested: zui.Action) !*const Ui.Frame {
+            return self.frame(app, declare, &.{.{ .action = .{ .target = element_id.hash, .action = requested } }});
+        }
+
         /// Focus moves at the start of the next frame, which this runs.
         pub fn focus(self: *Self, app: anytype, comptime declare: anytype, element_id: zui.Id) !*const Ui.Frame {
             self.ui.requestFocus(element_id);

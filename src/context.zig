@@ -14,6 +14,7 @@ const parallel_measure = @import("parallel_measure.zig");
 const contracts = @import("contracts.zig");
 const trace = @import("trace.zig");
 const sources_module = @import("sources.zig");
+const semantics_module = @import("semantics.zig");
 
 const Id = id_module.Id;
 const Instant = record_types.Instant;
@@ -221,6 +222,8 @@ pub fn ElementWith(comptime ContextDecoration: type) type {
         /// Ignored without `Config.features.gestures`, so a widget can declare
         /// them for every context.
         gestures: interaction.Gestures = .{},
+        /// What it is to an assistive technology, listed by `Frame.semantics()`.
+        semantics: ?semantics_module.Semantics = null,
     };
 }
 
@@ -400,7 +403,9 @@ pub fn Context(comptime config: Config) type {
         pub const draws_transforms = config.commands.contains(.transform) and limits.max_effects != 0;
         pub const max_spaces = if (draws_transforms) limits.max_effects else 0;
         pub const Results = interaction.Results(limits.max_elements, id_table_slots, features.gestures, max_spaces);
-        const InputState = interaction.State(limits.max_input_contacts, limits.max_depth + 1, limits.max_events_per_frame, limits.max_text_input_bytes, limits.max_dropped_path_bytes, features.gestures);
+        const InputState = interaction.State(limits.max_input_contacts, limits.max_depth + 1, limits.max_events_per_frame, limits.max_text_input_bytes, limits.max_dropped_path_bytes, features.gestures, features.semantics);
+        /// Semantic labels and text values share the text bytes.
+        const keeps_text_bytes = has_text or features.semantics;
 
         pub const Decoration = style.DecorationWith(Color, config.MaterialHandle);
         pub const Border = style.BorderWith(Color);
@@ -523,7 +528,7 @@ pub fn Context(comptime config: Config) type {
             floatings: [max_elements]style.Floating,
             floating_count: u32,
 
-            text_bytes: [if (has_text) limits.max_text_bytes else 0]u8,
+            text_bytes: [if (keeps_text_bytes) limits.max_text_bytes else 0]u8,
             text_bytes_used: u32,
             lines: [if (has_text) limits.max_render_commands else 0]text_layout.Line,
             line_count: u32,
@@ -543,13 +548,20 @@ pub fn Context(comptime config: Config) type {
                 return self.render_commands[0..self.command_count];
             }
 
-            /// The accessible elements, in tree order, for a host to bridge
-            /// to the platform's accessibility API. No element declares
-            /// semantics yet, so it is empty.
-            pub fn semantics(self: *const Frame) []const record_types.SemanticNode {
+            /// The elements that declare `semantics`, in tree order, for a
+            /// host to bridge to the platform's accessibility API.
+            pub fn semantics(self: *const Frame) []const semantics_module.SemanticNode {
                 comptime requireFeature(.semantics, "semantics()");
-                _ = self;
-                return &.{};
+                const list = &self.frameSlot().semantic_list;
+                return list.nodes[0..list.count];
+            }
+
+            fn frameSlot(self: *const Frame) *const FrameSlot {
+                return @fieldParentPtr("frame", self);
+            }
+
+            fn mutableFrameSlot(self: *Frame) *FrameSlot {
+                return @fieldParentPtr("frame", self);
             }
 
             /// What the host should apply with this frame: the cursor and
@@ -704,6 +716,7 @@ pub fn Context(comptime config: Config) type {
                 self.text_bytes_used = 0;
                 self.line_count = 0;
                 self.command_count = 0;
+                if (features.semantics) self.mutableFrameSlot().semantic_list.count = 0;
                 self.diagnostics = .{};
                 self.host_requests = .{};
                 self.pixels_per_unit = params.scale * params.zoom;
@@ -711,8 +724,23 @@ pub fn Context(comptime config: Config) type {
             }
         };
 
+        /// The semantic list lives beside its frame rather than in it: a
+        /// field added to `Frame`, even one of no size, reorders its arrays,
+        /// which changed what a frame without semantics executes.
+        const FrameSlot = struct {
+            frame: Frame,
+            semantic_list: SemanticList,
+        };
+
+        const SemanticList = if (features.semantics) struct {
+            nodes: [max_elements]semantics_module.SemanticNode,
+            /// The element each node describes.
+            elements: [max_elements]Index,
+            count: u32,
+        } else struct {};
+
         const Memory = struct {
-            frames: [config.frames_in_flight]Frame,
+            frames: [config.frames_in_flight]FrameSlot,
             cache: Cache,
             measure_batch: MeasureBatch,
             /// Scratch shared by every frame: the width of each word or
@@ -820,7 +848,8 @@ pub fn Context(comptime config: Config) type {
             self.memory.states.reset();
             self.memory.results.reset();
             self.memory.input.reset();
-            for (&self.memory.frames) |*frame| {
+            for (&self.memory.frames) |*frame_slot| {
+                const frame = &frame_slot.frame;
                 frame.held = .init(false);
                 frame.element_count = 0;
             }
@@ -929,7 +958,7 @@ pub fn Context(comptime config: Config) type {
         fn takeFreeFrame(self: *Self) ?*Frame {
             for (0..config.frames_in_flight) |offset| {
                 const slot = (self.next_frame_slot + offset) % config.frames_in_flight;
-                const frame = &self.memory.frames[slot];
+                const frame = &self.memory.frames[slot].frame;
                 if (!frame.held.load(.acquire)) {
                     self.next_frame_slot = @intCast((slot + 1) % config.frames_in_flight);
                     return frame;
@@ -1005,6 +1034,7 @@ pub fn Context(comptime config: Config) type {
 
             layout.run(Self, self, frame);
             @call(.never_inline, emission.run, .{ Self, self, frame });
+            if (features.semantics) finishSemantics(frame);
             if (self.text_input_caret) |caret| if (frame.rectOf(.{ .hash = caret })) |rect| {
                 frame.host_requests.text_input = .{ .caret = rect };
             };
@@ -1396,7 +1426,68 @@ pub fn Context(comptime config: Config) type {
                 frame.flags[index].scroll_x = false;
                 frame.flags[index].scroll_y = false;
             }
+            if (features.semantics) if (element.semantics) |*declared| self.describe(frame, index, declared, element.gestures);
             return index;
+        }
+
+        fn describe(self: *Self, frame: *Frame, index: Index, declared: *const semantics_module.Semantics, gestures: interaction.Gestures) void {
+            const hash = frame.element_id[index];
+            const flags = frame.flags[index];
+            var node_state = declared.state;
+            node_state.disabled = node_state.disabled or flags.disabled;
+            node_state.focused = hash == self.memory.input.focus;
+            var actions = declared.actions;
+            if (flags.interactive) actions.insert(.invoke);
+            if (flags.focusable) actions.insert(.focus);
+            if (flags.scroll_x or flags.scroll_y or (features.gestures and gestures.pan != .none)) actions.insert(.scroll);
+            if (features.gestures and gestures.long_press) actions.insert(.show_menu);
+            if (node_state.disabled) actions = .initEmpty();
+            const value: semantics_module.Value = switch (declared.value) {
+                .text => |content| .{ .text = self.keepSemanticText(frame, hash, content) },
+                else => declared.value,
+            };
+            const list = &frame.mutableFrameSlot().semantic_list;
+            list.elements[list.count] = index;
+            list.nodes[list.count] = .{
+                .id = hash,
+                .parent = null,
+                .role = declared.role,
+                .label = self.keepSemanticText(frame, hash, declared.label),
+                .value = value,
+                .bounds = undefined,
+                .state = node_state,
+                .actions = actions,
+            };
+            list.count += 1;
+        }
+
+        /// Copies what fits of `content`, cut at a character boundary.
+        fn keepSemanticText(self: *Self, frame: *Frame, hash: u64, content: []const u8) []const u8 {
+            const room = limits.max_text_bytes - frame.text_bytes_used;
+            var kept = @min(content.len, room);
+            if (kept < content.len) {
+                while (kept > 0 and content[kept] & 0b1100_0000 == 0b1000_0000) kept -= 1;
+                self.countDroppedTextBytes(frame, content.len - kept);
+                self.recordOverflow(frame, .max_text_bytes, hash);
+            }
+            const copy = frame.text_bytes[frame.text_bytes_used..][0..kept];
+            @memcpy(copy, content[0..kept]);
+            frame.text_bytes_used += @intCast(kept);
+            return copy;
+        }
+
+        /// Gives each node its laid-out bounds and the nearest node around it.
+        fn finishSemantics(frame: *Frame) void {
+            var enclosing: [max_depth]u32 = undefined;
+            var depth: usize = 0;
+            const list = &frame.mutableFrameSlot().semantic_list;
+            for (list.nodes[0..list.count], list.elements[0..list.count], 0..) |*node, index, node_index| {
+                while (depth > 0 and index >= frame.subtree_end[list.elements[enclosing[depth - 1]]]) depth -= 1;
+                node.parent = if (depth == 0) null else enclosing[depth - 1];
+                node.bounds = .{ .x = frame.position[index][0], .y = frame.position[index][1], .width = frame.size[index][0], .height = frame.size[index][1] };
+                enclosing[depth] = @intCast(node_index);
+                depth += 1;
+            }
         }
 
         fn offerCursor(self: *Self, frame: *Frame, hash: u64, cursor: Cursor) void {
@@ -1602,6 +1693,7 @@ pub fn Context(comptime config: Config) type {
                 .environment => |change| self.current_environment.apply(change),
                 .lifecycle => |change| input_state.lifecycle.insert(change),
                 .files_dropped => |drop| keepDrop(frame, input_state, drop),
+                .action => |request| if (features.semantics) self.applyAction(request),
                 .text => |typed| {
                     const room = limits.max_text_input_bytes - input_state.text_len;
                     const copied: u16 = @intCast(@min(typed.len, room));
@@ -1697,6 +1789,47 @@ pub fn Context(comptime config: Config) type {
             if (region.flags.disabled) return;
             contact.press_target = region.hash;
             if (region.flags.focusable) input_state.focus = region.hash;
+        }
+
+        /// Answers an assistive technology's request through the same
+        /// queries as the devices it stands in for. A disabled element
+        /// takes none.
+        fn applyAction(self: *Self, request: semantics_module.ActionEvent) void {
+            const input_state = &self.memory.input;
+            const results = &self.memory.results;
+            const target = request.target;
+            const flags = results.regionFlags(target);
+            if (target == 0 or flags.disabled) return;
+            switch (request.action) {
+                .invoke => if (flags.interactive) input_state.addClick(target),
+                .focus => if (results.isFocusable(target)) {
+                    input_state.focus = target;
+                },
+                .show_menu => if (flags.interactive) input_state.addContextRequest(target),
+                .scroll => |delta| self.scrollByAction(target, delta),
+                .adjust, .dismiss => input_state.keepAction(request),
+            }
+        }
+
+        /// Moves a scroll container, or an element that pans, as the wheel
+        /// would: against the content.
+        fn scrollByAction(self: *Self, target: u64, delta: [2]f32) void {
+            const results = &self.memory.results;
+            const entry = results.find(target) orelse return;
+            if (entry.region == interaction.no_region) return;
+            const region = &results.regions[entry.region];
+            const motion: [2]f32 = .{ -delta[0], -delta[1] };
+            const scrolls = region.flags.scroll_x or region.flags.scroll_y;
+            if (features.gestures) {
+                if (scrolls or region.gestures.pan != .none) self.panElement(target, motion);
+                return;
+            }
+            if (!scrolls) return;
+            const scroll = self.memory.states.get(target, interaction.ScrollState, self.stateGeneration(), .create) orelse return;
+            for (0..2) |axis| {
+                if (!region.flags.scrolls(axis)) continue;
+                scroll.offset[axis] = std.math.clamp(scroll.offset[axis] + offsetChange(region.flags, axis, motion[axis]), 0, region.max_scroll[axis]);
+            }
         }
 
         /// The innermost scroll container under the wheel that can still
@@ -2268,27 +2401,42 @@ pub fn Context(comptime config: Config) type {
         }
 
         /// Escape was pressed this frame while `element_id`, or an element
-        /// in its focus scope, was focused: a dialog or menu should close.
+        /// in its focus scope, was focused, or a `dismiss` action named one
+        /// of them: a dialog or menu should close.
         pub fn dismissed(self: *const Self, element_id: Id) bool {
-            if (element_id.isNone() or !self.keyPressed(.escape)) return false;
-            const focus = self.memory.input.focus;
-            return focus != 0 and (focus == element_id.hash or self.memory.results.focusScopeOf(focus) == element_id.hash);
+            if (element_id.isNone()) return false;
+            if (features.semantics) for (self.memory.input.actions()) |request| {
+                if (request.action == .dismiss and self.isWithinScope(request.target, element_id.hash)) return true;
+            };
+            if (!self.keyPressed(.escape)) return false;
+            return self.isWithinScope(self.memory.input.focus, element_id.hash);
         }
 
-        /// The steps the arrow keys moved the focused element this frame:
-        /// right and up add one, left and down take one away. Null when it
-        /// is not focused or no arrow was pressed.
+        fn isWithinScope(self: *const Self, hash: u64, scope: u64) bool {
+            return hash != 0 and (hash == scope or self.memory.results.focusScopeOf(hash) == scope);
+        }
+
+        /// The steps the arrow keys moved the focused element this frame,
+        /// plus those `adjust` actions named it with: right and up add one,
+        /// left and down take one away. Null when neither moved it.
         pub fn adjusted(self: *const Self, element_id: Id) ?i32 {
-            if (!self.focused(element_id)) return null;
             var steps: i32 = 0;
             var any = false;
+            if (features.semantics and !element_id.isNone()) for (self.memory.input.actions()) |request| switch (request.action) {
+                .adjust => |requested| if (request.target == element_id.hash) {
+                    steps +|= requested;
+                    any = true;
+                },
+                else => {},
+            };
+            if (!self.focused(element_id)) return if (any) steps else null;
             for (self.keyEvents()) |key_event| switch (key_event.key) {
                 .right, .up => {
-                    steps += 1;
+                    steps +|= 1;
                     any = true;
                 },
                 .left, .down => {
-                    steps -= 1;
+                    steps -|= 1;
                     any = true;
                 },
                 else => {},

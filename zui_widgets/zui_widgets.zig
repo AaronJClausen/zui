@@ -193,6 +193,7 @@ pub fn Widgets(comptime UiType: type) type {
                 .id = id,
                 .focusable = true,
                 .cursor = .pointer,
+                .semantics = .{ .role = .button, .label = content, .state = .{ .expanded = expanded.* } },
                 .decoration = .{
                     .background = if (state == .hovered or state == .pressed) theme.control.get(state) else null,
                     .border = focusRingOr(theme, ui, id, null),
@@ -225,6 +226,7 @@ pub fn Widgets(comptime UiType: type) type {
                 .focusable = true,
                 .disabled = options.disabled,
                 .cursor = if (options.disabled) null else .pointer,
+                .semantics = .{ .role = .button, .label = content },
                 .decoration = .{
                     .background = theme.control.get(ui.widgetState(id)),
                     .border = focusRingOr(theme, ui, id, null),
@@ -243,6 +245,8 @@ pub fn Widgets(comptime UiType: type) type {
 
         pub const CheckboxOptions = struct {
             disabled: bool = false,
+            /// Its name to an assistive technology; `content` when empty.
+            label: []const u8 = "",
         };
 
         /// Toggles `checked` when clicked; returns whether it did. An empty
@@ -258,6 +262,7 @@ pub fn Widgets(comptime UiType: type) type {
                 .focusable = true,
                 .disabled = options.disabled,
                 .cursor = if (options.disabled) null else .pointer,
+                .semantics = .{ .role = .checkbox, .label = if (options.label.len != 0) options.label else content, .state = .{ .checked = checked.* } },
                 .layout = .{ .sizing = .{ .height = .fixed(theme.control_height) }, .child_gap = theme.gap, .child_alignment = .{ .y = .center } },
             });
             const outline_color = if (state == .hovered or state == .pressed) theme.accent else theme.border_color;
@@ -336,36 +341,36 @@ pub fn Widgets(comptime UiType: type) type {
             step: ?f64 = null,
             disabled: bool = false,
             width: zui.Sizing = .grow,
+            /// Its name to an assistive technology; the slider draws no text.
+            label: []const u8 = "",
         };
 
-        /// Edits the integer or float behind `value` by dragging, or with
-        /// the arrow keys, Page Up/Down, Home and End while focused.
-        /// Returns whether the value changed. It keeps a horizontal drag,
-        /// so a list it is in scrolls only with a vertical one.
+        /// Edits the integer or float behind `value` by dragging, with the
+        /// arrow keys, Page Up/Down, Home and End while focused, or by
+        /// `adjust` actions. Returns whether the value changed. It keeps a
+        /// horizontal drag, so a list it is in scrolls only with a vertical
+        /// one.
         pub fn slider(self: Self, ui: *Ui, id: zui.Id, value: anytype, options: SliderOptions) bool {
             const Value = NumberPointee(@TypeOf(value), "slider");
             const theme = self.activeTheme(ui);
             const range = options.max - options.min;
             const previous: f64 = numberToFloat(value.*);
             var proposed = previous;
+            const key_step = options.step orelse if (@typeInfo(Value) == .int) 1 else range / 100;
 
             if (!options.disabled) {
                 if (pointerActivated(ui, id)) if (ui.pointerLocal(id)) |local| if (ui.rectOf(id)) |rect| {
                     const travel = rect.width - theme.slider_thumb_size[0];
                     if (travel > 0) proposed = options.min + range * (local[0] - theme.slider_thumb_size[0] / 2) / travel;
                 };
-                if (ui.focused(id)) {
-                    const key_step = options.step orelse if (@typeInfo(Value) == .int) 1 else range / 100;
-                    for (ui.keyEvents()) |key_event| switch (key_event.key) {
-                        .left, .down => proposed -= key_step,
-                        .right, .up => proposed += key_step,
-                        .page_down => proposed -= key_step * 10,
-                        .page_up => proposed += key_step * 10,
-                        .home => proposed = options.min,
-                        .end => proposed = options.max,
-                        else => {},
-                    };
-                }
+                if (ui.focused(id)) for (ui.keyEvents()) |key_event| switch (key_event.key) {
+                    .page_down => proposed -= key_step * 10,
+                    .page_up => proposed += key_step * 10,
+                    .home => proposed = options.min,
+                    .end => proposed = options.max,
+                    else => {},
+                };
+                if (ui.adjusted(id)) |steps| proposed += key_step * @as(f64, @floatFromInt(steps));
             }
 
             var changed = false;
@@ -385,6 +390,12 @@ pub fn Widgets(comptime UiType: type) type {
                 .disabled = options.disabled,
                 .cursor = if (options.disabled) null else .pointer,
                 .gestures = .{ .pan = .horizontal },
+                .semantics = .{
+                    .role = .slider,
+                    .label = options.label,
+                    .value = .{ .range = .{ .value = current, .min = options.min, .max = options.max, .step = key_step } },
+                    .actions = .initOne(.adjust),
+                },
                 .layout = .{ .sizing = .{ .width = options.width, .height = .fixed(theme.control_height) }, .child_alignment = .{ .y = .center } },
             });
             // The grow weights split the track's free space at the value,
@@ -429,6 +440,8 @@ pub fn Widgets(comptime UiType: type) type {
 
         pub const TextFieldOptions = struct {
             placeholder: []const u8 = "",
+            /// Its name to an assistive technology; the placeholder when empty.
+            label: []const u8 = "",
             disabled: bool = false,
             width: zui.Sizing = .grow,
         };
@@ -513,6 +526,7 @@ pub fn Widgets(comptime UiType: type) type {
                 .focusable = true,
                 .disabled = options.disabled,
                 .cursor = if (options.disabled) null else .text,
+                .semantics = .{ .role = .text_field, .label = if (options.label.len != 0) options.label else options.placeholder, .value = .{ .text = text.slice() } },
                 .decoration = .{
                     .background = theme.field_background,
                     .border = focusRingOr(theme, ui, id, .{ .color = theme.border_color, .widths = .all(1) }),
@@ -567,6 +581,8 @@ pub fn Widgets(comptime UiType: type) type {
 
         pub const DropdownOptions = struct {
             disabled: bool = false,
+            /// Its name to an assistive technology.
+            label: []const u8 = "",
             /// `.fit` is at least as wide as the widest label, so the
             /// control keeps its size when the selection changes.
             width: zui.Sizing = .fit,
@@ -577,7 +593,7 @@ pub fn Widgets(comptime UiType: type) type {
         /// A button showing `labels[selected.*]` that opens a list of
         /// `labels` below it. Choosing one sets `selected` and returns
         /// true. With the list closed, Up and Down change the selection.
-        /// Escape or a click outside closes the list.
+        /// Escape, a click outside or a `dismiss` action closes the list.
         pub fn dropdown(self: Self, ui: *Ui, id: zui.Id, selected: *usize, labels: []const []const u8, options: DropdownOptions) bool {
             const theme = self.activeTheme(ui);
             const popup = ui.state(id, Popup);
@@ -591,7 +607,7 @@ pub fn Widgets(comptime UiType: type) type {
                 if (popup.open and selected.* < labels.len) ui.requestFocus(id.indexedChild("option", selected.*));
             } else if (popup.open) {
                 if (ui.clicked(backdrop_id)) popup.open = false;
-                if (ui.keyPressed(.escape)) {
+                if (ui.keyPressed(.escape) or ui.dismissed(id.child("popup"))) {
                     popup.open = false;
                     ui.requestFocus(id);
                 }
@@ -617,11 +633,13 @@ pub fn Widgets(comptime UiType: type) type {
                 const indicator_width = ui.measureText(theme.dropdown_indicator, style)[0];
                 width.min = @max(width.min, widest_label + indicator_width + theme.gap + 2 * theme.horizontal_padding);
             }
+            const selected_label = if (selected.* < labels.len) labels[selected.*] else "";
             ui.open(.{
                 .id = id,
                 .focusable = true,
                 .disabled = options.disabled,
                 .cursor = if (options.disabled) null else .pointer,
+                .semantics = .{ .role = .combo_box, .label = options.label, .value = .{ .text = selected_label }, .state = .{ .expanded = popup.open } },
                 .decoration = .{
                     .background = theme.control.get(ui.widgetState(id)),
                     .border = focusRingOr(theme, ui, id, null),
@@ -634,7 +652,7 @@ pub fn Widgets(comptime UiType: type) type {
                     .child_alignment = .{ .y = .center },
                 },
             });
-            ui.text(if (selected.* < labels.len) labels[selected.*] else "", style);
+            ui.text(selected_label, style);
             ui.box(.{ .layout = .{ .sizing = .{ .width = .grow } } });
             ui.text(theme.dropdown_indicator, textStyle(theme, .muted));
             ui.close();
@@ -656,6 +674,7 @@ pub fn Widgets(comptime UiType: type) type {
             ui.open(.{
                 .id = id.child("popup"),
                 .focus_scope = true,
+                .semantics = .{ .role = .list_box, .actions = .initOne(.dismiss) },
                 .floating = .{ .attach_to = .{ .element = id }, .attach_point = .bottom_left, .offset = .{ 0, 4 }, .z = theme.popup_z + 1 },
                 .decoration = .{
                     .background = theme.popup_background,
@@ -675,6 +694,7 @@ pub fn Widgets(comptime UiType: type) type {
                     .id = option_id,
                     .focusable = true,
                     .cursor = .pointer,
+                    .semantics = .{ .role = .option, .label = option_label, .state = .{ .selected = index == selected } },
                     .decoration = .{
                         .background = switch (ui.widgetState(option_id)) {
                             .hovered, .pressed => theme.option_highlight,

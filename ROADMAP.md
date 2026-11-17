@@ -72,7 +72,7 @@ green, and its **Status** line below says which slice is next.
 | P11. Flat child lists | audit | `src/context.zig`, `src/layout.zig` | | waiting on a wide scene whose profile points at the walks; kept by the owner |
 | P12. Text commands that point at their style | audit | `src/commands.zig`, `src/emission.zig`, `zui_wire/`, `../zui-raylib`, `../zui-sokol`, `../zui-terminal` | | waiting on a profile of a renderer reading the commands |
 | G6. HDR and wide gamut | 8 | `src/context.zig`, `src/commands.zig`, `src/surface.zig`, `zui_wire/`, `zui_testing/`, `../zui-sokol`, `../zui-host` | | waiting on a session under Windows with an HDR display: zui-sokol's FP16 `.win32` swapchain and zui-host's `.scrgb_fp16` window |
-| V2. Semantics and accessibility actions | 9 | `src/context.zig`, `zui_widgets/`, `../zui-host` | | |
+| V2. Semantics and accessibility actions | 9 | `src/context.zig`, `zui_widgets/`, `../zui-host` | | in progress; the UI Automation bridge waits on a session under Windows |
 | V3. Safety sweeps | 9 | `src/context.zig`, `src/tests/` | | |
 | V4. The demo in a browser | 9 | `../zui-web`, `zui_wire/` | | |
 | F7. The wire's renderer declares its context's payload types | 5 | `zui_wire/remote.zig`, `zui_wire/tests.zig` | | |
@@ -3106,6 +3106,32 @@ Windows host bridges it to UI Automation, and with the feature off, R1
 counts are unchanged.
 
 **Spec.** §13.5.
+
+**Status.** The core and `zui_widgets` slice is done. `Element.semantics`
+declares a role, label, value, state and extra actions; `Frame.semantics()`
+lists each such element in tree order with its id, bounds, the index of
+the node around it, its state (with `disabled` and `focused` filled in) and
+its actions (with `invoke`, `focus`, `scroll` and `show_menu` taken from
+its flags and gestures). Labels and text values are copied into the
+frame's text bytes, counted against `max_text_bytes` and cut at a
+character when they do not fit. The list lives in a slot beside each
+frame, not in `Frame`: any field added to `Frame`, even a zero-size one,
+reordered its arrays and moved R1 counts by −0.33% to +0.49% with the
+feature off. `Event.action` carries an `ActionEvent`, answered by
+`clicked`, `focused`, `adjusted`, `manipulation` and a scroll,
+`contextRequested` and `dismissed`; a disabled element takes none, and
+without the feature the event is dropped. Every control in
+`zui_widgets` declares its semantics (button, checkbox, disclosure,
+slider with its range and `adjust`, text field, dropdown with its list
+and options), the slider steps through `adjusted`, the dropdown's list
+closes on `dismiss`, and `zui_reflect` names each control after its field.
+`zui_testing.Driver.action` sends one. Measured against `8911fb2` with
+`zig build counts`: with the feature off every scenario is identical to
+the instruction; with it on and nothing declared, declaration moves
+−1.28% to +0.52% and `endFrame` adds 2 to 7 instructions.
+Next: the Windows host (`../zui-host`) bridges the list to UI Automation
+and reports its requests as `action` events. That needs a session under
+Windows, so it waits for one.
 
 ### V3. Safety sweeps
 

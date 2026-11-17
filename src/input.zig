@@ -1,5 +1,6 @@
 const std = @import("std");
 const Instant = @import("record.zig").Instant;
+const ActionEvent = @import("semantics.zig").ActionEvent;
 
 /// Identifies one contact across its events: the mouse, one finger, one pen.
 pub const PointerId = enum(u32) {
@@ -236,6 +237,9 @@ pub const Event = union(enum) {
     environment: EnvironmentChange,
     files_dropped: FilesDropped,
     lifecycle: Lifecycle,
+    /// An assistive technology's request, through the host's
+    /// accessibility bridge. Ignored without `Config.features.semantics`.
+    action: ActionEvent,
 };
 
 /// Files the user dropped onto the surface.

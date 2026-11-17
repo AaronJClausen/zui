@@ -238,6 +238,13 @@ Implemented so far:
   file: the host's file watch publishes the file's changes into a
   source, and the loader's `loadTheme(io)` reads it again into another,
   so a replay restyles as the live run did.
+  With `features.semantics`, an element's `.semantics = .{ .role =
+  .button, .label = "Save" }` puts it in `frame.semantics()`, with its
+  value, bounds, state and actions, in tree order, and an `action` event
+  naming it is answered by the queries of the input it stands in for:
+  `invoke` by `clicked`, `adjust` by `adjusted`, `dismiss` by
+  `dismissed`. Every `zui_widgets` control declares its own; no host
+  bridges the list to a platform's accessibility API yet.
 
 The reference backend, its adapter host and the demo application live in
 [zui-raylib](https://github.com/AaronJClausen/zui-raylib); the other
@@ -250,7 +257,8 @@ shipped feature in the code a consumer writes, with semantic highlighting;
 open it in a browser, or read [docs/feature-tour.md](docs/feature-tour.md).
 
 Next, in the order of SPEC.md §21: the rest of the effects and of the
-inspector, accessibility, more hosts, motion and text editing.
+inspector, the Windows host's accessibility bridge, more hosts, motion and
+text editing.
 [ROADMAP.md](ROADMAP.md) keeps the queue of work in order, and
 [ARCHITECTURE.md](ARCHITECTURE.md) shows how the pieces connect.
 
