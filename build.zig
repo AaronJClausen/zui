@@ -78,6 +78,7 @@ const compile_error_cases = [_]struct { name: []const u8, expected_error: []cons
     .{ .name = "app_text_mismatch", .expected_error = "zui_app: app_text_mismatch.App.Text is app_text_mismatch.OtherFonts, but its Ui measures text with app_text_mismatch.Fonts" },
     .{ .name = "app_renderer_init_wrong_text", .expected_error = "zui_app: app_renderer_init_wrong_text.FontsRenderer.init must be fn (*app_renderer_init_wrong_text.FontsRenderer, zui.Surface, *const app_renderer_init_wrong_text.Fonts) !void, found fn (*app_renderer_init_wrong_text.FontsRenderer, surface.Surface, *const u8) error{OutOfMemory}!void" },
     .{ .name = "app_record_wrong_signature", .expected_error = "zui_app: app_record_wrong_signature.App.zuiRecord must be fn (*app_record_wrong_signature.App, *zui.RecordBuilder) void, found fn (*app_record_wrong_signature.App, *const record.RecordBuilder) void" },
+    .{ .name = "app_observe_wrong_signature", .expected_error = "zui_app: app_observe_wrong_signature.App.zuiObserve must be fn (*app_observe_wrong_signature.App, *const Ui, *const Ui.Frame) void" },
     .{ .name = "app_host_without_init", .expected_error = "zui_app: app_host_without_init.OffscreenHost must declare `pub fn init(self: *app_host_without_init.OffscreenHost, io: std.Io, window: zui.WindowOptions) !void`, which opens its window" },
     .{ .name = "wire_delivery_holds_pointer", .expected_error = "zui_wire: delivery of source `catalog` holds a pointer (*const wire_delivery_holds_pointer.Catalog); declare zuiSerialize on it to send it" },
     .{ .name = "wire_image_handle_holds_pointer", .expected_error = "zui_wire: ImageHandle holds a pointer (*const wire_image_handle_holds_pointer.Texture); declare zuiSerialize on it to send it" },
@@ -190,6 +191,13 @@ pub fn build(b: *std.Build) void {
     wire_module.addImport("zui_async", async_module);
     wire_module.addImport("zui_app", app_module);
     debug_module.addImport("zui_async", async_module);
+    debug_module.addImport("zui_bench_scenes", b.createModule(.{
+        .root_source_file = b.path("bench/scenes.zig"),
+        .imports = &.{
+            .{ .name = "zui", .module = zui_module },
+            .{ .name = "zui_async", .module = async_module },
+        },
+    }));
 
     for (compile_error_cases) |case| {
         const failing_object = b.addObject(.{

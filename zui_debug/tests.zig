@@ -601,3 +601,92 @@ test "a theme with no field written is the default, in either kind of color" {
     try testing.expectEqual(ExtendedTheme{}, ExtendedTheme.fromZon(.{}));
     try testing.expectEqual(@as(u32, 0x1e1e1ef0), (UiTheme.Zon{}).background);
 }
+
+const DocumentsView = @import("zui_bench_scenes").DocumentsView;
+const DocumentsUi = zui.Context(.{ .limits = DocumentsView.limits, .Text = Text });
+const DocumentsInspector = zui_debug.Inspector(DocumentsUi);
+
+const InspectedDocuments = struct {
+    text: Text = .{},
+    ui: DocumentsUi = undefined,
+    driver: zui_testing.Driver(DocumentsUi) = undefined,
+    view: DocumentsView = .{},
+    inspector: DocumentsInspector = .{},
+
+    fn init(app: *InspectedDocuments) !void {
+        app.* = .{};
+        app.ui = try .init(testing.allocator, testing.io, &app.text);
+        app.driver = .{ .ui = &app.ui };
+    }
+
+    fn deinit(app: *InspectedDocuments) void {
+        app.ui.deinit(testing.allocator);
+    }
+
+    fn declare(app: *InspectedDocuments, ui: *DocumentsUi) void {
+        app.view.declare(ui, 0);
+        app.inspector.declare(ui);
+    }
+
+    fn observed(app: *InspectedDocuments, ended: *const DocumentsUi.Frame) *const DocumentsUi.Frame {
+        const pointer = app.ui.primaryPointer();
+        app.inspector.observe(ended, if (pointer) |primary| primary.position else null);
+        return ended;
+    }
+
+    fn frame(app: *InspectedDocuments) !*const DocumentsUi.Frame {
+        return app.observed(try app.driver.frame(app, declare, &.{}));
+    }
+
+    fn hover(app: *InspectedDocuments, element_id: zui.Id) !*const DocumentsUi.Frame {
+        return app.observed(try app.driver.hover(app, declare, element_id));
+    }
+};
+
+fn rowsWithId(rows: []const DocumentsInspector.Row, element_id: zui.Id) usize {
+    var count: usize = 0;
+    for (rows) |row| {
+        if (row.id == element_id.hash) count += 1;
+    }
+    return count;
+}
+
+test "driven over the Documents view, the inspector lists its tree and shows the sidebar item under the pointer" {
+    const app = try testing.allocator.create(InspectedDocuments);
+    defer testing.allocator.destroy(app);
+    try app.init();
+    defer app.deinit();
+
+    _ = try app.frame();
+    const first = try app.frame();
+    const panel = first.lookup(DocumentsInspector.default_panel_id.hash).?;
+    const panel_elements = first.inspect(panel).subtree_end - panel;
+    const rows = app.inspector.rows();
+    try testing.expectEqual(first.elementCount() - panel_elements, rows.len);
+    try testing.expectEqual(DocumentsInspector.Kind.root, rows[0].kind);
+    for ([_]zui.Id{ .of("toolbar"), .of("sidebar"), .of("content"), .of("documents_view") }) |element_id| {
+        try testing.expectEqual(@as(usize, 1), rowsWithId(rows, element_id));
+    }
+    var documents: usize = 0;
+    for (rows) |row| {
+        if (row.kind == .text and std.mem.startsWith(u8, row.textPreview(), "Document ")) documents += 1;
+    }
+    try testing.expectEqual(@as(usize, 40), documents);
+
+    const sixth_document: zui.Id = .indexed("item", 5);
+    _ = try app.hover(sixth_document);
+    const hovered = app.inspector.hovered.?;
+    try testing.expectEqual(sixth_document.hash, hovered.row.id);
+    try testing.expectEqual(@as(u16, 4), hovered.row.depth);
+    try testing.expectEqual(@as(?zui.Color, .rgb(0x34344a)), hovered.decoration.?.background);
+
+    const shown = try app.frame();
+    try testing.expect(shown.diagnostics.ok());
+    var buffer: [256][]const u8 = undefined;
+    const lines = panelLines(shown, &buffer);
+    try expectLine(lines, "every limit held");
+    try expectLine(lines, "rect = 8, 264, 244x36");
+    try expectLine(lines, "flags = explicit_id interactive focusable");
+    try expectLine(lines, "decoration.background = #34344aff");
+    try expectLine(lines, "          text \"Document 6\" 100x20");
+}

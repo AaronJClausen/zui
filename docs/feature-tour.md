@@ -1400,7 +1400,7 @@ fn debugPanel(app: *App, ui: *Ui) void {
 
 ### `zui_debug`: the element tree and what's under the pointer · *shipped*
 
-`zui_debug.Inspector(Ui)` is a panel over `Frame.inspect`, floating at the right edge of the window. It opens with the frame's diagnostics: each limit exceeded, named by its `limits` field with what the frame needed, the first element past it, repeated ids, an unbalanced tree and refused publishes. Then come the fallbacks in effect: each optional command the renderer does not draw and what was drawn instead, colors clamped for a renderer without `zui_extended_color`, and whatever you hand `reportRun`, such as `zui_app`'s `Report` of what the host and renderer lack. Below them it lists the element tree, one row per element, indented by depth, with its name (its id in a build without `-Dzui-debug`), kind and size, and above it the element under the pointer: its rectangle, flags, and each field of its layout, decoration, effects, floating and text style that differs from the default. `observe` copies what it shows out of a frame after `endFrame`, so the frame is released as usual, and `declare` declares the panel in the next frame. Its own rows never appear in the tree, and while the pointer is over the panel, the element it showed stays. It sits in your application's state, sized by `limits.max_elements`, and allocates nothing. Make `zui_debug.ZoneTimer(Inner)` the context's tracer and hand it a clock with `useClock(io)`, and the panel adds a *Performance* section: each zone that ran, the steps of `beginFrame` and `endFrame` indented under them, with its time in the last frame and its mean and peak over the last 60, in milliseconds. The timer passes every zone on to `Inner`, so `zui_tracy.Tracer` still sees them, or to nothing for `void`; with any other tracer the inspector keeps no times.
+`zui_debug.Inspector(Ui)` is a panel over `Frame.inspect`, floating at the right edge of the window. It opens with the frame's diagnostics: each limit exceeded, named by its `limits` field with what the frame needed, the first element past it, repeated ids, an unbalanced tree and refused publishes. Then come the fallbacks in effect: each optional command the renderer does not draw and what was drawn instead, colors clamped for a renderer without `zui_extended_color`, and whatever you hand `reportRun`, such as `zui_app`'s `Report` of what the host and renderer lack. Below them it lists the element tree, one row per element, indented by depth, with its name (its id in a build without `-Dzui-debug`), kind and size, and above it the element under the pointer: its rectangle, flags, and each field of its layout, decoration, effects, floating and text style that differs from the default. `observe` copies what it shows out of a frame after `endFrame`, so the frame is released as usual, and `declare` declares the panel in the next frame. Its own rows never appear in the tree, and while the pointer is over the panel, the element it showed stays. It sits in your application's state, sized by `limits.max_elements`, and allocates nothing. Make `zui_debug.ZoneTimer(Inner)` the context's tracer and hand it a clock with `useClock(io)`, and the panel adds a *Performance* section: each zone that ran, the steps of `beginFrame` and `endFrame` indented under them, with its time in the last frame and its mean and peak over the last 60, in milliseconds. The timer passes every zone on to `Inner`, so `zui_tracy.Tracer` still sees them, or to nothing for `void`; with any other tracer the inspector keeps no times. On `zui_app`, the `zuiObserve` hook hands you each frame on the UI thread before it is submitted; in a loop of your own, call `observe` after `endFrame`.
 
 `src/app.zig`
 
@@ -1408,29 +1408,29 @@ fn debugPanel(app: *App, ui: *Ui) void {
 const zui_debug = @import("zui_debug");
 
 const ZoneTimer = zui_debug.ZoneTimer(zui_tracy.Tracer);
-const Ui = zui.Context(.{ .Text = Fonts, .features = .{ .Tracer = ZoneTimer } });
-
-fn startTiming(io: std.Io) void {
-    ZoneTimer.useClock(io);
-}
+const Ui = zui.Context(zui_app.contextConfig(zui_sokol.Renderer, .{ .Text = Fonts, .features = .{ .Tracer = ZoneTimer } }));
 
 const App = struct {
+    pub const Host = zui_host.Host;
+    pub const Renderer = zui_sokol.Renderer;
+    pub const Text = Fonts;
+
     inspector: zui_debug.Inspector(Ui) = .{},
     inspecting: bool = false,
 
-    fn declare(app: *App, ui: *Ui) void {
-        if (ui.chordPressed(.{ .key = .i, .modifiers = .{ .control = true, .shift = true } })) app.inspecting = !app.inspecting;
+    pub fn init(app: *App, start: zui_app.Start(App)) !void {
+        app.* = .{};
+        ZoneTimer.useClock(start.io);
+    }
+
+    pub fn zuiDeclare(app: *App, ui: *Ui) void {
+        if (ui.chordPressed(.{ .key = .f12 })) app.inspecting = !app.inspecting;
         declareDocuments(app, ui);
         if (app.inspecting) app.inspector.declare(ui);
     }
 
-    fn runFrame(app: *App, ui: *Ui, record: *const zui.FrameRecord) !void {
-        ui.beginFrame(record);
-        app.declare(ui);
-        const frame = ui.endFrame();
-        defer ui.release(frame);
+    pub fn zuiObserve(app: *App, ui: *const Ui, frame: *const Ui.Frame) void {
         if (app.inspecting) app.inspector.observe(frame, if (ui.primaryPointer()) |pointer| pointer.position else null);
-        try app.renderer.zuiSubmit(app.host.zuiSurface(.main), frame);
     }
 };
 ```
@@ -1473,7 +1473,7 @@ fn loadBetweenFrames(app: *App, io: std.Io, waker: zui.Waker) void {
 
 ### `zui_app`: the whole loop from one call · *shipped*
 
-You name a host and a renderer and write `zuiDeclare`, and `zui_app.run` does the rest. It opens the window, builds records, submits on a render thread when the renderer allows it, paces frames, sleeps when idle, and reports once what it's running with and each limit exceeded. The optional hooks are `init`, `deinit`, `zuiLoader` after each frame and `zuiRecord` for your own zoom and synthetic events. `contextConfig` derives the `Config` from the renderer's declarations.
+You name a host and a renderer and write `zuiDeclare`, and `zui_app.run` does the rest. It opens the window, builds records, submits on a render thread when the renderer allows it, paces frames, sleeps when idle, and reports once what it's running with and each limit exceeded. The optional hooks are `init`, `deinit`, `zuiLoader` after each frame, `zuiObserve` with each frame before it is submitted, for an inspector, and `zuiRecord` for your own zoom and synthetic events. `contextConfig` derives the `Config` from the renderer's declarations.
 
 `src/app.zig`
 

@@ -345,6 +345,10 @@ const CheckApp = struct {
         ui.box(.{ .decoration = .{ .background = .black } });
     }
 
+    pub fn zuiObserve(app: *CheckApp, _: *const AppUi, frame: *const AppUi.Frame) void {
+        app.frames += frame.elementCount();
+    }
+
     pub fn zuiLoader(app: *CheckApp, _: *const AppUi, _: std.Io) void {
         app.frames += 1;
     }

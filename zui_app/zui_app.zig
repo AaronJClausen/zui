@@ -206,6 +206,15 @@ pub const Setup = struct {
 /// - optionally `pub fn zuiRecord(app: *App, record: *zui.RecordBuilder) void`,
 ///   run after the host's poll, for the application's zoom and the events
 ///   it makes itself, after the host's;
+/// - optionally `pub fn zuiObserve(app: *App, ui: *const Ui, frame: *const
+///   Ui.Frame) void`, run on the UI thread with each frame `endFrame`
+///   returns, before it is submitted, for an inspector that reads it:
+///
+///   ```zig
+///   pub fn zuiObserve(app: *App, ui: *const Ui, frame: *const Ui.Frame) void {
+///       app.inspector.observe(frame, if (ui.primaryPointer()) |pointer| pointer.position else null);
+///   }
+///   ```
 /// - optionally `pub fn zuiLoader(app: *App, ui: *const Ui, io: std.Io) void`,
 ///   run after each frame and before the wait;
 /// - a field `sources` when the `Config` has `Sources`, holding them or
@@ -370,6 +379,7 @@ pub fn Runner(comptime App: type) type {
             self.app.zuiDeclare(&self.ui);
             const drawn = self.ui.endFrame();
             self.noticeDiagnostics(drawn.diagnostics);
+            if (@hasDecl(App, "zuiObserve")) self.app.zuiObserve(&self.ui, drawn);
 
             const surface = self.host.zuiSurface(window);
             if (self.report.submission == .render_thread) {
@@ -484,7 +494,7 @@ pub fn checkApp(comptime App: type) void {
     if (@typeInfo(App) != .@"struct") @compileError("zui_app: an application must be a struct type, got " ++ name);
     for (@typeInfo(App).@"struct".decls) |declaration| {
         if (!std.mem.startsWith(u8, declaration.name, "zui")) continue;
-        const known = for ([_][]const u8{ "zuiDeclare", "zuiLoader", "zuiRecord" }) |known_name| {
+        const known = for ([_][]const u8{ "zuiDeclare", "zuiLoader", "zuiObserve", "zuiRecord" }) |known_name| {
             if (std.mem.eql(u8, declaration.name, known_name)) break true;
         } else false;
         if (!known) {
@@ -508,6 +518,9 @@ pub fn checkApp(comptime App: type) void {
     const Ui = UiOf(App);
     if (@hasDecl(App, "zuiLoader") and @TypeOf(App.zuiLoader) != fn (*App, *const Ui, std.Io) void) {
         @compileError("zui_app: " ++ name ++ ".zuiLoader must be fn (*" ++ name ++ ", *const Ui, std.Io) void, found " ++ @typeName(@TypeOf(App.zuiLoader)));
+    }
+    if (@hasDecl(App, "zuiObserve") and @TypeOf(App.zuiObserve) != fn (*App, *const Ui, *const Ui.Frame) void) {
+        @compileError("zui_app: " ++ name ++ ".zuiObserve must be fn (*" ++ name ++ ", *const Ui, *const Ui.Frame) void");
     }
     if (@hasDecl(App, "zuiRecord") and @TypeOf(App.zuiRecord) != fn (*App, *zui.RecordBuilder) void) {
         @compileError("zui_app: " ++ name ++ ".zuiRecord must be fn (*" ++ name ++ ", *zui.RecordBuilder) void, found " ++ @typeName(@TypeOf(App.zuiRecord)));

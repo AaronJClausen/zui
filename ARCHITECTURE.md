@@ -111,7 +111,7 @@ only plain names are types the application uses directly: a source's
 | Renderer | a renderer | `zuiSubmit`, `zui_surfaces` | `zui_commands`, `zui_extended_color`, `zui_render_thread`, payload types | §16.2 |
 | Host | a host | `zuiPoll`, `zuiWaker`, `zuiWait`, `zuiSurface`, `zuiApply`, `zui_surfaces` | `zui_capabilities`, services (`zuiClipboard`, `zuiFileDialogs`, …) | §16.3 |
 | Tracer | a profiler binding | `zuiBegin`, `zuiEnd` | | §16.5 |
-| Application | the application, run by `zui_app` | `Host`, `Renderer`, `zuiDeclare` | `Text`, `zuiRecord`, `zuiLoader`, `init`, `deinit` | §19.5 |
+| Application | the application, run by `zui_app` | `Host`, `Renderer`, `zuiDeclare` | `Text`, `zuiRecord`, `zuiObserve`, `zuiLoader`, `init`, `deinit` | §19.5 |
 | Skin | a theme pack or the application | `zuiStyle` | | §19.2 |
 | Wire payload | an application type with pointers | `zuiSerialize`, `zuiDeserialize` | | §19.6 |
 

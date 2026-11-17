@@ -2211,7 +2211,7 @@ edit (the message quotes the `.hidden = true` line that fixes it).
 
 The composition root as a library: `contextConfig(Renderer, overrides)`,
 and `run(App, init, options)`, which owns the loop of §6.1, calls the
-application's `zuiDeclare` and optional `zuiLoader`, moves submission to
+application's `zuiDeclare` and optional `zuiObserve` and `zuiLoader`, moves submission to
 a render thread when the renderer allows, applies host requests, paces
 to `nextFrame`, and reports capabilities and fallbacks. An application
 that wants its own loop writes the six lines of §6.1 instead.
@@ -2227,6 +2227,7 @@ const App = struct {
     pub fn init(app: *App, start: zui_app.Start(App)) !void { ... }   // optional; else every field has a default
     pub fn zuiRecord(app: *App, record: *zui.RecordBuilder) void { ... } // optional
     pub fn zuiDeclare(app: *App, ui: *Ui) void { ... }
+    pub fn zuiObserve(app: *App, ui: *const Ui, frame: *const Ui.Frame) void { ... } // optional
     pub fn zuiLoader(app: *App, ui: *const Ui, io: std.Io) void { ... } // optional
     pub fn deinit(app: *App) void { ... }                              // optional
 };
@@ -2255,6 +2256,10 @@ const App = struct {
   there and appends events it makes itself, after the host's. Its
   `sources` field holds the `Config`'s `Sources` or points to them, so an
   application that wraps another can use the sources it already has.
+- **The application's view of the frame.** `zuiObserve` runs on the UI
+  thread with each frame `endFrame` returns, before it is submitted or
+  handed to the render thread, so an inspector (§19.7) reads the frame
+  before the next `beginFrame`; `zuiLoader` sees only the context.
 - **The render thread.** With `zui_render_thread` and more than one frame
   in flight, frames go through a queue of `frames_in_flight` entries to a
   task on the application's `Io` that submits and releases them; the UI
@@ -2350,7 +2355,8 @@ while (try client.frame(&host, &renderer)) {}
 An inspector over `Frame.inspect`: the element tree, the hovered element
 and its configs, the frame's diagnostics, lowerings and fallbacks in
 effect, and a performance overlay from the tracer. Over the wire it runs
-in another process.
+in another process. An application on `zui_app` hands it each frame from
+`zuiObserve`.
 
 ### 19.8 `zui_color`, `zui_icons`
 

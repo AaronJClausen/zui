@@ -72,7 +72,7 @@ green, and its **Status** line below says which slice is next.
 | P11. Flat child lists | audit | `src/context.zig`, `src/layout.zig` | | waiting on a wide scene whose profile points at the walks; kept by the owner |
 | P12. Text commands that point at their style | audit | `src/commands.zig`, `src/emission.zig`, `zui_wire/`, `../zui-raylib`, `../zui-sokol`, `../zui-terminal` | | waiting on a profile of a renderer reading the commands |
 | G6. HDR and wide gamut | 8 | `src/context.zig`, `src/commands.zig`, `src/surface.zig`, `zui_wire/`, `zui_testing/`, `../zui-sokol`, `../zui-host` | | waiting on a session under Windows with an HDR display: zui-sokol's FP16 `.win32` swapchain and zui-host's `.scrgb_fp16` window |
-| V1. `zui_debug` | 9 | `zui_debug/`, `src/context.zig`, `../zui-raylib` | | in progress |
+| V1. `zui_debug` | 9 | `zui_debug/`, `zui_app/`, `src/context.zig`, `../zui-raylib` | | in progress |
 | V2. Semantics and accessibility actions | 9 | `src/context.zig`, `zui_widgets/`, `../zui-host` | | |
 | V3. Safety sweeps | 9 | `src/context.zig`, `src/tests/` | | |
 | V4. The demo in a browser | 9 | `../zui-web`, `zui_wire/` | | |
@@ -3063,7 +3063,7 @@ demo toggles it with a key.
 
 **Spec.** §19.7.
 
-**Status.** Five slices landed. The first: `Frame.inspect(index)`
+**Status.** Six slices landed. The first: `Frame.inspect(index)`
 returns an `ElementView` of every element the frame kept, its id and
 debug name, parent, subtree end, rectangle, minimum and content sizes,
 flags, layout, decoration, effects (found by a binary search of the
@@ -3114,10 +3114,16 @@ the panel in the theme last delivered by the `Latest`; between frames,
 load and keeps the theme until the file changes again. A replay restyles
 from the delivered theme without reading a file. Sources of the wrong
 kind are compile errors. The panel draws no image, so its theme is the
-only file it reloads. Nothing in `src/` changed. Last comes the demo's
-key in `../zui-raylib`. `zui_app.run` hands the
-application no frame after `endFrame`, so the demo's key needs a hook
-there, or the demo's own loop, to call `observe`.
+only file it reloads. Nothing in `src/` changed. The sixth: `zui_app`'s
+optional `zuiObserve(app, ui, frame)` hook runs on the UI thread with
+each frame `endFrame` returns, before it is submitted or handed to the
+render thread, so an application on `zui_app` can call `observe`; a
+wrong signature is a compile error. `zui_testing`'s driver runs the
+inspector over the Documents view (`bench/scenes.zig`, the zui-raylib
+demo's, which `zui_debug`'s tests import as `zui_bench_scenes`): a row
+for each of its elements, and the sixth document under the pointer with
+its rectangle, flags and hovered background. Last comes the demo's key
+in `../zui-raylib`, which waits on this commit's push for its pin.
 
 ### V2. Semantics and accessibility actions
 

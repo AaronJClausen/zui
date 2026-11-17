@@ -213,6 +213,60 @@ fn FramesApp(comptime Renderer_: type, comptime frames_in_flight: u8, comptime f
     };
 }
 
+fn ObservingApp(comptime Renderer_: type) type {
+    return struct {
+        const Self = @This();
+        pub const Host = TestHost;
+        pub const Renderer = Renderer_;
+        pub const Ui = zui.Context(zui_app.contextConfig(Renderer, .{ .limits = .{ .max_elements = 16 }, .frames_in_flight = 2 }));
+        const frame_count = 4;
+
+        renderer: *Renderer = undefined,
+        observed_numbers: [frame_count]u64 = undefined,
+        submitted_when_observed: [frame_count]usize = undefined,
+        elements_observed: [frame_count]u32 = undefined,
+        observed: usize = 0,
+        thread_observed_on: ?std.Thread.Id = null,
+
+        pub fn init(app: *Self, start: zui_app.Start(Self)) !void {
+            app.* = .{ .renderer = start.renderer };
+            start.host.closes_after_polls = frame_count;
+        }
+
+        pub fn zuiDeclare(_: *Self, ui: *Ui) void {
+            ui.box(.{ .layout = .{ .sizing = .grow_both } });
+        }
+
+        pub fn zuiObserve(app: *Self, _: *const Ui, frame: *const Ui.Frame) void {
+            app.observed_numbers[app.observed] = frame.number;
+            if (!Renderer.zui_render_thread) app.submitted_when_observed[app.observed] = app.renderer.submitted;
+            app.elements_observed[app.observed] = frame.elementCount();
+            app.observed += 1;
+            app.thread_observed_on = std.Thread.getCurrentId();
+        }
+    };
+}
+
+test "zuiObserve reads each frame on the UI thread, before it is submitted" {
+    inline for (.{ TestRenderer(false), TestRenderer(true) }) |Renderer| {
+        const App = ObservingApp(Renderer);
+        var runner: zui_app.Runner(App) = undefined;
+        try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+        try testing.expectEqual(@as(u32, App.frame_count), try runToClose(&runner));
+        runner.stop();
+
+        try testing.expectEqual(@as(usize, App.frame_count), runner.app.observed);
+        try testing.expectEqual(std.Thread.getCurrentId(), runner.app.thread_observed_on.?);
+        for (runner.app.observed_numbers, runner.app.elements_observed, 0..) |number, elements, index| {
+            try testing.expectEqual(@as(u64, index), number);
+            try testing.expectEqual(@as(u32, 2), elements);
+        }
+        if (!Renderer.zui_render_thread) {
+            for (runner.app.submitted_when_observed, 0..) |submitted, index| try testing.expectEqual(index, submitted);
+        }
+    }
+}
+
 test "a renderer that declares zui_render_thread draws every frame, in order, on a thread of its own" {
     const App = FramesApp(TestRenderer(true), 2, 12);
     var runner: zui_app.Runner(App) = undefined;
