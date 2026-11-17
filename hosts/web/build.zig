@@ -9,15 +9,43 @@ pub fn build(b: *std.Build) void {
     b.step("test", "Run the unit tests").dependOn(&b.addRunArtifact(unit_tests).step);
 
     const browser_target = b.resolveTargetQuery(.{ .cpu_arch = .wasm32, .os_tag = .freestanding });
-    const browser_check = b.addObject(.{
-        .name = "browser_check",
-        .root_module = webModule(b, "src/browser_check.zig", browser_target, optimize),
-    });
-    const check_step = b.step("check", "Compile the unit tests, and zui for the browser, without running them");
+    const client = browserModule(b, "zui-web", "src/browser.zig", browser_target, optimize);
+    b.getInstallStep().dependOn(&b.addInstallArtifact(client, .{ .dest_dir = .{ .override = .{ .custom = "web" } } }).step);
+    const check_step = b.step("check", "Compile the unit tests, and the client for the browser, without running them");
     check_step.dependOn(&unit_tests.step);
-    check_step.dependOn(&browser_check.step);
+    check_step.dependOn(&client.step);
 
-    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src" };
+    const test_demo = b.step("test-demo", "Stream zui-sokol's tour, headless, to the browser's client under Node, and check every frame decodes to what was drawn");
+    if (b.lazyDependency("zui_sokol", .{ .target = target, .optimize = optimize })) |zui_sokol_dependency| {
+        const demo_stream = b.addExecutable(.{
+            .name = "demo-stream",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("tools/demo_stream.zig"),
+                .target = target,
+                .optimize = optimize,
+                .imports = &.{
+                    .{ .name = "zui_sokol", .module = zui_sokol_dependency.module("zui_sokol") },
+                    .{ .name = "zui_sokol_tour", .module = zui_sokol_dependency.module("zui_sokol_tour") },
+                    .{ .name = "zui_wire", .module = b.dependency("zui", .{ .target = target, .optimize = optimize }).module("zui_wire") },
+                },
+            }),
+        });
+        linkThroughLlvmOnLinux(demo_stream);
+        const write_stream = b.addRunArtifact(demo_stream);
+        const stream = write_stream.addOutputFileArg("tour.zuiw");
+        const expected = write_stream.addOutputFileArg("tour.expected");
+
+        const wire_check = browserModule(b, "zui-web-wire-check", "src/browser_wire_check.zig", browser_target, optimize);
+        const decode_in_client = b.addSystemCommand(&.{"node"});
+        decode_in_client.addFileArg(b.path("web/check_stream.mjs"));
+        decode_in_client.addArtifactArg(wire_check);
+        decode_in_client.addFileArg(stream);
+        decode_in_client.addFileArg(expected);
+        decode_in_client.expectExitCode(0);
+        test_demo.dependOn(&decode_in_client.step);
+    }
+
+    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "tools" };
     b.step("fmt", "Format all Zig sources").dependOn(&b.addFmt(.{ .paths = formatted_paths }).step);
     b.step("fmt-check", "Fail if any Zig source is not formatted").dependOn(&b.addFmt(.{ .paths = formatted_paths, .check = true }).step);
 }
@@ -28,6 +56,27 @@ fn webModule(b: *std.Build, root_source_file: []const u8, target: std.Build.Reso
         .root_source_file = b.path(root_source_file),
         .target = target,
         .optimize = optimize,
-        .imports = &.{.{ .name = "zui", .module = zui_dependency.module("zui") }},
+        .imports = &.{
+            .{ .name = "zui", .module = zui_dependency.module("zui") },
+            .{ .name = "zui_wire", .module = zui_dependency.module("zui_wire") },
+        },
     });
+}
+
+/// A WebAssembly module with no entry point, whose exports the page calls.
+fn browserModule(b: *std.Build, name: []const u8, root_source_file: []const u8, browser_target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Step.Compile {
+    const module = b.addExecutable(.{ .name = name, .root_module = webModule(b, root_source_file, browser_target, optimize) });
+    module.entry = .disabled;
+    module.rdynamic = true;
+    return module;
+}
+
+/// As zui-sokol links: Zig 0.16's ELF linker rejects the R_X86_64_PC64
+/// relocations that GCC 16's crt1.o carries, and LLD crashes the compiler
+/// unless the LLVM backend produced the objects.
+fn linkThroughLlvmOnLinux(compile: *std.Build.Step.Compile) void {
+    if (compile.rootModuleTarget().os.tag == .linux) {
+        compile.use_llvm = true;
+        compile.use_lld = true;
+    }
 }

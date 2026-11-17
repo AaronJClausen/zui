@@ -44,5 +44,20 @@ jobs:
       - run: zig build test
       - run: zig build test -Doptimize=ReleaseSafe
       - run: zig build test -Doptimize=ReleaseFast
-      - name: Check, including zui compiled for wasm32-freestanding
+      - name: Check, including the client compiled for wasm32-freestanding
         run: zig build check
+
+  demo:
+    name: The tour's stream decoded by the browser's client (Linux, Node)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - name: Install sokol's X11, OpenGL and PulseAudio dependencies, which the tour links
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxi-dev libxcursor-dev libgl1-mesa-dev libpulse-dev
+      - run: node --version
+      - run: zig build test-demo
+      - run: zig build test-demo -Doptimize=ReleaseSafe

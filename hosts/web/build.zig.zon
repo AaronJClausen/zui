@@ -5,9 +5,14 @@
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .zui = .{
-            .url = "git+https://github.com/AaronJClausen/zui#075fbbd22acc33ef921a5a043bba29556604a49f",
-            .hash = "zui-0.5.0-xfvfqgOrEABvDEtQNP8VXx56wh-nYkwXz_lr1dofLqbo",
+            .url = "git+https://github.com/AaronJClausen/zui#24e3706247471849a8d32698076fd202c31dc80d",
+            .hash = "zui-0.5.0-xfvfqjpCGACK7qXbCc4Dt_srYIc_oXSuPoFYZBy66Me6",
+        },
+        .zui_sokol = .{
+            .url = "git+https://github.com/AaronJClausen/zui-sokol#af617f266e5bc46d40b1066c3e13030a5f133bee",
+            .hash = "zui_sokol-0.2.0-LHR9oZhCCQAB0K_kyeT8_8NJFRz1UvyLt5ip-j-DrFOr",
+            .lazy = true,
         },
     },
-    .paths = .{ "build.zig", "build.zig.zon", "src", "README.md", "LICENSE" },
+    .paths = .{ "build.zig", "build.zig.zon", "src", "tools", "web", "README.md", "LICENSE" },
 }

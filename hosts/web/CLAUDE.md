@@ -4,7 +4,7 @@ zui-web is zui in the browser. It is filled by roadmap items V4 (the demo
 in a browser: a thin client that draws frames streamed over zui_wire,
 published from CI) and later H5 (a web host with a canvas surface, using
 `tryBeginFrame` since it cannot block). The wire client comes first
-(zui's ROADMAP.md, Decisions, Open #3).
+(zui's ROADMAP.md, Decisions, Open #2).
 
 zui's `ROADMAP.md` is the queue; this repository has none of its own.
 Read the item's entry there, and the SPEC.md sections it names, before
@@ -17,7 +17,9 @@ you declare); they hold here too.
 | Change | Goes in |
 |---|---|
 | the client and, later, the host | `src/<topic>.zig`, reached from `src/root.zig` |
-| what must compile for the browser | reached from `src/browser_check.zig`, which `zig build check` compiles for `wasm32-freestanding` |
+| what the browser runs | reached from `src/browser.zig`, the client's WebAssembly exports, which `zig build check` compiles for `wasm32-freestanding` |
+| what only a check needs in the browser | `src/browser_wire_check.zig`, which adds exports to the client's for `zig build test-demo` |
+| native programs the checks run, such as the tour's stream | `tools/` |
 | JavaScript and HTML glue | `web/` |
 | CI | `.github/workflows/ci.yml` |
 
@@ -32,7 +34,8 @@ Run each with `timeout 590` in front:
 |---|---|
 | `zig build test` | always |
 | `zig build test -Doptimize=ReleaseSafe` and `-Doptimize=ReleaseFast` | before committing; CI runs all three |
-| `zig build check` | always; it also compiles zui for `wasm32-freestanding`, so a browser break fails here and in CI |
+| `zig build check` | always; it also compiles the client for `wasm32-freestanding`, so a browser break fails here and in CI |
+| `zig build test-demo` | any change to the client, `src/demo_ui.zig` or the zui pin; needs Node, and in CI runs on Linux |
 | `zig build fmt` | before committing; CI runs `fmt-check` |
 
 - Every command, test run and CI job has a hard limit of 10 minutes
@@ -47,7 +50,9 @@ Run each with `timeout 590` in front:
 `zig build test --fork=../zui`. A commit here can only pin a zui commit
 that is pushed: move the pin with
 `zig fetch --save=zui git+https://github.com/AaronJClausen/zui#<commit>`,
-in the same commit as the code that needs it.
+in the same commit as the code that needs it. Keep it the commit
+zui-sokol's pin names, since `test-demo` builds the tour with zui-sokol's
+zui and `--fork=../zui` can fork only one zui package.
 
 ## Workflow
 
