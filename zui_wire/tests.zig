@@ -411,6 +411,41 @@ test "a message beyond the decoder's capacity fails instead of overrunning it" {
     try testing.expectError(error.EndOfStream, reading_truncated.next(&truncated));
 }
 
+test "a message cut short at any byte leaves the decoder as it was, to be read again whole" {
+    var stream: Stream = .init();
+    defer stream.deinit();
+    var encoder: zui_wire.Encoder(EveryCommandUi) = try .init(testing.allocator);
+    defer encoder.deinit(testing.allocator);
+    const params: zui.FrameParams = .{ .now = at(16), .viewport = .{ 100, 50 } };
+    const frames = [_]ListedCommands{
+        .{ .number = 1, .params = params, .list = &every_command },
+        .{ .number = 2, .params = .{ .now = at(32), .viewport = .{ 100, 50 } }, .list = changed_commands },
+        .{ .number = 3, .params = .{ .now = at(48), .viewport = .{ 100, 50 } }, .list = &every_command },
+    };
+    var message_ends: [frames.len]usize = undefined;
+    for (&frames, &message_ends) |*frame, *end| {
+        try encoder.writeFrame(stream.writer(), frame);
+        end.* = stream.out.written().len;
+    }
+    const written = stream.out.written();
+
+    var decoder: zui_wire.Decoder(EveryCommandUi) = try .init(testing.allocator, .of(EveryCommandUi));
+    defer decoder.deinit(testing.allocator);
+    var message_start: usize = 0;
+    for (&frames, message_ends) |*frame, message_end| {
+        for (message_start + 1..message_end) |cut| {
+            var cut_short: std.Io.Reader = .fixed(written[message_start..cut]);
+            try testing.expectError(error.EndOfStream, decoder.next(&cut_short));
+        }
+        var whole: std.Io.Reader = .fixed(written[message_start..message_end]);
+        const decoded = (try decoder.next(&whole)).?.frame;
+        try testing.expectEqual(frame.number, decoded.number);
+        try testing.expectEqualDeep(frame.params, decoded.params);
+        try testing.expectEqualDeep(frame.commands(), decoded.commands());
+        message_start = message_end;
+    }
+}
+
 const FingerprintedText = struct {
     fonts: u64,
 

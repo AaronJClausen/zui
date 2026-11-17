@@ -291,7 +291,10 @@ pub fn Decoder(comptime Ui: type) type {
             gpa.free(self.events);
         }
 
-        /// The next message, or null where the stream ends between two.
+        /// The next message, or null where the stream ends between two. A
+        /// message cut short fails with `error.EndOfStream` and leaves the
+        /// decoder as it was, so a reader given the stream in pieces, as a
+        /// browser is, reads the message again once the rest has arrived.
         pub fn next(self: *Self, reader: *std.Io.Reader) ReadError!?Message {
             const kind_byte = reader.takeByte() catch |err| switch (err) {
                 error.EndOfStream => return null,

@@ -2336,7 +2336,10 @@ pub fn Decoder(comptime Ui: type) type    // init(gpa, .of(Ui)); next(reader): .
 - **Limits.** Encoding allocates only in `init`; the decoder reserves
   what `Capacity` says (by default what the context's limits allow) and
   fails a message that does not fit with `error.CapacityExceeded`, since a
-  delta cannot be applied in part.
+  delta cannot be applied in part. A message cut short fails with
+  `error.EndOfStream` and leaves the decoder as it was, so a reader given
+  the stream in pieces, as a browser is, reads it again when the rest
+  arrives.
 
 A wire renderer and a wire host make a remote client nothing more than a
 host plus a renderer:

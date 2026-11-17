@@ -73,7 +73,7 @@ green, and its **Status** line below says which slice is next.
 | P12. Text commands that point at their style | audit | `src/commands.zig`, `src/emission.zig`, `zui_wire/`, `../zui-raylib`, `../zui-sokol`, `../zui-terminal` | | waiting on a profile of a renderer reading the commands |
 | G6. HDR and wide gamut | 8 | `src/context.zig`, `src/commands.zig`, `src/surface.zig`, `zui_wire/`, `zui_testing/`, `../zui-sokol`, `../zui-host` | | waiting on a session under Windows with an HDR display: zui-sokol's FP16 `.win32` swapchain and zui-host's `.scrgb_fp16` window |
 | V2. Semantics and accessibility actions | 9 | `src/context.zig`, `zui_widgets/`, `../zui-host` | | in progress; the UI Automation bridge waits on a session under Windows |
-| V4. The demo in a browser | 9 | `../zui-web`, `zui_wire/` | | |
+| V4. The demo in a browser | 9 | `../zui-web`, `zui_wire/` | | in progress; the client draws nothing yet |
 | F7. The wire's renderer declares its context's payload types | 5 | `zui_wire/remote.zig`, `zui_wire/tests.zig` | | |
 
 After the queue come stages 10 and 11 in the order of SPEC.md §21. They join the queue as it runs short.
@@ -3176,10 +3176,61 @@ Windows, so it waits for one.
 
 ### V4. The demo in a browser
 
+**Grounding.** The demo is zui-sokol's tour, which F5 streamed with
+`zui_wire.Host` and `zui_wire.Renderer` and drew in another process
+through `zui_wire.Client`. The client cannot run in a browser as it is:
+it reads and writes a `std.Io.net` stream, and a page has only
+WebSockets or messages from a worker, which hand over bytes in pieces of
+their own. `Decoder(Ui).next` decodes only a whole message, but one cut
+short fails with `error.EndOfStream` before changing anything
+(`zui_wire/zui_wire.zig`, `readFrame` swaps its histories only once the
+commands are read), so a reader can try again once more bytes arrive.
+The tour's `Ui` comes from `zui_sokol.config`, whose `Text`, `Image` and
+`Material` live in a module that links sokol, which does not build for
+`wasm32-freestanding`; the frames themselves hold only plain data (the
+`Image`'s two sokol ids, the `Material`'s pattern, colors, phase and
+scale). zui-sokol's `Text` declares no `zuiFingerprint`, so its streams
+carry none, and nothing is checked of the fonts.
+
 **Plan.** The demo streaming over the wire (F5) to a thin browser client,
 published from CI.
 
 **Done when:** the demo runs at its native frame rate in a browser.
+
+**Status.** In slices, each in zui-web unless it says otherwise:
+1. **The client's decoder in WebAssembly** (done). zui-web's
+   `FrameStream(Ui)` holds what has arrived of a stream and decodes each
+   frame once it is whole, and `src/browser.zig` exports it for the page
+   as `zui-web.wasm` (19 KB in ReleaseSmall, 12 MiB of memory reserved by
+   `zuiWebInit`). `DemoUi` declares the tour's commands, colors and
+   payload types field for field, so the browser decodes the tour without
+   sokol. `zig build test-demo` declares the tour's thirteen screens
+   headlessly for 24 frames each, the mouse crossing each, writes them as
+   the wire renderer does (2,619,982 bytes, every command kind but
+   `image`, which the tour never draws), feeds them under Node to the
+   client built for `wasm32-freestanding` in pieces of 1 to 16,384 bytes,
+   and checks that each of the 312 frames, written whole again in the
+   browser, hashes as the frame drawn did; a flipped bit in the stream or
+   in the expected hashes fails it. CI runs it on Linux. In zui, a test
+   pins the decoder reading again a message cut short at any byte.
+2. **Drawing.** The client lays each frame's commands out for the page,
+   and its JavaScript draws them on a canvas: rectangles, borders and
+   clips; text in the tour's TrueType fonts loaded as `FontFace`s and in
+   sokol_debugtext's bitmap fonts; gradients, shadows, transforms,
+   backdrop blurs and the three material patterns, through WebGL where a
+   2D canvas cannot. Checked against zui-sokol's renderer drawing the
+   same frames, which needs a browser: Chromium is on this machine, run
+   headless with the owner's leave.
+3. **Input.** The page turns pointer, wheel, key and text events, the
+   canvas's size and `devicePixelRatio` into records written by
+   `zui_wire`'s `Encoder` in the client, sent only when they hold events
+   or the viewport or scale changed, as F5's client sends; host requests
+   (the cursor) are applied to the canvas.
+4. **The demo behind the page,** as Open decision 3 settles, with the
+   transport between them.
+5. **Published from CI:** a Pages workflow in zui-web that builds the
+   client and the page. Only the owner, in a browser, can check the Done
+   when: that the tour keeps the display's frame rate there.
 
 ---
 
@@ -3379,3 +3430,10 @@ the spec.
 1. **Physical keys.** Planned: logical keys plus the opaque scancode.
 2. **V4, a web renderer or a thin client over the wire?** Planned: the
    wire client first, since F5 builds it anyway.
+3. **V4, where the demo runs behind the published page.** In a Web
+   Worker, the tour built for `wasm32-freestanding` and its frames posted
+   to the page over the wire, or as a native process behind a WebSocket.
+   Planned: the worker, since a page CI publishes has no server to reach;
+   it needs zui-sokol's `Text` and `Material` in a module that does not
+   link sokol (stb_truetype builds for wasm32 with Zig's C compiler), and
+   the tour's loaders, which start threads, on an `Io` a worker can run.
