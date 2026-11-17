@@ -46,7 +46,9 @@ async function cleanUp() {
     await exited;
   }
   server?.close();
-  if (profileDirectory) await rm(profileDirectory, { recursive: true, force: true });
+  // Chromium's child processes outlive the one killed, and may still be
+  // writing to the profile as it is removed.
+  if (profileDirectory) await rm(profileDirectory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }
 
 async function fail(message) {

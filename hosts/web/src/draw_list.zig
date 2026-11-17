@@ -3,6 +3,10 @@ const zui = @import("zui");
 const Text = @import("text.zig").Text;
 const GlyphAtlas = @import("glyph_atlas.zig").GlyphAtlas;
 const truetype = @import("truetype.zig");
+const backdrop_blur = @import("backdrop_blur.zig");
+const PixelRegion = backdrop_blur.PixelRegion;
+const Taps = backdrop_blur.Taps;
+const SplitWeight = backdrop_blur.SplitWeight;
 
 /// A frame's commands laid out as colored triangles in layout units, in
 /// paint order, cut into batches that each draw under one scissor
@@ -11,17 +15,29 @@ const truetype = @import("truetype.zig");
 /// triangle: rounded corners in eight segments, borders inside their
 /// bounds, gradients in bands of OKLab color, shadows faded in rings, text
 /// as a textured quad per glyph, and transforms applied to every vertex.
-/// Images, backdrop blurs and materials are not laid out yet. Memory is
-/// reserved by `init`.
+/// A backdrop blur runs before the batch that samples it, and a material
+/// is a batch of its own, drawn by its pattern. Images are not laid out
+/// yet. Memory is reserved by `init`.
 ///
 /// ```zig
 /// var draw_list: DrawList = try .init(gpa);
 /// draw_list.layOut(frame.commands(), frame.params, &text);
-/// for (draw_list.batches()) |batch| draw(draw_list.vertices()[batch.first_vertex..][0..batch.vertex_count], batch.scissor);
+/// var next_blur: usize = 0;
+/// for (draw_list.batches(), 0..) |batch, index| {
+///     while (next_blur < draw_list.backdropBlurs().len and draw_list.backdropBlurs()[next_blur].before_batch == index) : (next_blur += 1) {
+///         blur(draw_list.backdropBlurs()[next_blur], draw_list.blurTaps());
+///     }
+///     draw(draw_list.vertices()[batch.first_vertex..][0..batch.vertex_count], batch.scissor, batch.material);
+/// }
 /// ```
 pub const DrawList = struct {
     pub const max_vertices = 1 << 18;
     pub const max_batches = 1024;
+    /// As many as zui-sokol's renderer blurs in a frame.
+    pub const max_backdrop_blurs = 16;
+    pub const max_blur_taps = max_backdrop_blurs * 2 * Taps.max_count;
+    /// As many as zui-sokol's renderer draws in a frame.
+    pub const max_materials = 256;
     /// Triangles per rounded corner, as zui-sokol's renderer draws them.
     pub const corner_segments = 8;
 
@@ -33,7 +49,9 @@ pub const DrawList = struct {
         /// For `.bitmap_glyphs`, this vertex's texture coordinates. For
         /// `.glyph_atlas`, those at the window's origin, from which
         /// `texture_per_unit` finds each pixel's, the same at every vertex
-        /// of a glyph.
+        /// of a glyph. For `.material`, the vertex's position from the
+        /// element's top left, in its layout units, where the pattern is
+        /// found.
         texture_coordinates: [2]f32 = .{ 0, 0 },
         /// For `.glyph_atlas`, how the texture coordinates change per
         /// layout unit along the window's x, then its y.
@@ -56,6 +74,11 @@ pub const DrawList = struct {
         glyph_atlas,
         /// `Text.bitmap_glyph_texels`, sampled at the nearest texel.
         bitmap_glyphs,
+        /// The last backdrop blur run, at this pixel, replacing what was
+        /// drawn there.
+        backdrop_blur,
+        /// The batch's material, at `texture_coordinates`.
+        material,
     };
 
     pub const Batch = extern struct {
@@ -64,14 +87,57 @@ pub const DrawList = struct {
         /// In physical pixels from the bottom-left corner, as WebGL's
         /// `scissor` takes it.
         scissor: Scissor,
+        /// Which of `materials()` the batch's `.material` vertices draw, or
+        /// `no_material`.
+        material: u32 = no_material,
     };
+
+    pub const no_material = std.math.maxInt(u32);
 
     pub const Scissor = extern struct { x: i32, y: i32, width: i32, height: i32 };
 
+    /// Run before batch `before_batch` is drawn: what was drawn so far,
+    /// inside `region`, blurred along x by each of its taps into one float
+    /// target, then that along y into another, which the batch's
+    /// `.backdrop_blur` vertices sample. A sample past the region takes its
+    /// edge pixel.
+    pub const BackdropBlur = extern struct {
+        before_batch: u32,
+        first_tap: u32,
+        tap_count: u32,
+        /// In whole physical pixels from the top-left corner: left, top,
+        /// right and bottom.
+        region: [4]f32,
+    };
+
+    /// One sample of a blur along its axis: `offset` pixels from the pixel
+    /// blurred, linearly filtered, scaled by `weight` and added to the
+    /// target. Each Gaussian tap is two, as zui-sokol adds its weight in
+    /// two parts.
+    pub const BlurTap = extern struct { offset: f32, weight: f32 };
+
+    /// zui-sokol's material shader's uniforms, colors in sRGB's encoding
+    /// from 0 to 1.
+    pub const Material = extern struct {
+        first_color: [4]f32,
+        second_color: [4]f32,
+        size_and_scale: [4]f32,
+        pattern_and_phase: [4]f32,
+    };
+
     vertex_storage: []Vertex,
     batch_storage: []Batch,
+    backdrop_blur_storage: []BackdropBlur,
+    blur_tap_storage: []BlurTap,
+    material_storage: []Material,
     vertex_count: u32 = 0,
     batch_count: u32 = 0,
+    backdrop_blur_count: u32 = 0,
+    blur_tap_count: u32 = 0,
+    material_count: u32 = 0,
+    /// False when the page cannot blur, so that blurs draw their tint
+    /// alone, as zui-sokol's renderer does on a GPU without float targets.
+    blurs_backdrops: bool = true,
     /// Shapes left out of a frame because the vertices were full.
     vertex_overflows: u32 = 0,
     /// Clips that shared the last batch's scissor because the batches were
@@ -80,14 +146,32 @@ pub const DrawList = struct {
     /// Transforms nested deeper than `TransformStack` holds, drawn as
     /// their parent is.
     transform_overflows: u32 = 0,
+    /// Blurs drawn as their tint alone, and materials as their fallback,
+    /// because the frame had no room left for them.
+    effect_overflows: u32 = 0,
 
     pub fn init(gpa: std.mem.Allocator) std.mem.Allocator.Error!DrawList {
         const vertex_storage = try gpa.alloc(Vertex, max_vertices);
         errdefer gpa.free(vertex_storage);
-        return .{ .vertex_storage = vertex_storage, .batch_storage = try gpa.alloc(Batch, max_batches) };
+        const batch_storage = try gpa.alloc(Batch, max_batches);
+        errdefer gpa.free(batch_storage);
+        const backdrop_blur_storage = try gpa.alloc(BackdropBlur, max_backdrop_blurs);
+        errdefer gpa.free(backdrop_blur_storage);
+        const blur_tap_storage = try gpa.alloc(BlurTap, max_blur_taps);
+        errdefer gpa.free(blur_tap_storage);
+        return .{
+            .vertex_storage = vertex_storage,
+            .batch_storage = batch_storage,
+            .backdrop_blur_storage = backdrop_blur_storage,
+            .blur_tap_storage = blur_tap_storage,
+            .material_storage = try gpa.alloc(Material, max_materials),
+        };
     }
 
     pub fn deinit(self: *DrawList, gpa: std.mem.Allocator) void {
+        gpa.free(self.material_storage);
+        gpa.free(self.blur_tap_storage);
+        gpa.free(self.backdrop_blur_storage);
         gpa.free(self.batch_storage);
         gpa.free(self.vertex_storage);
     }
@@ -100,6 +184,19 @@ pub const DrawList = struct {
         return self.batch_storage[0..self.batch_count];
     }
 
+    /// In the order they run, which is the order of their batches.
+    pub fn backdropBlurs(self: *const DrawList) []const BackdropBlur {
+        return self.backdrop_blur_storage[0..self.backdrop_blur_count];
+    }
+
+    pub fn blurTaps(self: *const DrawList) []const BlurTap {
+        return self.blur_tap_storage[0..self.blur_tap_count];
+    }
+
+    pub fn materials(self: *const DrawList) []const Material {
+        return self.material_storage[0..self.material_count];
+    }
+
     /// Replaces what was laid out before with `commands`, a frame's,
     /// drawn into a target of `params.viewport` units at
     /// `params.scale × params.zoom` pixels each, its text in `text`'s
@@ -109,6 +206,9 @@ pub const DrawList = struct {
         text.prepareGlyphs(commands, builder.pixels_per_unit);
         self.vertex_count = 0;
         self.batch_count = 0;
+        self.backdrop_blur_count = 0;
+        self.blur_tap_count = 0;
+        self.material_count = 0;
         builder.beginBatch(null);
         var clips: ClipStack = .{};
         var transforms: TransformStack = .{};
@@ -121,6 +221,8 @@ pub const DrawList = struct {
                 .border => |border| builder.strokeBorder(bounds, border.widths, border.corner_radius, colorOf(border.color)),
                 .gradient => |gradient| builder.fillGradient(bounds, gradient),
                 .shadow => |shadow| builder.drawShadow(bounds, shadow),
+                .backdrop_blur => |blur| builder.drawBackdropBlur(bounds, blur),
+                .material => |material| builder.drawMaterial(bounds, material),
                 .text => |line| if (text.trueTypeFont(line.style.font)) |font| {
                     builder.drawTrueTypeText(text.atlas, font, line.content, bounds, line.style);
                 } else if (text.bitmap_fonts_loaded) {
@@ -158,33 +260,148 @@ const Builder = struct {
         self.shape_overflowed = false;
     }
 
-    /// A shape that did not fit whole is left out whole.
+    /// A shape that did not fit whole is left out whole, from every batch
+    /// it reached.
     fn endShape(self: *Builder) void {
         if (!self.shape_overflowed) return;
         const list = self.list;
         list.vertex_count = self.shape_start;
-        const batch = &list.batch_storage[list.batch_count - 1];
-        batch.vertex_count = list.vertex_count - batch.first_vertex;
+        var index = list.batch_count;
+        while (index > 0) {
+            index -= 1;
+            const batch = &list.batch_storage[index];
+            if (batch.first_vertex + batch.vertex_count <= self.shape_start) break;
+            batch.first_vertex = @min(batch.first_vertex, self.shape_start);
+            batch.vertex_count = self.shape_start - batch.first_vertex;
+        }
         list.vertex_overflows += 1;
     }
 
-    /// A batch with nothing in it yet takes the new scissor instead.
     fn beginBatch(self: *Builder, clip: ?zui.Rect) void {
+        if (!self.beginBatchWith(self.scissorOf(clip orelse wholeViewport(self.viewport)), DrawList.no_material)) {
+            self.list.batch_overflows += 1;
+        }
+    }
+
+    /// A batch with nothing in it yet is taken over instead. False, starting
+    /// nothing, when the batches are full.
+    fn beginBatchWith(self: *Builder, scissor: DrawList.Scissor, material: u32) bool {
         const list = self.list;
-        const scissor = self.scissorOf(clip orelse wholeViewport(self.viewport));
         if (list.batch_count > 0) {
             const last = &list.batch_storage[list.batch_count - 1];
             if (last.vertex_count == 0) {
                 last.scissor = scissor;
-                return;
+                last.material = material;
+                return true;
             }
-            if (list.batch_count == DrawList.max_batches) {
-                list.batch_overflows += 1;
-                return;
+            if (list.batch_count == DrawList.max_batches) return false;
+        }
+        list.batch_storage[list.batch_count] = .{ .first_vertex = list.vertex_count, .vertex_count = 0, .scissor = scissor, .material = material };
+        list.batch_count += 1;
+        return true;
+    }
+
+    fn currentBatch(self: *const Builder) *DrawList.Batch {
+        return &self.list.batch_storage[self.list.batch_count - 1];
+    }
+
+    /// Whether `count` batches more can begin, the current one taken over
+    /// if it is empty.
+    fn hasRoomForBatches(self: *const Builder, count: u32) bool {
+        const reusable: u32 = if (self.currentBatch().vertex_count == 0) 1 else 0;
+        return self.list.batch_count + count - reusable <= DrawList.max_batches;
+    }
+
+    /// As zui-sokol's renderer blurs: inside the outline, what was drawn
+    /// before blurred, then the tint over it. Drawn as the tint alone when
+    /// the page cannot blur or the frame has no room left.
+    fn drawBackdropBlur(self: *Builder, bounds: zui.Rect, blur: anytype) void {
+        if (self.list.blurs_backdrops) {
+            if (self.recordBackdropBlur(bounds, blur.radius)) {
+                var outline: Outline = .{};
+                outline.trace(bounds, blur.corner_radius, .{});
+                self.fillOutlineWith(&outline, centerOf(bounds), .{ .position = undefined, .color = .white, .texture = .backdrop_blur }, null);
             }
         }
-        list.batch_storage[list.batch_count] = .{ .first_vertex = list.vertex_count, .vertex_count = 0, .scissor = scissor };
-        list.batch_count += 1;
+        self.fillRectangle(bounds, blur.corner_radius, colorOf(blur.tint));
+    }
+
+    /// Begins the batch the blur runs before. False when nothing is to be
+    /// blurred: the region is empty, or the frame has no room, which is
+    /// counted.
+    fn recordBackdropBlur(self: *Builder, bounds: zui.Rect, radius: f32) bool {
+        const list = self.list;
+        const target_size: [2]f32 = .{ @round(self.viewport[0] * self.pixels_per_unit), @round(self.viewport[1] * self.pixels_per_unit) };
+        const pixels_per_unit: [2]f32 = .{ target_size[0] / self.viewport[0], target_size[1] / self.viewport[1] };
+        const region: PixelRegion = .covering(self.to_window.boundsOf(bounds), pixels_per_unit, target_size);
+        if (region.isEmpty()) return false;
+        const taps: Taps = .gaussian(radius * pixels_per_unit[0]);
+        if (list.backdrop_blur_count == DrawList.max_backdrop_blurs or
+            list.blur_tap_count + 2 * taps.count > DrawList.max_blur_taps or
+            !self.hasRoomForBatches(1))
+        {
+            list.effect_overflows += 1;
+            return false;
+        }
+        _ = self.beginBatchWith(self.currentBatch().scissor, DrawList.no_material);
+        const first_tap = list.blur_tap_count;
+        for (taps.weights[0..taps.count], taps.offsets[0..taps.count]) |weight, offset| {
+            const split: SplitWeight = .of(weight);
+            for ([2]f32{ split.coarseValue(), split.fineValue() }) |part| if (part > 0) {
+                list.blur_tap_storage[list.blur_tap_count] = .{ .offset = offset, .weight = part };
+                list.blur_tap_count += 1;
+            };
+        }
+        list.backdrop_blur_storage[list.backdrop_blur_count] = .{
+            .before_batch = list.batch_count - 1,
+            .first_tap = first_tap,
+            .tap_count = list.blur_tap_count - first_tap,
+            .region = .{ region.left, region.top, region.right, region.bottom },
+        };
+        list.backdrop_blur_count += 1;
+        return true;
+    }
+
+    /// A batch of its own, drawn by zui-sokol's material shader inside the
+    /// outline, and the batch after it begun for what follows. Drawn as its
+    /// fallback when the frame has no room left.
+    fn drawMaterial(self: *Builder, bounds: zui.Rect, material: anytype) void {
+        const list = self.list;
+        if (list.material_count == DrawList.max_materials or !self.hasRoomForBatches(2)) {
+            list.effect_overflows += 1;
+            self.fillRectangle(bounds, material.corner_radius, colorOf(material.fallback));
+            return;
+        }
+        const scissor = self.currentBatch().scissor;
+        _ = self.beginBatchWith(scissor, list.material_count);
+        const handle = material.handle;
+        const first = colorComponents(handle.first);
+        list.material_storage[list.material_count] = .{
+            .first_color = first,
+            .second_color = if (handle.pattern == .solid) first else colorComponents(handle.second),
+            .size_and_scale = .{ bounds.width, bounds.height, handle.scale, 0 },
+            .pattern_and_phase = .{ @floatFromInt(@intFromEnum(handle.pattern)), handle.phase, 0, 0 },
+        };
+        list.material_count += 1;
+        var outline: Outline = .{};
+        outline.trace(bounds, material.corner_radius, .{});
+        self.fillOutlineWith(&outline, centerOf(bounds), .{ .position = undefined, .color = .white, .texture = .material }, .{ bounds.x, bounds.y });
+        _ = self.beginBatchWith(scissor, DrawList.no_material);
+    }
+
+    /// As a fan from `center`, each vertex `template` at its point, and,
+    /// given `local_origin`, its texture coordinates the point's position
+    /// from there.
+    fn fillOutlineWith(self: *Builder, outline: *const Outline, center: [2]f32, template: DrawList.Vertex, local_origin: ?[2]f32) void {
+        for (0..outline.count) |index| {
+            const next = (index + 1) % outline.count;
+            for ([3][2]f32{ center, outline.points[index], outline.points[next] }) |point| {
+                var laid_out = template;
+                laid_out.position = self.to_window.apply(point);
+                if (local_origin) |origin| laid_out.texture_coordinates = .{ point[0] - origin[0], point[1] - origin[1] };
+                self.add(laid_out);
+            }
+        }
     }
 
     /// Truncated to whole pixels, as sokol_gfx's `applyScissorRectf` does.
@@ -335,10 +552,7 @@ const Builder = struct {
     /// As a fan from `center`, which an outline of a rounded rectangle
     /// always surrounds.
     fn fillOutline(self: *Builder, outline: *const Outline, center: [2]f32, color: zui.Color) void {
-        for (0..outline.count) |index| {
-            const next = (index + 1) % outline.count;
-            self.triangle(.{ center, outline.points[index], outline.points[next] }, color);
-        }
+        self.fillOutlineWith(outline, center, .{ .position = undefined, .color = color }, null);
     }
 
     /// Inside the bounds, as CSS draws a border: a ring between the
@@ -426,6 +640,15 @@ const Builder = struct {
 /// into it.
 fn colorOf(color: anytype) zui.Color {
     return if (@TypeOf(color) == zui.ExtendedColor) color.toColor() else color;
+}
+
+fn colorComponents(color: zui.Color) [4]f32 {
+    return .{
+        @as(f32, @floatFromInt(color.r)) / 255,
+        @as(f32, @floatFromInt(color.g)) / 255,
+        @as(f32, @floatFromInt(color.b)) / 255,
+        @as(f32, @floatFromInt(color.a)) / 255,
+    };
 }
 
 /// A rectangle by its edges, in layout units or texture coordinates.

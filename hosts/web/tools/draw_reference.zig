@@ -24,8 +24,8 @@ const gl_unsigned_byte = 0x1401;
 /// What the browser's client draws so far.
 fn isDrawnInBrowser(command: Command) bool {
     return switch (command.payload) {
-        .rectangle, .border, .text, .gradient, .shadow, .clip_begin, .clip_end, .transform_begin, .transform_end => true,
-        .image, .backdrop_blur, .material => false,
+        .rectangle, .border, .text, .gradient, .shadow, .backdrop_blur, .material, .clip_begin, .clip_end, .transform_begin, .transform_end => true,
+        .image => false,
     };
 }
 

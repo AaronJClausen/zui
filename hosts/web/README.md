@@ -7,7 +7,7 @@ Built by roadmap items V4 (the demo in a browser, a thin client over zui_wire) a
 ## Status
 
 V4 has begun. The client's decoder runs in WebAssembly: `zig build`
-writes `zig-out/web/zui-web.wasm` (63 KB in ReleaseSmall, 35 MiB of memory
+writes `zig-out/web/zui-web.wasm` (66 KB in ReleaseSmall, 35 MiB of memory
 once `zuiWebInit` reserves it), which takes a `zui_wire` stream in pieces of any size, as a socket
 delivers it, and decodes each frame once all of it has arrived.
 `zig build test-demo` declares every screen of zui-sokol's tour
@@ -21,11 +21,16 @@ WebGL 2: rectangles, borders, clips, gradients, shadows and transforms,
 and text, once the page hands the client the stream's fonts. TrueType
 glyphs are rasterized by stb_truetype, compiled into the client without a
 C library, into an atlas packed as zui-sokol packs its own; bitmap text
-uses sokol_debugtext's six fonts. Backdrop blurs and materials are not
-drawn yet, and there is no page. `zig build test-draw` draws a frame of
+uses sokol_debugtext's six fonts. A backdrop blur copies what was drawn
+beneath it and blurs it as zui-sokol does, along x and then y into two
+half-float targets, before the pane is drawn from them; a material is drawn
+by zui-sokol's material shader, ported to GLSL ES. Without
+`EXT_color_buffer_float`, blurs are drawn as their tint alone. Images are
+not drawn yet, and there is no page. `zig build test-draw` draws a frame of
 each of the tour's screens with zui-sokol's renderer and with the client in
 headless Chromium, and checks that every pixel matches, within 2 of each
-color or a pixel's neighbor, shapes and text alike. A frame may have one
+color or a pixel's neighbor: shapes, text, blurs and materials alike. A
+frame may have one
 pixel that matches nothing nearby: a glyph's partial coverage at its edge
 is a color no neighbor has, and the two rasterizers decide a pixel that
 close to a turned glyph's edge differently. Of the 13 frames, only the

@@ -178,8 +178,36 @@ export fn zuiWebPixelsPerUnit() f32 {
     return if (newest) |frame| frame.params.scale * frame.params.zoom else 1;
 }
 
-/// Since `zuiWebInit`, how often a frame left a shape out, or drew a clip
-/// or transform as its parent, because the draw list was full.
+/// The newest frame's backdrop blurs, `zuiWebBackdropBlurCount` of them,
+/// each a `DrawList.BackdropBlur` whose taps are in `zuiWebBlurTaps`, each
+/// a `DrawList.BlurTap`.
+export fn zuiWebBackdropBlurs() usize {
+    return @intFromPtr(draw_list.backdrop_blur_storage.ptr);
+}
+
+export fn zuiWebBackdropBlurCount() u32 {
+    return draw_list.backdrop_blur_count;
+}
+
+export fn zuiWebBlurTaps() usize {
+    return @intFromPtr(draw_list.blur_tap_storage.ptr);
+}
+
+/// The newest frame's materials, each a `DrawList.Material`, indexed by
+/// the batches that draw them.
+export fn zuiWebMaterials() usize {
+    return @intFromPtr(draw_list.material_storage.ptr);
+}
+
+/// From the next frame laid out, backdrop blurs are drawn as their tint
+/// alone, for a browser that cannot render into float textures.
+export fn zuiWebDrawBackdropBlursAsTints() void {
+    draw_list.blurs_backdrops = false;
+}
+
+/// Since `zuiWebInit`, how often a frame left a shape out, drew a clip
+/// or transform as its parent, or a blur or material as what it lowers
+/// to, because the draw list was full.
 export fn zuiWebDrawListOverflows() u32 {
-    return draw_list.vertex_overflows + draw_list.batch_overflows + draw_list.transform_overflows;
+    return draw_list.vertex_overflows + draw_list.batch_overflows + draw_list.transform_overflows + draw_list.effect_overflows;
 }

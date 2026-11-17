@@ -305,7 +305,91 @@ test "text in a font id past the bitmap fonts that no TrueType font was added fo
     try testing.expectEqual(40.0 / 48.0, laid_out.draw_list.vertices()[0].texture_coordinates[1]);
 }
 
+test "a batch, a blur and a material are what the page reads" {
+    try testing.expectEqual(28, @sizeOf(DrawList.Batch));
+    try testing.expectEqual(24, @offsetOf(DrawList.Batch, "material"));
+    try testing.expectEqual(28, @sizeOf(DrawList.BackdropBlur));
+    try testing.expectEqual(12, @offsetOf(DrawList.BackdropBlur, "region"));
+    try testing.expectEqual(8, @sizeOf(DrawList.BlurTap));
+    try testing.expectEqual(64, @sizeOf(DrawList.Material));
+}
+
+const frost: DemoCommand = .{
+    .bounds = .{ .x = 10.25, .y = 20, .width = 30, .height = 40 },
+    .id = 2,
+    .payload = .{ .backdrop_blur = .{ .radius = 5, .tint = .{ .r = 255, .g = 255, .b = 255, .a = 51 }, .corner_radius = .all(4) } },
+};
+const backdrop: DemoCommand = .{ .bounds = .{ .width = 200, .height = 100 }, .id = 1, .payload = .{ .rectangle = .{ .color = .black, .corner_radius = .zero } } };
+const fan_vertices = 4 * (DrawList.corner_segments + 1) * 3;
+
+test "a backdrop blur runs before a batch of its own, which samples it inside the outline and then draws the tint" {
+    var laid_out = try layOutForTest(&.{ backdrop, frost });
+    defer laid_out.deinit();
+    const draw_list = &laid_out.draw_list;
+    try testing.expectEqual(2, draw_list.batches().len);
+    const blurs = draw_list.backdropBlurs();
+    try testing.expectEqual(1, blurs.len);
+    try testing.expectEqual(1, blurs[0].before_batch);
+    try testing.expectEqualDeep([4]f32{ 20, 40, 81, 120 }, blurs[0].region);
+    var total: f32 = 0;
+    for (draw_list.blurTaps()[blurs[0].first_tap..][0..blurs[0].tap_count]) |tap| total += tap.weight;
+    try testing.expectApproxEqAbs(@as(f32, 1), total, 0.25 / 255.0);
+    const blurred = draw_list.vertices()[draw_list.batches()[1].first_vertex..];
+    try testing.expectEqual(DrawList.Texture.backdrop_blur, blurred[0].texture);
+    try testing.expectEqual(DrawList.Texture.none, blurred[fan_vertices].texture);
+    try testing.expectEqual(51, blurred[fan_vertices].color.a);
+}
+
+test "a blur the page cannot run is its tint alone" {
+    var laid_out = try layOutForTest(&.{});
+    defer laid_out.deinit();
+    const draw_list = &laid_out.draw_list;
+    draw_list.blurs_backdrops = false;
+    draw_list.layOut(&[_]DemoCommand{ backdrop, frost }, demo_params, &laid_out.text);
+    try testing.expectEqual(0, draw_list.backdropBlurs().len);
+    try testing.expectEqual(1, draw_list.batches().len);
+    try testing.expectEqual(6 + fan_vertices, draw_list.vertices().len);
+    try testing.expectEqual(0, draw_list.effect_overflows);
+}
+
+test "blurs past the frame's limit are their tint alone, and counted" {
+    var laid_out = try layOutForTest(&.{});
+    defer laid_out.deinit();
+    const draw_list = &laid_out.draw_list;
+    const too_many: [DrawList.max_backdrop_blurs + 1]DemoCommand = @splat(frost);
+    draw_list.layOut(&too_many, demo_params, &laid_out.text);
+    try testing.expectEqual(DrawList.max_backdrop_blurs, draw_list.backdropBlurs().len);
+    try testing.expectEqual(1, draw_list.effect_overflows);
+}
+
+test "a material is a batch of its own, its vertices at their place in the element, and the batch after it has none" {
+    const material: DemoCommand = .{ .bounds = .{ .x = 10, .y = 20, .width = 40, .height = 30 }, .id = 3, .payload = .{ .material = .{
+        .handle = .{ .pattern = .sheen, .first = .rgb(0x336699), .second = .white, .phase = 0.25, .scale = 32 },
+        .fallback = .rgb(0x336699),
+        .corner_radius = .all(6),
+    } } };
+    var laid_out = try layOutForTest(&.{ backdrop, material, backdrop });
+    defer laid_out.deinit();
+    const draw_list = &laid_out.draw_list;
+    const batches = draw_list.batches();
+    try testing.expectEqual(3, batches.len);
+    try testing.expectEqual(DrawList.no_material, batches[0].material);
+    try testing.expectEqual(0, batches[1].material);
+    try testing.expectEqual(fan_vertices, batches[1].vertex_count);
+    try testing.expectEqual(DrawList.no_material, batches[2].material);
+    const drawn = draw_list.materials()[0];
+    try testing.expectEqualDeep([4]f32{ 0x33.0 / 255.0, 0x66.0 / 255.0, 0x99.0 / 255.0, 1 }, drawn.first_color);
+    try testing.expectEqualDeep([4]f32{ 1, 1, 1, 1 }, drawn.second_color);
+    try testing.expectEqualDeep([4]f32{ 40, 30, 32, 0 }, drawn.size_and_scale);
+    try testing.expectEqualDeep([4]f32{ 1, 0.25, 0, 0 }, drawn.pattern_and_phase);
+    const center = draw_list.vertices()[batches[1].first_vertex];
+    try testing.expectEqual(DrawList.Texture.material, center.texture);
+    try testing.expectEqualDeep([2]f32{ 30, 35 }, center.position);
+    try testing.expectEqualDeep([2]f32{ 20, 15 }, center.texture_coordinates);
+}
+
 test {
+    _ = @import("backdrop_blur.zig");
     _ = @import("draw_list.zig");
     _ = @import("glyph_atlas.zig");
     _ = @import("text.zig");
