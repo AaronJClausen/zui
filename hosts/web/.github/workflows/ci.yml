@@ -61,3 +61,17 @@ jobs:
       - run: node --version
       - run: zig build test-demo
       - run: zig build test-demo -Doptimize=ReleaseSafe
+
+  draw:
+    name: The tour's frames drawn in headless Chrome, against zui-sokol's renderer (Linux, Xvfb)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - name: Install sokol's X11, OpenGL and PulseAudio dependencies, which the tour links, and Xvfb
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxi-dev libxcursor-dev libgl1-mesa-dev libpulse-dev xvfb
+      - run: google-chrome --version
+      - run: xvfb-run --auto-servernum zig build test-draw -Dbrowser=google-chrome

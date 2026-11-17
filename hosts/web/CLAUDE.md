@@ -18,7 +18,7 @@ you declare); they hold here too.
 |---|---|
 | the client and, later, the host | `src/<topic>.zig`, reached from `src/root.zig` |
 | what the browser runs | reached from `src/browser.zig`, the client's WebAssembly exports, which `zig build check` compiles for `wasm32-freestanding` |
-| what only a check needs in the browser | `src/browser_wire_check.zig`, which adds exports to the client's for `zig build test-demo` |
+| what only a check needs in the browser | `src/browser_wire_check.zig`, which adds exports to the client's for `zig build test-demo`; `web/check_*`, the pages and Node scripts the checks run |
 | native programs the checks run, such as the tour's stream | `tools/` |
 | JavaScript and HTML glue | `web/` |
 | CI | `.github/workflows/ci.yml` |
@@ -36,6 +36,7 @@ Run each with `timeout 590` in front:
 | `zig build test -Doptimize=ReleaseSafe` and `-Doptimize=ReleaseFast` | before committing; CI runs all three |
 | `zig build check` | always; it also compiles the client for `wasm32-freestanding`, so a browser break fails here and in CI |
 | `zig build test-demo` | any change to the client, `src/demo_ui.zig` or the zui pin; needs Node, and in CI runs on Linux |
+| `zig build test-draw` | any change to how the client lays frames out or the page draws them, or to the zui or zui-sokol pin; needs Node, Chromium (`-Dbrowser=<path>` names another) and a display, and in CI runs on Linux under Xvfb. Agents may run Chromium headless here, under `timeout`, leaving no Chromium process behind |
 | `zig build fmt` | before committing; CI runs `fmt-check` |
 
 - Every command, test run and CI job has a hard limit of 10 minutes

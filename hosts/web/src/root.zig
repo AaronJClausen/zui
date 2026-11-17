@@ -4,6 +4,7 @@ const zui_wire = @import("zui_wire");
 
 pub const FrameStream = @import("frame_stream.zig").FrameStream;
 pub const DemoUi = @import("demo_ui.zig").DemoUi;
+pub const DrawList = @import("draw_list.zig").DrawList;
 
 const testing = std.testing;
 
@@ -149,4 +150,101 @@ test "the demo's context decodes a stream" {
     var stream: FrameStream(DemoUi) = try .init(testing.allocator, .{});
     defer stream.deinit(testing.allocator);
     try testing.expectEqual(null, try stream.nextFrame());
+}
+
+const DemoCommand = DemoUi.RenderCommand;
+const demo_params: zui.FrameParams = .{ .now = .zero, .viewport = .{ 200, 100 }, .scale = 2 };
+
+fn layOutForTest(commands: []const DemoCommand) !DrawList {
+    var draw_list: DrawList = try .init(testing.allocator);
+    draw_list.layOut(commands, demo_params);
+    return draw_list;
+}
+
+test "a square rectangle is two triangles in its color, in one batch over the whole target" {
+    var draw_list = try layOutForTest(&.{
+        .{ .bounds = .{ .x = 10, .y = 20, .width = 30, .height = 40 }, .id = 1, .payload = .{ .rectangle = .{ .color = .rgb(0x336699), .corner_radius = .zero } } },
+    });
+    defer draw_list.deinit(testing.allocator);
+    try testing.expectEqual(6, draw_list.vertices().len);
+    try testing.expectEqualDeep([2]f32{ 40, 60 }, draw_list.vertices()[2].position);
+    try testing.expectEqualDeep(zui.Color.rgb(0x336699), draw_list.vertices()[0].color);
+    try testing.expectEqual(1, draw_list.batches().len);
+    try testing.expectEqualDeep(DrawList.Scissor{ .x = 0, .y = 0, .width = 400, .height = 200 }, draw_list.batches()[0].scissor);
+}
+
+test "a clip starts a batch scissored in pixels from the bottom, and its end restores the one around it" {
+    var draw_list = try layOutForTest(&.{
+        .{ .bounds = .{ .width = 200, .height = 100 }, .id = 1, .payload = .{ .rectangle = .{ .color = .black, .corner_radius = .zero } } },
+        .{ .bounds = .{}, .id = 2, .payload = .{ .clip_begin = .{ .x = 10.75, .y = 20, .width = 30, .height = 10 } } },
+        .{ .bounds = .{ .width = 200, .height = 100 }, .id = 3, .payload = .{ .rectangle = .{ .color = .white, .corner_radius = .all(4) } } },
+        .{ .bounds = .{}, .id = 2, .payload = .clip_end },
+        .{ .bounds = .{}, .id = 4, .payload = .{ .clip_begin = .{ .width = 1, .height = 1 } } },
+        .{ .bounds = .{}, .id = 4, .payload = .clip_end },
+        .{ .bounds = .{ .width = 5, .height = 5 }, .id = 5, .payload = .{ .border = .{ .color = .white, .widths = .all(1), .corner_radius = .zero } } },
+    });
+    defer draw_list.deinit(testing.allocator);
+    const batches = draw_list.batches();
+    try testing.expectEqual(3, batches.len);
+    try testing.expectEqualDeep(DrawList.Scissor{ .x = 21, .y = 200 - 60, .width = 60, .height = 20 }, batches[1].scissor);
+    try testing.expectEqual(6, batches[1].first_vertex);
+    try testing.expectEqual(4 * (DrawList.corner_segments + 1) * 3, batches[1].vertex_count);
+    try testing.expectEqualDeep(DrawList.Scissor{ .x = 0, .y = 0, .width = 400, .height = 200 }, batches[2].scissor);
+    try testing.expectEqual(4 * (DrawList.corner_segments + 1) * 6, batches[2].vertex_count);
+}
+
+test "a transform moves every vertex up to its end" {
+    const square: zui.Rect = .{ .width = 10, .height = 10 };
+    var draw_list = try layOutForTest(&.{
+        .{ .bounds = square, .id = 1, .payload = .{ .transform_begin = .{ .translation = .{ 50, 0 } } } },
+        .{ .bounds = square, .id = 2, .payload = .{ .rectangle = .{ .color = .white, .corner_radius = .zero } } },
+        .{ .bounds = square, .id = 1, .payload = .transform_end },
+        .{ .bounds = square, .id = 3, .payload = .{ .rectangle = .{ .color = .white, .corner_radius = .zero } } },
+    });
+    defer draw_list.deinit(testing.allocator);
+    try testing.expectEqualDeep([2]f32{ 50, 0 }, draw_list.vertices()[0].position);
+    try testing.expectEqualDeep([2]f32{ 0, 0 }, draw_list.vertices()[6].position);
+}
+
+test "a gradient's vertices take its colors at their points, and a shadow fades to clear" {
+    var draw_list = try layOutForTest(&.{
+        .{ .bounds = .{ .width = 100, .height = 10 }, .id = 1, .payload = .{ .gradient = .{ .from = .black, .to = .white } } },
+    });
+    defer draw_list.deinit(testing.allocator);
+    const gradient_vertices = draw_list.vertices();
+    var bands_reached_end = false;
+    for (gradient_vertices) |drawn| {
+        if (drawn.position[0] == 0) try testing.expectEqualDeep(zui.Color.black, drawn.color);
+        if (drawn.position[0] == 50) try testing.expect(drawn.color.r > 0 and drawn.color.r < 255);
+        if (drawn.position[0] == 100) {
+            try testing.expectEqualDeep(zui.Color.white, drawn.color);
+            bands_reached_end = true;
+        }
+    }
+    try testing.expect(bands_reached_end);
+
+    draw_list.layOut(&[_]DemoCommand{
+        .{ .bounds = .{ .width = 20, .height = 20 }, .id = 1, .payload = .{ .shadow = .{ .color = .black, .blur = 6 } } },
+    }, demo_params);
+    const shadow_vertices = draw_list.vertices();
+    try testing.expectEqual(255, shadow_vertices[0].color.a);
+    const outermost = shadow_vertices[shadow_vertices.len - 2];
+    try testing.expectEqual(0, outermost.color.a);
+    try testing.expectApproxEqAbs(@as(f32, -6), outermost.position[0], 0.001);
+}
+
+test "a shape that does not fit is left out whole, and the frame after starts again" {
+    var draw_list: DrawList = try .init(testing.allocator);
+    defer draw_list.deinit(testing.allocator);
+    const rounded: DemoCommand = .{ .bounds = .{ .width = 10, .height = 10 }, .id = 1, .payload = .{ .rectangle = .{ .color = .white, .corner_radius = .all(2) } } };
+    const rounded_vertices = 4 * (DrawList.corner_segments + 1) * 3;
+    const too_many = try testing.allocator.alloc(DemoCommand, DrawList.max_vertices / rounded_vertices + 1);
+    defer testing.allocator.free(too_many);
+    @memset(too_many, rounded);
+    draw_list.layOut(too_many, demo_params);
+    try testing.expectEqual(1, draw_list.vertex_overflows);
+    try testing.expectEqual((too_many.len - 1) * rounded_vertices, draw_list.vertices().len);
+    try testing.expectEqual(draw_list.vertices().len, draw_list.batches()[0].vertex_count);
+    draw_list.layOut(too_many[0..1], demo_params);
+    try testing.expectEqual(rounded_vertices, draw_list.vertices().len);
 }

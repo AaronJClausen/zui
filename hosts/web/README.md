@@ -6,14 +6,22 @@ Built by roadmap items V4 (the demo in a browser, a thin client over zui_wire) a
 
 ## Status
 
-V4 has begun. The client's decoder runs in WebAssembly: `zig build` writes
-`zig-out/web/zui-web.wasm` (19 KB in ReleaseSmall, 12 MiB of memory once
-`zuiWebInit` reserves it), which takes a `zui_wire` stream in pieces of any
-size, as a socket delivers it, and decodes each frame once all of it has
-arrived. `zig build test-demo` declares every screen of zui-sokol's tour
+V4 has begun. The client's decoder runs in WebAssembly: `zig build`
+writes `zig-out/web/zui-web.wasm` (37 KB in ReleaseSmall, 20 MiB of memory
+once `zuiWebInit` reserves it), which takes a `zui_wire` stream in pieces of any size, as a socket
+delivers it, and decodes each frame once all of it has arrived.
+`zig build test-demo` declares every screen of zui-sokol's tour
 headlessly, streams its frames to that client under Node in pieces of 1 to
-16,384 bytes, and checks that each of the 312 frames decodes to what the tour
-drew. Nothing draws them yet, and there is no page.
+16,384 bytes, and checks that each of the 312 frames decodes to what the
+tour drew.
+
+The client then lays each frame's shapes out as triangles, as zui-sokol's
+renderer does, and `web/frame_drawer.mjs` draws them on a canvas through
+WebGL 2: rectangles, borders, clips, gradients, shadows and transforms.
+Text, backdrop blurs and materials are not drawn yet, and there is no page.
+`zig build test-draw` draws a frame of each of the tour's screens with
+zui-sokol's renderer and with the client in headless Chromium, and checks
+that every pixel matches, within 2 of each color or a pixel's neighbor.
 See [zui's ROADMAP.md](https://github.com/AaronJClausen/zui/blob/main/ROADMAP.md).
 
 ## Requirements
@@ -23,6 +31,9 @@ See [zui's ROADMAP.md](https://github.com/AaronJClausen/zui/blob/main/ROADMAP.md
 - for `zig build test-demo`: Node on the `PATH`, and on Linux sokol's X11,
   OpenGL and PulseAudio headers, since the tour links them; zui-sokol,
   which holds the tour, is fetched automatically, pinned as zui is
+- for `zig build test-draw`, also Chromium or Google Chrome (`chromium`
+  on the `PATH`, or `-Dbrowser=<path>`), and a display for zui-sokol's
+  OpenGL window: on Linux CI, Xvfb
 
 ## Development
 
@@ -32,6 +43,7 @@ See [zui's ROADMAP.md](https://github.com/AaronJClausen/zui/blob/main/ROADMAP.md
 | `zig build` | write the client, `zig-out/web/zui-web.wasm` |
 | `zig build check` | compile without running, and compile the client for `wasm32-freestanding` |
 | `zig build test-demo` | stream zui-sokol's tour to the client under Node, and check every frame decodes to what was drawn |
+| `zig build test-draw` | draw a frame of each of the tour's screens in headless Chromium, and check each against zui-sokol's renderer drawing it |
 | `zig build fmt` | format the Zig sources |
 | `zig build fmt-check` | fail if a Zig source is not formatted (CI) |
 | `zig build test --fork=../zui` | build against a local zui checkout instead of the pin |
