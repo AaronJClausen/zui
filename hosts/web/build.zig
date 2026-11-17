@@ -69,8 +69,25 @@ fn webModule(b: *std.Build, root_source_file: []const u8, target: std.Build.Reso
         .imports = &.{
             .{ .name = "zui", .module = zui_dependency.module("zui") },
             .{ .name = "zui_wire", .module = zui_dependency.module("zui_wire") },
+            .{ .name = "stb_truetype", .module = stbTruetypeModule(b, target, optimize) },
         },
     });
+}
+
+/// stb_truetype's declarations, translated to Zig, with its implementation
+/// compiled in without a C library, at the commit zui-sokol rasterizes with.
+fn stbTruetypeModule(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Module {
+    const stb_dependency = b.dependency("stb", .{});
+    const translated = b.addTranslateC(.{
+        .root_source_file = stb_dependency.path("stb_truetype.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const module = translated.createModule();
+    module.link_libc = false;
+    module.addCSourceFile(.{ .file = b.path("src/stb_truetype.c"), .flags = &.{"-fvisibility=hidden"} });
+    module.addIncludePath(stb_dependency.path(""));
+    return module;
 }
 
 /// The frame of each of the tour's thirteen screens that `test-draw`

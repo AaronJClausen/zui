@@ -5,6 +5,7 @@ const zui_wire = @import("zui_wire");
 pub const FrameStream = @import("frame_stream.zig").FrameStream;
 pub const DemoUi = @import("demo_ui.zig").DemoUi;
 pub const DrawList = @import("draw_list.zig").DrawList;
+pub const Text = @import("text.zig").Text;
 
 const testing = std.testing;
 
@@ -155,17 +156,39 @@ test "the demo's context decodes a stream" {
 const DemoCommand = DemoUi.RenderCommand;
 const demo_params: zui.FrameParams = .{ .now = .zero, .viewport = .{ 200, 100 }, .scale = 2 };
 
-fn layOutForTest(commands: []const DemoCommand) !DrawList {
+const LaidOut = struct {
+    draw_list: DrawList,
+    text: Text,
+
+    fn deinit(self: *LaidOut) void {
+        self.draw_list.deinit(testing.allocator);
+        self.text.deinit(testing.allocator);
+    }
+};
+
+fn layOutForTest(commands: []const DemoCommand) !LaidOut {
+    var text: Text = try .init(testing.allocator);
+    errdefer text.deinit(testing.allocator);
     var draw_list: DrawList = try .init(testing.allocator);
-    draw_list.layOut(commands, demo_params);
-    return draw_list;
+    draw_list.layOut(commands, demo_params, &text);
+    return .{ .draw_list = draw_list, .text = text };
+}
+
+test "a vertex is the 56 bytes the page reads" {
+    try testing.expectEqual(56, @sizeOf(DrawList.Vertex));
+    try testing.expectEqual(8, @offsetOf(DrawList.Vertex, "color"));
+    try testing.expectEqual(12, @offsetOf(DrawList.Vertex, "texture"));
+    try testing.expectEqual(16, @offsetOf(DrawList.Vertex, "texture_coordinates"));
+    try testing.expectEqual(24, @offsetOf(DrawList.Vertex, "texture_per_unit"));
+    try testing.expectEqual(40, @offsetOf(DrawList.Vertex, "texture_bounds"));
 }
 
 test "a square rectangle is two triangles in its color, in one batch over the whole target" {
-    var draw_list = try layOutForTest(&.{
+    var laid_out = try layOutForTest(&.{
         .{ .bounds = .{ .x = 10, .y = 20, .width = 30, .height = 40 }, .id = 1, .payload = .{ .rectangle = .{ .color = .rgb(0x336699), .corner_radius = .zero } } },
     });
-    defer draw_list.deinit(testing.allocator);
+    defer laid_out.deinit();
+    const draw_list = &laid_out.draw_list;
     try testing.expectEqual(6, draw_list.vertices().len);
     try testing.expectEqualDeep([2]f32{ 40, 60 }, draw_list.vertices()[2].position);
     try testing.expectEqualDeep(zui.Color.rgb(0x336699), draw_list.vertices()[0].color);
@@ -174,7 +197,7 @@ test "a square rectangle is two triangles in its color, in one batch over the wh
 }
 
 test "a clip starts a batch scissored in pixels from the bottom, and its end restores the one around it" {
-    var draw_list = try layOutForTest(&.{
+    var laid_out = try layOutForTest(&.{
         .{ .bounds = .{ .width = 200, .height = 100 }, .id = 1, .payload = .{ .rectangle = .{ .color = .black, .corner_radius = .zero } } },
         .{ .bounds = .{}, .id = 2, .payload = .{ .clip_begin = .{ .x = 10.75, .y = 20, .width = 30, .height = 10 } } },
         .{ .bounds = .{ .width = 200, .height = 100 }, .id = 3, .payload = .{ .rectangle = .{ .color = .white, .corner_radius = .all(4) } } },
@@ -183,8 +206,8 @@ test "a clip starts a batch scissored in pixels from the bottom, and its end res
         .{ .bounds = .{}, .id = 4, .payload = .clip_end },
         .{ .bounds = .{ .width = 5, .height = 5 }, .id = 5, .payload = .{ .border = .{ .color = .white, .widths = .all(1), .corner_radius = .zero } } },
     });
-    defer draw_list.deinit(testing.allocator);
-    const batches = draw_list.batches();
+    defer laid_out.deinit();
+    const batches = laid_out.draw_list.batches();
     try testing.expectEqual(3, batches.len);
     try testing.expectEqualDeep(DrawList.Scissor{ .x = 21, .y = 200 - 60, .width = 60, .height = 20 }, batches[1].scissor);
     try testing.expectEqual(6, batches[1].first_vertex);
@@ -195,22 +218,24 @@ test "a clip starts a batch scissored in pixels from the bottom, and its end res
 
 test "a transform moves every vertex up to its end" {
     const square: zui.Rect = .{ .width = 10, .height = 10 };
-    var draw_list = try layOutForTest(&.{
+    var laid_out = try layOutForTest(&.{
         .{ .bounds = square, .id = 1, .payload = .{ .transform_begin = .{ .translation = .{ 50, 0 } } } },
         .{ .bounds = square, .id = 2, .payload = .{ .rectangle = .{ .color = .white, .corner_radius = .zero } } },
         .{ .bounds = square, .id = 1, .payload = .transform_end },
         .{ .bounds = square, .id = 3, .payload = .{ .rectangle = .{ .color = .white, .corner_radius = .zero } } },
     });
-    defer draw_list.deinit(testing.allocator);
+    defer laid_out.deinit();
+    const draw_list = &laid_out.draw_list;
     try testing.expectEqualDeep([2]f32{ 50, 0 }, draw_list.vertices()[0].position);
     try testing.expectEqualDeep([2]f32{ 0, 0 }, draw_list.vertices()[6].position);
 }
 
 test "a gradient's vertices take its colors at their points, and a shadow fades to clear" {
-    var draw_list = try layOutForTest(&.{
+    var laid_out = try layOutForTest(&.{
         .{ .bounds = .{ .width = 100, .height = 10 }, .id = 1, .payload = .{ .gradient = .{ .from = .black, .to = .white } } },
     });
-    defer draw_list.deinit(testing.allocator);
+    defer laid_out.deinit();
+    const draw_list = &laid_out.draw_list;
     const gradient_vertices = draw_list.vertices();
     var bands_reached_end = false;
     for (gradient_vertices) |drawn| {
@@ -225,7 +250,7 @@ test "a gradient's vertices take its colors at their points, and a shadow fades 
 
     draw_list.layOut(&[_]DemoCommand{
         .{ .bounds = .{ .width = 20, .height = 20 }, .id = 1, .payload = .{ .shadow = .{ .color = .black, .blur = 6 } } },
-    }, demo_params);
+    }, demo_params, &laid_out.text);
     const shadow_vertices = draw_list.vertices();
     try testing.expectEqual(255, shadow_vertices[0].color.a);
     const outermost = shadow_vertices[shadow_vertices.len - 2];
@@ -234,17 +259,54 @@ test "a gradient's vertices take its colors at their points, and a shadow fades 
 }
 
 test "a shape that does not fit is left out whole, and the frame after starts again" {
-    var draw_list: DrawList = try .init(testing.allocator);
-    defer draw_list.deinit(testing.allocator);
+    var laid_out = try layOutForTest(&.{});
+    defer laid_out.deinit();
+    const draw_list = &laid_out.draw_list;
     const rounded: DemoCommand = .{ .bounds = .{ .width = 10, .height = 10 }, .id = 1, .payload = .{ .rectangle = .{ .color = .white, .corner_radius = .all(2) } } };
     const rounded_vertices = 4 * (DrawList.corner_segments + 1) * 3;
     const too_many = try testing.allocator.alloc(DemoCommand, DrawList.max_vertices / rounded_vertices + 1);
     defer testing.allocator.free(too_many);
     @memset(too_many, rounded);
-    draw_list.layOut(too_many, demo_params);
+    draw_list.layOut(too_many, demo_params, &laid_out.text);
     try testing.expectEqual(1, draw_list.vertex_overflows);
     try testing.expectEqual((too_many.len - 1) * rounded_vertices, draw_list.vertices().len);
     try testing.expectEqual(draw_list.vertices().len, draw_list.batches()[0].vertex_count);
-    draw_list.layOut(too_many[0..1], demo_params);
+    draw_list.layOut(too_many[0..1], demo_params, &laid_out.text);
     try testing.expectEqual(rounded_vertices, draw_list.vertices().len);
+}
+
+test "bitmap text is a quad per glyph in its font's row, drawn once the fonts are loaded" {
+    const line: DemoCommand = .{ .bounds = .{ .x = 10, .y = 0, .width = 24, .height = 20 }, .id = 1, .payload = .{ .text = .{ .content = "A\u{e9}", .style = .{ .size = 16, .color = .white, .font = 2 }, .line = 0 } } };
+    var laid_out = try layOutForTest(&.{line});
+    defer laid_out.deinit();
+    try testing.expectEqual(0, laid_out.draw_list.vertices().len);
+
+    var rows: [Text.bitmap_font_bytes]u8 = @splat(0);
+    laid_out.text.loadBitmapFonts(&rows);
+    laid_out.draw_list.layOut(&[_]DemoCommand{line}, demo_params, &laid_out.text);
+    const vertices = laid_out.draw_list.vertices();
+    try testing.expectEqual(2 * 6, vertices.len);
+    const glyph_size = 16 * Text.bitmap_glyph_scale;
+    try testing.expectEqualDeep([2]f32{ 10, (20 - glyph_size) / 2 }, vertices[0].position);
+    try testing.expectEqualDeep([2]f32{ 10 + glyph_size, (20 + glyph_size) / 2 }, vertices[2].position);
+    try testing.expectEqual(DrawList.Texture.bitmap_glyphs, vertices[0].texture);
+    try testing.expectEqualDeep([2]f32{ 'A' * 8.0 / 2048.0, 16.0 / 48.0 }, vertices[0].texture_coordinates);
+    try testing.expectEqualDeep([2]f32{ '?' * 8.0 / 2048.0, 16.0 / 48.0 }, vertices[6].texture_coordinates);
+    try testing.expectEqualDeep([2]f32{ 10 + glyph_size, (20 - glyph_size) / 2 }, vertices[6].position);
+}
+
+test "text in a font id past the bitmap fonts that no TrueType font was added for draws in the last bitmap font" {
+    const line: DemoCommand = .{ .bounds = .{ .width = 12, .height = 16 }, .id = 1, .payload = .{ .text = .{ .content = "x", .style = .{ .size = 16, .color = .white, .font = Text.bitmap_font_count }, .line = 0 } } };
+    var laid_out = try layOutForTest(&.{});
+    defer laid_out.deinit();
+    var rows: [Text.bitmap_font_bytes]u8 = @splat(0);
+    laid_out.text.loadBitmapFonts(&rows);
+    laid_out.draw_list.layOut(&[_]DemoCommand{line}, demo_params, &laid_out.text);
+    try testing.expectEqual(40.0 / 48.0, laid_out.draw_list.vertices()[0].texture_coordinates[1]);
+}
+
+test {
+    _ = @import("draw_list.zig");
+    _ = @import("glyph_atlas.zig");
+    _ = @import("text.zig");
 }

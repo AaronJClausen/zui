@@ -1,30 +1,61 @@
 const std = @import("std");
 const zui = @import("zui");
+const Text = @import("text.zig").Text;
+const GlyphAtlas = @import("glyph_atlas.zig").GlyphAtlas;
+const truetype = @import("truetype.zig");
 
 /// A frame's commands laid out as colored triangles in layout units, in
 /// paint order, cut into batches that each draw under one scissor
 /// rectangle, so the page draws a frame with one vertex buffer and one draw
 /// call per batch. The geometry is zui-sokol's renderer's, triangle for
 /// triangle: rounded corners in eight segments, borders inside their
-/// bounds, gradients in bands of OKLab color, shadows faded in rings, and
-/// transforms applied to every vertex. Text, images, backdrop blurs and
-/// materials are not laid out yet. Memory is reserved by `init`.
+/// bounds, gradients in bands of OKLab color, shadows faded in rings, text
+/// as a textured quad per glyph, and transforms applied to every vertex.
+/// Images, backdrop blurs and materials are not laid out yet. Memory is
+/// reserved by `init`.
 ///
 /// ```zig
 /// var draw_list: DrawList = try .init(gpa);
-/// draw_list.layOut(frame.commands(), frame.params);
+/// draw_list.layOut(frame.commands(), frame.params, &text);
 /// for (draw_list.batches()) |batch| draw(draw_list.vertices()[batch.first_vertex..][0..batch.vertex_count], batch.scissor);
 /// ```
 pub const DrawList = struct {
-    pub const max_vertices = 1 << 19;
+    pub const max_vertices = 1 << 18;
     pub const max_batches = 1024;
     /// Triangles per rounded corner, as zui-sokol's renderer draws them.
     pub const corner_segments = 8;
 
-    /// As the page's WebGL reads it: two floats, then four bytes.
+    /// As the page's WebGL reads it.
     pub const Vertex = extern struct {
         position: [2]f32,
         color: zui.Color,
+        texture: Texture = .none,
+        /// For `.bitmap_glyphs`, this vertex's texture coordinates. For
+        /// `.glyph_atlas`, those at the window's origin, from which
+        /// `texture_per_unit` finds each pixel's, the same at every vertex
+        /// of a glyph.
+        texture_coordinates: [2]f32 = .{ 0, 0 },
+        /// For `.glyph_atlas`, how the texture coordinates change per
+        /// layout unit along the window's x, then its y.
+        texture_per_unit: [2][2]f32 = .{ .{ 0, 0 }, .{ 0, 0 } },
+        /// For `.glyph_atlas`, the glyph's texels: left, top, right and
+        /// bottom. Its triangles reach past them, and a pixel whose
+        /// texture coordinates fall outside is left as it was.
+        texture_bounds: [4]f32 = .{ 0, 0, 0, 0 },
+    };
+
+    /// What a vertex's color is multiplied by.
+    pub const Texture = enum(u32) {
+        none,
+        /// `Text.atlas`, sampled linearly at texture coordinates the page
+        /// finds from each pixel's position, which also decides whether
+        /// the pixel is in the glyph. Interpolated between vertices, both
+        /// would follow where the rasterizer snaps the vertices, which
+        /// SwiftShader does to a sixteenth of a pixel, and a turned glyph
+        /// would differ from zui-sokol's by up to 31 levels.
+        glyph_atlas,
+        /// `Text.bitmap_glyph_texels`, sampled at the nearest texel.
+        bitmap_glyphs,
     };
 
     pub const Batch = extern struct {
@@ -71,9 +102,11 @@ pub const DrawList = struct {
 
     /// Replaces what was laid out before with `commands`, a frame's,
     /// drawn into a target of `params.viewport` units at
-    /// `params.scale × params.zoom` pixels each.
-    pub fn layOut(self: *DrawList, commands: anytype, params: zui.FrameParams) void {
+    /// `params.scale × params.zoom` pixels each, its text in `text`'s
+    /// fonts, whose atlas gains the glyphs the frame needs.
+    pub fn layOut(self: *DrawList, commands: anytype, params: zui.FrameParams, text: *Text) void {
         var builder: Builder = .{ .list = self, .viewport = params.viewport, .pixels_per_unit = params.scale * params.zoom };
+        text.prepareGlyphs(commands, builder.pixels_per_unit);
         self.vertex_count = 0;
         self.batch_count = 0;
         builder.beginBatch(null);
@@ -88,6 +121,11 @@ pub const DrawList = struct {
                 .border => |border| builder.strokeBorder(bounds, border.widths, border.corner_radius, colorOf(border.color)),
                 .gradient => |gradient| builder.fillGradient(bounds, gradient),
                 .shadow => |shadow| builder.drawShadow(bounds, shadow),
+                .text => |line| if (text.trueTypeFont(line.style.font)) |font| {
+                    builder.drawTrueTypeText(text.atlas, font, line.content, bounds, line.style);
+                } else if (text.bitmap_fonts_loaded) {
+                    builder.drawBitmapText(line.content, bounds, line.style);
+                },
                 .clip_begin => |clip| {
                     clips.push(if (transforms.isActive()) transforms.current().boundsOf(clip).intersect(clips.current() orelse wholeViewport(params.viewport)) else clip);
                     builder.beginBatch(clips.current());
@@ -160,15 +198,122 @@ const Builder = struct {
     }
 
     fn vertex(self: *Builder, point: [2]f32, color: zui.Color) void {
+        self.add(.{ .position = self.to_window.apply(point), .color = color });
+    }
+
+    fn add(self: *Builder, laid_out: DrawList.Vertex) void {
         const list = self.list;
         if (self.shape_overflowed) return;
         if (list.vertex_count == DrawList.max_vertices) {
             self.shape_overflowed = true;
             return;
         }
-        list.vertex_storage[list.vertex_count] = .{ .position = self.to_window.apply(point), .color = color };
+        list.vertex_storage[list.vertex_count] = laid_out;
         list.vertex_count += 1;
         list.batch_storage[list.batch_count - 1].vertex_count += 1;
+    }
+
+    /// As sokol_gl draws a quad: the triangles 0, 1, 2 and 0, 2, 3 of its
+    /// corners, clockwise from the top left.
+    fn quad(self: *Builder, corners: [4][2]f32, vertex_of_corner: [4]DrawList.Vertex) void {
+        for ([_]usize{ 0, 1, 2, 0, 2, 3 }) |corner| {
+            var laid_out = vertex_of_corner[corner];
+            laid_out.position = self.to_window.apply(corners[corner]);
+            self.add(laid_out);
+        }
+    }
+
+    fn bitmapGlyph(self: *Builder, box: Box, texture_box: Box, color: zui.Color) void {
+        var corners: [4]DrawList.Vertex = undefined;
+        for (&corners, texture_box.corners()) |*corner, texture_corner| {
+            corner.* = .{ .position = undefined, .color = color, .texture = .bitmap_glyphs, .texture_coordinates = texture_corner };
+        }
+        self.quad(box.corners(), corners);
+    }
+
+    /// Drawn a pixel wider on every side, since the page decides pixel by
+    /// pixel which are in the glyph.
+    fn atlasGlyph(self: *Builder, box: Box, texture_box: Box, color: zui.Color) void {
+        var window_corners: [4][2]f32 = undefined;
+        for (box.corners(), &window_corners) |corner, *window_corner| window_corner.* = self.to_window.apply(corner);
+        const mapping = TextureMapping.of(window_corners, texture_box) orelse return;
+        const corner: DrawList.Vertex = .{
+            .position = undefined,
+            .color = color,
+            .texture = .glyph_atlas,
+            .texture_coordinates = mapping.at_origin,
+            .texture_per_unit = mapping.per_unit,
+            .texture_bounds = .{ texture_box.left, texture_box.top, texture_box.right, texture_box.bottom },
+        };
+        const margin = 1 / self.pixels_per_unit;
+        const widened: Box = .{ .left = box.left - margin, .top = box.top - margin, .right = box.right + margin, .bottom = box.bottom + margin };
+        self.quad(widened.corners(), @splat(corner));
+    }
+
+    /// The pen advances by each glyph's advance, as zui-sokol measured it,
+    /// so the text fills the bounds zui laid out; each glyph's quad starts
+    /// on a whole pixel.
+    fn drawTrueTypeText(self: *Builder, atlas: *const GlyphAtlas, font: *const truetype.Font, content: []const u8, bounds: zui.Rect, style: anytype) void {
+        const pixels_per_unit = self.pixels_per_unit;
+        const pixel_size = Text.rasterPixelSize(style.size, pixels_per_unit);
+        const units_per_raster_pixel = style.size / @as(f32, @floatFromInt(pixel_size));
+        const scale = font.scaleFor(style.size);
+        const glyph_box_height = (font.ascent - font.descent) * scale;
+        const baseline = snapToPixel(bounds.y + (bounds.height - glyph_box_height) / 2 + font.ascent * scale, pixels_per_unit);
+        const texel: f32 = 1.0 / @as(f32, GlyphAtlas.side);
+        const color = colorOf(style.color);
+
+        var pen = bounds.x;
+        var codepoints = truetype.Codepoints.init(content);
+        while (codepoints.next()) |codepoint| {
+            if (atlas.find(.{ .font = style.font, .pixel_size = pixel_size, .codepoint = codepoint })) |glyph| if (glyph.width != 0) {
+                const left = snapToPixel(pen, pixels_per_unit) + @as(f32, @floatFromInt(glyph.offset[0])) * units_per_raster_pixel;
+                const top = baseline + @as(f32, @floatFromInt(glyph.offset[1])) * units_per_raster_pixel;
+                const right = left + @as(f32, @floatFromInt(glyph.width)) * units_per_raster_pixel;
+                const bottom = top + @as(f32, @floatFromInt(glyph.height)) * units_per_raster_pixel;
+                const texture_left = @as(f32, @floatFromInt(glyph.x)) * texel;
+                const texture_top = @as(f32, @floatFromInt(glyph.y)) * texel;
+                const texture_right = texture_left + @as(f32, @floatFromInt(glyph.width)) * texel;
+                const texture_bottom = texture_top + @as(f32, @floatFromInt(glyph.height)) * texel;
+                self.atlasGlyph(
+                    .{ .left = left, .top = top, .right = right, .bottom = bottom },
+                    .{ .left = texture_left, .top = texture_top, .right = texture_right, .bottom = texture_bottom },
+                    color,
+                );
+            };
+            pen += font.advance(codepoint) * scale + style.letter_spacing;
+        }
+    }
+
+    /// As zui-sokol draws bitmap text into an image: square cells of the
+    /// glyph size from `bounds.x`, centered down `bounds`, and `?` for
+    /// what is not printable ASCII. A font id past the bitmap fonts with no
+    /// TrueType font draws in the last bitmap font.
+    fn drawBitmapText(self: *Builder, content: []const u8, bounds: zui.Rect, style: anytype) void {
+        const glyph_size = style.size * Text.bitmap_glyph_scale;
+        if (glyph_size <= 0) return;
+        const utf8 = std.unicode.Utf8View.init(content) catch return;
+        const glyph_side = Text.bitmap_glyph_side;
+        const font_index: u16 = @min(style.font, Text.bitmap_font_count - 1);
+        const font_row: f32 = @floatFromInt(font_index * glyph_side);
+        const top = bounds.y + (bounds.height - glyph_size) / 2;
+        const texture_top = font_row / Text.bitmap_texture_height;
+        const texture_bottom = (font_row + glyph_side) / Text.bitmap_texture_height;
+        const color = colorOf(style.color);
+        var glyph_index: f32 = 0;
+        var codepoints = utf8.iterator();
+        while (codepoints.nextCodepoint()) |codepoint| : (glyph_index += 1) {
+            const is_printable_ascii = codepoint >= 0x20 and codepoint < 0x7F;
+            const character: f32 = @floatFromInt(if (is_printable_ascii) codepoint else '?');
+            const left = bounds.x + glyph_index * (glyph_size + style.letter_spacing);
+            const texture_left = character * glyph_side / Text.bitmap_texture_width;
+            const texture_right = (character + 1) * glyph_side / Text.bitmap_texture_width;
+            self.bitmapGlyph(
+                .{ .left = left, .top = top, .right = left + glyph_size, .bottom = top + glyph_size },
+                .{ .left = texture_left, .top = texture_top, .right = texture_right, .bottom = texture_bottom },
+                color,
+            );
+        }
     }
 
     fn triangle(self: *Builder, points: [3][2]f32, color: zui.Color) void {
@@ -281,6 +426,59 @@ const Builder = struct {
 /// into it.
 fn colorOf(color: anytype) zui.Color {
     return if (@TypeOf(color) == zui.ExtendedColor) color.toColor() else color;
+}
+
+/// A rectangle by its edges, in layout units or texture coordinates.
+const Box = struct {
+    left: f32,
+    top: f32,
+    right: f32,
+    bottom: f32,
+
+    /// Clockwise from the top left.
+    fn corners(self: Box) [4][2]f32 {
+        return .{ .{ self.left, self.top }, .{ self.right, self.top }, .{ self.right, self.bottom }, .{ self.left, self.bottom } };
+    }
+};
+
+/// The affine map from a window position to the texture coordinates that a
+/// quad's interpolation would give there.
+const TextureMapping = struct {
+    at_origin: [2]f32,
+    per_unit: [2][2]f32,
+
+    /// Null for a quad with no area.
+    fn of(window_corners: [4][2]f32, texture_box: Box) ?TextureMapping {
+        const origin = widen(window_corners[0]);
+        const across = difference(widen(window_corners[1]), origin);
+        const down = difference(widen(window_corners[3]), origin);
+        const determinant = across[0] * down[1] - across[1] * down[0];
+        if (determinant == 0) return null;
+        const texture_origin: [2]f64 = .{ texture_box.left, texture_box.top };
+        const texture_across = @as(f64, texture_box.right) - texture_origin[0];
+        const texture_down = @as(f64, texture_box.bottom) - texture_origin[1];
+        const per_x: [2]f64 = .{ texture_across * down[1] / determinant, -texture_down * across[1] / determinant };
+        const per_y: [2]f64 = .{ -texture_across * down[0] / determinant, texture_down * across[0] / determinant };
+        return .{
+            .at_origin = .{
+                @floatCast(texture_origin[0] - per_x[0] * origin[0] - per_y[0] * origin[1]),
+                @floatCast(texture_origin[1] - per_x[1] * origin[0] - per_y[1] * origin[1]),
+            },
+            .per_unit = .{ .{ @floatCast(per_x[0]), @floatCast(per_x[1]) }, .{ @floatCast(per_y[0]), @floatCast(per_y[1]) } },
+        };
+    }
+
+    fn widen(point: [2]f32) [2]f64 {
+        return .{ point[0], point[1] };
+    }
+
+    fn difference(to: [2]f64, from: [2]f64) [2]f64 {
+        return .{ to[0] - from[0], to[1] - from[1] };
+    }
+};
+
+fn snapToPixel(value: f32, pixels_per_unit: f32) f32 {
+    return @round(value * pixels_per_unit) / pixels_per_unit;
 }
 
 fn smoothstep(amount: f32) f32 {
@@ -437,3 +635,21 @@ const TransformStack = struct {
         }
     }
 };
+
+test "a turned glyph's texture coordinates at each corner are the corner's" {
+    const quarter_turn: zui.Affine = .{ .x_axis = .{ 0, 1 }, .y_axis = .{ -1, 0 }, .offset = .{ 100, 20 } };
+    const box: Box = .{ .left = 10, .top = 4, .right = 18, .bottom = 16 };
+    const texture_box: Box = .{ .left = 0.25, .top = 0.5, .right = 0.375, .bottom = 0.75 };
+    var window_corners: [4][2]f32 = undefined;
+    for (box.corners(), &window_corners) |corner, *window_corner| window_corner.* = quarter_turn.apply(corner);
+    const mapping = TextureMapping.of(window_corners, texture_box).?;
+    for (window_corners, texture_box.corners()) |window_corner, texture_corner| {
+        const found: [2]f32 = .{
+            mapping.at_origin[0] + mapping.per_unit[0][0] * window_corner[0] + mapping.per_unit[1][0] * window_corner[1],
+            mapping.at_origin[1] + mapping.per_unit[0][1] * window_corner[0] + mapping.per_unit[1][1] * window_corner[1],
+        };
+        try std.testing.expectApproxEqAbs(texture_corner[0], found[0], 1e-6);
+        try std.testing.expectApproxEqAbs(texture_corner[1], found[1], 1e-6);
+    }
+    try std.testing.expectEqual(null, TextureMapping.of(@splat(.{ 1, 1 }), texture_box));
+}

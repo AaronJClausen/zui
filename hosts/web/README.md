@@ -7,7 +7,7 @@ Built by roadmap items V4 (the demo in a browser, a thin client over zui_wire) a
 ## Status
 
 V4 has begun. The client's decoder runs in WebAssembly: `zig build`
-writes `zig-out/web/zui-web.wasm` (37 KB in ReleaseSmall, 20 MiB of memory
+writes `zig-out/web/zui-web.wasm` (63 KB in ReleaseSmall, 35 MiB of memory
 once `zuiWebInit` reserves it), which takes a `zui_wire` stream in pieces of any size, as a socket
 delivers it, and decodes each frame once all of it has arrived.
 `zig build test-demo` declares every screen of zui-sokol's tour
@@ -15,13 +15,19 @@ headlessly, streams its frames to that client under Node in pieces of 1 to
 16,384 bytes, and checks that each of the 312 frames decodes to what the
 tour drew.
 
-The client then lays each frame's shapes out as triangles, as zui-sokol's
+The client then lays each frame out as triangles, as zui-sokol's
 renderer does, and `web/frame_drawer.mjs` draws them on a canvas through
-WebGL 2: rectangles, borders, clips, gradients, shadows and transforms.
-Text, backdrop blurs and materials are not drawn yet, and there is no page.
-`zig build test-draw` draws a frame of each of the tour's screens with
-zui-sokol's renderer and with the client in headless Chromium, and checks
-that every pixel matches, within 2 of each color or a pixel's neighbor.
+WebGL 2: rectangles, borders, clips, gradients, shadows and transforms,
+and text, once the page hands the client the stream's fonts. TrueType
+glyphs are rasterized by stb_truetype, compiled into the client without a
+C library, into an atlas packed as zui-sokol packs its own; bitmap text
+uses sokol_debugtext's six fonts. Backdrop blurs and materials are not
+drawn yet, and there is no page. `zig build test-draw` draws a frame of
+each of the tour's screens with zui-sokol's renderer and with the client in
+headless Chromium, and checks that every pixel matches, within 2 of each
+color or a pixel's neighbor; it compares the shapes, and text joins it
+once the owner settles how a pixel on a turned glyph's edge is judged
+(zui's ROADMAP.md, V4).
 See [zui's ROADMAP.md](https://github.com/AaronJClausen/zui/blob/main/ROADMAP.md).
 
 ## Requirements
@@ -50,7 +56,8 @@ See [zui's ROADMAP.md](https://github.com/AaronJClausen/zui/blob/main/ROADMAP.md
 
 To move the pin, push the zui change and run
 `zig fetch --save=zui git+https://github.com/AaronJClausen/zui#<commit>`.
-Keep zui's pin the one zui-sokol's pin names, and move the two together:
+Keep zui's pin the one zui-sokol's pin names, and move the two together,
+and likewise stb's, so the client rasterizes glyphs as zui-sokol does:
 the tour and the client then share zui's types, and `--fork=../zui`, which
 cannot fork two zui packages into one checkout, matches only one.
 

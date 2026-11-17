@@ -53,7 +53,9 @@ that is pushed: move the pin with
 `zig fetch --save=zui git+https://github.com/AaronJClausen/zui#<commit>`,
 in the same commit as the code that needs it. Keep it the commit
 zui-sokol's pin names, since `test-demo` builds the tour with zui-sokol's
-zui and `--fork=../zui` can fork only one zui package.
+zui and `--fork=../zui` can fork only one zui package. Keep the `stb` pin
+zui-sokol's too: the client compiles the same stb_truetype, so its glyphs
+are zui-sokol's.
 
 ## Workflow
 

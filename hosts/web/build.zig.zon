@@ -8,6 +8,10 @@
             .url = "git+https://github.com/AaronJClausen/zui#24e3706247471849a8d32698076fd202c31dc80d",
             .hash = "zui-0.5.0-xfvfqjpCGACK7qXbCc4Dt_srYIc_oXSuPoFYZBy66Me6",
         },
+        .stb = .{
+            .url = "git+https://github.com/nothings/stb#4e9b368bfc071e97206ea5c6adba68dd0cbf8897",
+            .hash = "N-V-__8AAFRGTgBWHIQULKwDqlrvga2AR9enp42AsQ7z-yXN",
+        },
         .zui_sokol = .{
             .url = "git+https://github.com/AaronJClausen/zui-sokol#af617f266e5bc46d40b1066c3e13030a5f133bee",
             .hash = "zui_sokol-0.2.0-LHR9oZhCCQAB0K_kyeT8_8NJFRz1UvyLt5ip-j-DrFOr",
