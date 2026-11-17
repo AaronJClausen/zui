@@ -169,6 +169,7 @@ The stage is the one in SPEC.md §21 that builds it.
 | inspector, and its overlay of zone times | `zui_debug` over `Frame.inspect`, and its `ZoneTimer` tracer over the tracer contract | 9 |
 | accessibility | core semantics and actions; `zui_widgets` declares each control's; host bridges to the platform API | 9 |
 | safety sweeps | core, over a finished frame; `endFrame` runs them behind `features.safety_sweeps` | 9 |
+| the demo in a browser | `zui-web`: the application in a Web Worker, its frames drawn by a thin client over `zui_wire` | 9 |
 | macOS, Linux and web hosts; services; decorations; many windows | `zui-host`; one `Context` per window | 10 |
 | motion and exit animations | `zui_motion`; ghost buffer in the core | 11 |
 | text editing and IME | `zui_widgets`; composition events and the IME area from the core | 11 |
@@ -265,6 +266,10 @@ What exists today, by stage:
   `zui_widgets` control declaring its own. `Frame.sweep()` checks the
   layout and command invariants a frame must keep, and with
   `features.safety_sweeps` `endFrame` panics on the first one broken.
+  zui-web runs zui-sokol's tour in a browser: the tour in a Web Worker
+  on an `Io` stepped to the page's clock, its frames drawn over
+  `zui_wire` through WebGL 2 with four samples per pixel and the
+  canvas's input sent back as records, published to GitHub Pages.
 
 The code and the spec still differ in these places, each closed by the
 roadmap item named:
@@ -287,7 +292,7 @@ parallel measurement and the module boundary.
 | `zui` | the core, the contracts, and the modules: async, widgets, reflect, testing, tracy, app, wire, debug, motion, color, icons |
 | `zui-host` | native hosts, one directory per OS, chosen by target: `windows/` today (H2) |
 | `zui-raylib`, `zui-sokol`, `zui-terminal` | renderers; `zui-raylib` also ships the raylib adapter host |
-| `zui-web` | the browser: a thin client over `zui_wire` (V4), then a web host (H5); today the client's decoder, in WebAssembly, and its drawing of shapes, text, backdrop blurs and materials through WebGL 2, checked against zui-sokol's renderer drawing the tour's frames, and the page's input written back as records the tour takes, with the cursor its frames ask for shown on the canvas; and zui-sokol's tour in a Web Worker on an `Io` of its own, whose tasks take turns on workers sharing its memory, drawing the frames it draws natively; and the page that puts them together, published to GitHub Pages from CI and made cross-origin isolated by a service worker of its own |
+| `zui-web` | the browser: a thin client over `zui_wire` (V4), then a web host (H5); today the client's decoder, in WebAssembly, and its drawing of shapes, text, backdrop blurs and materials through WebGL 2 with four samples per pixel, checked against zui-sokol's renderer drawing the tour's frames, and the page's input written back as records the tour takes, with the cursor its frames ask for shown on the canvas; and zui-sokol's tour in a Web Worker on an `Io` of its own, whose tasks take turns on workers sharing its memory, drawing the frames it draws natively and timing them on the worker's clock; and the page that puts them together, published to GitHub Pages from CI and made cross-origin isolated by a service worker of its own |
 | `zui-themes` | skins for OS design languages (K4); a skeleton today |
 | `zui-examples` | samples and the template project (D1, D2); a skeleton today |
 

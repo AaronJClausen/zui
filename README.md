@@ -251,6 +251,12 @@ Implemented so far:
   balanced clips) and names the first one broken; with
   `features.safety_sweeps`, on by default in safe builds, `endFrame`
   panics on it.
+  zui-sokol's tour runs in a browser, at
+  <https://aaronjclausen.github.io/zui-web/>: zui-web builds it for
+  `wasm32-freestanding` and runs it in a Web Worker, and its page draws
+  the tour's frames over `zui_wire` through WebGL 2, with four samples
+  per pixel as a native window with `sample_count = 4` has, and sends
+  the canvas's input back as records.
 
 The reference backend, its adapter host and the demo application live in
 [zui-raylib](https://github.com/AaronJClausen/zui-raylib); the other

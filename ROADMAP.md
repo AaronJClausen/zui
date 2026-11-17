@@ -31,7 +31,7 @@ Each item says:
 | stage 7 | gestures (I5): arbitration by motion component, zoom, long press, double tap, momentum, the intents and custom recognizers; drag and drop between elements (I1) | done: a carousel in a list, a pinch starting on a list inside a map, a lasso module against a map's pan, and `zui_testing.Driver.drag` moving an item between two lists, out of one that scrolls by dragging |
 | after stage 7: the foundation | G1's first slice ran 5.5% to 7.7% more instructions in scenes that draw no effect, so the work turned to what lay under it: benchmarks that can be trusted (R3 to R8, and R9 in part) and the data-oriented design audit's findings (P6 to P10) | done; a commit compared with itself over three code layouts calls nothing, its intervals 0.52% wide on average, and a change that only moves code is not called; a tooltip declared before a 3,000-cell grid lays out in 79 µs, not 671 µs (P6); warm text −43% (P9); `init` from 138 µs to 92 µs (P7, P10); the budgets judged in benchmarking mode |
 | stage 8, begun | gradients, shadows and glow (G1); backdrop blur (G2); effects in the corners of a decoration that draws nothing (G7); transforms with hit inversion (G3); materials (G5) | G1, G2, G7, G3 and G5 done: zui-sokol draws gradients, shadows, backdrop blurs, transforms and materials through a shader of its own and passes the renderer suite, its effects rounded by a decoration that draws nothing, a pointer hits a turned button where it is drawn, and a frame without effects runs no more instructions than before; G6 begun: `zui.ExtendedColor` is declared and clamped for a renderer that draws only `Color`, and zui-sokol draws it into an scRGB FP16 offscreen image and passes the renderer suite there |
-| stage 9, begun | `zui_debug` (V1) | V1 done: `Frame.inspect` and the inspector's diagnostics, fallbacks, zone times from its `ZoneTimer` tracer, element tree and hovered element's configs, and its theme reloaded from a watched file; zui-raylib's tour opens it with F12 through `zui_app`'s `zuiObserve`, and draws every screen with it open within its limits |
+| stage 9, begun | `zui_debug` (V1); the demo in a browser (V4) | V4 done: zui-sokol's tour runs in a browser at the display's frame rate, from <https://aaronjclausen.github.io/zui-web/>, in a Web Worker behind a page that draws its frames over `zui_wire`; V1 done: `Frame.inspect` and the inspector's diagnostics, fallbacks, zone times from its `ZoneTimer` tracer, element tree and hovered element's configs, and its theme reloaded from a watched file; zui-raylib's tour opens it with F12 through `zui_app`'s `zuiObserve`, and draws every screen with it open within its limits |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
@@ -73,9 +73,14 @@ green, and its **Status** line below says which slice is next.
 | P12. Text commands that point at their style | audit | `src/commands.zig`, `src/emission.zig`, `zui_wire/`, `../zui-raylib`, `../zui-sokol`, `../zui-terminal` | | waiting on a profile of a renderer reading the commands |
 | G6. HDR and wide gamut | 8 | `src/context.zig`, `src/commands.zig`, `src/surface.zig`, `zui_wire/`, `zui_testing/`, `../zui-sokol`, `../zui-host` | | waiting on a session under Windows with an HDR display: zui-sokol's FP16 `.win32` swapchain and zui-host's `.scrgb_fp16` window |
 | V2. Semantics and accessibility actions | 9 | `src/context.zig`, `zui_widgets/`, `../zui-host` | | in progress; the UI Automation bridge waits on a session under Windows |
-| V4. The demo in a browser | 9 | `../zui-web`, `zui_wire/` | | waiting on the owner: setting zui-web's Pages source to GitHub Actions, the Pages workflow's first deploy, and the tour keeping the display's frame rate on the published page in a browser (V4's Status, slice 5) |
+| H3. macOS | 10 | `../zui-host` | | |
+| H4. Linux | 10 | `../zui-host` | | |
+| H5. Web | 10 | `../zui-web` | | |
+| H6. Services | 10 | `src/host.zig`, `../zui-host` | | |
+| H7. Window decorations | 10 | `src/host.zig`, `../zui-host` | | |
+| H9. Many windows | 10 | `zui_app/`, `../zui-host` | | |
 
-After the queue come stages 10 and 11 in the order of SPEC.md §21. They join the queue as it runs short.
+After the queue comes stage 11 in the order of SPEC.md §21. It joins the queue as it runs short. Stage 10's items are listed under *Stage 10: reach*; each is given its Grounding, Plan and Done when as it is taken.
 
 Statuses: `next` (the first open row), `in progress` (a slice has
 landed), `waiting on <what>` (blocked by something the next session cannot
@@ -157,6 +162,286 @@ Things to know:
 ---
 
 ## Done
+
+### V4. The demo in a browser
+
+**Plan.** The demo streaming over the wire (F5) to a thin browser client,
+published from CI. **Done when:** the demo runs at its native frame rate
+in a browser.
+
+The owner opened <https://aaronjclausen.github.io/zui-web/> in a desktop
+browser: the tour keeps the display's frame rate, the mouse, the wheel
+and its shortcuts drive it, and its gradients, shadows, blurs and
+materials look right. They found two defects, fixed before V4 closed:
+- **Timings read 0 µs.** The tour's strip and frame inspector read 0 µs
+  for every timing, their bars at 0: zui-web's `TourSession` never
+  recorded the tour's `Perf` samples, which zui-sokol's host takes
+  around `beginFrame`, the declaration and `endFrame`, and had it, the
+  worker's `SteppedIo` reads the page's one instant for the whole frame.
+  The session now times each frame on a stopwatch of its own, the
+  worker's `performance.now()` imported by the module, and records what
+  the native host records, with the page's time to draw the frame before
+  as its submit time. `test-demo` still compares every frame byte for
+  byte with the native run: real timings differ from run to run and move
+  the strip's text and bars, so no mask could compare them, and both
+  runs time frames on a steady stopwatch instead, 1 µs a reading.
+  `test-site` now fails unless the page times its frames above 0 µs: it
+  failed before the fix (no frame above 0 µs within 10 s), and after it
+  the newest frame was declared in 745 µs, at 37 frames a second in
+  headless Chromium.
+- **Only text was smoothed.** zui-sokol's renderer has no coverage of
+  its own for shapes; its demo window smooths every edge with
+  `sample_count = 4`, and the page drew with one sample per pixel.
+  `test-draw` could not tell: its reference was drawn into an offscreen
+  image of one sample per pixel, and an unsmoothed pixel matches a
+  neighbor across the edge within the check's reach. The page now draws
+  into a renderbuffer of four samples per pixel and resolves it into the
+  texture that backdrop blurs sample and the canvas shows. zui-sokol
+  (`73f3612`) draws an `.offscreen` surface with
+  `renderer.offscreen_sample_count` samples per pixel, and passes the
+  renderer suite with four. `test-draw` draws each frame twice: with one
+  sample per pixel and every command, compared as before, and with four
+  and without text, where each reference pixel must also match the
+  drawing, a pixel may differ by one sample's share of the colors within
+  two pixels (SwiftShader snaps vertices to a sixteenth of a pixel), and
+  four pixels a frame may match nothing (a line thinner than a pixel has
+  two edges, each moving a sample). Text is left out there, since where a
+  glyph's quad covers part of a pixel a GPU may sample the glyph anywhere
+  in the pixel, and SwiftShader and NVIDIA's driver choose differently.
+  With four samples, the unsmoothed page failed every frame, 338 to 2,374
+  pixels a frame matching nothing; the smoothed one passes every frame,
+  at most 2 pixels a frame matching nothing. Its run in CI, its reference
+  drawn by llvmpipe, is to be confirmed once zui-sokol and then zui-web
+  are pushed.
+
+It landed in five slices, in zui-web unless one says otherwise:
+1. **The client's decoder in WebAssembly.** zui-web's
+   `FrameStream(Ui)` holds what has arrived of a stream and decodes each
+   frame once it is whole, and `src/browser.zig` exports it for the page
+   as `zui-web.wasm` (19 KB in ReleaseSmall, 12 MiB of memory reserved by
+   `zuiWebInit`). `DemoUi` declares the tour's commands, colors and
+   payload types field for field, so the browser decodes the tour without
+   sokol. `zig build test-demo` declares the tour's thirteen screens
+   headlessly for 24 frames each, the mouse crossing each, writes them as
+   the wire renderer does (2,619,982 bytes, every command kind but
+   `image`, which the tour never draws), feeds them under Node to the
+   client built for `wasm32-freestanding` in pieces of 1 to 16,384 bytes,
+   and checks that each of the 312 frames, written whole again in the
+   browser, hashes as the frame drawn did; a flipped bit in the stream or
+   in the expected hashes fails it. CI runs it on Linux. In zui, a test
+   pins the decoder reading again a message cut short at any byte.
+2. **Drawing,** in parts. The client lays each frame's commands out as
+   triangles in zui-sokol's renderer's geometry (`DrawList`: rounded
+   corners in eight segments, borders inside their bounds, gradients in
+   bands of OKLab color, shadows faded in six rings, transforms applied to
+   each vertex, a batch per clip scissored as sokol_gfx truncates it), and
+   `web/frame_drawer.mjs` draws them through WebGL 2, one draw call per
+   batch (Decisions, Made: how the browser draws). The client is now
+   37 KB in ReleaseSmall and reserves 20 MiB, 8 of them for the
+   vertices. `zig build test-draw`
+   draws the middle frame of each of the tour's thirteen screens with
+   zui-sokol's renderer into an `.sdr` offscreen image, through OpenGL in
+   a sokol_app window, and with the client in headless Chromium on
+   SwiftShader, keeping in both only the commands the client draws, and
+   compares them pixel by pixel. A pixel matches when its colors are within
+   2 of the reference's, or of a neighbor's, since two rasterizers may put
+   an edge a pixel apart.
+   - **Shapes:** rectangles, borders, clips, gradients, shadows and
+     transforms. Every pixel of the 13 frames matches: 1 to 12,638 of
+     each frame's 1,296,000 pixels differ at all, and 1 to 209 by more
+     than 2 (at most 231), each on the edge of a rounded corner or a fan's
+     triangle and matching a neighbor. The reference reads back the same
+     bytes on every run. Drawing the shadows with five rings instead of
+     six fails it. CI runs it on Linux under Xvfb with Google Chrome; its
+     first run there is to be confirmed once zui-web is pushed.
+   - **Text.** The
+     page hands the client the stream's fonts: the TrueType ones, which
+     follow the six bitmap fonts' ids in the order the host added them,
+     and sokol_debugtext's six. stb_truetype, at zui-sokol's commit, is
+     compiled into the client without a C library, allocating from a
+     scratch reserved at init, and rasterizes into a 1024² RG8 atlas
+     packed as zui-sokol packs its RGBA one, so a glyph sampled at its
+     edge blends with the same neighbors; bitmap glyphs are an R8 texture
+     sampled at the nearest texel. A vertex grows from 12 bytes to 56: an
+     atlas glyph carries the map from a pixel's position to its texture
+     coordinates, and its texel bounds, and the page finds both pixel by
+     pixel, since SwiftShader snaps vertices to a sixteenth of a pixel
+     and coordinates interpolated across a turned glyph differed from
+     the reference by up to 31 at 237 pixels of the Transforms screen.
+     The client is 63 KB in ReleaseSmall and reserves 35 MiB, 14 of them
+     for 2^18 vertices (6.7 times the busiest compared frame's 38,790).
+     `test-draw` compares the text too, its reference drawn with the
+     tour's fonts and failing if zui-sokol's glyph atlas overflowed, and
+     a frame passes with at most one pixel matching nothing within 1
+     (`maxUnmatchedPixelsPerFrame`; Decisions, Made: a pixel on a glyph's
+     edge). In Debug and ReleaseSafe alike, 1 to 12,717 of each frame's
+     1,296,000 pixels differ at all, 1 to 2,872 by more than 2 (at most
+     231), and every frame has no unmatched pixel but frame 252, on the
+     Transforms screen, which has one: its centre 0.0002 texels inside a
+     glyph's right edge, drawn by the client (75, 75, 85) and left as the
+     button's background (35, 35, 50) by zui-sokol's OpenGL capture.
+     Handing the client the Bold and Regular fonts swapped fails all 13
+     frames (13,480 to 61,256 unmatched pixels), and moving every
+     TrueType glyph a pixel right fails frames 204 and 252 (7 and 2,327);
+     the neighbor rule absorbs the shift elsewhere. CI's first `test-draw`
+     with text, its reference drawn by Mesa under Xvfb rather than this
+     machine's NVIDIA driver, is to be confirmed once zui-web is pushed.
+   - **Backdrop blurs and materials.** A blur starts a batch, and
+     before it the page copies the canvas into a texture and runs
+     zui-sokol's two passes: each Gaussian tap, split into the coarse and
+     fine weights zui-sokol's 8-bit vertex colors add, is an instance of a
+     quad over the blur's whole pixels, adding its linearly filtered
+     sample into a float target along x, then from that into another
+     along y, the sample clamped per pixel to the region's edge pixels,
+     which is what zui-sokol's three quads per tap draw. The batch's fan
+     then takes the blurred texel at each pixel, under the tint. A
+     material is a batch of its own, its uniforms zui-sokol's, its
+     pattern found at each vertex's place in the element by zui-sokol's
+     material shader ported to GLSL ES. The targets are RGBA32F where
+     WebGL can render, blend and filter it, else RGBA16F; without
+     `EXT_color_buffer_float` a blur is its tint alone; past 16 blurs or 256 materials a frame
+     draws the tint or the fallback, counted, as zui-sokol does. The client
+     is 66 KB in ReleaseSmall and still reserves 35 MiB. `test-draw` now
+     keeps every command but `image`, which the tour never draws. In
+     Debug and ReleaseSafe alike, 1 to 16,682 of each frame's 1,296,000
+     pixels differ at all and 1 to 2,872 by more than 2 (at most 231),
+     each matching a neighbor, and frame 252 keeps its one unmatched pixel;
+     inside the frosted pane on Light & Depth (frame 228) and the material
+     cards on Materials (frame 276) no pixel differs by more than 1.
+     Blurring with a radius of 8 instead of 10 fails frame 228 (550
+     unmatched pixels), and turning every material's phase by 0.02 more
+     fails frame 276 (48,254). The check's removal of Chromium's profile
+     now retries, since a child process could still be writing to it.
+     CI's first `test-draw` with blurs failed frame 228 (17,654 unmatched
+     pixels): Mesa's llvmpipe, drawing the reference under Xvfb, rounds
+     each tap's addition to an RGBA16F target differently and summed the
+     pane 2 to 6 color steps darker than NVIDIA. zui-sokol (`0d7eedb`)
+     now sums blurs in RGBA32F where the GPU can, and RGBA16F otherwise,
+     and so does the client; `test-draw` fails if either side cannot sum
+     in RGBA32F, and reports each failing frame's numbers and uploads its
+     images from CI. Against references drawn by NVIDIA and by llvmpipe
+     alike, no pixel inside the pane differs by more than 1, and every
+     frame but 252 (its one pixel) has none unmatched; 1 to 13,740 of each
+     frame's pixels differ at all on NVIDIA, 5,516 to 22,905 on llvmpipe.
+     Its run in CI is to be confirmed once zui-sokol and then zui-web are
+     pushed.
+3. **Input.** `web/input_recorder.mjs` turns a canvas's pointer,
+   wheel, key and text events, its size and `devicePixelRatio` into calls
+   the client makes records of: zui-web's `RecordStream(Ui)` fills a
+   `RecordBuilder` and writes, through `zui_wire`'s `Encoder`, the
+   stream's header and then a record only when it holds events or the
+   viewport or scale changed, as F5's client sends. Its message buffer is
+   reserved at init for every event the builder holds at twice its size
+   in memory, which a test fills with the largest events. A key is the
+   one `KeyboardEvent.key` names, or for a digit or a mark the one its
+   `code` places, so Ctrl+2 is Ctrl+2 on any layout, and a key that types
+   a character without Ctrl or Meta sends it as text; a wheel's lines are
+   40/3 units, a notch of three as far as the Windows host scrolls. The
+   newest frame's cursor is set on the canvas by its CSS name. The tour
+   has sources, so its records end with their deliveries, which a live
+   record writes as none whatever the sources: `DemoUi` declares one that
+   delivers nothing, without which the tour's host read past the end of
+   the browser's records. `zig build test-input` gives the page a mouse
+   move and a click on the rail, Ctrl+3, Ctrl+PageDown, two typed keys,
+   the wheel, a touch and a resize through headless Chromium's DevTools
+   protocol, runs the tour on the 9 records (429 bytes) the client wrote,
+   checks each against what the page was given and that the tour moved
+   to Mission Control, Box Storm and the Gallery and asked for the
+   pointer cursor over the rail, and sends its frames back to the page,
+   which must show that cursor. Dropping `ctrlKey` from the page's
+   modifiers fails record 3, positions in device pixels fail record 1,
+   and not setting the cursor fails frame 0. The client is 75 KB in
+   ReleaseSmall and still reserves 35 MiB. The IME's text input area, and
+   composed text, wait for E1; CI's first `test-input` is to be confirmed
+   once zui-web is pushed.
+4. **The demo behind the page, in a Web Worker** (Decisions, Made): the
+   tour built for `wasm32-freestanding`, its frames posted to the page as
+   wire bytes and the page's records posted back. In parts:
+   - **The tour without sokol** (in zui-sokol). `zui_sokol_ui`, a
+     module that does not import sokol, holds `Text`, `truetype`,
+     `Material`, `Image`, the commands the renderer draws and `config`;
+     `zui_sokol` re-exports them, and its `config` checks the renderer.
+     `Image` is now the ids of a sokol_gfx view and sampler, field for
+     field what zui-web's `DemoUi` decodes, and `zui_sokol.imageOf` makes
+     one from sokol's handles. The tour declares its `Ui` through
+     `zui_sokol_ui`, so `zui_sokol_tour` imports no sokol, and given a
+     freestanding target zui-sokol's build makes only those two modules.
+     Without a C library stb_truetype allocates nothing: it measures, and
+     would rasterize no glyph. zui-sokol's `zig build check` compiles and
+     links `examples/tour_freestanding.zig`, the tour declaring a frame
+     for `wasm32-freestanding` on `std.Io.failing` (7.5 MB in Debug,
+     importing nothing from the page); run once by hand under Node, it
+     declared the frame. The tour's frames are unchanged: with
+     `--fork=../zui-sokol`, zui-web's `test-demo` writes the same stream
+     byte for byte, its reference for `test-draw` is the same, and
+     `test-input` passes. zui-web's zui-sokol pin moved to that commit
+     (`3931162`) with the worker.
+   - **The worker** (pinned to zui-sokol `cac68e4`).
+     `zig build`
+     writes `zui-web-tour.wasm`, `zui_sokol_tour` built for
+     `wasm32-freestanding` with atomics and bulk memory, on memory it
+     imports shared: 793 KB in ReleaseSmall, 8.0 MB in Debug, and about
+     49 MiB once `zuiTourInit` reserves it (the tour, 16 thread stacks of
+     256 KiB and 4 MiB for a frame's bytes). zui-web's `TourSession`
+     runs the tour as a loop that owns its clock: each frame it steps the
+     tour's `Io` to the page's instant, takes the records that arrived
+     whole, declares the frame and writes it through `zui_wire`'s
+     `Encoder`, and `web/tour_worker.mjs` posts those bytes to the page.
+     The tour's tasks run on an `Io` of the worker's own, `SteppedIo`
+     (Decisions, Made: how the tour's tasks run in the worker): its
+     clocks read the page's instant, and its tasks take turns on 16
+     threads, each a worker on the tour's memory (`web/tour_thread.mjs`,
+     setting its own stack pointer and thread-local storage), one at a
+     time and only while the frame waits for them; a task runs as it
+     starts until it first waits, and waits for a thread while all 16
+     are taken. `test-demo` now also runs the tour in that worker under
+     Node, on the records the client wrote of the mouse crossing each of
+     the thirteen screens and Ctrl+PageDown between them, 312 frames at
+     60 Hz on the page's clock, and runs it natively on the same ticks
+     (`tools/tour_frames.zig`, the same `SteppedIo` on 16 native threads):
+     every frame is the same bytes (2,628,746 in all), the tour started
+     and finished 66 tasks and was refused none on both, and the client
+     decodes every frame. In the worker the 312 frames take 0.9 s in
+     Debug and 0.1 to 0.2 s in ReleaseSafe, ReleaseFast and ReleaseSmall,
+     starting the threads included; three runs of each agree. A worker
+     refusing every task, as `std.Io.failing` does, fails it (no task
+     finished), and so does a worker on 4 threads (frame 76 differs), and
+     at zui-sokol `3931162`, where the Gallery's tiles depended on the
+     pointer width, frame 88 differs. By hand, in headless Chromium
+     serving the page cross-origin isolated, the worker drew 312 frames
+     in 115 ms in ReleaseSmall, after 28 ms starting its threads, and ran
+     the same 66 tasks; served without those headers, the page cannot
+     post shared memory to its worker, so slice 5 must serve it isolated,
+     which GitHub Pages cannot set headers for: a service worker that
+     adds them, or another host.
+5. **Published from CI.** The
+   page, `web/index.html`, starts the tour's worker, and on each of the
+   display's frames sends it the page's clock and the record the canvas's
+   input made, draws the frame it answers with, and shows its cursor
+   (`web/tour_page.mjs`). It stays on GitHub Pages, made cross-origin
+   isolated by a service worker of its own (Decisions, Made: how the
+   published page is isolated): `web/isolation_service_worker.js`
+   serves the page and everything it loads again with
+   `Cross-Origin-Opener-Policy: same-origin` and
+   `Cross-Origin-Embedder-Policy: require-corp`, and the page registers it
+   and reloads once, and says so rather than reload again if it is still
+   not isolated. `zig build site` writes the page, the client, the tour's
+   worker, sokol_debugtext's fonts and the tour's TrueType fonts with
+   their license to `zig-out/site`, 1.0 MB in ReleaseSmall (the client
+   77 KB, the tour 793 KB); zui-web's Pages workflow builds it in
+   ReleaseSmall on each push to `main`, runs `test-site` on it and
+   publishes it. `zig build test-site` serves the site as GitHub Pages
+   does, without the isolation headers, opens it in headless Chromium and
+   checks that the page is isolated, through its own service worker,
+   after one reload, draws the worker's frames (49 of headless Chromium's
+   55 animation frames a second, on SwiftShader at 1600 by 1000 pixels,
+   the worker answering in 0.5 ms and the page drawing in 0.7 ms at the
+   median, in ReleaseSmall), and that its input reaches the tour: the
+   mouse over the rail turns the canvas's cursor to the pointer, and a
+   click on Mission Control's entry starts its two producers' tasks. A
+   service worker that leaves out `Cross-Origin-Embedder-Policy` fails it
+   (the page says it is not isolated), and so does a page that sends only
+   its first record, draws nothing, or shows no cursor. CI runs it too.
 
 ### F7. The wire's renderer declares its context's payload types
 
@@ -3183,280 +3468,6 @@ Next: the Windows host (`../zui-host`) bridges the list to UI Automation
 and reports its requests as `action` events. That needs a session under
 Windows, so it waits for one.
 
-### V4. The demo in a browser
-
-**Grounding.** The demo is zui-sokol's tour, which F5 streamed with
-`zui_wire.Host` and `zui_wire.Renderer` and drew in another process
-through `zui_wire.Client`. The client cannot run in a browser as it is:
-it reads and writes a `std.Io.net` stream, and a page has only
-WebSockets or messages from a worker, which hand over bytes in pieces of
-their own. `Decoder(Ui).next` decodes only a whole message, but one cut
-short fails with `error.EndOfStream` before changing anything
-(`zui_wire/zui_wire.zig`, `readFrame` swaps its histories only once the
-commands are read), so a reader can try again once more bytes arrive.
-The tour's `Ui` comes from `zui_sokol_ui.config`, whose `Text`, `Image`
-and `Material` build without sokol (zui-sokol's `src/ui/`), and its
-frames hold only plain data (the `Image`'s two sokol ids, the
-`Material`'s pattern, colors, phase and scale). The tour's loaders start
-tasks with `Io.Group.concurrent` (`examples/screens/gallery.zig`,
-`mission_control.zig`), and an `Io` without concurrency fails them:
-a tile fails as `NoThreadAvailable`, and the telemetry and chatter
-producers do not run. Those tasks sleep partway through, and WebAssembly
-cannot switch stacks, so each needs a thread to sleep on; in a browser a
-thread is a worker, which blocks only on `memory.atomic.wait32` over
-memory a page shares with its workers only when it is cross-origin
-isolated (served with `Cross-Origin-Opener-Policy: same-origin` and
-`Cross-Origin-Embedder-Policy: require-corp`). The tour drew the
-Gallery's corner radii and Mission Control's chatter with
-`uintLessThan(usize, ...)`, so a 32-bit target drew other tiles than a
-64-bit one; since zui-sokol `cac68e4` it draws a `u32`. zui-sokol's
-`Text` declares no `zuiFingerprint`, so its streams carry none, and
-nothing is checked of the fonts.
-
-**Plan.** The demo streaming over the wire (F5) to a thin browser client,
-published from CI.
-
-**Done when:** the demo runs at its native frame rate in a browser.
-
-**Status.** In slices, each in zui-web unless it says otherwise:
-1. **The client's decoder in WebAssembly** (done). zui-web's
-   `FrameStream(Ui)` holds what has arrived of a stream and decodes each
-   frame once it is whole, and `src/browser.zig` exports it for the page
-   as `zui-web.wasm` (19 KB in ReleaseSmall, 12 MiB of memory reserved by
-   `zuiWebInit`). `DemoUi` declares the tour's commands, colors and
-   payload types field for field, so the browser decodes the tour without
-   sokol. `zig build test-demo` declares the tour's thirteen screens
-   headlessly for 24 frames each, the mouse crossing each, writes them as
-   the wire renderer does (2,619,982 bytes, every command kind but
-   `image`, which the tour never draws), feeds them under Node to the
-   client built for `wasm32-freestanding` in pieces of 1 to 16,384 bytes,
-   and checks that each of the 312 frames, written whole again in the
-   browser, hashes as the frame drawn did; a flipped bit in the stream or
-   in the expected hashes fails it. CI runs it on Linux. In zui, a test
-   pins the decoder reading again a message cut short at any byte.
-2. **Drawing,** in parts. The client lays each frame's commands out as
-   triangles in zui-sokol's renderer's geometry (`DrawList`: rounded
-   corners in eight segments, borders inside their bounds, gradients in
-   bands of OKLab color, shadows faded in six rings, transforms applied to
-   each vertex, a batch per clip scissored as sokol_gfx truncates it), and
-   `web/frame_drawer.mjs` draws them through WebGL 2, one draw call per
-   batch (Decisions, Made: how the browser draws). The client is now
-   37 KB in ReleaseSmall and reserves 20 MiB, 8 of them for the
-   vertices. `zig build test-draw`
-   draws the middle frame of each of the tour's thirteen screens with
-   zui-sokol's renderer into an `.sdr` offscreen image, through OpenGL in
-   a sokol_app window, and with the client in headless Chromium on
-   SwiftShader, keeping in both only the commands the client draws, and
-   compares them pixel by pixel. A pixel matches when its colors are within
-   2 of the reference's, or of a neighbor's, since two rasterizers may put
-   an edge a pixel apart.
-   - **Shapes** (done): rectangles, borders, clips, gradients, shadows and
-     transforms. Every pixel of the 13 frames matches: 1 to 12,638 of
-     each frame's 1,296,000 pixels differ at all, and 1 to 209 by more
-     than 2 (at most 231), each on the edge of a rounded corner or a fan's
-     triangle and matching a neighbor. The reference reads back the same
-     bytes on every run. Drawing the shadows with five rings instead of
-     six fails it. CI runs it on Linux under Xvfb with Google Chrome; its
-     first run there is to be confirmed once zui-web is pushed.
-   - **Text** (done). The
-     page hands the client the stream's fonts: the TrueType ones, which
-     follow the six bitmap fonts' ids in the order the host added them,
-     and sokol_debugtext's six. stb_truetype, at zui-sokol's commit, is
-     compiled into the client without a C library, allocating from a
-     scratch reserved at init, and rasterizes into a 1024² RG8 atlas
-     packed as zui-sokol packs its RGBA one, so a glyph sampled at its
-     edge blends with the same neighbors; bitmap glyphs are an R8 texture
-     sampled at the nearest texel. A vertex grows from 12 bytes to 56: an
-     atlas glyph carries the map from a pixel's position to its texture
-     coordinates, and its texel bounds, and the page finds both pixel by
-     pixel, since SwiftShader snaps vertices to a sixteenth of a pixel
-     and coordinates interpolated across a turned glyph differed from
-     the reference by up to 31 at 237 pixels of the Transforms screen.
-     The client is 63 KB in ReleaseSmall and reserves 35 MiB, 14 of them
-     for 2^18 vertices (6.7 times the busiest compared frame's 38,790).
-     `test-draw` compares the text too, its reference drawn with the
-     tour's fonts and failing if zui-sokol's glyph atlas overflowed, and
-     a frame passes with at most one pixel matching nothing within 1
-     (`maxUnmatchedPixelsPerFrame`; Decisions, Made: a pixel on a glyph's
-     edge). In Debug and ReleaseSafe alike, 1 to 12,717 of each frame's
-     1,296,000 pixels differ at all, 1 to 2,872 by more than 2 (at most
-     231), and every frame has no unmatched pixel but frame 252, on the
-     Transforms screen, which has one: its centre 0.0002 texels inside a
-     glyph's right edge, drawn by the client (75, 75, 85) and left as the
-     button's background (35, 35, 50) by zui-sokol's OpenGL capture.
-     Handing the client the Bold and Regular fonts swapped fails all 13
-     frames (13,480 to 61,256 unmatched pixels), and moving every
-     TrueType glyph a pixel right fails frames 204 and 252 (7 and 2,327);
-     the neighbor rule absorbs the shift elsewhere. CI's first `test-draw`
-     with text, its reference drawn by Mesa under Xvfb rather than this
-     machine's NVIDIA driver, is to be confirmed once zui-web is pushed.
-   - **Backdrop blurs and materials** (done). A blur starts a batch, and
-     before it the page copies the canvas into a texture and runs
-     zui-sokol's two passes: each Gaussian tap, split into the coarse and
-     fine weights zui-sokol's 8-bit vertex colors add, is an instance of a
-     quad over the blur's whole pixels, adding its linearly filtered
-     sample into a float target along x, then from that into another
-     along y, the sample clamped per pixel to the region's edge pixels,
-     which is what zui-sokol's three quads per tap draw. The batch's fan
-     then takes the blurred texel at each pixel, under the tint. A
-     material is a batch of its own, its uniforms zui-sokol's, its
-     pattern found at each vertex's place in the element by zui-sokol's
-     material shader ported to GLSL ES. The targets are RGBA32F where
-     WebGL can render, blend and filter it, else RGBA16F; without
-     `EXT_color_buffer_float` a blur is its tint alone; past 16 blurs or 256 materials a frame
-     draws the tint or the fallback, counted, as zui-sokol does. The client
-     is 66 KB in ReleaseSmall and still reserves 35 MiB. `test-draw` now
-     keeps every command but `image`, which the tour never draws. In
-     Debug and ReleaseSafe alike, 1 to 16,682 of each frame's 1,296,000
-     pixels differ at all and 1 to 2,872 by more than 2 (at most 231),
-     each matching a neighbor, and frame 252 keeps its one unmatched pixel;
-     inside the frosted pane on Light & Depth (frame 228) and the material
-     cards on Materials (frame 276) no pixel differs by more than 1.
-     Blurring with a radius of 8 instead of 10 fails frame 228 (550
-     unmatched pixels), and turning every material's phase by 0.02 more
-     fails frame 276 (48,254). The check's removal of Chromium's profile
-     now retries, since a child process could still be writing to it.
-     CI's first `test-draw` with blurs failed frame 228 (17,654 unmatched
-     pixels): Mesa's llvmpipe, drawing the reference under Xvfb, rounds
-     each tap's addition to an RGBA16F target differently and summed the
-     pane 2 to 6 color steps darker than NVIDIA. zui-sokol (`0d7eedb`)
-     now sums blurs in RGBA32F where the GPU can, and RGBA16F otherwise,
-     and so does the client; `test-draw` fails if either side cannot sum
-     in RGBA32F, and reports each failing frame's numbers and uploads its
-     images from CI. Against references drawn by NVIDIA and by llvmpipe
-     alike, no pixel inside the pane differs by more than 1, and every
-     frame but 252 (its one pixel) has none unmatched; 1 to 13,740 of each
-     frame's pixels differ at all on NVIDIA, 5,516 to 22,905 on llvmpipe.
-     Its run in CI is to be confirmed once zui-sokol and then zui-web are
-     pushed.
-3. **Input** (done). `web/input_recorder.mjs` turns a canvas's pointer,
-   wheel, key and text events, its size and `devicePixelRatio` into calls
-   the client makes records of: zui-web's `RecordStream(Ui)` fills a
-   `RecordBuilder` and writes, through `zui_wire`'s `Encoder`, the
-   stream's header and then a record only when it holds events or the
-   viewport or scale changed, as F5's client sends. Its message buffer is
-   reserved at init for every event the builder holds at twice its size
-   in memory, which a test fills with the largest events. A key is the
-   one `KeyboardEvent.key` names, or for a digit or a mark the one its
-   `code` places, so Ctrl+2 is Ctrl+2 on any layout, and a key that types
-   a character without Ctrl or Meta sends it as text; a wheel's lines are
-   40/3 units, a notch of three as far as the Windows host scrolls. The
-   newest frame's cursor is set on the canvas by its CSS name. The tour
-   has sources, so its records end with their deliveries, which a live
-   record writes as none whatever the sources: `DemoUi` declares one that
-   delivers nothing, without which the tour's host read past the end of
-   the browser's records. `zig build test-input` gives the page a mouse
-   move and a click on the rail, Ctrl+3, Ctrl+PageDown, two typed keys,
-   the wheel, a touch and a resize through headless Chromium's DevTools
-   protocol, runs the tour on the 9 records (429 bytes) the client wrote,
-   checks each against what the page was given and that the tour moved
-   to Mission Control, Box Storm and the Gallery and asked for the
-   pointer cursor over the rail, and sends its frames back to the page,
-   which must show that cursor. Dropping `ctrlKey` from the page's
-   modifiers fails record 3, positions in device pixels fail record 1,
-   and not setting the cursor fails frame 0. The client is 75 KB in
-   ReleaseSmall and still reserves 35 MiB. The IME's text input area, and
-   composed text, wait for E1; CI's first `test-input` is to be confirmed
-   once zui-web is pushed.
-4. **The demo behind the page, in a Web Worker** (Decisions, Made): the
-   tour built for `wasm32-freestanding`, its frames posted to the page as
-   wire bytes and the page's records posted back. In parts:
-   - **The tour without sokol** (done, in zui-sokol). `zui_sokol_ui`, a
-     module that does not import sokol, holds `Text`, `truetype`,
-     `Material`, `Image`, the commands the renderer draws and `config`;
-     `zui_sokol` re-exports them, and its `config` checks the renderer.
-     `Image` is now the ids of a sokol_gfx view and sampler, field for
-     field what zui-web's `DemoUi` decodes, and `zui_sokol.imageOf` makes
-     one from sokol's handles. The tour declares its `Ui` through
-     `zui_sokol_ui`, so `zui_sokol_tour` imports no sokol, and given a
-     freestanding target zui-sokol's build makes only those two modules.
-     Without a C library stb_truetype allocates nothing: it measures, and
-     would rasterize no glyph. zui-sokol's `zig build check` compiles and
-     links `examples/tour_freestanding.zig`, the tour declaring a frame
-     for `wasm32-freestanding` on `std.Io.failing` (7.5 MB in Debug,
-     importing nothing from the page); run once by hand under Node, it
-     declared the frame. The tour's frames are unchanged: with
-     `--fork=../zui-sokol`, zui-web's `test-demo` writes the same stream
-     byte for byte, its reference for `test-draw` is the same, and
-     `test-input` passes. zui-web's zui-sokol pin moved to that commit
-     (`3931162`) with the worker.
-   - **The worker** (done, in zui-web, pinned to zui-sokol `cac68e4`).
-     `zig build`
-     writes `zui-web-tour.wasm`, `zui_sokol_tour` built for
-     `wasm32-freestanding` with atomics and bulk memory, on memory it
-     imports shared: 793 KB in ReleaseSmall, 8.0 MB in Debug, and about
-     49 MiB once `zuiTourInit` reserves it (the tour, 16 thread stacks of
-     256 KiB and 4 MiB for a frame's bytes). zui-web's `TourSession`
-     runs the tour as a loop that owns its clock: each frame it steps the
-     tour's `Io` to the page's instant, takes the records that arrived
-     whole, declares the frame and writes it through `zui_wire`'s
-     `Encoder`, and `web/tour_worker.mjs` posts those bytes to the page.
-     The tour's tasks run on an `Io` of the worker's own, `SteppedIo`
-     (Decisions, Made: how the tour's tasks run in the worker): its
-     clocks read the page's instant, and its tasks take turns on 16
-     threads, each a worker on the tour's memory (`web/tour_thread.mjs`,
-     setting its own stack pointer and thread-local storage), one at a
-     time and only while the frame waits for them; a task runs as it
-     starts until it first waits, and waits for a thread while all 16
-     are taken. `test-demo` now also runs the tour in that worker under
-     Node, on the records the client wrote of the mouse crossing each of
-     the thirteen screens and Ctrl+PageDown between them, 312 frames at
-     60 Hz on the page's clock, and runs it natively on the same ticks
-     (`tools/tour_frames.zig`, the same `SteppedIo` on 16 native threads):
-     every frame is the same bytes (2,628,746 in all), the tour started
-     and finished 66 tasks and was refused none on both, and the client
-     decodes every frame. In the worker the 312 frames take 0.9 s in
-     Debug and 0.1 to 0.2 s in ReleaseSafe, ReleaseFast and ReleaseSmall,
-     starting the threads included; three runs of each agree. A worker
-     refusing every task, as `std.Io.failing` does, fails it (no task
-     finished), and so does a worker on 4 threads (frame 76 differs), and
-     at zui-sokol `3931162`, where the Gallery's tiles depended on the
-     pointer width, frame 88 differs. By hand, in headless Chromium
-     serving the page cross-origin isolated, the worker drew 312 frames
-     in 115 ms in ReleaseSmall, after 28 ms starting its threads, and ran
-     the same 66 tasks; served without those headers, the page cannot
-     post shared memory to its worker, so slice 5 must serve it isolated,
-     which GitHub Pages cannot set headers for: a service worker that
-     adds them, or another host.
-5. **Published from CI** (done in zui-web; waiting on the owner). The
-   page, `web/index.html`, starts the tour's worker, and on each of the
-   display's frames sends it the page's clock and the record the canvas's
-   input made, draws the frame it answers with, and shows its cursor
-   (`web/tour_page.mjs`). It stays on GitHub Pages, made cross-origin
-   isolated by a service worker of its own (Decisions, Made: how the
-   published page is isolated): `web/isolation_service_worker.js`
-   serves the page and everything it loads again with
-   `Cross-Origin-Opener-Policy: same-origin` and
-   `Cross-Origin-Embedder-Policy: require-corp`, and the page registers it
-   and reloads once, and says so rather than reload again if it is still
-   not isolated. `zig build site` writes the page, the client, the tour's
-   worker, sokol_debugtext's fonts and the tour's TrueType fonts with
-   their license to `zig-out/site`, 1.0 MB in ReleaseSmall (the client
-   77 KB, the tour 793 KB); zui-web's Pages workflow builds it in
-   ReleaseSmall on each push to `main`, runs `test-site` on it and
-   publishes it. `zig build test-site` serves the site as GitHub Pages
-   does, without the isolation headers, opens it in headless Chromium and
-   checks that the page is isolated, through its own service worker,
-   after one reload, draws the worker's frames (49 of headless Chromium's
-   55 animation frames a second, on SwiftShader at 1600 by 1000 pixels,
-   the worker answering in 0.5 ms and the page drawing in 0.7 ms at the
-   median, in ReleaseSmall), and that its input reaches the tour: the
-   mouse over the rail turns the canvas's cursor to the pointer, and a
-   click on Mission Control's entry starts its two producers' tasks. A
-   service worker that leaves out `Cross-Origin-Embedder-Policy` fails it
-   (the page says it is not isolated), and so does a page that sends only
-   its first record, draws nothing, or shows no cursor. CI runs it too.
-   **Waiting on the owner:** zui-web's Pages source is to be set to
-   GitHub Actions (Settings, Pages), after which the Pages workflow's
-   first run, once zui-web is pushed, is to be confirmed, and then the
-   Done when, which only the owner can check: on
-   <https://aaronjclausen.github.io/zui-web/>, in a desktop browser on a
-   display of 60 Hz or more, the tour keeps the display's frame rate
-   (DevTools' frame rendering stats, or the Performance panel, show no
-   dropped frames over half a minute on each screen, Gallery and Mission
-   Control included), the canvas is sharp at the display's scale, and
-   the mouse, the wheel and the tour's shortcuts drive it.
-
 ---
 
 ## Stage 10: reach
@@ -3649,7 +3660,8 @@ Deliberate, and each a reason to choose zui:
 | A pixel on a glyph's edge (V4, open decision 3) | `test-draw` passes a frame with at most one pixel that matches no reference pixel within 1, settled by the owner: a glyph's partial coverage near its edge is a color no neighbor has, and two rasterizers decide a pixel whose centre lies that close to the edge differently. The tolerance of 2 and the neighbor rule are unchanged. Leaving text inside a turning transform out of the comparison, or having the client drop a pixel within 1/256 pixel of a glyph's edge, which is tuned to one machine's reference, were the other options |
 | How the tour's tasks run in the browser's worker (V4) | on an `Io` of the worker's own, `SteppedIo`, chosen in V4's worker part: its clocks read the page's instant, and the tour's tasks take turns on a fixed set of threads, each a worker on the tour's shared memory, one at a time and only while the frame waits for them, so the worker draws on the page's clock exactly the frames the tour draws natively on the same ticks, which `test-demo` checks byte for byte. A worker per loader was the other option: without shared memory it cannot reach the sources and loads the loaders write, so the tour's loaders would have been rewritten around messages, and with it, it is the same threads without the turns that keep frames alike. Its cost is a page served cross-origin isolated |
 | How the published page is isolated (V4) | on GitHub Pages, by a service worker of the page's own, chosen in V4's slice 5: it serves the page and everything it loads again with `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp`, which GitHub Pages cannot send, and the page reloads once after registering it. A host that sends the headers itself was the other option; it would add an account and a deploy outside the repository's own CI for two headers |
-| How the browser draws (V4) | the client lays every command out as zui-sokol's renderer does, triangle for triangle, and the page draws the triangles through WebGL 2 with one sample per pixel. A 2D canvas smooths every edge and cannot fade a shadow's rings vertex by vertex, so its frames could not be compared with zui-sokol's pixel by pixel |
+| How the browser draws (V4) | the client lays every command out as zui-sokol's renderer does, triangle for triangle, and the page draws the triangles through WebGL 2, with four samples per pixel resolved to one, as zui-sokol's demo window smooths its edges; `test-draw` compares them with one sample per pixel too. A 2D canvas smooths every edge its own way and cannot fade a shadow's rings vertex by vertex, so its frames could not be compared with zui-sokol's pixel by pixel |
+| A web renderer or a thin client over the wire (V4) | a thin client over `zui_wire`, as planned, since F5 built it: zui-web's page draws the frames an application in a Web Worker writes. A web host with a canvas surface, the application on the page itself, is H5's |
 | Where an element declares its material (G5) | `Ui.Decoration.material`, typed by the renderer's `MaterialHandle`: `Ui.Element`, `Ui.Decoration` and `Ui.Style` are the context's own, and are `zui.Element`, `zui.Decoration` and `zui.Style` without a handle, so no existing code changes. `open` taking `anytype` to accept both was rejected: a literal passed through `anytype` is not converted to `Ui.Element` |
 
 ### Open
@@ -3658,5 +3670,3 @@ Each is planned with its first option. SPEC.md §22 has those that change
 the spec.
 
 1. **Physical keys.** Planned: logical keys plus the opaque scancode.
-2. **V4, a web renderer or a thin client over the wire?** Planned: the
-   wire client first, since F5 builds it anyway.

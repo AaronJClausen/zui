@@ -2085,6 +2085,50 @@ const RemoteApp = struct {
 </script>
       </article>
 
+      <article class="feature" id="browser" data-title="In a browser">
+        <div class="feature-head"><h3>Running in a browser</h3><span class="pill shipped">Shipped</span></div>
+        <p>zui-web runs an application in a browser over <code class="z">zui_wire</code>, as zui-sokol's tour runs at <a href="https://aaronjclausen.github.io/zui-web/">aaronjclausen.github.io/zui-web</a>. The application is built for <code class="z">wasm32-freestanding</code> and runs in a Web Worker on an <code class="z">Io</code> that steps to the page's clock; each display frame, the page sends it that instant and the records its canvas's input wrote, and draws the frame bytes it answers with through WebGL 2, with four samples per pixel, as a native window with <code class="z">sample_count = 4</code> smooths its edges, and with the cursor the frame asks for. A worker shares its memory with its threads only on a cross-origin isolated page, so the published page isolates itself with a service worker. Durations inside a frame are timed on the worker's <code class="z">performance.now()</code>, imported by the module, since the stepped <code class="z">Io</code> holds one instant for the whole frame.</p>
+<script type="text/x-zig" data-file="src/browser_worker.zig">
+// Built for wasm32-freestanding and run in a Web Worker: zui-web's page
+// passes each display frame's instant and its canvas's records, and draws
+// the bytes this writes.
+var ui: Ui = undefined;
+var app: App = undefined;
+var fonts: Fonts = .{};
+var decoder: zui_wire.Decoder(Ui) = undefined;
+var encoder: zui_wire.Encoder(Ui) = undefined;
+var builder: zui.RecordBuilder = undefined;
+var canvas: zui.RecordBuilder.HostParams = .{ .now = .zero, .viewport = .{ 0, 0 } };
+var header_written = false;
+
+export fn darkroomFrame(now_milliseconds: f64, records: [*]const u8, record_count: usize, frame_bytes: [*]u8, frame_room: usize) usize {
+    const now: zui.Instant = .fromNanoseconds(@intFromFloat(now_milliseconds * std.time.ns_per_ms));
+    builder.begin(.{ .now = now, .viewport = canvas.viewport, .scale = canvas.scale });
+    var reader: std.Io.Reader = .fixed(records[0..record_count]);
+    while (decoder.next(&reader) catch null) |message| switch (message) {
+        .record => |record| {
+            canvas = .{ .now = now, .viewport = record.params.viewport, .scale = record.params.scale };
+            builder.params.viewport = canvas.viewport;
+            builder.params.scale = canvas.scale;
+            for (record.events) |event| builder.append(event);
+        },
+        .frame => {},
+    };
+
+    ui.beginFrame(&.{ .params = builder.params, .events = builder.events() }, &app.sources);
+    app.declare(&ui);
+    const frame = ui.endFrame();
+    defer ui.release(frame);
+
+    var writer: std.Io.Writer = .fixed(frame_bytes[0..frame_room]);
+    if (!header_written) zui_wire.writeHeader(&writer, zui_wire.fingerprintOf(&fonts)) catch return 0;
+    encoder.writeFrame(&writer, frame) catch return 0;
+    header_written = true;
+    return writer.end;
+}
+</script>
+      </article>
+
       <article class="feature" id="tracy" data-title="Profiling with Tracy">
         <div class="feature-head"><h3>Profiling with Tracy</h3><span class="pill shipped">Shipped</span></div>
         <p>A tracer is a type with <code class="z">zuiBegin</code> and <code class="z">zuiEnd</code> that sees every step of <code class="z">beginFrame</code> and <code class="z">endFrame</code> as a zone. <code class="z">zui_tracy.Tracer</code> sends them to Tracy. Without a tracer, zones are zero-sized and compile to nothing. Behind it, CI counts instructions per benchmark under Callgrind and fails on more than 2% growth over the parent commit.</p>

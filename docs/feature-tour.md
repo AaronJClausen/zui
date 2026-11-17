@@ -1951,6 +1951,54 @@ const RemoteApp = struct {
 };
 ```
 
+<a id="browser"></a>
+
+### Running in a browser · *shipped*
+
+zui-web runs an application in a browser over `zui_wire`, as zui-sokol's tour runs at <https://aaronjclausen.github.io/zui-web/>. The application is built for `wasm32-freestanding` and runs in a Web Worker on an `Io` that steps to the page's clock; each display frame, the page sends it that instant and the records its canvas's input wrote, and draws the frame bytes it answers with through WebGL 2, with four samples per pixel, as a native window with `sample_count = 4` smooths its edges, and with the cursor the frame asks for. A worker shares its memory with its threads only on a cross-origin isolated page, so the published page isolates itself with a service worker. Durations inside a frame are timed on the worker's `performance.now()`, imported by the module, since the stepped `Io` holds one instant for the whole frame.
+
+`src/browser_worker.zig`
+
+```zig
+// Built for wasm32-freestanding and run in a Web Worker: zui-web's page
+// passes each display frame's instant and its canvas's records, and draws
+// the bytes this writes.
+var ui: Ui = undefined;
+var app: App = undefined;
+var fonts: Fonts = .{};
+var decoder: zui_wire.Decoder(Ui) = undefined;
+var encoder: zui_wire.Encoder(Ui) = undefined;
+var builder: zui.RecordBuilder = undefined;
+var canvas: zui.RecordBuilder.HostParams = .{ .now = .zero, .viewport = .{ 0, 0 } };
+var header_written = false;
+
+export fn darkroomFrame(now_milliseconds: f64, records: [*]const u8, record_count: usize, frame_bytes: [*]u8, frame_room: usize) usize {
+    const now: zui.Instant = .fromNanoseconds(@intFromFloat(now_milliseconds * std.time.ns_per_ms));
+    builder.begin(.{ .now = now, .viewport = canvas.viewport, .scale = canvas.scale });
+    var reader: std.Io.Reader = .fixed(records[0..record_count]);
+    while (decoder.next(&reader) catch null) |message| switch (message) {
+        .record => |record| {
+            canvas = .{ .now = now, .viewport = record.params.viewport, .scale = record.params.scale };
+            builder.params.viewport = canvas.viewport;
+            builder.params.scale = canvas.scale;
+            for (record.events) |event| builder.append(event);
+        },
+        .frame => {},
+    };
+
+    ui.beginFrame(&.{ .params = builder.params, .events = builder.events() }, &app.sources);
+    app.declare(&ui);
+    const frame = ui.endFrame();
+    defer ui.release(frame);
+
+    var writer: std.Io.Writer = .fixed(frame_bytes[0..frame_room]);
+    if (!header_written) zui_wire.writeHeader(&writer, zui_wire.fingerprintOf(&fonts)) catch return 0;
+    encoder.writeFrame(&writer, frame) catch return 0;
+    header_written = true;
+    return writer.end;
+}
+```
+
 <a id="tracy"></a>
 
 ### Profiling with Tracy · *shipped*
