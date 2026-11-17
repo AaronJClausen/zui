@@ -531,6 +531,25 @@ export fn zuiCheckTracer() u32 {
     return CheckTracer.open_zones + @intFromBool(zui.Context(.{ .features = .{ .Tracer = zui_tracy.Tracer } }).Tracing.enabled);
 }
 
+const CheckZoneTimer = zui_debug.ZoneTimer(CheckTracer);
+const TimedUi = zui.Context(.{ .limits = .{ .max_elements = 64 }, .Text = CheckText, .features = .{ .Tracer = CheckZoneTimer } });
+
+var timed_memory: [TimedUi.required_bytes]u8 align(TimedUi.buffer_alignment) = undefined;
+var timed_inspector: zui_debug.Inspector(TimedUi) = .{};
+
+export fn zuiCheckZoneTimer() u32 {
+    var ui = TimedUi.initBuffer(&timed_memory, undefined, &check_text) catch return 0;
+    CheckZoneTimer.useClock(ui.io);
+    for (0..2) |_| {
+        ui.tryBeginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 100, 100 } } }) catch return 0;
+        timed_inspector.declare(&ui);
+        const frame = ui.endFrame();
+        timed_inspector.observe(frame, null);
+        ui.release(frame);
+    }
+    return @intCast(CheckZoneTimer.frameTimes().ran.count() + timed_inspector.zones.count);
+}
+
 const CheckSource = struct {
     pub const Delivery = ?u64;
     pub const View = zui.StatusWithProgress(error{Timeout}!u64, f32);

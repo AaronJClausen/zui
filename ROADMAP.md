@@ -31,7 +31,7 @@ Each item says:
 | stage 7 | gestures (I5): arbitration by motion component, zoom, long press, double tap, momentum, the intents and custom recognizers; drag and drop between elements (I1) | done: a carousel in a list, a pinch starting on a list inside a map, a lasso module against a map's pan, and `zui_testing.Driver.drag` moving an item between two lists, out of one that scrolls by dragging |
 | after stage 7: the foundation | G1's first slice ran 5.5% to 7.7% more instructions in scenes that draw no effect, so the work turned to what lay under it: benchmarks that can be trusted (R3 to R8, and R9 in part) and the data-oriented design audit's findings (P6 to P10) | done; a commit compared with itself over three code layouts calls nothing, its intervals 0.52% wide on average, and a change that only moves code is not called; a tooltip declared before a 3,000-cell grid lays out in 79 µs, not 671 µs (P6); warm text −43% (P9); `init` from 138 µs to 92 µs (P7, P10); the budgets judged in benchmarking mode |
 | stage 8, begun | gradients, shadows and glow (G1); backdrop blur (G2); effects in the corners of a decoration that draws nothing (G7); transforms with hit inversion (G3); materials (G5) | G1, G2, G7, G3 and G5 done: zui-sokol draws gradients, shadows, backdrop blurs, transforms and materials through a shader of its own and passes the renderer suite, its effects rounded by a decoration that draws nothing, a pointer hits a turned button where it is drawn, and a frame without effects runs no more instructions than before; G6 begun: `zui.ExtendedColor` is declared and clamped for a renderer that draws only `Color`, and zui-sokol draws it into an scRGB FP16 offscreen image and passes the renderer suite there |
-| stage 9, begun | `zui_debug` (V1) | `Frame.inspect` and the inspector's diagnostics, fallbacks, element tree and hovered element's configs; its tracer overlay, theme reload and the demo's key to come |
+| stage 9, begun | `zui_debug` (V1) | `Frame.inspect` and the inspector's diagnostics, fallbacks, zone times from its `ZoneTimer` tracer, element tree and hovered element's configs; its theme reload and the demo's key to come |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
@@ -3063,7 +3063,7 @@ demo toggles it with a key.
 
 **Spec.** §19.7.
 
-**Status.** Three slices landed. The first: `Frame.inspect(index)`
+**Status.** Four slices landed. The first: `Frame.inspect(index)`
 returns an `ElementView` of every element the frame kept, its id and
 debug name, parent, subtree end, rectangle, minimum and content sizes,
 flags, layout, decoration, effects (found by a binary search of the
@@ -3087,9 +3087,20 @@ limit held"; then the fallbacks in effect: each command in
 `zui_commands` that leaves it out, `clamped_colors` against
 `zui_extended_color`, and a line for each `; `-separated part of what
 `reportRun(report)` was handed, such as `zui_app`'s `Report` of what
-the host and renderer lack, which no frame carries. Next come the
-tracer's performance overlay; reloading its theme through a `Stream(zui.FileChange)`; and
-last the demo's key in `../zui-raylib`. `zui_app.run` hands the
+the host and renderer lack, which no frame carries. The fourth: the
+performance overlay. `zui_debug.ZoneTimer(Inner)` is a tracer that times
+each zone with the monotonic clock of the `Io` handed to its
+`useClock(io)`, summing a frame's times per zone in a thread-local
+`ZoneTimes` that `begin_frame` clears, and passes each zone on to
+`Inner`, such as `zui_tracy.Tracer`, or to nothing for `void`. An
+`Inspector` over a context whose `Config.features.Tracer` is one keeps
+the last 60 frames' times, recorded by `observe`, and lists under
+*Performance* each zone that ran, the steps indented under
+`begin_frame` and `end_frame`: its time in the last frame and its mean
+(over the frames it ran in) and peak, in milliseconds. Any other context
+keeps no history and says it is untimed. Next come reloading its theme
+through a `Stream(zui.FileChange)`; and last the demo's key in
+`../zui-raylib`. `zui_app.run` hands the
 application no frame after `endFrame`, so the demo's key needs a hook
 there, or the demo's own loop, to call `observe`.
 

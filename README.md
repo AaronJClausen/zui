@@ -228,7 +228,10 @@ Implemented so far:
   with every field of its layout, decoration, effects, floating and
   text style that differs from the default. `observe(frame, pointer)`
   after `endFrame` copies what it shows, and `declare(ui)` draws it in
-  the next frame.
+  the next frame. With `zui_debug.ZoneTimer(Inner)` as the tracer, the
+  panel also shows each zone's time in the last frame and its mean and
+  peak over the last 60, while passing the zones on to `Inner`, such as
+  `zui_tracy.Tracer`.
 
 The reference backend, its adapter host and the demo application live in
 [zui-raylib](https://github.com/AaronJClausen/zui-raylib); the other

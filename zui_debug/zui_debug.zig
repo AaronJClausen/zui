@@ -1,6 +1,6 @@
 //! An inspector over `Frame.inspect`: a panel listing the frame's
-//! diagnostics and fallbacks, the element tree and the configs of the
-//! element under the pointer.
+//! diagnostics and fallbacks, the time each zone took, the element tree
+//! and the configs of the element under the pointer.
 //!
 //! ```zig
 //! app.inspector.declare(ui); // last, so its panel floats over the rest
@@ -10,6 +10,130 @@
 
 const std = @import("std");
 const zui = @import("zui");
+
+/// What each zone took in one frame.
+pub const ZoneTimes = struct {
+    /// Summed over each time the zone ran.
+    nanoseconds: std.EnumArray(zui.TraceZone, u64) = .initFill(0),
+    ran: std.EnumSet(zui.TraceZone) = .initEmpty(),
+};
+
+/// A tracer for `Config.features.Tracer` that times each zone of a frame
+/// for the inspector's performance overlay, and passes each zone on to
+/// `Inner`, another tracer such as `zui_tracy.Tracer`, or to nothing when
+/// `Inner` is `void`. No zone is timed until `useClock` is given an `Io`.
+///
+/// ```zig
+/// const Timer = zui_debug.ZoneTimer(zui_tracy.Tracer);
+/// const Ui = zui.Context(.{ .Text = Fonts, .features = .{ .Tracer = Timer } });
+///
+/// Timer.useClock(io);
+/// ```
+pub fn ZoneTimer(comptime Inner: type) type {
+    const inner_is_tracer = Inner == void or (@typeInfo(Inner) == .@"struct" and @hasDecl(Inner, "zuiBegin") and @hasDecl(Inner, "zuiEnd"));
+    if (!inner_is_tracer) @compileError("zui_debug: ZoneTimer passes its zones on to a tracer or to void, got " ++ @typeName(Inner));
+    return struct {
+        const InnerSpan = if (Inner == void) void else @TypeOf(Inner.zuiBegin(zui.TraceZone.begin_frame));
+
+        var clock: ?std.Io = null;
+        threadlocal var frame_times: ZoneTimes = .{};
+
+        /// A zone begun, and when, if a clock was in use.
+        pub const Span = struct {
+            zone: zui.TraceZone,
+            started: ?std.Io.Timestamp,
+            inner: InnerSpan,
+        };
+
+        /// Times every zone from now on with `io`'s monotonic clock. Call it
+        /// before the first frame, or on the thread that runs the frames.
+        pub fn useClock(io: std.Io) void {
+            clock = io;
+        }
+
+        /// The zones this thread has timed since its last `begin_frame`
+        /// began: after `endFrame`, the whole frame's.
+        pub fn frameTimes() ZoneTimes {
+            return frame_times;
+        }
+
+        /// Starts `zone`'s time and `Inner`'s zone; a `begin_frame` starts
+        /// the frame's times afresh.
+        pub fn zuiBegin(comptime zone: zui.TraceZone) Span {
+            if (zone == .begin_frame) frame_times = .{};
+            const inner = if (Inner == void) {} else Inner.zuiBegin(zone);
+            return .{ .zone = zone, .started = if (clock) |io| std.Io.Timestamp.now(io, .awake) else null, .inner = inner };
+        }
+
+        /// Adds the zone's time to the frame's and ends `Inner`'s zone.
+        pub fn zuiEnd(span: Span) void {
+            if (span.started) |started| {
+                const elapsed = started.durationTo(std.Io.Timestamp.now(clock.?, .awake)).nanoseconds;
+                const time = frame_times.nanoseconds.getPtr(span.zone);
+                time.* +|= std.math.lossyCast(u64, elapsed);
+                frame_times.ran.insert(span.zone);
+            }
+            if (Inner != void) Inner.zuiEnd(span.inner);
+        }
+    };
+}
+
+/// The zone times of the last `frames_kept` frames recorded.
+pub const ZoneHistory = struct {
+    /// About a second of frames at 60 Hz.
+    pub const frames_kept = 60;
+
+    frames: [frames_kept]ZoneTimes = @splat(.{}),
+    count: u8 = 0,
+    next: u8 = 0,
+
+    /// Keeps `times` in place of the oldest frame once `frames_kept` are kept.
+    pub fn record(self: *ZoneHistory, times: ZoneTimes) void {
+        self.frames[self.next] = times;
+        self.next = (self.next + 1) % frames_kept;
+        self.count = @min(self.count + 1, frames_kept);
+    }
+
+    /// The frames kept, in no particular order.
+    pub fn kept(self: *const ZoneHistory) []const ZoneTimes {
+        return self.frames[0..self.count];
+    }
+
+    /// The frame recorded last.
+    pub fn latest(self: *const ZoneHistory) ?*const ZoneTimes {
+        if (self.count == 0) return null;
+        return &self.frames[(self.next + frames_kept - 1) % frames_kept];
+    }
+
+    /// Whether `zone` ran in any frame kept.
+    pub fn ran(self: *const ZoneHistory, zone: zui.TraceZone) bool {
+        for (self.kept()) |*times| if (times.ran.contains(zone)) return true;
+        return false;
+    }
+
+    /// The mean time of `zone` over the frames kept in which it ran.
+    pub fn mean(self: *const ZoneHistory, zone: zui.TraceZone) u64 {
+        var total: u64 = 0;
+        var frames_ran: u64 = 0;
+        for (self.kept()) |*times| if (times.ran.contains(zone)) {
+            total +|= times.nanoseconds.get(zone);
+            frames_ran += 1;
+        };
+        return if (frames_ran == 0) 0 else total / frames_ran;
+    }
+
+    /// The longest `zone` took in a frame kept.
+    pub fn peak(self: *const ZoneHistory, zone: zui.TraceZone) u64 {
+        var longest: u64 = 0;
+        for (self.kept()) |*times| longest = @max(longest, times.nanoseconds.get(zone));
+        return longest;
+    }
+};
+
+/// Whether `Tracer` keeps the frame's zone times, as `ZoneTimer` does.
+fn timesZones(comptime Tracer: type) bool {
+    return Tracer != void and @hasDecl(Tracer, "frameTimes") and @TypeOf(Tracer.frameTimes) == fn () ZoneTimes;
+}
 
 /// The inspector of a context of type `Ui`, which declares its panel into
 /// that same context. It copies what it shows out of each frame it
@@ -25,6 +149,11 @@ pub fn Inspector(comptime Ui: type) type {
         pub const DebugName = @FieldType(Ui.ElementView, "name");
         const CustomData = @FieldType(Ui.ElementContent, "custom");
         const has_debug_names = DebugName != void;
+        const Tracer = Ui.features.Tracer;
+        /// Whether the context's tracer is a `ZoneTimer`, whose times the
+        /// panel shows.
+        pub const times_zones = timesZones(Tracer);
+        const ZoneHistoryIfTimed = if (times_zones) ZoneHistory else void;
         const max_text_preview_bytes = 32;
         const max_line_bytes = 256;
         const max_indented_depth = 32;
@@ -115,6 +244,9 @@ pub fn Inspector(comptime Ui: type) type {
         diagnostics: zui.Diagnostics = .{},
         run_report_storage: [max_run_report_bytes]u8 = undefined,
         run_report_len: u16 = 0,
+        /// The zone times of the frames observed, kept only when
+        /// `times_zones`.
+        zones: ZoneHistoryIfTimed = if (times_zones) .{} else {},
 
         /// The tree as last observed, in declaration order.
         pub fn rows(self: *const Self) []const Row {
@@ -143,9 +275,12 @@ pub fn Inspector(comptime Ui: type) type {
         /// element under `pointer`: the last in declaration order whose
         /// rectangle holds it, which is the innermost. While the pointer is
         /// over the panel, the element it showed stays, so the pointer can
-        /// move there to read it.
+        /// move there to read it. With a `ZoneTimer`, it also records the
+        /// frame's zone times, so call it on the thread that ran the frame
+        /// and before the next `beginFrame`.
         pub fn observe(self: *Self, frame: *const Ui.Frame, pointer: ?[2]f32) void {
             self.diagnostics = frame.diagnostics;
+            if (times_zones) self.zones.record(Tracer.frameTimes());
             const panel_index = frame.lookup(self.panel_id.hash);
             const panel_rect: ?zui.Rect = if (panel_index) |index| frame.inspect(index).rect else null;
             const pointer_on_panel = pointer != null and panel_rect != null and panel_rect.?.contains(pointer.?);
@@ -252,6 +387,8 @@ pub fn Inspector(comptime Ui: type) type {
             self.declareDiagnostics(ui);
             self.heading(ui, "Fallbacks");
             self.declareFallbacks(ui);
+            self.heading(ui, "Performance");
+            self.declarePerformance(ui);
             self.heading(ui, "Hovered");
             if (self.hovered) |*hovered| self.declareHovered(ui, hovered) else self.line(ui, "nothing under the pointer", .{});
             self.heading(ui, "Elements");
@@ -309,6 +446,36 @@ pub fn Inspector(comptime Ui: type) type {
             var report_parts = std.mem.splitSequence(u8, self.runReport(), "; ");
             while (report_parts.next()) |part| if (part.len != 0) self.line(ui, "{s}", .{part});
             if (diagnostics.lowered.count() == 0 and !diagnostics.clamped_colors and self.run_report_len == 0) self.line(ui, "none in effect", .{});
+        }
+
+        fn declarePerformance(self: *const Self, ui: *Ui) void {
+            if (times_zones) {
+                self.declareZoneTimes(ui, &self.zones);
+            } else {
+                self.line(ui, "untimed, as Config.features.Tracer is not a zui_debug.ZoneTimer", .{});
+            }
+        }
+
+        fn declareZoneTimes(self: *const Self, ui: *Ui, history: *const ZoneHistory) void {
+            const latest = history.latest() orelse return self.line(ui, "no frame observed yet", .{});
+            var any_zone_ran = false;
+            for (history.kept()) |*times| any_zone_ran = any_zone_ran or times.ran.count() != 0;
+            if (!any_zone_ran) return self.line(ui, "no zone timed yet; the ZoneTimer times from useClock(io)", .{});
+            self.line(ui, "ms in the last frame (mean, peak) over {d} frames", .{history.count});
+            for (std.enums.values(zui.TraceZone)) |zone| if (history.ran(zone)) {
+                const depth: u16 = if (zone == .begin_frame or zone == .end_frame) 0 else 1;
+                self.line(ui, "{s}{t} {d:.3} ({d:.3}, {d:.3})", .{
+                    indentation(depth),
+                    zone,
+                    milliseconds(latest.nanoseconds.get(zone)),
+                    milliseconds(history.mean(zone)),
+                    milliseconds(history.peak(zone)),
+                });
+            };
+        }
+
+        fn milliseconds(nanoseconds: u64) f64 {
+            return @as(f64, @floatFromInt(nanoseconds)) / std.time.ns_per_ms;
         }
 
         fn loweredTo(command: zui.OptionalCommand) []const u8 {

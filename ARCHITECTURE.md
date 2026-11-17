@@ -166,7 +166,7 @@ The stage is the one in SPEC.md §21 that builds it.
 | static styles | core | 6 |
 | gestures, intents, momentum, drag and drop | core arbitration; custom recognizers in modules | 7 |
 | gradients, shadows, blur, transforms, materials, HDR | core commands and lowering; renderers draw; host reports headroom | 8 |
-| inspector | `zui_debug` over `Frame.inspect` | 9 |
+| inspector, and its overlay of zone times | `zui_debug` over `Frame.inspect`, and its `ZoneTimer` tracer over the tracer contract | 9 |
 | accessibility | core semantics; host bridges to the platform API | 9 |
 | macOS, Linux and web hosts; services; decorations; many windows | `zui-host`; one `Context` per window | 10 |
 | motion and exit animations | `zui_motion`; ghost buffer in the core | 11 |
@@ -252,8 +252,9 @@ What exists today, by stage:
   press hit-tests once; and the string cache keeps a text's wrapped lines
   beside its entries, and its keys and ages apart from its values.
 - **Stage 9, begun:** `Frame.inspect`, and `zui_debug`'s inspector of
-  the frame's diagnostics and fallbacks, the element tree and the
-  hovered element's configs.
+  the frame's diagnostics and fallbacks, the zone times its
+  `ZoneTimer` tracer takes, the element tree and the hovered element's
+  configs.
 
 The code and the spec still differ in these places, each closed by the
 roadmap item named:
@@ -263,7 +264,7 @@ roadmap item named:
 | output formats are negotiated through `Surface`, and zui-sokol draws an `.scrgb_fp16` offscreen image, but no host or renderer declares `.scrgb_fp16` for a window, and no host reports `hdr_headroom` | an FP16 swapchain when both sides support it; headroom from the display | `../zui-sokol`, `../zui-host` | G6 |
 | `Widgets(Ui)` with a `Theme` struct | `Widgets(Ui, Skin)` | `zui_widgets/` | K5 |
 | `Features` has every field and gates its API, but `Frame.semantics()` is always empty and `safety_sweeps` changes nothing | semantics and safety sweeps, each behind its field | `src/context.zig` | V2, V3 |
-| `zui_debug` shows the frame's diagnostics and fallbacks, the element tree and the hovered element's configs | also a performance overlay from the tracer | `zui_debug/` | V1 |
+| `zui_debug`'s panel is styled by a `Theme` struct set in code | its themes and assets reload when their files change, through the host's file watch | `zui_debug/` | V1 |
 
 Unchanged in shape: element storage in pre-order structure-of-arrays, the
 layout passes, the segment cache, ids, the state table, the frame arenas,

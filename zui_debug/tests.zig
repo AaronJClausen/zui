@@ -123,6 +123,7 @@ test "the tree has a row per element, indented by depth, and never the panel's o
     const lines = panelLines(frame, &buffer);
     try expectLine(lines, "nothing under the pointer");
     try expectLine(lines, "every limit held");
+    try expectLine(lines, "untimed, as Config.features.Tracer is not a zui_debug.ZoneTimer");
     try expectLine(lines, "shadow drawn as nothing, as the renderer's zui_commands leaves it out");
     try expectLine(lines, "    text \"Save\" 32x16");
     try expectLine(lines, "root 800x600");
@@ -300,4 +301,147 @@ test "a run's report too long to keep is cut before a codepoint it would split" 
     inspector.reportRun(LongReport{});
     try testing.expectEqual(@as(usize, 1023), inspector.runReport().len);
     try testing.expect(std.unicode.utf8ValidateSlice(inspector.runReport()));
+}
+
+const CountingTracer = struct {
+    var zones_begun: u32 = 0;
+    var zones_open: u32 = 0;
+
+    pub fn zuiBegin(comptime _: zui.TraceZone) void {
+        zones_begun += 1;
+        zones_open += 1;
+    }
+
+    pub fn zuiEnd(_: void) void {
+        zones_open -= 1;
+    }
+};
+
+const CountedTimer = zui_debug.ZoneTimer(CountingTracer);
+const UnclockedTimer = zui_debug.ZoneTimer(void);
+
+fn TracedUi(comptime Tracer: type) type {
+    return zui.Context(.{
+        .limits = .{ .max_elements = 64, .max_text_bytes = 4096, .max_render_commands = 256, .measure_cache_entries = 64 },
+        .Text = Text,
+        .features = .{ .Tracer = Tracer },
+    });
+}
+
+fn TracedScene(comptime TracedContext: type) type {
+    return struct {
+        fn declare(inspector: *zui_debug.Inspector(TracedContext), ui: *TracedContext) void {
+            ui.text("traced", .{});
+            ui.box(.{ .floating = .{ .z = 1 }, .layout = .{ .sizing = .{ .width = .fixed(10), .height = .fixed(10) } }, .decoration = .{ .background = .black } });
+            inspector.declare(ui);
+        }
+    };
+}
+
+fn TracedFixture(comptime Tracer: type) type {
+    const TracedContext = TracedUi(Tracer);
+    return struct {
+        const Self = @This();
+
+        text: Text = .{},
+        ui: TracedContext = undefined,
+        driver: zui_testing.Driver(TracedContext) = undefined,
+        inspector: zui_debug.Inspector(TracedContext) = .{},
+
+        fn create() !*Self {
+            const fixture = try testing.allocator.create(Self);
+            errdefer testing.allocator.destroy(fixture);
+            fixture.* = .{};
+            fixture.ui = try .init(testing.allocator, testing.io, &fixture.text);
+            fixture.driver = .{ .ui = &fixture.ui };
+            return fixture;
+        }
+
+        fn destroy(fixture: *Self) void {
+            fixture.ui.deinit(testing.allocator);
+            testing.allocator.destroy(fixture);
+        }
+
+        fn frame(fixture: *Self) !*const TracedContext.Frame {
+            return fixture.driver.frame(&fixture.inspector, TracedScene(TracedContext).declare, &.{});
+        }
+
+        fn observedFrame(fixture: *Self) !void {
+            fixture.inspector.observe(try fixture.frame(), null);
+        }
+    };
+}
+
+test "a zone timer times each zone a frame runs and passes each on to its inner tracer" {
+    const fixture = try TracedFixture(CountedTimer).create();
+    defer fixture.destroy();
+    CountedTimer.useClock(testing.io);
+
+    try fixture.observedFrame();
+    const begun_before_frame = CountingTracer.zones_begun;
+    try fixture.observedFrame();
+    const times = CountedTimer.frameTimes();
+    try testing.expectEqual(@as(u32, 0), CountingTracer.zones_open);
+    try testing.expectEqual(@as(usize, CountingTracer.zones_begun - begun_before_frame), times.ran.count());
+
+    const zones_run = [_]zui.TraceZone{ .begin_frame, .wait_for_frame, .evict_state, .apply_events, .end_frame, .measure_text, .fit_widths, .distribute_widths, .wrap_text, .fit_heights, .distribute_heights, .position, .emit, .sort_layers };
+    for (zones_run) |zone| try testing.expect(times.ran.contains(zone));
+    try testing.expect(!times.ran.contains(.swap_sources));
+    try testing.expect(!times.ran.contains(.relay));
+    try testing.expect(times.nanoseconds.get(.end_frame) >= times.nanoseconds.get(.emit) + times.nanoseconds.get(.position));
+    try testing.expect(times.nanoseconds.get(.begin_frame) >= times.nanoseconds.get(.apply_events));
+
+    try testing.expectEqual(@as(u8, 2), fixture.inspector.zones.count);
+    try testing.expectEqual(times, fixture.inspector.zones.latest().?.*);
+}
+
+test "the panel lists each zone timed, with its last, mean and peak time" {
+    const fixture = try TracedFixture(CountedTimer).create();
+    defer fixture.destroy();
+
+    for ([_]u64{ 3_000_000, 1_000_000, 2_000_000 }) |end_frame_nanoseconds| {
+        var times: zui_debug.ZoneTimes = .{};
+        times.nanoseconds.set(.end_frame, end_frame_nanoseconds);
+        times.nanoseconds.set(.emit, end_frame_nanoseconds / 4);
+        times.ran = .initMany(&.{ .end_frame, .emit });
+        fixture.inspector.zones.record(times);
+    }
+    var buffer: [64][]const u8 = undefined;
+    const lines = panelLines(try fixture.frame(), &buffer);
+    try expectLine(lines, "ms in the last frame (mean, peak) over 3 frames");
+    try expectLine(lines, "end_frame 2.000 (2.000, 3.000)");
+    try expectLine(lines, "  emit 0.500 (0.500, 0.750)");
+    for (lines) |line| try testing.expect(std.mem.indexOf(u8, line, "fit_widths") == null);
+}
+
+test "a zone timer without a clock times nothing, and the panel says so" {
+    const fixture = try TracedFixture(UnclockedTimer).create();
+    defer fixture.destroy();
+
+    var buffer: [64][]const u8 = undefined;
+    try expectLine(panelLines(try fixture.frame(), &buffer), "no frame observed yet");
+    try fixture.observedFrame();
+    try testing.expectEqual(@as(usize, 0), UnclockedTimer.frameTimes().ran.count());
+    try expectLine(panelLines(try fixture.frame(), &buffer), "no zone timed yet; the ZoneTimer times from useClock(io)");
+}
+
+test "the zone history keeps the last frames, and a zone's mean counts only the frames it ran in" {
+    var history: zui_debug.ZoneHistory = .{};
+    try testing.expectEqual(@as(?*const zui_debug.ZoneTimes, null), history.latest());
+    for (0..zui_debug.ZoneHistory.frames_kept + 5) |frame_number| {
+        var times: zui_debug.ZoneTimes = .{};
+        times.nanoseconds.set(.emit, frame_number);
+        times.ran.insert(.emit);
+        if (frame_number % 2 == 0) {
+            times.nanoseconds.set(.sort_layers, 10);
+            times.ran.insert(.sort_layers);
+        }
+        history.record(times);
+    }
+    try testing.expectEqual(@as(usize, zui_debug.ZoneHistory.frames_kept), history.kept().len);
+    try testing.expectEqual(@as(u64, zui_debug.ZoneHistory.frames_kept + 4), history.latest().?.nanoseconds.get(.emit));
+    try testing.expectEqual(@as(u64, zui_debug.ZoneHistory.frames_kept + 4), history.peak(.emit));
+    try testing.expectEqual(@as(u64, (5 + zui_debug.ZoneHistory.frames_kept + 4) / 2), history.mean(.emit));
+    try testing.expectEqual(@as(u64, 10), history.mean(.sort_layers));
+    try testing.expect(!history.ran(.relay));
 }
