@@ -73,7 +73,7 @@ green, and its **Status** line below says which slice is next.
 | P12. Text commands that point at their style | audit | `src/commands.zig`, `src/emission.zig`, `zui_wire/`, `../zui-raylib`, `../zui-sokol`, `../zui-terminal` | | waiting on a profile of a renderer reading the commands |
 | G6. HDR and wide gamut | 8 | `src/context.zig`, `src/commands.zig`, `src/surface.zig`, `zui_wire/`, `zui_testing/`, `../zui-sokol`, `../zui-host` | | waiting on a session under Windows with an HDR display: zui-sokol's FP16 `.win32` swapchain and zui-host's `.scrgb_fp16` window |
 | V2. Semantics and accessibility actions | 9 | `src/context.zig`, `zui_widgets/`, `../zui-host` | | in progress; the UI Automation bridge waits on a session under Windows |
-| V4. The demo in a browser | 9 | `../zui-web`, `zui_wire/` | | in progress; the client draws every command the tour does, compared with zui-sokol's, and writes the page's input as records the tour takes; the demo in a Web Worker (slice 4) is next |
+| V4. The demo in a browser | 9 | `../zui-web`, `zui_wire/` | | in progress; the client draws every command the tour does, compared with zui-sokol's, and writes the page's input as records the tour takes; the tour builds without sokol for `wasm32-freestanding`; the Web Worker that runs it (slice 4) is next |
 | F7. The wire's renderer declares its context's payload types | 5 | `zui_wire/remote.zig`, `zui_wire/tests.zig` | | |
 
 After the queue come stages 10 and 11 in the order of SPEC.md §21. They join the queue as it runs short.
@@ -3185,11 +3185,14 @@ their own. `Decoder(Ui).next` decodes only a whole message, but one cut
 short fails with `error.EndOfStream` before changing anything
 (`zui_wire/zui_wire.zig`, `readFrame` swaps its histories only once the
 commands are read), so a reader can try again once more bytes arrive.
-The tour's `Ui` comes from `zui_sokol.config`, whose `Text`, `Image` and
-`Material` live in a module that links sokol, which does not build for
-`wasm32-freestanding`; the frames themselves hold only plain data (the
-`Image`'s two sokol ids, the `Material`'s pattern, colors, phase and
-scale). zui-sokol's `Text` declares no `zuiFingerprint`, so its streams
+The tour's `Ui` comes from `zui_sokol_ui.config`, whose `Text`, `Image`
+and `Material` build without sokol (zui-sokol's `src/ui/`), and its
+frames hold only plain data (the `Image`'s two sokol ids, the
+`Material`'s pattern, colors, phase and scale). The tour's loaders start
+tasks with `Io.Group.concurrent` (`examples/screens/gallery.zig`,
+`mission_control.zig`), and an `Io` without concurrency fails them:
+a tile fails as `NoThreadAvailable`, and the telemetry and chatter
+producers do not run. zui-sokol's `Text` declares no `zuiFingerprint`, so its streams
 carry none, and nothing is checked of the fonts.
 
 **Plan.** The demo streaming over the wire (F5) to a thin browser client,
@@ -3339,10 +3342,36 @@ published from CI.
    once zui-web is pushed.
 4. **The demo behind the page, in a Web Worker** (Decisions, Made): the
    tour built for `wasm32-freestanding`, its frames posted to the page as
-   wire bytes and the page's records posted back. It needs zui-sokol's
-   `Text` and `Material` in a module that does not link sokol
-   (stb_truetype builds for wasm32 with Zig's C compiler), and the tour's
-   loaders, which start threads, on an `Io` a worker can run.
+   wire bytes and the page's records posted back. In parts:
+   - **The tour without sokol** (done, in zui-sokol). `zui_sokol_ui`, a
+     module that does not import sokol, holds `Text`, `truetype`,
+     `Material`, `Image`, the commands the renderer draws and `config`;
+     `zui_sokol` re-exports them, and its `config` checks the renderer.
+     `Image` is now the ids of a sokol_gfx view and sampler, field for
+     field what zui-web's `DemoUi` decodes, and `zui_sokol.imageOf` makes
+     one from sokol's handles. The tour declares its `Ui` through
+     `zui_sokol_ui`, so `zui_sokol_tour` imports no sokol, and given a
+     freestanding target zui-sokol's build makes only those two modules.
+     Without a C library stb_truetype allocates nothing: it measures, and
+     would rasterize no glyph. zui-sokol's `zig build check` compiles and
+     links `examples/tour_freestanding.zig`, the tour declaring a frame
+     for `wasm32-freestanding` on `std.Io.failing` (7.5 MB in Debug,
+     importing nothing from the page); run once by hand under Node, it
+     declared the frame. The tour's frames are unchanged: with
+     `--fork=../zui-sokol`, zui-web's `test-demo` writes the same stream
+     byte for byte, its reference for `test-draw` is the same, and
+     `test-input` passes. zui-web's zui-sokol pin moves to that commit
+     (`3931162`) once it is pushed, with the worker.
+   - **The worker** (next, in zui-web): `zui_sokol_tour` built for
+     `wasm32-freestanding`, declaring its frames on an `Io` a worker can
+     run, its clock the page's, writing them through `zui_wire`'s
+     `Encoder` into bytes posted to the page and reading the page's
+     records. On `std.Io.failing` the tour's loaders find no thread, so
+     the Gallery's tiles fail and Mission Control's producers stand
+     still; the worker's `Io` runs them, or they run in workers of their
+     own, which the part decides and records. Its check runs the worker
+     under Node or headless Chromium and compares its frames with the
+     native tour's, as `test-demo` does.
 5. **Published from CI:** a Pages workflow in zui-web that builds the
    client and the page. Only the owner, in a browser, can check the Done
    when: that the tour keeps the display's frame rate there.

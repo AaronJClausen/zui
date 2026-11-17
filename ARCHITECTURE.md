@@ -315,4 +315,7 @@ zui; its Windows host runs its message loop on a thread of its own. Its
 in one process, and draws it in another, through a `zui_wire.Client` over
 the Windows host and zui-sokol's renderer (F5), and its `theme` example
 restyles a window when its theme file changes, through the host's file
-watch (F6).
+watch (F6). zui-sokol's context types (`Text`, `Image`, `Material`, its
+`config`) live in `zui_sokol_ui`, which does not import sokol, so its
+tour builds for `wasm32-freestanding`, for zui-web to run in a worker
+(V4).
