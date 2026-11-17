@@ -3274,14 +3274,15 @@ published from CI.
      zui-sokol's two passes: each Gaussian tap, split into the coarse and
      fine weights zui-sokol's 8-bit vertex colors add, is an instance of a
      quad over the blur's whole pixels, adding its linearly filtered
-     sample into an RGBA16F target along x, then from that into another
+     sample into a float target along x, then from that into another
      along y, the sample clamped per pixel to the region's edge pixels,
      which is what zui-sokol's three quads per tap draw. The batch's fan
      then takes the blurred texel at each pixel, under the tint. A
      material is a batch of its own, its uniforms zui-sokol's, its
      pattern found at each vertex's place in the element by zui-sokol's
-     material shader ported to GLSL ES. Without `EXT_color_buffer_float`
-     a blur is its tint alone; past 16 blurs or 256 materials a frame
+     material shader ported to GLSL ES. The targets are RGBA32F where
+     WebGL can render, blend and filter it, else RGBA16F; without
+     `EXT_color_buffer_float` a blur is its tint alone; past 16 blurs or 256 materials a frame
      draws the tint or the fallback, counted, as zui-sokol does. The client
      is 66 KB in ReleaseSmall and still reserves 35 MiB. `test-draw` now
      keeps every command but `image`, which the tour never draws. In
@@ -3294,8 +3295,19 @@ published from CI.
      unmatched pixels), and turning every material's phase by 0.02 more
      fails frame 276 (48,254). The check's removal of Chromium's profile
      now retries, since a child process could still be writing to it.
-     CI's first `test-draw` with blurs, whose reference Mesa draws into
-     RGBA16F targets under Xvfb, is to be confirmed once zui-web is pushed.
+     CI's first `test-draw` with blurs failed frame 228 (17,654 unmatched
+     pixels): Mesa's llvmpipe, drawing the reference under Xvfb, rounds
+     each tap's addition to an RGBA16F target differently and summed the
+     pane 2 to 6 color steps darker than NVIDIA. zui-sokol (`0d7eedb`)
+     now sums blurs in RGBA32F where the GPU can, and RGBA16F otherwise,
+     and so does the client; `test-draw` fails if either side cannot sum
+     in RGBA32F, and reports each failing frame's numbers and uploads its
+     images from CI. Against references drawn by NVIDIA and by llvmpipe
+     alike, no pixel inside the pane differs by more than 1, and every
+     frame but 252 (its one pixel) has none unmatched; 1 to 13,740 of each
+     frame's pixels differ at all on NVIDIA, 5,516 to 22,905 on llvmpipe.
+     Its run in CI is to be confirmed once zui-sokol and then zui-web are
+     pushed.
 3. **Input.** The page turns pointer, wheel, key and text events, the
    canvas's size and `devicePixelRatio` into records written by
    `zui_wire`'s `Encoder` in the client, sent only when they hold events
