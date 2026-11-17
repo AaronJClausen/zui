@@ -69,7 +69,7 @@ green, and its **Status** line below says which slice is next.
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
 | R9. Measuring across operating systems and hardware | foundation | `bench/machine.zig`, `bench/report.zig`, `README.md` | | waiting on a run under Windows on the reference machine |
-| P12. Text commands that point at their style | audit | `src/commands.zig`, `src/emission.zig`, `zui_wire/`, `../zui-raylib`, `../zui-sokol`, `../zui-terminal` | | in progress; the renderer's scene is built, the change is to be judged by it |
+| P12. Text commands that point at their style | audit | `src/commands.zig`, `src/emission.zig`, `zui_wire/`, `../zui-raylib`, `../zui-sokol`, `../zui-terminal`, `../zui-web` | | waiting on the owner: judged and not shipped; retire it or keep it parked |
 | G6. HDR and wide gamut | 8 | `src/context.zig`, `src/commands.zig`, `src/surface.zig`, `zui_wire/`, `zui_testing/`, `../zui-sokol`, `../zui-host` | | waiting on a session under Windows with an HDR display: zui-sokol's FP16 `.win32` swapchain and zui-host's `.scrgb_fp16` window |
 | V2. Semantics and accessibility actions | 9 | `src/context.zig`, `zui_widgets/`, `../zui-host` | | in progress; the UI Automation bridge waits on a session under Windows |
 | H3. macOS | 10 | `../zui-host` | | |
@@ -3299,8 +3299,9 @@ floating layers, ids on every element, and a pointer pressing. The owner
 put its findings ahead of stage 8. P6 (the layer sort), P7 (the id → rect
 table), P8 (one hit test per press), P9 (wrapped lines kept with the string
 cache) and P10 (the string cache's keys apart) are in *Done*, and so is
-P11 (flat child lists), retired on its profile. P12 is judged by a scene
-that reads the commands as a renderer does, `1000 labels, rendered`.
+P11 (flat child lists), retired on its profile. P12, judged by a scene
+that reads the commands as a renderer does, made that scene no faster and
+waits on the owner.
 
 Each item is judged by `bench-compare` against its parent, with turbo
 off, and by `counts`; one that costs more elsewhere than it saves in its
@@ -3337,8 +3338,29 @@ renderers read them, each command's bounds and payload and, for a text,
 its style and every byte of its content, a pen advanced glyph by glyph.
 `bench` times the read as a phase of its own (`, read`), and `counts`
 counts it: 35.5 µs and 244,757 instructions a frame at its commit, from
-about 1,000 text commands and 16 for the columns. Next: P12's change
-carried onto `main` and judged against that commit.
+about 1,000 text commands and 16 for the columns.
+
+Carried onto `main` after `a021c1d` and finished, then judged and not
+shipped: parked on `p12-text-style-pointer-on-main` (`7e27942`), which
+supersedes `p12-text-style-pointer`, with zui-terminal's two tests on
+its own `p12-text-style-pointer` (`c9e48e0`). A context that clamps
+`ExtendedColor` points its commands at a clamped copy per text record,
+`Frame.clamped_text_styles`, which exists only there; `zui_wire` copies
+the style beside the text in its histories and the remote's slots.
+zui-raylib and zui-sokol pass against it unchanged; zui-web's tests,
+which build three text commands by value, were not updated. Every check
+passes. `bench-compare -- a021c1d --require-quiet` (100 rounds over 3
+layouts, turbo off, pinned): the read +0.4% (+0.1% to +0.9%), within
+its band, so not faster; called slower, beyond their bands, are
+`4096 interactive boxes`' declaration +2.3%, the documents view's +2.4%,
+both cells scenes' +0.8% and +1.3%, warm, single-line and cold text's
++1.1% to +1.2%, and `depth 64`'s `endFrame` +1.3%. By `counts`, the
+read runs 0.76% more instructions with 45.6% more simulated D1 misses
+(1,917 to 2,791 a frame): the style becomes a load from the frame's text
+records, away from the command the renderer is already reading, while
+every `endFrame` runs 0.05% to 1.09% fewer instructions. The saving the
+audit predicted is not there for a renderer that reads the commands in
+order; the owner decides whether to retire the item.
 
 ---
 
@@ -3601,7 +3623,7 @@ Deliberate, and each a reason to choose zui:
 | The benchmarking plan | its steps B1 to B8 became R3 to R10; the plan keeps its motivation and sources |
 | G1's first slice | not rebased, and superseded by G1 on `main`; `wip/g1-gradients-shadows-and-glow` is history, not work to resume |
 | Flat child lists (P11) | retired by the owner: its profile puts at most 0.9% of the wide tree's cycles on the walk, and a flat list would build two more passes a frame |
-| Text commands that point at their style (P12) | parked on `p12-text-style-pointer` until a scene reads the commands as a renderer does; the owner approved building that scene |
+| Text commands that point at their style (P12) | the owner approved building the scene a renderer reads, `1000 labels, rendered`; judged by it and not shipped, parked on `p12-text-style-pointer-on-main`, retiring it the owner's to decide |
 | The inspector | a module over `Frame.inspect` (V1) |
 | Animation | not in the core; `zui_motion` (M1) |
 | Safety checks | built, as `features.safety_sweeps` (V3) |
