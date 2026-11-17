@@ -68,7 +68,7 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
-| R9. Measuring across operating systems and hardware | foundation | `bench/machine.zig`, `bench/report.zig`, `README.md` | | waiting on a run under Windows on the reference machine |
+| R9. Measuring across operating systems and hardware | foundation | `bench/machine.zig`, `bench/report.zig`, `README.md` | | waiting on a run under Windows on the reference machine at `be96e84`; the Linux half is on the shared drive |
 | P12. Text commands that point at their style | audit | `src/commands.zig`, `src/emission.zig`, `zui_wire/`, `../zui-raylib`, `../zui-sokol`, `../zui-terminal`, `../zui-web` | | waiting on the owner: judged and not shipped; retire it or keep it parked |
 | G6. HDR and wide gamut | 8 | `src/context.zig`, `src/commands.zig`, `src/surface.zig`, `zui_wire/`, `zui_testing/`, `../zui-sokol`, `../zui-host` | | waiting on a session under Windows with an HDR display: zui-sokol's FP16 `.win32` swapchain and zui-host's `.scrgb_fp16` window |
 | V2. Semantics and accessibility actions | 9 | `src/context.zig`, `zui_widgets/`, `../zui-host` | | in progress; the UI Automation bridge waits on a session under Windows |
@@ -3281,10 +3281,12 @@ macOS; the commit and the clock stay out of the fingerprint. `bench
 whose relative cost differs most. README's *Comparing machines* gives the
 recipe, cross-built executables included. Checked on one machine only,
 pinned against unpinned as two setups: the documents view's first frame
-and `init` moved most (1.31× and 1.28×). To finish: boot Windows, run
-`zig build bench -- --core 19 --results-dir <dir>` at the same commit
-there and under Linux, into a directory both can reach, and run
-`bench-report` on it. `--counters` builds for ARM Linux but is
+and `init` moved most (1.31× and 1.28×). The Linux half ran at `be96e84`
+(turbo off, `performance`, core 19, with `--counters`; no allocation
+after `init`) into `cross-os-files/source/repos/AaronJClausen/zui/bench-results`
+on the shared 2 TB data drive, as `3b27f9488f36046b/be96e84.json`. To
+finish: boot Windows, check out `be96e84`, run `zig build bench --
+--core 19 --results-dir <that folder>`, and run `bench-report` on it. `--counters` builds for ARM Linux but is
 unverified there; macOS's counters through kperf are not written.
 
 **Spec.** §20.3.
