@@ -1,6 +1,13 @@
-// [ZUI_WEB_DRAW_FAILURES=<directory>] node check_draw.mjs <chromium> <client wasm> <stream> <reference> <bitmap fonts> <TrueType font>...
+// [ZUI_WEB_DRAW_FAILURES=<directory>] node check_draw.mjs <chromium> <client wasm> <stream>
+//     <one-sample reference> <four-sample reference without text> <bitmap fonts> <TrueType font>...
 // Each frame that fails is written there as PPM, drawn and reference;
 // without it, to a new temporary directory.
+//
+// Each frame is drawn twice. With one sample per pixel, everything is
+// compared, text too. With the four samples a pixel that zui-sokol's demo
+// window has, which smooth every edge, text is left out: where a glyph's
+// quad covers part of a pixel, a GPU may sample the glyph anywhere in the
+// pixel, and SwiftShader and zui-sokol's GPU choose differently.
 
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -9,17 +16,30 @@ import { fileURLToPath } from "node:url";
 import { openHeadlessPage } from "./headless_page.mjs";
 
 // A pixel matches when each of its colors is within `tolerance` of the
-// reference's, or of a reference neighbor's within `edgeReach` pixels,
-// since two rasterizers may place an edge a pixel apart.
+// other image's, or of a neighbor's there within `edgeReach` pixels, since
+// two rasterizers may place an edge a pixel apart. With four samples, each
+// reference pixel must also match the drawing that way: an edge smoothed
+// in one image alone is a blend that the other has nowhere, though each of
+// its unsmoothed pixels matches a neighbor across the edge. With one, a
+// glyph's edge pixel may be in the glyph in one image and not the other.
+// With four, a pixel also matches when each of its colors is within one
+// sample's share of their range within `sampleShareReach` pixels:
+// SwiftShader snaps vertices to a sixteenth of a pixel, so a sample that
+// close to an edge is decided differently. An edge left unsmoothed still
+// differs by half that range where the edge halves a pixel.
 const tolerance = 2;
 const edgeReach = 1;
-// A glyph's partial coverage at its edge is a color no neighbor has, and
-// two rasterizers decide a pixel whose centre lies that close to the edge
-// differently.
-const maxUnmatchedPixelsPerFrame = 1;
+const sampleShareReach = 2;
+// With one sample, a glyph's partial coverage at its edge is a color no
+// neighbor has, and two rasterizers decide a pixel whose centre lies that
+// close to the edge differently. With four, a pixel of a line thinner than
+// a pixel is crossed by both its edges, so two of its samples may be
+// decided differently; a frame whose edges are not smoothed has hundreds
+// of pixels that match nothing.
+const maxUnmatchedPixelsPerFrame = { 1: 1, 4: 4 };
 const watchdogMilliseconds = 300_000;
 
-const [chromiumPath, wasmPath, streamPath, referencePath, bitmapFontsPath, ...trueTypeFontPaths] = process.argv.slice(2);
+const [chromiumPath, wasmPath, streamPath, oneSampleReferencePath, fourSampleReferencePath, bitmapFontsPath, ...trueTypeFontPaths] = process.argv.slice(2);
 const webDirectory = dirname(fileURLToPath(import.meta.url));
 
 const served = {
@@ -72,7 +92,42 @@ function within(drawn, reference, drawnAt, referenceAt) {
   return true;
 }
 
-function compare(drawn, reference, width, height) {
+function colorRangeAround(pixels, x, y, width, height, channel) {
+  let least = 255;
+  let most = 0;
+  for (let ny = Math.max(0, y - sampleShareReach); ny <= Math.min(height - 1, y + sampleShareReach); ny += 1) {
+    for (let nx = Math.max(0, x - sampleShareReach); nx <= Math.min(width - 1, x + sampleShareReach); nx += 1) {
+      const value = pixels[(ny * width + nx) * 4 + channel];
+      least = Math.min(least, value);
+      most = Math.max(most, value);
+    }
+  }
+  return most - least;
+}
+
+function withinOneSample(drawn, reference, x, y, width, height, samplesPerPixel) {
+  const at = (y * width + x) * 4;
+  for (let channel = 0; channel < 3; channel += 1) {
+    const range = Math.max(colorRangeAround(drawn, x, y, width, height, channel), colorRangeAround(reference, x, y, width, height, channel));
+    if (Math.abs(drawn[at + channel] - reference[at + channel]) > tolerance + range / samplesPerPixel) return false;
+  }
+  return true;
+}
+
+function matchesNearby(pixels, other, x, y, width, height) {
+  const at = (y * width + x) * 4;
+  for (let dy = -edgeReach; dy <= edgeReach; dy += 1) {
+    for (let dx = -edgeReach; dx <= edgeReach; dx += 1) {
+      const nx = x + dx;
+      const ny = y + dy;
+      if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+      if (within(pixels, other, at, (ny * width + nx) * 4)) return true;
+    }
+  }
+  return false;
+}
+
+function compare(drawn, reference, width, height, samplesPerPixel) {
   let differing = 0;
   let beyondTolerance = 0;
   let unmatched = 0;
@@ -87,16 +142,10 @@ function compare(drawn, reference, width, height) {
       largestDifference = Math.max(largestDifference, difference);
       if (difference <= tolerance) continue;
       beyondTolerance += 1;
-      let matchedNearby = false;
-      for (let dy = -edgeReach; dy <= edgeReach && !matchedNearby; dy += 1) {
-        for (let dx = -edgeReach; dx <= edgeReach && !matchedNearby; dx += 1) {
-          const nx = x + dx;
-          const ny = y + dy;
-          if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
-          matchedNearby = within(drawn, reference, at, (ny * width + nx) * 4);
-        }
-      }
-      if (!matchedNearby) unmatched += 1;
+      const smoothed = samplesPerPixel > 1;
+      const matched = matchesNearby(drawn, reference, x, y, width, height) && (!smoothed || matchesNearby(reference, drawn, x, y, width, height));
+      if (matched || (smoothed && withinOneSample(drawn, reference, x, y, width, height, samplesPerPixel))) continue;
+      unmatched += 1;
     }
   }
   return { differing, beyondTolerance, unmatched, largestDifference };
@@ -133,28 +182,37 @@ if (blurAccumulationFormat !== "RGBA32F") {
   await fail(`the page sums backdrop blurs in ${blurAccumulationFormat ?? "nothing, drawing their tint alone"}, not RGBA32F as the reference does, so they cannot be compared`);
 }
 
-const reference = readReference(await readFile(referencePath));
+const drawings = [
+  { name: "oneSample", description: "with one sample per pixel", samplesPerPixel: 1, referencePath: oneSampleReferencePath },
+  { name: "fourSamplesWithoutText", description: "with four samples per pixel, without text", samplesPerPixel: 4, referencePath: fourSampleReferencePath },
+];
 // A step that succeeds has its output dropped by `zig build`, and one that
 // fails shows only its stderr.
 const failedFrameLines = [];
 let failedImages = null;
-for (const expected of reference) {
-  const drawn = await evaluate(`drawFrame(${expected.number})`).catch((error) => fail(`frame ${expected.number}: ${error.message}`));
-  if (drawn.width !== expected.width || drawn.height !== expected.height) {
-    await fail(`frame ${expected.number}: drawn ${drawn.width}×${drawn.height}, the reference is ${expected.width}×${expected.height}`);
-  }
-  if (drawn.overflows !== 0) await fail(`frame ${expected.number}: the draw list was full ${drawn.overflows} times`);
-  if (drawn.glyphOverflows !== 0) await fail(`frame ${expected.number}: glyphs were left out ${drawn.glyphOverflows} times`);
-  const pixels = Buffer.from(drawn.pixels, "base64");
-  const result = compare(pixels, expected.pixels, expected.width, expected.height);
-  const total = expected.width * expected.height;
-  const line = `check_draw: frame ${expected.number}: ${result.differing} of ${total} pixels differ, by at most ${result.largestDifference}; ${result.beyondTolerance} by more than ${tolerance}, ${result.unmatched} of them matching no reference pixel within ${edgeReach} (at most ${maxUnmatchedPixelsPerFrame} allowed)`;
-  console.log(line);
-  if (result.unmatched > maxUnmatchedPixelsPerFrame) {
-    failedFrameLines.push(line);
-    failedImages ??= await directoryForFailedImages();
-    await writePortablePixmap(join(failedImages, `${expected.number}-drawn.ppm`), pixels, expected.width, expected.height);
-    await writePortablePixmap(join(failedImages, `${expected.number}-reference.ppm`), expected.pixels, expected.width, expected.height);
+let framesCompared = 0;
+for (const drawing of drawings) {
+  for (const expected of readReference(await readFile(drawing.referencePath))) {
+    const frame = `frame ${expected.number} ${drawing.description}`;
+    const drawn = await evaluate(`drawFrame("${drawing.name}", ${expected.number})`).catch((error) => fail(`${frame}: ${error.message}`));
+    if (drawn.width !== expected.width || drawn.height !== expected.height) {
+      await fail(`${frame}: drawn ${drawn.width}×${drawn.height}, the reference is ${expected.width}×${expected.height}`);
+    }
+    if (drawn.overflows !== 0) await fail(`${frame}: the draw list was full ${drawn.overflows} times`);
+    if (drawn.glyphOverflows !== 0) await fail(`${frame}: glyphs were left out ${drawn.glyphOverflows} times`);
+    const pixels = Buffer.from(drawn.pixels, "base64");
+    const result = compare(pixels, expected.pixels, expected.width, expected.height, drawing.samplesPerPixel);
+    const total = expected.width * expected.height;
+    const line = `check_draw: ${frame}: ${result.differing} of ${total} pixels differ, by at most ${result.largestDifference}; ${result.beyondTolerance} by more than ${tolerance}, ${result.unmatched} of them matching no pixel of the other image within ${edgeReach} (at most ${maxUnmatchedPixelsPerFrame[drawing.samplesPerPixel]} allowed)`;
+    console.log(line);
+    framesCompared += 1;
+    if (result.unmatched > maxUnmatchedPixelsPerFrame[drawing.samplesPerPixel]) {
+      failedFrameLines.push(line);
+      failedImages ??= await directoryForFailedImages();
+      const imageName = `${expected.number}-${drawing.samplesPerPixel}-samples`;
+      await writePortablePixmap(join(failedImages, `${imageName}-drawn.ppm`), pixels, expected.width, expected.height);
+      await writePortablePixmap(join(failedImages, `${imageName}-reference.ppm`), expected.pixels, expected.width, expected.height);
+    }
   }
 }
 
@@ -162,7 +220,7 @@ clearTimeout(watchdog);
 await cleanUp();
 if (failedFrameLines.length > 0) {
   for (const line of failedFrameLines) console.error(line);
-  console.error(`check_draw: ${failedFrameLines.length} of ${reference.length} frames do not match zui-sokol's; each frame drawn and its reference are in ${failedImages}`);
+  console.error(`check_draw: ${failedFrameLines.length} of ${framesCompared} frames do not match zui-sokol's; each frame drawn and its reference are in ${failedImages}`);
   process.exit(1);
 }
-console.log(`check_draw: ${reference.length} frames drawn in Chromium match zui-sokol's renderer`);
+console.log(`check_draw: ${framesCompared} frames drawn in Chromium match zui-sokol's renderer`);

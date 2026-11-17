@@ -4,7 +4,7 @@ zui-web is zui in the browser. It is filled by roadmap items V4 (the demo
 in a browser: a thin client that draws frames streamed over zui_wire,
 published from CI) and later H5 (a web host with a canvas surface, using
 `tryBeginFrame` since it cannot block). The wire client comes first
-(zui's ROADMAP.md, Decisions, Open #2).
+(zui's ROADMAP.md, Decisions, Made).
 
 zui's `ROADMAP.md` is the queue; this repository has none of its own.
 Read the item's entry there, and the SPEC.md sections it names, before

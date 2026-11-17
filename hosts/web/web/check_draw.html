@@ -1,47 +1,59 @@
 <!doctype html>
 <meta charset="utf-8">
 <title>zui-web drawing check</title>
-<canvas id="frame"></canvas>
+<canvas id="one-sample"></canvas>
+<canvas id="four-samples"></canvas>
 <script type="module">
   import { startClient } from "./client.mjs";
   import { FrameDrawer } from "./frame_drawer.mjs";
 
-  const { wasm, errorName } = await startClient();
-  const drawer = new FrameDrawer(document.getElementById("frame"), wasm);
-  window.blurAccumulationFormat = drawer.blurAccumulationFormat?.name ?? null;
   const stream = new Uint8Array(await (await fetch("tour.zuiw")).arrayBuffer());
-  let streamed = 0;
   const pieceBytes = 64 * 1024;
 
-  function receiveNextPiece() {
-    if (streamed === stream.length) throw new Error("the stream ended");
-    const piece = stream.subarray(streamed, streamed + pieceBytes);
-    const room = wasm.zuiWebRoomFor(piece.length) >>> 0;
-    if (room === 0) throw new Error(`no room for ${piece.length} bytes: ${errorName()}`);
-    new Uint8Array(wasm.memory.buffer, room, piece.length).set(piece);
-    wasm.zuiWebReceived(piece.length);
-    streamed += piece.length;
+  // A client drawing the stream on its own canvas. `drawFrame` decodes the
+  // stream up to frame `number`, draws it, and returns its pixels as WebGL
+  // reads them, bottom row first, in base64.
+  async function startDrawing(canvasId, clientOptions, drawerOptions) {
+    const { wasm, errorName } = await startClient(clientOptions);
+    const drawer = new FrameDrawer(document.getElementById(canvasId), wasm, drawerOptions);
+    let streamed = 0;
+
+    function receiveNextPiece() {
+      if (streamed === stream.length) throw new Error("the stream ended");
+      const piece = stream.subarray(streamed, streamed + pieceBytes);
+      const room = wasm.zuiWebRoomFor(piece.length) >>> 0;
+      if (room === 0) throw new Error(`no room for ${piece.length} bytes: ${errorName()}`);
+      new Uint8Array(wasm.memory.buffer, room, piece.length).set(piece);
+      wasm.zuiWebReceived(piece.length);
+      streamed += piece.length;
+    }
+
+    function drawFrame(number) {
+      for (;;) {
+        const status = wasm.zuiWebNextFrame();
+        if (status < 0) throw new Error(errorName());
+        if (status === 0) {
+          receiveNextPiece();
+          continue;
+        }
+        const decoded = Number(wasm.zuiWebFrameNumber());
+        if (decoded > number) throw new Error(`frame ${number} was not in the stream`);
+        if (decoded < number) continue;
+        drawer.draw();
+        const { gl } = drawer;
+        const pixels = new Uint8Array(gl.drawingBufferWidth * gl.drawingBufferHeight * 4);
+        gl.readPixels(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+        return { width: gl.drawingBufferWidth, height: gl.drawingBufferHeight, overflows: wasm.zuiWebDrawListOverflows(), glyphOverflows: wasm.zuiWebGlyphOverflows(), pixels: pixels.toBase64() };
+      }
+    }
+    return { drawer, drawFrame };
   }
 
-  // Decodes the stream up to frame `number`, draws it, and returns its
-  // pixels as WebGL reads them, bottom row first, in base64.
-  window.drawFrame = (number) => {
-    for (;;) {
-      const status = wasm.zuiWebNextFrame();
-      if (status < 0) throw new Error(errorName());
-      if (status === 0) {
-        receiveNextPiece();
-        continue;
-      }
-      const decoded = Number(wasm.zuiWebFrameNumber());
-      if (decoded > number) throw new Error(`frame ${number} was not in the stream`);
-      if (decoded < number) continue;
-      drawer.draw();
-      const { gl } = drawer;
-      const pixels = new Uint8Array(gl.drawingBufferWidth * gl.drawingBufferHeight * 4);
-      gl.readPixels(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
-      return { width: gl.drawingBufferWidth, height: gl.drawingBufferHeight, overflows: wasm.zuiWebDrawListOverflows(), glyphOverflows: wasm.zuiWebGlyphOverflows(), pixels: pixels.toBase64() };
-    }
+  const drawings = {
+    oneSample: await startDrawing("one-sample", {}, { samplesPerPixel: 1 }),
+    fourSamplesWithoutText: await startDrawing("four-samples", { fonts: false }, { samplesPerPixel: 4 }),
   };
+  window.blurAccumulationFormat = drawings.oneSample.drawer.blurAccumulationFormat?.name ?? null;
+  window.drawFrame = (drawing, number) => drawings[drawing].drawFrame(number);
   window.ready = true;
 </script>

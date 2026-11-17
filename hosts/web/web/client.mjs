@@ -1,10 +1,12 @@
 // The client, `zui-web.wasm`, started and handed the tour's fonts: the six
 // bitmap fonts' rows from `bitmap.fonts`, then each TrueType font that
 // `truetype-fonts.json` lists, in the order the tour's host added them.
+// Without them, it draws no text.
 //
 //   const { wasm, errorName } = await startClient();
+//   const withoutText = await startClient({ fonts: false });
 
-export async function startClient() {
+export async function startClient({ fonts = true } = {}) {
   const { instance } = await WebAssembly.instantiateStreaming(fetch("zui-web.wasm"), {});
   const wasm = instance.exports;
   const errorName = () => {
@@ -13,6 +15,7 @@ export async function startClient() {
     return new TextDecoder().decode(memory.subarray(start, memory.indexOf(0, start)));
   };
   if (!wasm.zuiWebInit()) throw new Error("the client could not reserve its memory");
+  if (!fonts) return { wasm, errorName };
 
   const bitmapFontRows = new Uint8Array(await (await fetch("bitmap.fonts")).arrayBuffer());
   new Uint8Array(wasm.memory.buffer, wasm.zuiWebBitmapFontRows() >>> 0, bitmapFontRows.length).set(bitmapFontRows);

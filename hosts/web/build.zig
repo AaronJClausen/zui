@@ -16,7 +16,7 @@ pub fn build(b: *std.Build) void {
     check_step.dependOn(&client.step);
 
     const test_demo = b.step("test-demo", "Stream zui-sokol's tour, headless, to the browser's client under Node, and check every frame decodes to what was drawn; run the tour in a worker under Node, and check every frame is the one it draws natively");
-    const test_draw = b.step("test-draw", "Draw frames of zui-sokol's tour in headless Chromium and check each against zui-sokol's renderer drawing it; needs a display");
+    const test_draw = b.step("test-draw", "Draw frames of zui-sokol's tour in headless Chromium, with one sample per pixel and with four, and check each against zui-sokol's renderer drawing it alike; needs a display");
     const test_input = b.step("test-input", "Give the client input in headless Chromium, run zui-sokol's tour on the records it writes, and check the tour took them and the page shows its cursor");
     const site_step = b.step("site", "Write the published page, the client, the tour's worker and the tour's fonts to zig-out/site");
     const test_site = b.step("test-site", "Serve the published page without isolation headers, open it in headless Chromium, and check its service worker isolates it, it draws the tour's frames and its input reaches the tour");
@@ -66,10 +66,8 @@ pub fn build(b: *std.Build) void {
         }
 
         const draw_reference = tourTool(b, "draw-reference", "tools/draw_reference.zig", tour_imports, target, optimize);
-        const write_reference = b.addRunArtifact(draw_reference);
-        write_reference.addFileArg(stream);
-        const reference = write_reference.addOutputFileArg("tour.reference");
-        for (compared_frames) |frame_number| write_reference.addArg(b.fmt("{d}", .{frame_number}));
+        const one_sample_reference = drawReference(b, draw_reference, stream, "1", "with-text");
+        const four_sample_reference = drawReference(b, draw_reference, stream, "4", "without-text");
 
         const bitmap_fonts = tourTool(b, "bitmap-fonts", "tools/bitmap_fonts.zig", tour_imports, target, optimize);
         const write_bitmap_fonts = b.addRunArtifact(bitmap_fonts);
@@ -80,7 +78,8 @@ pub fn build(b: *std.Build) void {
         draw_in_browser.addArg(browser);
         draw_in_browser.addArtifactArg(client);
         draw_in_browser.addFileArg(stream);
-        draw_in_browser.addFileArg(reference);
+        draw_in_browser.addFileArg(one_sample_reference);
+        draw_in_browser.addFileArg(four_sample_reference);
         draw_in_browser.addFileArg(bitmap_font_rows);
         for (tour_truetype_fonts) |font| draw_in_browser.addFileArg(zui_sokol_dependency.path(font));
         for ([_][]const u8{ "web/check_draw.html", "web/client.mjs", "web/frame_drawer.mjs", "web/headless_page.mjs" }) |page_file| draw_in_browser.addFileInput(b.path(page_file));
@@ -144,6 +143,17 @@ fn stbTruetypeModule(b: *std.Build, target: std.Build.ResolvedTarget, optimize: 
     module.addCSourceFile(.{ .file = b.path("src/stb_truetype.c"), .flags = &.{"-fvisibility=hidden"} });
     module.addIncludePath(stb_dependency.path(""));
     return module;
+}
+
+/// zui-sokol's renderer drawing `compared_frames` of `stream` with
+/// `samples_per_pixel`, and its text only `"with-text"`.
+fn drawReference(b: *std.Build, draw_reference: *std.Build.Step.Compile, stream: std.Build.LazyPath, samples_per_pixel: []const u8, text_choice: []const u8) std.Build.LazyPath {
+    const write_reference = b.addRunArtifact(draw_reference);
+    write_reference.addFileArg(stream);
+    const reference = write_reference.addOutputFileArg(b.fmt("tour-{s}-{s}.reference", .{ samples_per_pixel, text_choice }));
+    write_reference.addArgs(&.{ samples_per_pixel, text_choice });
+    for (compared_frames) |frame_number| write_reference.addArg(b.fmt("{d}", .{frame_number}));
+    return reference;
 }
 
 /// The frame of each of the tour's thirteen screens that `test-draw`

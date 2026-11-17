@@ -17,7 +17,9 @@ tour drew.
 
 The client then lays each frame out as triangles, as zui-sokol's
 renderer does, and `web/frame_drawer.mjs` draws them on a canvas through
-WebGL 2: rectangles, borders, clips, gradients, shadows and transforms,
+WebGL 2, with four samples per pixel resolved to one, which smooth every
+edge as zui-sokol's demo window does with its `sample_count = 4`:
+rectangles, borders, clips, gradients, shadows and transforms,
 and text, once the page hands the client the stream's fonts. TrueType
 glyphs are rasterized by stb_truetype, compiled into the client without a
 C library, into an atlas packed as zui-sokol packs its own; bitmap text
@@ -32,13 +34,21 @@ rounding differs between drivers by several color steps; without
 `EXT_color_buffer_float`, blurs are drawn as their tint alone. Images are
 not drawn yet. `zig build test-draw` draws a frame of
 each of the tour's screens with zui-sokol's renderer and with the client in
-headless Chromium, and checks that every pixel matches, within 2 of each
-color or a pixel's neighbor: shapes, text, blurs and materials alike. It
-fails, rather than compare them, if either side cannot sum blurs in
-RGBA32F. A frame may have one pixel that matches nothing nearby: a glyph's partial coverage at its edge
-is a color no neighbor has, and the two rasterizers decide a pixel that
-close to a turned glyph's edge differently. Of the 13 frames, only the
-Transforms screen's has such a pixel.
+headless Chromium, twice. With one sample per pixel, it checks that every
+pixel matches, within 2 of each color or a pixel's neighbor: shapes, text,
+blurs and materials alike. A frame may have one pixel that matches nothing
+nearby: a glyph's partial coverage at its edge is a color no neighbor has,
+and the two rasterizers decide a pixel that close to a turned glyph's edge
+differently. Of the 13 frames, only the Transforms screen's has such a
+pixel. With four samples per pixel and without text, it checks that every
+pixel of each image also matches the other's, so an edge smoothed in one
+alone fails, allowing one sample's share of the colors around a pixel,
+since SwiftShader snaps vertices to a sixteenth of a pixel, and four
+pixels a frame where a line thinner than a pixel has two samples decided
+differently; a frame drawn unsmoothed has hundreds that match nothing.
+Text is left out there, since where a glyph's quad covers part of a pixel
+a GPU may sample the glyph anywhere in the pixel. It fails, rather than
+compare them, if either side cannot sum blurs in RGBA32F.
 
 Input goes back the other way. `web/input_recorder.mjs` turns a canvas's
 pointer, wheel, key and text events, its size and `devicePixelRatio` into
@@ -123,7 +133,7 @@ See [zui's ROADMAP.md](https://github.com/AaronJClausen/zui/blob/main/ROADMAP.md
 | `zig build` | write the client, `zig-out/web/zui-web.wasm`, and the tour for a worker, `zig-out/web/zui-web-tour.wasm` |
 | `zig build check` | compile without running, and compile the client and the tour's worker for `wasm32-freestanding` |
 | `zig build test-demo` | stream zui-sokol's tour to the client under Node, and check every frame decodes to what was drawn; run the tour in a worker under Node, and check every frame is the one the tour draws natively |
-| `zig build test-draw` | draw a frame of each of the tour's screens in headless Chromium, and check each against zui-sokol's renderer drawing it |
+| `zig build test-draw` | draw a frame of each of the tour's screens in headless Chromium, with one sample per pixel and with four, and check each against zui-sokol's renderer drawing it alike |
 | `zig build test-input` | give the page input in headless Chromium, run the tour on the records the client wrote of it, and check the tour took them and the page shows the cursor it asks for |
 | `zig build site` | write the published page, the client, the tour's worker and its fonts to `zig-out/site`; serve that directory over HTTP (or HTTPS, off `localhost`) to run the tour in a browser |
 | `zig build test-site` | serve the site without isolation headers, open it in headless Chromium, and check its service worker isolates it, it draws the tour's frames and its input reaches the tour |

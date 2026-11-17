@@ -1,8 +1,9 @@
 //! ```sh
-//! draw-reference <stream path> <reference path> <frame number>...
+//! draw-reference <stream path> <reference path> <samples per pixel> <with-text | without-text> <frame number>...
 //! ```
 //! Draws each frame named with zui-sokol's renderer, keeping only the
-//! commands the browser's client draws, and writes for each, little-endian,
+//! commands the browser's client draws, and its text only `with-text`, and
+//! writes for each, little-endian,
 //! its number (u64), its width and height in pixels (u32 each), and its
 //! RGBA pixels, bottom row first, as OpenGL and WebGL read them back.
 
@@ -22,12 +23,15 @@ const gl_rgba = 0x1908;
 const gl_unsigned_byte = 0x1401;
 
 /// What the browser's client draws so far.
-fn isDrawnInBrowser(command: Command) bool {
+fn isDrawnInBrowser(command: Command, draws_text: bool) bool {
     return switch (command.payload) {
-        .rectangle, .border, .text, .gradient, .shadow, .backdrop_blur, .material, .clip_begin, .clip_end, .transform_begin, .transform_end => true,
+        .rectangle, .border, .gradient, .shadow, .backdrop_blur, .material, .clip_begin, .clip_end, .transform_begin, .transform_end => true,
+        .text => draws_text,
         .image => false,
     };
 }
+
+const TextChoice = enum { @"with-text", @"without-text" };
 
 const KeptFrame = struct {
     params: zui_sokol.zui.FrameParams,
@@ -44,6 +48,8 @@ const Harness = struct {
     stream: []const u8,
     reference_path: []const u8,
     frame_numbers: []const u64,
+    samples_per_pixel: i32,
+    draws_text: bool,
     text: zui_sokol.Text = .{},
     renderer: zui_sokol.Renderer = undefined,
     outcome: anyerror!void = error.FrameNeverDrawn,
@@ -79,7 +85,7 @@ const Harness = struct {
             next_number += 1;
 
             var kept_count: usize = 0;
-            for (frame.commands()) |command| if (isDrawnInBrowser(command)) {
+            for (frame.commands()) |command| if (isDrawnInBrowser(command, self.draws_text)) {
                 kept[kept_count] = command;
                 kept_count += 1;
             };
@@ -115,6 +121,7 @@ fn onInit(userdata: ?*anyopaque) callconv(.c) void {
     const harness: *Harness = .from(userdata);
     sg.setup(.{ .environment = sokol.glue.environment(), .logger = .{ .func = sokol.log.func } });
     harness.renderer = .init(&harness.text);
+    harness.renderer.offscreen_sample_count = harness.samples_per_pixel;
 }
 
 fn onFrame(userdata: ?*anyopaque) callconv(.c) void {
@@ -132,17 +139,27 @@ fn onCleanup(userdata: ?*anyopaque) callconv(.c) void {
 pub fn main(init: std.process.Init) !void {
     const arena = init.arena.allocator();
     const arguments = try init.minimal.args.toSlice(arena);
-    if (arguments.len < 4) {
-        std.debug.print("expected <stream path> <reference path> <frame number>...\n", .{});
+    if (arguments.len < 6) {
+        std.debug.print("expected <stream path> <reference path> <samples per pixel> <with-text | without-text> <frame number>...\n", .{});
         return error.UnknownArgument;
     }
-    const frame_numbers = try arena.alloc(u64, arguments.len - 3);
-    for (arguments[3..], frame_numbers) |argument, *number| number.* = try std.fmt.parseInt(u64, argument, 10);
+    const samples_per_pixel = try std.fmt.parseInt(i32, arguments[3], 10);
+    const text_choice = std.meta.stringToEnum(TextChoice, arguments[4]) orelse return error.UnknownArgument;
+    const frame_numbers = try arena.alloc(u64, arguments.len - 5);
+    for (arguments[5..], frame_numbers) |argument, *number| number.* = try std.fmt.parseInt(u64, argument, 10);
     if (!std.sort.isSorted(u64, frame_numbers, {}, std.sort.asc(u64))) return error.FrameNumbersOutOfOrder;
 
     const stream = try std.Io.Dir.cwd().readFileAlloc(init.io, arguments[1], arena, .unlimited);
     const harness = try arena.create(Harness);
-    harness.* = .{ .gpa = init.gpa, .io = init.io, .stream = stream, .reference_path = arguments[2], .frame_numbers = frame_numbers };
+    harness.* = .{
+        .gpa = init.gpa,
+        .io = init.io,
+        .stream = stream,
+        .reference_path = arguments[2],
+        .frame_numbers = frame_numbers,
+        .samples_per_pixel = samples_per_pixel,
+        .draws_text = text_choice == .@"with-text",
+    };
     try tour.kit.addFonts(&harness.text);
     sapp.run(.{
         .init_userdata_cb = onInit,

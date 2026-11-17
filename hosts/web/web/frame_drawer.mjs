@@ -179,9 +179,59 @@ function blurAccumulationFormat(gl) {
 }
 
 /**
- * Where a frame's backdrop blurs run: a copy of what was drawn, and the
- * two float targets that zui-sokol's renderer blurs into, along x and
- * then along y, sized to the canvas.
+ * Where a frame is drawn, sized to the canvas, `samplesPerPixel` samples a
+ * pixel, and the texture they are resolved into, which backdrop blurs
+ * sample and the canvas is given at the end.
+ */
+class SceneTargets {
+  constructor(gl, width, height, samplesPerPixel) {
+    this.gl = gl;
+    this.width = width;
+    this.height = height;
+    this.samples = gl.createRenderbuffer();
+    gl.bindRenderbuffer(gl.RENDERBUFFER, this.samples);
+    // 0 asks for one sample per pixel; 1 may give more.
+    gl.renderbufferStorageMultisample(gl.RENDERBUFFER, samplesPerPixel > 1 ? samplesPerPixel : 0, gl.RGBA8, width, height);
+    this.samplesFramebuffer = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.samplesFramebuffer);
+    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.RENDERBUFFER, this.samples);
+    this.resolved = makeTexture(gl, blurSourceUnit, gl.LINEAR);
+    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, width, height);
+    this.resolvedFramebuffer = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.resolvedFramebuffer);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.resolved, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+
+  /** Resolves what is drawn into `resolved`; the scissor test must be off. */
+  resolve() {
+    const { gl, width, height } = this;
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.samplesFramebuffer);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.resolvedFramebuffer);
+    gl.blitFramebuffer(0, 0, width, height, 0, 0, width, height, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+  }
+
+  /** Resolves what is drawn and copies it to the canvas. */
+  present() {
+    const { gl, width, height } = this;
+    this.resolve();
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.resolvedFramebuffer);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+    gl.blitFramebuffer(0, 0, width, height, 0, 0, width, height, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+
+  delete() {
+    const { gl } = this;
+    gl.deleteRenderbuffer(this.samples);
+    gl.deleteTexture(this.resolved);
+    for (const framebuffer of [this.samplesFramebuffer, this.resolvedFramebuffer]) gl.deleteFramebuffer(framebuffer);
+  }
+}
+
+/**
+ * The two float targets that zui-sokol's renderer blurs a frame's
+ * backdrop blurs into, along x and then along y, sized to the canvas.
  */
 class BlurTargets {
   constructor(gl, width, height, accumulationFormat) {
@@ -189,9 +239,6 @@ class BlurTargets {
     this.width = width;
     this.height = height;
     this.accumulationFormat = accumulationFormat;
-    this.scene = makeTexture(gl, blurSourceUnit, gl.LINEAR);
-    // The canvas has no alpha, and a copy may only take channels its source has.
-    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGB8, width, height);
     [this.alongX, this.alongXFramebuffer] = this.makeFloatTarget(blurSourceUnit);
     [this.blurred, this.blurredFramebuffer] = this.makeFloatTarget(blurredBackdropUnit);
   }
@@ -209,7 +256,7 @@ class BlurTargets {
 
   delete() {
     const { gl } = this;
-    for (const texture of [this.scene, this.alongX, this.blurred]) gl.deleteTexture(texture);
+    for (const texture of [this.alongX, this.blurred]) gl.deleteTexture(texture);
     for (const framebuffer of [this.alongXFramebuffer, this.blurredFramebuffer]) gl.deleteFramebuffer(framebuffer);
   }
 }
@@ -228,15 +275,20 @@ export class FrameDrawer {
    *   and, if bitmap text is to be drawn, `zuiWebLoadBitmapFonts`. Without
    *   float render targets, backdrop blurs are drawn as their tint alone,
    *   and `blurAccumulationFormat` is null.
+   * @param {{ samplesPerPixel?: number }} options 4 by default, as
+   *   zui-sokol's demo window has, smoothing every edge; 1 draws as an
+   *   image with one sample per pixel does
    */
-  constructor(canvas, wasm) {
-    // Edges are not smoothed and nothing is composed with the page's
-    // background, as a native target with one sample per pixel draws.
+  constructor(canvas, wasm, { samplesPerPixel = 4 } = {}) {
+    // Nothing is composed with the page's background, and the canvas is
+    // given each frame already resolved from the scene's samples.
     const gl = canvas.getContext("webgl2", { alpha: false, antialias: false, depth: false, stencil: false, preserveDrawingBuffer: true });
     if (!gl) throw new Error("this browser has no WebGL 2");
     this.canvas = canvas;
     this.gl = gl;
     this.wasm = wasm;
+    this.samplesPerPixel = Math.min(samplesPerPixel, gl.getParameter(gl.MAX_SAMPLES));
+    this.sceneTargets = null;
 
     this.blurAccumulationFormat = blurAccumulationFormat(gl);
     if (!this.blurAccumulationFormat) wasm.zuiWebDrawBackdropBlursAsTints();
@@ -295,8 +347,8 @@ export class FrameDrawer {
   }
 
   /**
-   * Blurs what the canvas holds inside the blur's region, as zui-sokol's
-   * renderer does, into the texture that `.backdrop_blur` vertices sample.
+   * Blurs what is drawn inside the blur's region, as zui-sokol's renderer
+   * does, into the texture that `.backdrop_blur` vertices sample.
    */
   runBackdropBlur(blur, width, height) {
     const { gl } = this;
@@ -305,11 +357,9 @@ export class FrameDrawer {
       this.blurTargets = new BlurTargets(gl, width, height, this.blurAccumulationFormat);
     }
     const targets = this.blurTargets;
-    gl.activeTexture(gl.TEXTURE0 + blurSourceUnit);
-    gl.bindTexture(gl.TEXTURE_2D, targets.scene);
-    gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, width, height);
-
     gl.disable(gl.SCISSOR_TEST);
+    this.sceneTargets.resolve();
+    gl.activeTexture(gl.TEXTURE0 + blurSourceUnit);
     gl.useProgram(this.blurProgram);
     gl.bindVertexArray(this.blurVertexArray);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.blurTapBuffer);
@@ -320,7 +370,7 @@ export class FrameDrawer {
     gl.uniform4f(this.blurUniforms.region, left, height - bottom, right, height - top);
     gl.uniform2f(this.blurUniforms.targetSize, width, height);
     const passes = [
-      { into: targets.alongXFramebuffer, source: targets.scene, direction: [1, 0] },
+      { into: targets.alongXFramebuffer, source: this.sceneTargets.resolved, direction: [1, 0] },
       // The region is laid out from the top, the target's rows from the bottom.
       { into: targets.blurredFramebuffer, source: targets.alongX, direction: [0, -1] },
     ];
@@ -332,7 +382,7 @@ export class FrameDrawer {
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, blur.tapCount);
     }
 
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.sceneTargets.samplesFramebuffer);
     gl.useProgram(this.program);
     gl.bindVertexArray(this.vertexArray);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
@@ -351,7 +401,10 @@ export class FrameDrawer {
     });
   }
 
-  /** Draws the newest frame the client decoded, cleared to black. */
+  /**
+   * Draws the newest frame the client decoded, cleared to black, with
+   * `samplesPerPixel` samples a pixel.
+   */
   draw() {
     const { gl, wasm } = this;
     const batchCount = wasm.zuiWebLayOutNewestFrame();
@@ -363,12 +416,23 @@ export class FrameDrawer {
       this.canvas.width = width;
       this.canvas.height = height;
     }
+    if (this.sceneTargets?.width !== width || this.sceneTargets?.height !== height) {
+      this.sceneTargets?.delete();
+      this.sceneTargets = new SceneTargets(gl, width, height, this.samplesPerPixel);
+    }
 
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.sceneTargets.samplesFramebuffer);
     gl.viewport(0, 0, width, height);
     gl.disable(gl.SCISSOR_TEST);
     gl.clearColor(0, 0, 0, 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
-    if (batchCount === 0) return;
+    if (batchCount > 0) this.drawBatches(batchCount, viewport, pixelsPerUnit, width, height);
+    gl.disable(gl.SCISSOR_TEST);
+    this.sceneTargets.present();
+  }
+
+  drawBatches(batchCount, viewport, pixelsPerUnit, width, height) {
+    const { gl, wasm } = this;
 
     const memory = wasm.memory.buffer;
     const changedGlyphAtlas = wasm.zuiWebGlyphAtlasTexelsIfChanged() >>> 0;
