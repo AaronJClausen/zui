@@ -69,7 +69,6 @@ green, and its **Status** line below says which slice is next.
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
 | R9. Measuring across operating systems and hardware | foundation | `bench/machine.zig`, `bench/report.zig`, `README.md` | | waiting on a run under Windows on the reference machine |
-| P11. Flat child lists | audit | `src/context.zig`, `src/layout.zig` | | waiting on a wide scene whose profile points at the walks; kept by the owner |
 | P12. Text commands that point at their style | audit | `src/commands.zig`, `src/emission.zig`, `zui_wire/`, `../zui-raylib`, `../zui-sokol`, `../zui-terminal` | | waiting on a profile of a renderer reading the commands |
 | G6. HDR and wide gamut | 8 | `src/context.zig`, `src/commands.zig`, `src/surface.zig`, `zui_wire/`, `zui_testing/`, `../zui-sokol`, `../zui-host` | | waiting on a session under Windows with an HDR display: zui-sokol's FP16 `.win32` swapchain and zui-host's `.scrgb_fp16` window |
 | V2. Semantics and accessibility actions | 9 | `src/context.zig`, `zui_widgets/`, `../zui-host` | | in progress; the UI Automation bridge waits on a session under Windows |
@@ -162,6 +161,35 @@ Things to know:
 ---
 
 ## Done
+
+### P11. Flat child lists
+
+**Grounding.** `Frame.Children.next` (`src/context.zig:487`) and
+`FlowChildren` (`src/layout.zig:76`) step to each sibling through
+`subtree_end`, one dependent load at a time.
+
+**Plan.** Only after `perf` attributes cycles of `4000 children of one
+parent` to these walks: child indices in one array, built after
+declaration from `child_counts` and a prefix sum. P4 recorded that
+reshaping these passes cost 3% to 17% before.
+
+**Done when:** the wide tree is faster by `bench-compare` and the box tree
+no slower; or retired with the profile.
+
+**Retired by the owner,** on the profile taken at `85242fc` and
+`a4dfbf4`; nothing was built. Under Callgrind, `Children.next` takes
+24,000 steps a frame in `4000 children of one parent`, 5.5% of its
+`endFrame` instructions. `bench --counters` (turbo off, pinned) counts
+that `endFrame` at 877,162 instructions in 289,703 cycles, 3.0 a cycle,
+with 34 branch misses and no last-level misses: a pass waiting on a chain
+of dependent loads could not keep that rate. The box tree runs 3.1 a
+cycle. `perf record -e cycles:upp` over 40 runs of the scene (35,520
+samples) puts 0.9% of its cycles on the walk's lines
+(`context.zig:489-491`), against 21% in `distribute` and `position` as a
+whole: the time goes to each child's work, most of it reading the
+child's sizing through its `layout` pointer (`context.zig:506`, `:517`)
+and its size, not to finding the next child. A flat child list could
+save at most that 0.9%, and would build two more passes every frame.
 
 ### V4. The demo in a browser
 
@@ -3270,42 +3298,13 @@ sweeps, in paths no benchmark ran until `db4ea4d` added scenes for them:
 floating layers, ids on every element, and a pointer pressing. The owner
 put its findings ahead of stage 8. P6 (the layer sort), P7 (the id → rect
 table), P8 (one hit test per press), P9 (wrapped lines kept with the string
-cache) and P10 (the string cache's keys apart) are in *Done*. P11 and
-P12 wait on profiles that point at them.
+cache) and P10 (the string cache's keys apart) are in *Done*, and so is
+P11 (flat child lists), retired on its profile. P12 waits on a scene that
+reads the commands as a renderer does.
 
 Each item is judged by `bench-compare` against its parent, with turbo
 off, and by `counts`; one that costs more elsewhere than it saves in its
 scene does not ship.
-
-### P11. Flat child lists
-
-**Grounding.** `Frame.Children.next` (`src/context.zig:487`) and
-`FlowChildren` (`src/layout.zig:76`) step to each sibling through
-`subtree_end`, one dependent load at a time.
-
-**Plan.** Only after `perf` attributes cycles of `4000 children of one
-parent` to these walks: child indices in one array, built after
-declaration from `child_counts` and a prefix sum. P4 recorded that
-reshaping these passes cost 3% to 17% before.
-
-**Done when:** the wide tree is faster by `bench-compare` and the box tree
-no slower; or retired with the profile.
-
-**Status.** Profiled at `85242fc` and `a4dfbf4`; nothing built. Under
-Callgrind, `Children.next` takes 24,000 steps a frame in `4000 children
-of one parent`, 5.5% of its `endFrame` instructions. `bench --counters`
-(turbo off, pinned) counts that `endFrame` at 877,162 instructions in
-289,703 cycles, 3.0 a cycle, with 34 branch misses and no last-level
-misses: a pass waiting on a chain of dependent loads could not keep that
-rate. The box tree runs 3.1 a cycle. `perf record -e cycles:upp` over
-40 runs of the scene (35,520 samples) puts 0.9% of its cycles on the
-walk's lines (`context.zig:489-491`), against 21% in `distribute` and
-`position` as a whole: the time goes to each child's work, most of it
-reading the child's sizing through its `layout` pointer
-(`context.zig:506`, `:517`) and its size, not to finding the next child.
-A flat child list could save at most that 0.9%, and would build two more
-passes every frame. The owner keeps the item waiting rather than
-retiring it.
 
 ### P12. Text commands that point at their style
 
@@ -3593,7 +3592,7 @@ Deliberate, and each a reason to choose zui:
 | Building on a slow foundation | not done: when an item's counts or budgets fail because of the code under it, the foundation is profiled and fixed first, as items of their own; the audit's findings went ahead of stage 8 for G1 |
 | The benchmarking plan | its steps B1 to B8 became R3 to R10; the plan keeps its motivation and sources |
 | G1's first slice | not rebased, and superseded by G1 on `main`; `wip/g1-gradients-shadows-and-glow` is history, not work to resume |
-| Flat child lists (P11) | kept, waiting, though its profile puts 0.9% of the wide tree's cycles on the walk |
+| Flat child lists (P11) | retired by the owner: its profile puts at most 0.9% of the wide tree's cycles on the walk, and a flat list would build two more passes a frame |
 | Text commands that point at their style (P12) | parked on `p12-text-style-pointer` until a scene reads the commands as a renderer does |
 | The inspector | a module over `Frame.inspect` (V1) |
 | Animation | not in the core; `zui_motion` (M1) |
