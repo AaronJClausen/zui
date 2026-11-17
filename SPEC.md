@@ -2461,8 +2461,9 @@ same clock as every comparison:
 
 - **`zig build bench`**, always ReleaseFast: the budget scenarios, deep
   and wide trees, a realistic document view, cold text on one thread and
-  in parallel, a render thread against one thread, and startup (`init`,
-  `initBuffer`, first frames). It fails on any allocation after `init`,
+  in parallel, a render thread against one thread, a renderer reading a
+  frame of 1,000 labels' commands, timed as a phase of its own, and
+  startup (`init`, `initBuffer`, first frames). It fails on any allocation after `init`,
   and reports each phase's fastest, median and 95th-percentile frame,
   warning when a phase's frames fall into two clusters. `--core <n>` pins
   it to one core at a raised priority; `--machine-json <path>` records

@@ -358,6 +358,57 @@ pub const ChangingTexts = struct {
     }
 };
 
+/// 1,000 single-line labels in 8 bordered columns, every one inside the
+/// viewport, read after each frame as a renderer reads its commands:
+/// each command's bounds and payload, and for a text its style and every
+/// byte of its content, advancing a pen across it glyph by glyph.
+pub const RenderedLabels = struct {
+    pub const name = "1000 labels, rendered";
+    pub const limits: zui.Limits = .{ .max_elements = 1100, .max_render_commands = 2048, .max_text_bytes = 64 * 1024, .string_cache_entries = 2048 };
+    pub const layout_target_ns: ?u64 = null;
+    const columns = 8;
+    const labels_per_column = 125;
+    const glyph_advances = (GlyphTableText{}).advances;
+    sentences: Sentences(false) = .{},
+
+    pub fn declare(self: *RenderedLabels, ui: anytype, _: usize) void {
+        const sentences = self.sentences.get();
+        ui.open(.{ .layout = .{ .sizing = .grow_both } });
+        for (0..columns) |column| {
+            ui.open(.{
+                .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(200), .height = .grow }, .child_gap = 1 },
+                .decoration = .{ .background = .rgb(0x1a1a22), .border = .{ .color = .rgb(0x34344a), .widths = .{ .right = 1 } } },
+            });
+            for (sentences[column * labels_per_column ..][0..labels_per_column]) |sentence| ui.text(sentence, .{ .size = 7, .color = .rgb(0xe8e8f0) });
+            ui.close();
+        }
+        ui.close();
+    }
+
+    pub fn readCommands(_: *RenderedLabels, commands: anytype) void {
+        var checksum: f32 = 0;
+        for (commands) |command| {
+            const bounds = command.bounds;
+            switch (command.payload) {
+                .rectangle => |rectangle| checksum += bounds.x + bounds.y + bounds.width + bounds.height + colorSum(rectangle.color) + rectangle.corner_radius.top_left,
+                .border => |border| checksum += bounds.x + bounds.y + bounds.width + bounds.height + colorSum(border.color) + border.widths.right,
+                .text => |line| {
+                    const scale = line.style.size / 16;
+                    var pen = bounds.x;
+                    for (line.content) |byte| pen += glyph_advances[byte] * scale + line.style.letter_spacing;
+                    checksum += pen + bounds.y + bounds.height + colorSum(line.style.color) + @as(f32, @floatFromInt(line.style.font));
+                },
+                else => checksum += bounds.x,
+            }
+        }
+        std.mem.doNotOptimizeAway(checksum);
+    }
+
+    fn colorSum(color: zui.Color) f32 {
+        return @floatFromInt(@as(u32, color.r) + color.g + color.b + color.a);
+    }
+};
+
 pub const DeepTree = struct {
     pub const name = "depth 64";
     pub const layout_target_ns: ?u64 = null;

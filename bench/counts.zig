@@ -20,14 +20,21 @@ const warmup_frames = 4;
 const counted_frames = 10;
 const growth_tolerance = 1.02;
 
-const Scenarios = .{ scenes.BoxTree, scenes.StaticBoxTree, scenes.TextWall, scenes.TextWallCold, scenes.SingleLineTexts, scenes.ChangingTexts, scenes.DeepTree, scenes.WideTree, scenes.DocumentsView, scenes.GridWithTooltip(.first), scenes.GridWithTooltip(.last), scenes.InteractiveBoxTree, scenes.PressedInteractiveBoxTree, scenes.ClickedInteractiveBoxTree, scenes.DeepTreeWithIdleSources, scenes.DeepTreeWithIdleAsyncSources };
+const Scenarios = .{ scenes.BoxTree, scenes.StaticBoxTree, scenes.TextWall, scenes.TextWallCold, scenes.SingleLineTexts, scenes.ChangingTexts, scenes.DeepTree, scenes.WideTree, scenes.DocumentsView, scenes.GridWithTooltip(.first), scenes.GridWithTooltip(.last), scenes.InteractiveBoxTree, scenes.PressedInteractiveBoxTree, scenes.ClickedInteractiveBoxTree, scenes.RenderedLabels, scenes.DeepTreeWithIdleSources, scenes.DeepTreeWithIdleAsyncSources };
 
 const Phase = enum {
     /// `beginFrame` and the scene's declaration.
     declare,
     /// Layout and emission.
     endFrame,
+    /// A renderer reading the frame's commands, for a scene that declares
+    /// `readCommands`.
+    read,
 };
+
+fn hasPhase(comptime Scene: type, phase: Phase) bool {
+    return phase != .read or @hasDecl(Scene, "readCommands");
+}
 
 /// Runs one scenario in a fresh `Context`, with Callgrind collecting only
 /// while `phase` runs in the counted frames.
@@ -44,6 +51,7 @@ fn runCounted(comptime Scene: type, io: Io, gpa: std.mem.Allocator, phase: Phase
         const counted = frame_index >= warmup_frames;
         const counting_declare = counted and phase == .declare;
         const counting_end_frame = counted and phase == .endFrame;
+        const counting_read = counted and phase == .read;
 
         if (counting_declare) callgrind.toggleCollect();
         const record: Ui.FrameRecord = .{ .params = .{ .now = .zero, .viewport = .{ 1600, 1200 } }, .events = scenes.eventsOf(&scene, frame_index) };
@@ -54,13 +62,21 @@ fn runCounted(comptime Scene: type, io: Io, gpa: std.mem.Allocator, phase: Phase
         if (counting_end_frame) callgrind.toggleCollect();
         const frame = ui.endFrame();
         if (counting_end_frame) callgrind.toggleCollect();
+        if (comptime @hasDecl(Scene, "readCommands")) {
+            if (counting_read) callgrind.toggleCollect();
+            scene.readCommands(frame.commands());
+            if (counting_read) callgrind.toggleCollect();
+        }
         ui.release(frame);
     }
 }
 
 fn runScenario(name: []const u8, phase: Phase, io: Io, gpa: std.mem.Allocator) !void {
     inline for (Scenarios) |Scene| {
-        if (std.mem.eql(u8, name, Scene.name)) return runCounted(Scene, io, gpa, phase);
+        if (std.mem.eql(u8, name, Scene.name)) {
+            if (!hasPhase(Scene, phase)) return error.UnknownPhase;
+            return runCounted(Scene, io, gpa, phase);
+        }
     }
     std.debug.print("unknown scenario \"{s}\"\n", .{name});
     return error.UnknownScenario;
@@ -191,6 +207,7 @@ pub fn main(init: std.process.Init) !void {
     var counts: std.ArrayList(Count) = .empty;
     inline for (Scenarios) |Scene| {
         for (std.enums.values(Phase)) |phase| {
+            if (!hasPhase(Scene, phase)) continue;
             const key = try std.fmt.allocPrint(arena, "{s}, {s}", .{ Scene.name, @tagName(phase) });
             const events = try countUnderCallgrind(io, arena, arguments[0], Scene.name, phase);
             // The instruction key keeps its old name, so a parent from

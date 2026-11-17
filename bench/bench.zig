@@ -39,6 +39,7 @@ const GridWithTooltip = scenes.GridWithTooltip;
 const InteractiveBoxTree = scenes.InteractiveBoxTree;
 const PressedInteractiveBoxTree = scenes.PressedInteractiveBoxTree;
 const ClickedInteractiveBoxTree = scenes.ClickedInteractiveBoxTree;
+const RenderedLabels = scenes.RenderedLabels;
 const eventsOf = scenes.eventsOf;
 
 /// Text measurement with the cost profile of a shaping engine: about a
@@ -84,11 +85,15 @@ const Measurement = struct {
     declare: Spread,
     /// Layout and emission: the time `endFrame` takes.
     layout: Spread,
+    /// A renderer reading the frame's commands, for a scene that declares
+    /// `readCommands`.
+    read: ?Spread = null,
     /// Declaration, layout and emission together.
     frame_median_ns: u64,
     /// Each event's fewest per frame, with `--counters`.
     declare_counts: ?counters.Counts = null,
     layout_counts: ?counters.Counts = null,
+    read_counts: ?counters.Counts = null,
     layout_target_ns: ?u64 = null,
     declare_target_ns: ?u64 = null,
     measure_calls_per_frame: f64,
@@ -162,6 +167,7 @@ const Layout = struct {
 fn Scenario(comptime limits: zui.Limits, comptime Text: type, comptime Scene: type) type {
     return struct {
         const Ui = zui.Context(.{ .limits = limits, .Text = Text });
+        const reads_commands = @hasDecl(Scene, "readCommands");
 
         /// Times `frame_count` frames after `warmup_frames`, in a fresh
         /// Context whose allocator counts every call after `init`.
@@ -186,9 +192,11 @@ fn Scenario(comptime limits: zui.Limits, comptime Text: type, comptime Scene: ty
             var declare_times: [max_timed_frames]u64 = undefined;
             var layout_times: [max_timed_frames]u64 = undefined;
             var frame_times: [max_timed_frames]u64 = undefined;
+            var read_times: [if (reads_commands) max_timed_frames else 0]u64 = undefined;
             const group = layout.counter_group;
             var declare_counts: counters.Counts = @splat(std.math.maxInt(u64));
             var layout_counts: counters.Counts = @splat(std.math.maxInt(u64));
+            var read_counts: counters.Counts = @splat(std.math.maxInt(u64));
             const calls_before = ui.measureCalls();
             for (0..frame_count) |index| {
                 if (group) |counting_group| counting_group.start();
@@ -210,6 +218,17 @@ fn Scenario(comptime limits: zui.Limits, comptime Text: type, comptime Scene: ty
                     counting_group.stop();
                     fewest(&layout_counts, try counting_group.read());
                 }
+                if (reads_commands) {
+                    if (group) |counting_group| counting_group.start();
+                    const read_start = Io.Timestamp.now(io, .awake);
+                    scene.readCommands(frame.commands());
+                    const read_end = Io.Timestamp.now(io, .awake);
+                    if (group) |counting_group| {
+                        counting_group.stop();
+                        fewest(&read_counts, try counting_group.read());
+                    }
+                    read_times[index] = @intCast(read_start.durationTo(read_end).nanoseconds);
+                }
                 element_count = frame.elementCount();
                 ui.release(frame);
                 declare_times[index] = @intCast(frame_start.durationTo(declare_end).nanoseconds);
@@ -222,17 +241,20 @@ fn Scenario(comptime limits: zui.Limits, comptime Text: type, comptime Scene: ty
             std.mem.sortUnstable(u64, declare_times[0..frame_count], {}, std.sort.asc(u64));
             std.mem.sortUnstable(u64, layout_times[0..frame_count], {}, std.sort.asc(u64));
             std.mem.sortUnstable(u64, frame_times[0..frame_count], {}, std.sort.asc(u64));
+            if (reads_commands) std.mem.sortUnstable(u64, read_times[0..frame_count], {}, std.sort.asc(u64));
             return .{
                 .name = Scene.name,
                 .elements = element_count,
                 .declare = .of(declare_times[0..frame_count]),
                 .layout = .of(layout_times[0..frame_count]),
+                .read = if (reads_commands) .of(read_times[0..frame_count]) else null,
                 .frame_median_ns = frame_times[frame_count / 2],
                 .layout_target_ns = Scene.layout_target_ns,
                 .declare_target_ns = if (@hasDecl(Scene, "declare_target_ns")) Scene.declare_target_ns else null,
                 .measure_calls_per_frame = @as(f64, @floatFromInt(calls)) / @as(f64, @floatFromInt(frame_count)),
                 .declare_counts = if (group != null) declare_counts else null,
                 .layout_counts = if (group != null) layout_counts else null,
+                .read_counts = if (group != null and reads_commands) read_counts else null,
             };
         }
     };
@@ -511,6 +533,7 @@ const entries = [_]Entry{
     frames(.compared_frames, InteractiveBoxTree.limits, GlyphTableText, InteractiveBoxTree),
     frames(.compared_frames, PressedInteractiveBoxTree.limits, GlyphTableText, PressedInteractiveBoxTree),
     frames(.compared_frames, ClickedInteractiveBoxTree.limits, GlyphTableText, ClickedInteractiveBoxTree),
+    frames(.compared_frames, RenderedLabels.limits, GlyphTableText, RenderedLabels),
     frames(.reported_frames, shaping_limits, ShapingText(false), ShapedTextWall(false)),
     frames(.reported_frames, shaping_limits, ShapingText(true), ShapedTextWall(true)),
     .{ .name = "render thread", .kind = .render_thread, .run = timeRenderThread },
@@ -666,7 +689,7 @@ fn printCounters(out: *Io.Writer, runs: []const ?Run) !void {
             .frames => |frames_run| frames_run,
             else => continue,
         } else continue;
-        const phases = [_]struct { []const u8, ?counters.Counts }{ .{ "declare", measurement.declare_counts }, .{ "layout", measurement.layout_counts } };
+        const phases = [_]struct { []const u8, ?counters.Counts }{ .{ "declare", measurement.declare_counts }, .{ "layout", measurement.layout_counts }, .{ "read", measurement.read_counts } };
         for (phases) |phase| {
             const counts = phase[1] orelse continue;
             if (!printed_header) {
@@ -712,7 +735,7 @@ const ComparedTime = struct {
     }
 };
 
-const max_compared_values = (2 + 2 * counters.event_count) * entries.len;
+const max_compared_values = (3 + 3 * counters.event_count) * entries.len;
 
 fn comparedTimes(runs: []const ?Run, times: *[max_compared_values]ComparedTime) []const ComparedTime {
     var count: usize = 0;
@@ -723,8 +746,12 @@ fn comparedTimes(runs: []const ?Run, times: *[max_compared_values]ComparedTime) 
                 times[count] = .init("{s}", measurement.name, measurement.layout.min_ns);
                 times[count + 1] = .init("{s}, declare", measurement.name, measurement.declare.min_ns);
                 count += 2;
+                if (measurement.read) |read| {
+                    times[count] = .init("{s}, read", measurement.name, read.min_ns);
+                    count += 1;
+                }
                 // A base without counters shows these as only in head.
-                const phases = [_]struct { []const u8, ?counters.Counts }{ .{ "", measurement.layout_counts }, .{ ", declare", measurement.declare_counts } };
+                const phases = [_]struct { []const u8, ?counters.Counts }{ .{ "", measurement.layout_counts }, .{ ", declare", measurement.declare_counts }, .{ ", read", measurement.read_counts } };
                 for (phases) |phase| {
                     const counts = phase[1] orelse continue;
                     for (std.enums.values(counters.Event), counts) |event, value| {
@@ -772,6 +799,7 @@ pub fn main(init: std.process.Init) !void {
     }
 
     const missed_target = try printFrames(out, &runs);
+    try printReads(out, &runs);
     try printRates(out, &runs);
     try printStartup(out, &runs);
     try printCounters(out, &runs);
@@ -823,6 +851,27 @@ fn printFrames(out: *Io.Writer, runs: []const ?Run) !bool {
     return missed_target;
 }
 
+fn printReads(out: *Io.Writer, runs: []const ?Run) !void {
+    var printed_header = false;
+    for (runs) |maybe_run| {
+        const measurement = if (maybe_run) |run| switch (run) {
+            .frames => |frames_run| frames_run,
+            else => continue,
+        } else continue;
+        const read = measurement.read orelse continue;
+        if (!printed_header) {
+            try out.print("\n{s:<38} {s:>11} {s:>11} {s:>11}\n", .{ "a renderer reading the commands", "min", "median", "p95" });
+            printed_header = true;
+        }
+        try out.print("{s:<38} {d:>9.1}us {d:>9.1}us {d:>9.1}us\n", .{
+            measurement.name,
+            microseconds(read.min_ns),
+            microseconds(read.median_ns),
+            microseconds(read.p95_ns),
+        });
+    }
+}
+
 fn printRates(out: *Io.Writer, runs: []const ?Run) !void {
     const one_thread = runs[entryIndex(shaped_one_thread).?];
     const parallel = runs[entryIndex(shaped_parallel).?];
@@ -869,6 +918,7 @@ fn printClusterWarnings(out: *Io.Writer, runs: []const ?Run) !void {
             .frames => |measurement| {
                 try printClusterWarning(out, measurement.name, ", declare", measurement.declare);
                 try printClusterWarning(out, measurement.name, ", layout", measurement.layout);
+                if (measurement.read) |read| try printClusterWarning(out, measurement.name, ", read", read);
             },
             .startup => |measurement| try printClusterWarning(out, measurement.name, "", measurement.spread),
             .render_thread => {},
