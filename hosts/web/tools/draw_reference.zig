@@ -24,8 +24,8 @@ const gl_unsigned_byte = 0x1401;
 /// What the browser's client draws so far.
 fn isDrawnInBrowser(command: Command) bool {
     return switch (command.payload) {
-        .rectangle, .border, .gradient, .shadow, .clip_begin, .clip_end, .transform_begin, .transform_end => true,
-        .text, .image, .backdrop_blur, .material => false,
+        .rectangle, .border, .text, .gradient, .shadow, .clip_begin, .clip_end, .transform_begin, .transform_end => true,
+        .image, .backdrop_blur, .material => false,
     };
 }
 
@@ -102,6 +102,7 @@ const Harness = struct {
             try out.writeAll(std.mem.sliceAsBytes(pixels.items));
         }
         try out.flush();
+        if (self.renderer.glyph_overflows != 0) return error.GlyphAtlasOverflowed;
     }
 };
 
@@ -137,6 +138,7 @@ pub fn main(init: std.process.Init) !void {
     const stream = try std.Io.Dir.cwd().readFileAlloc(init.io, arguments[1], arena, .unlimited);
     const harness = try arena.create(Harness);
     harness.* = .{ .gpa = init.gpa, .io = init.io, .stream = stream, .reference_path = arguments[2], .frame_numbers = frame_numbers };
+    try tour.kit.addFonts(&harness.text);
     sapp.run(.{
         .init_userdata_cb = onInit,
         .frame_userdata_cb = onFrame,

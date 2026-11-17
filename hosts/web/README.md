@@ -25,9 +25,11 @@ uses sokol_debugtext's six fonts. Backdrop blurs and materials are not
 drawn yet, and there is no page. `zig build test-draw` draws a frame of
 each of the tour's screens with zui-sokol's renderer and with the client in
 headless Chromium, and checks that every pixel matches, within 2 of each
-color or a pixel's neighbor; it compares the shapes, and text joins it
-once the owner settles how a pixel on a turned glyph's edge is judged
-(zui's ROADMAP.md, V4).
+color or a pixel's neighbor, shapes and text alike. A frame may have one
+pixel that matches nothing nearby: a glyph's partial coverage at its edge
+is a color no neighbor has, and the two rasterizers decide a pixel that
+close to a turned glyph's edge differently. Of the 13 frames, only the
+Transforms screen's has such a pixel.
 See [zui's ROADMAP.md](https://github.com/AaronJClausen/zui/blob/main/ROADMAP.md).
 
 ## Requirements

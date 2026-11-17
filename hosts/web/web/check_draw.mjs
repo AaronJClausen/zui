@@ -1,4 +1,4 @@
-// node check_draw.mjs <chromium> <client wasm> <stream> <reference>
+// node check_draw.mjs <chromium> <client wasm> <stream> <reference> <bitmap fonts> <TrueType font>...
 
 import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -12,9 +12,13 @@ import { fileURLToPath } from "node:url";
 // since two rasterizers may place an edge a pixel apart.
 const tolerance = 2;
 const edgeReach = 1;
+// A glyph's partial coverage at its edge is a color no neighbor has, and
+// two rasterizers decide a pixel whose centre lies that close to the edge
+// differently.
+const maxUnmatchedPixelsPerFrame = 1;
 const watchdogMilliseconds = 300_000;
 
-const [chromiumPath, wasmPath, streamPath, referencePath] = process.argv.slice(2);
+const [chromiumPath, wasmPath, streamPath, referencePath, bitmapFontsPath, ...trueTypeFontPaths] = process.argv.slice(2);
 const webDirectory = dirname(fileURLToPath(import.meta.url));
 
 const served = {
@@ -22,7 +26,14 @@ const served = {
   "/frame_drawer.mjs": { path: join(webDirectory, "frame_drawer.mjs"), type: "text/javascript" },
   "/zui-web.wasm": { path: wasmPath, type: "application/wasm" },
   "/tour.zuiw": { path: streamPath, type: "application/octet-stream" },
+  "/bitmap.fonts": { path: bitmapFontsPath, type: "application/octet-stream" },
 };
+const trueTypeFontUrls = trueTypeFontPaths.map((path, index) => {
+  const url = `/truetype-${index}.ttf`;
+  served[url] = { path, type: "font/ttf" };
+  return url;
+});
+served["/truetype-fonts.json"] = { body: JSON.stringify(trueTypeFontUrls), type: "application/json" };
 
 let chromium = null;
 let profileDirectory = null;
@@ -115,7 +126,8 @@ server = createServer(async (request, response) => {
     response.writeHead(404).end();
     return;
   }
-  response.writeHead(200, { "content-type": file.type }).end(await readFile(file.path));
+  const body = file.path ? await readFile(file.path) : file.body;
+  response.writeHead(200, { "content-type": file.type }).end(body);
 });
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 const pageUrl = `http://127.0.0.1:${server.address().port}/`;
@@ -202,11 +214,12 @@ for (const expected of reference) {
     await fail(`frame ${expected.number}: drawn ${drawn.width}×${drawn.height}, the reference is ${expected.width}×${expected.height}`);
   }
   if (drawn.overflows !== 0) await fail(`frame ${expected.number}: the draw list was full ${drawn.overflows} times`);
+  if (drawn.glyphOverflows !== 0) await fail(`frame ${expected.number}: glyphs were left out ${drawn.glyphOverflows} times`);
   const pixels = Buffer.from(drawn.pixels, "base64");
   const result = compare(pixels, expected.pixels, expected.width, expected.height);
   const total = expected.width * expected.height;
-  console.log(`check_draw: frame ${expected.number}: ${result.differing} of ${total} pixels differ, by at most ${result.largestDifference}; ${result.beyondTolerance} by more than ${tolerance}, ${result.unmatched} of them matching no reference pixel within ${edgeReach}`);
-  if (result.unmatched > 0) {
+  console.log(`check_draw: frame ${expected.number}: ${result.differing} of ${total} pixels differ, by at most ${result.largestDifference}; ${result.beyondTolerance} by more than ${tolerance}, ${result.unmatched} of them matching no reference pixel within ${edgeReach} (at most ${maxUnmatchedPixelsPerFrame} allowed)`);
+  if (result.unmatched > maxUnmatchedPixelsPerFrame) {
     failures += 1;
     failedImages ??= await mkdtemp(join(tmpdir(), "zui-web-draw-"));
     await writePortablePixmap(join(failedImages, `${expected.number}-drawn.ppm`), pixels, expected.width, expected.height);

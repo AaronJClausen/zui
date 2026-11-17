@@ -44,12 +44,18 @@ pub fn build(b: *std.Build) void {
         const reference = write_reference.addOutputFileArg("tour.reference");
         for (compared_frames) |frame_number| write_reference.addArg(b.fmt("{d}", .{frame_number}));
 
+        const bitmap_fonts = tourTool(b, "bitmap-fonts", "tools/bitmap_fonts.zig", tour_imports, target, optimize);
+        const write_bitmap_fonts = b.addRunArtifact(bitmap_fonts);
+        const bitmap_font_rows = write_bitmap_fonts.addOutputFileArg("bitmap.fonts");
+
         const draw_in_browser = b.addSystemCommand(&.{"node"});
         draw_in_browser.addFileArg(b.path("web/check_draw.mjs"));
         draw_in_browser.addArg(browser);
         draw_in_browser.addArtifactArg(client);
         draw_in_browser.addFileArg(stream);
         draw_in_browser.addFileArg(reference);
+        draw_in_browser.addFileArg(bitmap_font_rows);
+        for (tour_truetype_fonts) |font| draw_in_browser.addFileArg(zui_sokol_dependency.path(font));
         for ([_][]const u8{ "web/check_draw.html", "web/frame_drawer.mjs" }) |page_file| draw_in_browser.addFileInput(b.path(page_file));
         draw_in_browser.expectExitCode(0);
         test_draw.dependOn(&draw_in_browser.step);
@@ -96,6 +102,13 @@ const compared_frames = compared: {
     var numbers: [13]u64 = undefined;
     for (&numbers, 0..) |*number, screen| number.* = 24 * screen + 12;
     break :compared numbers;
+};
+
+/// The TrueType fonts zui-sokol's tour adds, in the order `kit.addFonts`
+/// adds them, so each takes the `FontId` the tour's text names.
+const tour_truetype_fonts = [_][]const u8{
+    "examples/fonts/AtkinsonHyperlegible-Regular.ttf",
+    "examples/fonts/AtkinsonHyperlegible-Bold.ttf",
 };
 
 /// A native program that runs zui-sokol's tour.
