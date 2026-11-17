@@ -185,7 +185,10 @@ zui-host's `remote` example, `zui.checkRenderer` of
 builds against zui-sokol `cac68e4`, whose tour has a Materials screen;
 with this commit it compiles (`zig build check -Dtarget=x86_64-windows`
 with zui and zui-sokol as path dependencies), and needs no change of its
-own, only its pins moved. Nothing on a hot path changed.
+own, only its pins moved. Nothing on a hot path changed. The pins have
+moved: zui-sokol `3b5e242` pins this commit, zui-host `fe9d90b` pins
+both and its check for x86_64 and aarch64 Windows compiles the `remote`
+example, and zui-web, zui-raylib and zui-terminal pin the same zui.
 
 ### V3. Safety sweeps
 
