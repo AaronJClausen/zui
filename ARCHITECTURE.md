@@ -251,6 +251,8 @@ What exists today, by stage:
   narrow slots indexing dense entries that carry their region's flags; a
   press hit-tests once; and the string cache keeps a text's wrapped lines
   beside its entries, and its keys and ages apart from its values.
+- **Stage 9, begun:** `Frame.inspect`, and `zui_debug`'s inspector of
+  the element tree and the hovered element's configs.
 
 The code and the spec still differ in these places, each closed by the
 roadmap item named:
@@ -260,6 +262,7 @@ roadmap item named:
 | output formats are negotiated through `Surface`, and zui-sokol draws an `.scrgb_fp16` offscreen image, but no host or renderer declares `.scrgb_fp16` for a window, and no host reports `hdr_headroom` | an FP16 swapchain when both sides support it; headroom from the display | `../zui-sokol`, `../zui-host` | G6 |
 | `Widgets(Ui)` with a `Theme` struct | `Widgets(Ui, Skin)` | `zui_widgets/` | K5 |
 | `Features` has every field and gates its API, but `Frame.semantics()` is always empty and `safety_sweeps` changes nothing | semantics and safety sweeps, each behind its field | `src/context.zig` | V2, V3 |
+| `zui_debug` shows the element tree and the hovered element's configs | also the frame's diagnostics, lowerings and fallbacks, and a performance overlay from the tracer | `zui_debug/` | V1 |
 
 Unchanged in shape: element storage in pre-order structure-of-arrays, the
 layout passes, the segment cache, ids, the state table, the frame arenas,

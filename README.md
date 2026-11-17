@@ -220,6 +220,13 @@ Implemented so far:
   surface in `.scrgb_fp16` in linear light and passes it, but no host
   opens an FP16 window yet, so no window is HDR.
   An element or frame without effects pays nothing for them.
+- **Stage 9, begun:** seeing the UI. `frame.inspect(index)` reports
+  everything a frame kept of one element, and `zui_debug.Inspector(Ui)`
+  is a panel over it: the element tree, and the element under the
+  pointer with every field of its layout, decoration, effects, floating
+  and text style that differs from the default. `observe(frame, pointer)`
+  after `endFrame` copies what it shows, and `declare(ui)` draws it in
+  the next frame.
 
 The reference backend, its adapter host and the demo application live in
 [zui-raylib](https://github.com/AaronJClausen/zui-raylib); the other
@@ -231,8 +238,8 @@ hosts live in [zui-host](https://github.com/AaronJClausen/zui-host).
 shipped feature in the code a consumer writes, with semantic highlighting;
 open it in a browser, or read [docs/feature-tour.md](docs/feature-tour.md).
 
-Next, in the order of SPEC.md §21: the rest of the effects, an
-inspector and accessibility, more hosts, motion and text editing.
+Next, in the order of SPEC.md §21: the rest of the effects and of the
+inspector, accessibility, more hosts, motion and text editing.
 [ROADMAP.md](ROADMAP.md) keeps the queue of work in order, and
 [ARCHITECTURE.md](ARCHITECTURE.md) shows how the pieces connect.
 
@@ -465,6 +472,7 @@ exe.root_module.addImport("zui_widgets", zui.module("zui_widgets"));
 exe.root_module.addImport("zui_reflect", zui.module("zui_reflect"));
 exe.root_module.addImport("zui_app", zui.module("zui_app"));
 exe.root_module.addImport("zui_wire", zui.module("zui_wire"));
+exe.root_module.addImport("zui_debug", zui.module("zui_debug"));
 tests.root_module.addImport("zui_testing", zui.module("zui_testing"));
 // Tracing into Tracy; `.@"zui-tracy" = true` in the options above links it.
 exe.root_module.addImport("zui_tracy", zui.module("zui_tracy"));

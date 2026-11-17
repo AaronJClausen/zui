@@ -11,6 +11,7 @@ const zui_reflect = @import("zui_reflect");
 const zui_tracy = @import("zui_tracy");
 const zui_app = @import("zui_app");
 const zui_wire = @import("zui_wire");
+const zui_debug = @import("zui_debug");
 
 /// A freestanding target has no default log output, so an application there
 /// brings its own, as this one does.
@@ -27,6 +28,7 @@ const CheckText = struct {
 const Ui = zui.Context(.{ .limits = .{ .max_elements = 64 }, .Text = CheckText, .CustomData = u32, .ImageHandle = u32, .features = .{ .semantics = true, .flex_wrap = true } });
 
 var check_text: CheckText = .{};
+var inspector: zui_debug.Inspector(Ui) = .{};
 var memory: [Ui.required_bytes]u8 align(Ui.buffer_alignment) = undefined;
 
 const Expanded = struct { open: bool };
@@ -95,8 +97,10 @@ export fn zuiCheckFrame(width: f32, height: f32, pointer_x: f32, pointer_y: f32)
     _ = ui.dropped(list, [2]f32) orelse ui.draggedOver(list, [2]f32);
     _ = ui.doubleTapped(save) or ui.contextRequested(save) or ui.dismissed(list) or ui.adjusted(save) != null or ui.navigated(save) == .up;
     declareWidgets(&ui);
+    inspector.declare(&ui);
     const frame = ui.endFrame();
     defer ui.release(frame);
+    inspector.observe(frame, .{ pointer_x, pointer_y });
     var snapshot_buffer: [256]u8 = undefined;
     var snapshot_writer: std.Io.Writer = .fixed(&snapshot_buffer);
     zui_testing.snapshot(&snapshot_writer, frame.commands(), zui.ids(.{"save"})) catch {};
@@ -106,7 +110,7 @@ export fn zuiCheckFrame(width: f32, height: f32, pointer_x: f32, pointer_y: f32)
     const host_requests = @intFromEnum(requests.cursor) + @intFromBool(requests.text_input != null);
     const inspected = frame.inspect(frame.elementCount() - 1);
     const inspected_content = @intFromEnum(inspected.content) + @intFromBool(inspected.effects != null and inspected.floating != null);
-    return frame.commands().len + @intFromBool(ui.nextFrame() == .immediately) + violation_count + failed_check + frame.elementCount() + host_requests + frame.semantics().len + inspected_content;
+    return frame.commands().len + @intFromBool(ui.nextFrame() == .immediately) + violation_count + failed_check + frame.elementCount() + host_requests + frame.semantics().len + inspected_content + inspector.rows().len;
 }
 
 const Settings = struct {

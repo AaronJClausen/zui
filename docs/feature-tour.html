@@ -1592,6 +1592,34 @@ fn debugPanel(app: *App, ui: *Ui) void {
 </script>
       </article>
 
+      <article class="feature" id="zui-debug" data-title="zui_debug">
+        <div class="feature-head"><h3><code>zui_debug</code>: the element tree and what's under the pointer</h3><span class="pill shipped">Shipped</span></div>
+        <p><code class="z">zui_debug.Inspector(Ui)</code> is a panel over <code class="z">Frame.inspect</code>, floating at the right edge of the window. It lists the element tree, one row per element, indented by depth, with its name (its id in a build without <code class="z">-Dzui-debug</code>), kind and size, and above it the element under the pointer: its rectangle, flags, and each field of its layout, decoration, effects, floating and text style that differs from the default. <code class="z">observe</code> copies what it shows out of a frame after <code class="z">endFrame</code>, so the frame is released as usual, and <code class="z">declare</code> declares the panel in the next frame. Its own rows never appear in the tree, and while the pointer is over the panel, the element it showed stays. It sits in your application's state, sized by <code class="z">limits.max_elements</code>, and allocates nothing. The frame's diagnostics, lowerings, a tracer overlay and its theme reloading from a file come next (V1).</p>
+<script type="text/x-zig" data-file="src/app.zig">
+const zui_debug = @import("zui_debug");
+
+const App = struct {
+    inspector: zui_debug.Inspector(Ui) = .{},
+    inspecting: bool = false,
+
+    fn declare(app: *App, ui: *Ui) void {
+        if (ui.chordPressed(.{ .key = .i, .modifiers = .{ .control = true, .shift = true } })) app.inspecting = !app.inspecting;
+        declareDocuments(app, ui);
+        if (app.inspecting) app.inspector.declare(ui);
+    }
+
+    fn runFrame(app: *App, ui: *Ui, record: *const zui.FrameRecord) !void {
+        ui.beginFrame(record);
+        app.declare(ui);
+        const frame = ui.endFrame();
+        defer ui.release(frame);
+        if (app.inspecting) app.inspector.observe(frame, if (ui.primaryPointer()) |pointer| pointer.position else null);
+        try app.renderer.zuiSubmit(app.host.zuiSurface(.main), frame);
+    }
+};
+</script>
+      </article>
+
       <article class="feature" id="zui-app" data-title="zui_app">
         <div class="feature-head"><h3><code>zui_app</code>: the whole loop from one call</h3><span class="pill shipped">Shipped</span></div>
         <p>You name a host and a renderer and write <code class="z">zuiDeclare</code>, and <code class="z">zui_app.run</code> does the rest. It opens the window, builds records, submits on a render thread when the renderer allows it, paces frames, sleeps when idle, and reports once what it's running with and each limit exceeded. The optional hooks are <code class="z">init</code>, <code class="z">deinit</code>, <code class="z">zuiLoader</code> after each frame and <code class="z">zuiRecord</code> for your own zoom and synthetic events. <code class="z">contextConfig</code> derives the <code class="z">Config</code> from the renderer's declarations.</p>
@@ -1994,7 +2022,7 @@ fn present(renderer: *Renderer, surface: zui.Surface, frame: *const Ui.Frame) !v
         <li><b><code class="z">features.semantics</code> <span class="pill partial">Declared only</span></b><span><code class="z">Frame.semantics()</code> is always empty. Accessibility is V2.</span></li>
         <li><b><code class="z">features.safety_sweeps</code> <span class="pill partial">Declared only</span></b><span>The flag exists, but it doesn't change behaviour yet. Sweeps are V3.</span></li>
         <li><b>Extended color <span class="pill partial">Clamped only</span></b><span><code class="z">Config.Color = zui.ExtendedColor</code> declares colors brighter than SDR white or outside sRGB, as <code class="z">.linear(4, 4, 4, 1)</code> or with <code class="z">Color</code>'s own <code class="z">.rgb(0x3366ff)</code>, and every type that holds a color follows it: <code class="z">Ui.Decoration</code>, <code class="z">Ui.Border</code>, <code class="z">Ui.Effects</code>, <code class="z">Ui.TextStyle</code>. For a renderer that draws only <code class="z">zui.Color</code>, each is clamped as it is emitted, and <code class="z">frame.diagnostics.clamped_colors</code> says when that changed one. zui-sokol declares <code class="z">zui_extended_color</code>, so it is given them as declared, and encodes them into its 8-bit sRGB target; <code class="z">zui_wire</code> carries them unclamped when its context's renderer draws them, and the renderer suite declares its scene in them, with a box of HDR white. A host and a renderer that both declare <code class="z">.scrgb_fp16</code> in <code class="z">zui_output_formats</code> open the window with it in <code class="z">WindowOptions.output_formats</code>, and the host's surface says which format it chose, <code class="z">surface.outputFormat()</code>; SDR otherwise. The renderer suite reads an FP16 target back through a harness's <code class="z">extendedPixel</code> and expects HDR white there at four times SDR white. zui-sokol draws an <code class="z">.offscreen</code> surface in <code class="z">.scrgb_fp16</code>, in linear light, and passes the suite there, reading HDR white back at four times SDR white. No host opens an FP16 window yet, so no window is brighter than SDR white: that, and the host's headroom, are the rest of G6.</span></li>
-        <li><b>Still to come</b><span>A visual inspector <code>zui_debug</code> (V1), motion, multi-line text editing, skins, and more hosts (macOS, Linux, web).</span></li>
+        <li><b>Still to come</b><span>The rest of <code>zui_debug</code> (V1): the frame's diagnostics, lowerings, a tracer overlay and its theme reloading; motion, multi-line text editing, skins, and more hosts (macOS, Linux, web).</span></li>
       </ul>
     </section>
 

@@ -31,6 +31,7 @@ Each item says:
 | stage 7 | gestures (I5): arbitration by motion component, zoom, long press, double tap, momentum, the intents and custom recognizers; drag and drop between elements (I1) | done: a carousel in a list, a pinch starting on a list inside a map, a lasso module against a map's pan, and `zui_testing.Driver.drag` moving an item between two lists, out of one that scrolls by dragging |
 | after stage 7: the foundation | G1's first slice ran 5.5% to 7.7% more instructions in scenes that draw no effect, so the work turned to what lay under it: benchmarks that can be trusted (R3 to R8, and R9 in part) and the data-oriented design audit's findings (P6 to P10) | done; a commit compared with itself over three code layouts calls nothing, its intervals 0.52% wide on average, and a change that only moves code is not called; a tooltip declared before a 3,000-cell grid lays out in 79 µs, not 671 µs (P6); warm text −43% (P9); `init` from 138 µs to 92 µs (P7, P10); the budgets judged in benchmarking mode |
 | stage 8, begun | gradients, shadows and glow (G1); backdrop blur (G2); effects in the corners of a decoration that draws nothing (G7); transforms with hit inversion (G3); materials (G5) | G1, G2, G7, G3 and G5 done: zui-sokol draws gradients, shadows, backdrop blurs, transforms and materials through a shader of its own and passes the renderer suite, its effects rounded by a decoration that draws nothing, a pointer hits a turned button where it is drawn, and a frame without effects runs no more instructions than before; G6 begun: `zui.ExtendedColor` is declared and clamped for a renderer that draws only `Color`, and zui-sokol draws it into an scRGB FP16 offscreen image and passes the renderer suite there |
+| stage 9, begun | `zui_debug` (V1) | `Frame.inspect` and the inspector's element tree and hovered element's configs; its diagnostics, tracer overlay, theme reload and the demo's key to come |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
@@ -3062,16 +3063,25 @@ demo toggles it with a key.
 
 **Spec.** §19.7.
 
-**Status.** The first slice landed: `Frame.inspect(index)` returns an
-`ElementView` of every element the frame kept, its id and debug name,
-parent, subtree end, rectangle, minimum and content sizes, flags,
-layout, decoration, effects (found by a binary search of the effect
-elements), floating and content, and `zui.ElementFlags` is exported for
-it. Next comes the `zui_debug` module with its element tree and the
-hovered element's configs over `inspect`; then the diagnostics,
-lowerings and fallbacks; the tracer's performance overlay; reloading its
-theme through a `Stream(zui.FileChange)`; and last the demo's key in
-`../zui-raylib`.
+**Status.** Two slices landed. The first: `Frame.inspect(index)`
+returns an `ElementView` of every element the frame kept, its id and
+debug name, parent, subtree end, rectangle, minimum and content sizes,
+flags, layout, decoration, effects (found by a binary search of the
+effect elements), floating and content, and `zui.ElementFlags` is
+exported for it. The second: the `zui_debug` module, whose
+`Inspector(Ui)` copies a frame's tree out of `inspect` in
+`observe(frame, pointer)`, leaving out its own panel's subtree, and finds
+the innermost element under the pointer, keeping the last one while the
+pointer is over the panel; `declare(ui)` floats a panel at the
+viewport's right edge with that element's rectangle, flags and every
+field of its layout, decoration, effects, floating and text style that
+differs from the default, then a row per element, indented by depth,
+the hovered one highlighted. Its `Theme` is a struct for now. Next come
+the diagnostics, lowerings and fallbacks; the tracer's performance
+overlay; reloading its theme through a `Stream(zui.FileChange)`; and
+last the demo's key in `../zui-raylib`. `zui_app.run` hands the
+application no frame after `endFrame`, so the demo's key needs a hook
+there, or the demo's own loop, to call `observe`.
 
 ### V2. Semantics and accessibility actions
 
