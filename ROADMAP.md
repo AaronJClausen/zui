@@ -73,7 +73,7 @@ green, and its **Status** line below says which slice is next.
 | P12. Text commands that point at their style | audit | `src/commands.zig`, `src/emission.zig`, `zui_wire/`, `../zui-raylib`, `../zui-sokol`, `../zui-terminal` | | waiting on a profile of a renderer reading the commands |
 | G6. HDR and wide gamut | 8 | `src/context.zig`, `src/commands.zig`, `src/surface.zig`, `zui_wire/`, `zui_testing/`, `../zui-sokol`, `../zui-host` | | waiting on a session under Windows with an HDR display: zui-sokol's FP16 `.win32` swapchain and zui-host's `.scrgb_fp16` window |
 | V2. Semantics and accessibility actions | 9 | `src/context.zig`, `zui_widgets/`, `../zui-host` | | in progress; the UI Automation bridge waits on a session under Windows |
-| V4. The demo in a browser | 9 | `../zui-web`, `zui_wire/` | | in progress; the client draws text, and comparing it waits on Decisions, Open #3 (zui-web's `v4-text-comparison`); backdrop blurs and materials are next |
+| V4. The demo in a browser | 9 | `../zui-web`, `zui_wire/` | | in progress; the client draws shapes and text, both compared with zui-sokol's; backdrop blurs and materials are next |
 | F7. The wire's renderer declares its context's payload types | 5 | `zui_wire/remote.zig`, `zui_wire/tests.zig` | | |
 
 After the queue come stages 10 and 11 in the order of SPEC.md §21. They join the queue as it runs short.
@@ -3237,7 +3237,7 @@ published from CI.
      bytes on every run. Drawing the shadows with five rings instead of
      six fails it. CI runs it on Linux under Xvfb with Google Chrome; its
      first run there is to be confirmed once zui-web is pushed.
-   - **Text** (drawn; its comparison waits on Decisions, Open #3). The
+   - **Text** (done). The
      page hands the client the stream's fonts: the TrueType ones, which
      follow the six bitmap fonts' ids in the order the host added them,
      and sokol_debugtext's six. stb_truetype, at zui-sokol's commit, is
@@ -3253,16 +3253,22 @@ published from CI.
      the reference by up to 31 at 237 pixels of the Transforms screen.
      The client is 63 KB in ReleaseSmall and reserves 35 MiB, 14 of them
      for 2^18 vertices (6.7 times the busiest compared frame's 38,790).
-     `test-draw` on `main` still compares only shapes, unchanged; the
-     comparison with text is parked on zui-web's `v4-text-comparison`
-     branch (501cd96): 12 of the 13 frames match, and frame 252 has one
-     pixel matching nothing within 1, its centre 0.0002 texels inside a
-     glyph's right edge, drawn by the client (75, 75, 85) and left as
-     the button's background (35, 35, 50) by zui-sokol's OpenGL capture.
-     Next: the owner settles #3, then the branch is finished on `main`
-     (no zui pin moves; the stb pin is zui-sokol's), and CI's first
-     `test-draw` with text is confirmed, its reference drawn by Mesa
-     under Xvfb rather than this machine's NVIDIA driver.
+     `test-draw` compares the text too, its reference drawn with the
+     tour's fonts and failing if zui-sokol's glyph atlas overflowed, and
+     a frame passes with at most one pixel matching nothing within 1
+     (`maxUnmatchedPixelsPerFrame`; Decisions, Made: a pixel on a glyph's
+     edge). In Debug and ReleaseSafe alike, 1 to 12,717 of each frame's
+     1,296,000 pixels differ at all, 1 to 2,872 by more than 2 (at most
+     231), and every frame has no unmatched pixel but frame 252, on the
+     Transforms screen, which has one: its centre 0.0002 texels inside a
+     glyph's right edge, drawn by the client (75, 75, 85) and left as the
+     button's background (35, 35, 50) by zui-sokol's OpenGL capture.
+     Handing the client the Bold and Regular fonts swapped fails all 13
+     frames (13,480 to 61,256 unmatched pixels), and moving every
+     TrueType glyph a pixel right fails frames 204 and 252 (7 and 2,327);
+     the neighbor rule absorbs the shift elsewhere. CI's first `test-draw`
+     with text, its reference drawn by Mesa under Xvfb rather than this
+     machine's NVIDIA driver, is to be confirmed once zui-web is pushed.
    - **Backdrop blurs and materials:** the blur as zui-sokol's passes
      run it, sampling what was drawn before into a texture, and the three
      material patterns in its shader, ported to GLSL ES.
@@ -3470,6 +3476,7 @@ Deliberate, and each a reason to choose zui:
 | Time on the wire (F5) | the client's host's clock, counted on by the wire host between records, so records are sent only for events or a new viewport or scale |
 | Watching files (F6) | `zuiFileWatch.watch(host, directory, sink)` until `deinit`, subdirectories included; the host publishes `zui.FileChange`s into a `zui.FileChangeSink` made from a source the application chooses, and the loader reads the files |
 | Where the demo runs behind the published page (V4, open decision 3) | in a Web Worker, settled by the owner: the tour built for `wasm32-freestanding`, its frames posted to the page as wire bytes, since a page CI publishes has no server to reach. A native process behind a WebSocket was the other option |
+| A pixel on a glyph's edge (V4, open decision 3) | `test-draw` passes a frame with at most one pixel that matches no reference pixel within 1, settled by the owner: a glyph's partial coverage near its edge is a color no neighbor has, and two rasterizers decide a pixel whose centre lies that close to the edge differently. The tolerance of 2 and the neighbor rule are unchanged. Leaving text inside a turning transform out of the comparison, or having the client drop a pixel within 1/256 pixel of a glyph's edge, which is tuned to one machine's reference, were the other options |
 | How the browser draws (V4) | the client lays every command out as zui-sokol's renderer does, triangle for triangle, and the page draws the triangles through WebGL 2 with one sample per pixel. A 2D canvas smooths every edge and cannot fade a shadow's rings vertex by vertex, so its frames could not be compared with zui-sokol's pixel by pixel |
 | Where an element declares its material (G5) | `Ui.Decoration.material`, typed by the renderer's `MaterialHandle`: `Ui.Element`, `Ui.Decoration` and `Ui.Style` are the context's own, and are `zui.Element`, `zui.Decoration` and `zui.Style` without a handle, so no existing code changes. `open` taking `anytype` to accept both was rejected: a literal passed through `anytype` is not converted to `Ui.Element` |
 
@@ -3481,14 +3488,3 @@ the spec.
 1. **Physical keys.** Planned: logical keys plus the opaque scancode.
 2. **V4, a web renderer or a thin client over the wire?** Planned: the
    wire client first, since F5 builds it anyway.
-3. **V4, a pixel on a turned glyph's edge.** `test-draw` matches a pixel
-   within 2 of the reference's, or of a neighbor's. A pixel whose centre
-   lies within a rasterizer's precision of a turned glyph's edge is drawn
-   by one renderer and not the other, and its partial coverage matches no
-   neighbor: one pixel of 1,296,000 in frame 252. Options: (a) accept a
-   frame with at most one such pixel; (b) leave text drawn inside a
-   turning transform out of the comparison; (c) have the client leave out
-   a pixel within 1/256 pixel of a glyph's edge, which matches this
-   machine's reference but is tuned to it. Planned: none, unlike the
-   others; the owner chooses, and zui-web's `v4-text-comparison` holds
-   the comparison until then.
