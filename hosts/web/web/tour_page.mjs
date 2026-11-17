@@ -28,7 +28,8 @@ export async function runTour(canvas, stopped) {
   worker.post({ type: "start", wasm: tourWasm }, [tourWasm.buffer]);
   await inbox.expect("ready");
 
-  const tour = { framesDrawn: 0, tasks: null, drawer };
+  const tour = { framesDrawn: 0, tasks: null, frameMicroseconds: 0, drawer };
+  let previousDraw = 0;
 
   // Whether `bytes` completed a frame.
   function receive(bytes) {
@@ -49,11 +50,14 @@ export async function runTour(canvas, stopped) {
     await nextAnimationFrame();
     const now = performance.now();
     const records = recorder.takeRecord(now) ?? new Uint8Array(0);
-    worker.post({ type: "frame", now, records }, [records.buffer]);
-    const { bytes, tasks } = await inbox.expect("frame");
+    worker.post({ type: "frame", now, previousDraw, records }, [records.buffer]);
+    const { bytes, tasks, frameMicroseconds } = await inbox.expect("frame");
     tour.tasks = tasks;
+    tour.frameMicroseconds = frameMicroseconds;
     if (!receive(bytes)) return;
+    const drawStarted = performance.now();
     drawer.draw();
+    previousDraw = performance.now() - drawStarted;
     recorder.applyHostRequests();
     tour.framesDrawn += 1;
   }

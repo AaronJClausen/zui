@@ -2,11 +2,12 @@
 //! tour-frames <ticks path> <stream path>
 //! ```
 //! Runs zui-sokol's tour natively as the browser's worker runs it, on each
-//! tick the page gave the worker: its instant on the page's clock (f64,
-//! milliseconds) and the records it sent since the one before (a u32
-//! count, then the bytes), little-endian. Writes the wire bytes of every
-//! frame, and prints how many tasks the tour started, finished and was
-//! refused.
+//! tick the page gave the worker: its instant on the page's clock and how
+//! long it took to draw the frame before (f64 milliseconds each), and the
+//! records it sent since the one before (a u32 count, then the bytes),
+//! little-endian. Times the tour's frames on a steady stopwatch, as the
+//! worker does when its check asks. Writes the wire bytes of every frame,
+//! and prints how many tasks the tour started, finished and was refused.
 
 const std = @import("std");
 const tour_session = @import("tour_session");
@@ -50,10 +51,11 @@ pub fn main(init: std.process.Init) !void {
             error.EndOfStream => break,
             else => |other| return other,
         });
+        const previous_draw_milliseconds: f64 = @bitCast(try ticks.takeInt(u64, .little));
         const record_count = try ticks.takeInt(u32, .little);
         try ticks.readSliceAll(try session.roomForRecords(record_count));
         session.receivedRecords(record_count);
-        if (try session.frame(now_milliseconds)) |wire_bytes| try stream_writer.interface.writeAll(wire_bytes);
+        if (try session.frame(now_milliseconds, previous_draw_milliseconds)) |wire_bytes| try stream_writer.interface.writeAll(wire_bytes);
     }
     try stream_writer.interface.flush();
     std.debug.print("{d} {d} {d}\n", .{ stepped.counts.started, stepped.counts.finished, stepped.counts.refused });

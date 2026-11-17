@@ -7,7 +7,7 @@ import { parentPort } from "./worker_port.mjs";
 const parent = await parentPort();
 parent.listen(({ module, memory, index, stackTop, threadLocalStorage }) => {
   try {
-    const instance = new WebAssembly.Instance(module, { env: { memory } });
+    const instance = new WebAssembly.Instance(module, { env: { memory, performanceNow: () => performance.now() } });
     const tour = instance.exports;
     tour.__stack_pointer.value = stackTop;
     tour.__wasm_init_tls(threadLocalStorage);

@@ -1,13 +1,18 @@
 // zui-sokol's tour in a Web Worker, behind the page. The page sends
 //
-//   { type: "start", wasm }                   the tour's module, as bytes
-//   { type: "frame", now, records }           its clock, in milliseconds, and
-//                                             the records written since the last
+//   { type: "start", wasm, steadyTimings }    the tour's module, as bytes, and
+//                                             whether to time its frames on a
+//                                             steady stopwatch, as natively
+//   { type: "frame", now, previousDraw,       its clock and how long it took to
+//     records }                               draw the frame before, in
+//                                             milliseconds, and the records
+//                                             written since the last
 //
 // and the worker answers `{ type: "ready" }` once its threads have started,
-// then `{ type: "frame", bytes, tasks }` for each frame: the frame's wire
-// bytes, empty before the first record, and how many tasks the tour has
-// started, finished and been refused. A failure is `{ type: "failed", error }`.
+// then `{ type: "frame", bytes, tasks, frameMicroseconds }` for each frame:
+// the frame's wire bytes, empty before the first record, how many tasks the
+// tour has started, finished and been refused, and the microseconds its
+// strip shows the newest frame took to declare. A failure is `{ type: "failed", error }`.
 
 import { Inbox, parentPort, startWorker } from "./worker_port.mjs";
 
@@ -64,11 +69,11 @@ function importedMemoryLimits(wasm) {
   throw new Error("the tour's module imports no memory");
 }
 
-async function start(wasm) {
+async function start(wasm, steadyTimings) {
   const module = await WebAssembly.compile(wasm);
   memory = new WebAssembly.Memory(importedMemoryLimits(wasm));
-  tour = (await WebAssembly.instantiate(module, { env: { memory } })).exports;
-  if (!tour.zuiTourInit()) throw new Error(`the tour could not reserve its memory: ${errorName()}`);
+  tour = (await WebAssembly.instantiate(module, { env: { memory, performanceNow: () => performance.now() } })).exports;
+  if (!tour.zuiTourInit(steadyTimings)) throw new Error(`the tour could not reserve its memory: ${errorName()}`);
   const started = [];
   for (let index = 0; index < tour.zuiTourThreadCount(); index += 1) {
     const thread = await startWorker(new URL("./tour_thread.mjs", import.meta.url));
@@ -85,28 +90,28 @@ async function start(wasm) {
   await Promise.all(started);
 }
 
-function frame(now, records) {
+function frame(now, previousDraw, records) {
   if (records.length > 0) {
     const room = tour.zuiTourRoomForRecords(records.length) >>> 0;
     if (room === 0) throw new Error(`no room for ${records.length} bytes of records: ${errorName()}`);
     new Uint8Array(memory.buffer, room, records.length).set(records);
     tour.zuiTourReceivedRecords(records.length);
   }
-  const count = tour.zuiTourFrame(now);
+  const count = tour.zuiTourFrame(now, previousDraw);
   if (count < 0) throw new Error(`the tour could not write its frame: ${errorName()}`);
   const bytes = new Uint8Array(memory.buffer, tour.zuiTourFrameBytes() >>> 0, count).slice();
   const tasks = { started: tour.zuiTourTasksStarted(), finished: tour.zuiTourTasksFinished(), refused: tour.zuiTourTasksRefused() };
-  return { bytes, tasks };
+  return { bytes, tasks, frameMicroseconds: tour.zuiTourNewestFrameMicroseconds() };
 }
 
 parent.listen(async (message) => {
   try {
     if (message.type === "start") {
-      await start(message.wasm);
+      await start(message.wasm, message.steadyTimings ?? false);
       parent.post({ type: "ready" });
     } else if (message.type === "frame") {
-      const { bytes, tasks } = frame(message.now, message.records);
-      parent.post({ type: "frame", bytes, tasks }, [bytes.buffer]);
+      const { bytes, tasks, frameMicroseconds } = frame(message.now, message.previousDraw, message.records);
+      parent.post({ type: "frame", bytes, tasks, frameMicroseconds }, [bytes.buffer]);
     }
   } catch (error) {
     parent.post({ type: "failed", error: error.message });

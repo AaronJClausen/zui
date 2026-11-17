@@ -3,10 +3,11 @@
 // Serves the published site as GitHub Pages does, without the headers that
 // make a page cross-origin isolated, and opens it in headless Chromium. Its
 // service worker must make it isolated, after one reload; the page must
-// then draw the tour's frames from its worker, and the canvas's input must
-// reach the tour: the mouse over the rail turns the cursor to the pointer
-// the tour asks for, and a click on Mission Control's entry starts its
-// producers' tasks.
+// then draw the tour's frames from its worker, which times them above 0 µs
+// as the tour's strip shows them, and the canvas's input must reach the
+// tour: the mouse over the rail turns the cursor to the pointer the tour
+// asks for, and a click on Mission Control's entry starts its producers'
+// tasks.
 
 import { readdir } from "node:fs/promises";
 import { extname, join, relative, sep } from "node:path";
@@ -87,6 +88,9 @@ const distinctColors = await evaluate(`(() => {
 const fewestDistinctColors = 64;
 if (distinctColors < fewestDistinctColors) await fail(`the canvas shows ${distinctColors} colors, not a frame of the tour`);
 
+await waitUntil("tour.frameMicroseconds > 0", "the tour's strip did not time a frame above 0 µs");
+const frameMicroseconds = await evaluate("tour.frameMicroseconds");
+
 await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 50, y: 266 });
 await waitUntil(`tour.drawer.canvas.style.cursor === "pointer"`, "the canvas did not show the pointer cursor over the rail");
 
@@ -100,6 +104,7 @@ if (page.pageErrors.length > 0) await fail(`the page failed: ${page.pageErrors.j
 clearTimeout(watchdog);
 await page.close();
 console.log(
-  `check_site: isolated by its service worker after one reload; ${framesPerSecond.toFixed(0)} frames a second drawn from the worker, ${distinctColors} colors; ` +
+  `check_site: isolated by its service worker after one reload; ${framesPerSecond.toFixed(0)} frames a second drawn from the worker, ${distinctColors} colors, ` +
+    `the newest declared in ${frameMicroseconds.toFixed(0)} µs; ` +
     `the pointer shown over the rail, and ${tasks.started} tasks started after the click`,
 );

@@ -3,6 +3,7 @@ const zui_sokol_ui = @import("zui_sokol_ui");
 const zui_wire = @import("zui_wire");
 const tour = @import("zui_sokol_tour");
 const zui = tour.kit.zui;
+const FrameReason = tour.FrameReason;
 
 pub const SteppedIo = @import("stepped_io.zig").SteppedIo;
 
@@ -11,15 +12,17 @@ pub const Ui = tour.kit.Ui;
 /// zui-sokol's tour, run by a loop that owns its clock: the page's, in a
 /// browser's worker. Each `frame` steps the tour's `Io` to the page's
 /// instant, takes the records the page sent since the last, declares a
-/// frame and writes it as the wire renderer sends it, the stream's header
-/// before the first. Given the same instants and records, it writes the
-/// same bytes in a worker as natively. Memory is reserved by `init`.
+/// frame, times it on the session's `Stopwatch` for the tour's strip, and
+/// writes it as the wire renderer sends it, the stream's header before the
+/// first. Given the same instants, records and draw times, and a `.steady`
+/// stopwatch, it writes the same bytes in a worker as natively. Memory is
+/// reserved by `init`.
 ///
 /// ```zig
-/// try session.init(gpa, &stepped, .{});
+/// try session.init(gpa, &stepped, .{ .stopwatch = .{ .clock = performanceNow } });
 /// @memcpy(try session.roomForRecords(bytes.len), bytes);
 /// session.receivedRecords(bytes.len);
-/// if (try session.frame(page_milliseconds)) |wire_bytes| post(wire_bytes);
+/// if (try session.frame(page_milliseconds, last_draw_milliseconds)) |wire_bytes| post(wire_bytes);
 /// ```
 pub const TourSession = struct {
     /// The threads the tour's tasks take turns on, the same wherever it
@@ -47,6 +50,21 @@ pub const TourSession = struct {
     /// Set when a frame did not fit `frame_bytes`, so the next is written
     /// whole rather than as changes from one the page never received.
     key_frame_next: bool = false,
+    stopwatch: Stopwatch,
+    steady_stopwatch_reads: u64 = 0,
+    previous_frame_milliseconds: ?f64 = null,
+    previous_params: ?zui.FrameParams = null,
+
+    /// What the tour's frames are timed by: the page's `Io` cannot time
+    /// them, since it holds one instant for all of a frame.
+    pub const Stopwatch = union(enum) {
+        /// Milliseconds since a fixed instant, such as the page's
+        /// `performance.now()`.
+        clock: *const fn () callconv(.c) f64,
+        /// Moves on `step_nanoseconds` each time it is read, so every run
+        /// times its frames alike and draws the same timings.
+        steady: struct { step_nanoseconds: u64 = std.time.ns_per_us },
+    };
 
     pub const Options = struct {
         /// The most bytes held of records that have not arrived whole.
@@ -54,6 +72,7 @@ pub const TourSession = struct {
         /// The most bytes one frame is written in: at least a key frame of
         /// every command.
         max_frame_bytes: usize = 4 << 20,
+        stopwatch: Stopwatch = .{ .steady = .{} },
     };
 
     pub const FrameError = zui_wire.HeaderError || error{
@@ -79,6 +98,7 @@ pub const TourSession = struct {
             .builder = undefined,
             .pending_records = &.{},
             .frame_bytes = &.{},
+            .stopwatch = options.stopwatch,
         };
         try tour.kit.addFonts(&self.text);
         const io = stepped.io();
@@ -137,8 +157,10 @@ pub const TourSession = struct {
     /// Steps the tour's tasks to `now_milliseconds` on the page's clock,
     /// declares a frame with the events of every record that has arrived
     /// whole, and returns it as wire bytes, valid until the next call; null
-    /// until the first record has measured the canvas.
-    pub fn frame(self: *TourSession, now_milliseconds: f64) FrameError!?[]const u8 {
+    /// until the first record has measured the canvas. The tour's strip
+    /// shows `previous_draw_milliseconds`, how long the page took to draw
+    /// the frame before, as its renderer's submit time.
+    pub fn frame(self: *TourSession, now_milliseconds: f64, previous_draw_milliseconds: f64) FrameError!?[]const u8 {
         const now: zui.Instant = .fromNanoseconds(@intFromFloat(@max(0, now_milliseconds) * std.time.ns_per_ms));
         self.stepped.step(now.nanoseconds);
 
@@ -151,11 +173,46 @@ pub const TourSession = struct {
         builder.params.viewport = measured.viewport;
         builder.params.scale = measured.scale;
 
+        const reason = self.frameReason(builder.params, builder.events().len);
+        const measure_calls_before = self.ui.measureCalls();
+        const started = self.readStopwatch();
         self.ui.beginFrame(&.{ .params = builder.params, .events = builder.events() }, &app.sources);
+        const began = self.readStopwatch();
         app.declare(&self.ui);
+        const declaration_ended = self.readStopwatch();
         const declared = self.ui.endFrame();
+        const ended = self.readStopwatch();
         app.afterFrame(&self.ui);
         defer self.ui.release(declared);
+
+        const measure_calls = self.ui.measureCalls() - measure_calls_before;
+        const perf = &app.perf;
+        perf.record(.{
+            .begin_frame_us = microsecondsBetween(started, began),
+            .declare_us = microsecondsBetween(began, declaration_ended),
+            .end_frame_us = microsecondsBetween(declaration_ended, ended),
+            .elements = declared.elementCount(),
+            .commands = @intCast(declared.commands().len),
+            .measure_calls = @intCast(measure_calls),
+            .reason = reason,
+        });
+        const submit_microseconds: f32 = @floatCast(previous_draw_milliseconds * std.time.us_per_ms);
+        perf.submit_us = if (perf.display_frames == 0) submit_microseconds else perf.submit_us * 0.95 + submit_microseconds * 0.05;
+        if (self.previous_frame_milliseconds) |previous| {
+            if (now_milliseconds > previous) perf.display_fps = @floatCast(std.time.ms_per_s / (now_milliseconds - previous));
+        }
+        perf.zui_frames += 1;
+        perf.display_frames += 1;
+        perf.measure_calls_total += measure_calls;
+        perf.diagnostics = declared.diagnostics;
+        perf.wakes = app.wakes.load(.monotonic);
+        perf.next_frame = self.ui.nextFrame(&app.sources);
+        perf.next_frame_seconds = switch (perf.next_frame) {
+            .at => |deadline| deadline.secondsSince(now),
+            else => 0,
+        };
+        self.previous_frame_milliseconds = now_milliseconds;
+        self.previous_params = builder.params;
 
         var writer: std.Io.Writer = .fixed(self.frame_bytes);
         self.writeFrame(&writer, declared) catch {
@@ -163,6 +220,32 @@ pub const TourSession = struct {
             return error.FrameTooLarge;
         };
         return writer.buffered();
+    }
+
+    /// Why the tour declares this frame, as a host that declares only the
+    /// frames zui needs would tell it; the page asks for one at every
+    /// display frame, which the tour sees as a requested frame.
+    fn frameReason(self: *const TourSession, params: zui.FrameParams, event_count: usize) FrameReason {
+        const previous = self.previous_params orelse return .first;
+        if (event_count != 0) return .input;
+        if (!std.meta.eql(params.viewport, previous.viewport) or params.scale != previous.scale or params.zoom != previous.zoom) return .resize;
+        inline for (@typeInfo(tour.kit.Sources).@"struct".fields) |field| {
+            if (@field(&self.app.sources, field.name).zuiPending()) return .source;
+        }
+        return switch (self.ui.nextFrame(&self.app.sources)) {
+            .at => |deadline| if (params.now.isBefore(deadline)) .requested else .timer,
+            .immediately, .on_event => .requested,
+        };
+    }
+
+    fn readStopwatch(self: *TourSession) zui.Instant {
+        switch (self.stopwatch) {
+            .clock => |milliseconds| return .fromNanoseconds(@intFromFloat(@max(0, milliseconds()) * std.time.ns_per_ms)),
+            .steady => |steady| {
+                self.steady_stopwatch_reads += 1;
+                return .fromNanoseconds(self.steady_stopwatch_reads * steady.step_nanoseconds);
+            },
+        }
     }
 
     fn writeFrame(self: *TourSession, writer: *std.Io.Writer, declared: *const Ui.Frame) zui_wire.WriteError!void {
@@ -194,6 +277,10 @@ pub const TourSession = struct {
                 else => self.builder.append(event),
             };
         }
+    }
+
+    fn microsecondsBetween(earlier: zui.Instant, later: zui.Instant) f32 {
+        return later.secondsSince(earlier) * std.time.us_per_s;
     }
 
     /// A record cut short is read again once the rest has arrived.

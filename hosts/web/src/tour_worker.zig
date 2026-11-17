@@ -1,8 +1,10 @@
 //! zui-sokol's tour for a browser's Web Worker, on memory shared with the
 //! workers its tasks run on. `web/tour_worker.mjs` instantiates it, starts
 //! a worker per thread that calls `zuiTourRunThread` on a stack of its own,
-//! and then, once per frame, hands over the page's records and instant and
-//! posts back the wire bytes `zuiTourFrame` wrote.
+//! and then, once per frame, hands over the page's records, instant and
+//! draw time and posts back the wire bytes `zuiTourFrame` wrote. The module
+//! imports `performanceNow`, the worker's `performance.now()`, which times
+//! the tour's frames.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -22,21 +24,25 @@ var session: TourSession = undefined;
 var thread_memory: []align(16) u8 = &.{};
 var error_name: [*:0]const u8 = "";
 
+extern "env" fn performanceNow() f64;
+
 /// Reserves the tour's memory. False, with `zuiTourErrorName` saying why,
-/// if it did not fit.
-export fn zuiTourInit() bool {
-    initialize() catch |err| {
+/// if it did not fit. With `steady_timings`, the tour's frames are timed
+/// as `tour-frames` times them natively, so the two draw the same bytes,
+/// rather than by `performanceNow`.
+export fn zuiTourInit(steady_timings: bool) bool {
+    initialize(if (steady_timings) .{ .steady = .{} } else .{ .clock = performanceNow }) catch |err| {
         error_name = @errorName(err);
         return false;
     };
     return true;
 }
 
-fn initialize() !void {
+fn initialize(stopwatch: TourSession.Stopwatch) !void {
     if (threadLocalBytes() > thread_local_bytes_most) return error.ThreadLocalStorageTooLarge;
     thread_memory = try growing_allocator.alignedAlloc(u8, .@"16", thread_count * (thread_stack_bytes + thread_local_bytes_most));
     stepped = try .init(growing_allocator, futex_io, .{ .thread_count = thread_count });
-    try session.init(growing_allocator, &stepped, .{});
+    try session.init(growing_allocator, &stepped, .{ .stopwatch = stopwatch });
 }
 
 export fn zuiTourThreadCount() u32 {
@@ -79,11 +85,12 @@ export fn zuiTourReceivedRecords(count: usize) void {
 
 var frame_bytes: []const u8 = &.{};
 
-/// Declares the frame at `now_milliseconds` on the page's clock: the count
+/// Declares the frame at `now_milliseconds` on the page's clock, after the
+/// page took `previous_draw_milliseconds` to draw the one before: the count
 /// of wire bytes at `zuiTourFrameBytes`, 0 before the first record, or -1
 /// with `zuiTourErrorName` saying why.
-export fn zuiTourFrame(now_milliseconds: f64) i32 {
-    frame_bytes = (session.frame(now_milliseconds) catch |err| {
+export fn zuiTourFrame(now_milliseconds: f64, previous_draw_milliseconds: f64) i32 {
+    frame_bytes = (session.frame(now_milliseconds, previous_draw_milliseconds) catch |err| {
         error_name = @errorName(err);
         return -1;
     }) orelse &.{};
@@ -96,6 +103,12 @@ export fn zuiTourFrameBytes() usize {
 
 export fn zuiTourErrorName() [*:0]const u8 {
     return error_name;
+}
+
+/// What the tour's strip shows for its newest frame: the microseconds of
+/// its beginFrame, declaration and layout together.
+export fn zuiTourNewestFrameMicroseconds() f64 {
+    return session.app.perf.latest().totalMicroseconds();
 }
 
 export fn zuiTourTasksStarted() f64 {

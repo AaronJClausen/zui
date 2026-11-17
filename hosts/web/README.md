@@ -60,7 +60,10 @@ The tour itself runs in the browser too, in a Web Worker behind the page:
 built for `wasm32-freestanding` with shared memory (793 KB in
 ReleaseSmall, about 49 MiB of memory once `zuiTourInit` reserves it).
 `web/tour_worker.mjs` takes the page's clock and records each frame and
-posts back the frame's wire bytes. The tour's loaders, the Gallery's
+posts back the frame's wire bytes. The tour's strip and frame inspector
+time each frame's beginFrame, declaration and layout on the worker's
+`performance.now()`, and show the page's time to draw the frame before as
+its submit time. The tour's loaders, the Gallery's
 tiles and Mission Control's producers, run on an `Io` of the worker's own,
 `SteppedIo`: its clocks read the page's instant, and its tasks take turns
 on 16 threads, each a worker of its own on the same memory
@@ -74,7 +77,8 @@ records the client wrote of the mouse crossing each screen and
 Ctrl+PageDown between them, and checks that each of the 312 frames is,
 byte for byte, the frame the tour draws natively on the same ticks
 (`tools/tour_frames.zig`), that its tasks ran alike, and that the client
-decodes every frame.
+decodes every frame. Real timings differ from run to run, so there both
+time frames on a steady stopwatch, 1 µs a reading.
 
 The published page puts it all together: `web/index.html` starts the
 tour's worker, draws each frame it sends on the canvas, a frame for each
@@ -91,7 +95,7 @@ source is GitHub Actions.
 `zig build test-site` serves that site without the isolation headers,
 as GitHub Pages does, opens it in headless Chromium, and checks that the
 service worker isolated it after one reload, that the page draws the
-worker's frames, and that its input reaches the tour: the mouse over the
+worker's frames, timed above 0 µs, and that its input reaches the tour: the mouse over the
 rail shows the pointer cursor the tour asks for, and a click on Mission
 Control starts its producers' tasks.
 See [zui's ROADMAP.md](https://github.com/AaronJClausen/zui/blob/main/ROADMAP.md).

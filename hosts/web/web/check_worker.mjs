@@ -1,11 +1,15 @@
 // node check_worker.mjs <client wasm> <tour worker wasm> <tour-frames>
 //
 // Runs zui-sokol's tour in a worker, as the page will: on each tick, the
-// page's clock and the records the client wrote of the mouse crossing each
-// of the tour's thirteen screens, with Ctrl+PageDown between them. Then
-// `tour-frames` runs the tour natively on the same ticks, and the worker's
-// frames must be its bytes, the tour's tasks must have run alike, and the
-// client must decode every frame. Exits with 1 on the first difference.
+// page's clock, a made-up time for drawing the frame before, and the
+// records the client wrote of the mouse crossing each of the tour's
+// thirteen screens, with Ctrl+PageDown between them. Then `tour-frames`
+// runs the tour natively on the same ticks, and the worker's frames must be
+// its bytes, the tour's tasks must have run alike, and the client must
+// decode every frame. Both time the tour's frames on a steady stopwatch,
+// since frames that show real timings differ from run to run; the page's
+// check, `check_site.mjs`, sees the real ones. Exits with 1 on the first
+// difference.
 
 import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -83,9 +87,10 @@ const ticks = [];
 const frames = [];
 let decodedFrames = 0;
 let tasks = null;
+let frameMicroseconds = 0;
 const startedAt = performance.now();
 try {
-  worker.post({ type: "start", wasm: await readFile(tourPath) });
+  worker.post({ type: "start", wasm: await readFile(tourPath), steadyTimings: true });
   await inbox.expect("ready");
   for (let tick = 1; tick <= screens * framesPerScreen; tick += 1) {
     const now = (tick * 1000) / 60;
@@ -99,11 +104,13 @@ try {
     const across = step / framesPerScreen;
     client.zuiWebPointerMove(mouse.id, mouse.kind, across * canvas[0], across * canvas[1], 0, 0, 0, now);
     const records = takeRecord(now);
-    ticks.push({ now, records });
-    worker.post({ type: "frame", now, records });
+    const previousDraw = (tick % 7) / 4;
+    ticks.push({ now, previousDraw, records });
+    worker.post({ type: "frame", now, previousDraw, records });
     const answer = await inbox.expect("frame");
     frames.push(answer.bytes);
     tasks = answer.tasks;
+    frameMicroseconds = answer.frameMicroseconds;
     decodedFrames += decodeInClient(answer.bytes);
   }
 } catch (error) {
@@ -116,15 +123,17 @@ worker = null;
 const expectedFrames = screens * framesPerScreen;
 if (decodedFrames !== expectedFrames) await fail(`the client decoded ${decodedFrames} frames of the ${expectedFrames} the worker drew`);
 if (tasks.finished === 0) await fail(`the tour started ${tasks.started} tasks in the worker and finished none`);
+if (!(frameMicroseconds > 0)) await fail(`the tour's strip timed its last frame at ${frameMicroseconds} µs`);
 
 workDirectory = await mkdtemp(join(tmpdir(), "zui-web-worker-"));
 const ticksPath = join(workDirectory, "tour.ticks");
 const nativePath = join(workDirectory, "tour.zuiw");
 const tickBytes = Buffer.concat(
-  ticks.flatMap(({ now, records }) => {
-    const head = Buffer.alloc(12);
+  ticks.flatMap(({ now, previousDraw, records }) => {
+    const head = Buffer.alloc(20);
     head.writeDoubleLE(now, 0);
-    head.writeUInt32LE(records.length, 8);
+    head.writeDoubleLE(previousDraw, 8);
+    head.writeUInt32LE(records.length, 16);
     return [head, Buffer.from(records)];
   }),
 );
