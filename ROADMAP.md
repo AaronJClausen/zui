@@ -73,7 +73,7 @@ green, and its **Status** line below says which slice is next.
 | P12. Text commands that point at their style | audit | `src/commands.zig`, `src/emission.zig`, `zui_wire/`, `../zui-raylib`, `../zui-sokol`, `../zui-terminal` | | waiting on a profile of a renderer reading the commands |
 | G6. HDR and wide gamut | 8 | `src/context.zig`, `src/commands.zig`, `src/surface.zig`, `zui_wire/`, `zui_testing/`, `../zui-sokol`, `../zui-host` | | waiting on a session under Windows with an HDR display: zui-sokol's FP16 `.win32` swapchain and zui-host's `.scrgb_fp16` window |
 | V2. Semantics and accessibility actions | 9 | `src/context.zig`, `zui_widgets/`, `../zui-host` | | in progress; the UI Automation bridge waits on a session under Windows |
-| V4. The demo in a browser | 9 | `../zui-web`, `zui_wire/` | | in progress; the client draws every command the tour does, compared with zui-sokol's, and writes the page's input as records the tour takes; the tour runs in a Web Worker on an `Io` of its own, frame for frame as natively (waiting on zui-sokol `cac68e4`'s push and zui-web's zui-sokol pin moving to it); publishing from CI (slice 5) is next |
+| V4. The demo in a browser | 9 | `../zui-web`, `zui_wire/` | | waiting on the owner: setting zui-web's Pages source to GitHub Actions, the Pages workflow's first deploy, and the tour keeping the display's frame rate on the published page in a browser (V4's Status, slice 5) |
 | F7. The wire's renderer declares its context's payload types | 5 | `zui_wire/remote.zig`, `zui_wire/tests.zig` | | |
 
 After the queue come stages 10 and 11 in the order of SPEC.md §21. They join the queue as it runs short.
@@ -3371,8 +3371,8 @@ published from CI.
      byte for byte, its reference for `test-draw` is the same, and
      `test-input` passes. zui-web's zui-sokol pin moved to that commit
      (`3931162`) with the worker.
-   - **The worker** (done, in zui-web; waiting on zui-sokol `cac68e4`
-     being pushed and zui-web's zui-sokol pin moving to it). `zig build`
+   - **The worker** (done, in zui-web, pinned to zui-sokol `cac68e4`).
+     `zig build`
      writes `zui-web-tour.wasm`, `zui_sokol_tour` built for
      `wasm32-freestanding` with atomics and bulk memory, on memory it
      imports shared: 793 KB in ReleaseSmall, 8.0 MB in Debug, and about
@@ -3408,14 +3408,45 @@ published from CI.
      the same 66 tasks; served without those headers, the page cannot
      post shared memory to its worker, so slice 5 must serve it isolated,
      which GitHub Pages cannot set headers for: a service worker that
-     adds them, or another host. Until the pin moves, `test-demo` passes
-     only with `--fork=../zui-sokol`.
-5. **Published from CI:** a Pages workflow in zui-web that builds the
-   client, the tour's worker and the page, which draws the worker's
-   frames on the canvas and sends it the canvas's input, served
-   cross-origin isolated so the page can share the tour's memory with its
-   workers. Only the owner, in a browser, can check the Done
-   when: that the tour keeps the display's frame rate there.
+     adds them, or another host.
+5. **Published from CI** (done in zui-web; waiting on the owner). The
+   page, `web/index.html`, starts the tour's worker, and on each of the
+   display's frames sends it the page's clock and the record the canvas's
+   input made, draws the frame it answers with, and shows its cursor
+   (`web/tour_page.mjs`). It stays on GitHub Pages, made cross-origin
+   isolated by a service worker of its own (Decisions, Made: how the
+   published page is isolated): `web/isolation_service_worker.js`
+   serves the page and everything it loads again with
+   `Cross-Origin-Opener-Policy: same-origin` and
+   `Cross-Origin-Embedder-Policy: require-corp`, and the page registers it
+   and reloads once, and says so rather than reload again if it is still
+   not isolated. `zig build site` writes the page, the client, the tour's
+   worker, sokol_debugtext's fonts and the tour's TrueType fonts with
+   their license to `zig-out/site`, 1.0 MB in ReleaseSmall (the client
+   77 KB, the tour 793 KB); zui-web's Pages workflow builds it in
+   ReleaseSmall on each push to `main`, runs `test-site` on it and
+   publishes it. `zig build test-site` serves the site as GitHub Pages
+   does, without the isolation headers, opens it in headless Chromium and
+   checks that the page is isolated, through its own service worker,
+   after one reload, draws the worker's frames (49 of headless Chromium's
+   55 animation frames a second, on SwiftShader at 1600 by 1000 pixels,
+   the worker answering in 0.5 ms and the page drawing in 0.7 ms at the
+   median, in ReleaseSmall), and that its input reaches the tour: the
+   mouse over the rail turns the canvas's cursor to the pointer, and a
+   click on Mission Control's entry starts its two producers' tasks. A
+   service worker that leaves out `Cross-Origin-Embedder-Policy` fails it
+   (the page says it is not isolated), and so does a page that sends only
+   its first record, draws nothing, or shows no cursor. CI runs it too.
+   **Waiting on the owner:** zui-web's Pages source is to be set to
+   GitHub Actions (Settings, Pages), after which the Pages workflow's
+   first run, once zui-web is pushed, is to be confirmed, and then the
+   Done when, which only the owner can check: on
+   <https://aaronjclausen.github.io/zui-web/>, in a desktop browser on a
+   display of 60 Hz or more, the tour keeps the display's frame rate
+   (DevTools' frame rendering stats, or the Performance panel, show no
+   dropped frames over half a minute on each screen, Gallery and Mission
+   Control included), the canvas is sharp at the display's scale, and
+   the mouse, the wheel and the tour's shortcuts drive it.
 
 ---
 
@@ -3608,6 +3639,7 @@ Deliberate, and each a reason to choose zui:
 | Where the demo runs behind the published page (V4, open decision 3) | in a Web Worker, settled by the owner: the tour built for `wasm32-freestanding`, its frames posted to the page as wire bytes, since a page CI publishes has no server to reach. A native process behind a WebSocket was the other option |
 | A pixel on a glyph's edge (V4, open decision 3) | `test-draw` passes a frame with at most one pixel that matches no reference pixel within 1, settled by the owner: a glyph's partial coverage near its edge is a color no neighbor has, and two rasterizers decide a pixel whose centre lies that close to the edge differently. The tolerance of 2 and the neighbor rule are unchanged. Leaving text inside a turning transform out of the comparison, or having the client drop a pixel within 1/256 pixel of a glyph's edge, which is tuned to one machine's reference, were the other options |
 | How the tour's tasks run in the browser's worker (V4) | on an `Io` of the worker's own, `SteppedIo`, chosen in V4's worker part: its clocks read the page's instant, and the tour's tasks take turns on a fixed set of threads, each a worker on the tour's shared memory, one at a time and only while the frame waits for them, so the worker draws on the page's clock exactly the frames the tour draws natively on the same ticks, which `test-demo` checks byte for byte. A worker per loader was the other option: without shared memory it cannot reach the sources and loads the loaders write, so the tour's loaders would have been rewritten around messages, and with it, it is the same threads without the turns that keep frames alike. Its cost is a page served cross-origin isolated |
+| How the published page is isolated (V4) | on GitHub Pages, by a service worker of the page's own, chosen in V4's slice 5: it serves the page and everything it loads again with `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp`, which GitHub Pages cannot send, and the page reloads once after registering it. A host that sends the headers itself was the other option; it would add an account and a deploy outside the repository's own CI for two headers |
 | How the browser draws (V4) | the client lays every command out as zui-sokol's renderer does, triangle for triangle, and the page draws the triangles through WebGL 2 with one sample per pixel. A 2D canvas smooths every edge and cannot fade a shadow's rings vertex by vertex, so its frames could not be compared with zui-sokol's pixel by pixel |
 | Where an element declares its material (G5) | `Ui.Decoration.material`, typed by the renderer's `MaterialHandle`: `Ui.Element`, `Ui.Decoration` and `Ui.Style` are the context's own, and are `zui.Element`, `zui.Decoration` and `zui.Style` without a handle, so no existing code changes. `open` taking `anytype` to accept both was rejected: a literal passed through `anytype` is not converted to `Ui.Element` |
 
