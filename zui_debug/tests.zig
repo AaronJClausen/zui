@@ -20,6 +20,7 @@ const Driver = zui_testing.Driver(Ui);
 
 const toolbar_id: zui.Id = .of("toolbar");
 const badge_id = toolbar_id.child("badge");
+const second_card_id: zui.Id = .of("second card");
 const raised_shadow: zui.Shadow = .{ .color = .black, .offset = .{ 0, 2 }, .blur = 4 };
 
 const Toolbar = struct {
@@ -121,6 +122,8 @@ test "the tree has a row per element, indented by depth, and never the panel's o
     var buffer: [64][]const u8 = undefined;
     const lines = panelLines(frame, &buffer);
     try expectLine(lines, "nothing under the pointer");
+    try expectLine(lines, "every limit held");
+    try expectLine(lines, "shadow drawn as nothing, as the renderer's zui_commands leaves it out");
     try expectLine(lines, "    text \"Save\" 32x16");
     try expectLine(lines, "root 800x600");
     try expectLine(lines, "    " ++ comptime labelOf(badge_id, "badge") ++ " box 6x6");
@@ -225,4 +228,76 @@ test "an extended-color context's decoration shows its colors and material" {
     const lines = panelLines(try driver.frame(inspector, Scene.declare, &.{}), &buffer);
     try expectLine(lines, "decoration.background = .{ .r = 4, .g = 4, .b = 4, .a = 1 }");
     try expectLine(lines, "decoration.material = 2");
+    try expectLine(lines, "material drawn as its fallback background, as the renderer's zui_commands leaves it out");
+    try expectLine(lines, "colors clamped to Color, as the renderer does not declare zui_extended_color");
+}
+
+const OneEffectUi = zui.Context(.{
+    .limits = .{ .max_elements = 32, .max_text_bytes = 2048, .max_render_commands = 128, .measure_cache_entries = 32, .max_effects = 1 },
+    .Text = Text,
+    .commands = .initOne(.shadow),
+});
+
+test "a limit the frame exceeded is named by its field, with what the frame needed and the first element past it" {
+    var text: Text = .{};
+    var ui = try OneEffectUi.init(testing.allocator, testing.io, &text);
+    defer ui.deinit(testing.allocator);
+    const inspector = try testing.allocator.create(zui_debug.Inspector(OneEffectUi));
+    defer testing.allocator.destroy(inspector);
+    inspector.* = .{};
+    const Scene = struct {
+        fn frame(declared: *OneEffectUi, shown: *zui_debug.Inspector(OneEffectUi)) *const OneEffectUi.Frame {
+            declared.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 800, 600 } }, .events = &.{} });
+            declared.box(.{ .id = .of("first card"), .effects = &.{ .shadow = raised_shadow } });
+            declared.box(.{ .id = second_card_id, .effects = &.{ .shadow = raised_shadow } });
+            shown.declare(declared);
+            const ended = declared.endFrame();
+            declared.release(ended);
+            return ended;
+        }
+    };
+    inspector.observe(Scene.frame(&ui, inspector), null);
+    try testing.expect(inspector.diagnostics.exceeded.contains(.max_effects));
+    var buffer: [32][]const u8 = undefined;
+    const lines = panelLines(Scene.frame(&ui, inspector), &buffer);
+    try expectLine(lines, "limits.max_effects is 1; the frame needed 2");
+    try expectLine(lines, "first past a limit: " ++ comptime labelOf(second_card_id, "second card"));
+    try expectLine(lines, "none in effect");
+}
+
+test "a run's report is listed among the fallbacks, a line for each part" {
+    const fixture = try testing.allocator.create(Fixture);
+    defer testing.allocator.destroy(fixture);
+    fixture.* = .{};
+    try fixture.init();
+    defer fixture.deinit();
+
+    const Report = struct {
+        pub fn format(_: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
+            try writer.writeAll("raylib with raylib; one window; no host clipboard, menus");
+        }
+    };
+    fixture.toolbar.inspector.reportRun(Report{});
+    _ = try fixture.frame();
+    var buffer: [64][]const u8 = undefined;
+    const lines = panelLines(try fixture.frame(), &buffer);
+    try expectLine(lines, "raylib with raylib");
+    try expectLine(lines, "one window");
+    try expectLine(lines, "no host clipboard, menus");
+}
+
+test "a run's report too long to keep is cut before a codepoint it would split" {
+    const inspector = try testing.allocator.create(Inspector);
+    defer testing.allocator.destroy(inspector);
+    inspector.* = .{};
+
+    const LongReport = struct {
+        pub fn format(_: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
+            try writer.splatByteAll('a', 1023);
+            try writer.writeAll("é and more");
+        }
+    };
+    inspector.reportRun(LongReport{});
+    try testing.expectEqual(@as(usize, 1023), inspector.runReport().len);
+    try testing.expect(std.unicode.utf8ValidateSlice(inspector.runReport()));
 }

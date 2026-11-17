@@ -1,5 +1,6 @@
-//! An inspector over `Frame.inspect`: a panel listing the element tree and
-//! the configs of the element under the pointer.
+//! An inspector over `Frame.inspect`: a panel listing the frame's
+//! diagnostics and fallbacks, the element tree and the configs of the
+//! element under the pointer.
 //!
 //! ```zig
 //! app.inspector.declare(ui); // last, so its panel floats over the rest
@@ -27,6 +28,7 @@ pub fn Inspector(comptime Ui: type) type {
         const max_text_preview_bytes = 32;
         const max_line_bytes = 256;
         const max_indented_depth = 32;
+        const max_run_report_bytes = 1024;
 
         /// How the panel looks; `font` and `text_size` apply to every line.
         pub const Theme = struct {
@@ -109,17 +111,41 @@ pub fn Inspector(comptime Ui: type) type {
         row_count: u32 = 0,
         hovered: ?Hovered = null,
         hovered_row: ?u32 = null,
+        /// The last observed frame's.
+        diagnostics: zui.Diagnostics = .{},
+        run_report_storage: [max_run_report_bytes]u8 = undefined,
+        run_report_len: u16 = 0,
 
         /// The tree as last observed, in declaration order.
         pub fn rows(self: *const Self) []const Row {
             return self.row_storage[0..self.row_count];
         }
 
-        /// Copies the tree out of `frame`, and the element under `pointer`:
-        /// the last in declaration order whose rectangle holds it, which is
-        /// the innermost. While the pointer is over the panel, the element
-        /// it showed stays, so the pointer can move there to read it.
+        /// Keeps `report` formatted with `{f}`, to list under the fallbacks
+        /// what no frame says: what the host and renderer lack. Each part
+        /// that `; ` separates gets a line, and what does not fit is cut.
+        ///
+        /// ```zig
+        /// app.inspector.reportRun(runner.report); // zui_app's Report
+        /// ```
+        pub fn reportRun(self: *Self, report: anytype) void {
+            var writer: std.Io.Writer = .fixed(&self.run_report_storage);
+            writer.print("{f}", .{report}) catch {};
+            self.run_report_len = @intCast(withoutCutCodepoint(writer.buffered()).len);
+        }
+
+        /// What `reportRun` kept.
+        pub fn runReport(self: *const Self) []const u8 {
+            return self.run_report_storage[0..self.run_report_len];
+        }
+
+        /// Copies the diagnostics and the tree out of `frame`, and the
+        /// element under `pointer`: the last in declaration order whose
+        /// rectangle holds it, which is the innermost. While the pointer is
+        /// over the panel, the element it showed stays, so the pointer can
+        /// move there to read it.
         pub fn observe(self: *Self, frame: *const Ui.Frame, pointer: ?[2]f32) void {
+            self.diagnostics = frame.diagnostics;
             const panel_index = frame.lookup(self.panel_id.hash);
             const panel_rect: ?zui.Rect = if (panel_index) |index| frame.inspect(index).rect else null;
             const pointer_on_panel = pointer != null and panel_rect != null and panel_rect.?.contains(pointer.?);
@@ -222,6 +248,10 @@ pub fn Inspector(comptime Ui: type) type {
                 .clip = .both,
                 .scroll = .{},
             });
+            self.heading(ui, "Diagnostics");
+            self.declareDiagnostics(ui);
+            self.heading(ui, "Fallbacks");
+            self.declareFallbacks(ui);
             self.heading(ui, "Hovered");
             if (self.hovered) |*hovered| self.declareHovered(ui, hovered) else self.line(ui, "nothing under the pointer", .{});
             self.heading(ui, "Elements");
@@ -253,6 +283,59 @@ pub fn Inspector(comptime Ui: type) type {
             }
         }
 
+        fn declareDiagnostics(self: *const Self, ui: *Ui) void {
+            const diagnostics = &self.diagnostics;
+            inline for (comptime std.enums.values(zui.Limit)) |limit| {
+                if (diagnostics.exceeded.contains(limit)) {
+                    self.line(ui, "limits." ++ @tagName(limit) ++ " is {d}; the frame needed {d}", .{ @field(Ui.limits, @tagName(limit)), diagnostics.needed.get(limit) });
+                }
+            }
+            if (diagnostics.first_dropped_id != 0) self.line(ui, "first past a limit: {f}", .{self.elementName(diagnostics.first_dropped_id)});
+            if (diagnostics.duplicate_ids != 0) self.line(ui, "{d} duplicate ids; each second one is not interactive", .{diagnostics.duplicate_ids});
+            if (diagnostics.unbalanced) self.line(ui, "open and close are unbalanced", .{});
+            if (diagnostics.refused_publishes != 0) {
+                self.line(ui, "{d} publishes refused, first by Sources.{s}", .{ diagnostics.refused_publishes, diagnostics.first_refusing_source });
+            }
+            if (diagnostics.ok()) self.line(ui, "every limit held", .{});
+        }
+
+        fn declareFallbacks(self: *const Self, ui: *Ui) void {
+            const diagnostics = &self.diagnostics;
+            var lowered = diagnostics.lowered.iterator();
+            while (lowered.next()) |command| {
+                self.line(ui, "{t} drawn as {s}, as the renderer's zui_commands leaves it out", .{ command, loweredTo(command) });
+            }
+            if (diagnostics.clamped_colors) self.line(ui, "colors clamped to Color, as the renderer does not declare zui_extended_color", .{});
+            var report_parts = std.mem.splitSequence(u8, self.runReport(), "; ");
+            while (report_parts.next()) |part| if (part.len != 0) self.line(ui, "{s}", .{part});
+            if (diagnostics.lowered.count() == 0 and !diagnostics.clamped_colors and self.run_report_len == 0) self.line(ui, "none in effect", .{});
+        }
+
+        fn loweredTo(command: zui.OptionalCommand) []const u8 {
+            return switch (command) {
+                .gradient => "a rectangle in its mean color",
+                .shadow => "nothing",
+                .backdrop_blur => "a rectangle in its tint",
+                .transform => "the untransformed element",
+                .material => "its fallback background",
+            };
+        }
+
+        fn elementName(self: *const Self, id: u64) ElementName {
+            for (self.rows()) |*row| if (row.id == id) return .{ .id = id, .row = row };
+            return .{ .id = id, .row = null };
+        }
+
+        const ElementName = struct {
+            id: u64,
+            row: ?*const Row,
+
+            pub fn format(self: ElementName, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+                if (has_debug_names) if (self.row) |row| if (row.name.len != 0) return writer.writeAll(row.name);
+                try writer.print("0x{x:0>16}", .{self.id});
+            }
+        };
+
         /// One line for each field of `config` that differs from its
         /// default, or one saying there are none.
         fn declareChangedFields(self: *const Self, ui: *Ui, comptime label: []const u8, config: anytype) void {
@@ -276,7 +359,7 @@ pub fn Inspector(comptime Ui: type) type {
             var buffer: [max_line_bytes]u8 = undefined;
             var writer: std.Io.Writer = .fixed(&buffer);
             writer.print(format, arguments) catch {};
-            const fitted = wholeCodepoints(writer.buffered(), max_line_bytes);
+            const fitted = withoutCutCodepoint(writer.buffered());
             ui.text(fitted, .{ .font = self.theme.font, .size = self.theme.text_size, .color = self.theme.text, .wrap = .words });
         }
 
@@ -312,6 +395,16 @@ fn wholeCodepoints(bytes: []const u8, capacity: usize) []const u8 {
     var end = capacity;
     while (end > 0 and bytes[end] & 0b1100_0000 == 0b1000_0000) end -= 1;
     return bytes[0..end];
+}
+
+/// `bytes` without a UTF-8 sequence that a full fixed writer cut short.
+fn withoutCutCodepoint(bytes: []const u8) []const u8 {
+    var lead = bytes.len;
+    while (lead > 0 and bytes[lead - 1] & 0b1100_0000 == 0b1000_0000) lead -= 1;
+    if (lead == 0) return bytes;
+    lead -= 1;
+    const sequence_length = std.unicode.utf8ByteSequenceLength(bytes[lead]) catch return bytes[0..lead];
+    return if (bytes.len - lead >= sequence_length) bytes else bytes[0..lead];
 }
 
 fn Formatted(comptime T: type) type {

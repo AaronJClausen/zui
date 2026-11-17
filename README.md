@@ -222,9 +222,11 @@ Implemented so far:
   An element or frame without effects pays nothing for them.
 - **Stage 9, begun:** seeing the UI. `frame.inspect(index)` reports
   everything a frame kept of one element, and `zui_debug.Inspector(Ui)`
-  is a panel over it: the element tree, and the element under the
-  pointer with every field of its layout, decoration, effects, floating
-  and text style that differs from the default. `observe(frame, pointer)`
+  is a panel over it: the frame's diagnostics, the fallbacks in effect
+  (commands lowered, colors clamped, and a run's report handed to
+  `reportRun`), the element tree, and the element under the pointer
+  with every field of its layout, decoration, effects, floating and
+  text style that differs from the default. `observe(frame, pointer)`
   after `endFrame` copies what it shows, and `declare(ui)` draws it in
   the next frame.
 
