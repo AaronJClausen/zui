@@ -13,6 +13,7 @@ const surface = @import("surface.zig");
 const host = @import("host.zig");
 const contracts = @import("contracts.zig");
 const semantics = @import("semantics.zig");
+const sweeps = @import("sweeps.zig");
 
 pub const Context = context.Context;
 pub const Config = context.Config;
@@ -26,6 +27,9 @@ pub const Diagnostics = context.Diagnostics;
 pub const ElementFlags = context.ElementFlags;
 
 pub const TraceZone = trace.TraceZone;
+
+pub const Invariant = sweeps.Invariant;
+pub const SweepFailure = sweeps.SweepFailure;
 
 pub const OptionalCommand = commands.OptionalCommand;
 pub const CommandSet = commands.CommandSet;

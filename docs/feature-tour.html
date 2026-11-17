@@ -1323,6 +1323,24 @@ fn outlineHovered(frame: *const Ui.Frame, pointer: [2]f32) ?zui.Rect {
 </script>
       </article>
 
+      <article class="feature" id="sweeps" data-title="Safety sweeps">
+        <div class="feature-head"><h3>Safety sweeps</h3><span class="pill shipped">Shipped</span></div>
+        <p><code class="z">frame.sweep()</code> checks what every laid-out frame must keep: sizes and positions finite and not negative, child lists that agree with their parents, free space and overflow shared as the sizing rules say, children starting inside their parent's content box, and commands in nondecreasing layers with balanced clips. It returns the first invariant broken, as a <code class="z">zui.SweepFailure</code> naming the invariant and the element or command, or null. With <code class="z">features.safety_sweeps</code>, on by default in Debug and ReleaseSafe, <code class="z">endFrame</code> sweeps every frame and panics on a failure, naming the frame and the element, so a layout bug stops where it happens instead of drawing wrong.</p>
+<script type="text/x-zig" data-file="src/tests/layout_test.zig">
+test "the album grid keeps every layout invariant at any width" {
+    var ui = try Ui.init(std.testing.allocator, std.testing.io, &fonts);
+    defer ui.deinit(std.testing.allocator);
+    for ([_]f32{ 1, 320, 800, 2560 }) |width| {
+        ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ width, 900 } } });
+        albumGrid(&ui, &app);
+        const frame = ui.endFrame();
+        defer ui.release(frame);
+        try std.testing.expectEqual(null, frame.sweep());
+    }
+}
+</script>
+      </article>
+
       <article class="feature" id="compile-errors" data-title="Features and compile errors">
         <div class="feature-head"><h3>Features and compile errors</h3><span class="pill shipped">Shipped</span></div>
         <p><code class="z">Config.features</code> turns capabilities on or off. A feature that is off generates no code and no memory, and calling its API fails to compile with a message naming the field to set. The same discipline runs through every contract. Each message below is pinned by a compile-error test.</p>
@@ -2092,7 +2110,6 @@ fn present(renderer: *Renderer, surface: zui.Surface, frame: *const Ui.Frame) !v
       <p class="group-intro">These names compile, but they don't do anything yet. This list is from <code>ARCHITECTURE.md</code> §7 and the roadmap.</p>
       <ul class="gap-list">
         <li><b>Accessibility on a platform <span class="pill partial">No host bridge yet</span></b><span><code class="z">Frame.semantics()</code> lists each element's role, label, value, state and actions, and <code class="z">action</code> events are answered, but no host bridges them to a platform's accessibility API yet. The Windows host's UI Automation bridge is the rest of V2.</span></li>
-        <li><b><code class="z">features.safety_sweeps</code> <span class="pill partial">Declared only</span></b><span>The flag exists, but it doesn't change behaviour yet. Sweeps are V3.</span></li>
         <li><b>Extended color <span class="pill partial">Clamped only</span></b><span><code class="z">Config.Color = zui.ExtendedColor</code> declares colors brighter than SDR white or outside sRGB, as <code class="z">.linear(4, 4, 4, 1)</code> or with <code class="z">Color</code>'s own <code class="z">.rgb(0x3366ff)</code>, and every type that holds a color follows it: <code class="z">Ui.Decoration</code>, <code class="z">Ui.Border</code>, <code class="z">Ui.Effects</code>, <code class="z">Ui.TextStyle</code>. For a renderer that draws only <code class="z">zui.Color</code>, each is clamped as it is emitted, and <code class="z">frame.diagnostics.clamped_colors</code> says when that changed one. zui-sokol declares <code class="z">zui_extended_color</code>, so it is given them as declared, and encodes them into its 8-bit sRGB target; <code class="z">zui_wire</code> carries them unclamped when its context's renderer draws them, and the renderer suite declares its scene in them, with a box of HDR white. A host and a renderer that both declare <code class="z">.scrgb_fp16</code> in <code class="z">zui_output_formats</code> open the window with it in <code class="z">WindowOptions.output_formats</code>, and the host's surface says which format it chose, <code class="z">surface.outputFormat()</code>; SDR otherwise. The renderer suite reads an FP16 target back through a harness's <code class="z">extendedPixel</code> and expects HDR white there at four times SDR white. zui-sokol draws an <code class="z">.offscreen</code> surface in <code class="z">.scrgb_fp16</code>, in linear light, and passes the suite there, reading HDR white back at four times SDR white. No host opens an FP16 window yet, so no window is brighter than SDR white: that, and the host's headroom, are the rest of G6.</span></li>
         <li><b>Still to come</b><span>Motion, multi-line text editing, skins, the inspector over the wire, and more hosts (macOS, Linux, web).</span></li>
       </ul>

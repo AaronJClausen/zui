@@ -73,7 +73,6 @@ green, and its **Status** line below says which slice is next.
 | P12. Text commands that point at their style | audit | `src/commands.zig`, `src/emission.zig`, `zui_wire/`, `../zui-raylib`, `../zui-sokol`, `../zui-terminal` | | waiting on a profile of a renderer reading the commands |
 | G6. HDR and wide gamut | 8 | `src/context.zig`, `src/commands.zig`, `src/surface.zig`, `zui_wire/`, `zui_testing/`, `../zui-sokol`, `../zui-host` | | waiting on a session under Windows with an HDR display: zui-sokol's FP16 `.win32` swapchain and zui-host's `.scrgb_fp16` window |
 | V2. Semantics and accessibility actions | 9 | `src/context.zig`, `zui_widgets/`, `../zui-host` | | in progress; the UI Automation bridge waits on a session under Windows |
-| V3. Safety sweeps | 9 | `src/context.zig`, `src/tests/` | | |
 | V4. The demo in a browser | 9 | `../zui-web`, `zui_wire/` | | |
 | F7. The wire's renderer declares its context's payload types | 5 | `zui_wire/remote.zig`, `zui_wire/tests.zig` | | |
 
@@ -159,6 +158,48 @@ Things to know:
 ---
 
 ## Done
+
+### V3. Safety sweeps
+
+**Plan.** The invariant checks that read only a `Frame`, at the end of
+`endFrame`, behind `features.safety_sweeps`, which C7 added. **Done
+when:** the randomized tests run through it, a debug demo runs with it
+on, and with the feature off, R1 counts are unchanged.
+
+`Frame.sweep()`, in `src/sweeps.zig`, returns the first invariant a
+frame breaks as a `zui.SweepFailure`, naming a `zui.Invariant` and the
+element or command: sizes and positions finite and not negative; child
+lists that agree with the parent links, declaration order and counts;
+overflow only once every shrinkable child is at its minimum, free space
+only once every growing child is at its max, `grow_from_min` siblings
+grown by equal shares, growing children filling the content box across;
+a wrapping row's lines fitting it and not overlapping; children in the
+flow starting inside the content box on each axis that does not scroll;
+and commands in nondecreasing layers, with clips balanced in each. Its
+slack grows with the sizes compared, since sums of thousands of sizes
+round in `f32`. With `features.safety_sweeps`, `endFrame` runs it after
+emission and panics on a failure, naming the frame and the element.
+These were the randomized test's own checks; they moved into the core,
+and the test now runs 2,000 random trees through `endFrame`. The tests'
+shared context turns the feature on, so every test frame is swept in
+every build mode, and a test pins that a negative and a NaN size are
+named. SPEC.md §20.1 said children lie within their parent's clip; it
+now says they start inside the content box on an axis that does not
+scroll, since an overflowing child that cannot shrink passes the clip by
+design and a scrolled axis is offset by state the frame does not keep.
+
+zui-raylib's demo needs no change: its Debug build has the feature on by
+default, and `zig build demo --fork=../zui -- --hidden --frames 900
+--cycle 40` drew 900 frames across every screen, every limit held, with
+no failure. zui-raylib's, zui-sokol's and zui-terminal's tests pass
+against this checkout.
+
+Measured against `4f9d316` with `zig build counts`: with the feature
+off (its ReleaseFast default) every scenario is identical to the
+instruction. With it on, declaration, whose code did not change, moves
+−0.10% to +0.74% as the code lands elsewhere, and `endFrame` grows by about 220 instructions an element: +71.9% for the
+4,096-box tree, +58.4% for 4,000 children of one parent, +45.5% for the
+interactive boxes, +23.1% for warm text and +6.5% for cold text.
 
 ### V1. `zui_debug`
 
@@ -3132,16 +3173,6 @@ the instruction; with it on and nothing declared, declaration moves
 Next: the Windows host (`../zui-host`) bridges the list to UI Automation
 and reports its requests as `action` events. That needs a session under
 Windows, so it waits for one.
-
-### V3. Safety sweeps
-
-**Plan.** The invariant checks that read only a `Frame`, at the end of
-`endFrame`, behind `features.safety_sweeps`, which C7 added.
-
-**Done when:** the randomized tests run through it, a debug demo runs
-with it on, and with the feature off, R1 counts are unchanged.
-
-**Spec.** §20.1.
 
 ### V4. The demo in a browser
 

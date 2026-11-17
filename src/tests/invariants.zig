@@ -1,4 +1,4 @@
-//! Randomized trees, checked against properties every layout must have.
+//! Randomized trees, swept for the properties every layout must have.
 
 const std = @import("std");
 const zui = @import("../root.zig");
@@ -113,201 +113,6 @@ const Generator = struct {
     }
 };
 
-fn checkInvariants(frame: *const Frame) !void {
-    for (0..frame.element_count) |index| {
-        const element: Ui.Index = @intCast(index);
-        for (0..2) |a| {
-            try std.testing.expect(std.math.isFinite(frame.size[element][a]));
-            try std.testing.expect(std.math.isFinite(frame.position[element][a]));
-            try std.testing.expect(frame.size[element][a] >= -tolerance);
-        }
-        try checkChildren(frame, element);
-        if (frame.child_counts[element].all != 0) try checkParent(frame, element);
-    }
-    try checkCommands(frame);
-}
-
-/// Layers paint in nondecreasing z, and clip pairs balance within each layer.
-fn checkCommands(frame: *const Frame) !void {
-    var previous_z: i16 = std.math.minInt(i16);
-    var clip_depth: i32 = 0;
-    for (frame.commands()) |command| {
-        if (command.z != previous_z) {
-            try std.testing.expectEqual(@as(i32, 0), clip_depth);
-            try std.testing.expect(command.z > previous_z);
-            previous_z = command.z;
-        }
-        switch (command.payload) {
-            .clip_begin => clip_depth += 1,
-            .clip_end => clip_depth -= 1,
-            else => {},
-        }
-        try std.testing.expect(clip_depth >= 0);
-    }
-    try std.testing.expectEqual(@as(i32, 0), clip_depth);
-}
-
-/// The child walk visits exactly the elements whose parent is `parent`, in
-/// declaration order, and counts the same children declaration did.
-fn checkChildren(frame: *const Frame, parent: Ui.Index) !void {
-    var count: u32 = 0;
-    var flow_count: u32 = 0;
-    var previous: ?Ui.Index = null;
-    var children = frame.children(parent);
-    while (children.next()) |child| {
-        try std.testing.expectEqual(parent, frame.parent[child]);
-        if (previous) |earlier| try std.testing.expect(child > earlier);
-        previous = child;
-        count += 1;
-        if (!frame.isFloating(child)) flow_count += 1;
-    }
-    try std.testing.expectEqual(@as(u32, frame.child_counts[parent].all), count);
-    try std.testing.expectEqual(@as(u32, frame.child_counts[parent].in_flow), flow_count);
-}
-
-fn flowCount(frame: *const Frame, parent: Ui.Index) u32 {
-    var count: u32 = 0;
-    var children = frame.children(parent);
-    while (children.next()) |child| {
-        if (!frame.isFloating(child)) count += 1;
-    }
-    return count;
-}
-
-fn checkParent(frame: *const Frame, parent: Ui.Index) !void {
-    if (frame.flags[parent].wraps) return checkWrappingRow(frame, parent);
-    const parent_layout = frame.layoutOf(parent);
-    const along = parent_layout.direction.axis();
-    const a = @intFromEnum(along);
-    const b = 1 - a;
-    const content_along = @max(0, frame.size[parent][a] - parent_layout.padding.total(along));
-    const content_across = @max(0, frame.size[parent][b] - parent_layout.padding.total(along.other()));
-    const content_top = frame.position[parent][1] + parent_layout.padding.top;
-    const content_left = frame.position[parent][0] + parent_layout.padding.left;
-    const content_right = frame.position[parent][0] + frame.size[parent][0] - parent_layout.padding.left;
-    const reversed = frame.flags[parent].reversed;
-
-    const flow_count = flowCount(frame, parent);
-    if (flow_count == 0) return;
-    const scrolls_along = frame.flags[parent].scrolls(along);
-
-    var used = parent_layout.child_gap * @as(f32, @floatFromInt(flow_count - 1));
-    var children = frame.children(parent);
-    while (children.next()) |child| {
-        if (!frame.isFloating(child)) used += frame.size[child][a];
-    }
-    if (used <= content_along + tolerance) try checkGrowFromMinWeights(frame, parent, along);
-
-    children = frame.children(parent);
-    while (children.next()) |child| {
-        if (frame.isFloating(child)) continue;
-        const sizing = sizingAlong(frame, child, along);
-        // Overflow is only allowed once every shrinkable child is at its
-        // minimum, or along an axis that scrolls.
-        if (used > content_along + tolerance and sizing.rule != .fixed and !scrolls_along) {
-            try std.testing.expect(frame.size[child][a] <= frame.min_size[child][a] + tolerance);
-        }
-        // Free space is only left over once every growable child is at its max.
-        if (used < content_along - tolerance and sizing.rule.grows() and sizing.amount > 0) {
-            try std.testing.expect(frame.size[child][a] >= sizing.max - tolerance);
-        }
-        const across_sizing = sizingAlong(frame, child, along.other());
-        if (across_sizing.rule.grows()) {
-            const expected = @max(frame.min_size[child][b], std.math.clamp(content_across, across_sizing.min, across_sizing.max));
-            try std.testing.expectApproxEqAbs(expected, frame.size[child][b], tolerance);
-        }
-        // Children start inside the parent's content box, at its right for
-        // a reversed parent. These frames never scroll, so every offset is
-        // zero.
-        if (reversed) {
-            try std.testing.expect(frame.position[child][0] + frame.size[child][0] <= content_right + tolerance);
-        } else {
-            try std.testing.expect(frame.position[child][0] >= content_left - tolerance);
-        }
-        try std.testing.expect(frame.position[child][1] >= content_top - tolerance);
-    }
-}
-
-/// Each line fits the row unless it holds one child or the row scrolls,
-/// leaves free space only once its growing children are at their max, and
-/// lies below the line before it; every child starts inside the content box.
-fn checkWrappingRow(frame: *const Frame, row: Ui.Index) !void {
-    const row_layout = frame.layoutOf(row);
-    const gap = row_layout.child_gap;
-    const content_width = @max(0, frame.size[row][0] - row_layout.padding.total(.x));
-    const content_left = frame.position[row][0] + row_layout.padding.left;
-    const content_right = frame.position[row][0] + frame.size[row][0] - row_layout.padding.left;
-    const content_top = frame.position[row][1] + row_layout.padding.top;
-    const scrolls = frame.flags[row].scroll_x or frame.flags[row].scroll_y;
-
-    var line_first: ?Ui.Index = null;
-    var previous_line_bottom: f32 = -std.math.inf(f32);
-    var children = frame.children(row);
-    while (true) {
-        const next = children.next();
-        if (next) |child| if (frame.isFloating(child)) continue;
-        if (next == null or frame.starts_line[next.?]) {
-            if (line_first) |first| {
-                var line_width = -gap;
-                var line_count: u32 = 0;
-                var line_top = std.math.inf(f32);
-                var line_bottom = -std.math.inf(f32);
-                var line = frame.children(row);
-                line.next_child = first;
-                line.end = next orelse frame.subtree_end[row];
-                while (line.next()) |child| {
-                    if (frame.isFloating(child)) continue;
-                    line_width += frame.size[child][0] + gap;
-                    line_count += 1;
-                    line_top = @min(line_top, frame.position[child][1]);
-                    line_bottom = @max(line_bottom, frame.position[child][1] + frame.size[child][1]);
-                }
-                if (line_count > 1 and !scrolls) try std.testing.expect(line_width <= content_width + tolerance);
-                if (!scrolls) try std.testing.expect(line_top >= previous_line_bottom + gap - tolerance);
-                line = frame.children(row);
-                line.next_child = first;
-                line.end = next orelse frame.subtree_end[row];
-                while (line.next()) |child| {
-                    if (frame.isFloating(child)) continue;
-                    const sizing = frame.sizingOf(child, .x);
-                    if (line_width < content_width - tolerance and sizing.rule.grows() and sizing.amount > 0) {
-                        try std.testing.expect(frame.size[child][0] >= sizing.max - tolerance);
-                    }
-                    if (frame.flags[row].reversed) {
-                        try std.testing.expect(frame.position[child][0] + frame.size[child][0] <= content_right + tolerance);
-                    } else {
-                        try std.testing.expect(frame.position[child][0] >= content_left - tolerance);
-                    }
-                    try std.testing.expect(frame.position[child][1] >= content_top - tolerance);
-                }
-                previous_line_bottom = line_bottom;
-            }
-            line_first = next;
-        }
-        if (next == null) break;
-    }
-}
-
-/// `grow_from_min` siblings that are neither at their floor nor at their max
-/// have grown from their `min` by the same share of their weights.
-fn checkGrowFromMinWeights(frame: *const Frame, parent: Ui.Index, along: zui.Axis) !void {
-    const a = @intFromEnum(along);
-    var share: ?f32 = null;
-    var children = frame.children(parent);
-    while (children.next()) |child| {
-        if (frame.isFloating(child)) continue;
-        const sizing = sizingAlong(frame, child, along);
-        if (sizing.rule != .grow_from_min or sizing.amount == 0) continue;
-        const size = frame.size[child][a];
-        try std.testing.expect(size >= frame.min_size[child][a] - tolerance);
-        if (size <= frame.min_size[child][a] + tolerance or size >= sizing.max - tolerance) continue;
-        const child_share = (size - sizing.min) / sizing.amount;
-        if (share) |expected| {
-            try std.testing.expectApproxEqAbs(expected, child_share, tolerance);
-        } else share = child_share;
-    }
-}
-
 fn buildRandomFrame(ui: *Ui, seed: u64, element_budget: u32) void {
     buildRandomFrameIn(ui, seed, element_budget, .left_to_right, true);
 }
@@ -328,15 +133,42 @@ test "random trees satisfy the layout invariants" {
     try harness.init();
     defer harness.deinit();
 
+    comptime std.debug.assert(Ui.features.safety_sweeps);
+    // A seed that breaks an invariant panics in `endFrame`, naming the
+    // frame, whose number is the seed.
     for (0..2000) |seed| {
         buildRandomFrame(&harness.ui, seed, @intCast(seed % 200 + 1));
-        const frame = harness.ui.endFrame();
-        checkInvariants(frame) catch |err| {
-            std.debug.print("invariant violated for seed {d}\n", .{seed});
-            return err;
-        };
-        harness.ui.release(frame);
+        harness.ui.release(harness.ui.endFrame());
     }
+}
+
+const UnsweptUi = zui.Context(.{
+    .limits = .{ .max_elements = 16 },
+    .Text = support.FixedMetricsText,
+    .features = .{ .safety_sweeps = false },
+});
+
+fn sweepOfOneBox(box: zui.Element) ?zui.SweepFailure {
+    var text_contract: support.FixedMetricsText = .{};
+    var ui = UnsweptUi.init(std.testing.allocator, std.testing.io, &text_contract) catch unreachable;
+    defer ui.deinit(std.testing.allocator);
+    ui.beginFrame(&support.record(.zero, &.{}));
+    ui.box(box);
+    const frame = ui.endFrame();
+    defer ui.release(frame);
+    return frame.sweep();
+}
+
+test "a sweep names the invariant a frame breaks and where" {
+    try std.testing.expectEqual(null, sweepOfOneBox(.{ .layout = .{ .sizing = .{ .width = .fixed(40) } } }));
+    try std.testing.expectEqual(
+        zui.SweepFailure{ .invariant = .negative_size, .at = .{ .element = 1 } },
+        sweepOfOneBox(.{ .layout = .{ .sizing = .{ .width = .fixed(-40) } } }),
+    );
+    try std.testing.expectEqual(
+        zui.SweepFailure{ .invariant = .non_finite_geometry, .at = .{ .element = 1 } },
+        sweepOfOneBox(.{ .layout = .{ .sizing = .{ .height = .fixed(std.math.nan(f32)) } } }),
+    );
 }
 
 test "a random tree in a right-to-left environment is the left-to-right one reflected" {
@@ -388,10 +220,4 @@ test "layout is deterministic" {
 
 fn rectAt(frame: *const Frame, index: usize) zui.Rect {
     return .{ .x = frame.position[index][0], .y = frame.position[index][1], .width = frame.size[index][0], .height = frame.size[index][1] };
-}
-
-fn sizingAlong(frame: *const Frame, child: Ui.Index, axis: zui.Axis) zui.Sizing {
-    return switch (axis) {
-        inline else => |comptime_axis| frame.sizingOf(child, comptime_axis),
-    };
 }

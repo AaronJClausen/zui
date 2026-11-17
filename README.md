@@ -245,6 +245,12 @@ Implemented so far:
   `invoke` by `clicked`, `adjust` by `adjusted`, `dismiss` by
   `dismissed`. Every `zui_widgets` control declares its own; no host
   bridges the list to a platform's accessibility API yet.
+  `frame.sweep()` checks the invariants every laid-out frame keeps
+  (finite sizes, consistent child lists, free space and overflow shared
+  as the sizing rules say, commands in nondecreasing layers with
+  balanced clips) and names the first one broken; with
+  `features.safety_sweeps`, on by default in safe builds, `endFrame`
+  panics on it.
 
 The reference backend, its adapter host and the demo application live in
 [zui-raylib](https://github.com/AaronJClausen/zui-raylib); the other

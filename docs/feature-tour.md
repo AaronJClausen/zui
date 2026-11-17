@@ -1085,6 +1085,28 @@ fn outlineHovered(frame: *const Ui.Frame, pointer: [2]f32) ?zui.Rect {
 }
 ```
 
+<a id="sweeps"></a>
+
+### Safety sweeps · *shipped*
+
+`frame.sweep()` checks what every laid-out frame must keep: sizes and positions finite and not negative, child lists that agree with their parents, free space and overflow shared as the sizing rules say, children starting inside their parent's content box, and commands in nondecreasing layers with balanced clips. It returns the first invariant broken, as a `zui.SweepFailure` naming the invariant and the element or command, or null. With `features.safety_sweeps`, on by default in Debug and ReleaseSafe, `endFrame` sweeps every frame and panics on a failure, naming the frame and the element, so a layout bug stops where it happens instead of drawing wrong.
+
+`src/tests/layout_test.zig`
+
+```zig
+test "the album grid keeps every layout invariant at any width" {
+    var ui = try Ui.init(std.testing.allocator, std.testing.io, &fonts);
+    defer ui.deinit(std.testing.allocator);
+    for ([_]f32{ 1, 320, 800, 2560 }) |width| {
+        ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ width, 900 } } });
+        albumGrid(&ui, &app);
+        const frame = ui.endFrame();
+        defer ui.release(frame);
+        try std.testing.expectEqual(null, frame.sweep());
+    }
+}
+```
+
 <a id="compile-errors"></a>
 
 ### Features and compile errors · *shipped*
@@ -1960,7 +1982,6 @@ Build with `-Dzui-tracy=true` to link Tracy's client, then connect profiler 0.14
 These names compile, but they don't do anything yet. This list is from `ARCHITECTURE.md` §7 and the roadmap.
 
 - **Accessibility on a platform** *(no host bridge yet)*: `Frame.semantics()` lists each element's role, label, value, state and actions, and `action` events are answered, but no host bridges them to a platform's accessibility API yet. The Windows host's UI Automation bridge is the rest of V2.
-- **`features.safety_sweeps`** *(declared only)*: The flag exists, but it doesn't change behaviour yet. Sweeps are V3.
 - **Extended color** *(clamped only)*: `Config.Color = zui.ExtendedColor` declares colors brighter than SDR white or outside sRGB, as `.linear(4, 4, 4, 1)` or with `Color`'s own `.rgb(0x3366ff)`, and every type that holds a color follows it: `Ui.Decoration`, `Ui.Border`, `Ui.Effects`, `Ui.TextStyle`. For a renderer that draws only `zui.Color`, each is clamped as it is emitted, and `frame.diagnostics.clamped_colors` says when that changed one. zui-sokol declares `zui_extended_color`, so it is given them as declared, and encodes them into its 8-bit sRGB target; `zui_wire` carries them unclamped when its context's renderer draws them, and the renderer suite declares its scene in them, with a box of HDR white. A host and a renderer that both declare `.scrgb_fp16` in `zui_output_formats` open the window with it in `WindowOptions.output_formats`, and the host's surface says which format it chose, `surface.outputFormat()`; SDR otherwise. The renderer suite reads an FP16 target back through a harness's `extendedPixel` and expects HDR white there at four times SDR white. zui-sokol draws an `.offscreen` surface in `.scrgb_fp16`, in linear light, and passes the suite there, reading HDR white back at four times SDR white. No host opens an FP16 window yet, so no window is brighter than SDR white: that, and the host's headroom, are the rest of G6.
 - **Still to come**: Motion, multi-line text editing, skins, the inspector over the wire, and more hosts (macOS, Linux, web).
 

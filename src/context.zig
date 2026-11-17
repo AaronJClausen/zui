@@ -15,6 +15,7 @@ const contracts = @import("contracts.zig");
 const trace = @import("trace.zig");
 const sources_module = @import("sources.zig");
 const semantics_module = @import("semantics.zig");
+const sweeps = @import("sweeps.zig");
 
 const Id = id_module.Id;
 const Instant = record_types.Instant;
@@ -72,8 +73,8 @@ pub const Features = struct {
     gestures: bool = true,
     /// Moving a row's children that overflow it onto new lines.
     flex_wrap: bool = false,
-    /// The invariant checks that read only a `Frame`, at the end of every
-    /// `endFrame`, in any build.
+    /// `Frame.sweep()` at the end of every `endFrame`, in any build,
+    /// panicking on the first invariant the frame breaks.
     safety_sweeps: bool = std.debug.runtime_safety,
     /// The tracer contract: a type with `zuiBegin` and `zuiEnd`, which
     /// sees each step of `beginFrame` and `endFrame` as a zone. `void`
@@ -556,6 +557,17 @@ pub fn Context(comptime config: Config) type {
                 return list.nodes[0..list.count];
             }
 
+            /// The first invariant the frame breaks, or null. With
+            /// `features.safety_sweeps`, `endFrame` panics on one; anything
+            /// holding a frame can also ask, as a test does:
+            ///
+            /// ```zig
+            /// try std.testing.expectEqual(null, frame.sweep());
+            /// ```
+            pub fn sweep(self: *const Frame) ?sweeps.SweepFailure {
+                return sweeps.run(Self, self);
+            }
+
             fn frameSlot(self: *const Frame) *const FrameSlot {
                 return @fieldParentPtr("frame", self);
             }
@@ -1035,6 +1047,7 @@ pub fn Context(comptime config: Config) type {
             layout.run(Self, self, frame);
             @call(.never_inline, emission.run, .{ Self, self, frame });
             if (features.semantics) finishSemantics(frame);
+            if (features.safety_sweeps) if (frame.sweep()) |failure| panicOnSweepFailure(frame, failure);
             if (self.text_input_caret) |caret| if (frame.rectOf(.{ .hash = caret })) |rect| {
                 frame.host_requests.text_input = .{ .caret = rect };
             };
@@ -1048,6 +1061,18 @@ pub fn Context(comptime config: Config) type {
             frame.held.store(true, .release);
             self.current = null;
             return frame;
+        }
+
+        fn panicOnSweepFailure(frame: *const Frame, failure: sweeps.SweepFailure) noreturn {
+            @branchHint(.cold);
+            switch (failure.at) {
+                .element => |element| std.debug.panic("zui: frame {d} broke the invariant {t} at element {f}", .{
+                    frame.number, failure.invariant, nameOf(frame, @intCast(element)),
+                }),
+                .command => |command| std.debug.panic("zui: frame {d} broke the invariant {t} at command {d}", .{
+                    frame.number, failure.invariant, command,
+                }),
+            }
         }
 
         fn reportUnbalanced(self: *Self, frame: *Frame) void {

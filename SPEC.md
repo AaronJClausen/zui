@@ -430,7 +430,8 @@ pub fn release(self: *Self, frame: *const Frame) void
 ```
 
 `endFrame` checks the tree's balance, runs layout (§8), emits (§13),
-settles source demand (§14.5), and returns the frame. **It always
+sweeps the frame with `features.safety_sweeps` (§20.1), settles source
+demand (§14.5), and returns the frame. **It always
 returns a usable frame.** If a limit was exceeded, the part that fit was
 laid out, and `frame.diagnostics` says what to raise; an application that
 wants an error writes `try frame.diagnostics.check()`.
@@ -444,6 +445,7 @@ pub const Frame = struct {
     pub fn requests(self: *const Frame) HostRequests              // cursor, IME area, text input
     pub fn inspect(self: *const Frame, index: ElementIndex) ElementView   // by declaration order, for inspectors
     pub fn elementCount(self: *const Frame) ElementIndex
+    pub fn sweep(self: *const Frame) ?SweepFailure               // the first invariant broken (§20.1)
     diagnostics: Diagnostics,
     number: u64,                // frames since `init`, from 0
     params: FrameParams,        // the record's: what a renderer needs to draw at the right size and scale
@@ -2408,11 +2410,18 @@ nothing until it builds with Tracy.
 
 ### 20.1 Tests
 
-- **Invariants**, on every test frame: children within their parent's
-  clip unless floating; grow siblings proportional to weight except where
-  clamped; no negative or NaN size; commands in nondecreasing layer
-  order. With `features.safety_sweeps`, the checks that read only a
-  `Frame` run at the end of `endFrame` in any build.
+- **Invariants**, on every test frame: children in the flow start inside
+  their parent's content box, on each axis that does not scroll; grow
+  siblings proportional to weight except where clamped; overflow only
+  once every shrinkable child is at its minimum, and free space only
+  once every growing child is at its max; no negative or NaN size;
+  child lists that agree with the parent links and counts; commands in
+  nondecreasing layer order, with clips balanced in each layer. These
+  read only a `Frame`: `frame.sweep()` returns the first one broken, as
+  a `SweepFailure` naming the invariant and the element or command, and
+  with `features.safety_sweeps` `endFrame` runs it in any build and
+  panics on a failure, naming the frame. Tests turn it on, so every test
+  frame is swept.
 - **Randomized trees** of 1–5,000 elements from a seed, through the
   invariants.
 - **Golden layouts** with exact rectangles for every sizing rule, basis,

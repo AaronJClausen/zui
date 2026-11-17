@@ -168,6 +168,7 @@ The stage is the one in SPEC.md §21 that builds it.
 | gradients, shadows, blur, transforms, materials, HDR | core commands and lowering; renderers draw; host reports headroom | 8 |
 | inspector, and its overlay of zone times | `zui_debug` over `Frame.inspect`, and its `ZoneTimer` tracer over the tracer contract | 9 |
 | accessibility | core semantics and actions; `zui_widgets` declares each control's; host bridges to the platform API | 9 |
+| safety sweeps | core, over a finished frame; `endFrame` runs them behind `features.safety_sweeps` | 9 |
 | macOS, Linux and web hosts; services; decorations; many windows | `zui-host`; one `Context` per window | 10 |
 | motion and exit animations | `zui_motion`; ghost buffer in the core | 11 |
 | text editing and IME | `zui_widgets`; composition events and the IME area from the core | 11 |
@@ -261,7 +262,9 @@ What exists today, by stage:
   value, bounds, state and actions in tree order, kept beside its frame;
   `action` events answered by `clicked`, `focused`, `adjusted`,
   `manipulation`, `contextRequested` and `dismissed`; and every
-  `zui_widgets` control declaring its own.
+  `zui_widgets` control declaring its own. `Frame.sweep()` checks the
+  layout and command invariants a frame must keep, and with
+  `features.safety_sweeps` `endFrame` panics on the first one broken.
 
 The code and the spec still differ in these places, each closed by the
 roadmap item named:
@@ -272,7 +275,6 @@ roadmap item named:
 | `Widgets(Ui)` with a `Theme` struct | `Widgets(Ui, Skin)` | `zui_widgets/` | K5 |
 | `zui_debug`'s inspector runs in the application's process; a frame on the wire carries no elements for it | over the wire, the inspector runs in another process (SPEC.md §19.7) | `zui_debug/`, `zui_wire/` | not yet queued |
 | `Frame.semantics()` lists each element's role, label, value, state and actions, and `action` events are answered, but no host bridges them to a platform's accessibility API | the Windows host bridges semantics to UI Automation | `../zui-host` | V2 |
-| `Features` has every field and gates its API, but `safety_sweeps` changes nothing | safety sweeps behind their field | `src/context.zig` | V3 |
 
 Unchanged in shape: element storage in pre-order structure-of-arrays, the
 layout passes, the segment cache, ids, the state table, the frame arenas,

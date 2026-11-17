@@ -109,11 +109,12 @@ export fn zuiCheckFrame(width: f32, height: f32, pointer_x: f32, pointer_y: f32)
     zui_testing.snapshot(&snapshot_writer, frame.commands(), zui.ids(.{"save"})) catch {};
     const violation_count = @intFromBool(zui_testing.findViolation(frame.commands()) != null);
     const failed_check = @intFromBool(std.meta.isError(frame.diagnostics.check()));
+    const broken_invariant = @intFromBool(frame.sweep() != null);
     const requests = frame.requests();
     const host_requests = @intFromEnum(requests.cursor) + @intFromBool(requests.text_input != null);
     const inspected = frame.inspect(frame.elementCount() - 1);
     const inspected_content = @intFromEnum(inspected.content) + @intFromBool(inspected.effects != null and inspected.floating != null);
-    return frame.commands().len + @intFromBool(ui.nextFrame() == .immediately) + violation_count + failed_check + frame.elementCount() + host_requests + frame.semantics().len + inspected_content + inspector.rows().len;
+    return frame.commands().len + @intFromBool(ui.nextFrame() == .immediately) + violation_count + failed_check + broken_invariant + frame.elementCount() + host_requests + frame.semantics().len + inspected_content + inspector.rows().len;
 }
 
 const Settings = struct {
