@@ -72,7 +72,7 @@ green, and its **Status** line below says which slice is next.
 | G6. HDR and wide gamut | 8 | `src/context.zig`, `src/commands.zig`, `src/surface.zig`, `zui_wire/`, `zui_testing/`, `../zui-sokol`, `../zui-host` | | waiting on a session under Windows with an HDR display: zui-sokol's FP16 `.win32` swapchain and zui-host's `.scrgb_fp16` window |
 | V2. Semantics and accessibility actions | 9 | `src/context.zig`, `zui_widgets/`, `../zui-host` | | in progress; the UI Automation bridge waits on a session under Windows |
 | H3. macOS | 10 | `../zui-host` | | |
-| H4. Linux | 10 | `../zui-host`, `../zui-sokol` | | in progress; slice 2, key repeat, lifecycle and the environment, is next |
+| H4. Linux | 10 | `../zui-host`, `../zui-sokol` | | in progress; slice 3, fractional scale, the clipboard, drops and file watching, is next |
 | H5. Web | 10 | `../zui-web` | | |
 | H6. Services | 10 | `src/host.zig`, `../zui-host` | | |
 | H7. Window decorations | 10 | `src/host.zig`, `../zui-host` | | |
@@ -3612,7 +3612,38 @@ across every screen in a tiled window, seen in a screenshot, with no
 layer overflow; and Layout Lab idled at 1.2 to 4.4 ms of CPU over 10 s,
 with 0 or 1 frames and no wakes, in five ReleaseSafe runs of six (the
 sixth drew 96 frames for the pointer over the window). zui-host's CI
-gains a Linux job under a headless Weston, which passes (`a141d78`). Slice 2 is next.
+gains a Linux job under a headless Weston, which passes (`a141d78`).
+
+Slice 2 is done in zui-host alone, `96d3720` (`linux/host.zig`,
+`linux/dbus.zig`, `linux/desktop_bus.zig`), not pushed, reporting what the Windows host reports
+(`windows/host.zig:504`, `:534-544`, `:672-706`, `:768-777`) where Linux
+has it. A held key repeats at `repeat_info`'s rate and delay, each repeat
+a `key_down` with `repeat` set that types again, and a wait ends at the
+next repeat. SIGINT, SIGTERM and SIGHUP set a flag and wake, and the next
+poll delivers `.terminate_requested`, after which the window reports
+closed; logind's `PrepareForSleep` is `.suspend` and `.resume`. The
+theme, contrast and reduced motion come from the portal's
+`org.freedesktop.appearance` settings (`ReadAll`, then `SettingChanged`),
+and power from UPower's `OnBattery` and power-profiles-daemon's
+`ActiveProfile` (`power-saver` is `.saver`), each change as signalled,
+the buses' sockets waited on beside the display. Without a bus, portal
+or daemon they stay at zui's defaults, and `environmentSources()` says
+which answered. On Hyprland, with the portal, UPower and
+power-profiles-daemon running, `init` took 1.9 ms in all and the first
+record held the dark theme the portal reported; the host suite and 13
+tests of the host's own pass in Debug, ReleaseFast and ReleaseSafe, 15
+unit tests beside them, one of which plays the portal on a
+`dbus-daemon` of its own and checks that its answer and signal arrive
+and an impostor's signal does not (CI starts such a daemon). The tour
+drew 300 frames across every screen with no layer overflow, and Layout
+Lab idled at 9.7 to 15.2 ms of CPU over 10 s with 9 to 11 frames and no
+wakes in three runs of four (the fourth drew 58 frames for the pointer),
+as `a141d78` did the same day (10.6 and 12.8 ms, 9 and 10 frames): a run
+counted no reads of either bus while idle, and the frames come from the
+compositor's events. Not reported yet: `.low_memory` (the Windows host's
+memory notification has no unprivileged counterpart but pressure
+triggers), reduced transparency and text scale, which the portal does not
+carry. Slice 3 is next.
 
 Decided here:
 - **libwayland-client, linked,** as sokol-zig links it, since the surface
@@ -3631,6 +3662,27 @@ Decided here:
   against a real compositor without showing a window.
 - **A logical key** is the keysym at the key's first level, or its US
   place where that names no key; `scancode` is the evdev code.
+- **A D-Bus client of the host's own,** not libdbus or sd-bus. Slice 1
+  linked libwayland because a surface must be its objects for EGL to draw
+  into; nothing outside the host shares a D-Bus connection, so no such
+  reason holds here. The portal and the daemons need a SASL `EXTERNAL`
+  handshake, a few method calls and three signals over a Unix socket,
+  about 900 lines beside their tests, read into fixed buffers on the
+  polling thread, so the host allocates nothing after `init` and waits
+  on the buses in the same `ppoll` as the display. libdbus would add a
+  runtime dependency and a `-dev` package, allocate per message, need
+  `dbus_threads_init_default` and a watch-and-timeout main-loop
+  integration; sd-bus would tie the host to systemd's libraries, which
+  musl distributions lack.
+- **The first frame has the desktop's settings:** `init` waits up to
+  250 ms for the answers, and one that comes later arrives as a change.
+  Match rules name the sender, so another client's signal is not taken
+  for the portal's.
+- **A signal the application handles or ignores is left alone,** and the
+  host's handler resets itself as it runs, so a second Ctrl+C ends a
+  process the first did not.
+- **Repeats keep their own instants,** and a frame late by more than four
+  gets four, not a burst.
 
 ---
 
@@ -3809,6 +3861,7 @@ Deliberate, and each a reason to choose zui:
 | How the published page is isolated (V4) | on GitHub Pages, by a service worker of the page's own, chosen in V4's slice 5: it serves the page and everything it loads again with `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp`, which GitHub Pages cannot send, and the page reloads once after registering it. A host that sends the headers itself was the other option; it would add an account and a deploy outside the repository's own CI for two headers |
 | How the browser draws (V4) | the client lays every command out as zui-sokol's renderer does, triangle for triangle, and the page draws the triangles through WebGL 2, with four samples per pixel resolved to one, as zui-sokol's demo window smooths its edges; `test-draw` compares them with one sample per pixel too. A 2D canvas smooths every edge its own way and cannot fade a shadow's rings vertex by vertex, so its frames could not be compared with zui-sokol's pixel by pixel |
 | A web renderer or a thin client over the wire (V4) | a thin client over `zui_wire`, as planned, since F5 built it: zui-web's page draws the frames an application in a Web Worker writes. A web host with a canvas surface, the application on the page itself, is H5's |
+| A D-Bus client for the Linux host (H4) | the host's own, over a Unix socket into fixed buffers, not libdbus or sd-bus: no outside code shares the connection, as EGL shares libwayland's objects, and the portal and UPower need only a handshake, a few calls and three signals; libdbus allocates per message and is thread-unfriendly, sd-bus ties the host to systemd |
 | Where an element declares its material (G5) | `Ui.Decoration.material`, typed by the renderer's `MaterialHandle`: `Ui.Element`, `Ui.Decoration` and `Ui.Style` are the context's own, and are `zui.Element`, `zui.Decoration` and `zui.Style` without a handle, so no existing code changes. `open` taking `anytype` to accept both was rejected: a literal passed through `anytype` is not converted to `Ui.Element` |
 
 ### Open

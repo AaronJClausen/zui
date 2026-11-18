@@ -262,8 +262,12 @@ Implemented so far:
   scale, the pointer, the wheel, keys through the compositor's keymap,
   typed text, focus and cursor shapes, passing zui's host suite; zui-sokol
   draws into it through EGL, and its tour runs on it unchanged and idles
-  at 0% CPU. X11, key repeat, lifecycle, the environment, fractional
-  scale, the clipboard, drops, file watching and the IME come next.
+  at 0% CPU. Held keys repeat at the compositor's rate; SIGINT, SIGTERM
+  and SIGHUP are terminate requests, and sleeping and waking suspend and
+  resume; the theme, contrast and reduced motion come from the XDG
+  desktop portal and power from UPower, over a D-Bus client of the
+  host's own. X11, fractional scale, the clipboard, drops, file watching
+  and the IME come next.
 
 The reference backend, its adapter host and the demo application live in
 [zui-raylib](https://github.com/AaronJClausen/zui-raylib); the other

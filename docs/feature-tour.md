@@ -823,7 +823,7 @@ fn wasEverOpened(ui: *Ui) bool {
 
 ### The environment · *shipped*
 
-The host reports the user's settings as events, and `ui.environment()` holds the current values: theme, contrast, reduced motion and transparency, text scale, locale, reading direction, HDR headroom, power, window focus, and whether the system material (Mica) shows behind the window.
+The host reports the user's settings as events, and `ui.environment()` holds the current values: theme, contrast, reduced motion and transparency, text scale, locale, reading direction, HDR headroom, power, window focus, and whether the system material (Mica) shows behind the window. zui-host's Windows host reads them from the system, and its Linux host reads the theme, contrast and reduced motion from the XDG desktop portal and power from UPower and power-profiles-daemon, over D-Bus; where no portal answers, they stay at their defaults.
 
 `src/ui/palette.zig`
 
@@ -852,7 +852,7 @@ fn shouldAnimate(ui: *const Ui) bool {
 
 ### Dropped files and lifecycle events · *shipped*
 
-Files dropped onto the window arrive with their drop position and paths. Lifecycle events cover suspend, resume, a termination request (Ctrl+C, a closing console, the session ending) and low memory. zui-host's Windows host reports all of them.
+Files dropped onto the window arrive with their drop position and paths. Lifecycle events cover suspend, resume, a termination request (Ctrl+C, a closing console, the session ending) and low memory. zui-host's Windows host reports all of them; its Linux host reports SIGINT, SIGTERM and SIGHUP as termination requests, and the system sleeping and waking as suspend and resume.
 
 `src/ui/system.zig`
 
@@ -1598,7 +1598,7 @@ Some of the notices it logs: *"limits.max_elements is 4096, but a frame needed 5
 
 ## 06. The backend contracts
 
-zui draws nothing and opens no windows itself. Renderers and hosts are plain types checked at compile time, with conformance suites they run in their own CI. Today there are zui-raylib (a renderer and adapter host), zui-sokol, zui-terminal, and zui-host's Windows host (message loop on its own thread, per-monitor DPI, Mica, IME, clipboard, dropped files, file watching), and the first slice of its Linux host, on Wayland (buffer scale, pointer, wheel, keys through the compositor's keymap, typed text, focus, cursor shapes).
+zui draws nothing and opens no windows itself. Renderers and hosts are plain types checked at compile time, with conformance suites they run in their own CI. Today there are zui-raylib (a renderer and adapter host), zui-sokol, zui-terminal, and zui-host's Windows host (message loop on its own thread, per-monitor DPI, Mica, IME, clipboard, dropped files, file watching), and its Linux host, on Wayland so far (buffer scale, pointer, wheel, keys through the compositor's keymap with their repeats, typed text, focus, cursor shapes, the environment from the desktop portal and UPower over D-Bus, and signals, sleep and waking as lifecycle events).
 
 <a id="renderer"></a>
 
