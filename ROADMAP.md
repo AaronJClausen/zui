@@ -3612,7 +3612,7 @@ across every screen in a tiled window, seen in a screenshot, with no
 layer overflow; and Layout Lab idled at 1.2 to 4.4 ms of CPU over 10 s,
 with 0 or 1 frames and no wakes, in five ReleaseSafe runs of six (the
 sixth drew 96 frames for the pointer over the window). zui-host's CI
-gains a Linux job under a headless Weston, not yet run. Slice 2 is next.
+gains a Linux job under a headless Weston, which passes (`a141d78`). Slice 2 is next.
 
 Decided here:
 - **libwayland-client, linked,** as sokol-zig links it, since the surface
