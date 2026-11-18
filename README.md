@@ -257,6 +257,13 @@ Implemented so far:
   the tour's frames over `zui_wire` through WebGL 2, with four samples
   per pixel as a native window with `sample_count = 4` has, and sends
   the canvas's input back as records.
+- **Stage 10, begun:** zui-host's Linux host opens a Wayland window
+  through libwayland-client and xdg-shell, with the compositor's buffer
+  scale, the pointer, the wheel, keys through the compositor's keymap,
+  typed text, focus and cursor shapes, passing zui's host suite; zui-sokol
+  draws into it through EGL, and its tour runs on it unchanged and idles
+  at 0% CPU. X11, key repeat, lifecycle, the environment, fractional
+  scale, the clipboard, drops, file watching and the IME come next.
 
 The reference backend, its adapter host and the demo application live in
 [zui-raylib](https://github.com/AaronJClausen/zui-raylib); the other

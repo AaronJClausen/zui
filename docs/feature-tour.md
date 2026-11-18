@@ -1598,7 +1598,7 @@ Some of the notices it logs: *"limits.max_elements is 4096, but a frame needed 5
 
 ## 06. The backend contracts
 
-zui draws nothing and opens no windows itself. Renderers and hosts are plain types checked at compile time, with conformance suites they run in their own CI. Today there are zui-raylib (a renderer and adapter host), zui-sokol, zui-terminal, and zui-host's Windows host (message loop on its own thread, per-monitor DPI, Mica, IME, clipboard, dropped files, file watching).
+zui draws nothing and opens no windows itself. Renderers and hosts are plain types checked at compile time, with conformance suites they run in their own CI. Today there are zui-raylib (a renderer and adapter host), zui-sokol, zui-terminal, and zui-host's Windows host (message loop on its own thread, per-monitor DPI, Mica, IME, clipboard, dropped files, file watching), and the first slice of its Linux host, on Wayland (buffer scale, pointer, wheel, keys through the compositor's keymap, typed text, focus, cursor shapes).
 
 <a id="renderer"></a>
 

@@ -280,6 +280,7 @@ roadmap item named:
 | `Widgets(Ui)` with a `Theme` struct | `Widgets(Ui, Skin)` | `zui_widgets/` | K5 |
 | `zui_debug`'s inspector runs in the application's process; a frame on the wire carries no elements for it | over the wire, the inspector runs in another process (SPEC.md §19.7) | `zui_debug/`, `zui_wire/` | not yet queued |
 | `Frame.semantics()` lists each element's role, label, value, state and actions, and `action` events are answered, but no host bridges them to a platform's accessibility API | the Windows host bridges semantics to UI Automation | `../zui-host` | V2 |
+| zui-host's Linux host speaks Wayland only, at whole buffer scales, and reports no key repeat, lifecycle events, environment beyond focus, clipboard, drops, file changes or IME | a Linux host on Wayland and X11 with every report the Windows host makes, and a system material where the compositor offers one | `../zui-host` | H4 |
 
 Unchanged in shape: element storage in pre-order structure-of-arrays, the
 layout passes, the segment cache, ids, the state table, the frame arenas,
@@ -290,7 +291,7 @@ parallel measurement and the module boundary.
 | Repository | Holds |
 |---|---|
 | `zui` | the core, the contracts, and the modules: async, widgets, reflect, testing, tracy, app, wire, debug, motion, color, icons |
-| `zui-host` | native hosts, one directory per OS, chosen by target: `windows/` today (H2) |
+| `zui-host` | native hosts, one directory per OS, chosen by target: `windows/` (H2) and `linux/`, on Wayland (H4) |
 | `zui-raylib`, `zui-sokol`, `zui-terminal` | renderers; `zui-raylib` also ships the raylib adapter host |
 | `zui-web` | the browser: a thin client over `zui_wire` (V4), then a web host (H5); today the client's decoder, in WebAssembly, and its drawing of shapes, text, backdrop blurs and materials through WebGL 2 with four samples per pixel, checked against zui-sokol's renderer drawing the tour's frames, and the page's input written back as records the tour takes, with the cursor its frames ask for shown on the canvas; and zui-sokol's tour in a Web Worker on an `Io` of its own, whose tasks take turns on workers sharing its memory, drawing the frames it draws natively and timing them on the worker's clock; and the page that puts them together, published to GitHub Pages from CI and made cross-origin isolated by a service worker of its own |
 | `zui-themes` | skins for OS design languages (K4); a skeleton today |
@@ -314,7 +315,9 @@ zui-terminal's loops still do a host's work by hand, but zui-sokol's
 renderer also draws into a native host's `win32` window without
 sokol_app, with D3D11 through a DirectComposition swapchain that keeps
 alpha so a system material shows (H8), and zui-host runs zui-sokol's tour
-that way (H2), through `zui_app` with the tour's own text contract (C9). zui-host pins zui and zui-sokol by commit, as the renderers pin
+that way (H2), through `zui_app` with the tour's own text contract (C9);
+on Linux it draws into a native host's `wayland` surface with OpenGL
+through EGL, and zui-host's Linux host runs the same tour (H4). zui-host pins zui and zui-sokol by commit, as the renderers pin
 zui; its Windows host runs its message loop on a thread of its own. Its
 `remote` example runs zui-sokol's tour on `zui_wire`'s host and renderer
 in one process, and draws it in another, through a `zui_wire.Client` over

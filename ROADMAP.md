@@ -72,7 +72,7 @@ green, and its **Status** line below says which slice is next.
 | G6. HDR and wide gamut | 8 | `src/context.zig`, `src/commands.zig`, `src/surface.zig`, `zui_wire/`, `zui_testing/`, `../zui-sokol`, `../zui-host` | | waiting on a session under Windows with an HDR display: zui-sokol's FP16 `.win32` swapchain and zui-host's `.scrgb_fp16` window |
 | V2. Semantics and accessibility actions | 9 | `src/context.zig`, `zui_widgets/`, `../zui-host` | | in progress; the UI Automation bridge waits on a session under Windows |
 | H3. macOS | 10 | `../zui-host` | | |
-| H4. Linux | 10 | `../zui-host` | | |
+| H4. Linux | 10 | `../zui-host`, `../zui-sokol` | | in progress; slice 2, key repeat, lifecycle and the environment, is next |
 | H5. Web | 10 | `../zui-web` | | |
 | H6. Services | 10 | `src/host.zig`, `../zui-host` | | |
 | H7. Window decorations | 10 | `src/host.zig`, `../zui-host` | | |
@@ -3540,6 +3540,97 @@ Windows, so it waits for one.
 
 **Done when (each):** the host passes C3, and the demo runs on it
 unchanged.
+
+### H4. Linux
+
+**Grounding.** zui-host has one directory per OS, and `zui_host.Host`
+is a compile error on anything but Windows (`zui_host.zig:8-11`); its
+build links Win32 libraries and builds the examples only there
+(`build.zig:17-19`, `build.zig:43`). The Windows host is the shape to
+follow: an `Inbox` of events in physical pixels (`windows/host.zig:84`),
+converted to layout units at `zuiPoll` (`:203`, `:245`), a sticky wake
+cleared after the wait (`:272`), and a harness that delivers what the OS
+would, synchronously, to the host's own handlers
+(`windows/conformance.zig:36`, `:66`). Its message loop runs on a thread
+of its own (`:348`) only because Windows runs moves and resizes in a
+modal loop; a Wayland client has no such loop, so one thread suffices.
+SPEC.md §16.4's `wayland` surface is a display and a surface
+(`src/surface.zig:48`), the objects of libwayland-client: EGL's and
+Vulkan's Wayland platforms take exactly those, so a host that spoke the
+protocol itself would give a surface no GPU driver can draw into.
+sokol-zig links libwayland-client, libwayland-egl, libxkbcommon and EGL
+for its own Wayland window (its `build.zig`, the `wayland` option), so
+linking them is the ecosystem's way. zui-sokol draws into a native window
+only on Windows (`src/renderer.zig:29`, `:50`, `:119`), through a context
+of its own, as `src/wgl.zig` does with WGL; on Linux sokol_gfx draws with
+OpenGL, so a `.wayland` surface is an EGL context on a `wl_egl_window`.
+The tour on the host (`examples/tour.zig:171`, `:114`, `:217`) names
+`.win32` and reads the process's CPU time and the screen through Win32.
+
+**Plan.** In slices, each passing C3 where it can run:
+1. **A Wayland window** (`linux/`): libwayland-client with xdg-shell's
+   interfaces written in Zig, a `.wayland` surface, integer scale from
+   `wl_surface.preferred_buffer_scale`, the pointer, the wheel by
+   notch, keys through xkbcommon with modifiers, the evdev code and
+   typed text, focus, the close button, the cursor through
+   `wp_cursor_shape_v1`, and waits on the display, an `eventfd` wake and
+   a deadline. zui-sokol draws into `.wayland` through EGL; the tour runs
+   on it; the host suite runs against an unmapped window, skipping with
+   a message where no compositor runs.
+2. **Repeat, lifecycle and the environment:** key repeat from
+   `repeat_info`, SIGINT and SIGTERM as `.terminate_requested` (the
+   handler sets a flag and wakes), the theme, contrast and reduced
+   motion from the XDG desktop portal's settings over D-Bus, and power
+   from UPower.
+3. **Fractional scale, the clipboard, drops and file watching:**
+   `wp_fractional_scale_v1` with `wp_viewporter`, `wl_data_device`'s
+   selection as `zuiClipboard` and its drops as `files_dropped`,
+   `zuiFileWatch` through inotify; `zig build theme` on Linux.
+4. **The IME:** `zwp_text_input_v3`, enabled while a frame asks for text
+   input, its cursor rectangle at the caret, committed text as `text`.
+5. **The material:** an alpha surface, KDE's `org_kde_kwin_blur` where
+   KWin offers it, and `ext_background_effect_v1` where a compositor
+   offers that, reported as `Environment.system_material`.
+6. **X11:** an X11 host with the same reports, and `zui_host.Host`
+   choosing Wayland when a compositor answers and X11 otherwise, its
+   surface `.wayland` or `.x11`; zui-sokol draws both through EGL.
+
+**Done when:** the host passes C3 on Wayland and on X11, in CI under a
+headless compositor and Xvfb; zui-sokol's tour runs on it unchanged and
+idles at 0% CPU; and the theme example restyles on a file change.
+
+**Spec.** §7, §16.3, §16.4, §21 (stage 10).
+
+**Status.** Slice 1 is done: zui-host `e9607a3` (`linux/host.zig`,
+`linux/wayland.zig`, `linux/xkb.zig`, `linux/keys.zig`) and zui-sokol
+`301765b` (`src/egl.zig`), neither pushed; zui-host's pin moves to
+zui-sokol `301765b` once it is. On Hyprland with an NVIDIA RTX 2060
+SUPER, the host suite and six tests of the host's own pass in Debug,
+ReleaseFast and ReleaseSafe against a window the compositor never shows,
+and skip with a message without a compositor; the tour drew 1,500 frames
+across every screen in a tiled window, seen in a screenshot, with no
+layer overflow; and Layout Lab idled at 1.2 to 4.4 ms of CPU over 10 s,
+with 0 or 1 frames and no wakes, in five ReleaseSafe runs of six (the
+sixth drew 96 frames for the pointer over the window). zui-host's CI
+gains a Linux job under a headless Weston, not yet run. Slice 2 is next.
+
+Decided here:
+- **libwayland-client, linked,** as sokol-zig links it, since the surface
+  must be its objects; xdg-shell's and cursor-shape-v1's interfaces are
+  written in Zig rather than generated at build time, so the build needs
+  no wayland-scanner or protocol files.
+- **One thread:** the host reads and dispatches in `zuiPoll` and
+  `zuiWait`; a wait ends on input, a wake, a configure, a new scale or
+  the close button, and the compositor's other events (a buffer
+  released after each frame) are dispatched without ending it, which is
+  what lets the tour idle.
+- **The renderer sizes the surface:** zui-sokol resizes its
+  `wl_egl_window` to each frame's viewport in physical pixels, since a
+  Wayland surface has no size until a buffer is attached.
+- **An unshown window is a surface without a role,** so the suite runs
+  against a real compositor without showing a window.
+- **A logical key** is the keysym at the key's first level, or its US
+  place where that names no key; `scancode` is the evdev code.
 
 ---
 
