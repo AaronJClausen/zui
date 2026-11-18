@@ -8,6 +8,7 @@
 //   const tour = await runTour(canvas, (error) => show(error));
 //   tour.framesDrawn; // so far
 //   tour.wakes; // the times the page stepped the tour, drawing a frame or not
+//   tour.onStep = ({ now, wakeAt, tasks }) => log.push(wakeAt - now); // Infinity: until input
 
 import { startClient } from "./client.mjs";
 import { FrameDrawer } from "./frame_drawer.mjs";
@@ -93,6 +94,7 @@ export async function runTour(canvas, stopped) {
     tour.wakes += 1;
     tour.tasks = tasks;
     tour.frameMicroseconds = frameMicroseconds;
+    tour.onStep?.({ now, wakeAt, tasks });
     if (receive(bytes)) {
       const drawStarted = performance.now();
       drawer.draw();
