@@ -370,6 +370,32 @@ fn panelFor(id: zui.Id) Ui.Element {
 }
 ```
 
+<a id="extended-color"></a>
+
+### HDR and wide-gamut color · *shipped*
+
+`Config.Color = zui.ExtendedColor` declares colors in linear scRGB, where 1.0 is SDR white: above it for HDR, outside 0 to 1 for wide gamut, written `.linear(4, 4, 4, 1)` or with `Color`'s own `.rgb(0x3366ff)`. Every type that holds a color follows it: `Ui.Decoration`, `Ui.Border`, `Ui.Effects`, `Ui.TextStyle`. For a renderer that draws only `zui.Color`, each is clamped as it is emitted, and `frame.diagnostics.clamped_colors` says when that changed one; `zui_wire` carries them unclamped when its context's renderer draws them. A host and a renderer that both declare `.scrgb_fp16` in `zui_output_formats` open the window with it in `WindowOptions.output_formats`, and the host picks it while its display shows HDR; `surface.outputFormat()` says which it chose. zui-host's Windows host picks it on a monitor in HDR and reports `ui.environment().hdr_headroom`, the monitor's peak over SDR white (1 in SDR), so a theme can tell how bright a highlight may go. zui-sokol draws that window into a half-float scRGB swapchain, with SDR white where other windows show theirs, and zui-host's `zig build hdr` shows two and four times SDR white beside it, measured off the desktop at 2.00× and 4.00×. The renderer suite reads an FP16 target back and expects HDR white there at four times SDR white.
+
+`src/ui/exposure.zig`
+
+```zig
+const Ui = zui.Context(zui_app.contextConfig(Renderer, .{ .Color = zui.ExtendedColor }));
+
+const caption: zui.ExtendedColor = .rgb(0xe0e0e0);
+
+fn highlightSwatch(ui: *Ui, photo: *const Photo) void {
+    const brightest = @min(ui.environment().hdr_headroom, photo.peak_over_white);
+    ui.open(.{ .layout = .{ .direction = .top_to_bottom, .child_gap = 6 } });
+    defer ui.close();
+    ui.box(.{
+        .id = .of("highlight"),
+        .layout = .{ .sizing = .{ .width = .fixed(96), .height = .fixed(96) } },
+        .decoration = .{ .background = .linear(brightest, brightest, brightest, 1), .corner_radius = .all(6) },
+    });
+    ui.text("Highlights", .{ .size = 12, .color = caption });
+}
+```
+
 <a id="ids"></a>
 
 ### Ids · *shipped*
@@ -2039,7 +2065,6 @@ Build with `-Dzui-tracy=true` to link Tracy's client, then connect profiler 0.14
 These names compile, but they don't do anything yet. This list is from `ARCHITECTURE.md` §7 and the roadmap.
 
 - **Accessibility on a platform** *(no host bridge yet)*: `Frame.semantics()` lists each element's role, label, value, state and actions, and `action` events are answered, but no host bridges them to a platform's accessibility API yet. The Windows host's UI Automation bridge is the rest of V2.
-- **Extended color** *(clamped only)*: `Config.Color = zui.ExtendedColor` declares colors brighter than SDR white or outside sRGB, as `.linear(4, 4, 4, 1)` or with `Color`'s own `.rgb(0x3366ff)`, and every type that holds a color follows it: `Ui.Decoration`, `Ui.Border`, `Ui.Effects`, `Ui.TextStyle`. For a renderer that draws only `zui.Color`, each is clamped as it is emitted, and `frame.diagnostics.clamped_colors` says when that changed one. zui-sokol declares `zui_extended_color`, so it is given them as declared, and encodes them into its 8-bit sRGB target; `zui_wire` carries them unclamped when its context's renderer draws them, and the renderer suite declares its scene in them, with a box of HDR white. A host and a renderer that both declare `.scrgb_fp16` in `zui_output_formats` open the window with it in `WindowOptions.output_formats`, and the host's surface says which format it chose, `surface.outputFormat()`; SDR otherwise. The renderer suite reads an FP16 target back through a harness's `extendedPixel` and expects HDR white there at four times SDR white. zui-sokol draws an `.offscreen` surface in `.scrgb_fp16`, in linear light, and passes the suite there, reading HDR white back at four times SDR white. No host opens an FP16 window yet, so no window is brighter than SDR white: that, and the host's headroom, are the rest of G6.
 - **Still to come**: Motion, multi-line text editing, skins, the inspector over the wire, and more hosts (macOS, Linux, web).
 
 <a id="dx"></a>

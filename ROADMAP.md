@@ -30,7 +30,7 @@ Each item says:
 | stage 6 | the single-line fast path (T1), the whole-string cache (T2), static styles (L8), the box tree's layout and emission (P4) and declaration (P5), line-break segmentation (T4), the grow basis (L1), aspect ratio and natural sizes (L2), dividers and decorated images (L3), floating options (L4), right-to-left layout (L6), wrap (L7); the backends drawing images' tint and corner radius (C10) | done; the box tree's and warm text's budgets met, as they were then judged with Turbo Boost on: the box tree declares in 48.9 µs and lays out and emits in 89.2 µs, warm text in 90.5 µs; a box tree of static styles declares in 28.0 µs; zui-raylib and zui-sokol draw tinted, rounded images and pass the renderer suite that checks them |
 | stage 7 | gestures (I5): arbitration by motion component, zoom, long press, double tap, momentum, the intents and custom recognizers; drag and drop between elements (I1) | done: a carousel in a list, a pinch starting on a list inside a map, a lasso module against a map's pan, and `zui_testing.Driver.drag` moving an item between two lists, out of one that scrolls by dragging |
 | after stage 7: the foundation | G1's first slice ran 5.5% to 7.7% more instructions in scenes that draw no effect, so the work turned to what lay under it: benchmarks that can be trusted (R3 to R9) and the data-oriented design audit's findings (P6 to P10) | done; a commit compared with itself over three code layouts calls nothing, its intervals 0.52% wide on average, and a change that only moves code is not called; a tooltip declared before a 3,000-cell grid lays out in 79 µs, not 671 µs (P6); warm text −43% (P9); `init` from 138 µs to 92 µs (P7, P10); the budgets judged in benchmarking mode |
-| stage 8, begun | gradients, shadows and glow (G1); backdrop blur (G2); effects in the corners of a decoration that draws nothing (G7); transforms with hit inversion (G3); materials (G5) | G1, G2, G7, G3 and G5 done: zui-sokol draws gradients, shadows, backdrop blurs, transforms and materials through a shader of its own and passes the renderer suite, its effects rounded by a decoration that draws nothing, a pointer hits a turned button where it is drawn, and a frame without effects runs no more instructions than before; G6 begun: `zui.ExtendedColor` is declared and clamped for a renderer that draws only `Color`, and zui-sokol draws it into an scRGB FP16 offscreen image and passes the renderer suite there |
+| stage 8 | gradients, shadows and glow (G1); backdrop blur (G2); effects in the corners of a decoration that draws nothing (G7); transforms with hit inversion (G3); materials (G5); HDR and wide gamut (G6) | done: zui-sokol draws gradients, shadows, backdrop blurs, transforms and materials through a shader of its own and passes the renderer suite, its effects rounded by a decoration that draws nothing, a pointer hits a turned button where it is drawn, and a frame without effects runs no more instructions than before; `zui.ExtendedColor` is clamped for a renderer that draws only `Color`, and on a monitor in HDR the Windows host opens the window in scRGB and reports its headroom, and zui-sokol shows twice SDR white at 2.00× and four times it at 4.00×, measured off the desktop |
 | stage 9, begun | `zui_debug` (V1); the demo in a browser (V4) | V4 done: zui-sokol's tour runs in a browser at the display's frame rate, from <https://aaronjclausen.github.io/zui-web/>, in a Web Worker behind a page that draws its frames over `zui_wire` and sleeps between the frames the tour needs; V1 done: `Frame.inspect` and the inspector's diagnostics, fallbacks, zone times from its `ZoneTimer` tracer, element tree and hovered element's configs, and its theme reloaded from a watched file; zui-raylib's tour opens it with F12 through `zui_app`'s `zuiObserve`, and draws every screen with it open within its limits |
 
 No release is tagged; everything is on `main`. From here, work is
@@ -68,7 +68,6 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
-| G6. HDR and wide gamut | 8 | `src/context.zig`, `src/commands.zig`, `src/surface.zig`, `zui_wire/`, `zui_testing/`, `../zui-sokol`, `../zui-host` | | waiting on a session under Windows with an HDR display: zui-sokol's FP16 `.win32` swapchain and zui-host's `.scrgb_fp16` window |
 | V2. Semantics and accessibility actions | 9 | `src/context.zig`, `zui_widgets/`, `../zui-host` | | in progress; the UI Automation bridge waits on a session under Windows |
 | H3. macOS | 10 | `../zui-host` | | |
 | H4. Linux | 10 | `../zui-host`, `../zui-sokol` | | in progress; slice 3, fractional scale, the clipboard, drops and file watching, is next |
@@ -159,6 +158,117 @@ Things to know:
 ---
 
 ## Done
+
+### G6. HDR and wide gamut
+
+**Plan.** `Config.Color = zui.ExtendedColor`, clamped for renderers
+without `zui_extended_color`; headroom from the environment; the output
+format negotiated through `Surface`.
+
+**Done when:** snapshot and lowering tests; the renderer suite's
+reference scene declares it, and one renderer that declares it passes
+the suite; the Windows host shows HDR white brighter than SDR white.
+
+The first slice landed the core: `zui.ExtendedColor`
+(4×f16 linear scRGB, with `Color`'s helpers), `Config.Color` and its
+compile error, and `Config.extended_color`, which `zui_app.contextConfig`
+takes from the renderer. Every type that holds a color is generic over
+it (`zui.BorderWith`, `EffectsWith`, `GradientWith`, `ShadowWith`,
+`BackdropBlurWith`, `DecorationWith(Color, MaterialHandle)`,
+`TextStyleWith`), named by the context as `Ui.Border` and the rest, and
+`zui`'s own unless `Color` is `ExtendedColor`. The commands carry
+`Ui.CommandColor`: emission clamps each color for a renderer that draws
+only `Color` and sets `Diagnostics.clamped_colors` when that changed
+one. A context in `Color` runs the same instructions as before in
+every `counts` scenario, and `bench-compare` against `2ac7223` calls
+no scenario slower. The flag first made `Diagnostics` 104 bytes, which
+moved every array of the frame after it by 8 and made the box tree's
+declaration 3.4% slower (2.8% for the documents view);
+`duplicate_ids` became a saturating `u16`, so it stays 96.
+The second slice declares the renderer suite's reference scene in
+`ExtendedColor`, with a box of HDR white, and takes the suite's
+`extended_color` from the renderer, so one that declares
+`zui_extended_color` is given every color as declared and must encode
+it as `toColor` does (a test renderer that skips the encoding fails);
+`zui_wire.Renderer(Ui)` declares `zui_extended_color` when `Ui`'s
+commands carry `ExtendedColor`, and its commands round-trip in either
+color. `toColor(fromColor(c))` is `c` for every 8-bit channel, so
+zui-terminal still passes at a tolerance of 0, and zui-raylib and
+zui-sokol pass unchanged against this checkout.
+The third slice, in zui-sokol (`64737d9`, pinned to `b6d3086`):
+its renderer declares `zui_extended_color`, so `zui_sokol.config`
+sets `extended_color`, and it encodes each command's color at the
+point it is drawn, as `toColor` does, from either color the
+application declares; it passes the suite in its sokol_app window, and
+fails it when the channels are encoded linearly instead.
+The fourth slice negotiates the output format: `zui.OutputFormat`
+(`.sdr`, `.scrgb_fp16`) and a host's and a renderer's optional
+`zui_output_formats`, which must include `.sdr`, and in a renderer
+names `.scrgb_fp16` only beside `zui_extended_color`, each a compile
+error. `zui_app` opens the window with the formats both declare,
+`zui.sharedOutputFormats`, in `WindowOptions.output_formats`, and
+reports them; each native `Surface` carries the format the host chose,
+`.sdr` by default, so the backends compile unchanged, and
+`surface.outputFormat()` reads it. The host suite fails a surface in a
+format the host does not declare. The core's hot paths are untouched;
+zui-raylib, zui-sokol and zui-terminal pass against this checkout.
+The fifth slice reads an `.scrgb_fp16` target back: a harness whose
+`beginDraw` returns a surface in that format is read through its
+optional `extendedPixel`, HDR white must read back as `hdr_white`
+(four times SDR white, within the tolerance's share of it), and a
+translucent color is expected to blend, and a blur to average, in
+linear light there. The suite's own test renderer draws into either
+target and passes in both; one that clamps HDR into its FP16 target
+fails, reading back SDR white. Nothing outside `zui_testing` changed.
+The sixth slice, in zui-sokol (`af617f2`, pinned to `24e3706`): its
+renderer takes an `.offscreen` surface and draws into an image of its
+own in the surface's format, RGBA16F for `.scrgb_fp16`, in linear
+light, through a shader with sokol_gl's layout that decodes each 8-bit
+sRGB vertex color and texel; a color brighter than SDR white is
+carried divided by its brightest channel, which rides in sokol_gl's
+per-vertex point size and is multiplied back. Its conformance run
+passes the suite into the swapchain and into `.sdr` and `.scrgb_fp16`
+offscreen images, and fails the FP16 run when HDR is clamped. It does
+not declare `zui_output_formats` yet, since its `.win32` swapchain is
+still 8-bit.
+
+The seventh slice, in zui-host (`113a5af`): the Windows host declares
+`zui_output_formats` with `.scrgb_fp16`. It reads the monitor the window
+is on through DXGI (whether Windows runs it in HDR, and its peak) and the
+display configuration (the SDR white level the SDR content brightness
+slider sets), opens the surface in `.scrgb_fp16` there when the window
+was opened with it and in `.sdr` otherwise, and reports
+`Environment.hdr_headroom`, the peak over SDR white, or 1 in `.sdr`. It
+reads them again when the window moves to another monitor, the displays
+change, or a setting does. `forced_display_color` keeps its tests off the
+monitor.
+The eighth slice, in zui-sokol (`df9a490`): the renderer declares
+`zui_output_formats` with `.scrgb_fp16` when it draws through
+DirectComposition (not with `-Dgl=true`). A `.win32` surface in
+`.scrgb_fp16` resizes the composition swapchain to RGBA16F in linear
+scRGB, draws the frame as into an `.scrgb_fp16` offscreen image, which
+the suite checks, and copies it into the swapchain through a shader that
+multiplies each color by the monitor's SDR white over 80 nits, since
+zui's scRGB puts SDR white at 1.0 and the swapchain's puts 80 nits there.
+The level is read at most twice a second, since the slider tells no
+window when it moves.
+The ninth, in zui-host (`acc379f`): `zig build hdr` shows boxes of SDR
+white and two and four times it, and `-- --measure` reads them back off
+the desktop in scRGB through DXGI's desktop duplication, which sees past
+SDR white where GDI clips at it. On the reference machine's monitor in
+HDR (a 1,068-nit peak, SDR white at 280 nits): `scrgb_fp16`, headroom
+3.81; SDR white 3.500 in scRGB, twice it 7.000, four times it 14.000,
+2.00× and 4.00× SDR white. zui-host's tour, zui-sokol's demo, its
+conformance run and every test pass in `.sdr` as before.
+
+Left for later: the SDR content brightness slider is read again only
+when the window moves, the displays change or a setting does, and by
+zui-sokol twice a second, so a headroom reported after the slider moves
+waits for one of those; the Linux host (H4) and macOS (H3) report no
+headroom. zui-host pins zui-sokol `301765b`, so its `hdr` example opens
+in `.sdr` until the pin moves to `df9a490` once that is pushed.
+
+**Spec.** §13.1, §13.3, §16.4, §18.
 
 ### R9. Measuring across operating systems and hardware
 
@@ -3400,93 +3510,7 @@ scene does not ship.
 
 ## Stage 8: effects
 
-- **G6. HDR and wide gamut:** `Config.Color = zui.ExtendedColor`, clamped
-  for renderers without `zui_extended_color`; headroom from the
-  environment; the output format negotiated through `Surface`.
-
-  **Status.** The first slice landed the core: `zui.ExtendedColor`
-  (4×f16 linear scRGB, with `Color`'s helpers), `Config.Color` and its
-  compile error, and `Config.extended_color`, which `zui_app.contextConfig`
-  takes from the renderer. Every type that holds a color is generic over
-  it (`zui.BorderWith`, `EffectsWith`, `GradientWith`, `ShadowWith`,
-  `BackdropBlurWith`, `DecorationWith(Color, MaterialHandle)`,
-  `TextStyleWith`), named by the context as `Ui.Border` and the rest, and
-  `zui`'s own unless `Color` is `ExtendedColor`. The commands carry
-  `Ui.CommandColor`: emission clamps each color for a renderer that draws
-  only `Color` and sets `Diagnostics.clamped_colors` when that changed
-  one. A context in `Color` runs the same instructions as before in
-  every `counts` scenario, and `bench-compare` against `2ac7223` calls
-  no scenario slower. The flag first made `Diagnostics` 104 bytes, which
-  moved every array of the frame after it by 8 and made the box tree's
-  declaration 3.4% slower (2.8% for the documents view);
-  `duplicate_ids` became a saturating `u16`, so it stays 96.
-  The second slice declares the renderer suite's reference scene in
-  `ExtendedColor`, with a box of HDR white, and takes the suite's
-  `extended_color` from the renderer, so one that declares
-  `zui_extended_color` is given every color as declared and must encode
-  it as `toColor` does (a test renderer that skips the encoding fails);
-  `zui_wire.Renderer(Ui)` declares `zui_extended_color` when `Ui`'s
-  commands carry `ExtendedColor`, and its commands round-trip in either
-  color. `toColor(fromColor(c))` is `c` for every 8-bit channel, so
-  zui-terminal still passes at a tolerance of 0, and zui-raylib and
-  zui-sokol pass unchanged against this checkout.
-  The third slice, in zui-sokol (`64737d9`, pinned to `b6d3086`):
-  its renderer declares `zui_extended_color`, so `zui_sokol.config`
-  sets `extended_color`, and it encodes each command's color at the
-  point it is drawn, as `toColor` does, from either color the
-  application declares; it passes the suite in its sokol_app window, and
-  fails it when the channels are encoded linearly instead.
-  The fourth slice negotiates the output format: `zui.OutputFormat`
-  (`.sdr`, `.scrgb_fp16`) and a host's and a renderer's optional
-  `zui_output_formats`, which must include `.sdr`, and in a renderer
-  names `.scrgb_fp16` only beside `zui_extended_color`, each a compile
-  error. `zui_app` opens the window with the formats both declare,
-  `zui.sharedOutputFormats`, in `WindowOptions.output_formats`, and
-  reports them; each native `Surface` carries the format the host chose,
-  `.sdr` by default, so the backends compile unchanged, and
-  `surface.outputFormat()` reads it. The host suite fails a surface in a
-  format the host does not declare. The core's hot paths are untouched;
-  zui-raylib, zui-sokol and zui-terminal pass against this checkout.
-  The fifth slice reads an `.scrgb_fp16` target back: a harness whose
-  `beginDraw` returns a surface in that format is read through its
-  optional `extendedPixel`, HDR white must read back as `hdr_white`
-  (four times SDR white, within the tolerance's share of it), and a
-  translucent color is expected to blend, and a blur to average, in
-  linear light there. The suite's own test renderer draws into either
-  target and passes in both; one that clamps HDR into its FP16 target
-  fails, reading back SDR white. Nothing outside `zui_testing` changed.
-  The sixth slice, in zui-sokol (`af617f2`, pinned to `24e3706`): its
-  renderer takes an `.offscreen` surface and draws into an image of its
-  own in the surface's format, RGBA16F for `.scrgb_fp16`, in linear
-  light, through a shader with sokol_gl's layout that decodes each 8-bit
-  sRGB vertex color and texel; a color brighter than SDR white is
-  carried divided by its brightest channel, which rides in sokol_gl's
-  per-vertex point size and is multiplied back. Its conformance run
-  passes the suite into the swapchain and into `.sdr` and `.scrgb_fp16`
-  offscreen images, and fails the FP16 run when HDR is clamped. It does
-  not declare `zui_output_formats` yet, since its `.win32` swapchain is
-  still 8-bit.
-  Next: zui-sokol's `.win32` swapchain in RGBA16F (D3D11 through
-  DirectComposition, in scRGB) and `zui_output_formats` on the renderer,
-  and zui-host's Windows host declaring `.scrgb_fp16` and reporting
-  `hdr_headroom`, whose *Done when* needs a run on Windows with an HDR
-  display.
-
-C1 generated the optional commands' variants; each item here adds the
-declaration that produces its command and the lowering for renderers that
-do not declare it, listed in `Diagnostics.lowered`, which G1 added (in
-*Done*). The renderer that declares each command is zui-sokol, as for
-G1 and G2: the command joins `Renderer.zui_commands`, gets an arm in
-`Renderer.record`, and is shown on its tour (G1's and G2's are on the
-Light & Depth screen, G3's on the Transforms screen, G5's on the Materials screen). Develop it with `--fork=../zui`; once the user has the zui
-change pushed, move the pin with `zig fetch --save=zui`.
-
-**Done when (each):** snapshot and lowering tests; the renderer suite's
-reference scene declares it, and one renderer that declares the command
-passes the suite; for G6, the Windows host shows HDR white brighter than
-SDR white.
-
-**Spec.** §13.1, §13.3, §16.4, §18.
+Done: G1, G2, G7, G3, G5 and G6 are in *Done*.
 
 ---
 

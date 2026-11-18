@@ -187,7 +187,7 @@ Implemented so far:
   every command (671 µs to 79 µs), warm texts that wrap reuse their lines
   (43% faster), `init` takes 92 µs instead of 138 µs, and the id-to-rect
   table is 96 KiB smaller.
-- **Stage 8, begun:** effects. `.effects = &.{ .gradient = ..., .shadow
+- **Stage 8:** effects. `.effects = &.{ .gradient = ..., .shadow
   = ... }` gives an element a linear gradient, interpolated in OKLab,
   and a shadow, which with no offset is a glow, both in the shape of its
   rounded box. A renderer that declares `.gradient` and `.shadow` gets
@@ -217,8 +217,10 @@ Implemented so far:
   in `zui_output_formats` open the window in it, and its surface says
   which format the host chose. The renderer suite reads an FP16 target
   back and checks HDR white there; zui-sokol draws an `.offscreen`
-  surface in `.scrgb_fp16` in linear light and passes it, but no host
-  opens an FP16 window yet, so no window is HDR.
+  surface in `.scrgb_fp16` in linear light and passes it. On a monitor
+  in HDR, zui-host's Windows host opens the window in `.scrgb_fp16` and
+  reports `hdr_headroom`, and zui-sokol draws it into a half-float scRGB
+  swapchain, where twice SDR white shows twice as bright.
   An element or frame without effects pays nothing for them.
 - **Stage 9, begun:** seeing the UI. `frame.inspect(index)` reports
   everything a frame kept of one element, and `zui_debug.Inspector(Ui)`

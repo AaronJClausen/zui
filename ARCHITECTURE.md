@@ -276,7 +276,6 @@ roadmap item named:
 
 | Today | The spec | Where today | Item |
 |---|---|---|---|
-| output formats are negotiated through `Surface`, and zui-sokol draws an `.scrgb_fp16` offscreen image, but no host or renderer declares `.scrgb_fp16` for a window, and no host reports `hdr_headroom` | an FP16 swapchain when both sides support it; headroom from the display | `../zui-sokol`, `../zui-host` | G6 |
 | `Widgets(Ui)` with a `Theme` struct | `Widgets(Ui, Skin)` | `zui_widgets/` | K5 |
 | `zui_debug`'s inspector runs in the application's process; a frame on the wire carries no elements for it | over the wire, the inspector runs in another process (SPEC.md §19.7) | `zui_debug/`, `zui_wire/` | not yet queued |
 | `Frame.semantics()` lists each element's role, label, value, state and actions, and `action` events are answered, but no host bridges them to a platform's accessibility API | the Windows host bridges semantics to UI Automation | `../zui-host` | V2 |

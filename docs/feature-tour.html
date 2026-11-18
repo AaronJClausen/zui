@@ -704,6 +704,28 @@ fn panelFor(id: zui.Id) Ui.Element {
 </script>
       </article>
 
+      <article class="feature" id="extended-color" data-title="HDR and wide-gamut color">
+        <div class="feature-head"><h3>HDR and wide-gamut color</h3><span class="pill shipped">Shipped</span></div>
+        <p><code class="z">Config.Color = zui.ExtendedColor</code> declares colors in linear scRGB, where 1.0 is SDR white: above it for HDR, outside 0 to 1 for wide gamut, written <code class="z">.linear(4, 4, 4, 1)</code> or with <code class="z">Color</code>'s own <code class="z">.rgb(0x3366ff)</code>. Every type that holds a color follows it: <code class="z">Ui.Decoration</code>, <code class="z">Ui.Border</code>, <code class="z">Ui.Effects</code>, <code class="z">Ui.TextStyle</code>. For a renderer that draws only <code class="z">zui.Color</code>, each is clamped as it is emitted, and <code class="z">frame.diagnostics.clamped_colors</code> says when that changed one; <code class="z">zui_wire</code> carries them unclamped when its context's renderer draws them. A host and a renderer that both declare <code class="z">.scrgb_fp16</code> in <code class="z">zui_output_formats</code> open the window with it in <code class="z">WindowOptions.output_formats</code>, and the host picks it while its display shows HDR; <code class="z">surface.outputFormat()</code> says which it chose. zui-host's Windows host picks it on a monitor in HDR and reports <code class="z">ui.environment().hdr_headroom</code>, the monitor's peak over SDR white (1 in SDR), so a theme can tell how bright a highlight may go. zui-sokol draws that window into a half-float scRGB swapchain, with SDR white where other windows show theirs, and zui-host's <code class="z">zig build hdr</code> shows two and four times SDR white beside it, measured off the desktop at 2.00× and 4.00×. The renderer suite reads an FP16 target back and expects HDR white there at four times SDR white.</p>
+<script type="text/x-zig" data-file="src/ui/exposure.zig">
+const Ui = zui.Context(zui_app.contextConfig(Renderer, .{ .Color = zui.ExtendedColor }));
+
+const caption: zui.ExtendedColor = .rgb(0xe0e0e0);
+
+fn highlightSwatch(ui: *Ui, photo: *const Photo) void {
+    const brightest = @min(ui.environment().hdr_headroom, photo.peak_over_white);
+    ui.open(.{ .layout = .{ .direction = .top_to_bottom, .child_gap = 6 } });
+    defer ui.close();
+    ui.box(.{
+        .id = .of("highlight"),
+        .layout = .{ .sizing = .{ .width = .fixed(96), .height = .fixed(96) } },
+        .decoration = .{ .background = .linear(brightest, brightest, brightest, 1), .corner_radius = .all(6) },
+    });
+    ui.text("Highlights", .{ .size = 12, .color = caption });
+}
+</script>
+      </article>
+
       <article class="feature" id="ids" data-title="Ids">
         <div class="feature-head"><h3>Ids</h3><span class="pill shipped">Shipped</span></div>
         <p>Ids are hashes, built at comptime where they can be. <code class="z">.of</code> names one element, <code class="z">.indexed</code> names one per list item, <code class="z">child</code> and <code class="z">indexedChild</code> scope ids under a parent so two dropdowns' options never collide, and <code class="z">.dynamic</code> hashes a runtime string. <code class="z">zui.ids</code> builds a struct of ids and fails to compile on a repeated name or a hash collision. Build with <code class="z">-Dzui-debug=true</code> and duplicate-id panics name the element.</p>
@@ -2163,7 +2185,6 @@ fn present(renderer: *Renderer, surface: zui.Surface, frame: *const Ui.Frame) !v
       <p class="group-intro">These names compile, but they don't do anything yet. This list is from <code>ARCHITECTURE.md</code> §7 and the roadmap.</p>
       <ul class="gap-list">
         <li><b>Accessibility on a platform <span class="pill partial">No host bridge yet</span></b><span><code class="z">Frame.semantics()</code> lists each element's role, label, value, state and actions, and <code class="z">action</code> events are answered, but no host bridges them to a platform's accessibility API yet. The Windows host's UI Automation bridge is the rest of V2.</span></li>
-        <li><b>Extended color <span class="pill partial">Clamped only</span></b><span><code class="z">Config.Color = zui.ExtendedColor</code> declares colors brighter than SDR white or outside sRGB, as <code class="z">.linear(4, 4, 4, 1)</code> or with <code class="z">Color</code>'s own <code class="z">.rgb(0x3366ff)</code>, and every type that holds a color follows it: <code class="z">Ui.Decoration</code>, <code class="z">Ui.Border</code>, <code class="z">Ui.Effects</code>, <code class="z">Ui.TextStyle</code>. For a renderer that draws only <code class="z">zui.Color</code>, each is clamped as it is emitted, and <code class="z">frame.diagnostics.clamped_colors</code> says when that changed one. zui-sokol declares <code class="z">zui_extended_color</code>, so it is given them as declared, and encodes them into its 8-bit sRGB target; <code class="z">zui_wire</code> carries them unclamped when its context's renderer draws them, and the renderer suite declares its scene in them, with a box of HDR white. A host and a renderer that both declare <code class="z">.scrgb_fp16</code> in <code class="z">zui_output_formats</code> open the window with it in <code class="z">WindowOptions.output_formats</code>, and the host's surface says which format it chose, <code class="z">surface.outputFormat()</code>; SDR otherwise. The renderer suite reads an FP16 target back through a harness's <code class="z">extendedPixel</code> and expects HDR white there at four times SDR white. zui-sokol draws an <code class="z">.offscreen</code> surface in <code class="z">.scrgb_fp16</code>, in linear light, and passes the suite there, reading HDR white back at four times SDR white. No host opens an FP16 window yet, so no window is brighter than SDR white: that, and the host's headroom, are the rest of G6.</span></li>
         <li><b>Still to come</b><span>Motion, multi-line text editing, skins, the inspector over the wire, and more hosts (macOS, Linux, web).</span></li>
       </ul>
     </section>
