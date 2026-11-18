@@ -265,8 +265,7 @@ Left for later: the SDR content brightness slider is read again only
 when the window moves, the displays change or a setting does, and by
 zui-sokol twice a second, so a headroom reported after the slider moves
 waits for one of those; the Linux host (H4) and macOS (H3) report no
-headroom. zui-host pins zui-sokol `301765b`, so its `hdr` example opens
-in `.sdr` until the pin moves to `df9a490` once that is pushed.
+headroom. zui-host pins zui-sokol `df9a490`.
 
 **Spec.** §13.1, §13.3, §16.4, §18.
 
