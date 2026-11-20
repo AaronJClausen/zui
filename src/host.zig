@@ -1,5 +1,6 @@
 const Wake = @import("sources.zig").Wake;
 const OutputFormats = @import("surface.zig").OutputFormats;
+const SemanticsCapacity = @import("semantics.zig").SemanticsCapacity;
 
 /// One of a host's windows. A host with one window calls it `.main`.
 pub const WindowId = enum(u32) {
@@ -38,6 +39,10 @@ pub const WindowOptions = struct {
     /// best its display shows, such as `.scrgb_fp16` on an HDR display,
     /// and falls back to `.sdr`.
     output_formats: OutputFormats = .initOne(.sdr),
+    /// Room for the window's accessibility bridge, which the host takes
+    /// when it opens the window; without it, a host leaves the window to
+    /// the OS's default accessibility.
+    semantics: SemanticsCapacity = .{},
 };
 
 /// The system's backdrop for a window, by role; each host maps it to the

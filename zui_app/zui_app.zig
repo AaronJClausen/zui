@@ -78,6 +78,9 @@ pub const Notice = union(enum) {
     publishes_refused: struct { source: []const u8, count: u32 },
     duplicate_ids: u32,
     unbalanced_tree,
+    /// The host's accessibility bridge had no room for the end of the
+    /// list; an assistive technology sees what came before.
+    semantics_dropped: zui.SemanticsDropped,
 
     pub fn format(self: Notice, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         switch (self) {
@@ -87,6 +90,7 @@ pub const Notice = union(enum) {
             .publishes_refused => |refused| try writer.print("the full source `{s}` refused {d} publishes; raise its capacity", .{ refused.source, refused.count }),
             .duplicate_ids => |count| try writer.print("{d} ids were declared twice in one frame; the second of each is not interactive", .{count}),
             .unbalanced_tree => try writer.writeAll("open and close were unbalanced; the frame closed what was left open"),
+            .semantics_dropped => |dropped| try writer.print("the host's accessibility bridge had no room for {d} semantic nodes and {d} bytes of their text; an assistive technology sees the rest", .{ dropped.nodes, dropped.text_bytes }),
         }
     }
 };
@@ -114,6 +118,7 @@ pub const Report = struct {
     lowered: zui.CommandSet,
     /// Host services that are absent.
     missing_services: Services,
+    accessibility: Accessibility,
 
     pub fn format(self: Report, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         try writer.print("{s} with {s}; {s}", .{ self.host, self.renderer, if (self.capabilities.windows == .many) "many windows" else "one window" });
@@ -125,6 +130,7 @@ pub const Report = struct {
         try writeSet(writer, "; output: ", self.output_formats);
         try writeSet(writer, "; lowered: ", self.lowered);
         try writeSet(writer, "; no host ", self.missing_services);
+        if (self.accessibility == .not_bridged) try writer.writeAll("; semantics on, but the host bridges none to an accessibility API");
     }
 
     fn writeSet(writer: *std.Io.Writer, comptime prefix: []const u8, set: anytype) std.Io.Writer.Error!void {
@@ -134,6 +140,16 @@ pub const Report = struct {
             try writer.print("{s}{t}", .{ if (first) prefix else ", ", member });
         }
     }
+};
+
+pub const Accessibility = enum {
+    /// `Config.features.semantics` is off.
+    off,
+    /// The host bridges `Frame.semantics()` to the platform's API.
+    bridged,
+    /// Semantics are on, but the host declares no `zuiSemantics`, so an
+    /// assistive technology sees only the window.
+    not_bridged,
 };
 
 pub const Submission = union(enum) {
@@ -224,7 +240,11 @@ pub const Setup = struct {
 ///   needs a default.
 ///
 /// The host declares `pub fn init(self: *Host, io: std.Io, window:
-/// zui.WindowOptions) !void` and `pub fn deinit(self: *Host) void`. The
+/// zui.WindowOptions) !void` and `pub fn deinit(self: *Host) void`. With
+/// `features.semantics`, a host that declares `zuiSemantics` opens the
+/// window with room for `Config.limits`' elements and text, and is handed
+/// each frame's list on the UI thread, after `zuiObserve` and before the
+/// frame is submitted. The
 /// renderer may declare `pub fn init(self: *Renderer, surface:
 /// zui.Surface) !void`, or with `App.Text` `pub fn init(self: *Renderer,
 /// surface: zui.Surface, text: *const Text) !void`, and `pub fn
@@ -282,6 +302,7 @@ pub fn Runner(comptime App: type) type {
             publishes_refused: bool = false,
             duplicate_ids: bool = false,
             unbalanced_tree: bool = false,
+            semantics_dropped: bool = false,
         };
 
         pub fn start(self: *Self, setup: Setup, options: Options) !void {
@@ -293,7 +314,7 @@ pub fn Runner(comptime App: type) type {
             self.render_task = .init;
 
             setFieldDefaults(Host, &self.host);
-            try self.host.init(setup.io, .{ .title = options.title, .size = options.size, .visible = options.visible, .resizable = options.resizable, .material = options.material, .output_formats = output_formats });
+            try self.host.init(setup.io, .{ .title = options.title, .size = options.size, .visible = options.visible, .resizable = options.resizable, .material = options.material, .output_formats = output_formats, .semantics = window_semantics });
             errdefer self.host.deinit();
             if (Text != void) {
                 if (@hasDecl(Text, "init")) {
@@ -341,11 +362,15 @@ pub fn Runner(comptime App: type) type {
                 .submission = self.startRenderThread(options),
                 .lowered = lowered,
                 .missing_services = missing_services,
+                .accessibility = accessibility,
             };
             self.notify(.{ .started = self.report });
         }
 
         const output_formats = zui.sharedOutputFormats(Host, Renderer);
+        const bridges_semantics = Ui.features.semantics and @hasDecl(Host, "zuiSemantics");
+        const window_semantics: zui.SemanticsCapacity = if (bridges_semantics) .{ .nodes = Ui.limits.max_elements, .text_bytes = Ui.limits.max_text_bytes } else .{};
+        const accessibility: Accessibility = if (!Ui.features.semantics) .off else if (bridges_semantics) .bridged else .not_bridged;
         const lowered = if (@hasDecl(Renderer, "zui_commands")) Renderer.zui_commands.complement() else zui.CommandSet.initFull();
         const missing_services = blk: {
             var missing: Services = .initEmpty();
@@ -380,6 +405,7 @@ pub fn Runner(comptime App: type) type {
             const drawn = self.ui.endFrame();
             self.noticeDiagnostics(drawn.diagnostics);
             if (@hasDecl(App, "zuiObserve")) self.app.zuiObserve(&self.ui, drawn);
+            if (bridges_semantics) self.noticeDroppedSemantics(self.host.zuiSemantics(window, drawn.semantics()));
 
             const surface = self.host.zuiSurface(window);
             if (self.report.submission == .render_thread) {
@@ -425,6 +451,12 @@ pub fn Runner(comptime App: type) type {
                 };
                 self.ui.release(pending.frame);
             } else |_| {}
+        }
+
+        fn noticeDroppedSemantics(self: *Self, dropped: zui.SemanticsDropped) void {
+            if (self.noticed.semantics_dropped or !dropped.any()) return;
+            self.noticed.semantics_dropped = true;
+            self.notify(.{ .semantics_dropped = dropped });
         }
 
         fn noticeDroppedInput(self: *Self) void {

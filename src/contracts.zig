@@ -7,6 +7,7 @@ const commands = @import("commands.zig");
 const surface = @import("surface.zig");
 const host = @import("host.zig");
 const record = @import("record.zig");
+const semantics = @import("semantics.zig");
 
 /// Every `zui`-prefixed declaration of every contract. One that is not
 /// here belongs to no contract, which is almost always a misspelling.
@@ -16,7 +17,9 @@ const known_declarations = text_declarations ++ source_declarations ++ renderer_
 const text_declarations = [_][]const u8{ "zuiMeasure", "zuiSegment", "zui_thread_safe", "zuiFingerprint" };
 const source_declarations = [_][]const u8{ "zuiSwap", "zuiView", "zuiDelivery", "zuiInject", "zuiPending", "zuiEndFrame", "zuiRefusedCount" };
 const renderer_declarations = [_][]const u8{ "zuiSubmit", "zui_surfaces", "zui_commands", "zui_extended_color", "zui_render_thread", "zui_output_formats" };
-const host_declarations = [_][]const u8{ "zuiPoll", "zuiWaker", "zuiWait", "zuiSurface", "zuiApply", "zui_capabilities", "zui_output_formats" } ++ host_services;
+const host_declarations = [_][]const u8{ "zuiPoll", "zuiWaker", "zuiWait", "zuiSurface", "zuiApply", "zui_capabilities", "zui_output_formats" } ++ host_frame_calls ++ host_services;
+/// What `zui_app` hands the host from each frame, besides its requests.
+const host_frame_calls = [_][]const u8{"zuiSemantics"};
 const host_services = [_][]const u8{ "zuiClipboard", "zuiNotifications", "zuiFileDialogs", "zuiOpenUrl", "zuiMenus", "zuiFileWatch" };
 const tracer_declarations = [_][]const u8{ "zuiBegin", "zuiEnd" };
 const skin_declarations = [_][]const u8{"zuiStyle"};
@@ -104,7 +107,29 @@ pub fn checkHost(comptime Host: type) void {
     expectHostCall(Host, "zuiWait", fn (*Host, record.NextFrame) void, "fn (" ++ host_pointer ++ ", zui.NextFrame) void");
     expectHostCall(Host, "zuiSurface", fn (*Host, host.WindowId) surface.Surface, "fn (" ++ host_pointer ++ ", zui.WindowId) zui.Surface");
     expectHostCall(Host, "zuiApply", fn (*Host, host.WindowId, record.HostRequests) void, "fn (" ++ host_pointer ++ ", zui.WindowId, zui.HostRequests) void");
+    inline for (hostFrameCalls(Host)) |call| {
+        if (@hasDecl(Host, call.declaration)) expectHostCall(Host, call.declaration, call.Expected, call.expected_name);
+    }
     if (@hasDecl(Host, "zuiFileWatch")) checkFileWatch(Host);
+}
+
+const HostFrameCall = struct {
+    declaration: []const u8,
+    Expected: type,
+    expected_name: []const u8,
+};
+
+/// Each takes the window and a slice of the frame's data, which is valid
+/// only during the call.
+fn hostFrameCalls(comptime Host: type) []const HostFrameCall {
+    const host_pointer = "*" ++ @typeName(Host);
+    return &.{
+        .{
+            .declaration = "zuiSemantics",
+            .Expected = fn (*Host, host.WindowId, []const semantics.SemanticNode) semantics.SemanticsDropped,
+            .expected_name = "fn (" ++ host_pointer ++ ", zui.WindowId, []const zui.SemanticNode) zui.SemanticsDropped",
+        },
+    };
 }
 
 fn checkOutputFormats(comptime Party: type) void {

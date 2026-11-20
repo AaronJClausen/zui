@@ -608,3 +608,140 @@ test "contextConfig keeps a text contract the overrides name, even from a render
     const config = zui_app.contextConfig(TestRenderer(false), .{ .Text = Fonts });
     try testing.expect(config.Text == Fonts);
 }
+
+/// `TestHost` with an accessibility bridge that keeps what it is handed.
+const SemanticsHost = struct {
+    pub const zui_surfaces = TestHost.zui_surfaces;
+
+    base: TestHost,
+    lists_received: u32 = 0,
+    last_node_count: usize = 0,
+    last_label: [16]u8 = undefined,
+    last_label_len: usize = 0,
+    thread_received_on: ?std.Thread.Id = null,
+    submitted_when_received: [4]usize = undefined,
+    renderer_submitted: ?*const usize = null,
+    reports_dropped: zui.SemanticsDropped = .{},
+
+    pub fn init(self: *SemanticsHost, io: std.Io, window: zui.WindowOptions) !void {
+        self.* = .{ .base = undefined };
+        try self.base.init(io, window);
+    }
+
+    pub fn deinit(self: *SemanticsHost) void {
+        self.base.deinit();
+    }
+
+    pub fn zuiPoll(self: *SemanticsHost, window: zui.WindowId, record: *zui.RecordBuilder) bool {
+        return self.base.zuiPoll(window, record);
+    }
+
+    pub fn zuiWaker(self: *SemanticsHost) zui.Waker {
+        return self.base.zuiWaker();
+    }
+
+    pub fn zuiWait(self: *SemanticsHost, next: zui.NextFrame) void {
+        self.base.zuiWait(next);
+    }
+
+    pub fn zuiSurface(self: *SemanticsHost, window: zui.WindowId) zui.Surface {
+        return self.base.zuiSurface(window);
+    }
+
+    pub fn zuiApply(self: *SemanticsHost, window: zui.WindowId, requests: zui.HostRequests) void {
+        self.base.zuiApply(window, requests);
+    }
+
+    pub fn zuiSemantics(self: *SemanticsHost, _: zui.WindowId, nodes: []const zui.SemanticNode) zui.SemanticsDropped {
+        if (self.renderer_submitted) |submitted| {
+            if (self.lists_received < self.submitted_when_received.len) self.submitted_when_received[self.lists_received] = submitted.*;
+        }
+        self.lists_received += 1;
+        self.last_node_count = nodes.len;
+        if (nodes.len > 0) {
+            self.last_label_len = @min(nodes[0].label.len, self.last_label.len);
+            @memcpy(self.last_label[0..self.last_label_len], nodes[0].label[0..self.last_label_len]);
+        }
+        self.thread_received_on = std.Thread.getCurrentId();
+        return self.reports_dropped;
+    }
+};
+
+fn AccessibleApp(comptime Host_: type, comptime Renderer_: type, comptime semantics: bool) type {
+    return struct {
+        const Self = @This();
+        pub const Host = Host_;
+        pub const Renderer = Renderer_;
+        pub const Ui = zui.Context(zui_app.contextConfig(Renderer, .{ .limits = .{ .max_elements = 16 }, .features = .{ .semantics = semantics } }));
+        const frame_count = 3;
+
+        pub fn init(_: *Self, start: zui_app.Start(Self)) !void {
+            const host_closing = if (Host == SemanticsHost) &start.host.base else start.host;
+            host_closing.closes_after_polls = frame_count;
+            if (Host == SemanticsHost and !Renderer.zui_render_thread) start.host.renderer_submitted = &start.renderer.submitted;
+        }
+
+        pub fn zuiDeclare(_: *Self, ui: *Ui) void {
+            ui.box(.{ .id = save, .interactive = true, .semantics = .{ .role = .button, .label = "Save" }, .layout = .{ .sizing = .{ .width = .fixed(100), .height = .fixed(40) } } });
+        }
+    };
+}
+
+test "a host that bridges semantics is handed each frame's list on the UI thread, before the frame is submitted" {
+    inline for (.{ TestRenderer(false), TestRenderer(true) }) |Renderer| {
+        const App = AccessibleApp(SemanticsHost, Renderer, true);
+        var runner: zui_app.Runner(App) = undefined;
+        try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+        try testing.expectEqual(zui.SemanticsCapacity{ .nodes = 16, .text_bytes = App.Ui.limits.max_text_bytes }, runner.host.base.window.semantics);
+        try testing.expectEqual(zui_app.Accessibility.bridged, runner.report.accessibility);
+        try testing.expectEqual(@as(u32, App.frame_count), try runToClose(&runner));
+        runner.stop();
+
+        try testing.expectEqual(@as(u32, App.frame_count), runner.host.lists_received);
+        try testing.expectEqual(@as(usize, 1), runner.host.last_node_count);
+        try testing.expectEqualStrings("Save", runner.host.last_label[0..runner.host.last_label_len]);
+        try testing.expectEqual(std.Thread.getCurrentId(), runner.host.thread_received_on.?);
+        if (!Renderer.zui_render_thread) {
+            for (runner.host.submitted_when_received[0..App.frame_count], 0..) |submitted, index| try testing.expectEqual(index, submitted);
+        }
+    }
+}
+
+test "without semantics a bridging host is never handed a list, and opens its window without room for one" {
+    const App = AccessibleApp(SemanticsHost, TestRenderer(false), false);
+    var runner: zui_app.Runner(App) = undefined;
+    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+    defer runner.stop();
+    try testing.expectEqual(zui.SemanticsCapacity{}, runner.host.base.window.semantics);
+    try testing.expectEqual(zui_app.Accessibility.off, runner.report.accessibility);
+    _ = try runToClose(&runner);
+    try testing.expectEqual(@as(u32, 0), runner.host.lists_received);
+}
+
+test "semantics on a host without a bridge are reported as a fallback" {
+    Notices.clear();
+    const App = AccessibleApp(TestHost, TestRenderer(false), true);
+    var runner: zui_app.Runner(App) = undefined;
+    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+    defer runner.stop();
+    try testing.expectEqual(zui.SemanticsCapacity{}, runner.host.window.semantics);
+    try testing.expectEqual(zui_app.Accessibility.not_bridged, runner.report.accessibility);
+    const described = try std.fmt.allocPrint(testing.allocator, "{f}", .{Notices.first(.started)});
+    defer testing.allocator.free(described);
+    try testing.expect(std.mem.endsWith(u8, described, "; semantics on, but the host bridges none to an accessibility API"));
+}
+
+test "a bridge without room for the list is reported once" {
+    Notices.clear();
+    const App = AccessibleApp(SemanticsHost, TestRenderer(false), true);
+    var runner: zui_app.Runner(App) = undefined;
+    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+    defer runner.stop();
+    runner.host.reports_dropped = .{ .nodes = 2, .text_bytes = 5 };
+    _ = try runToClose(&runner);
+
+    try testing.expectEqual(@as(usize, 1), Notices.countOf(.semantics_dropped));
+    const described = try std.fmt.allocPrint(testing.allocator, "{f}", .{Notices.first(.semantics_dropped)});
+    defer testing.allocator.free(described);
+    try testing.expectEqualStrings("the host's accessibility bridge had no room for 2 semantic nodes and 5 bytes of their text; an assistive technology sees the rest", described);
+}

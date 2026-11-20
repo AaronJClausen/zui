@@ -132,3 +132,24 @@ pub const SemanticNode = struct {
     /// Empty while it is disabled.
     actions: Actions,
 };
+
+/// How much of `Frame.semantics()` a window's accessibility bridge holds.
+/// `zui_app` opens the window with `Config.limits`' `max_elements` and
+/// `max_text_bytes` when `features.semantics` is on; zero nodes, the
+/// default, opens it with no bridge.
+pub const SemanticsCapacity = struct {
+    nodes: u32 = 0,
+    text_bytes: u32 = 0,
+};
+
+/// What a host's `zuiSemantics` had no room for: the nodes past those that
+/// fit, cut from the end of the list so what is kept is still a tree, and
+/// the label and value bytes cut at a character.
+pub const SemanticsDropped = struct {
+    nodes: u32 = 0,
+    text_bytes: u32 = 0,
+
+    pub fn any(self: SemanticsDropped) bool {
+        return self.nodes != 0 or self.text_bytes != 0;
+    }
+};

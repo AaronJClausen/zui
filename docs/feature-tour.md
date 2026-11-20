@@ -927,7 +927,7 @@ host.zuiApply(.main, requests);
 
 ### Semantics and accessibility actions · *shipped*
 
-With `features.semantics`, an element's `semantics` says what it is to an assistive technology: a role, a label, a value (text, or a position in a range), a state (checked, expanded, selected), and the actions it takes beyond those its flags and gestures already report. `frame.semantics()` lists every element that declares it, in tree order, each with its id, its laid-out bounds and the index of the node around it, its labels copied into the frame. A host bridges the list to the platform's accessibility API and reports what the screen reader asks as `action` events; each one is answered by the query of the input it stands in for, so `invoke` is a `clicked`, `adjust` an `adjusted`, `scroll` a `manipulation` and a scroll, `show_menu` a `contextRequested` and `dismiss` a `dismissed`. Every `zui_widgets` control declares its own. Without the feature, `semantics` is ignored and none of it is compiled. No host bridges the list yet: the Windows host's UI Automation bridge is next.
+With `features.semantics`, an element's `semantics` says what it is to an assistive technology: a role, a label, a value (text, or a position in a range), a state (checked, expanded, selected), and the actions it takes beyond those its flags and gestures already report. `frame.semantics()` lists every element that declares it, in tree order, each with its id, its laid-out bounds and the index of the node around it, its labels copied into the frame. A host bridges the list to the platform's accessibility API and reports what the screen reader asks as `action` events; each one is answered by the query of the input it stands in for, so `invoke` is a `clicked`, `adjust` an `adjusted`, `scroll` a `manipulation` and a scroll, `show_menu` a `contextRequested` and `dismiss` a `dismissed`. Every `zui_widgets` control declares its own. Without the feature, `semantics` is ignored and none of it is compiled. A host that declares `zuiSemantics` is handed the list with each frame, on the UI thread, and copies what fits into room it took when the window opened. zui-host's Windows host bridges it to UI Automation, so Narrator reads each control's name, role and bounds, and its `Invoke` and `SetFocus` arrive as `action` events; the control patterns (toggle, expand, range, value, selection and scroll) come next.
 
 `src/ui/toolbar.zig`
 
@@ -960,8 +960,10 @@ fn zoomSlider(app: *App, ui: *Ui) void {
     });
 }
 
-// a host's accessibility bridge, after endFrame:
-for (frame.semantics()) |node| bridge.update(node.id, node.role, node.label, node.value, node.bounds, node.state, node.actions);
+// a host's accessibility bridge, which zui_app calls after endFrame:
+pub fn zuiSemantics(host: *MyHost, window: zui.WindowId, nodes: []const zui.SemanticNode) zui.SemanticsDropped {
+    return host.bridge(window).copy(nodes); // keep what fits: the nodes go when the call returns
+}
 // and when the screen reader asks, in the next record:
 builder.append(.{ .action = .{ .target = node_id, .action = .invoke } });
 ```
@@ -2064,7 +2066,7 @@ Build with `-Dzui-tracy=true` to link Tracy's client, then connect profiler 0.14
 
 These names compile, but they don't do anything yet. This list is from `ARCHITECTURE.md` §7 and the roadmap.
 
-- **Accessibility on a platform** *(no host bridge yet)*: `Frame.semantics()` lists each element's role, label, value, state and actions, and `action` events are answered, but no host bridges them to a platform's accessibility API yet. The Windows host's UI Automation bridge is the rest of V2.
+- **Accessibility patterns** *(names, roles and invoke only)*: The Windows host bridges `Frame.semantics()` to UI Automation with each node's name, role, bounds and place in the tree, and `Invoke` and `SetFocus`, but not yet the Toggle, ExpandCollapse, RangeValue, Value, Selection or Scroll patterns, property changes, the context menu or dismissal. They are the rest of V2.
 - **Still to come**: Motion, multi-line text editing, skins, the inspector over the wire, and more hosts (macOS, Linux, web).
 
 <a id="dx"></a>

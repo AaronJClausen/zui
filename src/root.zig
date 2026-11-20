@@ -113,6 +113,8 @@ pub const Action = semantics.Action;
 pub const ActionKind = semantics.ActionKind;
 pub const Actions = semantics.Actions;
 pub const ActionEvent = semantics.ActionEvent;
+pub const SemanticsCapacity = semantics.SemanticsCapacity;
+pub const SemanticsDropped = semantics.SemanticsDropped;
 
 pub const Event = input.Event;
 pub const Pointer = input.Pointer;

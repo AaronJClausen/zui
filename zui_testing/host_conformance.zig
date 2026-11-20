@@ -31,6 +31,8 @@ pub const HostError = error{
     WokeBeforeInstant,
     WaitedPastInstant,
     ClosedWindowPolled,
+    SemanticsDropped,
+    ActionLost,
 };
 pub const HostViolation = DescribedViolation(HostError);
 
@@ -49,8 +51,12 @@ const other_thread_wake_ns = 20 * std.time.ns_per_ms;
 ///   cleared, so the next `.at` wait lasts until its instant;
 /// - a wake from another thread ends an `.on_event` wait;
 /// - an `.at` wait ends at its instant, not before and not long after;
-/// - `zuiApply` takes requests, and, when the harness can close the window,
-///   `zuiPoll` returns false after it is closed.
+/// - `zuiApply` takes requests;
+/// - with `zuiSemantics` and a harness `invoke`, a button invoked through
+///   the platform's accessibility API arrives as an `action` event naming
+///   it;
+/// - when the harness can close the window, `zuiPoll` returns false after
+///   it is closed.
 ///
 /// Every wait the suite starts is bounded by `conformance`.
 ///
@@ -59,6 +65,10 @@ const other_thread_wake_ns = 20 * std.time.ns_per_ms;
 /// - `fn post(self, event: zui.Event) bool`: make the OS report `event` to
 ///   the host, or return false when this host cannot report its kind, which
 ///   the suite then skips;
+/// - optionally `fn invoke(self, label: []const u8) bool`: ask the
+///   platform's accessibility API to invoke the element labelled `label`,
+///   or return false when this host cannot, which the suite then skips. The
+///   harness opens its window with room for at least one semantic node;
 /// - optionally `fn close(self) void`, closing the window as the user would.
 ///
 /// ```zig
@@ -128,6 +138,9 @@ pub fn findHostViolation(comptime Host: type, harness: anytype, conformance: Hos
 
     host.zuiApply(window, .{ .cursor = .pointer });
     host.zuiApply(window, .{});
+    if (@hasDecl(Host, "zuiSemantics") and @hasDecl(Harness, "invoke")) {
+        if (try expectInvokedAction(host, harness, &builder, conformance)) |violation| return violation;
+    }
     if (@hasDecl(Harness, "close")) {
         harness.close();
         if (host.zuiPoll(window, &builder)) return .init(error.ClosedWindowPolled, "polled true after its window was closed", .{});
@@ -180,6 +193,33 @@ fn expectPostedEvents(host: anytype, harness: anytype, builder: *zui.RecordBuild
     return .init(error.EventLost, "reported the posted {t} (event {d} of {d}) out of order or not at all", .{
         std.meta.activeTag(posted[arrived]), arrived + 1, posted_count,
     });
+}
+
+/// Both halves of the id are non-zero, so a host that keeps only one fails.
+const invoked_button: zui.SemanticNode = .{
+    .id = 0x8000_0001_0000_0002,
+    .parent = null,
+    .role = .button,
+    .label = "Save",
+    .value = .none,
+    .bounds = .{ .x = 8, .y = 8, .width = 80, .height = 24 },
+    .state = .{},
+    .actions = .initOne(.invoke),
+};
+
+fn expectInvokedAction(host: anytype, harness: anytype, builder: *zui.RecordBuilder, conformance: HostConformance) !?HostViolation {
+    const dropped = host.zuiSemantics(conformance.window, &.{invoked_button});
+    if (dropped.nodes != 0) return .init(error.SemanticsDropped, "dropped {d} of 1 semantic nodes", .{dropped.nodes});
+    if (!harness.invoke(invoked_button.label)) return null;
+    const started = now(conformance.io);
+    while (now(conformance.io).nanoseconds -| started.nanoseconds <= conformance.event_arrival_ns) {
+        host.zuiWait(.immediately);
+        if (!host.zuiPoll(conformance.window, builder)) return .init(error.WindowClosed, "closed its window while the suite polled for an action", .{});
+        for (builder.events()) |event| {
+            if (event == .action and event.action.target == invoked_button.id and event.action.action == .invoke) return null;
+        }
+    }
+    return .init(error.ActionLost, "did not report the invoke an assistive technology asked for within {d} ms", .{milliseconds(conformance.event_arrival_ns)});
 }
 
 fn sameEvent(event: zui.Event, posted: zui.Event) bool {
@@ -268,6 +308,8 @@ const QueueHostFlaw = enum {
     /// A wake that arrives before a wait is lost.
     clears_wake_before_waiting,
     gives_undeclared_hdr_surface,
+    /// Its accessibility bridge keeps nothing, so an invoke names no element.
+    drops_actions,
 };
 
 /// Reports what its harness posts, and waits on an `Io.Event` for the
@@ -283,6 +325,8 @@ fn QueueHost(comptime flaw: QueueHostFlaw) type {
         queued_count: usize = 0,
         window_open: bool = true,
         applied: zui.HostRequests = .{},
+        bridged: [4]zui.SemanticNode = undefined,
+        bridged_count: usize = 0,
 
         const longest_wait_ns = 10 * std.time.ns_per_s;
 
@@ -327,6 +371,15 @@ fn QueueHost(comptime flaw: QueueHostFlaw) type {
             self.applied = requests;
         }
 
+        pub fn zuiSemantics(self: *Self, window: zui.WindowId, nodes: []const zui.SemanticNode) zui.SemanticsDropped {
+            std.debug.assert(window == .main);
+            if (flaw == .drops_actions) return .{};
+            const kept = @min(nodes.len, self.bridged.len);
+            @memcpy(self.bridged[0..kept], nodes[0..kept]);
+            self.bridged_count = kept;
+            return .{ .nodes = @intCast(nodes.len - kept) };
+        }
+
         fn wake(context: *anyopaque) void {
             const self: *Self = @ptrCast(@alignCast(context));
             self.woken.set(self.io);
@@ -351,6 +404,18 @@ fn QueueHostHarness(comptime Host: type) type {
             return true;
         }
 
+        /// As an assistive technology finds an element: by its label, in
+        /// what the bridge kept.
+        pub fn invoke(self: *Self, label: []const u8) bool {
+            const queue_host = &self.queue_host;
+            for (queue_host.bridged[0..queue_host.bridged_count]) |node| {
+                if (!std.mem.eql(u8, node.label, label)) continue;
+                queue_host.queued[queue_host.queued_count] = .{ .action = .{ .target = node.id, .action = .invoke } };
+                queue_host.queued_count += 1;
+            }
+            return true;
+        }
+
         pub fn close(self: *Self) void {
             self.queue_host.window_open = false;
         }
@@ -361,6 +426,7 @@ test "a host that keeps the contract passes the suite" {
     var harness: QueueHostHarness(QueueHost(.none)) = .{ .queue_host = .{ .io = std.testing.io } };
     try expectHostConforms(QueueHost(.none), &harness, .{ .io = std.testing.io });
     try std.testing.expectEqual(zui.Cursor.default, harness.queue_host.applied.cursor);
+    try std.testing.expectEqual(@as(usize, 1), harness.queue_host.bridged_count);
 }
 
 test "a host that clears a wake before waiting fails the suite" {
@@ -377,4 +443,12 @@ test "a host that gives a surface in an output format it does not declare fails 
     const violation = (try findHostViolation(Host, &harness, .{ .io = std.testing.io })).?;
     try std.testing.expectEqual(error.OutputFormatNotDeclared, violation.kind);
     try std.testing.expectEqualStrings("gave a surface in .scrgb_fp16, which its zui_output_formats does not name", violation.description());
+}
+
+test "a host whose accessibility bridge loses what it is handed fails the suite" {
+    const Host = QueueHost(.drops_actions);
+    var harness: QueueHostHarness(Host) = .{ .queue_host = .{ .io = std.testing.io } };
+    const violation = (try findHostViolation(Host, &harness, .{ .io = std.testing.io, .event_arrival_ns = 50 * std.time.ns_per_ms })).?;
+    try std.testing.expectEqual(error.ActionLost, violation.kind);
+    try std.testing.expectEqualStrings("did not report the invoke an assistive technology asked for within 50 ms", violation.description());
 }

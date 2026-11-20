@@ -1477,7 +1477,9 @@ bar still lets the OS move, resize and snap the window.
 `.semantics = .{ .role = .button, .label = "Save" }` adds an entry to
 `Frame.semantics()`: id, role, label, value, bounds, state and supported
 actions, in tree order, each with the index of the nearest entry around
-it. A host bridges it to the platform's accessibility API, and actions
+it. A host that declares `zuiSemantics` (§16.3) is handed the list after
+each `endFrame` and bridges it to the platform's accessibility API; the
+window is opened with room for it (`WindowOptions.semantics`). Actions
 come back as `action` events naming the id, answered by the same queries
 as other input (§11.3). An element's flags and gestures are the actions
 it reports, beyond those it declares: `invoke` when it is interactive,
@@ -1824,6 +1826,7 @@ const Win32Host = struct {
     pub fn zuiWait(self: *Win32Host, next: zui.NextFrame) void { ... }
     pub fn zuiSurface(self: *Win32Host, window: zui.WindowId) zui.Surface { ... }
     pub fn zuiApply(self: *Win32Host, window: zui.WindowId, requests: zui.HostRequests) void { ... } // cursor, IME window
+    pub fn zuiSemantics(self: *Win32Host, window: zui.WindowId, nodes: []const zui.SemanticNode) zui.SemanticsDropped { ... } // optional: the accessibility bridge
 
     pub const zuiClipboard = struct { ... };       // optional services
     pub const zuiNotifications = struct { ... };
@@ -1857,7 +1860,11 @@ pub const HostCapabilities = struct {
     system_material: bool = false,
 };
 /// What a host opens a window with (`zui_app` passes it to the host's `init`).
-pub const WindowOptions = struct { title: [:0]const u8 = "zui", size: [2]u32 = .{ 1280, 720 }, visible: bool = true, resizable: bool = true, material: SystemMaterial = .none };
+pub const WindowOptions = struct { title: [:0]const u8 = "zui", size: [2]u32 = .{ 1280, 720 }, visible: bool = true, resizable: bool = true, material: SystemMaterial = .none, semantics: SemanticsCapacity = .{} };
+/// Room for a window's accessibility bridge; zero nodes opens it with none.
+pub const SemanticsCapacity = struct { nodes: u32 = 0, text_bytes: u32 = 0 };
+/// What `zuiSemantics` had no room for: nodes cut from the end, and text bytes cut at a character.
+pub const SemanticsDropped = struct { nodes: u32 = 0, text_bytes: u32 = 0 };
 /// The backdrop a window asks for, by role: Mica and Acrylic on Windows 11, vibrancy on macOS.
 pub const SystemMaterial = enum { none, window, transient };
 
@@ -1888,6 +1895,17 @@ pub fn checkHostAndRenderer(comptime Host: type, comptime Renderer: type) void  
   `nextFrame` and the wait ends the wait.
 - **`zuiApply`** takes the frame's `HostRequests`, setting the cursor and
   placing the IME window.
+- **`zuiSemantics`**, optional, is handed `Frame.semantics()` on the UI
+  thread after `endFrame` and before the frame is submitted, so a render
+  thread never races it; the nodes are valid only during the call. The
+  host copies them into room it took when the window opened with
+  `WindowOptions.semantics`, which `zui_app` sizes from `Config.limits`,
+  so it allocates nothing after `init`. What does not fit is cut from the
+  end, which leaves a tree since parents come first, and returned in
+  `SemanticsDropped`; `zui_app` reports it once. The platform's requests
+  are appended to the next record as `action` events, so they relay and
+  replay as other input does. A window opened without room is left to
+  the OS's default accessibility. `checkHost` checks its signature.
 - **The composition root checks the pair.** `checkHostAndRenderer` is
   called by the application or `zui_app`, the one place naming both:
   ``"zui: RaylibHost and TerminalRenderer share no surface kind: the host gives .library, the renderer draws into .terminal"``.
@@ -1973,7 +1991,7 @@ build's instruction counts are unchanged.
 | Case | Absence is | Examples |
 |---|---|---|
 | zui needs it | **a compile error** naming it | `zuiMeasure`; a base command a renderer cannot draw; a host without `zuiPoll` |
-| zui uses it implicitly | **a documented fallback** | no material: the fallback background; no blur: the tint; an unhandled lifecycle event: the OS default |
+| zui uses it implicitly | **a documented fallback** | no material: the fallback background; no blur: the tint; an unhandled lifecycle event: the OS default; no `zuiSemantics`: an assistive technology sees only the window |
 | the application asks for it by name | **a compile error at the call**, unless guarded by `has_*` | notifications on a target without them |
 | the target has it, this machine does not | **a returned status** | Mica on Windows 10; notifications the user denied |
 

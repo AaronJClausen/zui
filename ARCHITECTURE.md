@@ -109,7 +109,7 @@ only plain names are types the application uses directly: a source's
 | Text | a renderer or a font library | `zuiMeasure` | `zuiSegment`, `zui_thread_safe`, `zuiFingerprint` | §9.4 |
 | Source | `zui_async` or the application | `Delivery`, `View`, `zuiSwap`, `zuiView`, `zuiDelivery`, `zuiInject` | `zuiPending`, `zuiEndFrame`, `zuiRefusedCount` | §14.2 |
 | Renderer | a renderer | `zuiSubmit`, `zui_surfaces` | `zui_commands`, `zui_extended_color`, `zui_render_thread`, payload types | §16.2 |
-| Host | a host | `zuiPoll`, `zuiWaker`, `zuiWait`, `zuiSurface`, `zuiApply`, `zui_surfaces` | `zui_capabilities`, services (`zuiClipboard`, `zuiFileDialogs`, …) | §16.3 |
+| Host | a host | `zuiPoll`, `zuiWaker`, `zuiWait`, `zuiSurface`, `zuiApply`, `zui_surfaces` | `zui_capabilities`, `zuiSemantics`, services (`zuiClipboard`, `zuiFileDialogs`, …) | §16.3 |
 | Tracer | a profiler binding | `zuiBegin`, `zuiEnd` | | §16.5 |
 | Application | the application, run by `zui_app` | `Host`, `Renderer`, `zuiDeclare` | `Text`, `zuiRecord`, `zuiObserve`, `zuiLoader`, `init`, `deinit` | §19.5 |
 | Skin | a theme pack or the application | `zuiStyle` | | §19.2 |
@@ -278,7 +278,7 @@ roadmap item named:
 |---|---|---|---|
 | `Widgets(Ui)` with a `Theme` struct | `Widgets(Ui, Skin)` | `zui_widgets/` | K5 |
 | `zui_debug`'s inspector runs in the application's process; a frame on the wire carries no elements for it | over the wire, the inspector runs in another process (SPEC.md §19.7) | `zui_debug/`, `zui_wire/` | not yet queued |
-| `Frame.semantics()` lists each element's role, label, value, state and actions, and `action` events are answered, but no host bridges them to a platform's accessibility API | the Windows host bridges semantics to UI Automation | `../zui-host` | V2 |
+| zui-host's Windows host bridges `Frame.semantics()` to UI Automation through `zuiSemantics`, with each node's name, control type, id, bounds and place in the tree, `Invoke` and `SetFocus` as `action` events, and focus and structure events; it offers no Toggle, ExpandCollapse, RangeValue, Value, Selection or Scroll pattern, no property-changed events, and no context menu or dismissal | every control's pattern and state, and every action, through UI Automation | `../zui-host` | V2 |
 | zui-host's Linux host speaks Wayland only, at whole buffer scales, and reports no low memory, clipboard, drops, file changes or IME; its environment comes from the desktop portal and UPower over D-Bus, and stays at the defaults without them | a Linux host on Wayland and X11 with every report the Windows host makes, and a system material where the compositor offers one | `../zui-host` | H4 |
 
 Unchanged in shape: element storage in pre-order structure-of-arrays, the
