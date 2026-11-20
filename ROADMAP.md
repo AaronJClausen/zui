@@ -71,7 +71,7 @@ green, and its **Status** line below says which slice is next.
 | H3. macOS | 10 | `../zui-host` | | |
 | H4. Linux | 10 | `../zui-host`, `../zui-sokol` | | in progress; slice 3, fractional scale, the clipboard, drops and file watching, is next |
 | H5. Web | 10 | `../zui-web` | | |
-| H7. Window decorations | 10 | `src/chrome.zig`, `src/context.zig`, `zui_app/`, `../zui-host` | | in progress; slice 2, the Windows host, is next |
+| H7. Window decorations | 10 | `src/chrome.zig`, `src/context.zig`, `zui_app/`, `../zui-host` | | waiting on a person: the checklist under H7's *Status*, on `zig build title-bar` in zui-host |
 | H9. Many windows | 10 | `zui_app/`, `../zui-host` | | |
 
 After the queue comes stage 11 in the order of SPEC.md §21. It joins the queue as it runs short. Stage 10's items are listed under *Stage 10: reach*; each is given its Grounding, Plan and Done when as it is taken.
@@ -465,9 +465,11 @@ What remains, and where it went:
   smaller, and removing the bar gives it back. A window opened at a
   size keeps its outer size, not its content's.
 - **H7:** a custom title bar has no caption for Windows' menu bar to sit
-  under. H7 decides whether `setBar` then answers `error.Unavailable`, or
-  the application draws its own bar and uses `popup` for its menus. A
-  popup's position, in the client area's layout units, holds either way.
+  under. H7 decided: under a custom title bar `setBar` answers
+  `error.Unavailable`, since a native bar would sit hidden under the
+  drawn one, and the application draws its own bar and uses `popup` for
+  its menus. A popup's position, in the client area's layout units, holds
+  either way.
 - **H9:** dialogs and menus name their `WindowId`, and the Windows host
   asserts `.main` until H9 maps ids to windows; the menu bar's state is
   one struct for H9 to keep per window.
@@ -4271,12 +4273,20 @@ caption buttons itself.
    - Conformance tests send `WM_NCHITTEST` and the non-client mouse
      messages to hidden windows.
    - `examples/title_bar.zig` and `zig build title-bar`.
-   - Whether `zuiMenus.setBar` answers `error.Unavailable` under a custom
-     title bar is decided here and recorded.
+   - Under a custom title bar `zuiMenus.setBar` answers
+     `error.Unavailable`, since a native bar would sit hidden under the
+     drawn one.
 
 **Decisions.** Made by the owner when H7 was taken:
 - The host works the caption buttons, as the system's own. It also has
-  public calls for an application that acts on `clicked`.
+  public calls for an application that acts on `clicked`. Slice 2 found
+  that a pointer's click would then be worked twice, by the host and by
+  `clicked`, and a double maximize undoes itself, so the host ends a
+  caption button's press with `pointer_cancel`: zui shows the press and
+  reports no click, and `clicked` comes only from the keyboard and
+  assistive technologies.
+- Under a custom title bar `zuiMenus.setBar` is `error.Unavailable`
+  (recorded in H6 too).
 - The channel is an optional frame call, `zuiChromeRegions`, not a field
   of `HostRequests`.
 - A title bar's `.client` regions are derived from its interactive,
@@ -4320,10 +4330,54 @@ caption buttons itself.
   `start`.
 - The host suite hands a host that declares the call two regions from a
   buffer it then overwrites.
-- R1 counts were not measured: there is no Valgrind on this Windows
-  machine, and no local Docker image has it. CI's counts job judges this
-  commit against its parent.
-Next: slice 2, the Windows host.
+- R1, measured by CI's counts job on `6b6ce6f` against its parent
+  `e2ba59b`: every scenario's declaration and `endFrame` per frame is
+  identical to the instruction (4096 boxes declare 436,605 and
+  `endFrame` 1,264,648; 1000 warm texts' `endFrame` 654,147).
+
+Slice 2, the Windows host (zui-host `38d2be5`), is done:
+- A window opened with `title_bar = .custom` drops its caption in
+  `WM_NCCALCSIZE` and keeps the system's frame on the other three sides,
+  so DWM draws its border, rounded corners and shadow. Maximized, its
+  client top is inset by the frame's thickness. It is sized so its client
+  area is still the size asked for.
+- `WM_NCHITTEST` answers the system's borders, then a top resize band
+  (`SM_CYSIZEFRAME + SM_CXPADDEDBORDER`), then a snapshot of the regions,
+  the last on top. The snapshot is one `ChromeSnapshot` field with its
+  own SRW lock, holding up to 256 regions in pixels, ready for H9 to move
+  into each window's state.
+- Non-client moves and leaves over the caption buttons reach zui at
+  their client points. A press and its release on the same button work
+  it through `WM_SYSCOMMAND`, and the release arrives as `pointer_cancel`.
+  `Host.minimize`, `Host.toggleMaximized` and `Host.close` serve the
+  keyboard and Narrator.
+- The first report includes `custom_title_bar`, and `WM_SIZE` reports
+  `window_maximized`. `zuiMenus.setBar` is `error.Unavailable` under a
+  custom title bar.
+- The host suite passes on a custom window. New tests send
+  `WM_NCHITTEST` at the title bar, a search field inside it, each
+  caption button, a grip, the top band and the three borders at a scale
+  of 2, from a buffer overwritten after the call. They also send
+  non-client moves, leaves, presses and releases, and check that a
+  native window keeps the system's answers.
+- `zig build title-bar -- --check` hit-tests each part as `zui_app` laid
+  it out in a hidden window, and exits 0.
+
+Waiting on a person, on `zig build title-bar` in zui-host, with and
+without `--no-system-material`, in light and dark mode:
+- Dragging the title bar moves the window, double-clicking it maximizes
+  and restores it, and right-clicking it opens the system menu.
+- Win+Up, Win+Down, Win+Left and Win+Right snap the window, and so does
+  dragging it to a screen edge.
+- Hovering the maximize button shows snap layouts.
+- Resizing works from all four edges and four corners, the top included.
+- The caption buttons show hover and press, and minimize,
+  maximize/restore and close each work once.
+- Maximized, the title bar is not cut off at the top.
+- Mica, dark mode, and the DWM border and shadow show.
+- Moving the window to a monitor at another scale keeps the parts where
+  they are drawn.
+Once checked, H7 moves to *Done*.
 
 ---
 

@@ -1498,7 +1498,10 @@ region, so the list never overflows. `zui_app` hands the list to the
 host's `zuiChromeRegions` with every frame (§16.3). The host answers the
 window manager from its copy (`WM_NCHITTEST` on Windows,
 `xdg_toplevel.move` and `resize` on Wayland), and still forwards the
-pointer over the caption buttons, so they show hover and press. Chrome
+pointer over the caption buttons, so they show hover and press. A press
+the host works ends as `pointer_cancel`, not a release, so zui reports no
+click and an application that works the buttons on `clicked`, for the
+keyboard and assistive technologies, never works one twice. Chrome
 changes nothing about an element's interaction, and a frame without the
 feature lists none and costs nothing.
 

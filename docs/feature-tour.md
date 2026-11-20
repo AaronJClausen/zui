@@ -968,6 +968,35 @@ pub fn zuiSemantics(host: *MyHost, window: zui.WindowId, nodes: []const zui.Sema
 builder.append(.{ .action = .{ .target = node_id, .action = .invoke } });
 ```
 
+<a id="title-bar"></a>
+
+### A custom title bar · *shipped*
+
+With `features.chrome_regions`, a window opened with `.title_bar = .custom` leaves its title bar to you, and `ui.environment().custom_title_bar` says whether it did. Mark each part you draw with `chrome`: a `.title_bar`, which Windows drags, maximizes on a double click and opens the system menu on; `.minimize_button`, `.maximize_button` and `.close_button`, which the host works when a press and its release land on them, as the system's own (hovering maximize shows snap layouts); and `.resize_*` edges and grips. `frame.chromeRegions()` lists them in tree order, and every interactive element inside a title bar, a search field or a tab, stays yours as a `.client` region. `zui_app` hands the list to the host's `zuiChromeRegions` each frame. The pointer still reaches the caption buttons, so they show hover and press, but the host ends a press it works as `pointer_cancel`, so `clicked` comes only from the keyboard and Narrator: act on it through the host's `minimize`, `toggleMaximized` and `close`, and each button works once. `ui.environment().window_maximized` picks the restore glyph. zui-host's Windows host does all of it, keeping the system's border, rounded corners and shadow; there `zuiMenus.setBar` is `error.Unavailable`, so draw your menus in the title bar.
+
+`src/ui/title_bar.zig`
+
+```zig
+fn titleBar(app: *App, ui: *Ui) void {
+    if (!ui.environment().custom_title_bar) return; // the system draws one
+    ui.open(.{ .id = .of("title bar"), .chrome = .title_bar, .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(32) }, .child_alignment = .{ .y = .center } } });
+    defer ui.close();
+    ui.text("Notes", .{ .size = 12 });
+    _ = app.widgets.textField(ui, .of("search"), &app.search, .{ .label = "Search" }); // stays the application's
+    const maximized = ui.environment().window_maximized;
+    if (captionButton(ui, .of("maximize"), .maximize_button, if (maximized) "Restore" else "Maximize")) app.host.toggleMaximized();
+    if (captionButton(ui, .of("close"), .close_button, "Close")) app.host.close();
+}
+
+fn captionButton(ui: *Ui, id: zui.Id, kind: zui.ChromeKind, label: []const u8) bool {
+    ui.box(.{ .id = id, .chrome = kind, .focusable = true, .semantics = .{ .role = .button, .label = label }, .layout = .{ .sizing = .{ .width = .fixed(46), .height = .grow } } });
+    return ui.clicked(id); // the keyboard's or Narrator's; a pointer's is the host's
+}
+
+// opening the window:
+try zui_app.run(App, init, .{ .title = "Notes", .material = .window, .title_bar = .custom });
+```
+
 <a id="loop"></a>
 
 ## 03. The frame loop, timing and diagnostics
@@ -2106,7 +2135,6 @@ Build with `-Dzui-tracy=true` to link Tracy's client, then connect profiler 0.14
 
 These names compile, but they don't do anything yet. This list is from `ARCHITECTURE.md` §7 and the roadmap.
 
-- **Custom title bars**: `WindowOptions.title_bar = .custom` (`zui_app`'s `.title_bar = .custom`), `Element.chrome` (`.title_bar`, `.close_button`, `.resize_bottom_right` and the rest) and `frame.chromeRegions()` compile and list what the application draws, behind `features.chrome_regions`, and `zui_app` hands the list to a host's `zuiChromeRegions`. No host leaves its title bar to the application yet: the Windows host does next.
 - **Still to come**: Motion, multi-line text editing, skins, the inspector over the wire, and more hosts (macOS, Linux, web).
 
 <a id="dx"></a>

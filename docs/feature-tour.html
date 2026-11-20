@@ -1223,6 +1223,30 @@ pub fn zuiSemantics(host: *MyHost, window: zui.WindowId, nodes: []const zui.Sema
 builder.append(.{ .action = .{ .target = node_id, .action = .invoke } });
 </script>
       </article>
+      <article class="feature" id="title-bar" data-title="A custom title bar">
+        <div class="feature-head"><h3>A custom title bar</h3><span class="pill shipped">Shipped</span></div>
+        <p>With <code class="z">features.chrome_regions</code>, a window opened with <code class="z">.title_bar = .custom</code> leaves its title bar to you, and <code class="z">ui.environment().custom_title_bar</code> says whether it did. Mark each part you draw with <code class="z">chrome</code>: a <code class="z">.title_bar</code>, which Windows drags, maximizes on a double click and opens the system menu on; <code class="z">.minimize_button</code>, <code class="z">.maximize_button</code> and <code class="z">.close_button</code>, which the host works when a press and its release land on them, as the system's own (hovering maximize shows snap layouts); and <code class="z">.resize_*</code> edges and grips. <code class="z">frame.chromeRegions()</code> lists them in tree order, and every interactive element inside a title bar, a search field or a tab, stays yours as a <code class="z">.client</code> region. <code class="z">zui_app</code> hands the list to the host's <code class="z">zuiChromeRegions</code> each frame. The pointer still reaches the caption buttons, so they show hover and press, but the host ends a press it works as <code class="z">pointer_cancel</code>, so <code class="z">clicked</code> comes only from the keyboard and Narrator: act on it through the host's <code class="z">minimize</code>, <code class="z">toggleMaximized</code> and <code class="z">close</code>, and each button works once. <code class="z">ui.environment().window_maximized</code> picks the restore glyph. zui-host's Windows host does all of it, keeping the system's border, rounded corners and shadow; there <code class="z">zuiMenus.setBar</code> is <code class="z">error.Unavailable</code>, so draw your menus in the title bar.</p>
+<script type="text/x-zig" data-file="src/ui/title_bar.zig">
+fn titleBar(app: *App, ui: *Ui) void {
+    if (!ui.environment().custom_title_bar) return; // the system draws one
+    ui.open(.{ .id = .of("title bar"), .chrome = .title_bar, .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(32) }, .child_alignment = .{ .y = .center } } });
+    defer ui.close();
+    ui.text("Notes", .{ .size = 12 });
+    _ = app.widgets.textField(ui, .of("search"), &app.search, .{ .label = "Search" }); // stays the application's
+    const maximized = ui.environment().window_maximized;
+    if (captionButton(ui, .of("maximize"), .maximize_button, if (maximized) "Restore" else "Maximize")) app.host.toggleMaximized();
+    if (captionButton(ui, .of("close"), .close_button, "Close")) app.host.close();
+}
+
+fn captionButton(ui: *Ui, id: zui.Id, kind: zui.ChromeKind, label: []const u8) bool {
+    ui.box(.{ .id = id, .chrome = kind, .focusable = true, .semantics = .{ .role = .button, .label = label }, .layout = .{ .sizing = .{ .width = .fixed(46), .height = .grow } } });
+    return ui.clicked(id); // the keyboard's or Narrator's; a pointer's is the host's
+}
+
+// opening the window:
+try zui_app.run(App, init, .{ .title = "Notes", .material = .window, .title_bar = .custom });
+</script>
+      </article>
     </section>
 
     <section class="group" id="loop" data-title="The frame loop">
@@ -2222,7 +2246,6 @@ fn present(renderer: *Renderer, surface: zui.Surface, frame: *const Ui.Frame) !v
       <div class="group-head"><span class="group-index">08</span><h2>Declared but not working yet</h2></div>
       <p class="group-intro">These names compile, but they don't do anything yet. This list is from <code>ARCHITECTURE.md</code> §7 and the roadmap.</p>
       <ul class="gap-list">
-        <li><b>Custom title bars</b><span><code>WindowOptions.title_bar = .custom</code> (<code>zui_app</code>'s <code>.title_bar = .custom</code>), <code>Element.chrome</code> (<code>.title_bar</code>, <code>.close_button</code>, <code>.resize_bottom_right</code> and the rest) and <code>frame.chromeRegions()</code> compile and list what the application draws, behind <code>features.chrome_regions</code>, and <code>zui_app</code> hands the list to a host's <code>zuiChromeRegions</code>. No host leaves its title bar to the application yet: the Windows host does next.</span></li>
         <li><b>Still to come</b><span>Motion, multi-line text editing, skins, the inspector over the wire, and more hosts (macOS, Linux, web).</span></li>
       </ul>
     </section>
