@@ -1552,7 +1552,7 @@ fn reloadThemeOnSave(app: *App, ui: *Ui) void {
 
       <article class="feature" id="services" data-title="Host services">
         <div class="feature-head"><h3>Host services</h3><span class="pill shipped">Shipped</span></div>
-        <p>Services are what the system does for an application: the clipboard, notifications, file dialogs, opening a URL, menus. Each is an optional host declaration with a checked shape. They are work, so declaration only notes that you want one, and you call it between frames, from <code class="z">zuiLoader</code>, through <code class="z">zui_app.ServicesOf(Host)</code>, whose <code class="z">has_*</code> guards are known at compile time. Every call returns at once, and its answer is published into a source you choose, so a replay sees what the user chose without opening a dialog. zui-host's Windows host reads and writes the clipboard and opens URLs, refusing paths and <code class="z">file:</code> URLs.</p>
+        <p>Services are what the system does for an application: the clipboard, notifications, file dialogs, opening a URL, menus. Each is an optional host declaration with a checked shape. They are work, so declaration only notes that you want one, and you call it between frames, from <code class="z">zuiLoader</code>, through <code class="z">zui_app.ServicesOf(Host)</code>, whose <code class="z">has_*</code> guards are known at compile time. Every call returns at once, and its answer is published into a source you choose, so a replay sees what the user chose without opening a dialog. zui-host's Windows host reads and writes the clipboard, opens URLs, refusing paths and <code class="z">file:</code> URLs, and shows notifications as toasts.</p>
 <script type="text/x-zig" data-file="src/app.zig">
 const services = zui_app.ServicesOf(App.Host);
 const paste: zui.ServiceRequest = .of("paste");
@@ -2210,7 +2210,7 @@ fn present(renderer: *Renderer, surface: zui.Surface, frame: *const Ui.Frame) !v
       <div class="group-head"><span class="group-index">08</span><h2>Declared but not working yet</h2></div>
       <p class="group-intro">These names compile, but they don't do anything yet. This list is from <code>ARCHITECTURE.md</code> §7 and the roadmap.</p>
       <ul class="gap-list">
-        <li><b>Notifications, file dialogs and menus</b><span>Their shapes are checked and <code class="z">zui_testing</code>'s host suite tests them, but no host implements them yet. The Windows host's are the rest of H6.</span></li>
+        <li><b>File dialogs and menus</b><span>Their shapes are checked and <code class="z">zui_testing</code>'s host suite tests them, but no host implements them yet. The Windows host's are the rest of H6.</span></li>
         <li><b>Still to come</b><span>Motion, multi-line text editing, skins, the inspector over the wire, and more hosts (macOS, Linux, web).</span></li>
       </ul>
     </section>

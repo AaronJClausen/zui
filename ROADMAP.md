@@ -71,7 +71,7 @@ green, and its **Status** line below says which slice is next.
 | H3. macOS | 10 | `../zui-host` | | |
 | H4. Linux | 10 | `../zui-host`, `../zui-sokol` | | in progress; slice 3, fractional scale, the clipboard, drops and file watching, is next |
 | H5. Web | 10 | `../zui-web` | | |
-| H6. Services | 10 | `src/services.zig`, `zui_app/`, `zui_testing/`, `../zui-host` | | in progress; slice 2, notifications, is next |
+| H6. Services | 10 | `src/services.zig`, `zui_app/`, `zui_testing/`, `../zui-host` | | in progress; slice 3, file dialogs, is next |
 | H7. Window decorations | 10 | `src/host.zig`, `../zui-host` | | |
 | H9. Many windows | 10 | `zui_app/`, `../zui-host` | | |
 
@@ -3867,7 +3867,33 @@ reports only notifications, file dialogs and menus missing. Decided in
 the slice, beyond the plan: `Busy` also refuses a clipboard read or a URL
 still waiting for the window thread; `ServiceAnswer.left_out_bytes`
 carries what the host itself could not hold; `zui.isOpenableUrl` is core,
-so every host refuses the same URLs. Next: slice 2, notifications.
+so every host refuses the same URLs.
+
+Slice 2 is done, in zui-host alone (not pushed). `zuiNotifications.show`
+checks the text is UTF-8, copies the title and body into fixed buffers cut
+at a character to what `NOTIFYICONDATAW` holds (63 and 255 UTF-16 units),
+and posts to the window thread, which adds the window's notification-area
+icon on first use (`NIM_ADD`, then `NIM_SETVERSION` to version 4) and
+shows the balloon (`NIM_MODIFY` with `NIF_INFO`), which Windows 10 and 11
+show as a toast. The icon's callback message answers
+`.notification_activated` for `NIN_BALLOONUSERCLICK` and
+`.notification_dismissed` for `NIN_BALLOONTIMEOUT` and `NIN_BALLOONHIDE`,
+then removes the icon; a notification replaced by the next is answered
+`.notification_dismissed` and the icon stays; `Shell_NotifyIconW` failing
+is `.failed = .unavailable`; the icon goes when the window is destroyed,
+and one still showing then is not answered. A second `show` while the
+first waits for the window thread is `error.Busy`. The fake records each
+`Shell_NotifyIconW` call by message and the balloon's text, and answers
+as the harness's `scriptServices` says by posting the callback message
+Windows would, so the host suite now checks a notification through the
+real callback path; the host's own tests check the calls made, the title
+cut at a character, a click, a replacement, a time-out removing the icon,
+and a callback with nothing showing answering nothing. zui-sokol's tour on
+the host idles as before (15.6 ms of CPU over 10 s and 10 frames on the
+Welcome screen in ReleaseSafe) and `zui_app` now reports only file dialogs
+and menus missing. Not detected: notifications the user turned off, or Do
+Not Disturb, neither of which a balloon reports, so the Windows host never
+answers `.failed = .denied`. Next: slice 3, file dialogs.
 
 ### H4. Linux
 

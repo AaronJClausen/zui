@@ -278,8 +278,8 @@ Implemented so far:
   reached through `zui_app.ServicesOf(Host)`'s compile-time `has_*`
   guards, with every answer published into a source the application
   chooses (`zui.ServiceReply`), so it relays and replays; the Windows
-  host reads and writes the clipboard and opens URLs through them, and
-  notifications, file dialogs and menus come next.
+  host reads and writes the clipboard, opens URLs and shows
+  notifications through them, and file dialogs and menus come next.
 
 The reference backend, its adapter host and the demo application live in
 [zui-raylib](https://github.com/AaronJClausen/zui-raylib); the other
