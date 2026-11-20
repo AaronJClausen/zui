@@ -117,9 +117,11 @@ Things to know:
   still missing is listed in ARCHITECTURE.md §7 with the item that adds
   it. With `TaskPool` deleted, outside data reaches a frame only through
   sources: `zui_async`'s (A4) or the application's own (A3).
-- **A core change reaches the backends by a pin.** zui-raylib,
-  zui-sokol and zui-terminal pin zui by commit; develop them against this
-  checkout with `--fork=../zui`, push zui, then move each pin with
+- **A core change reaches the backends in this repository at once, and
+  the others by a pin.** `renderers/terminal/` names `core/` by path, and
+  `zig build test-all` tests it with the change. zui-raylib and zui-sokol
+  pin zui by commit; develop them against this checkout with
+  `--fork=../zui`, push zui, then move each pin with
   `zig fetch --save=zui`. The demo's `--measure-idle` and
   `-Dzui-tracy=true` check the idle budget and the trace there.
 - **`bench --check-targets` checks §20.2's budgets,** including
@@ -4186,7 +4188,7 @@ pool.
 ## Stage 3: the contracts
 
 Done: C1, C2, C3, C7, C4 and H1 are in *Done*. Lowering comes with
-stage 8's commands; zui-sokol and zui-terminal remain renderers without
+stage 8's commands; zui-sokol and the terminal renderer remain renderers without
 a host of their own, and zui-sokol's renderer gains a native surface
 with H2.
 

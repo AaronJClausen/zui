@@ -61,7 +61,7 @@ Implemented so far:
   it draws into, the optional commands it draws), checked at compile time
   by `zui.checkRenderer`, and a `RenderCommand` union generated with
   exactly the variants a renderer draws, so its exhaustive `switch` names
-  nothing else. zui-raylib, zui-sokol and zui-terminal are renderers.
+  nothing else. zui-raylib, zui-sokol and `zui_terminal` are renderers.
   The host contract (`zuiPoll`, `zuiWaker`, `zuiWait`, `zuiSurface`,
   `zuiApply`), checked by `zui.checkHost`, with `zui.RecordBuilder` for
   the record a host fills and `zui.checkHostAndRenderer` failing to
@@ -305,7 +305,7 @@ Implemented so far:
 The reference backend, its adapter host and the demo application live in
 [zui-raylib](https://github.com/AaronJClausen/zui-raylib); the other
 backends are [zui-sokol](https://github.com/AaronJClausen/zui-sokol) and
-[zui-terminal](https://github.com/AaronJClausen/zui-terminal); native
+the terminal renderer in [renderers/terminal/](renderers/terminal/); native
 hosts live in [zui-host](https://github.com/AaronJClausen/zui-host).
 
 [docs/feature-tour.html](docs/feature-tour.html) walks through every
@@ -380,9 +380,22 @@ modules and runs core's steps under the same names. Beside core:
   Windows, macOS, GNOME and KDE, as data applied through `zui_widgets`'
   skin contract (K4, after the skin contract, K5); a skeleton today.
 - `examples/`: a template project (D1) and samples (D2); a skeleton today.
+- `renderers/terminal/`, the package `zui_terminal`: the terminal
+  renderer (see *The terminal renderer* below).
 
 Each has its own `test` and `check`, run from its directory, and
-`test-all` and `check-all` run them. Run these from the root:
+`test-all` and `check-all` run them. The terminal renderer has these too,
+run from `renderers/terminal/`:
+
+| Command | What it does |
+|---|---|
+| `zig build test` | run its unit tests and zui's renderer suite against it |
+| `zig build conformance` | run zui's renderer suite alone |
+| `zig build check` | compile the renderer and the demo without producing output |
+| `zig build demo` | run the demo in this terminal; Ctrl+C or Ctrl+Q quits |
+| `zig build demo -- --dump` | render the demo offscreen at 100×30 and print its glyphs |
+
+Run these from the root:
 
 | Command | What it does |
 |---|---|
@@ -419,7 +432,9 @@ CI runs:
   with producers on other threads;
 - `zui_tracy` with Tracy's client, on Linux, Windows and macOS;
 - the tests of `themes/` and `examples/` in three optimize modes, and
-  their `check`, on Linux, Windows and macOS, each run from its directory.
+  their `check`, on Linux, Windows and macOS, each run from its directory;
+- the terminal renderer's tests, its conformance, its `check` and its
+  demo's `--dump`, on Linux, Windows and macOS, from `renderers/terminal/`.
 
 Those targets exist to catch assumptions about the host machine early:
 the first 32-bit build found two places that used a 64-bit hash as an
@@ -536,12 +551,12 @@ The recipe the backends follow:
 - CI runs `zig build conformance`, under `xvfb-run --auto-servernum` on
   Linux when the backend needs a window for its graphics context;
 - a backend whose test step needs no display adds `conformance` to
-  `test` too, as zui-terminal does.
+  `test` too, as the terminal renderer does.
 
 `zui_testing.findRendererViolation` and `findHostViolation` return the
 first violation instead of failing, and the doc comments of
 `expectRendererConforms` and `expectHostConforms` list what a harness
-declares. zui-raylib, zui-sokol and zui-terminal each have a
+declares. zui-raylib, zui-sokol and `renderers/terminal/` each have a
 `src/conformance.zig` to copy.
 
 The repository uses LF line endings everywhere (see `.gitattributes`),
@@ -579,6 +594,84 @@ _ = zui_reflect.inspector(widgets, ui, .of("settings"), &settings);
 
 SPEC.md §19.2 lists the widgets, and §19.3 covers the inspector's typed
 options.
+
+### The terminal renderer
+
+`zui_terminal` decodes keys, mouse reports and focus reports into the
+events of zui's frame records, measures text in cells through zui's text
+contract, and paints zui's frames as 24-bit-color cells, as a renderer.
+It needs no library besides zui, and a terminal with VT sequences, 24-bit
+color and SGR mouse reports: Windows Terminal, the Windows 10+ console,
+or any xterm-compatible terminal on Linux and macOS.
+
+```zig
+// build.zig, with `zui` the dependency above
+const zui_terminal = zui.builder.dependency("zui_terminal", .{ .target = target, .optimize = optimize });
+exe.root_module.addImport("zui_terminal", zui_terminal.module("zui_terminal"));
+```
+
+```zig
+const zui = @import("zui");
+const zui_terminal = @import("zui_terminal");
+const Ui = zui.Context(zui_terminal.config(.{}));
+
+var terminal = try zui_terminal.Terminal.enter(io);
+defer terminal.leave();
+var text: zui_terminal.Text = .{};
+var ui = try Ui.init(gpa, io, &text);
+var screen: zui_terminal.Screen = .{};
+var renderer: zui_terminal.Renderer = .{ .gpa = gpa, .screen = &screen, .output = stdout, .background = background };
+var decoder: zui_terminal.InputDecoder = .{};
+
+while (!decoder.quit_requested) {
+    const surface = terminal.surface(); // .terminal, with the size in cells
+    ui.beginFrame(&.{ .params = .{ .now = terminal.now(), .viewport = viewportFor(surface) }, .events = decoder.take() });
+    // ... declare your UI ...
+    const frame = ui.endFrame();
+    try renderer.zuiSubmit(surface, frame); // paints the cells and writes what changed
+    ui.release(frame);
+    terminal.wait(ui.nextFrame());
+    decoder.feed(terminal.readAvailable(&read_buffer), terminal.now());
+}
+```
+
+`zui_terminal.config(...)` builds the `Config` from `Renderer`'s
+declarations: it declares no optional commands and no payload types, so
+its `switch` over the commands names only the five base commands. To
+paint into a `CellBuffer` of your own, call `zui_terminal.render` instead.
+
+`terminal.wait` sleeps as `nextFrame` says: not at all, until a
+requested instant, or until input, a resize or a wake, so an idle UI uses
+no CPU. `terminal.waker()` is a `zui.Waker` for sources' producers: on
+Windows it writes a console input record, elsewhere it writes to a pipe,
+and either way a wake that arrives before the wait still ends it. On
+Linux and macOS a resize does not wake `poll`, so an idle wait looks at
+the size every 250 ms and runs a frame only when it changed.
+
+Layout stays in pixel-like units: a cell is `Text.cell_size` units (8×16
+by default), so a UI written for a pixel renderer still lays out
+sensibly. A cell is painted when its center lies inside a command's
+bounds.
+
+| zui | terminal |
+|---|---|
+| `rectangle` | cell backgrounds; translucent colors blend over what is below |
+| `border` | box drawing (`┌─┐`, or `╭─╮` with a corner radius); `[` `]` on a one-row box |
+| `text` | one glyph per code point, one line per command; letter spacing moves each glyph to the nearest cell |
+| `clip_begin` / `clip_end` | a stack of cell rectangles |
+| pointer | SGR mouse reports as `pointer_move`, `pointer_down` and `pointer_up`, in the order they arrived |
+| wheel | SGR wheel reports, `InputDecoder.wheel_step` units per notch |
+| keys | navigation, function and editing keys; letters and digits also as keys, so Ctrl+S and Alt+S are chords |
+| focus | focus reports (`CSI I` / `CSI O`) as the environment's `window_focused` |
+
+What a terminal cannot do:
+- **One font, one size.** `Text.zuiMeasure` ignores both: every code
+  point is one cell, plus the letter spacing after it. Wide characters
+  (CJK, most emoji) take two cells on screen but are measured as one.
+- **Borders never overwrite glyphs.** zui draws borders after their
+  children, so a border cell that already holds text keeps it.
+- **No cursor shapes or IME window.** The frame's host requests are not
+  applied.
 
 ## License
 

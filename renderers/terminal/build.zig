@@ -4,19 +4,15 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const zui_dependency = b.dependency("zui", .{ .target = target, .optimize = optimize });
-    const zui_module = zui_dependency.module("zui");
-    const zui_widgets_module = zui_dependency.module("zui_widgets");
+    const core = b.dependency("zui_core", .{ .target = target, .optimize = optimize });
+    const zui_module = core.module("zui");
+    const zui_testing_module = core.module("zui_testing");
 
     const backend_module = b.addModule("zui_terminal", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
-        .imports = &.{
-            .{ .name = "zui", .module = zui_module },
-            .{ .name = "zui_widgets", .module = zui_widgets_module },
-            .{ .name = "zui_reflect", .module = zui_dependency.module("zui_reflect") },
-        },
+        .imports = &.{.{ .name = "zui", .module = zui_module }},
     });
 
     const test_module = b.createModule(.{
@@ -25,9 +21,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{
             .{ .name = "zui", .module = zui_module },
-            .{ .name = "zui_widgets", .module = zui_widgets_module },
-            .{ .name = "zui_reflect", .module = zui_dependency.module("zui_reflect") },
-            .{ .name = "zui_testing", .module = zui_dependency.module("zui_testing") },
+            .{ .name = "zui_testing", .module = zui_testing_module },
         },
     });
     const unit_tests = b.addTest(.{ .root_module = test_module });
@@ -40,7 +34,8 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{
             .{ .name = "zui_terminal", .module = backend_module },
-            .{ .name = "zui_testing", .module = zui_dependency.module("zui_testing") },
+            .{ .name = "zui", .module = zui_module },
+            .{ .name = "zui_testing", .module = zui_testing_module },
         },
     }) });
     const run_conformance = b.addRunArtifact(conformance_tests);
@@ -56,7 +51,7 @@ pub fn build(b: *std.Build) void {
             .imports = &.{
                 .{ .name = "zui_terminal", .module = backend_module },
                 .{ .name = "zui", .module = zui_module },
-                .{ .name = "zui_widgets", .module = zui_widgets_module },
+                .{ .name = "zui_widgets", .module = core.module("zui_widgets") },
             },
         }),
     });

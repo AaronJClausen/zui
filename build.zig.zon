@@ -5,6 +5,7 @@
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .zui_core = .{ .path = "core" },
+        .zui_terminal = .{ .path = "renderers/terminal" },
     },
     .paths = .{
         "build.zig",
@@ -12,6 +13,7 @@
         "core",
         "themes",
         "examples",
+        "renderers/terminal",
         "LICENSE",
         "README.md",
         "SPEC.md",

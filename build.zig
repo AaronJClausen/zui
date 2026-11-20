@@ -6,6 +6,7 @@ const packages = [_][]const u8{
     "core",
     "themes",
     "examples",
+    "renderers/terminal",
 };
 
 const core_modules = [_][]const u8{ "zui", "zui_testing", "zui_widgets", "zui_async", "zui_tracy", "zui_reflect", "zui_app", "zui_wire", "zui_debug" };

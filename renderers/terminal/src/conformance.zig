@@ -1,6 +1,6 @@
 const std = @import("std");
 const zui_terminal = @import("zui_terminal");
-const zui = zui_terminal.zui;
+const zui = @import("zui");
 const zui_testing = @import("zui_testing");
 
 /// Draws into a `Screen` it never shows, and reads each pixel back as the

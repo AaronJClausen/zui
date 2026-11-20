@@ -297,18 +297,21 @@ parallel measurement and the module boundary.
 |---|---|
 | `zui` | in `core/`, the package `zui_core`: the core, the contracts, and the modules: async, widgets, reflect, testing, tracy, app, wire, debug, motion, color, icons; at the root, the package `zui` that users fetch, which re-exports core's modules and runs every package's steps |
 | `zui-host` | native hosts, one directory per OS, chosen by target: `windows/` (H2) and `linux/`, on Wayland (H4) |
-| `zui-raylib`, `zui-sokol`, `zui-terminal` | renderers; `zui-raylib` also ships the raylib adapter host |
+| `zui-raylib`, `zui-sokol` | renderers; `zui-raylib` also ships the raylib adapter host |
+| `zui`, in `renderers/terminal/` | the package `zui_terminal`: the terminal renderer, its input decoder and raw-mode terminal, its conformance harness and its demo; no third-party library |
 | `zui-web` | the browser: a thin client over `zui_wire` (V4), then a web host (H5); today the client's decoder, in WebAssembly, and its drawing of shapes, text, backdrop blurs and materials through WebGL 2 with four samples per pixel, checked against zui-sokol's renderer drawing the tour's frames, and the page's input written back as records the tour takes, with the cursor its frames ask for shown on the canvas; and zui-sokol's tour in a Web Worker on an `Io` of its own, whose tasks take turns on workers sharing its memory, drawing the frames it draws natively and timing them on the worker's clock; and the page that puts them together, published to GitHub Pages from CI and made cross-origin isolated by a service worker of its own |
 | `zui`, in `themes/` | the package `zui_themes`: skins for OS design languages (K4); a skeleton today |
 | `zui`, in `examples/` | the package `zui_examples`: samples and the template project (D1, D2); a skeleton today |
 
 `zui-web`, `themes/` and `examples/` were created ahead of their items.
 `zui-web` has its build, CI and an agent guide, and pins zui by commit;
-`themes/` and `examples/` each have their build and CI jobs, and name
-core by path.
+`themes/`, `examples/` and `renderers/terminal/` each have their build
+and CI jobs, and name core by path, so a change to core is built and
+tested against each of them in place; each runs its own steps from its
+own directory, and the root's `test-all` and `check-all` run them all.
 
-The renderer repositories pin zui by commit, moved to stage 2 with it
-(C8), and to the end of stage 6 with C10: each declares `Text`, a text
+zui-raylib and zui-sokol pin zui by commit, moved to stage 2 with it
+(C8), and to the end of stage 6 with C10. Each renderer declares `Text`, a text
 contract, and its loop builds a `FrameRecord`, from events where its library reports them and through
 `zui.InputSampler` where it reports state (raylib), then waits as
 `nextFrame` says. Each is a renderer (C1): a `Renderer` type implementing
@@ -318,7 +321,7 @@ declarations, so its `switch` over the commands names exactly what it
 draws (the terminal's names only the five base commands). zui-raylib is
 also a host (H1): `zui_raylib.Host` waits in GLFW and samples raylib's
 input, and its demo runs through `zui_app`. zui-sokol's and
-zui-terminal's loops still do a host's work by hand, but zui-sokol's
+the terminal renderer's loops still do a host's work by hand, but zui-sokol's
 renderer also draws into a native host's `win32` window without
 sokol_app, with D3D11 through a DirectComposition swapchain that keeps
 alpha so a system material shows (H8), and zui-host runs zui-sokol's tour
@@ -334,3 +337,16 @@ watch (F6). zui-sokol's context types (`Text`, `Image`, `Material`, its
 `config`) live in `zui_sokol_ui`, which does not import sokol, so its
 tour builds for `wasm32-freestanding`, for zui-web to run in a worker
 (V4).
+
+The terminal renderer, `zui_terminal`, keeps layout in pixel-like units,
+`Text.cell_size` (8×16) to a cell, and paints a cell when its center lies
+inside a command's bounds. `src/cells.zig` paints a frame's commands into
+a `CellBuffer`; `src/screen.zig` double-buffers it and writes only the
+cells that changed; `src/input.zig`'s `InputDecoder` turns UTF-8, VT key
+sequences, SGR mouse reports and focus reports into a frame record's
+events; `src/terminal.zig` enters raw mode on the alternate screen, waits
+as `nextFrame` says, and wakes through a console input record on Windows
+and a pipe elsewhere. Its conformance harness reads each pixel back as
+the cell covering it, so it passes the renderer suite at a tolerance of
+0, and its `test` step runs the suite too. It builds `examples/demo.zig`,
+which draws `examples/showcase.zig`, the same UI as zui-sokol's demo.

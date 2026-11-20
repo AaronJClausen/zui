@@ -70,8 +70,9 @@ Stop and ask the user instead of guessing when:
 | a skin for an OS design language | `themes/src/<design language>.zig`, exported from `themes/src/root.zig` (the `zui_themes` module), with its tests beside it. A skin is data, applied through `zui_widgets`' skin contract: it imports only `zui` and `zui_widgets`, and holds no drawing or OS code |
 | the template project | `examples/template/`, a package of its own, so it can be copied out as a new app |
 | a sample | `examples/samples/<name>/`, built and tested from `examples/build.zig` and imported from the `test` block of `examples/samples/root.zig`. A sample uses only the public APIs of zui, its modules, and the renderers and hosts, as a user would |
-| a package | its own directory, with its `build.zig` and `build.zig.zon`, naming other packages by `.path`; in the root, a line in `packages` in `build.zig` and in `.paths` in `build.zig.zon` |
-| renderer and adapter-host changes | `../zui-raylib`, `../zui-sokol`, `../zui-terminal`, tested against this checkout with `zig build test --fork=../zui` |
+| a package | its own directory, with its `build.zig` and `build.zig.zon`, naming other packages by `.path`; in the root, a line in `packages` in `build.zig` and in `.paths` in `build.zig.zon`. A renderer or host package is also a `.path` entry in the root's `.dependencies`, so users reach it as `zui.builder.dependency("<name>", …)`; the root's `build()` never instantiates it |
+| renderer changes | `renderers/<name>/`, which names `core/` by path, so it is tested in place from its directory: `renderers/terminal/` |
+| renderer and adapter-host changes outside this repository | `../zui-raylib`, `../zui-sokol`, tested against this checkout with `zig build test --fork=../zui` |
 | native hosts | `../zui-host`, which is created by H2 and not before |
 
 Each stage's features and their layer are listed in `ARCHITECTURE.md` §6.
@@ -113,7 +114,11 @@ Run these from the repository's root, which runs core's steps under the
 same names; another package's own steps run from its directory. In
 `themes/` and `examples/`, run `zig build test` in all three optimize
 modes and `zig build check` before committing; `test-all` and `check-all`
-run them from the root.
+run them from the root. In `renderers/terminal/`, run `zig build test`
+(which runs `conformance` too), `zig build check`, the same `check` with
+`-Dtarget=x86_64-windows` and `-Dtarget=aarch64-macos`, and
+`zig build demo -- --dump`, which prints the demo's glyphs and must
+contain "zui + terminal" (without `--dump` the demo is interactive).
 
 | Command | When |
 |---|---|
@@ -174,7 +179,8 @@ run them from the root.
   prefix ("Add the tracer contract"), and a body that says what changed
   and why, with measurements.
 - Work on `main`, as the history does. **Do not push or tag** unless the
-  user says to in this session. Sibling repositories pin zui by commit,
+  user says to in this session. Packages in this repository name `core/`
+  by path and need no pin. Sibling repositories pin zui by commit,
   so they cannot take a zui change until it is pushed. Until then, test
   them with `--fork=../zui`.
 - Work in a sibling repository only for an item whose *Where* names it,
