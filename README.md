@@ -376,6 +376,17 @@ The engine and its modules are the package in `core/`; the repository's
 root is the package `zui` that users fetch, which re-exports core's
 modules and runs core's steps under the same names. Beside core:
 
+- `text/glyphs/`, the package `zui_glyphs`: what font systems and
+  renderers share, so text is drawn where it was measured: the one
+  layout that places a run's glyphs, the placement a renderer declares
+  (a pixel grid, or the terminal's cells), the handle a renderer draws a
+  text's fonts through, and the glyph atlas. The root re-exports it.
+- `text/truetype/`, the package `zui_truetype`: the default font system,
+  `zui_truetype.Text`, on stb_truetype; given no fonts, it measures and
+  draws in Atkinson Hyperlegible Regular (see *Text* below).
+- `text/fonts/`, the package `zui_fonts`: Atkinson Hyperlegible Regular
+  and Bold and Liberation Mono, each a `pub const` of its bytes, with
+  their licences. The root re-exports it.
 - `themes/`, the package `zui_themes`: skins in the design languages of
   Windows, macOS, GNOME and KDE, as data applied through `zui_widgets`'
   skin contract (K4, after the skin contract, K5); a skeleton today.
@@ -395,7 +406,9 @@ modules and runs core's steps under the same names. Beside core:
   a Web Worker, and the published page (see *The web host* below).
 
 Each has its own `test` and `check`, run from its directory, and
-`test-all` and `check-all` run them. The raylib renderer has these too,
+`test-all` and `check-all` run them. The text packages' `check` also
+compiles their tests for `wasm32-freestanding`; `zui_truetype`'s first
+build fetches stb. The raylib renderer has these too,
 run from `renderers/raylib/`; the first build fetches raylib and compiles
 it:
 
@@ -461,12 +474,11 @@ for the examples sokol's
 | `zig build title-bar` | a title bar the application draws, which Windows still drags, snaps and resizes; `-- --check` hit-tests it hidden (Windows) |
 | `zig build many-windows` | one application in two windows, each with its own UI; `-- --check` clicks and closes them hidden (Windows) |
 
-The WebGL renderer has `test` and `check`, run from `renderers/webgl/`;
-the first build fetches stb:
+The WebGL renderer has `test` and `check`, run from `renderers/webgl/`:
 
 | Command | What it does |
 |---|---|
-| `zig build test` | run the draw list's, text's, glyph atlas's and blur's unit tests |
+| `zig build test` | run the draw list's, bitmap fonts' and blur's unit tests |
 | `zig build check` | compile the unit tests natively and for `wasm32-freestanding` without running them |
 
 The web host has these, run from `hosts/web/`. The steps besides `test`
@@ -701,6 +713,12 @@ exe.root_module.addImport("zui_debug", zui.module("zui_debug"));
 tests.root_module.addImport("zui_testing", zui.module("zui_testing"));
 // Tracing into Tracy; `.@"zui-tracy" = true` in the options above links it.
 exe.root_module.addImport("zui_tracy", zui.module("zui_tracy"));
+// Text: what font systems and renderers share, and the bundled typefaces.
+exe.root_module.addImport("zui_glyphs", zui.module("zui_glyphs"));
+exe.root_module.addImport("zui_fonts", zui.module("zui_fonts"));
+// The default font system, which builds stb_truetype, so it is a package of its own.
+const zui_truetype = zui.builder.dependency("zui_truetype", .{ .target = target, .optimize = optimize });
+exe.root_module.addImport("zui_truetype", zui_truetype.module("zui_truetype"));
 ```
 
 ```zig
@@ -714,6 +732,39 @@ _ = zui_reflect.inspector(widgets, ui, .of("settings"), &settings);
 SPEC.md §19.2 lists the widgets, and §19.3 covers the inspector's typed
 options.
 
+### Text
+
+zui measures text through the text contract the application names, and
+`zui_truetype.Text` is the default one: TrueType fonts on stb_truetype,
+which given no fonts measures and draws in Atkinson Hyperlegible Regular
+as font 0, the only font it then embeds. Fonts are added before the first
+frame, each `addFont` returning its `FontId`; `zui_fonts` bundles
+Atkinson Hyperlegible Regular and Bold and Liberation Mono, and only the
+ones an application references are embedded. A font's bytes may also
+arrive at run time, into memory the application reserves.
+
+```zig
+var text: zui_truetype.Text = .{ .placement = zui_glyphs.placementOf(Renderer) };
+const body = try text.addFont(zui_fonts.atkinson_hyperlegible_regular);
+const code = try text.addFont(zui_fonts.liberation_mono_regular);
+var ui: Ui = try .init(gpa, io, &text);
+ui.text("let x = 1;", .{ .font = code, .size = 14 });
+```
+
+A run is laid out once, in `zui_glyphs`, and that layout is both what the
+text measures and where the renderer draws each glyph: every glyph
+advances the pen by its font's advance and the letter spacing, without
+kerning, so a run measures as its words do. A renderer declares how it
+places glyphs, on the pixel grid or one per terminal cell
+(`glyph_placement`), and the text lays out for it, so the same fonts
+measure in cells on the terminal. A renderer takes the text as `anytype`
+and never names a font system, so another font system plugs in by
+providing `zui_glyphs`' few methods (`fontMetrics`, `advance`,
+`glyphIndex`, `glyphBox`, `rasterize`) and passing
+`zui_glyphs.expectFontsConform`. Its `zuiFingerprint` covers its fonts'
+bytes and its placement, so a remote renderer refuses a stream measured
+with other fonts.
+
 Renderers and hosts are packages of their own, reached
 through the `zui` dependency's builder as the next sections show, so an
 application fetches only the libraries of the renderers it uses.
@@ -721,7 +772,7 @@ application fetches only the libraries of the renderers it uses.
 ### The raylib renderer
 
 `zui_raylib` is a [raylib](https://www.raylib.com) renderer (zui's
-renderer and text contracts, with raylib's fonts) and an adapter host
+renderer contract, drawing any text's fonts) and an adapter host
 (zui's host contract on raylib's window), so an application runs on it
 through `zui_app` in one call. It needs raylib **6.0**, the newest raylib
 release whose build supports Zig 0.16, which is fetched the first time it
@@ -743,11 +794,13 @@ two build one `zui` module and their types match.
 const zui = @import("zui");
 const zui_app = @import("zui_app");
 const zui_raylib = @import("zui_raylib");
+const zui_truetype = @import("zui_truetype");
 
 const App = struct {
     pub const Host = zui_raylib.Host;
     pub const Renderer = zui_raylib.Renderer;
-    pub const Ui = zui.Context(zui_app.contextConfig(Renderer, .{ .Sources = AppSources }));
+    pub const Text = zui_truetype.Text;
+    pub const Ui = zui.Context(zui_app.contextConfig(Renderer, .{ .Text = Text, .Sources = AppSources }));
 
     sources: AppSources = .{},
 
@@ -765,18 +818,17 @@ pub fn main(init: std.process.Init) !void {
 }
 ```
 
-`zui_raylib.Renderer` implements zui's renderer and text contracts. Its
-surface is `.library`: raylib's own window between `BeginDrawing` and
-`EndDrawing`, or a render texture between `BeginTextureMode` and
-`EndTextureMode`. It draws each frame scaled by the record's zoom, and the
-host divides the viewport and the pointer by it. Its `fonts` are raylib
-`Font`s, indexed by `FontId`; an id past them draws in raylib's built-in
-font. `zui_raylib.loadTrueTypeFont(data, pixel_size)` rasterizes a
-TrueType font's printable ASCII into a mipmapped atlas, and measures
-without a window, so a headless test lays text out as the window will;
-`zui_raylib.unloadFont` frees it. `zui_app.contextConfig` builds the
-`Config` from its declarations: the renderer measures text,
-`ImageHandle` is raylib's `Texture2D`, so `ui.image(.{ .handle = texture
+`zui_raylib.Renderer` implements zui's renderer contract. Its surface is
+`.library`: raylib's own window between `BeginDrawing` and `EndDrawing`,
+or a render texture between `BeginTextureMode` and `EndTextureMode`. It
+draws each frame scaled by the record's zoom, and the host divides the
+viewport and the pointer by it. `zui_app` hands its `init` the
+application's `Text`, whose glyphs it rasterizes on first use into a
+`zui_glyphs` atlas reserved there and uploaded as one texture, and draws
+where `zui_glyphs` laid them out; a font id that text has no face for
+draws in raylib's built-in font, which `zui_raylib.measureInBuiltInFont`
+measures. `zui_app.contextConfig` builds the `Config` from its
+declarations: `ImageHandle` is raylib's `Texture2D`, so `ui.image(.{ .handle = texture
 }, ...)` draws directly, and there are no optional commands and no
 `CustomData`. The renderer's `switch` over the commands therefore names
 exactly the base commands and `image`. raylib's OpenGL context belongs to
@@ -821,17 +873,13 @@ What raylib cannot do:
 - **Corner radii.** raylib rounds all four corners of a rectangle or a
   border the same, so the largest of zui's four radii is used; an image
   rounds each corner by its own.
-- **Letter spacing.** Text is measured glyph by glyph with the spacing
-  after each glyph included: a glyph with no advance of its own, as in
-  raylib's built-in font, takes `Renderer.bitmap_glyph_spacing` of the
+- **Letter spacing in the built-in font.** raylib's built-in font is
+  measured glyph by glyph with the spacing after each glyph included: a
+  glyph with no advance of its own takes `built_in_glyph_spacing` of the
   size, and the style adds its own. zui measures words and spaces
   separately and adds them up, so measurement has to be additive, and
   raylib's own `MeasureTextEx` leaves out the spacing after the last
   glyph.
-- **One raster size per font.** A font's glyphs are rasterized once;
-  smaller text is drawn from its mipmaps, and larger text is scaled up
-  and softens. Only printable ASCII is loaded; other code points draw
-  as `?`.
 - **No IME window.** raylib cannot place one, so a text-input request is
   not applied.
 - **One window.** `zui_capabilities.windows` is `.one`.
@@ -885,13 +933,15 @@ costs live, and Tab moves focus.
 ![The gallery loading tiles on other threads](renderers/raylib/docs/gallery.png)
 
 `examples/demo.zig` is the tour's application as `zui_app` runs it: it
-loads the fonts into the renderer, sets the record's zoom and the
+names the tour's text, `kit.Text`, whose `zui_truetype.Text` holds
+`zui_fonts`' three typefaces and whose fourth font is raylib's built-in
+one, sets the record's zoom and the
 environment changes the tour makes up, hands each frame to `zui_debug`
 while its panel is open, and times each step for the strip;
 `kit.Renderer` wraps `zui_raylib.Renderer` to time its submits. The tour
 itself (`app.zig`, `kit.zig`, `perf.zig` and `screens/`) is the sokol renderer's,
-with raylib's fonts in place of sokol_debugtext's and stb_truetype's,
-and `zui_debug`'s panel on F12, which the sokol renderer's does not have yet.
+with Liberation Mono and raylib's built-in font in place of sokol_debugtext's
+fonts, and `zui_debug`'s panel on F12, which the sokol renderer's does not have yet.
 
 `--measure-idle` runs the tour in a hidden window and reads its own CPU
 time at two frames it asks for with `requestFrameAt`, 10 seconds apart,
@@ -907,12 +957,13 @@ time).
 through [sokol-zig](https://github.com/floooh/sokol-zig): it collects
 sokol_app events into zui's frame records, measures text through zui's
 text contract, and draws zui's frames as a renderer with sokol_gl,
-sokol_debugtext, stb_truetype and shaders of its own, on D3D11
-(Windows), Metal (macOS) or OpenGL (Linux). It draws every optional
-command, gradients, shadows, backdrop blurs, transforms and materials,
-and extended colors. sokol-zig and stb_truetype (from
-[stb](https://github.com/nothings/stb)) are fetched the first time it is
-built; on Linux it needs
+sokol_debugtext and shaders of its own, on D3D11 (Windows), Metal
+(macOS) or OpenGL (Linux), its TrueType text from a `zui_glyphs` atlas
+where `zui_glyphs` laid it out. It draws every optional command,
+gradients, shadows, backdrop blurs, transforms and materials, and
+extended colors. sokol-zig, and stb_truetype (from
+[stb](https://github.com/nothings/stb)) for `zui_truetype`, are fetched
+the first time it is built; on Linux it needs
 `libx11-dev libxi-dev libxcursor-dev libgl1-mesa-dev libpulse-dev libegl-dev libwayland-dev`.
 
 ```zig
@@ -927,7 +978,7 @@ const zui_sokol = @import("zui_sokol");
 const Ui = zui.Context(zui_sokol.config(.{}));
 
 // before the first frame, to draw TrueType text with `.font = body_font`:
-const body_font = try text.addTrueTypeFont(@embedFile("Inter-Regular.ttf"));
+const body_font = try text.addTrueTypeFont(zui_fonts.atkinson_hyperlegible_regular);
 
 // in sokol_app's init callback, after sg.setup:
 renderer = .init(&text);
@@ -1012,7 +1063,7 @@ fn panel(seconds: f32) Ui.Decoration {
 |---|---|
 | `rectangle` | sokol_gl quads, or a triangle fan with each corner's own radius |
 | `border` | a ring of triangles inside the bounds, with per-edge widths and per-corner radii |
-| `text` | `FontId` 0–5: sokol_debugtext, one call per wrapped line, with letter spacing placing each glyph on its own. From 6: a TrueType font added with `Text.addTrueTypeFont`, its glyphs rasterized by stb_truetype at the text's size in physical pixels into a glyph atlas and drawn as sokol_gl quads |
+| `text` | `FontId` 0–5: sokol_debugtext, one call per wrapped line, with letter spacing placing each glyph on its own. From 6: a TrueType font added with `Text.addTrueTypeFont`, laid out by `zui_glyphs` as it was measured, its glyphs rasterized at the text's size in physical pixels into a `zui_glyphs` atlas and drawn as sokol_gl quads |
 | `image` | a textured sokol_gl quad colored by the tint, or a triangle fan with each corner's own radius |
 | `gradient` | the rounded outline cut into bands at most 4 units long across the gradient (64 at most), each vertex colored by `colorAt`, so sokol_gl's sRGB blend between vertices stays within a step of zui's OKLab one |
 | `shadow` | the rounded box at the offset, grown by the spread, in the shadow's color, then six rings out to the blur, fading to clear along a smoothstep |
@@ -1061,11 +1112,12 @@ Current limits:
   `Text.glyph_scale` of the text size, and every glyph has the same advance.
 - **TrueType text has no kerning or shaping.** Each codepoint is one
   glyph, advanced by its own width, so measuring a run split at any word
-  gives the same width. The atlas is one 1024×1024 image, remade whenever
-  a frame needs glyphs it lacks (sokol_gfx images cannot be updated once
-  made); when a frame needs more than it holds, it starts over, and
-  `Renderer.glyph_overflows` counts frames whose glyphs still did not fit.
-  Text larger than 160 physical pixels is drawn from 160-pixel glyphs.
+  gives the same width. The atlas is one 1024×1024 image, reserved by
+  `init` and remade whenever a frame needs glyphs it lacks (sokol_gfx
+  images cannot be updated once made); when a frame needs more than it
+  holds, it starts over, and `Renderer.glyphOverflows()` counts frames
+  whose glyphs still did not fit. Text larger than 160 physical pixels is
+  drawn from 160-pixel glyphs.
 - **No idle sleep.** sokol_app presents at every display refresh, so the
   process never sleeps. The demo declares a zui frame only when
   `nextFrame` or new input calls for one, and otherwise redraws the frame
@@ -1095,11 +1147,11 @@ runs it on Linux under `xvfb-run`, and it passes on Windows.
 
 An application that only declares frames, for a renderer elsewhere to
 draw, imports `zui_sokol_ui`, which does not import sokol: `Text`,
-`truetype`, `Material`, `Image`, the commands the renderer draws, and
-`config`, which `zui_sokol` re-exports and checks against its renderer.
-Without a C library, as on `wasm32-freestanding`, its stb_truetype
-allocates nothing: it measures every font, and would rasterize no glyph.
-The tour declares its `Ui` through it, so `zui_sokol_tour` builds where
+`Material`, `Image`, the commands the renderer draws, and `config`,
+which `zui_sokol` re-exports and checks against its renderer. Its `Text`
+hands TrueType fonts to `zui_truetype`, which builds without a C library,
+as on `wasm32-freestanding`. The tour declares its `Ui` through it, so
+`zui_sokol_tour` builds where
 sokol does not, and given a freestanding target, the package's build
 fetches stb alone and makes only those two modules:
 
@@ -1134,6 +1186,9 @@ raylib renderer lowers, and two screens are its own:
 `zui_terminal` decodes keys, mouse reports and focus reports into the
 events of zui's frame records, measures text in cells through zui's text
 contract, and paints zui's frames as 24-bit-color cells, as a renderer.
+It declares cell placement (`Renderer.glyph_placement`), so its `Text`,
+or any font system laid out for it, measures every glyph one cell wide,
+as it is drawn.
 It needs no library besides zui, and a terminal with VT sequences, 24-bit
 color and SGR mouse reports: Windows Terminal, the Windows 10+ console,
 or any xterm-compatible terminal on Linux and macOS.
@@ -1191,7 +1246,7 @@ bounds.
 |---|---|
 | `rectangle` | cell backgrounds; translucent colors blend over what is below |
 | `border` | box drawing (`┌─┐`, or `╭─╮` with a corner radius); `[` `]` on a one-row box |
-| `text` | one glyph per code point, one line per command; letter spacing moves each glyph to the nearest cell |
+| `text` | one glyph per code point, one line per command, in the cell where `zui_glyphs`' cell placement puts it; letter spacing moves each glyph to the nearest cell |
 | `clip_begin` / `clip_end` | a stack of cell rectangles |
 | pointer | SGR mouse reports as `pointer_move`, `pointer_down` and `pointer_up`, in the order they arrived |
 | wheel | SGR wheel reports, `InputDecoder.wheel_step` units per notch |
@@ -1200,7 +1255,8 @@ bounds.
 
 What a terminal cannot do:
 - **One font, one size.** `Text.zuiMeasure` ignores both: every code
-  point is one cell, plus the letter spacing after it. Wide characters
+  point is one cell, plus the letter spacing after it, and an invalid
+  byte one cell of U+FFFD. Wide characters
   (CJK, most emoji) take two cells on screen but are measured as one.
 - **Borders never overwrite glyphs.** zui draws borders after their
   children, so a border cell that already holds text keeps it.
@@ -1216,10 +1272,12 @@ under one scissor rectangle, and `web/frame_drawer.mjs` draws them on a
 canvas through WebGL 2, with four samples per pixel resolved to one,
 which smooth every edge as the sokol renderer's demo window does with its
 `sample_count = 4`: rectangles, borders, clips, gradients, shadows and
-transforms, and text, once the page hands over the stream's fonts.
-`Text` holds them: TrueType glyphs are rasterized by stb_truetype,
-compiled in without a C library, into an atlas packed as the sokol
-renderer packs its own, and bitmap text uses sokol_debugtext's six fonts.
+transforms, and text, once the page hands over the stream's fonts:
+TrueType glyphs placed where `zui_glyphs` lays them out, from a
+`zui_glyphs` atlas of RG8 texels, as the sokol renderer places and packs
+its own, and bitmap text in sokol_debugtext's six fonts, `BitmapFonts`,
+for a font id the text has no face for. It draws any text's fonts, taken
+as `anytype`, and depends on no font system or third-party library.
 A backdrop blur copies what was drawn beneath it and blurs it as the sokol
 renderer does, along x and then y into two float targets, before the pane
 is drawn from them; a material is drawn by the sokol renderer's material
@@ -1241,11 +1299,13 @@ client.root_module.addImport("zui_webgl", zui_webgl.module("zui_webgl"));
 ```
 
 ```zig
-var text: zui_webgl.Text = try .init(gpa);
+var text: zui_truetype.Text = .{}; // or any text contract `zui_glyphs.Fonts.of` erases
 var draw_list: zui_webgl.DrawList = try .init(gpa);
+draw_list.bitmap_fonts.load(&sokol_debugtext_rows);
 draw_list.layOut(frame.commands(), frame.params, &text);
-// hand draw_list.batches(), .vertices(), .backdropBlurs(), .blurTaps() and
-// .materials() to the page's FrameDrawer, as hosts/web's client does
+// hand draw_list.batches(), .vertices(), .backdropBlurs(), .blurTaps(),
+// .materials() and, when it changed, draw_list.glyph_atlas.texels to the
+// page's FrameDrawer, as hosts/web's client does
 ```
 
 The web host's `test-draw` checks it against the sokol renderer (see
@@ -1758,10 +1818,17 @@ steps run from `hosts/web/` (see *Development*). Everything under its
 memory once `zuiWebInit` reserves it), which takes
 a `zui_wire` stream in pieces of any size, as a socket delivers it,
 decodes each frame once all of it has arrived, and lays it out with the
-WebGL renderer for `frame_drawer.mjs` to draw. `zig build test-demo`
-declares every screen of the sokol renderer's tour headlessly, streams
-its frames to that client under Node in pieces of 1 to 16,384 bytes, and
-checks that each of the 312 frames decodes to what the tour drew.
+WebGL renderer for `frame_drawer.mjs` to draw. Its text is the sokol
+renderer's bitmap font ids followed by the TrueType fonts the page hands
+over, laid out through a `zui_truetype.Text` with no default font, so the
+client embeds none; once the page hands fonts over, a stream whose header
+carries another fingerprint, measured with other fonts or the same fonts
+in another order, is refused with `FontsDiffer` rather than drawn.
+`zig build test-demo` declares every screen of the sokol renderer's tour
+headlessly, streams its frames to that client, handed the tour's fonts,
+under Node in pieces of 1 to 16,384 bytes, checks that each of the 312
+frames decodes to what the tour drew, and that a client handed the fonts
+in the other order refuses the stream.
 `zig build test-draw` draws a frame of each of the tour's screens with the
 sokol renderer and with the client in headless Chromium, twice. With one
 sample per pixel, it checks that every pixel matches, within 2 of each
@@ -1837,7 +1904,7 @@ cross-origin isolated, so the page registers a service worker of its own,
 `web/isolation_service_worker.js`, which serves the page and everything
 it loads again with them, and reloads once. `zig build site` writes the
 page, the client, the frame drawer, the tour's worker and the tour's fonts
-to `zig-out/site` (in ReleaseSmall, `zui-web.wasm` is 78 KB and
+to `zig-out/site` (in ReleaseSmall, `zui-web.wasm` is 82 KB and
 `zui-web-tour.wasm` 845 KB), and the Pages workflow
 (`.github/workflows/pages.yml`) builds it in ReleaseSmall, checks it, and
 publishes it from `main`. `zig build test-site` serves that site without
@@ -1861,12 +1928,9 @@ and, like it, is licensed under CC BY-SA 4.0; see
 [assets/LICENSE.md](assets/LICENSE.md). zui is not affiliated with or endorsed
 by the Zig Software Foundation.
 
-The raylib renderer's tour uses fonts under the SIL Open Font License
-1.1: Atkinson Hyperlegible, copyright 2020 Braille Institute of America,
-Inc. (see
-[renderers/raylib/examples/fonts/OFL.txt](renderers/raylib/examples/fonts/OFL.txt)),
-and Liberation Mono, copyright 2010 Google Corporation and 2012 Red Hat,
-Inc. (see
-[renderers/raylib/examples/fonts/LiberationMono-LICENSE.txt](renderers/raylib/examples/fonts/LiberationMono-LICENSE.txt)).
-The sokol renderer's tour uses Atkinson Hyperlegible too (see
-[renderers/sokol/examples/fonts/OFL.txt](renderers/sokol/examples/fonts/OFL.txt)).
+The fonts `zui_fonts` bundles, which `zui_truetype` draws in by default
+and the tours use, are under the SIL Open Font License 1.1: Atkinson
+Hyperlegible, copyright 2020 Braille Institute of America, Inc. (see
+[text/fonts/OFL.txt](text/fonts/OFL.txt)), and Liberation Mono, copyright
+2010 Google Corporation and 2012 Red Hat, Inc. (see
+[text/fonts/LiberationMono-LICENSE.txt](text/fonts/LiberationMono-LICENSE.txt)).

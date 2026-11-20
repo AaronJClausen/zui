@@ -39,18 +39,17 @@ const default_window_size: [2]u32 = .{ 1440, 900 };
 /// layout and the gallery's first tiles.
 const screenshot_after_frames = 45;
 
-/// The tour's application, as `zui_app` runs one: this loads its fonts
-/// into the renderer, times each step for the performance strip, and
-/// passes each step on.
+/// The tour's application, as `zui_app` runs one: this times each step for
+/// the performance strip, and passes each step on.
 const TourOnRaylib = struct {
     pub const Host = zui_raylib.Host;
     pub const Renderer = kit.Renderer;
+    pub const Text = kit.Text;
 
     tour: Tour,
     sources: *kit.Sources,
     host: *Host,
     renderer: *Renderer,
-    fonts: kit.Fonts,
     options: Options,
     frames: u64 = 0,
     next: zui.NextFrame = .immediately,
@@ -70,11 +69,9 @@ const TourOnRaylib = struct {
             .sources = &app.tour.sources,
             .host = start.host,
             .renderer = start.renderer,
-            .fonts = try .load(),
             .options = options,
             .idle_measurement = if (options.measure_idle) .{ .launched_at = start.host.now() } else null,
         };
-        start.renderer.raylib.fonts = &app.fonts.loaded;
         start.renderer.io = start.io;
         kit.ZoneTimer.useClock(start.io);
         app.tour.init(start.io, start.host.now());
@@ -92,7 +89,6 @@ const TourOnRaylib = struct {
     /// Stops the tour's producers, so the sources outlive them.
     pub fn deinit(app: *TourOnRaylib) void {
         app.tour.deinit();
-        app.fonts.deinit();
         if (app.options.frame_limit != null) std.debug.print("drew {d} frames, diagnostics ok: {}\n", .{ app.frames, app.tour.perf.diagnostics.ok() });
     }
 

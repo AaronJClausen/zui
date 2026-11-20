@@ -110,7 +110,6 @@ pub const Perf = struct {
 };
 
 /// zui_raylib's renderer, timing each submit for the performance strip.
-/// It is also the tour's text contract, as the renderer it wraps is.
 pub const TimedRenderer = struct {
     pub const zui_surfaces = zui_raylib.Renderer.zui_surfaces;
     pub const ImageHandle = zui_raylib.Renderer.ImageHandle;
@@ -128,8 +127,12 @@ pub const TimedRenderer = struct {
         diagnostics: zui.Diagnostics = .{},
     };
 
-    pub fn zuiMeasure(self: *TimedRenderer, run: []const u8, key: zui.MeasureKey(u16)) [2]f32 {
-        return self.raylib.zuiMeasure(run, key);
+    pub fn init(self: *TimedRenderer, surface: zui.Surface, text: anytype) !void {
+        try self.raylib.init(surface, text);
+    }
+
+    pub fn deinit(self: *TimedRenderer) void {
+        self.raylib.deinit();
     }
 
     pub fn zuiSubmit(self: *TimedRenderer, surface: zui.Surface, frame: anytype) !void {

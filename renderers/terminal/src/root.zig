@@ -1,5 +1,6 @@
 const std = @import("std");
 const zui = @import("zui");
+const zui_glyphs = @import("zui_glyphs");
 
 const cells = @import("cells.zig");
 pub const Cell = cells.Cell;
@@ -41,6 +42,9 @@ pub fn config(overrides: zui.Config) zui.Config {
 /// ```
 pub const Renderer = struct {
     pub const zui_surfaces: zui.SurfaceKinds = .initOne(.terminal);
+    /// Every glyph one cell, whatever its font: text laid out in
+    /// `zui_glyphs`' cells of `cell_size` is drawn where it was measured.
+    pub const glyph_placement: zui_glyphs.Placement = .{ .cells = default_cell_size };
 
     gpa: std.mem.Allocator,
     screen: *Screen,
@@ -60,25 +64,16 @@ pub const Renderer = struct {
     }
 };
 
-/// The text contract of a terminal, which has one font at one size: every
-/// code point is one cell wide, plus the letter spacing after it, and one
-/// cell tall.
+/// The text contract of a terminal, which has one font at one size: text
+/// laid out in `zui_glyphs`' cells, every code point one cell wide, plus the
+/// letter spacing after it, and one cell tall.
 pub const Text = struct {
     cell_size: [2]f32 = default_cell_size,
 
     pub fn zuiMeasure(self: *Text, run: []const u8, key: zui.MeasureKey(u16)) [2]f32 {
-        return .{ @as(f32, @floatFromInt(codepointCount(run))) * (self.cell_size[0] + key.letter_spacing), self.cell_size[1] };
+        return zui_glyphs.measure({}, run, key, .{ .cells = self.cell_size }).?;
     }
 };
-
-pub fn codepointCount(text: []const u8) usize {
-    var count: usize = 0;
-    for (text) |byte| {
-        const is_continuation_byte = byte & 0xC0 == 0x80;
-        if (!is_continuation_byte) count += 1;
-    }
-    return count;
-}
 
 fn measure(text: *Text, run: []const u8, size: f32, letter_spacing: f32) [2]f32 {
     return text.zuiMeasure(run, .{ .font = 0, .size = size, .letter_spacing = letter_spacing });
@@ -119,6 +114,11 @@ test "letter spacing follows every code point, so measurement stays additive" {
     try std.testing.expectEqual(@as(f32, 4 * 8), measure(&text, "café", 16, 0)[0]);
     try std.testing.expectEqual(@as(f32, 4 * 16), measure(&text, "café", 16, 8)[0]);
     try std.testing.expectEqual(measure(&text, "ab", 16, 8)[0], measure(&text, "a", 16, 8)[0] + measure(&text, "b", 16, 8)[0]);
+}
+
+test "an invalid byte measures as the one cell it is drawn in" {
+    var text: Text = .{};
+    try std.testing.expectEqual(@as(f32, 3 * 8), measure(&text, "a\xffb", 16, 0)[0]);
 }
 
 test {

@@ -6,19 +6,16 @@ const App = @import("app.zig").App;
 
 const testing = std.testing;
 
-/// The tour without a window: raylib's fonts measure from their glyphs'
-/// metrics, and nothing is drawn.
+/// The tour without a window: its text measures, and nothing is drawn.
 const Harness = struct {
-    fonts: kit.Fonts = undefined,
-    renderer: kit.Renderer = .{},
+    text: kit.Text = .{},
     ui: Ui = undefined,
     app: *App = undefined,
     frame_number: u64 = 0,
 
     fn init(harness: *Harness) !void {
-        harness.fonts = try .load();
-        harness.renderer.raylib.fonts = &harness.fonts.loaded;
-        harness.ui = try .init(testing.allocator, testing.io, &harness.renderer);
+        try harness.text.init();
+        harness.ui = try .init(testing.allocator, testing.io, &harness.text);
         harness.app = try testing.allocator.create(App);
         harness.app.init(testing.io, .zero);
     }
@@ -27,7 +24,6 @@ const Harness = struct {
         harness.app.deinit();
         testing.allocator.destroy(harness.app);
         harness.ui.deinit(testing.allocator);
-        harness.fonts.deinit();
     }
 
     fn frame(harness: *Harness, viewport: [2]f32) *const Ui.Frame {
@@ -145,19 +141,18 @@ test "F12 opens zui_debug's panel over the classic screen, listing its elements,
 }
 
 test "the tour's TrueType fonts load without a window, and measure proportionally or monospaced" {
-    var fonts: kit.Fonts = try .load();
-    defer fonts.deinit();
-    var renderer: kit.Renderer = .{ .raylib = .{ .fonts = &fonts.loaded } };
+    var text: kit.Text = undefined;
+    try text.init();
     for ([_]u16{ kit.body_font, kit.bold_font }) |font| {
-        const narrow = renderer.zuiMeasure("iiii", .{ .font = font, .size = 16, .letter_spacing = 0 });
-        const wide = renderer.zuiMeasure("WWWW", .{ .font = font, .size = 16, .letter_spacing = 0 });
+        const narrow = text.zuiMeasure("iiii", .{ .font = font, .size = 16, .letter_spacing = 0 });
+        const wide = text.zuiMeasure("WWWW", .{ .font = font, .size = 16, .letter_spacing = 0 });
         try testing.expect(narrow[0] * 2 < wide[0]);
         try testing.expectEqual(@as(f32, 16), narrow[1]);
     }
-    const regular = renderer.zuiMeasure("Hello", .{ .font = kit.body_font, .size = 16, .letter_spacing = 0 });
-    const bold = renderer.zuiMeasure("Hello", .{ .font = kit.bold_font, .size = 16, .letter_spacing = 0 });
+    const regular = text.zuiMeasure("Hello", .{ .font = kit.body_font, .size = 16, .letter_spacing = 0 });
+    const bold = text.zuiMeasure("Hello", .{ .font = kit.bold_font, .size = 16, .letter_spacing = 0 });
     try testing.expect(bold[0] > regular[0]);
-    const mono_narrow = renderer.zuiMeasure("iiii", .{ .font = kit.mono_font, .size = 16, .letter_spacing = 0 });
-    const mono_wide = renderer.zuiMeasure("WWWW", .{ .font = kit.mono_font, .size = 16, .letter_spacing = 0 });
+    const mono_narrow = text.zuiMeasure("iiii", .{ .font = kit.mono_font, .size = 16, .letter_spacing = 0 });
+    const mono_wide = text.zuiMeasure("WWWW", .{ .font = kit.mono_font, .size = 16, .letter_spacing = 0 });
     try testing.expectApproxEqAbs(mono_narrow[0], mono_wide[0], 0.001);
 }

@@ -473,7 +473,7 @@ In a test, `ui.measureCalls()` confirms that a steady-state frame never reaches 
 
 ### The text contract you implement · *shipped*
 
-zui never touches fonts. You give it a type with `zuiMeasure`, and optionally `zui_thread_safe` to allow parallel measurement and `zuiSegment` to report where a paragraph may break. Without `zuiSegment`, text breaks after spaces. With it, CJK and Thai wrap between characters. A misspelled declaration such as `zui_threadsafe` is a compile error rather than silently ignored.
+zui's core never touches fonts. You give it a type with `zuiMeasure`, and optionally `zui_thread_safe` to allow parallel measurement and `zuiSegment` to report where a paragraph may break. Without `zuiSegment`, text breaks after spaces. With it, CJK and Thai wrap between characters. A misspelled declaration such as `zui_threadsafe` is a compile error rather than silently ignored.
 
 `src/fonts.zig`
 
@@ -499,6 +499,44 @@ pub const Fonts = struct {
         while (opportunities.next()) |offset| sink.add(offset);
     }
 };
+```
+
+<a id="fonts"></a>
+
+### Fonts out of the box · *shipped*
+
+`zui_truetype.Text` is a text contract you do not write: TrueType fonts on stb_truetype, laid out through `zui_glyphs`, whose one layout both measures a run and tells every renderer where to draw each glyph, so text is drawn where it was measured. Given no fonts it draws in Atkinson Hyperlegible Regular as font 0; `zui_fonts` bundles that, its bold and Liberation Mono, and only the ones you reference are embedded. Each renderer declares how it places glyphs, on the pixel grid or one per terminal cell, and the text lays out for it. Its fingerprint covers its fonts and placement, so a remote renderer with other fonts refuses your stream. Reach it through the `zui` dependency: `zui.builder.dependency("zui_truetype", .{})`.
+
+`src/typefaces.zig`
+
+```zig
+const std = @import("std");
+const zui = @import("zui");
+const zui_glyphs = @import("zui_glyphs");
+const zui_truetype = @import("zui_truetype");
+const zui_fonts = @import("zui_fonts");
+const zui_raylib = @import("zui_raylib");
+
+pub const Ui = zui.Context(.{ .Text = zui_truetype.Text });
+
+pub const Typefaces = struct {
+    body: u16,
+    code: u16,
+
+    /// Before the first frame: measuring may run on other threads.
+    pub fn add(text: *zui_truetype.Text) !Typefaces {
+        text.placement = zui_glyphs.placementOf(zui_raylib.Renderer);
+        return .{
+            .body = try text.addFont(zui_fonts.atkinson_hyperlegible_regular),
+            .code = try text.addFont(zui_fonts.liberation_mono_regular),
+        };
+    }
+};
+
+fn snippet(ui: *Ui, typefaces: Typefaces) void {
+    ui.text("Measured and drawn by one layout:", .{ .font = typefaces.body, .size = 16 });
+    ui.text("const x = 1;", .{ .font = typefaces.code, .size = 14 });
+}
 ```
 
 <a id="images"></a>

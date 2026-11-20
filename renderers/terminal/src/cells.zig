@@ -1,5 +1,6 @@
 const std = @import("std");
 const zui = @import("zui");
+const zui_glyphs = @import("zui_glyphs");
 
 pub const Cell = struct {
     codepoint: u21 = ' ',
@@ -111,7 +112,7 @@ pub fn render(buffer: *CellBuffer, cell_size: [2]f32, commands: anytype) void {
         switch (command.payload) {
             .rectangle => |rectangle| fillRectangle(buffer, area.intersect(clips.current()), rectangle.color),
             .border => |border| drawBorder(buffer, area, clips.current(), border.color, border.widths, border.corner_radius),
-            .text => |text| drawText(buffer, area, clips.current(), text.content, text.style.color, (cell_size[0] + text.style.letter_spacing) / cell_size[0]),
+            .text => |text| drawText(buffer, area, clips.current(), cell_size, text.content, text.style),
             .clip_begin => |clip| clips.push(CellRect.fromLayout(clip, cell_size)),
             .clip_end => clips.pop(),
         }
@@ -198,35 +199,20 @@ fn putBorderGlyph(buffer: *CellBuffer, clip: CellRect, column: i32, row: i32, gl
 }
 
 /// zui wraps text itself and emits one command per line, so a line starts
-/// at its bounds and never needs wrapping here. Letter spacing moves each
-/// glyph to the cell nearest where it would start.
-fn drawText(buffer: *CellBuffer, area: CellRect, clip: CellRect, content: []const u8, color: zui.Color, glyph_pitch_in_cells: f32) void {
+/// at its bounds and never needs wrapping here. Each glyph is drawn in the
+/// cell nearest where the cell placement puts it, so letter spacing spreads
+/// glyphs over the cells it covers.
+fn drawText(buffer: *CellBuffer, area: CellRect, clip: CellRect, cell_size: [2]f32, content: []const u8, style: anytype) void {
     const row = area.top;
-    var glyph_index: usize = 0;
-    var codepoints = (std.unicode.Utf8View.init(content) catch return drawInvalidUtf8(buffer, area, clip, content.len, color, glyph_pitch_in_cells)).iterator();
-    while (codepoints.nextCodepoint()) |codepoint| : (glyph_index += 1) {
-        const column = glyphColumn(area, glyph_index, glyph_pitch_in_cells);
+    var glyphs = zui_glyphs.layOut({}, content, style, .{ .cells = cell_size }).?;
+    while (glyphs.next()) |glyph| {
+        const column = area.left + roundToCell(glyph.x / cell_size[0]);
         if (column >= clip.right) return;
         if (!clip.contains(column, row)) continue;
         const cell = buffer.at(column, row);
-        cell.codepoint = if (codepoint < 0x20 or codepoint == 0x7F) ' ' else codepoint;
-        cell.foreground = blend(cell.background, color);
+        cell.codepoint = if (glyph.codepoint < 0x20 or glyph.codepoint == 0x7F) ' ' else glyph.codepoint;
+        cell.foreground = blend(cell.background, style.color);
     }
-}
-
-fn drawInvalidUtf8(buffer: *CellBuffer, area: CellRect, clip: CellRect, length: usize, color: zui.Color, glyph_pitch_in_cells: f32) void {
-    for (0..length) |glyph_index| {
-        const column = glyphColumn(area, glyph_index, glyph_pitch_in_cells);
-        if (clip.contains(column, area.top)) {
-            const cell = buffer.at(column, area.top);
-            cell.codepoint = std.unicode.replacement_character;
-            cell.foreground = blend(cell.background, color);
-        }
-    }
-}
-
-fn glyphColumn(area: CellRect, glyph_index: usize, glyph_pitch_in_cells: f32) i32 {
-    return area.left + roundToCell(@as(f32, @floatFromInt(glyph_index)) * glyph_pitch_in_cells);
 }
 
 /// zui's clip rectangles are already intersected with every enclosing clip,

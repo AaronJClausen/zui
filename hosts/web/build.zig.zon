@@ -6,6 +6,9 @@
     .dependencies = .{
         .zui_core = .{ .path = "../../core" },
         .zui_webgl = .{ .path = "../../renderers/webgl" },
+        .zui_glyphs = .{ .path = "../../text/glyphs" },
+        .zui_truetype = .{ .path = "../../text/truetype" },
+        .zui_fonts = .{ .path = "../../text/fonts" },
         .zui_sokol = .{ .path = "../../renderers/sokol", .lazy = true },
     },
     .paths = .{ "build.zig", "build.zig.zon", "src", "tools", "web" },

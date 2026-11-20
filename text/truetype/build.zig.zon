@@ -1,0 +1,17 @@
+.{
+    .name = .zui_truetype,
+    .version = "0.1.0",
+    .fingerprint = 0x4e8e4244756169de, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        .zui_core = .{ .path = "../../core" },
+        .zui_glyphs = .{ .path = "../glyphs" },
+        .zui_fonts = .{ .path = "../fonts" },
+        .stb = .{
+            .url = "git+https://github.com/nothings/stb#4e9b368bfc071e97206ea5c6adba68dd0cbf8897",
+            .hash = "N-V-__8AAFRGTgBWHIQULKwDqlrvga2AR9enp42AsQ7z-yXN",
+            .lazy = true,
+        },
+    },
+    .paths = .{ "build.zig", "build.zig.zon", "src" },
+}

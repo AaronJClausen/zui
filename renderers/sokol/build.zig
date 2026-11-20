@@ -10,13 +10,14 @@ pub fn build(b: *std.Build) void {
     b.step("fmt-check", "Fail if any Zig source is not formatted").dependOn(&b.addFmt(.{ .paths = formatted_paths, .exclude_paths = &generated_paths, .check = true }).step);
 
     const check = b.step("check", "Compile the backend and the demo, and link the tour for wasm32-freestanding, without installing them");
-    const stb_dependency = b.lazyDependency("stb", .{}) orelse return;
-    const tour_modules = addTourModules(b, stb_dependency, target, optimize, .exported);
+    const truetype_dependency = truetypeDeclaring(b, .{ .target = target, .optimize = optimize }) orelse return;
+    const tour_modules = addTourModules(b, truetype_dependency, target, optimize, .exported);
     if (target.result.os.tag == .freestanding) return;
 
     const core = b.dependency("zui_core", .{ .target = target, .optimize = optimize });
     const sokol_dependency = b.lazyDependency("sokol", .{ .target = target, .optimize = optimize, .gl = force_opengl }) orelse return;
     const zui_module = core.module("zui");
+    const glyphs_module = b.dependency("zui_glyphs", .{ .target = target, .optimize = optimize }).module("zui_glyphs");
 
     const backend_module = b.addModule("zui_sokol", .{
         .root_source_file = b.path("src/root.zig"),
@@ -24,6 +25,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{
             .{ .name = "zui", .module = zui_module },
+            .{ .name = "zui_glyphs", .module = glyphs_module },
             .{ .name = "zui_sokol_ui", .module = tour_modules.ui },
             .{ .name = "sokol", .module = sokol_dependency.module("sokol") },
         },
@@ -62,7 +64,8 @@ pub fn build(b: *std.Build) void {
 
     check.dependOn(&demo.step);
     const freestanding_target = b.resolveTargetQuery(.{ .cpu_arch = .wasm32, .os_tag = .freestanding });
-    const freestanding_tour_modules = addTourModules(b, stb_dependency, freestanding_target, optimize, .private);
+    const freestanding_truetype_dependency = truetypeDeclaring(b, .{ .target = freestanding_target, .optimize = optimize }) orelse return;
+    const freestanding_tour_modules = addTourModules(b, freestanding_truetype_dependency, freestanding_target, optimize, .private);
     const freestanding_tour = b.addExecutable(.{
         .name = "zui-sokol-tour-freestanding",
         .root_module = b.createModule(.{
@@ -89,6 +92,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{
             .{ .name = "zui", .module = zui_module },
+            .{ .name = "zui_glyphs", .module = glyphs_module },
             .{ .name = "zui_sokol_ui", .module = tour_modules.ui },
             .{ .name = "sokol", .module = gl_sokol_dependency.module("sokol") },
         },
@@ -179,16 +183,19 @@ const TourModules = struct {
 
 /// `.exported` adds the modules for dependents to import; `.private`
 /// makes them for this build alone, as for a second target.
-fn addTourModules(b: *std.Build, stb_dependency: *std.Build.Dependency, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, visibility: enum { exported, private }) TourModules {
+fn addTourModules(b: *std.Build, truetype_dependency: *std.Build.Dependency, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, visibility: enum { exported, private }) TourModules {
     const core = b.dependency("zui_core", .{ .target = target, .optimize = optimize });
+    const fonts_module = b.dependency("zui_fonts", .{ .target = target, .optimize = optimize }).module("zui_fonts");
     const ui_options: std.Build.Module.CreateOptions = .{
         .root_source_file = b.path("src/ui/root.zig"),
         .target = target,
         .optimize = optimize,
-        .imports = &.{
+        .imports = b.allocator.dupe(std.Build.Module.Import, &.{
             .{ .name = "zui", .module = core.module("zui") },
-            .{ .name = "stb_truetype", .module = stbTruetypeModule(b, stb_dependency, target, optimize) },
-        },
+            .{ .name = "zui_glyphs", .module = b.dependency("zui_glyphs", .{ .target = target, .optimize = optimize }).module("zui_glyphs") },
+            .{ .name = "zui_truetype", .module = truetype_dependency.module("zui_truetype") },
+            .{ .name = "zui_fonts", .module = fonts_module },
+        }) catch @panic("out of memory"),
     };
     const ui = if (visibility == .exported) b.addModule("zui_sokol_ui", ui_options) else b.createModule(ui_options);
     const imports = b.allocator.dupe(std.Build.Module.Import, &.{
@@ -197,27 +204,17 @@ fn addTourModules(b: *std.Build, stb_dependency: *std.Build.Dependency, target: 
         .{ .name = "zui_widgets", .module = core.module("zui_widgets") },
         .{ .name = "zui_reflect", .module = core.module("zui_reflect") },
         .{ .name = "zui_async", .module = core.module("zui_async") },
+        .{ .name = "zui_fonts", .module = fonts_module },
     }) catch @panic("out of memory");
     const tour_options: std.Build.Module.CreateOptions = .{ .root_source_file = b.path("examples/tour_app.zig"), .target = target, .optimize = optimize, .imports = imports };
     const tour = if (visibility == .exported) b.addModule("zui_sokol_tour", tour_options) else b.createModule(tour_options);
     return .{ .ui = ui, .tour = tour, .imports = imports };
 }
 
-/// stb_truetype's declarations, translated to Zig, with its implementation
-/// compiled in, for the TrueType fonts of `zui_sokol.Text`. Without a C
-/// library, as on `wasm32-freestanding`, it allocates nothing, so it
-/// measures but rasterizes no glyph.
-fn stbTruetypeModule(b: *std.Build, stb_dependency: *std.Build.Dependency, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Module {
-    const has_libc = target.result.os.tag != .freestanding;
-    const translated = b.addTranslateC(.{
-        .root_source_file = stb_dependency.path("stb_truetype.h"),
-        .target = target,
-        .optimize = optimize,
-        .link_libc = has_libc,
-    });
-    const module = translated.createModule();
-    module.link_libc = has_libc;
-    module.addCSourceFile(.{ .file = b.path("src/ui/stb_truetype.c"), .flags = if (has_libc) &.{} else &.{"-DZUI_SOKOL_NO_LIBC"} });
-    module.addIncludePath(stb_dependency.path(""));
-    return module;
+/// The font system the tour's text delegates its TrueType fonts to, once
+/// it has declared its module: until stb is fetched it returns from
+/// `build()` before declaring it.
+fn truetypeDeclaring(b: *std.Build, args: anytype) ?*std.Build.Dependency {
+    const dependency = b.dependency("zui_truetype", args);
+    return if (dependency.builder.modules.contains("zui_truetype")) dependency else null;
 }

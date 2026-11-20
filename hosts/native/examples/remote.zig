@@ -104,6 +104,7 @@ fn view(gpa: std.mem.Allocator, io: std.Io, port: u16, check_path: ?[]const u8) 
     try host.init(io, .{ .title = "zui tour, drawn here, running elsewhere", .size = .{ 1440, 900 } });
     defer host.deinit();
     var text: zui_sokol.Text = .{};
+    try tour.kit.addFonts(&text);
     var renderer: zui_sokol.Renderer = try .initForSurface(&text, host.zuiSurface(.main));
     defer renderer.deinit();
     renderer.clear_color = tour.kit.Palette.forEnvironment(&.{}).background;

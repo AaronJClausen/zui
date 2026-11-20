@@ -10,11 +10,9 @@
             .hash = "sokol-0.1.0-pb1HK7kgQwAn3WHvyiRMRsck4OexoWoFrKPTnLAEsJYH",
             .lazy = true,
         },
-        .stb = .{
-            .url = "git+https://github.com/nothings/stb#4e9b368bfc071e97206ea5c6adba68dd0cbf8897",
-            .hash = "N-V-__8AAFRGTgBWHIQULKwDqlrvga2AR9enp42AsQ7z-yXN",
-            .lazy = true,
-        },
+        .zui_glyphs = .{ .path = "../../text/glyphs" },
+        .zui_truetype = .{ .path = "../../text/truetype" },
+        .zui_fonts = .{ .path = "../../text/fonts" },
     },
     .paths = .{ "build.zig", "build.zig.zon", "src", "examples" },
 }

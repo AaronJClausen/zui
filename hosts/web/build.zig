@@ -4,6 +4,13 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "tools" };
+    b.step("fmt", "Format all Zig sources").dependOn(&b.addFmt(.{ .paths = formatted_paths }).step);
+    b.step("fmt-check", "Fail if any Zig source is not formatted").dependOn(&b.addFmt(.{ .paths = formatted_paths, .check = true }).step);
+
+    // Until stb is fetched, the font system declares no module, and every
+    // step here needs it.
+    if (truetypeDeclaring(b, .{ .target = target, .optimize = optimize }) == null) return;
     const web_module = webModule(b, "src/root.zig", target, optimize);
     const unit_tests = b.addTest(.{ .root_module = web_module });
     b.step("test", "Run the unit tests").dependOn(&b.addRunArtifact(unit_tests).step);
@@ -50,6 +57,7 @@ pub fn build(b: *std.Build) void {
         decode_in_client.addArtifactArg(wire_check);
         decode_in_client.addFileArg(stream);
         decode_in_client.addFileArg(expected);
+        for (tour_truetype_fonts) |font| decode_in_client.addFileArg(fontsDependency(b).path(font));
         decode_in_client.expectExitCode(0);
         test_demo.dependOn(&decode_in_client.step);
 
@@ -83,7 +91,7 @@ pub fn build(b: *std.Build) void {
         draw_in_browser.addFileArg(one_sample_reference);
         draw_in_browser.addFileArg(four_sample_reference);
         draw_in_browser.addFileArg(bitmap_font_rows);
-        for (tour_truetype_fonts) |font| draw_in_browser.addFileArg(zui_sokol_dependency.path(font));
+        for (tour_truetype_fonts) |font| draw_in_browser.addFileArg(fontsDependency(b).path(font));
         for ([_][]const u8{ "web/check_draw.html", "web/client.mjs", "web/headless_page.mjs" }) |page_file| draw_in_browser.addFileInput(b.path(page_file));
         draw_in_browser.expectExitCode(0);
         test_draw.dependOn(&draw_in_browser.step);
@@ -99,7 +107,7 @@ pub fn build(b: *std.Build) void {
         test_input.dependOn(&input_in_browser.step);
 
         if (tour_worker) |worker| {
-            const site = siteFiles(b, client, worker, bitmap_font_rows, webglDependency(b, target, optimize), zui_sokol_dependency);
+            const site = siteFiles(b, client, worker, bitmap_font_rows, webglDependency(b, target, optimize));
             site_step.dependOn(&b.addInstallDirectory(.{ .source_dir = site.getDirectory(), .install_dir = .prefix, .install_subdir = "site" }).step);
 
             const open_site = b.addSystemCommand(&.{"node"});
@@ -111,10 +119,6 @@ pub fn build(b: *std.Build) void {
             test_site.dependOn(&open_site.step);
         }
     }
-
-    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "tools" };
-    b.step("fmt", "Format all Zig sources").dependOn(&b.addFmt(.{ .paths = formatted_paths }).step);
-    b.step("fmt-check", "Fail if any Zig source is not formatted").dependOn(&b.addFmt(.{ .paths = formatted_paths, .check = true }).step);
 }
 
 fn webModule(b: *std.Build, root_source_file: []const u8, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Module {
@@ -123,12 +127,27 @@ fn webModule(b: *std.Build, root_source_file: []const u8, target: std.Build.Reso
         .root_source_file = b.path(root_source_file),
         .target = target,
         .optimize = optimize,
-        .imports = &.{
+        .imports = b.allocator.dupe(std.Build.Module.Import, &.{
             .{ .name = "zui", .module = core_dependency.module("zui") },
             .{ .name = "zui_wire", .module = core_dependency.module("zui_wire") },
             .{ .name = "zui_webgl", .module = webglDependency(b, target, optimize).module("zui_webgl") },
-        },
+            .{ .name = "zui_glyphs", .module = b.dependency("zui_glyphs", .{ .target = target, .optimize = optimize }).module("zui_glyphs") },
+            .{ .name = "zui_truetype", .module = truetypeDeclaring(b, .{ .target = target, .optimize = optimize }).?.module("zui_truetype") },
+            .{ .name = "zui_fonts", .module = b.dependency("zui_fonts", .{ .target = target, .optimize = optimize }).module("zui_fonts") },
+        }) catch @panic("out of memory"),
     });
+}
+
+fn fontsDependency(b: *std.Build) *std.Build.Dependency {
+    return b.dependency("zui_fonts", .{});
+}
+
+/// The font system the client's text adds the page's fonts to, once it has
+/// declared its module: until stb is fetched it returns from `build()`
+/// before declaring it.
+fn truetypeDeclaring(b: *std.Build, args: anytype) ?*std.Build.Dependency {
+    const dependency = b.dependency("zui_truetype", args);
+    return if (dependency.builder.modules.contains("zui_truetype")) dependency else null;
 }
 
 fn webglDependency(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Dependency {
@@ -154,12 +173,12 @@ const compared_frames = compared: {
     break :compared numbers;
 };
 
-/// The TrueType fonts the sokol renderer's tour adds, in the order
-/// `kit.addFonts` adds them, so each takes the `FontId` the tour's text
-/// names.
+/// The TrueType fonts of `zui_fonts` that the sokol renderer's tour adds,
+/// in the order `kit.addFonts` adds them, so each takes the `FontId` the
+/// tour's text names.
 const tour_truetype_fonts = [_][]const u8{
-    "examples/fonts/AtkinsonHyperlegible-Regular.ttf",
-    "examples/fonts/AtkinsonHyperlegible-Bold.ttf",
+    "AtkinsonHyperlegible-Regular.ttf",
+    "AtkinsonHyperlegible-Bold.ttf",
 };
 
 /// What the published page loads from `web/`, besides the client, the frame
@@ -178,7 +197,7 @@ const site_scripts = [_][]const u8{
 
 /// The published site: the page, the client, the frame drawer, the tour's
 /// worker, and the tour's fonts with their license.
-fn siteFiles(b: *std.Build, client: *std.Build.Step.Compile, worker: *std.Build.Step.Compile, bitmap_font_rows: std.Build.LazyPath, webgl_dependency: *std.Build.Dependency, zui_sokol_dependency: *std.Build.Dependency) *std.Build.Step.WriteFile {
+fn siteFiles(b: *std.Build, client: *std.Build.Step.Compile, worker: *std.Build.Step.Compile, bitmap_font_rows: std.Build.LazyPath, webgl_dependency: *std.Build.Dependency) *std.Build.Step.WriteFile {
     const site = b.addWriteFiles();
     for (site_scripts) |script| _ = site.addCopyFile(b.path(b.fmt("web/{s}", .{script})), script);
     _ = site.addCopyFile(webgl_dependency.path("web/frame_drawer.mjs"), "frame_drawer.mjs");
@@ -188,13 +207,13 @@ fn siteFiles(b: *std.Build, client: *std.Build.Step.Compile, worker: *std.Build.
     var font_urls: std.ArrayList(u8) = .empty;
     font_urls.append(b.allocator, '[') catch @panic("out of memory");
     for (tour_truetype_fonts, 0..) |font, index| {
-        const url = b.fmt("fonts/{s}", .{std.fs.path.basename(font)});
-        _ = site.addCopyFile(zui_sokol_dependency.path(font), url);
+        const url = b.fmt("fonts/{s}", .{font});
+        _ = site.addCopyFile(fontsDependency(b).path(font), url);
         font_urls.print(b.allocator, "{s}\"{s}\"", .{ if (index == 0) "" else ",", url }) catch @panic("out of memory");
     }
     font_urls.append(b.allocator, ']') catch @panic("out of memory");
     _ = site.add("truetype-fonts.json", font_urls.items);
-    _ = site.addCopyFile(zui_sokol_dependency.path("examples/fonts/OFL.txt"), "fonts/OFL.txt");
+    _ = site.addCopyFile(fontsDependency(b).path("OFL.txt"), "fonts/OFL.txt");
     return site;
 }
 

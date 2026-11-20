@@ -12,8 +12,6 @@ pub const zui_sokol_ui = @import("zui_sokol_ui");
 pub const Text = zui_sokol_ui.Text;
 pub const Image = zui_sokol_ui.Image;
 pub const Material = zui_sokol_ui.Material;
-pub const truetype = zui_sokol_ui.truetype;
-pub const codepointCount = zui_sokol_ui.codepointCount;
 
 /// The `Image` for a sokol_gfx view and the sampler to draw it with.
 pub fn imageOf(view: sokol.gfx.View, sampler: sokol.gfx.Sampler) Image {
@@ -80,7 +78,7 @@ test "the renderer draws the base commands, images, gradients, shadows, backdrop
     ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 100, 100 } } });
     const frame = ui.endFrame();
     defer ui.release(frame);
-    var renderer: Renderer = .{ .text = &text, .pipeline = .{}, .alpha_coverage_pipeline = .{} };
+    var renderer: Renderer = .{ .fonts = .of(&text), .pipeline = .{}, .alpha_coverage_pipeline = .{} };
     try std.testing.expectError(error.UnsupportedSurface, renderer.zuiSubmit(.{ .terminal = .{ .columns = 80, .rows = 24 } }, frame));
 }
 
@@ -96,5 +94,4 @@ test {
     _ = @import("materials.zig");
     _ = @import("destination.zig");
     _ = @import("bitmap_glyphs.zig");
-    _ = @import("glyph_atlas.zig");
 }

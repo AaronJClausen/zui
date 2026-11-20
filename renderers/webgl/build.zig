@@ -25,30 +25,10 @@ pub fn build(b: *std.Build) void {
     check_step.dependOn(&browser_tests.step);
 }
 
-/// Until stb is fetched, the module is declared without it, so that a
-/// package depending on this one still configures, and asks for stb too.
 fn webglModuleOptions(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) std.Build.Module.CreateOptions {
-    const zui_core = b.dependency("zui_core", .{ .target = target, .optimize = optimize });
-    var imports: std.ArrayList(std.Build.Module.Import) = .empty;
-    imports.append(b.allocator, .{ .name = "zui", .module = zui_core.module("zui") }) catch @panic("out of memory");
-    if (b.lazyDependency("stb", .{})) |stb_dependency| {
-        imports.append(b.allocator, .{ .name = "stb_truetype", .module = stbTruetypeModule(b, stb_dependency, target, optimize) }) catch @panic("out of memory");
-    }
-    return .{ .root_source_file = b.path("src/root.zig"), .target = target, .optimize = optimize, .imports = imports.items };
-}
-
-/// stb_truetype's declarations, translated to Zig, with its implementation
-/// compiled in without a C library, at the commit the sokol renderer
-/// rasterizes with.
-fn stbTruetypeModule(b: *std.Build, stb_dependency: *std.Build.Dependency, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Module {
-    const translated = b.addTranslateC(.{
-        .root_source_file = stb_dependency.path("stb_truetype.h"),
-        .target = target,
-        .optimize = optimize,
-    });
-    const module = translated.createModule();
-    module.link_libc = false;
-    module.addCSourceFile(.{ .file = b.path("src/stb_truetype.c"), .flags = &.{"-fvisibility=hidden"} });
-    module.addIncludePath(stb_dependency.path(""));
-    return module;
+    const imports = b.allocator.dupe(std.Build.Module.Import, &.{
+        .{ .name = "zui", .module = b.dependency("zui_core", .{ .target = target, .optimize = optimize }).module("zui") },
+        .{ .name = "zui_glyphs", .module = b.dependency("zui_glyphs", .{ .target = target, .optimize = optimize }).module("zui_glyphs") },
+    }) catch @panic("out of memory");
+    return .{ .root_source_file = b.path("src/root.zig"), .target = target, .optimize = optimize, .imports = imports };
 }

@@ -606,6 +606,41 @@ test "an application whose text contract is not the renderer has zui_app make it
     try testing.expectEqual(deinitializations_before + 1, Fonts.deinitializations);
 }
 
+/// Names no text contract: it erases whichever it is given.
+const AnyTextRenderer = struct {
+    pub const zui_surfaces: zui.SurfaceKinds = .initOne(.offscreen);
+
+    text: ?*const anyopaque = null,
+
+    pub fn init(self: *AnyTextRenderer, _: zui.Surface, text: anytype) !void {
+        self.text = text;
+    }
+
+    pub fn zuiSubmit(_: *AnyTextRenderer, _: zui.Surface, _: anytype) !void {}
+};
+
+const AnyTextApp = struct {
+    pub const Host = TestHost;
+    pub const Renderer = AnyTextRenderer;
+    pub const Text = Fonts;
+    pub const Ui = zui.Context(zui_app.contextConfig(Renderer, .{ .limits = .{ .max_elements = 8 }, .Text = Fonts }));
+
+    pub fn init(_: *AnyTextApp, start: zui_app.Start(AnyTextApp)) !void {
+        start.host.closes_after_polls = 1;
+    }
+
+    pub fn zuiDeclare(_: *AnyTextApp, ui: *Ui) void {
+        ui.text("fonts", .{});
+    }
+};
+
+test "a renderer may take the text it is given as anytype" {
+    var runner: zui_app.Runner(AnyTextApp) = undefined;
+    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+    defer runner.stop();
+    try testing.expectEqual(@as(?*const anyopaque, &runner.text), runner.renderer.text);
+}
+
 test "zuiRecord adds the application's zoom and events to the record, after the host's" {
     var runner: zui_app.Runner(FontsApp) = undefined;
     try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .zoom = 1, .notify = Notices.record });

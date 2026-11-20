@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const zui_sokol_ui = @import("zui_sokol_ui");
+const zui_fonts = @import("zui_fonts");
 pub const zui = @import("zui");
 pub const zui_widgets = @import("zui_widgets");
 pub const zui_reflect = @import("zui_reflect");
@@ -37,7 +38,7 @@ pub const Widgets = zui_widgets.Widgets(Ui);
 pub const TextStyle = Ui.TextStyle;
 
 /// Atkinson Hyperlegible, from the Braille Institute, under the SIL Open
-/// Font License (fonts/OFL.txt).
+/// Font License, as `zui_fonts` bundles it.
 pub const body_font: u16 = zui_sokol_ui.Text.bitmap_font_count;
 pub const bold_font: u16 = body_font + 1;
 /// One of sokol_debugtext's bitmap fonts, for code and logs: the Amstrad
@@ -47,8 +48,8 @@ pub const mono_font: u16 = 3;
 /// Call once, before the first frame, so `body_font` and `bold_font` name
 /// the fonts they say.
 pub fn addFonts(text: *zui_sokol_ui.Text) error{ InvalidFont, TooManyFonts }!void {
-    const regular = try text.addTrueTypeFont(@embedFile("fonts/AtkinsonHyperlegible-Regular.ttf"));
-    const bold = try text.addTrueTypeFont(@embedFile("fonts/AtkinsonHyperlegible-Bold.ttf"));
+    const regular = try text.addTrueTypeFont(zui_fonts.atkinson_hyperlegible_regular);
+    const bold = try text.addTrueTypeFont(zui_fonts.atkinson_hyperlegible_bold);
     std.debug.assert(regular == body_font and bold == bold_font);
 }
 

@@ -7,10 +7,9 @@ const sdtx = sokol.debugtext;
 const builtin = @import("builtin");
 const options = @import("zui_sokol_options");
 const zui_sokol_ui = @import("zui_sokol_ui");
-const Text = zui_sokol_ui.Text;
+const zui_glyphs = @import("zui_glyphs");
 const Image = zui_sokol_ui.Image;
-const truetype = zui_sokol_ui.truetype;
-const GlyphAtlas = @import("glyph_atlas.zig").GlyphAtlas;
+const GlyphAtlas = zui_glyphs.Atlas(.rgba8);
 const BackdropBlurs = @import("backdrop_blur.zig").BackdropBlurs;
 const materials = @import("materials.zig");
 const Material = zui_sokol_ui.Material;
@@ -47,9 +46,10 @@ else
     };
 
 /// The renderer contract, through sokol_gfx: draws zui frames with
-/// sokol_gl (shapes, images, TrueType text) and sokol_debugtext (bitmap
-/// text) into sokol_app's swapchain, its `.library` surface, into an image
-/// of its own for an `.offscreen` surface, which may be `.scrgb_fp16`, or,
+/// sokol_gl (shapes, images, and TrueType text where `zui_glyphs` lays it
+/// out) and sokol_debugtext (bitmap text) into sokol_app's swapchain, its
+/// `.library` surface, into an image of its own for an `.offscreen`
+/// surface, which may be `.scrgb_fp16`, or,
 /// into a native host's window: `.win32` on Windows, `.wayland` on Linux.
 /// Both record into numbered layers that are replayed in order, so shapes
 /// and text interleave in zui's paint order, and each layer is drawn under
@@ -87,7 +87,11 @@ pub const Renderer = struct {
         backdrop_blurs: BackdropBlurs = .{},
     };
 
-    text: *const Text,
+    /// The fonts of the text its frames were measured with; a font id they
+    /// do not have is one of sokol_debugtext's bitmap fonts.
+    fonts: zui_glyphs.Fonts = .none,
+    /// A bitmap glyph's height and advance as a fraction of the text size.
+    bitmap_glyph_scale: f32 = 0.75,
     /// What each frame's pass clears to before drawing.
     clear_color: zui.Color = .black,
     /// Triangles per rounded corner.
@@ -112,15 +116,12 @@ pub const Renderer = struct {
     shared_device: ?*anyopaque = null,
     /// `initForSurface` set sokol_gfx up, so `deinit` shuts it down.
     owns_gfx: bool = false,
-    /// Made on the first TrueType text, so bitmap-only applications never
-    /// pay for it.
+    /// Reserved by `init`; null only when that ran out of memory, and then
+    /// TrueType text is not drawn.
     glyphs: ?*GlyphAtlas = null,
     glyph_image: sg.Image = .{},
     glyph_view: sg.View = .{},
     glyph_sampler: sg.Sampler = .{},
-    /// Times a frame needed more glyphs than the atlas holds; the ones
-    /// that did not fit were not drawn.
-    glyph_overflows: u32 = 0,
     backdrop_blurs: BackdropBlurs = .{},
     /// For bitmap text inside a transform, which sokol_debugtext cannot
     /// draw transformed.
@@ -139,8 +140,11 @@ pub const Renderer = struct {
     format: zui.OutputFormat = .sdr,
     scrgb_present: ScrgbPresent = .{},
 
-    /// Call after `sokol.gfx.setup`.
-    pub fn init(text: *const Text) Renderer {
+    /// Call after `sokol.gfx.setup`. `text` is the text contract frames
+    /// are measured with, which must outlive the renderer: a
+    /// `zui_sokol.Text`, or any text whose fonts `zui_glyphs.Fonts.of`
+    /// erases.
+    pub fn init(text: anytype) Renderer {
         sgl.setup(.{ .max_vertices = 1 << 19, .max_commands = 1 << 14, .logger = .{ .func = sokol.log.func } });
         var debugtext_desc: sdtx.Desc = .{
             .context = .{ .char_buf_size = 1 << 16, .max_commands = 1 << 14 },
@@ -152,13 +156,19 @@ pub const Renderer = struct {
         var coverage: [8]sg.ColorTargetState = @splat(.{});
         coverage[0].write_mask = .A;
         coverage[0].blend = .{ .enabled = true, .src_factor_alpha = .ONE, .dst_factor_alpha = .ONE, .op_alpha = .MAX };
-        return .{ .text = text, .pipeline = sgl.makePipeline(destination.blendingPipeline()), .alpha_coverage_pipeline = sgl.makePipeline(.{ .colors = coverage }) };
+        return .{
+            .fonts = zui_glyphs.Fonts.of(text),
+            .bitmap_glyph_scale = if (@hasField(@typeInfo(@TypeOf(text)).pointer.child, "glyph_scale")) text.glyph_scale else 0.75,
+            .glyphs = GlyphAtlas.create(std.heap.page_allocator) catch null,
+            .pipeline = sgl.makePipeline(destination.blendingPipeline()),
+            .alpha_coverage_pipeline = sgl.makePipeline(.{ .colors = coverage }),
+        };
     }
 
     /// For a native host's window: makes its graphics context, sets
     /// sokol_gfx up on it, then does what `init` does. `deinit` then also
     /// shuts sokol_gfx down.
-    pub fn initForSurface(text: *const Text, surface: zui.Surface) !Renderer {
+    pub fn initForSurface(text: anytype, surface: zui.Surface) !Renderer {
         var context = switch (surface) {
             .win32 => |window| if (comptime draws_into_win32) try native.Context.init(window.hwnd) else return error.UnsupportedSurface,
             .wayland => |window| if (comptime draws_into_wayland) try native.Context.init(window.display, window.surface) else return error.UnsupportedSurface,
@@ -187,7 +197,7 @@ pub const Renderer = struct {
         self.bitmap_glyphs.deinit();
         self.destroyGlyphTexture();
         if (self.glyph_sampler.id != 0) sg.destroySampler(self.glyph_sampler);
-        if (self.glyphs) |atlas| std.heap.page_allocator.destroy(atlas);
+        if (self.glyphs) |atlas| atlas.destroy(std.heap.page_allocator);
         sgl.destroyPipeline(self.pipeline);
         sgl.destroyPipeline(self.alpha_coverage_pipeline);
         sdtx.shutdown();
@@ -373,15 +383,15 @@ pub const Renderer = struct {
                     strokeBorder(bounds, border.widths, border.corner_radius, color, self.corner_segments);
                     if (self.covers_alpha) self.coverAlpha(recorder.layer, strokeBorder, .{ bounds, border.widths, border.corner_radius, color, self.corner_segments });
                 },
-                .text => |line| if (self.text.trueTypeFont(line.style.font)) |font| {
+                .text => |line| if (self.fonts.fontMetrics(line.style.font) != null) {
                     recorder.beginShapes();
-                    if (self.glyphs) |atlas| drawTrueTypeText(atlas, self.glyph_view, self.glyph_sampler, font, line.content, bounds, line.style, .of(line.style.color, format), pixels_per_unit);
+                    if (self.glyphs) |atlas| drawTrueTypeText(self.fonts, atlas, self.glyph_view, self.glyph_sampler, line.content, bounds, line.style, .of(line.style.color, format), pixels_per_unit);
                 } else if (transforms.isActive() or !into.is_swapchain) {
                     recorder.beginShapes();
-                    self.bitmap_glyphs.draw(line.content, bounds, line.style.font, self.text.glyphSize(line.style.size), line.style.letter_spacing, .of(line.style.color, format));
+                    self.bitmap_glyphs.draw(line.content, bounds, line.style.font, line.style.size * self.bitmap_glyph_scale, line.style.letter_spacing, .of(line.style.color, format));
                 } else {
                     recorder.beginText();
-                    drawText(self.text, line.content, bounds, line.style, viewport);
+                    drawText(line.style.size * self.bitmap_glyph_scale, line.content, bounds, line.style, viewport);
                 },
                 .image => |image| {
                     recorder.beginShapes();
@@ -507,36 +517,19 @@ pub const Renderer = struct {
         return @intCast(max_layers + layer);
     }
 
-    /// Rasterizes every glyph the frame's TrueType text needs before any is
-    /// drawn, so the texture is made at most once per frame. If the atlas
-    /// fills up, it starts over with only this frame's glyphs.
-    fn prepareGlyphs(self: *Renderer, commands: anytype, pixels_per_unit: f32) void {
-        if (self.text.truetype_font_count == 0) return;
-        const atlas = self.glyphs orelse created: {
-            const created = GlyphAtlas.create(std.heap.page_allocator) catch return;
-            self.glyphs = created;
-            break :created created;
-        };
-        self.addGlyphs(atlas, commands, pixels_per_unit) catch {
-            atlas.reset();
-            self.addGlyphs(atlas, commands, pixels_per_unit) catch {
-                self.glyph_overflows += 1;
-            };
-        };
-        if (atlas.changed) self.uploadGlyphs(atlas);
+    /// Times a frame needed more glyphs than the atlas holds, or a glyph
+    /// could not be rasterized; those were not drawn.
+    pub fn glyphOverflows(self: *const Renderer) u32 {
+        const atlas = self.glyphs orelse return 0;
+        return atlas.overflows + atlas.raster_refusals;
     }
 
-    fn addGlyphs(self: *Renderer, atlas: *GlyphAtlas, commands: anytype, pixels_per_unit: f32) error{Full}!void {
-        for (commands) |command| switch (command.payload) {
-            .text => |line| if (self.text.trueTypeFont(line.style.font)) |font| {
-                const pixel_size = rasterPixelSize(line.style.size, pixels_per_unit);
-                var codepoints = truetype.Codepoints.init(line.content);
-                while (codepoints.next()) |codepoint| {
-                    _ = try atlas.findOrAdd(.{ .font = line.style.font, .pixel_size = pixel_size, .codepoint = codepoint }, font);
-                }
-            },
-            else => {},
-        };
+    /// Rasterizes every glyph the frame's TrueType text needs before any is
+    /// drawn, so the texture is made at most once per frame.
+    fn prepareGlyphs(self: *Renderer, commands: anytype, pixels_per_unit: f32) void {
+        const atlas = self.glyphs orelse return;
+        atlas.addFrameGlyphs(self.fonts, commands, pixels_per_unit);
+        if (atlas.changed) self.uploadGlyphs(atlas);
     }
 
     /// sokol_gfx images are immutable once made, so a changed atlas is a
@@ -547,7 +540,7 @@ pub const Renderer = struct {
             .width = GlyphAtlas.side,
             .height = GlyphAtlas.side,
             .pixel_format = .RGBA8,
-            .data = sg.asRange(&atlas.pixels),
+            .data = sg.asRange(&atlas.texels),
         });
         self.glyph_view = sg.makeView(.{ .texture = .{ .image = self.glyph_image } });
         if (self.glyph_sampler.id == 0) self.glyph_sampler = sg.makeSampler(.{
@@ -963,8 +956,7 @@ const Outline = struct {
 /// baked into vertices as they are emitted, so one context serves every
 /// text size in a frame. With letter spacing, each glyph is placed on its
 /// own, since the grid advances by whole glyphs.
-fn drawText(text: *const Text, content: []const u8, bounds: zui.Rect, style: anytype, viewport: [2]f32) void {
-    const glyph_size = text.glyphSize(style.size);
+fn drawText(glyph_size: f32, content: []const u8, bounds: zui.Rect, style: anytype, viewport: [2]f32) void {
     if (glyph_size <= 0) return;
     const canvas_scale = 8 / glyph_size;
     sdtx.canvas(viewport[0] * canvas_scale, viewport[1] * canvas_scale);
@@ -983,48 +975,19 @@ fn drawText(text: *const Text, content: []const u8, bounds: zui.Rect, style: any
     }
 }
 
-/// Text is rasterized at its size in physical pixels, so it is drawn one
-/// texel per pixel, up to the atlas's largest size.
-fn rasterPixelSize(size: f32, pixels_per_unit: f32) u16 {
-    return @intFromFloat(std.math.clamp(@round(size * pixels_per_unit), 1, GlyphAtlas.max_pixel_size));
-}
-
-fn snapToPixel(value: f32, pixels_per_unit: f32) f32 {
-    return @round(value * pixels_per_unit) / pixels_per_unit;
-}
-
-/// The pen advances exactly as `Font.measure` measured, so the text fills
-/// the bounds zui laid out; each glyph's quad starts on a whole pixel.
-fn drawTrueTypeText(atlas: *const GlyphAtlas, view: sg.View, sampler: sg.Sampler, font: *const truetype.Font, content: []const u8, bounds: zui.Rect, style: anytype, color: VertexColor, pixels_per_unit: f32) void {
-    const pixel_size = rasterPixelSize(style.size, pixels_per_unit);
-    const units_per_raster_pixel = style.size / @as(f32, @floatFromInt(pixel_size));
-    const scale = font.scaleFor(style.size);
-    const glyph_box_height = (font.ascent - font.descent) * scale;
-    const baseline = snapToPixel(bounds.y + (bounds.height - glyph_box_height) / 2 + font.ascent * scale, pixels_per_unit);
-    const texel: f32 = 1.0 / @as(f32, GlyphAtlas.side);
-
+fn drawTrueTypeText(fonts: zui_glyphs.Fonts, atlas: *const GlyphAtlas, view: sg.View, sampler: sg.Sampler, content: []const u8, bounds: zui.Rect, style: anytype, color: VertexColor, pixels_per_unit: f32) void {
+    var quads = zui_glyphs.glyphQuads(fonts, atlas, content, bounds, style, pixels_per_unit) orelse return;
     sgl.enableTexture();
     sgl.texture(view, sampler);
     color.apply();
     sgl.beginQuads();
-    var pen = bounds.x;
-    var codepoints = truetype.Codepoints.init(content);
-    while (codepoints.next()) |codepoint| {
-        if (atlas.find(.{ .font = style.font, .pixel_size = pixel_size, .codepoint = codepoint })) |glyph| if (glyph.width != 0) {
-            const left = snapToPixel(pen, pixels_per_unit) + @as(f32, @floatFromInt(glyph.offset[0])) * units_per_raster_pixel;
-            const top = baseline + @as(f32, @floatFromInt(glyph.offset[1])) * units_per_raster_pixel;
-            const right = left + @as(f32, @floatFromInt(glyph.width)) * units_per_raster_pixel;
-            const bottom = top + @as(f32, @floatFromInt(glyph.height)) * units_per_raster_pixel;
-            const texture_left = @as(f32, @floatFromInt(glyph.x)) * texel;
-            const texture_top = @as(f32, @floatFromInt(glyph.y)) * texel;
-            const texture_right = texture_left + @as(f32, @floatFromInt(glyph.width)) * texel;
-            const texture_bottom = texture_top + @as(f32, @floatFromInt(glyph.height)) * texel;
-            sgl.v2fT2f(left, top, texture_left, texture_top);
-            sgl.v2fT2f(right, top, texture_right, texture_top);
-            sgl.v2fT2f(right, bottom, texture_right, texture_bottom);
-            sgl.v2fT2f(left, bottom, texture_left, texture_bottom);
-        };
-        pen += font.advance(codepoint) * scale + style.letter_spacing;
+    while (quads.next()) |quad| {
+        const position = quad.position;
+        const texture = quad.texture;
+        sgl.v2fT2f(position.left, position.top, texture.left, texture.top);
+        sgl.v2fT2f(position.right, position.top, texture.right, texture.top);
+        sgl.v2fT2f(position.right, position.bottom, texture.right, texture.bottom);
+        sgl.v2fT2f(position.left, position.bottom, texture.left, texture.bottom);
     }
     sgl.end();
     sgl.disableTexture();

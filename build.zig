@@ -4,6 +4,9 @@ const std = @import("std");
 /// `fmt` formats each.
 const packages = [_][]const u8{
     "core",
+    "text/glyphs",
+    "text/fonts",
+    "text/truetype",
     "themes",
     "examples",
     "renderers/terminal",
@@ -22,6 +25,11 @@ const generated_sources = [_][]const u8{
 };
 
 const core_modules = [_][]const u8{ "zui", "zui_testing", "zui_widgets", "zui_async", "zui_tracy", "zui_reflect", "zui_app", "zui_wire", "zui_debug" };
+
+/// Packages with no third-party library, whose module of the same name the
+/// aggregator re-exports. One that links a C library is reached through
+/// `zui.builder.dependency`, so a user fetches only the libraries they use.
+const pure_zig_packages = [_][]const u8{ "zui_glyphs", "zui_fonts" };
 
 /// A dependency's build does not see the arguments after `--`, and installs
 /// into a prefix of its own in the cache, so the aggregator runs and installs
@@ -45,6 +53,9 @@ pub fn build(b: *std.Build) void {
         .@"bench-layout-seed" = b.option(u64, "bench-layout-seed", "Move every function of the benchmark by a seed-chosen offset, as bench-compare's layouts do"),
     });
     for (core_modules) |name| b.modules.put(b.graph.arena, name, core.module(name)) catch @panic("OOM");
+    for (pure_zig_packages) |name| {
+        b.modules.put(b.graph.arena, name, b.dependency(name, .{ .target = target, .optimize = optimize }).module(name)) catch @panic("OOM");
+    }
 
     for ([_][]const u8{ "test", "check" }) |name| forwardStep(b, core, name).dependOn(&core.builder.top_level_steps.get(name).?.step);
     forwardStep(b, core, "docs").dependOn(&b.addInstallDirectory(.{

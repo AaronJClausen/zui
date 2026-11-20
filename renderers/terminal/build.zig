@@ -7,12 +7,16 @@ pub fn build(b: *std.Build) void {
     const core = b.dependency("zui_core", .{ .target = target, .optimize = optimize });
     const zui_module = core.module("zui");
     const zui_testing_module = core.module("zui_testing");
+    const zui_glyphs_module = b.dependency("zui_glyphs", .{ .target = target, .optimize = optimize }).module("zui_glyphs");
 
     const backend_module = b.addModule("zui_terminal", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
-        .imports = &.{.{ .name = "zui", .module = zui_module }},
+        .imports = &.{
+            .{ .name = "zui", .module = zui_module },
+            .{ .name = "zui_glyphs", .module = zui_glyphs_module },
+        },
     });
 
     const test_module = b.createModule(.{
@@ -21,6 +25,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{
             .{ .name = "zui", .module = zui_module },
+            .{ .name = "zui_glyphs", .module = zui_glyphs_module },
             .{ .name = "zui_testing", .module = zui_testing_module },
         },
     });

@@ -10,6 +10,9 @@
             .lazy = true,
         },
         .zui_core = .{ .path = "../../core" },
+        .zui_glyphs = .{ .path = "../../text/glyphs" },
+        .zui_truetype = .{ .path = "../../text/truetype" },
+        .zui_fonts = .{ .path = "../../text/fonts" },
     },
     .paths = .{ "build.zig", "build.zig.zon", "src", "examples" },
 }

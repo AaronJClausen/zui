@@ -12,8 +12,11 @@ pub fn build(b: *std.Build) void {
 
     const core = b.dependency("zui_core", .{ .target = target, .optimize = optimize, .@"zui-tracy" = tracy });
     const raylib_dependency = b.lazyDependency("raylib", .{ .target = target, .optimize = optimize }) orelse return;
+    const truetype_dependency = truetypeDeclaring(b, .{ .target = target, .optimize = optimize, .@"zui-tracy" = tracy }) orelse return;
     const zui_module = core.module("zui");
     const zui_app_module = core.module("zui_app");
+    const zui_glyphs_module = b.dependency("zui_glyphs", .{ .target = target, .optimize = optimize }).module("zui_glyphs");
+    const zui_truetype_module = truetype_dependency.module("zui_truetype");
 
     const backend_module = b.addModule("zui_raylib", .{
         .root_source_file = b.path("src/root.zig"),
@@ -22,6 +25,7 @@ pub fn build(b: *std.Build) void {
         .imports = &.{
             .{ .name = "zui", .module = zui_module },
             .{ .name = "zui_app", .module = zui_app_module },
+            .{ .name = "zui_glyphs", .module = zui_glyphs_module },
             .{ .name = "raylib", .module = raylib_dependency.module("raylib") },
             .{ .name = "rlgl", .module = raylib_dependency.module("rlgl") },
         },
@@ -43,6 +47,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "zui", .module = zui_module },
             .{ .name = "zui_app", .module = zui_app_module },
             .{ .name = "zui_testing", .module = core.module("zui_testing") },
+            .{ .name = "zui_truetype", .module = zui_truetype_module },
         },
     }) });
     linkThroughLlvmOnLinux(conformance_tests);
@@ -57,6 +62,9 @@ pub fn build(b: *std.Build) void {
         .{ .name = "zui_async", .module = core.module("zui_async") },
         .{ .name = "zui_tracy", .module = core.module("zui_tracy") },
         .{ .name = "zui_debug", .module = core.module("zui_debug") },
+        .{ .name = "zui_glyphs", .module = zui_glyphs_module },
+        .{ .name = "zui_truetype", .module = zui_truetype_module },
+        .{ .name = "zui_fonts", .module = b.dependency("zui_fonts", .{ .target = target, .optimize = optimize }).module("zui_fonts") },
     };
     const demo = b.addExecutable(.{
         .name = "zui-demo",
@@ -78,6 +86,14 @@ pub fn build(b: *std.Build) void {
     check_step.dependOn(&demo.step);
     check_step.dependOn(&tour_tests.step);
     check_step.dependOn(&conformance_tests.step);
+}
+
+/// The font system the tour and the renderer suite measure with, once it
+/// has declared its module: until stb is fetched it returns from `build()`
+/// before declaring it.
+fn truetypeDeclaring(b: *std.Build, args: anytype) ?*std.Build.Dependency {
+    const dependency = b.dependency("zui_truetype", args);
+    return if (dependency.builder.modules.contains("zui_truetype")) dependency else null;
 }
 
 /// Zig 0.16's own ELF linker rejects the R_X86_64_PC64 relocations in the

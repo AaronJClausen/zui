@@ -1799,8 +1799,8 @@ nothing.
 
 A type implements a contract by declaring `zui`-prefixed members.
 Everything else on the type is its own business, so a contract never
-collides with its API, and one type may implement several (a renderer is
-usually also the text contract).
+collides with its API, and one type may implement several (a renderer may
+also be the text contract).
 
 **The exceptions are types the application names directly,** which keep
 their plain names because they are the implementer's own API as much as

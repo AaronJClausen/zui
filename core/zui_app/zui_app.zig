@@ -358,8 +358,9 @@ pub const Setup = struct {
 /// `zuiChromeRegions` is handed each frame's chrome regions at the same
 /// point. The renderer may declare `pub fn init(self: *Renderer, surface:
 /// zui.Surface) !void`, or with `App.Text` `pub fn init(self: *Renderer,
-/// surface: zui.Surface, text: *const Text) !void`, and `pub fn
-/// deinit(self: *Renderer) void`. `App.Text` may declare `pub fn init(self:
+/// surface: zui.Surface, text: *const Text) !void`, or with `text: anytype`
+/// for a renderer that draws any text's fonts, and `pub fn deinit(self:
+/// *Renderer) void`. `App.Text` may declare `pub fn init(self:
 /// *Text) !void` and `pub fn deinit(self: *Text) void`. Without `init`,
 /// every field needs a default; with it, the fields that have a default
 /// hold it when `init` is called.
@@ -988,7 +989,10 @@ pub fn checkApp(comptime App: type) void {
     const renderer_name = @typeName(App.Renderer);
     if (rendererInitTakesText(App)) {
         const expected_name = "fn (*" ++ renderer_name ++ ", zui.Surface, *const " ++ @typeName(Text) ++ ") !void";
-        if (@typeInfo(@TypeOf(App.Renderer.init)).@"fn".params[2].type == *Text) {
+        const parameters = @typeInfo(@TypeOf(App.Renderer.init)).@"fn".params;
+        if (parameters[2].type == null) {
+            if (parameters[0].type != *App.Renderer or parameters[1].type != zui.Surface) @compileError("zui_app: " ++ renderer_name ++ ".init must be " ++ expected_name ++ ", or take its text as `anytype`");
+        } else if (parameters[2].type == *Text) {
             expectFunction(App.Renderer, "init", fn (*App.Renderer, zui.Surface, *Text) anyerror!void, expected_name);
         } else {
             expectFunction(App.Renderer, "init", fn (*App.Renderer, zui.Surface, *const Text) anyerror!void, expected_name);

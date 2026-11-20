@@ -149,7 +149,7 @@ fn onFrame(userdata: ?*anyopaque) callconv(.c) void {
     const submit_microseconds = microsecondsBetween(submit_started, state.now());
     perf.submit_us = if (perf.display_frames == 0) submit_microseconds else perf.submit_us * 0.95 + submit_microseconds * 0.05;
     perf.layer_overflows = state.renderer.layer_overflows;
-    perf.glyph_overflows = state.renderer.glyph_overflows;
+    perf.glyph_overflows = state.renderer.glyphOverflows();
 
     const frame_duration: f32 = @floatCast(sapp.frameDuration());
     if (frame_duration > 0) perf.display_fps = 1 / frame_duration;

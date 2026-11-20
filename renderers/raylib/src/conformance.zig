@@ -4,26 +4,30 @@ const zui = @import("zui");
 const zui_app = @import("zui_app");
 const c = zui_raylib.c;
 const zui_testing = @import("zui_testing");
+const zui_truetype = @import("zui_truetype");
 
 /// Draws into a render texture of a hidden window, and reads each frame
-/// back as an image.
+/// back as an image. Its text is `zui_truetype`'s, in its default font.
 const RenderTextureHarness = struct {
-    pub const config = zui_app.contextConfig(zui_raylib.Renderer, .{});
+    pub const config = zui_app.contextConfig(zui_raylib.Renderer, .{ .Text = zui_truetype.Text });
 
     drawn: zui_raylib.Renderer = .{},
+    text_contract: zui_truetype.Text = .{},
     target: c.RenderTexture2D,
     pictures: [4]c.Texture2D = undefined,
     picture_count: usize = 0,
     read_back: ?c.Image = null,
 
-    fn init(self: *RenderTextureHarness) void {
+    fn init(self: *RenderTextureHarness) !void {
         c.SetTraceLogLevel(c.LOG_WARNING);
         c.SetConfigFlags(c.FLAG_WINDOW_HIDDEN);
         c.InitWindow(zui_testing.renderer_viewport[0], zui_testing.renderer_viewport[1], "zui renderer suite");
         self.* = .{ .target = c.LoadRenderTexture(zui_testing.renderer_viewport[0], zui_testing.renderer_viewport[1]) };
+        try self.drawn.init(.library, &self.text_contract);
     }
 
     fn deinit(self: *RenderTextureHarness) void {
+        self.drawn.deinit();
         if (self.read_back) |frame_pixels| c.UnloadImage(frame_pixels);
         for (self.pictures[0..self.picture_count]) |picture| c.UnloadTexture(picture);
         c.UnloadRenderTexture(self.target);
@@ -34,8 +38,8 @@ const RenderTextureHarness = struct {
         return &self.drawn;
     }
 
-    pub fn text(self: *RenderTextureHarness) *zui_raylib.Renderer {
-        return &self.drawn;
+    pub fn text(self: *RenderTextureHarness) *zui_truetype.Text {
+        return &self.text_contract;
     }
 
     pub fn beginDraw(self: *RenderTextureHarness, size: [2]u32) zui.Surface {
@@ -70,7 +74,7 @@ const RenderTextureHarness = struct {
 
 test "the renderer passes zui's renderer suite" {
     var harness: RenderTextureHarness = undefined;
-    harness.init();
+    try harness.init();
     defer harness.deinit();
     try zui_testing.expectRendererConforms(zui_raylib.Renderer, &harness, .{ .gpa = std.testing.allocator, .io = std.testing.io });
 }

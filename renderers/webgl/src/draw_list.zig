@@ -1,8 +1,8 @@
 const std = @import("std");
 const zui = @import("zui");
-const Text = @import("text.zig").Text;
-const GlyphAtlas = @import("glyph_atlas.zig").GlyphAtlas;
-const truetype = @import("truetype.zig");
+const zui_glyphs = @import("zui_glyphs");
+const BitmapFonts = @import("bitmap_fonts.zig").BitmapFonts;
+const GlyphAtlas = @import("root.zig").GlyphAtlas;
 const backdrop_blur = @import("backdrop_blur.zig");
 const PixelRegion = backdrop_blur.PixelRegion;
 const Taps = backdrop_blur.Taps;
@@ -11,17 +11,20 @@ const SplitWeight = backdrop_blur.SplitWeight;
 /// A frame's commands laid out as colored triangles in layout units, in
 /// paint order, cut into batches that each draw under one scissor
 /// rectangle, so the page draws a frame with one vertex buffer and one draw
-/// call per batch. The geometry is zui-sokol's renderer's, triangle for
+/// call per batch. The geometry is the sokol renderer's, triangle for
 /// triangle: rounded corners in eight segments, borders inside their
 /// bounds, gradients in bands of OKLab color, shadows faded in rings, text
 /// as a textured quad per glyph, and transforms applied to every vertex.
 /// A backdrop blur runs before the batch that samples it, and a material
-/// is a batch of its own, drawn by its pattern. Images are not laid out
+/// is a batch of its own, drawn by its pattern. TrueType text is drawn
+/// where `zui_glyphs` lays it out, from `glyph_atlas`, and text in a font
+/// the text has no face for from `bitmap_fonts`. Images are not laid out
 /// yet. Memory is reserved by `init`.
 ///
 /// ```zig
 /// var draw_list: DrawList = try .init(gpa);
 /// draw_list.layOut(frame.commands(), frame.params, &text);
+/// if (draw_list.glyph_atlas.changed) upload(&draw_list.glyph_atlas.texels);
 /// var next_blur: usize = 0;
 /// for (draw_list.batches(), 0..) |batch, index| {
 ///     while (next_blur < draw_list.backdropBlurs().len and draw_list.backdropBlurs()[next_blur].before_batch == index) : (next_blur += 1) {
@@ -33,12 +36,12 @@ const SplitWeight = backdrop_blur.SplitWeight;
 pub const DrawList = struct {
     pub const max_vertices = 1 << 18;
     pub const max_batches = 1024;
-    /// As many as zui-sokol's renderer blurs in a frame.
+    /// As many as the sokol renderer blurs in a frame.
     pub const max_backdrop_blurs = 16;
     pub const max_blur_taps = max_backdrop_blurs * 2 * Taps.max_count;
-    /// As many as zui-sokol's renderer draws in a frame.
+    /// As many as the sokol renderer draws in a frame.
     pub const max_materials = 256;
-    /// Triangles per rounded corner, as zui-sokol's renderer draws them.
+    /// Triangles per rounded corner, as the sokol renderer draws them.
     pub const corner_segments = 8;
 
     /// As the page's WebGL reads it.
@@ -65,14 +68,14 @@ pub const DrawList = struct {
     /// What a vertex's color is multiplied by.
     pub const Texture = enum(u32) {
         none,
-        /// `Text.atlas`, sampled linearly at texture coordinates the page
+        /// `glyph_atlas`, sampled linearly at texture coordinates the page
         /// finds from each pixel's position, which also decides whether
         /// the pixel is in the glyph. Interpolated between vertices, both
         /// would follow where the rasterizer snaps the vertices, which
         /// SwiftShader does to a sixteenth of a pixel, and a turned glyph
-        /// would differ from zui-sokol's by up to 31 levels.
+        /// would differ from the sokol renderer's by up to 31 levels.
         glyph_atlas,
-        /// `Text.bitmap_glyph_texels`, sampled at the nearest texel.
+        /// `bitmap_fonts.texels`, sampled at the nearest texel.
         bitmap_glyphs,
         /// The last backdrop blur run, at this pixel, replacing what was
         /// drawn there.
@@ -112,11 +115,11 @@ pub const DrawList = struct {
 
     /// One sample of a blur along its axis: `offset` pixels from the pixel
     /// blurred, linearly filtered, scaled by `weight` and added to the
-    /// target. Each Gaussian tap is two, as zui-sokol adds its weight in
+    /// target. Each Gaussian tap is two, as the sokol renderer adds its weight in
     /// two parts.
     pub const BlurTap = extern struct { offset: f32, weight: f32 };
 
-    /// zui-sokol's material shader's uniforms, colors in sRGB's encoding
+    /// the sokol renderer's material shader's uniforms, colors in sRGB's encoding
     /// from 0 to 1.
     pub const Material = extern struct {
         first_color: [4]f32,
@@ -130,13 +133,15 @@ pub const DrawList = struct {
     backdrop_blur_storage: []BackdropBlur,
     blur_tap_storage: []BlurTap,
     material_storage: []Material,
+    glyph_atlas: *GlyphAtlas,
+    bitmap_fonts: BitmapFonts,
     vertex_count: u32 = 0,
     batch_count: u32 = 0,
     backdrop_blur_count: u32 = 0,
     blur_tap_count: u32 = 0,
     material_count: u32 = 0,
     /// False when the page cannot blur, so that blurs draw their tint
-    /// alone, as zui-sokol's renderer does on a GPU without float targets.
+    /// alone, as the sokol renderer does on a GPU without float targets.
     blurs_backdrops: bool = true,
     /// Shapes left out of a frame because the vertices were full.
     vertex_overflows: u32 = 0,
@@ -159,16 +164,24 @@ pub const DrawList = struct {
         errdefer gpa.free(backdrop_blur_storage);
         const blur_tap_storage = try gpa.alloc(BlurTap, max_blur_taps);
         errdefer gpa.free(blur_tap_storage);
+        const material_storage = try gpa.alloc(Material, max_materials);
+        errdefer gpa.free(material_storage);
+        const glyph_atlas: *GlyphAtlas = try .create(gpa);
+        errdefer glyph_atlas.destroy(gpa);
         return .{
             .vertex_storage = vertex_storage,
             .batch_storage = batch_storage,
             .backdrop_blur_storage = backdrop_blur_storage,
             .blur_tap_storage = blur_tap_storage,
-            .material_storage = try gpa.alloc(Material, max_materials),
+            .material_storage = material_storage,
+            .glyph_atlas = glyph_atlas,
+            .bitmap_fonts = try .init(gpa),
         };
     }
 
     pub fn deinit(self: *DrawList, gpa: std.mem.Allocator) void {
+        self.bitmap_fonts.deinit(gpa);
+        self.glyph_atlas.destroy(gpa);
         gpa.free(self.material_storage);
         gpa.free(self.blur_tap_storage);
         gpa.free(self.backdrop_blur_storage);
@@ -199,11 +212,14 @@ pub const DrawList = struct {
 
     /// Replaces what was laid out before with `commands`, a frame's,
     /// drawn into a target of `params.viewport` units at
-    /// `params.scale × params.zoom` pixels each, its text in `text`'s
-    /// fonts, whose atlas gains the glyphs the frame needs.
-    pub fn layOut(self: *DrawList, commands: anytype, params: zui.FrameParams, text: *Text) void {
+    /// `params.scale × params.zoom` pixels each, its text in the fonts of
+    /// `text`, the text contract the frame was measured with, or anything
+    /// `zui_glyphs.Fonts.of` erases. The atlas gains the glyphs the frame
+    /// needs.
+    pub fn layOut(self: *DrawList, commands: anytype, params: zui.FrameParams, text: anytype) void {
         var builder: Builder = .{ .list = self, .viewport = params.viewport, .pixels_per_unit = params.scale * params.zoom };
-        text.prepareGlyphs(commands, builder.pixels_per_unit);
+        const fonts = zui_glyphs.Fonts.of(text);
+        self.glyph_atlas.addFrameGlyphs(fonts, commands, builder.pixels_per_unit);
         self.vertex_count = 0;
         self.batch_count = 0;
         self.backdrop_blur_count = 0;
@@ -223,9 +239,9 @@ pub const DrawList = struct {
                 .shadow => |shadow| builder.drawShadow(bounds, shadow),
                 .backdrop_blur => |blur| builder.drawBackdropBlur(bounds, blur),
                 .material => |material| builder.drawMaterial(bounds, material),
-                .text => |line| if (text.trueTypeFont(line.style.font)) |font| {
-                    builder.drawTrueTypeText(text.atlas, font, line.content, bounds, line.style);
-                } else if (text.bitmap_fonts_loaded) {
+                .text => |line| if (fonts.fontMetrics(line.style.font) != null) {
+                    builder.drawTrueTypeText(fonts, self.glyph_atlas, line.content, bounds, line.style);
+                } else if (self.bitmap_fonts.loaded) {
                     builder.drawBitmapText(line.content, bounds, line.style);
                 },
                 .clip_begin => |clip| {
@@ -312,7 +328,7 @@ const Builder = struct {
         return self.list.batch_count + count - reusable <= DrawList.max_batches;
     }
 
-    /// As zui-sokol's renderer blurs: inside the outline, what was drawn
+    /// As the sokol renderer blurs: inside the outline, what was drawn
     /// before blurred, then the tint over it. Drawn as the tint alone when
     /// the page cannot blur or the frame has no room left.
     fn drawBackdropBlur(self: *Builder, bounds: zui.Rect, blur: anytype) void {
@@ -362,7 +378,7 @@ const Builder = struct {
         return true;
     }
 
-    /// A batch of its own, drawn by zui-sokol's material shader inside the
+    /// A batch of its own, drawn by the sokol renderer's material shader inside the
     /// outline, and the batch after it begun for what follows. Drawn as its
     /// fallback when the frame has no room left.
     fn drawMaterial(self: *Builder, bounds: zui.Rect, material: anytype) void {
@@ -467,55 +483,26 @@ const Builder = struct {
         self.quad(widened.corners(), @splat(corner));
     }
 
-    /// The pen advances by each glyph's advance, as zui-sokol measured it,
-    /// so the text fills the bounds zui laid out; each glyph's quad starts
-    /// on a whole pixel.
-    fn drawTrueTypeText(self: *Builder, atlas: *const GlyphAtlas, font: *const truetype.Font, content: []const u8, bounds: zui.Rect, style: anytype) void {
-        const pixels_per_unit = self.pixels_per_unit;
-        const pixel_size = Text.rasterPixelSize(style.size, pixels_per_unit);
-        const units_per_raster_pixel = style.size / @as(f32, @floatFromInt(pixel_size));
-        const scale = font.scaleFor(style.size);
-        const glyph_box_height = (font.ascent - font.descent) * scale;
-        const baseline = snapToPixel(bounds.y + (bounds.height - glyph_box_height) / 2 + font.ascent * scale, pixels_per_unit);
-        const texel: f32 = 1.0 / @as(f32, GlyphAtlas.side);
+    fn drawTrueTypeText(self: *Builder, fonts: zui_glyphs.Fonts, atlas: *const GlyphAtlas, content: []const u8, bounds: zui.Rect, style: anytype) void {
+        var quads = zui_glyphs.glyphQuads(fonts, atlas, content, bounds, style, self.pixels_per_unit) orelse return;
         const color = colorOf(style.color);
-
-        var pen = bounds.x;
-        var codepoints = truetype.Codepoints.init(content);
-        while (codepoints.next()) |codepoint| {
-            if (atlas.find(.{ .font = style.font, .pixel_size = pixel_size, .codepoint = codepoint })) |glyph| if (glyph.width != 0) {
-                const left = snapToPixel(pen, pixels_per_unit) + @as(f32, @floatFromInt(glyph.offset[0])) * units_per_raster_pixel;
-                const top = baseline + @as(f32, @floatFromInt(glyph.offset[1])) * units_per_raster_pixel;
-                const right = left + @as(f32, @floatFromInt(glyph.width)) * units_per_raster_pixel;
-                const bottom = top + @as(f32, @floatFromInt(glyph.height)) * units_per_raster_pixel;
-                const texture_left = @as(f32, @floatFromInt(glyph.x)) * texel;
-                const texture_top = @as(f32, @floatFromInt(glyph.y)) * texel;
-                const texture_right = texture_left + @as(f32, @floatFromInt(glyph.width)) * texel;
-                const texture_bottom = texture_top + @as(f32, @floatFromInt(glyph.height)) * texel;
-                self.atlasGlyph(
-                    .{ .left = left, .top = top, .right = right, .bottom = bottom },
-                    .{ .left = texture_left, .top = texture_top, .right = texture_right, .bottom = texture_bottom },
-                    color,
-                );
-            };
-            pen += font.advance(codepoint) * scale + style.letter_spacing;
-        }
+        while (quads.next()) |glyph| self.atlasGlyph(boxOf(glyph.position), boxOf(glyph.texture), color);
     }
 
-    /// As zui-sokol draws bitmap text into an image: square cells of the
+    /// As the sokol renderer draws bitmap text into an image: square cells of the
     /// glyph size from `bounds.x`, centered down `bounds`, and `?` for
     /// what is not printable ASCII. A font id past the bitmap fonts with no
     /// TrueType font draws in the last bitmap font.
     fn drawBitmapText(self: *Builder, content: []const u8, bounds: zui.Rect, style: anytype) void {
-        const glyph_size = style.size * Text.bitmap_glyph_scale;
+        const glyph_size = style.size * BitmapFonts.glyph_scale;
         if (glyph_size <= 0) return;
         const utf8 = std.unicode.Utf8View.init(content) catch return;
-        const glyph_side = Text.bitmap_glyph_side;
-        const font_index: u16 = @min(style.font, Text.bitmap_font_count - 1);
+        const glyph_side = BitmapFonts.glyph_side;
+        const font_index: u16 = @min(style.font, BitmapFonts.count - 1);
         const font_row: f32 = @floatFromInt(font_index * glyph_side);
         const top = bounds.y + (bounds.height - glyph_size) / 2;
-        const texture_top = font_row / Text.bitmap_texture_height;
-        const texture_bottom = (font_row + glyph_side) / Text.bitmap_texture_height;
+        const texture_top = font_row / BitmapFonts.texture_height;
+        const texture_bottom = (font_row + glyph_side) / BitmapFonts.texture_height;
         const color = colorOf(style.color);
         var glyph_index: f32 = 0;
         var codepoints = utf8.iterator();
@@ -523,8 +510,8 @@ const Builder = struct {
             const is_printable_ascii = codepoint >= 0x20 and codepoint < 0x7F;
             const character: f32 = @floatFromInt(if (is_printable_ascii) codepoint else '?');
             const left = bounds.x + glyph_index * (glyph_size + style.letter_spacing);
-            const texture_left = character * glyph_side / Text.bitmap_texture_width;
-            const texture_right = (character + 1) * glyph_side / Text.bitmap_texture_width;
+            const texture_left = character * glyph_side / BitmapFonts.texture_width;
+            const texture_right = (character + 1) * glyph_side / BitmapFonts.texture_width;
             self.bitmapGlyph(
                 .{ .left = left, .top = top, .right = left + glyph_size, .bottom = top + glyph_size },
                 .{ .left = texture_left, .top = texture_top, .right = texture_right, .bottom = texture_bottom },
@@ -700,8 +687,8 @@ const TextureMapping = struct {
     }
 };
 
-fn snapToPixel(value: f32, pixels_per_unit: f32) f32 {
-    return @round(value * pixels_per_unit) / pixels_per_unit;
+fn boxOf(edges: zui_glyphs.Edges) Box {
+    return .{ .left = edges.left, .top = edges.top, .right = edges.right, .bottom = edges.bottom };
 }
 
 fn smoothstep(amount: f32) f32 {

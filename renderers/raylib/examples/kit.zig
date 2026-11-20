@@ -3,6 +3,9 @@
 
 const std = @import("std");
 const zui_raylib = @import("zui_raylib");
+const zui_glyphs = @import("zui_glyphs");
+const zui_truetype = @import("zui_truetype");
+const zui_fonts = @import("zui_fonts");
 pub const zui = @import("zui");
 pub const zui_app = @import("zui_app");
 pub const zui_widgets = @import("zui_widgets");
@@ -24,6 +27,7 @@ pub const Sources = struct {
 };
 
 pub const Ui = zui.Context(zui_app.contextConfig(Renderer, .{
+    .Text = Text,
     .Sources = Sources,
     .features = .{ .Tracer = ZoneTimer },
     .limits = .{
@@ -44,38 +48,36 @@ pub const Widgets = zui_widgets.Widgets(Ui);
 pub const TextStyle = Ui.TextStyle;
 
 /// Atkinson Hyperlegible, from the Braille Institute, and Liberation Mono,
-/// from Red Hat, both under the SIL Open Font License (fonts/OFL.txt and
-/// fonts/LiberationMono-LICENSE.txt). `raylib_font` is no font of the
-/// tour's, so the renderer draws it in raylib's built-in one.
+/// from Red Hat, both under the SIL Open Font License, as `zui_fonts`
+/// bundles them. `raylib_font` is no font of the tour's, so the renderer
+/// draws it in raylib's built-in one.
 pub const body_font: u16 = 0;
 pub const bold_font: u16 = 1;
 pub const mono_font: u16 = 2;
 pub const raylib_font: u16 = 3;
 
-/// The tour's TrueType fonts, indexed by `body_font`, `bold_font` and
-/// `mono_font`, for `Renderer.raylib.fonts`.
-pub const Fonts = struct {
-    /// Text drawn larger than this is scaled up from it, and softens.
-    pub const pixel_size = 96;
+/// The tour's text contract: `body_font`, `bold_font` and `mono_font`
+/// through `zui_truetype`, which the renderer draws from its atlas, and
+/// `raylib_font` measured as raylib's built-in font.
+pub const Text = struct {
+    pub const zui_thread_safe = true;
 
-    loaded: [3]zui_raylib.c.Font,
+    truetype: zui_truetype.Text = .{},
 
-    pub fn load() error{InvalidFont}!Fonts {
-        var fonts: Fonts = undefined;
-        const files = [_][]const u8{
-            @embedFile("fonts/AtkinsonHyperlegible-Regular.ttf"),
-            @embedFile("fonts/AtkinsonHyperlegible-Bold.ttf"),
-            @embedFile("fonts/LiberationMono-Regular.ttf"),
-        };
-        for (files, 0..) |file, index| {
-            errdefer for (fonts.loaded[0..index]) |font| zui_raylib.unloadFont(font);
-            fonts.loaded[index] = try zui_raylib.loadTrueTypeFont(file, pixel_size);
+    pub fn init(text: *Text) error{ InvalidFont, TooManyFonts }!void {
+        text.* = .{};
+        for ([_][]const u8{ zui_fonts.atkinson_hyperlegible_regular, zui_fonts.atkinson_hyperlegible_bold, zui_fonts.liberation_mono_regular }, 0..) |font, expected_id| {
+            std.debug.assert(try text.truetype.addFont(font) == expected_id);
         }
-        return fonts;
     }
 
-    pub fn deinit(fonts: *Fonts) void {
-        for (fonts.loaded) |font| zui_raylib.unloadFont(font);
+    pub fn zuiMeasure(text: *Text, run: []const u8, key: zui.MeasureKey(u16)) [2]f32 {
+        if (key.font < raylib_font) return text.truetype.zuiMeasure(run, key);
+        return zui_raylib.measureInBuiltInFont(run, key);
+    }
+
+    pub fn glyphFonts(text: *const Text) zui_glyphs.Fonts {
+        return .of(&text.truetype);
     }
 };
 

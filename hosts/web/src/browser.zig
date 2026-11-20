@@ -1,8 +1,10 @@
 const std = @import("std");
 const zui = @import("zui");
+const zui_wire = @import("zui_wire");
 const DemoUi = @import("demo_ui.zig").DemoUi;
 const DrawList = @import("zui_webgl").DrawList;
-const Text = @import("zui_webgl").Text;
+const BitmapFonts = @import("zui_webgl").BitmapFonts;
+const Text = @import("text.zig").Text;
 const browser_input = @import("browser_input.zig");
 
 pub const DemoStream = @import("frame_stream.zig").FrameStream(DemoUi);
@@ -14,7 +16,7 @@ pub var newest: ?*const DemoStream.Frame = null;
 pub var records: DemoRecords = undefined;
 var draw_list: DrawList = undefined;
 var text: Text = undefined;
-var bitmap_font_rows: [Text.bitmap_font_bytes]u8 = undefined;
+var bitmap_font_rows: [BitmapFonts.font_bytes]u8 = undefined;
 var last_error: ?anyerror = null;
 const key_name_bytes_most = 64;
 var key_names: [2 * key_name_bytes_most]u8 = undefined;
@@ -66,8 +68,8 @@ export fn zuiWebInit() bool {
     return true;
 }
 
-/// Where to write sokol_debugtext's six fonts, `Text.bitmap_font_bytes`
-/// of them laid out as `Text.bitmap_font_bytes` says, before
+/// Where to write sokol_debugtext's six fonts, `BitmapFonts.font_bytes`
+/// of them laid out as `BitmapFonts.font_bytes` says, before
 /// `zuiWebLoadBitmapFonts`.
 export fn zuiWebBitmapFontRows() usize {
     return @intFromPtr(&bitmap_font_rows);
@@ -76,13 +78,13 @@ export fn zuiWebBitmapFontRows() usize {
 /// Unpacks the bitmap fonts written to `zuiWebBitmapFontRows` into
 /// `zuiWebBitmapGlyphTexels`. Until then, bitmap text is not drawn.
 export fn zuiWebLoadBitmapFonts() void {
-    text.loadBitmapFonts(&bitmap_font_rows);
+    draw_list.bitmap_fonts.load(&bitmap_font_rows);
 }
 
-/// `Text.bitmap_texture_width` × `Text.bitmap_texture_height` bytes, one
+/// `BitmapFonts.texture_width` × `BitmapFonts.texture_height` bytes, one
 /// a texel, for an R8 texture sampled at the nearest texel.
 export fn zuiWebBitmapGlyphTexels() usize {
-    return @intFromPtr(text.bitmap_glyph_texels.ptr);
+    return @intFromPtr(draw_list.bitmap_fonts.texels.ptr);
 }
 
 /// Where to write the next TrueType font's `count` bytes, or 0 when they
@@ -94,12 +96,14 @@ export fn zuiWebRoomForFont(count: usize) usize {
 
 /// Adds the TrueType font written to `zuiWebRoomForFont`, returning its
 /// `FontId`, which follows the six bitmap fonts' and those added before
-/// it, or -1 when it cannot be read, as `zuiWebErrorName` says.
+/// it, or -1 when it cannot be read, as `zuiWebErrorName` says. From then
+/// on, a stream measured with other fonts is refused.
 export fn zuiWebAddTrueTypeFont(count: usize) i32 {
     const font = text.addTrueTypeFont(count) catch |err| {
         last_error = err;
         return -1;
     };
+    stream.fingerprint = zui_wire.fingerprintOf(&text);
     return font;
 }
 
@@ -107,15 +111,16 @@ export fn zuiWebAddTrueTypeFont(count: usize) i32 {
 /// an RG8 texture sampled linearly, when they changed since this was last
 /// asked, or else 0.
 export fn zuiWebGlyphAtlasTexelsIfChanged() usize {
-    if (!text.atlas.changed) return 0;
-    text.atlas.changed = false;
-    return @intFromPtr(&text.atlas.texels);
+    const atlas = draw_list.glyph_atlas;
+    if (!atlas.changed) return 0;
+    atlas.changed = false;
+    return @intFromPtr(&atlas.texels);
 }
 
 /// Since `zuiWebInit`, how often a frame left glyphs out because the atlas
 /// was full, or stb_truetype ran out of memory rasterizing one.
 export fn zuiWebGlyphOverflows() u32 {
-    return text.glyph_overflows + text.scratch.refusals;
+    return draw_list.glyph_atlas.overflows + draw_list.glyph_atlas.raster_refusals;
 }
 
 /// Where to write the next `count` bytes of the stream, or 0 when they do

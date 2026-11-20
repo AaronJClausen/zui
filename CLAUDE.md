@@ -67,11 +67,15 @@ Stop and ask the user instead of guessing when:
 | a conformance suite (`expect*Conforms`) | `core/zui_testing/zui_testing.zig` |
 | a benchmark scenario | `core/bench/bench.zig`; its budget, if any, comes from SPEC.md §20.2 |
 | CI | `.github/workflows/ci.yml`; publishing the web host's page, `.github/workflows/pages.yml` |
+| what font systems and renderers share: the layout of a run into positioned glyphs, the placement a renderer declares, the type-erased fonts a renderer draws through, the glyph atlas, the font systems' conformance suite | `text/glyphs/src/<topic>.zig`, exported from `text/glyphs/src/root.zig` (the `zui_glyphs` module, which the root re-exports); pure Zig, importing nothing but `std` |
+| the default font system, `zui_truetype.Text` on stb_truetype | `text/truetype/src/`, the `zui_truetype` module, reached through `zui.builder.dependency("zui_truetype", …)` and never re-exported, since it builds stb; it lays text out only through `zui_glyphs` and never imports a renderer. stb_truetype is compiled in from `text/truetype/src/stb_truetype.c` without a C library on every target |
+| a bundled typeface | `text/fonts/`, its file and licence beside `zui_fonts.zig`, which makes it a `pub const` of its `@embedFile` bytes and adds both to `.paths` in `text/fonts/build.zig.zon` |
+| a new face, shaper or rasterizer | a package of its own beside `text/truetype/`, depending on `zui_glyphs`, and in the root's `packages`, `.paths` and `.dependencies` |
 | a skin for an OS design language | `themes/src/<design language>.zig`, exported from `themes/src/root.zig` (the `zui_themes` module), with its tests beside it. A skin is data, applied through `zui_widgets`' skin contract: it imports only `zui` and `zui_widgets`, and holds no drawing or OS code |
 | the template project | `examples/template/`, a package of its own, so it can be copied out as a new app |
 | a sample | `examples/samples/<name>/`, built and tested from `examples/build.zig` and imported from the `test` block of `examples/samples/root.zig`. A sample uses only the public APIs of zui, its modules, and the renderers and hosts, as a user would |
 | a package | its own directory, with its `build.zig` and `build.zig.zon`, naming other packages by `.path`; in the root, a line in `packages` in `build.zig` and in `.paths` in `build.zig.zon`. A renderer or host package is also a `.path` entry in the root's `.dependencies`, so users reach it as `zui.builder.dependency("<name>", …)`; the root's `build()` never instantiates it |
-| renderer changes | `renderers/<name>/`, which names `core/` by path, so it is tested in place from its directory: `renderers/raylib/`, `renderers/sokol/`, `renderers/terminal/`, `renderers/webgl/` |
+| renderer changes | `renderers/<name>/`, which names `core/` by path, so it is tested in place from its directory: `renderers/raylib/`, `renderers/sokol/`, `renderers/terminal/`, `renderers/webgl/`. A renderer module imports `zui_glyphs`, never a font system: it takes the text it is given as `anytype`, erases it with `zui_glyphs.Fonts.of`, and draws where `zui_glyphs` lays the text out, declaring `glyph_placement` when it does not draw on the pixel grid |
 | native hosts | `hosts/native/<os>/`, in the package `zui_host`, which names `core/` and `renderers/sokol/` by path, so it is tested in place from `hosts/native/`; its examples are `hosts/native/examples/` |
 | the browser's drawing of a frame | `renderers/webgl/src/<topic>.zig`, reached from `renderers/webgl/src/root.zig` (the module `zui_webgl`); the page's WebGL 2 drawing of it, `renderers/webgl/web/frame_drawer.mjs`. It never imports anything of `hosts/web/` |
 | the web client and, later, the web host | `hosts/web/src/<topic>.zig`, reached from `hosts/web/src/root.zig`, in the package `zui_web`, which names `core/`, `renderers/webgl/` and `renderers/sokol/` by path, so it is tested in place from `hosts/web/` |
@@ -122,9 +126,11 @@ reused (`ROADMAP.md` explains the letters).
 
 Run these from the repository's root, which runs core's steps under the
 same names; another package's own steps run from its directory. In
-`themes/` and `examples/`, run `zig build test` in all three optimize
-modes and `zig build check` before committing; `test-all` and `check-all`
-run them from the root. In `renderers/terminal/`, run `zig build test`
+`themes/`, `examples/`, `text/glyphs/`, `text/fonts/` and
+`text/truetype/`, run `zig build test` in all three optimize modes and
+`zig build check` (which, for the text packages, also compiles their
+tests for `wasm32-freestanding`) before committing; `test-all` and
+`check-all` run them from the root. In `renderers/terminal/`, run `zig build test`
 (which runs `conformance` too), `zig build check`, the same `check` with
 `-Dtarget=x86_64-windows` and `-Dtarget=aarch64-macos`, and
 `zig build demo -- --dump`, which prints the demo's glyphs and must
@@ -177,9 +183,9 @@ and, each with `timeout` in front:
 `zig build test-demo` (and with `-Doptimize=ReleaseSafe`) after any
 change to the client, `hosts/web/src/demo_ui.zig`, the tour's worker
 (`hosts/web/src/tour_*.zig`, `hosts/web/src/stepped_io.zig`,
-`hosts/web/web/tour_*.mjs`), core or the sokol renderer's tour; it needs
+`hosts/web/web/tour_*.mjs`), core, `text/` or the sokol renderer's tour; it needs
 Node. `zig build test-draw` after any change to how the client lays
-frames out or the page draws them (`renderers/webgl/`), or to the sokol
+frames out or the page draws them (`renderers/webgl/`), or to `text/` or the sokol
 renderer; it needs Node, Chromium (`-Dbrowser=<path>` names another) and
 a display, and `ZUI_WEB_DRAW_FAILURES=<dir>` keeps its failing frames.
 `zig build test-input` after any change to how the client writes records

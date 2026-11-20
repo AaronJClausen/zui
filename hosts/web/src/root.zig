@@ -8,7 +8,9 @@ pub const RecordStream = @import("record_stream.zig").RecordStream;
 pub const SteppedIo = @import("stepped_io.zig").SteppedIo;
 const browser_input = @import("browser_input.zig");
 const DrawList = @import("zui_webgl").DrawList;
-const Text = @import("zui_webgl").Text;
+const BitmapFonts = @import("zui_webgl").BitmapFonts;
+const Text = @import("text.zig").Text;
+const zui_fonts = @import("zui_fonts");
 
 const testing = std.testing;
 
@@ -119,6 +121,43 @@ test "a stream measured with other fonts, or not a wire stream, is rejected" {
     defer not_wire.deinit(testing.allocator);
     try not_wire.receive("GET / HTTP/1.1\r\n");
     try testing.expectError(error.NotAWireStream, not_wire.nextFrame());
+}
+
+/// The browser's text, handed `fonts` as the page hands them over.
+fn textWith(fonts: []const []const u8) !Text {
+    var text: Text = try .init(testing.allocator);
+    errdefer text.deinit(testing.allocator);
+    for (fonts) |font| {
+        @memcpy(text.roomForFont(font.len).?, font);
+        _ = try text.addTrueTypeFont(font.len);
+    }
+    return text;
+}
+
+test "the client rejects a stream measured with other fonts, and takes one measured with its own" {
+    var drawn_with = try textWith(&.{ zui_fonts.atkinson_hyperlegible_regular, zui_fonts.atkinson_hyperlegible_bold });
+    defer drawn_with.deinit(testing.allocator);
+    var out: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer out.deinit();
+    try writeStream(&out, zui_wire.fingerprintOf(&drawn_with));
+
+    var other_order = try textWith(&.{ zui_fonts.atkinson_hyperlegible_bold, zui_fonts.atkinson_hyperlegible_regular });
+    defer other_order.deinit(testing.allocator);
+    var fewer = try textWith(&.{zui_fonts.atkinson_hyperlegible_regular});
+    defer fewer.deinit(testing.allocator);
+    for ([_]*const Text{ &other_order, &fewer }) |other_fonts| {
+        var stream: FrameStream(SmallUi) = try .init(testing.allocator, .{ .max_pending_bytes = 512, .fingerprint = zui_wire.fingerprintOf(other_fonts) });
+        defer stream.deinit(testing.allocator);
+        try stream.receive(out.written());
+        try testing.expectError(error.FontsDiffer, stream.nextFrame());
+    }
+
+    var same = try textWith(&.{ zui_fonts.atkinson_hyperlegible_regular, zui_fonts.atkinson_hyperlegible_bold });
+    defer same.deinit(testing.allocator);
+    var stream: FrameStream(SmallUi) = try .init(testing.allocator, .{ .max_pending_bytes = 512, .fingerprint = zui_wire.fingerprintOf(&same) });
+    defer stream.deinit(testing.allocator);
+    try stream.receive(out.written());
+    try expectFrame(&frames[0], (try stream.nextFrame()).?);
 }
 
 test "a record in a stream of frames is rejected" {
@@ -432,12 +471,12 @@ test "bitmap text is a quad per glyph in its font's row, drawn once the fonts ar
     defer laid_out.deinit();
     try testing.expectEqual(0, laid_out.draw_list.vertices().len);
 
-    var rows: [Text.bitmap_font_bytes]u8 = @splat(0);
-    laid_out.text.loadBitmapFonts(&rows);
+    var rows: [BitmapFonts.font_bytes]u8 = @splat(0);
+    laid_out.draw_list.bitmap_fonts.load(&rows);
     laid_out.draw_list.layOut(&[_]DemoCommand{line}, demo_params, &laid_out.text);
     const vertices = laid_out.draw_list.vertices();
     try testing.expectEqual(2 * 6, vertices.len);
-    const glyph_size = 16 * Text.bitmap_glyph_scale;
+    const glyph_size = 16 * BitmapFonts.glyph_scale;
     try testing.expectEqualDeep([2]f32{ 10, (20 - glyph_size) / 2 }, vertices[0].position);
     try testing.expectEqualDeep([2]f32{ 10 + glyph_size, (20 + glyph_size) / 2 }, vertices[2].position);
     try testing.expectEqual(DrawList.Texture.bitmap_glyphs, vertices[0].texture);
@@ -447,13 +486,35 @@ test "bitmap text is a quad per glyph in its font's row, drawn once the fonts ar
 }
 
 test "text in a font id past the bitmap fonts that no TrueType font was added for draws in the last bitmap font" {
-    const line: DemoCommand = .{ .bounds = .{ .width = 12, .height = 16 }, .id = 1, .payload = .{ .text = .{ .content = "x", .style = .{ .size = 16, .color = .white, .font = Text.bitmap_font_count }, .line = 0 } } };
+    const line: DemoCommand = .{ .bounds = .{ .width = 12, .height = 16 }, .id = 1, .payload = .{ .text = .{ .content = "x", .style = .{ .size = 16, .color = .white, .font = BitmapFonts.count }, .line = 0 } } };
     var laid_out = try layOutForTest(&.{});
     defer laid_out.deinit();
-    var rows: [Text.bitmap_font_bytes]u8 = @splat(0);
-    laid_out.text.loadBitmapFonts(&rows);
+    var rows: [BitmapFonts.font_bytes]u8 = @splat(0);
+    laid_out.draw_list.bitmap_fonts.load(&rows);
     laid_out.draw_list.layOut(&[_]DemoCommand{line}, demo_params, &laid_out.text);
     try testing.expectEqual(40.0 / 48.0, laid_out.draw_list.vertices()[0].texture_coordinates[1]);
+}
+
+test "TrueType text is a quad per glyph where the layout puts it, from the atlas" {
+    const line: DemoCommand = .{ .bounds = .{ .x = 10, .y = 0, .width = 80, .height = 20 }, .id = 1, .payload = .{ .text = .{ .content = "Hi you", .style = .{ .size = 16, .color = .white, .font = BitmapFonts.count, .letter_spacing = 1 }, .line = 0 } } };
+    var laid_out = try layOutForTest(&.{});
+    defer laid_out.deinit();
+    laid_out.text.deinit(testing.allocator);
+    laid_out.text = try textWith(&.{zui_fonts.atkinson_hyperlegible_regular});
+    laid_out.draw_list.layOut(&[_]DemoCommand{line}, demo_params, &laid_out.text);
+    const vertices = laid_out.draw_list.vertices();
+    try testing.expectEqual(5 * 6, vertices.len);
+    try testing.expect(laid_out.draw_list.glyph_atlas.changed);
+    var layout = @import("zui_glyphs").layOut(&laid_out.text, "Hi you", line.payload.text.style, .pixel_grid).?;
+    var quad: usize = 0;
+    while (layout.next()) |glyph| {
+        if (glyph.codepoint == ' ') continue;
+        const left = std.mem.min(f32, &.{ vertices[6 * quad].position[0], vertices[6 * quad + 1].position[0], vertices[6 * quad + 2].position[0] });
+        const pen = @round((10 + glyph.x) * demo_params.scale) / demo_params.scale;
+        try testing.expect(@abs(left - pen) < 2);
+        try testing.expectEqual(DrawList.Texture.glyph_atlas, vertices[6 * quad].texture);
+        quad += 1;
+    }
 }
 
 test "a batch, a blur and a material are what the page reads" {
@@ -541,4 +602,5 @@ test "a material is a batch of its own, its vertices at their place in the eleme
 
 test {
     _ = @import("stepped_io.zig");
+    _ = @import("text.zig");
 }
