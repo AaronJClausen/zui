@@ -25,7 +25,7 @@ const CheckText = struct {
     }
 };
 
-const Ui = zui.Context(.{ .limits = .{ .max_elements = 64 }, .Text = CheckText, .CustomData = u32, .ImageHandle = u32, .features = .{ .semantics = true, .flex_wrap = true } });
+const Ui = zui.Context(.{ .limits = .{ .max_elements = 64 }, .Text = CheckText, .CustomData = u32, .ImageHandle = u32, .features = .{ .semantics = true, .flex_wrap = true, .chrome_regions = true } });
 
 var check_text: CheckText = .{};
 var inspector: zui_debug.Inspector(Ui) = .{};
@@ -68,7 +68,7 @@ export fn zuiCheckFrame(width: f32, height: f32, pointer_x: f32, pointer_y: f32)
     });
     const save: zui.Id = .of("save");
     const list: zui.Id = .of("list");
-    ui.open(.{ .id = .of("root"), .layout = .{ .sizing = .grow_both, .padding = .all(4), .child_gap = 2 }, .decoration = .{ .background = .white, .border = .{ .color = .black, .widths = .all(1) } } });
+    ui.open(.{ .id = .of("root"), .chrome = if (ui.environment().custom_title_bar) .title_bar else null, .layout = .{ .sizing = .grow_both, .padding = .all(4), .child_gap = 2 }, .decoration = .{ .background = .white, .border = .{ .color = .black, .widths = .all(1) } } });
     ui.text("check every pass", .{ .wrap = .words, .alignment = .center, .letter_spacing = 1 });
     ui.image(.{ .handle = 1 }, .{ .layout = .{ .sizing = .{ .width = .fixed(8), .height = .percent(0.5) } } });
     ui.image(.{ .handle = 1, .natural_size = .{ 16, 9 } }, .{ .layout = .{ .sizing = .{ .width = .grow } } });
@@ -114,7 +114,7 @@ export fn zuiCheckFrame(width: f32, height: f32, pointer_x: f32, pointer_y: f32)
     const host_requests = @intFromEnum(requests.cursor) + @intFromBool(requests.text_input != null);
     const inspected = frame.inspect(frame.elementCount() - 1);
     const inspected_content = @intFromEnum(inspected.content) + @intFromBool(inspected.effects != null and inspected.floating != null);
-    return frame.commands().len + @intFromBool(ui.nextFrame() == .immediately) + violation_count + failed_check + broken_invariant + frame.elementCount() + host_requests + frame.semantics().len + inspected_content + inspector.rows().len;
+    return frame.commands().len + @intFromBool(ui.nextFrame() == .immediately) + violation_count + failed_check + broken_invariant + frame.elementCount() + host_requests + frame.semantics().len + frame.chromeRegions().len + inspected_content + inspector.rows().len;
 }
 
 const Settings = struct {
@@ -280,10 +280,11 @@ export fn zuiCheckExtendedColor() usize {
 
 const OffscreenHost = struct {
     pub const zui_surfaces: zui.SurfaceKinds = .initOne(.offscreen);
-    pub const zui_capabilities: zui.HostCapabilities = .{ .windows = .many };
+    pub const zui_capabilities: zui.HostCapabilities = .{ .windows = .many, .custom_title_bar = true };
     pub const zui_output_formats: zui.OutputFormats = .initMany(&.{ .sdr, .scrgb_fp16 });
 
     polls: u32 = 0,
+    chrome_region_count: usize = 0,
     applied: zui.HostRequests = .{},
     format: zui.OutputFormat = .sdr,
 
@@ -312,6 +313,10 @@ const OffscreenHost = struct {
 
     pub fn zuiApply(self: *OffscreenHost, _: zui.WindowId, requests: zui.HostRequests) void {
         self.applied = requests;
+    }
+
+    pub fn zuiChromeRegions(self: *OffscreenHost, _: zui.WindowId, regions: []const zui.ChromeRegion) void {
+        self.chrome_region_count = regions.len;
     }
 };
 

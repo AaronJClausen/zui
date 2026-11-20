@@ -281,6 +281,11 @@ Implemented so far:
   host reads and writes the clipboard, opens URLs, and shows
   notifications, file dialogs, context menus and a menu bar through
   them, all five from one window in zui-host's `zig build services`.
+  With `features.chrome_regions`, an element's `.chrome = .title_bar`
+  (or a caption button or a resize edge) lists it in
+  `frame.chromeRegions()` for a window opened with `title_bar = .custom`,
+  and `zui_app` hands the list to the host's `zuiChromeRegions`; the
+  Windows host's custom title bar comes next.
 
 The reference backend, its adapter host and the demo application live in
 [zui-raylib](https://github.com/AaronJClausen/zui-raylib); the other

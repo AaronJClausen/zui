@@ -56,6 +56,12 @@ pub const Options = struct {
     /// has a system material; `Environment.system_material` says whether
     /// it does on this machine.
     material: zui.SystemMaterial = .none,
+    /// Who draws the title bar. `.custom` needs
+    /// `Config.features.chrome_regions`, or `start` returns
+    /// `error.CustomTitleBarWithoutChromeRegions`; on a host without
+    /// `custom_title_bar` the window keeps the system's, and
+    /// `Environment.custom_title_bar` stays false.
+    title_bar: zui.TitleBar = .native,
     /// The application's zoom, multiplied into layout.
     zoom: f32 = 1,
     /// Submit on a thread of its own when the renderer declares
@@ -285,8 +291,9 @@ pub const Setup = struct {
 /// `features.semantics`, a host that declares `zuiSemantics` opens the
 /// window with room for `Config.limits`' elements and text, and is handed
 /// each frame's list on the UI thread, after `zuiObserve` and before the
-/// frame is submitted. The
-/// renderer may declare `pub fn init(self: *Renderer, surface:
+/// frame is submitted. With `features.chrome_regions`, a host that declares
+/// `zuiChromeRegions` is handed each frame's chrome regions at the same
+/// point. The renderer may declare `pub fn init(self: *Renderer, surface:
 /// zui.Surface) !void`, or with `App.Text` `pub fn init(self: *Renderer,
 /// surface: zui.Surface, text: *const Text) !void`, and `pub fn
 /// deinit(self: *Renderer) void`. `App.Text` may declare `pub fn init(self:
@@ -354,8 +361,9 @@ pub fn Runner(comptime App: type) type {
             self.render_error = .init(0);
             self.render_task = .init;
 
+            if (options.title_bar == .custom and !Ui.features.chrome_regions) return error.CustomTitleBarWithoutChromeRegions;
             setFieldDefaults(Host, &self.host);
-            try self.host.init(setup.io, .{ .title = options.title, .size = options.size, .visible = options.visible, .resizable = options.resizable, .material = options.material, .output_formats = output_formats, .semantics = window_semantics });
+            try self.host.init(setup.io, .{ .title = options.title, .size = options.size, .visible = options.visible, .resizable = options.resizable, .material = options.material, .output_formats = output_formats, .semantics = window_semantics, .title_bar = options.title_bar });
             errdefer self.host.deinit();
             if (Text != void) {
                 if (@hasDecl(Text, "init")) {
@@ -410,6 +418,7 @@ pub fn Runner(comptime App: type) type {
 
         const output_formats = zui.sharedOutputFormats(Host, Renderer);
         const bridges_semantics = Ui.features.semantics and @hasDecl(Host, "zuiSemantics");
+        const hands_over_chrome = Ui.features.chrome_regions and @hasDecl(Host, "zuiChromeRegions");
         const window_semantics: zui.SemanticsCapacity = if (bridges_semantics) .{ .nodes = Ui.limits.max_elements, .text_bytes = Ui.limits.max_text_bytes } else .{};
         const accessibility: Accessibility = if (!Ui.features.semantics) .off else if (bridges_semantics) .bridged else .not_bridged;
         const lowered = if (@hasDecl(Renderer, "zui_commands")) Renderer.zui_commands.complement() else zui.CommandSet.initFull();
@@ -447,6 +456,7 @@ pub fn Runner(comptime App: type) type {
             self.noticeDiagnostics(drawn.diagnostics);
             if (@hasDecl(App, "zuiObserve")) self.app.zuiObserve(&self.ui, drawn);
             if (bridges_semantics) self.noticeDroppedSemantics(self.host.zuiSemantics(window, drawn.semantics()));
+            if (hands_over_chrome) self.host.zuiChromeRegions(window, drawn.chromeRegions());
 
             const surface = self.host.zuiSurface(window);
             if (self.report.submission == .render_thread) {

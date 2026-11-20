@@ -15,6 +15,7 @@ const contracts = @import("contracts.zig");
 const trace = @import("trace.zig");
 const sources_module = @import("sources.zig");
 const semantics_module = @import("semantics.zig");
+const chrome_module = @import("chrome.zig");
 const sweeps = @import("sweeps.zig");
 
 const Id = id_module.Id;
@@ -73,6 +74,10 @@ pub const Features = struct {
     gestures: bool = true,
     /// Moving a row's children that overflow it onto new lines.
     flex_wrap: bool = false,
+    /// Window chrome, `Frame.chromeRegions()`: the title bar, caption
+    /// buttons and resize edges an application draws for a window opened
+    /// with `title_bar = .custom`.
+    chrome_regions: bool = false,
     /// `Frame.sweep()` at the end of every `endFrame`, in any build,
     /// panicking on the first invariant the frame breaks.
     safety_sweeps: bool = std.debug.runtime_safety,
@@ -218,6 +223,13 @@ pub fn ElementWith(comptime ContextDecoration: type) type {
         /// the hovering pointer that sets a cursor. Only an interactive
         /// element is hit-tested, so on any other this has no effect.
         cursor: ?Cursor = null,
+        /// What this element is to the window manager in a custom title
+        /// bar, listed by `Frame.chromeRegions()`. It changes nothing about
+        /// the element's own interaction: a caption button is also
+        /// `interactive`, to show hover and press. Ignored without
+        /// `Config.features.chrome_regions`, so a widget can declare it for
+        /// every context.
+        chrome: ?chrome_module.ChromeKind = null,
         /// What it accepts from pointers, which decides which of nested
         /// elements a pointer goes to. Declaring any makes it interactive.
         /// Ignored without `Config.features.gestures`, so a widget can declare
@@ -557,6 +569,18 @@ pub fn Context(comptime config: Config) type {
                 return list.nodes[0..list.count];
             }
 
+            /// The elements that declare `chrome`, in tree order. Each
+            /// `.title_bar` is followed by a `.client` region for every
+            /// interactive, disabled or scrolling element inside it that
+            /// declares no chrome itself. Where two overlap, the later one is
+            /// on top. For `zui_app` to hand to a host's `zuiChromeRegions`;
+            /// valid until the frame is released.
+            pub fn chromeRegions(self: *const Frame) []const chrome_module.ChromeRegion {
+                comptime requireFeature(.chrome_regions, "chromeRegions()");
+                const list = &self.frameSlot().chrome_list;
+                return list.regions[0..list.region_count];
+            }
+
             /// The first invariant the frame breaks, or null. With
             /// `features.safety_sweeps`, `endFrame` panics on one; anything
             /// holding a frame can also ask, as a test does:
@@ -729,6 +753,11 @@ pub fn Context(comptime config: Config) type {
                 self.line_count = 0;
                 self.command_count = 0;
                 if (features.semantics) self.mutableFrameSlot().semantic_list.count = 0;
+                if (features.chrome_regions) {
+                    const chrome_list = &self.mutableFrameSlot().chrome_list;
+                    chrome_list.declared_count = 0;
+                    chrome_list.region_count = 0;
+                }
                 self.diagnostics = .{};
                 self.host_requests = .{};
                 self.pixels_per_unit = params.scale * params.zoom;
@@ -736,13 +765,24 @@ pub fn Context(comptime config: Config) type {
             }
         };
 
-        /// The semantic list lives beside its frame rather than in it: a
-        /// field added to `Frame`, even one of no size, reorders its arrays,
-        /// which changed what a frame without semantics executes.
+        /// The semantic and chrome lists live beside their frame rather than
+        /// in it: a field added to `Frame`, even one of no size, reorders its
+        /// arrays, which changed what a frame without them executes.
         const FrameSlot = struct {
             frame: Frame,
             semantic_list: SemanticList,
+            chrome_list: ChromeList,
         };
+
+        /// Each element adds at most one region, as itself or as a
+        /// `.client` inside a title bar, so the list never overflows.
+        const ChromeList = if (features.chrome_regions) struct {
+            declared_elements: [max_elements]Index,
+            declared_kinds: [max_elements]chrome_module.ChromeKind,
+            declared_count: u32,
+            regions: [max_elements]chrome_module.ChromeRegion,
+            region_count: u32,
+        } else struct {};
 
         const SemanticList = if (features.semantics) struct {
             nodes: [max_elements]semantics_module.SemanticNode,
@@ -1047,6 +1087,7 @@ pub fn Context(comptime config: Config) type {
             layout.run(Self, self, frame);
             @call(.never_inline, emission.run, .{ Self, self, frame });
             if (features.semantics) self.finishSemantics(frame);
+            if (features.chrome_regions) if (frame.frameSlot().chrome_list.declared_count != 0) finishChrome(frame);
             if (features.safety_sweeps) if (frame.sweep()) |failure| panicOnSweepFailure(frame, failure);
             if (self.text_input_caret) |caret| if (frame.rectOf(.{ .hash = caret })) |rect| {
                 frame.host_requests.text_input = .{ .caret = rect };
@@ -1452,7 +1493,52 @@ pub fn Context(comptime config: Config) type {
                 frame.flags[index].scroll_y = false;
             }
             if (features.semantics) if (element.semantics) |*declared| self.describe(frame, index, declared, element.gestures);
+            if (features.chrome_regions) if (element.chrome) |chrome_kind| declareChrome(frame, index, chrome_kind);
             return index;
+        }
+
+        fn declareChrome(frame: *Frame, index: Index, kind: chrome_module.ChromeKind) void {
+            const list = &frame.mutableFrameSlot().chrome_list;
+            list.declared_elements[list.declared_count] = index;
+            list.declared_kinds[list.declared_count] = kind;
+            list.declared_count += 1;
+        }
+
+        /// Lists the declared chrome in tree order, with a `.client` region
+        /// for each element inside a title bar that the pointer must still
+        /// reach. Each element is visited once, from the first chrome
+        /// element on, skipping ahead whenever no title bar is open.
+        fn finishChrome(frame: *Frame) void {
+            const list = &frame.mutableFrameSlot().chrome_list;
+            var next_declared: u32 = 0;
+            var title_bars_end: Index = 0;
+            var element = list.declared_elements[0];
+            while (element < frame.element_count) {
+                const declared_here = next_declared < list.declared_count and list.declared_elements[next_declared] == element;
+                if (declared_here) {
+                    const kind = list.declared_kinds[next_declared];
+                    next_declared += 1;
+                    appendChromeRegion(frame, list, element, kind);
+                    if (kind == .title_bar) title_bars_end = @max(title_bars_end, frame.subtree_end[element]);
+                } else if (element < title_bars_end) {
+                    const flags = frame.flags[element];
+                    if (flags.interactive or flags.disabled or flags.scroll_x or flags.scroll_y) appendChromeRegion(frame, list, element, .client);
+                }
+                if (element + 1 < title_bars_end) {
+                    element += 1;
+                } else if (next_declared < list.declared_count) {
+                    element = @max(element + 1, list.declared_elements[next_declared]);
+                } else break;
+            }
+        }
+
+        fn appendChromeRegion(frame: *const Frame, list: *ChromeList, element: Index, kind: chrome_module.ChromeKind) void {
+            list.regions[list.region_count] = .{
+                .id = frame.element_id[element],
+                .bounds = .{ .x = frame.position[element][0], .y = frame.position[element][1], .width = frame.size[element][0], .height = frame.size[element][1] },
+                .kind = kind,
+            };
+            list.region_count += 1;
         }
 
         fn describe(self: *Self, frame: *Frame, index: Index, declared: *const semantics_module.Semantics, gestures: interaction.Gestures) void {

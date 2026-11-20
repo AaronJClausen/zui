@@ -2222,6 +2222,7 @@ fn present(renderer: *Renderer, surface: zui.Surface, frame: *const Ui.Frame) !v
       <div class="group-head"><span class="group-index">08</span><h2>Declared but not working yet</h2></div>
       <p class="group-intro">These names compile, but they don't do anything yet. This list is from <code>ARCHITECTURE.md</code> §7 and the roadmap.</p>
       <ul class="gap-list">
+        <li><b>Custom title bars</b><span><code>WindowOptions.title_bar = .custom</code> (<code>zui_app</code>'s <code>.title_bar = .custom</code>), <code>Element.chrome</code> (<code>.title_bar</code>, <code>.close_button</code>, <code>.resize_bottom_right</code> and the rest) and <code>frame.chromeRegions()</code> compile and list what the application draws, behind <code>features.chrome_regions</code>, and <code>zui_app</code> hands the list to a host's <code>zuiChromeRegions</code>. No host leaves its title bar to the application yet: the Windows host does next.</span></li>
         <li><b>Still to come</b><span>Motion, multi-line text editing, skins, the inspector over the wire, and more hosts (macOS, Linux, web).</span></li>
       </ul>
     </section>

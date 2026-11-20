@@ -8,6 +8,7 @@ const surface = @import("surface.zig");
 const host = @import("host.zig");
 const record = @import("record.zig");
 const semantics = @import("semantics.zig");
+const chrome = @import("chrome.zig");
 const services = @import("services.zig");
 
 /// Every `zui`-prefixed declaration of every contract. One that is not
@@ -20,7 +21,7 @@ const source_declarations = [_][]const u8{ "zuiSwap", "zuiView", "zuiDelivery", 
 const renderer_declarations = [_][]const u8{ "zuiSubmit", "zui_surfaces", "zui_commands", "zui_extended_color", "zui_render_thread", "zui_output_formats" };
 const host_declarations = [_][]const u8{ "zuiPoll", "zuiWaker", "zuiWait", "zuiSurface", "zuiApply", "zui_capabilities", "zui_output_formats" } ++ host_frame_calls ++ host_services;
 /// What `zui_app` hands the host from each frame, besides its requests.
-const host_frame_calls = [_][]const u8{"zuiSemantics"};
+const host_frame_calls = [_][]const u8{ "zuiSemantics", "zuiChromeRegions" };
 const host_services = [_][]const u8{ "zuiClipboard", "zuiNotifications", "zuiFileDialogs", "zuiOpenUrl", "zuiMenus", "zuiFileWatch" };
 const tracer_declarations = [_][]const u8{ "zuiBegin", "zuiEnd" };
 const skin_declarations = [_][]const u8{"zuiStyle"};
@@ -97,7 +98,12 @@ pub fn checkHost(comptime Host: type) void {
     }
     expectDeclarationType(Host, "zui_surfaces", surface.SurfaceKinds, "zui.SurfaceKinds");
     if (Host.zui_surfaces.count() == 0) @compileError("zui: " ++ name ++ ".zui_surfaces names no surface kind, so no renderer can draw into it");
-    if (@hasDecl(Host, "zui_capabilities")) expectDeclarationType(Host, "zui_capabilities", host.HostCapabilities, "zui.HostCapabilities");
+    if (@hasDecl(Host, "zui_capabilities")) {
+        expectDeclarationType(Host, "zui_capabilities", host.HostCapabilities, "zui.HostCapabilities");
+        if (Host.zui_capabilities.custom_title_bar and !@hasDecl(Host, "zuiChromeRegions")) {
+            @compileError("zui: " ++ name ++ ".zui_capabilities.custom_title_bar is true but " ++ name ++ " does not declare zuiChromeRegions, so the OS could not move its window");
+        }
+    }
     checkOutputFormats(Host);
     for (host_services) |service| {
         if (!@hasDecl(Host, service)) continue;
@@ -209,6 +215,11 @@ fn hostFrameCalls(comptime Host: type) []const HostFrameCall {
             .declaration = "zuiSemantics",
             .Expected = fn (*Host, host.WindowId, []const semantics.SemanticNode) semantics.SemanticsDropped,
             .expected_name = "fn (" ++ host_pointer ++ ", zui.WindowId, []const zui.SemanticNode) zui.SemanticsDropped",
+        },
+        .{
+            .declaration = "zuiChromeRegions",
+            .Expected = fn (*Host, host.WindowId, []const chrome.ChromeRegion) void,
+            .expected_name = "fn (" ++ host_pointer ++ ", zui.WindowId, []const zui.ChromeRegion) void",
         },
     };
 }

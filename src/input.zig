@@ -328,6 +328,13 @@ pub const Environment = struct {
     /// transparency off, or the window did not ask for one: the root then
     /// draws its own background.
     system_material: bool = false,
+    /// The window was opened with `title_bar = .custom` and shows no title
+    /// bar of its own, so the application draws one. False on a host
+    /// without `custom_title_bar`, or where the system kept its own.
+    custom_title_bar: bool = false,
+    /// The window fills its monitor's work area: a custom title bar shows
+    /// restore in place of maximize.
+    window_maximized: bool = false,
 
     pub const Theme = enum(u8) { light, dark };
     pub const Contrast = enum(u8) { normal, high };
@@ -358,6 +365,8 @@ pub const EnvironmentChange = union(enum) {
     power: Environment.Power,
     window_focused: bool,
     system_material: bool,
+    custom_title_bar: bool,
+    window_maximized: bool,
 };
 
 /// Turns the state a library reports once per frame (where the mouse is,

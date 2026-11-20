@@ -65,6 +65,9 @@ const other_thread_wake_ns = 20 * std.time.ns_per_ms;
 /// - a wake from another thread ends an `.on_event` wait;
 /// - an `.at` wait ends at its instant, not before and not long after;
 /// - `zuiApply` takes requests;
+/// - with `zuiChromeRegions`, the host takes a title bar and a close button
+///   from a buffer the suite then overwrites, and keeps polling: it must
+///   keep a copy, not the slice;
 /// - with `zuiSemantics` and a harness `invoke`, a button invoked through
 ///   the platform's accessibility API arrives as an `action` event naming
 ///   it;
@@ -164,6 +167,15 @@ pub fn findHostViolation(comptime Host: type, harness: anytype, conformance: Hos
 
     host.zuiApply(window, .{ .cursor = .pointer });
     host.zuiApply(window, .{});
+    if (@hasDecl(Host, "zuiChromeRegions")) {
+        var regions = [_]zui.ChromeRegion{
+            .{ .id = 1, .bounds = .{ .width = viewport[0], .height = 32 }, .kind = .title_bar },
+            .{ .id = 2, .bounds = .{ .x = viewport[0] - 46, .width = 46, .height = 32 }, .kind = .close_button },
+        };
+        host.zuiChromeRegions(window, &regions);
+        @memset(std.mem.sliceAsBytes(&regions), 0xaa);
+        if (!host.zuiPoll(window, &builder)) return .init(error.WindowClosed, "closed its window after it was handed chrome regions", .{});
+    }
     if (@hasDecl(Host, "zuiSemantics") and @hasDecl(Harness, "invoke")) {
         if (try expectInvokedAction(host, harness, &builder, conformance)) |violation| return violation;
     }

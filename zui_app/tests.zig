@@ -758,6 +758,104 @@ test "a bridge without room for the list is reported once" {
     try testing.expectEqualStrings("the host's accessibility bridge had no room for 2 semantic nodes and 5 bytes of their text; an assistive technology sees the rest", described);
 }
 
+/// `TestHost` that leaves the title bar to the application, and counts the
+/// chrome it is handed on each frame.
+const TitleBarHost = struct {
+    pub const zui_surfaces = TestHost.zui_surfaces;
+    pub const zui_capabilities: zui.HostCapabilities = .{ .custom_title_bar = true };
+
+    base: TestHost,
+    lists_received: u32 = 0,
+    last_kinds: [4]zui.ChromeKind = undefined,
+    last_count: usize = 0,
+    thread_received_on: ?std.Thread.Id = null,
+
+    pub fn init(self: *TitleBarHost, io: std.Io, window: zui.WindowOptions) !void {
+        self.* = .{ .base = undefined };
+        try self.base.init(io, window);
+    }
+
+    pub fn deinit(self: *TitleBarHost) void {
+        self.base.deinit();
+    }
+
+    pub fn zuiPoll(self: *TitleBarHost, window: zui.WindowId, record: *zui.RecordBuilder) bool {
+        return self.base.zuiPoll(window, record);
+    }
+
+    pub fn zuiWaker(self: *TitleBarHost) zui.Waker {
+        return self.base.zuiWaker();
+    }
+
+    pub fn zuiWait(self: *TitleBarHost, next: zui.NextFrame) void {
+        self.base.zuiWait(next);
+    }
+
+    pub fn zuiSurface(self: *TitleBarHost, window: zui.WindowId) zui.Surface {
+        return self.base.zuiSurface(window);
+    }
+
+    pub fn zuiApply(self: *TitleBarHost, window: zui.WindowId, requests: zui.HostRequests) void {
+        self.base.zuiApply(window, requests);
+    }
+
+    pub fn zuiChromeRegions(self: *TitleBarHost, _: zui.WindowId, regions: []const zui.ChromeRegion) void {
+        self.lists_received += 1;
+        self.last_count = @min(regions.len, self.last_kinds.len);
+        for (regions[0..self.last_count], self.last_kinds[0..self.last_count]) |region, *kind| kind.* = region.kind;
+        self.thread_received_on = std.Thread.getCurrentId();
+    }
+};
+
+fn TitleBarApp(comptime Host_: type, comptime chrome_regions: bool) type {
+    return struct {
+        const Self = @This();
+        pub const Host = Host_;
+        pub const Renderer = TestRenderer(true);
+        pub const Ui = zui.Context(zui_app.contextConfig(Renderer, .{ .limits = .{ .max_elements = 16 }, .features = .{ .chrome_regions = chrome_regions } }));
+        const frame_count = 3;
+
+        pub fn init(_: *Self, start: zui_app.Start(Self)) !void {
+            const host_closing = if (Host == TitleBarHost) &start.host.base else start.host;
+            host_closing.closes_after_polls = frame_count;
+        }
+
+        pub fn zuiDeclare(_: *Self, ui: *Ui) void {
+            ui.open(.{ .id = .of("title bar"), .chrome = .title_bar, .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(32) } } });
+            ui.box(.{ .id = save, .interactive = true, .layout = .{ .sizing = .{ .width = .fixed(100), .height = .fixed(24) } } });
+            ui.box(.{ .id = .of("close"), .interactive = true, .chrome = .close_button, .layout = .{ .sizing = .{ .width = .fixed(46), .height = .fixed(32) } } });
+            ui.close();
+        }
+    };
+}
+
+test "a custom title bar opens the window with it, and the host is handed each frame's chrome on the UI thread" {
+    const App = TitleBarApp(TitleBarHost, true);
+    var runner: zui_app.Runner(App) = undefined;
+    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .title_bar = .custom, .notify = Notices.record });
+    try testing.expectEqual(zui.TitleBar.custom, runner.host.base.window.title_bar);
+    try testing.expect(runner.report.capabilities.custom_title_bar);
+    try testing.expectEqual(@as(u32, App.frame_count), try runToClose(&runner));
+    runner.stop();
+
+    try testing.expectEqual(@as(u32, App.frame_count), runner.host.lists_received);
+    try testing.expectEqualSlices(zui.ChromeKind, &.{ .title_bar, .client, .close_button }, runner.host.last_kinds[0..runner.host.last_count]);
+    try testing.expectEqual(std.Thread.getCurrentId(), runner.host.thread_received_on.?);
+}
+
+test "without chrome regions a custom title bar does not start, and a native one hands the host nothing" {
+    var refused: zui_app.Runner(TitleBarApp(TitleBarHost, false)) = undefined;
+    try testing.expectError(error.CustomTitleBarWithoutChromeRegions, refused.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .title_bar = .custom, .notify = Notices.record }));
+
+    const App = TitleBarApp(TitleBarHost, false);
+    var runner: zui_app.Runner(App) = undefined;
+    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+    defer runner.stop();
+    try testing.expectEqual(zui.TitleBar.native, runner.host.base.window.title_bar);
+    _ = try runToClose(&runner);
+    try testing.expectEqual(@as(u32, 0), runner.host.lists_received);
+}
+
 const LastReply = struct {
     reply: ?zui.ServiceReply(16) = null,
 

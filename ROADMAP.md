@@ -71,7 +71,7 @@ green, and its **Status** line below says which slice is next.
 | H3. macOS | 10 | `../zui-host` | | |
 | H4. Linux | 10 | `../zui-host`, `../zui-sokol` | | in progress; slice 3, fractional scale, the clipboard, drops and file watching, is next |
 | H5. Web | 10 | `../zui-web` | | |
-| H7. Window decorations | 10 | `src/host.zig`, `../zui-host` | | |
+| H7. Window decorations | 10 | `src/chrome.zig`, `src/context.zig`, `zui_app/`, `../zui-host` | | in progress; slice 2, the Windows host, is next |
 | H9. Many windows | 10 | `zui_app/`, `../zui-host` | | |
 
 After the queue comes stage 11 in the order of SPEC.md §21. It joins the queue as it runs short. Stage 10's items are listed under *Stage 10: reach*; each is given its Grounding, Plan and Done when as it is taken.
@@ -4196,6 +4196,134 @@ Decided here:
   process the first did not.
 - **Repeats keep their own instants,** and a frame late by more than four
   gets four, not a burst.
+
+### H7. Window decorations
+
+**Grounding.**
+- Before H7, nothing implemented chrome regions. SPEC.md listed
+  `Frame.chromeRegions()` (§6.5), and §13.4 had one sentence about them.
+- Hit regions are not a list in the frame. Emission writes them into the
+  context's `memory.results` (`src/emission.zig:65-66`, `:328-331`), so
+  chrome is computed beside the frame instead, after layout, and emission
+  is not touched. Its walk is copied per frame kind because any change to
+  it moved `endFrame` by up to 5% (`src/emission.zig:56-61`).
+- The pattern for data beside a frame is V2's: a list in `FrameSlot`
+  (`src/context.zig:771`). Any field added to `Frame` moved R1 counts.
+- `appendElement` is `inline`, so an `Element` field left at its default
+  costs nothing. V2's `semantics` field left the counts identical with the
+  feature off.
+- The Windows host:
+  - runs its message loop on a thread of its own (zui-host
+    `windows/host.zig:541`);
+  - sizes the window with `AdjustWindowRectExForDpi` (`:588`);
+  - handles no non-client message, and sets the application's cursor only
+    over `HTCLIENT` (`:724`);
+  - stores requests under its SRW lock in `zuiApply` (`:479`), for the
+    window thread to apply (`:864`);
+  - extends the frame over the client for Mica (`:900`), and sets dark
+    mode in `reportEnvironment` (`:914`).
+- H6's `zuiMenus.setBar` (`windows/host.zig:150`) sets a native menu bar,
+  which is non-client.
+
+**Plan.** A custom title bar is asked for in `WindowOptions`. The
+application marks its parts with `Element.chrome`, behind
+`features.chrome_regions`. The frame lists them in a slot beside it, and
+`zui_app` hands the list to the host through an optional frame call,
+`zuiChromeRegions`, as it hands semantics to `zuiSemantics`. The Windows
+host keeps a snapshot, answers `WM_NCHITTEST` from it, and works the
+caption buttons itself.
+1. **The core, `zui_app` and `zui_testing`** (zui only):
+   - `ChromeKind`, `ChromeRegion` (`src/chrome.zig`).
+   - `TitleBar`, `WindowOptions.title_bar` and
+     `HostCapabilities.custom_title_bar` (`src/host.zig`).
+   - `Environment.custom_title_bar` and `.window_maximized`, with their
+     changes (`src/input.zig`).
+   - `Features.chrome_regions`, `Element.chrome`, `Frame.chromeRegions()`,
+     and the list in `FrameSlot` (`src/context.zig`).
+   - `zuiChromeRegions` checked as a frame call, and `custom_title_bar`
+     checked against it (`src/contracts.zig`).
+   - `zui_app.Options.title_bar`.
+   - A step in the host suite.
+2. **The Windows host** (zui-host, then a zui commit for the documents):
+   - `WM_NCCALCSIZE` removes only the caption, so DWM keeps the border,
+     the rounded corners and the shadow. A maximized window is inset by
+     the frame's thickness.
+   - `WM_NCHITTEST` answers, in this order:
+     - `DefWindowProcW`'s border codes;
+     - a top resize band, from `SM_CYSIZEFRAME + SM_CXPADDEDBORDER`, when
+       not maximized;
+     - a snapshot of the regions, from the last to the first, under the
+       lock taken shared (`HTCAPTION`, `HTMINBUTTON`, `HTMAXBUTTON`,
+       `HTCLOSE`, `HTTOP` … `HTBOTTOMRIGHT`, `HTCLIENT`);
+     - otherwise `HTCLIENT`.
+   - `WM_NCMOUSEMOVE` and `WM_NCMOUSELEAVE` become pointer moves and
+     leaves at client points.
+   - `WM_NCLBUTTONDOWN` and `WM_NCLBUTTONUP` on a caption button become a
+     press and a release, and the host minimizes, maximizes or restores,
+     or closes on the release.
+   - Presses on the caption and the edges go to `DefWindowProcW`, which
+     moves, resizes, maximizes on a double click and opens the system
+     menu.
+   - Public `minimize`, `toggleMaximized` and `close` let an application
+     act on `clicked` for the keyboard and Narrator.
+   - The snapshot holds 256 regions, and nothing is allocated after
+     `init`.
+   - Conformance tests send `WM_NCHITTEST` and the non-client mouse
+     messages to hidden windows.
+   - `examples/title_bar.zig` and `zig build title-bar`.
+   - Whether `zuiMenus.setBar` answers `error.Unavailable` under a custom
+     title bar is decided here and recorded.
+
+**Decisions.** Made by the owner when H7 was taken:
+- The host works the caption buttons, as the system's own. It also has
+  public calls for an application that acts on `clicked`.
+- The channel is an optional frame call, `zuiChromeRegions`, not a field
+  of `HostRequests`.
+- A title bar's `.client` regions are derived from its interactive,
+  disabled and scrolling descendants.
+- The Windows host makes the top resize band itself.
+- The title bar's state is reported in `Environment`.
+- `zui_app.start` refuses `.custom` without the feature.
+- A person checks it on a new `zui-host/examples/title_bar.zig`.
+
+**Done when:**
+- A core test lists declared chrome with its bounds and its `.client`
+  regions.
+- `zui_app` hands the host each frame's list.
+- zui-host's tests get `HTCAPTION`, `HTMAXBUTTON`, `HTMINBUTTON`,
+  `HTCLOSE`, `HTCLIENT` and the edges from `WM_NCHITTEST`, and the host
+  suite passes on a custom window.
+- A person drags, double-clicks, snaps with Win+arrows, sees snap layouts
+  over the maximize button, and resizes from every edge on
+  `zig build title-bar`, with Mica and dark mode showing.
+- With the feature off, R1 counts are unchanged.
+
+**Spec.** §6.5, §7.2, §10.1, §13.4, §16.3, §19.5.
+
+**Status.** Slice 1, the core, is done:
+- `Element.chrome` declares a `ChromeKind`, ignored without
+  `features.chrome_regions`.
+- `Frame.chromeRegions()` lists the declared chrome in tree order, with
+  each element's laid-out bounds and id. Each title bar is followed by a
+  `.client` region for each interactive, disabled or scrolling element
+  inside it that declares no chrome, in one walk that visits each element
+  once from the first chrome element on.
+- The list lives in `FrameSlot` beside the semantic list. It holds
+  `max_elements` regions, since each element adds at most one, so no
+  limit was added.
+- `zuiChromeRegions(window, regions)` is a host frame call, checked as
+  `zuiSemantics` is. A host whose capabilities set `custom_title_bar`
+  without it is a compile error.
+- `zui_app` hands the list to the host after `zuiSemantics`, on the UI
+  thread and before the frame is submitted, so a render thread never
+  races it. `Options.title_bar = .custom` without the feature fails
+  `start`.
+- The host suite hands a host that declares the call two regions from a
+  buffer it then overwrites.
+- R1 counts were not measured: there is no Valgrind on this Windows
+  machine, and no local Docker image has it. CI's counts job judges this
+  commit against its parent.
+Next: slice 2, the Windows host.
 
 ---
 

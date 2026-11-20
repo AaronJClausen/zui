@@ -14,6 +14,7 @@ const host = @import("host.zig");
 const services = @import("services.zig");
 const contracts = @import("contracts.zig");
 const semantics = @import("semantics.zig");
+const chrome = @import("chrome.zig");
 const sweeps = @import("sweeps.zig");
 
 pub const Context = context.Context;
@@ -64,6 +65,7 @@ pub const WindowId = host.WindowId;
 pub const HostCapabilities = host.HostCapabilities;
 pub const WindowOptions = host.WindowOptions;
 pub const SystemMaterial = host.SystemMaterial;
+pub const TitleBar = host.TitleBar;
 pub const FileChange = host.FileChange;
 pub const FileChangeSink = host.FileChangeSink;
 pub const FileWatchError = host.FileWatchError;
@@ -83,7 +85,9 @@ pub const isOpenableUrl = services.isOpenableUrl;
 /// Fails to compile, with a message naming the declaration, unless `Host`
 /// implements the host contract: `zuiPoll`, `zuiWaker`, `zuiWait`,
 /// `zuiSurface`, `zuiApply` and `zui_surfaces`, and optionally
-/// `zui_capabilities`, `zui_output_formats` (with `.sdr`) and the services
+/// `zui_capabilities` (with `custom_title_bar` only beside
+/// `zuiChromeRegions`), `zui_output_formats` (with `.sdr`), the frame calls
+/// `zuiSemantics` and `zuiChromeRegions`, and the services
 /// (`zuiClipboard`, `zuiNotifications`, `zuiFileDialogs`, `zuiOpenUrl`,
 /// `zuiMenus`, `zuiFileWatch`), each a struct of functions taking the host
 /// first, whose types it checks. A host's `zuiWaker` must be sticky: a wake
@@ -130,6 +134,9 @@ pub const Actions = semantics.Actions;
 pub const ActionEvent = semantics.ActionEvent;
 pub const SemanticsCapacity = semantics.SemanticsCapacity;
 pub const SemanticsDropped = semantics.SemanticsDropped;
+
+pub const ChromeKind = chrome.ChromeKind;
+pub const ChromeRegion = chrome.ChromeRegion;
 
 pub const Event = input.Event;
 pub const Pointer = input.Pointer;
@@ -237,4 +244,5 @@ test {
     _ = @import("tests/colors.zig");
     _ = @import("tests/inspection.zig");
     _ = @import("tests/semantics.zig");
+    _ = @import("tests/chrome.zig");
 }

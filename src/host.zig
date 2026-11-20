@@ -15,6 +15,10 @@ pub const HostCapabilities = struct {
     windows: Windows = .one,
     /// The desktop can show through the window, as Mica or vibrancy.
     system_material: bool = false,
+    /// The host can leave a window's title bar to the application,
+    /// `WindowOptions.title_bar = .custom`, and declares
+    /// `zuiChromeRegions`, so the OS still moves, resizes and snaps it.
+    custom_title_bar: bool = false,
 
     pub const Windows = enum { one, many };
 };
@@ -43,6 +47,19 @@ pub const WindowOptions = struct {
     /// when it opens the window; without it, a host leaves the window to
     /// the OS's default accessibility.
     semantics: SemanticsCapacity = .{},
+    /// Who draws the title bar. With `.custom`, on a host whose
+    /// `zui_capabilities.custom_title_bar` is true, the application draws
+    /// it and marks its parts with `Element.chrome`. Whether the window got
+    /// one arrives as `Environment.custom_title_bar`.
+    title_bar: TitleBar = .native,
+};
+
+/// Who draws a window's title bar.
+pub const TitleBar = enum {
+    /// The system, with its own caption buttons.
+    native,
+    /// The application, inside the window's content.
+    custom,
 };
 
 /// The system's backdrop for a window, by role; each host maps it to the

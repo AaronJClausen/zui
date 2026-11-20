@@ -233,6 +233,7 @@ pub const Features = struct {
     semantics: bool = false,                          // the accessibility tree (§13.5)
     gestures: bool = true,                            // pan, zoom, drag, long press, double tap (§11.4)
     flex_wrap: bool = false,                          // `wrapChildren()` (§8.1)
+    chrome_regions: bool = false,                     // `Frame.chromeRegions()`, a custom title bar (§13.4)
     safety_sweeps: bool = std.debug.runtime_safety,   // invariant checks at the end of `endFrame` (§20.1)
     /// The tracer contract (§16.5). `void` compiles tracing out.
     Tracer: type = void,
@@ -247,7 +248,7 @@ pub const Features = struct {
 | memory plan | every limit, every payload type | the offset of every array in the reservation, and `required_bytes`, as constants (§5) |
 | `RenderCommand` | `commands`, `ImageHandle`, `CustomData`, `MaterialHandle`, `Color` | a union with exactly the variants this renderer draws (§13.1) |
 | `FrameRecord`, `Deliveries`, `SourceField` | `Sources` | one delivery field per source, and a `FieldEnum` for `ui.source` (§14) |
-| API surface | payload types, `Text`, features | `image`, `custom`, `text`, `semantics`, `wrapChildren` and the gesture queries exist only when their type or feature is set; calling one that does not is a compile error naming the field to set |
+| API surface | payload types, `Text`, features | `image`, `custom`, `text`, `semantics`, `chromeRegions`, `wrapChildren` and the gesture queries exist only when their type or feature is set; calling one that does not is a compile error naming the field to set |
 | contract checks | `Text`, `Sources`, `Tracer` | run once, at instantiation, with exact messages (§16.1) |
 
 ### 4.2 Validation
@@ -265,7 +266,8 @@ compile-error test:
   `"zui: doubleTapped() needs Config.features.gestures = true"`,
   `"zui: pointerEvents() needs Config.features.gestures = true"`,
   `"zui: dropped() needs Config.features.gestures = true"`,
-  `"zui: wrapChildren() needs Config.features.flex_wrap = true"`;
+  `"zui: wrapChildren() needs Config.features.flex_wrap = true"`,
+  `"zui: chromeRegions() needs Config.features.chrome_regions = true"`;
 - every contract violation, in the form of §16.1.
 
 Limit names in diagnostics come from `std.meta.FieldEnum(Limits)`, so a
@@ -441,7 +443,7 @@ pub const Frame = struct {
     pub fn commands(self: *const Frame) []const RenderCommand
     pub fn hitRegions(self: *const Frame) []const HitRegion
     pub fn semantics(self: *const Frame) []const SemanticNode     // features.semantics
-    pub fn chromeRegions(self: *const Frame) []const ChromeRegion // title bar, resize edges
+    pub fn chromeRegions(self: *const Frame) []const ChromeRegion // features.chrome_regions: title bar, caption buttons, resize edges
     pub fn requests(self: *const Frame) HostRequests              // cursor, IME area, text input
     pub fn inspect(self: *const Frame, index: ElementIndex) ElementView   // by declaration order, for inspectors
     pub fn elementCount(self: *const Frame) ElementIndex
@@ -610,6 +612,8 @@ pub const Environment = struct {
     power: Power = .plugged,                        // enum { plugged, battery, saver }
     window_focused: bool = true,    // the OS window has keyboard focus, not an element
     system_material: bool = false,  // the window shows the system's material where nothing is drawn
+    custom_title_bar: bool = false, // the application draws the title bar (§13.4)
+    window_maximized: bool = false, // the window fills its monitor's work area
 };
 
 /// One field's new value: `.{ .environment = .{ .theme = .dark } }`.
@@ -996,6 +1000,7 @@ pub const Element = struct {
     disabled: ?bool = null,             // no hover, press or focus; queries report `.disabled`
     gestures: Gestures = .{},           // features.gestures, ignored without it; makes it interactive (§11.4)
     cursor: ?Cursor = null,             // the pointer's shape while this element is hot
+    chrome: ?ChromeKind = null,         // features.chrome_regions: a title bar, caption button or resize edge (§13.4)
     semantics: ?Semantics = null,       // features.semantics (§13.5)
     exit_seconds: f32 = 0,              // limits.exit_ghost_commands (§19.9)
 };
@@ -1466,9 +1471,36 @@ diagnostics for the inspector.
 
 Hit regions carry the id, rectangle, clip, layer, flags and accepted
 gestures of every interactive element, and of every floating element
-with `capture = true`. Chrome
-regions mark title bars and resize edges, so a host with a custom title
-bar still lets the OS move, resize and snap the window.
+with `capture = true`.
+
+*With `features.chrome_regions`.* A window opened with
+`WindowOptions.title_bar = .custom` leaves its title bar to the
+application, and `Environment.custom_title_bar` says whether it did. The
+application marks the parts it draws with `Element.chrome`: a
+`title_bar`, which a press drags, a double click maximizes and a secondary
+click opens the window menu on; the `minimize_button`, `maximize_button`
+and `close_button`, which the host works itself when a press and its
+release land on them, as the system's own; and `resize_*` edges and
+corners. `Frame.chromeRegions()` lists them in tree order, each with its
+id and its bounds as laid out:
+
+```zig
+pub const ChromeKind = enum(u8) { title_bar, minimize_button, maximize_button, close_button,
+    resize_top, resize_bottom, resize_left, resize_right, resize_top_left, resize_top_right, resize_bottom_left, resize_bottom_right, client };
+pub const ChromeRegion = struct { id: u64, bounds: Rect, kind: ChromeKind };
+```
+
+Each title bar is followed by a `client` region for every interactive,
+disabled or scrolling element inside it that declares no chrome, so a
+search field or a tab in the title bar stays the application's. Where
+regions overlap, the later one is on top. Each element adds at most one
+region, so the list never overflows. `zui_app` hands the list to the
+host's `zuiChromeRegions` with every frame (§16.3). The host answers the
+window manager from its copy (`WM_NCHITTEST` on Windows,
+`xdg_toplevel.move` and `resize` on Wayland), and still forwards the
+pointer over the caption buttons, so they show hover and press. Chrome
+changes nothing about an element's interaction, and a frame without the
+feature lists none and costs nothing.
 
 ### 13.5 Semantics
 
@@ -1830,6 +1862,7 @@ const Win32Host = struct {
     pub fn zuiSurface(self: *Win32Host, window: zui.WindowId) zui.Surface { ... }
     pub fn zuiApply(self: *Win32Host, window: zui.WindowId, requests: zui.HostRequests) void { ... } // cursor, IME window
     pub fn zuiSemantics(self: *Win32Host, window: zui.WindowId, nodes: []const zui.SemanticNode) zui.SemanticsDropped { ... } // optional: the accessibility bridge
+    pub fn zuiChromeRegions(self: *Win32Host, window: zui.WindowId, regions: []const zui.ChromeRegion) void { ... } // optional: a custom title bar
 
     pub const zuiClipboard = struct { ... };       // optional services: write(host, text); read(host, request, sink)
     pub const zuiNotifications = struct { ... };   // show(host, request, notification, sink)
@@ -1907,9 +1940,12 @@ pub const WindowId = enum(u32) { main = 0, _ };
 pub const HostCapabilities = struct {
     windows: enum { one, many } = .one,
     system_material: bool = false,
+    custom_title_bar: bool = false,   // leaves the title bar to the application; needs `zuiChromeRegions`
 };
 /// What a host opens a window with (`zui_app` passes it to the host's `init`).
-pub const WindowOptions = struct { title: [:0]const u8 = "zui", size: [2]u32 = .{ 1280, 720 }, visible: bool = true, resizable: bool = true, material: SystemMaterial = .none, semantics: SemanticsCapacity = .{} };
+pub const WindowOptions = struct { title: [:0]const u8 = "zui", size: [2]u32 = .{ 1280, 720 }, visible: bool = true, resizable: bool = true, material: SystemMaterial = .none, semantics: SemanticsCapacity = .{}, title_bar: TitleBar = .native };
+/// Who draws a window's title bar: the system, or the application (§13.4).
+pub const TitleBar = enum { native, custom };
 /// Room for a window's accessibility bridge; zero nodes opens it with none.
 pub const SemanticsCapacity = struct { nodes: u32 = 0, text_bytes: u32 = 0 };
 /// What `zuiSemantics` had no room for: nodes cut from the end, and text bytes cut at a character.
@@ -1955,6 +1991,13 @@ pub fn checkHostAndRenderer(comptime Host: type, comptime Renderer: type) void  
   are appended to the next record as `action` events, so they relay and
   replay as other input does. A window opened without room is left to
   the OS's default accessibility. `checkHost` checks its signature.
+- **`zuiChromeRegions`**, optional, is handed `Frame.chromeRegions()` at
+  the same point, valid only during the call. A host whose capabilities
+  include `custom_title_bar` must declare it, or `checkHost` fails with
+  ``"zui: Win32Host.zui_capabilities.custom_title_bar is true but Win32Host does not declare zuiChromeRegions, so the OS could not move its window"``.
+  It keeps a copy in fixed room, keeping the regions that fit from the
+  first, and answers the window manager from that copy on whatever thread
+  the OS asks on. `checkHost` checks its signature.
 - **The composition root checks the pair.** `checkHostAndRenderer` is
   called by the application or `zui_app`, the one place naming both:
   ``"zui: RaylibHost and TerminalRenderer share no surface kind: the host gives .library, the renderer draws into .terminal"``.
@@ -2374,8 +2417,10 @@ const App = struct {
   renderer a pointer to it. A `Ui` whose `Text` is neither the renderer
   nor `App.Text` is a compile error.
 - **What it opens.** The host declares `init(self, io, window:
-  zui.WindowOptions) !void` (title, size, visible, resizable) and
-  `deinit`; the renderer may declare `init(self, surface) !void`, or
+  zui.WindowOptions) !void` (title, size, visible, resizable, material,
+  title bar; `Options.title_bar = .custom` without
+  `features.chrome_regions` makes `start` return
+  `error.CustomTitleBarWithoutChromeRegions`) and `deinit`; the renderer may declare `init(self, surface) !void`, or
   `init(self, surface, text: *const Text) !void` beside `App.Text`, and
   `deinit`. Each field with a default holds it when `init` is called, so
   a setting made on the type survives. `Start(App)` gives the application

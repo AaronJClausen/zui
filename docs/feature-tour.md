@@ -2106,6 +2106,7 @@ Build with `-Dzui-tracy=true` to link Tracy's client, then connect profiler 0.14
 
 These names compile, but they don't do anything yet. This list is from `ARCHITECTURE.md` §7 and the roadmap.
 
+- **Custom title bars**: `WindowOptions.title_bar = .custom` (`zui_app`'s `.title_bar = .custom`), `Element.chrome` (`.title_bar`, `.close_button`, `.resize_bottom_right` and the rest) and `frame.chromeRegions()` compile and list what the application draws, behind `features.chrome_regions`, and `zui_app` hands the list to a host's `zuiChromeRegions`. No host leaves its title bar to the application yet: the Windows host does next.
 - **Still to come**: Motion, multi-line text editing, skins, the inspector over the wire, and more hosts (macOS, Linux, web).
 
 <a id="dx"></a>
