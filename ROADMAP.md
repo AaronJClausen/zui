@@ -31,7 +31,7 @@ Each item says:
 | stage 7 | gestures (I5): arbitration by motion component, zoom, long press, double tap, momentum, the intents and custom recognizers; drag and drop between elements (I1) | done: a carousel in a list, a pinch starting on a list inside a map, a lasso module against a map's pan, and `zui_testing.Driver.drag` moving an item between two lists, out of one that scrolls by dragging |
 | after stage 7: the foundation | G1's first slice ran 5.5% to 7.7% more instructions in scenes that draw no effect, so the work turned to what lay under it: benchmarks that can be trusted (R3 to R9) and the data-oriented design audit's findings (P6 to P10) | done; a commit compared with itself over three code layouts calls nothing, its intervals 0.52% wide on average, and a change that only moves code is not called; a tooltip declared before a 3,000-cell grid lays out in 79 µs, not 671 µs (P6); warm text −43% (P9); `init` from 138 µs to 92 µs (P7, P10); the budgets judged in benchmarking mode |
 | stage 8 | gradients, shadows and glow (G1); backdrop blur (G2); effects in the corners of a decoration that draws nothing (G7); transforms with hit inversion (G3); materials (G5); HDR and wide gamut (G6) | done: zui-sokol draws gradients, shadows, backdrop blurs, transforms and materials through a shader of its own and passes the renderer suite, its effects rounded by a decoration that draws nothing, a pointer hits a turned button where it is drawn, and a frame without effects runs no more instructions than before; `zui.ExtendedColor` is clamped for a renderer that draws only `Color`, and on a monitor in HDR the Windows host opens the window in scRGB and reports its headroom, and zui-sokol shows twice SDR white at 2.00× and four times it at 4.00×, measured off the desktop |
-| stage 9, begun | `zui_debug` (V1); the demo in a browser (V4) | V4 done: zui-sokol's tour runs in a browser at the display's frame rate, from <https://aaronjclausen.github.io/zui-web/>, in a Web Worker behind a page that draws its frames over `zui_wire` and sleeps between the frames the tour needs; V1 done: `Frame.inspect` and the inspector's diagnostics, fallbacks, zone times from its `ZoneTimer` tracer, element tree and hovered element's configs, and its theme reloaded from a watched file; zui-raylib's tour opens it with F12 through `zui_app`'s `zuiObserve`, and draws every screen with it open within its limits |
+| stage 9 | `zui_debug` (V1); semantics and accessibility actions (V2); safety sweeps (V3); the demo in a browser (V4) | done. V2: every `zui_widgets` control lists its semantics, and the Windows host bridges them to UI Automation with each control's pattern, its state and changes, and every action, so a client out of process toggles, sets, expands, selects, scrolls and invokes zui-host's accessibility example; V4: zui-sokol's tour runs in a browser at the display's frame rate, from <https://aaronjclausen.github.io/zui-web/>, in a Web Worker behind a page that draws its frames over `zui_wire` and sleeps between the frames the tour needs; V1 done: `Frame.inspect` and the inspector's diagnostics, fallbacks, zone times from its `ZoneTimer` tracer, element tree and hovered element's configs, and its theme reloaded from a watched file; zui-raylib's tour opens it with F12 through `zui_app`'s `zuiObserve`, and draws every screen with it open within its limits |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
@@ -68,7 +68,6 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
-| V2. Semantics and accessibility actions | 9 | `src/context.zig`, `zui_widgets/`, `../zui-host` | | in progress; slice 3, scrolling, the context menu and dismissal, is next |
 | H3. macOS | 10 | `../zui-host` | | |
 | H4. Linux | 10 | `../zui-host`, `../zui-sokol` | | in progress; slice 3, fractional scale, the clipboard, drops and file watching, is next |
 | H5. Web | 10 | `../zui-web` | | |
@@ -158,6 +157,208 @@ Things to know:
 ---
 
 ## Done
+
+### V2. Semantics and accessibility actions
+
+**Grounding.** `Frame.semantics()` lists each node in tree order
+(`src/context.zig:552-558`), in a slot beside its frame (`:739-749`)
+that is emptied when the frame is released (`:731`). A node has a `u64`
+id, the index of the node around it, a role, a label, a value,
+untransformed bounds in layout units, a state and its actions
+(`src/semantics.zig:120-134`). Parents always come earlier in the list
+(`context.zig:1505-1516`), so any prefix of it is a whole tree. An
+`action` event (`src/input.zig:240-242`) is answered by `applyAction`
+(`context.zig:1822-1837`); a disabled element takes none. `zui_app`
+hands the list to a host that declares `zuiSemantics`, on the UI thread,
+after `zuiObserve` and before submission (`zui_app/zui_app.zig:408`),
+and opens the window with room sized from `Config.limits`
+(`:371-373`). `checkHost` checks the call's signature from a table that
+H7's chrome regions can join (`src/contracts.zig:22`, `:124`). zui-host's
+Windows host keeps one `accessibility.Bridge` per window
+(`windows/host.zig:87`); `zuiSemantics` publishes into it (`:336`), the
+window thread answers `WM_GETOBJECT` (`:580`), raises events
+(`:576`) and disconnects at `WM_DESTROY` (`:482`), and runs in a
+single-threaded apartment (`:389`). The bridge's snapshots, elements and
+root are in `windows/accessibility.zig` (`Bridge` at `:28`, `publish` at
+`:77`, `Element` at `:644`, `Root` at `:1117`); patterns are offered in
+`patternProvider` (`:811`) and properties in `propertyValue` (`:832`),
+a request is delivered by `request` (`:795`), and `announceChanges`
+(`:141`) compares each node with its last `Summaries` (`:512`).
+
+**Plan.** `Element.semantics`, and `Frame.semantics()` filled with each
+node's role, label, value, state and actions, behind
+`features.semantics`, which C7 added with `semantics()` gated and empty;
+actions arrive as events and answer through the intent queries. The
+host receives each frame's list through an optional call,
+`zuiSemantics(window, nodes) SemanticsDropped`, which `zui_app` makes on
+the UI thread between `endFrame` and submission, so a render thread and
+`release` never race it. The host copies the list into two snapshots it
+took room for in `init`, sized by `WindowOptions.semantics`, and swaps
+them under a lock; UI Automation reads the front through providers
+written as hand-made COM vtables, and a request comes back as an
+`action` event through the host's inbox. In slices:
+1. **The contract, the tree and `invoke`** (zui and zui-host): the
+   contract and its compile error, `zui_app`'s call, notice and report,
+   the host suite's `invoke` step, and on Windows the fragment root, an
+   element per node with its name, control type, AutomationId (the id in
+   hex), runtime id (`[UiaAppendRuntimeId, low, high]`), bounds in
+   screen pixels and place in the tree, `ElementProviderFromPoint`,
+   `GetFocus`, `Invoke` and `SetFocus` as actions, and focus-changed and
+   structure-changed events raised on the window thread only while a
+   client listens; `examples/accessible.zig` for Narrator.
+2. **The control patterns and property events** (zui-host):
+   `IToggleProvider` for checkboxes and toggles through `invoke`;
+   `IExpandCollapseProvider` for a node whose `state.expanded` is set,
+   through `invoke` when the state differs; `IRangeValueProvider` for
+   sliders and progress bars, `SetValue` becoming `adjust` by
+   `round((new − value) / step)`, and by ±1 toward the target when `step`
+   is 0; `IValueProvider`, read-only, for text fields and combo boxes;
+   `ISelectionItemProvider` for options and radios and
+   `ISelectionProvider` on a `list_box`; and property-changed events for
+   name, value, toggle, expand, selection, range and enabled, compared
+   against a summary the window thread keeps. Tested through the client
+   against `zui_widgets` controls.
+3. **Scroll, the menu and dismissal** (zui, zui-host, zui-sokol):
+   `scroll: ?SemanticScroll` on `SemanticNode` (offset, content and
+   viewport per axis, filled from `ScrollState`, paid for only with the
+   feature on) and `IScrollProvider`;
+   `IRawElementProviderSimple2::ShowContextMenu` as `show_menu`;
+   `IWindowProvider.Close` on a dialog and `Collapse` on an open combo
+   box's list as `dismiss`; the heading level; and the tour with
+   semantics on, with Box Storm's frame time compared before and after.
+
+The provider does not set `ProviderOptions_UseComThreading`: it is
+free-threaded, reading snapshots under the bridge's lock, with atomic
+reference counts and elements assigned under a lock of their own, so it
+is correct on whatever thread UI Automation calls and in either
+apartment. It never holds a lock while calling into UI Automation or the
+host's inbox. A text field's `SetValue` stays read-only; typing reaches
+it through the keyboard.
+
+**Done when:** a widget test checks the list for each control; the
+Windows host bridges it to UI Automation, checked through the UI
+Automation client in-process (each slice's tests) and with Narrator and
+Accessibility Insights by a person; and with the feature off, R1 counts
+are unchanged.
+
+**Cost.** With the feature off nothing runs: `zui_app`'s call is behind
+`comptime Ui.features.semantics`, the check is comptime, and a window
+opened without room allocates no bridge and leaves `WM_GETOBJECT` to
+Windows. With it on, `zuiSemantics` copies the list, O(nodes + text
+bytes), and asks `UiaClientsAreListening` once; events are raised only
+while a client listens. The bridge takes 2 × (nodes × about 96 bytes +
+text bytes + an index of 8 to 16 bytes a node) and a pool of elements at
+`init`, from `std.heap.page_allocator`, since a host's `init` has no
+allocator. BSTRs and SAFEARRAYs handed to UI Automation are allocated by
+OLE for the caller to free, as the clipboard's `GlobalAlloc` is.
+
+**Spec.** §13.5, §16.3, §16.6.
+
+The core and `zui_widgets` slice came first. `Element.semantics`
+declares a role, label, value, state and extra actions; `Frame.semantics()`
+lists each such element in tree order with its id, bounds, the index of
+the node around it, its state (with `disabled` and `focused` filled in) and
+its actions (with `invoke`, `focus`, `scroll` and `show_menu` taken from
+its flags and gestures). Labels and text values are copied into the
+frame's text bytes, counted against `max_text_bytes` and cut at a
+character when they do not fit. The list lives in a slot beside each
+frame, not in `Frame`: any field added to `Frame`, even a zero-size one,
+reordered its arrays and moved R1 counts by −0.33% to +0.49% with the
+feature off. `Event.action` carries an `ActionEvent`, answered by
+`clicked`, `focused`, `adjusted`, `manipulation` and a scroll,
+`contextRequested` and `dismissed`; a disabled element takes none, and
+without the feature the event is dropped. Every control in
+`zui_widgets` declares its semantics (button, checkbox, disclosure,
+slider with its range and `adjust`, text field, dropdown with its list
+and options), the slider steps through `adjusted`, the dropdown's list
+closes on `dismiss`, and `zui_reflect` names each control after its field.
+`zui_testing.Driver.action` sends one. Measured against `8911fb2` with
+`zig build counts`: with the feature off every scenario is identical to
+the instruction; with it on and nothing declared, declaration moves
+−1.28% to +0.52% and `endFrame` adds 2 to 7 instructions.
+
+Slice 1 is done, in zui and in zui-host (not pushed; zui-host's pin
+moves once zui is). zui gains `zuiSemantics`, `SemanticsCapacity`,
+`SemanticsDropped` and `WindowOptions.semantics`, the compile error
+`host_semantics_wrong_signature`, `zui_app`'s call with
+`Notice.semantics_dropped` and `Report.accessibility`, and the host
+suite's `invoke` step, which `QueueHost` passes and
+`QueueHost(.drops_actions)` fails. zui-host's Windows host passes the
+suite with the step answered through UI Automation's client in-process
+against a window that is never shown (UI Automation exposes it), and
+four tests of its own: the tree reads back with names, control types,
+AutomationIds, parent and siblings through the raw view, and bounds in
+screen pixels at a scale of 2; `SetFocus` arrives as a `focus` action and
+a disabled element offers no Invoke pattern; a window opened without
+room leaves `WM_GETOBJECT` to Windows; and a list past the room is cut
+from the end and reported. Out of process, Windows PowerShell's UI
+Automation client read `zig build accessible`'s Save button, label,
+checkbox, slider and text field with their roles and bounds, invoked
+Save (the label then read "Saved 1 times") and moved focus to the
+checkbox.
+
+Slice 2 is done, in zui-host alone. Each element offers the pattern that
+stands for what it does: Toggle for a node that says whether it is
+checked (not a radio or option), ExpandCollapse for one that says
+whether it is expanded, RangeValue for a range, Value for text,
+SelectionItem for an option or a radio and Selection for a list box,
+and Invoke only where none of those stands for the click, so a checkbox,
+an option and a combo box no longer offer it. Toggle, Expand, Collapse,
+Select and AddToSelection become `invoke` when the node is not already
+as asked; a range's SetValue becomes `adjust` by whole steps, or by one
+toward the target when the range has no step, and a target outside the
+range fails; RemoveFromSelection fails on the selected option, since one
+is always chosen. A text field's Value reads as editable while it is
+enabled, which it is from the keyboard, and its SetValue fails with
+UIA_E_INVALIDOPERATION, since zui has no action that replaces text; a
+combo box's Value is read-only. While a client listens, the window
+thread compares each node with a summary of what it last announced (a
+hash of its name and text, its range value, and its checked, expanded,
+selected and disabled state, in two buffers allocated in `init`) and
+raises property-changed events for name, value, range value, toggle
+state, expand state, selection and enabled, and the element-selected
+event. Three tests drive a window of `zui_widgets` controls through UI
+Automation's client: each control's pattern and state; Toggle, SetValue
+(0.5 to 0.8 at a step of 0.1), Expand and Select each arriving as the
+action that answers it and the next frame showing it, with the list's
+Selection naming the chosen option; and a property-changed handler,
+added from the test's thread, hearing the checkbox turn off. With no
+pattern code in zui, R1 counts cannot move.
+
+Slice 3 is done, in zui, zui-sokol and zui-host. zui's `SemanticNode`
+gains `scroll: ?SemanticScroll` (offset, content and viewport sizes and
+the axes it scrolls on, filled after layout from the element's scroll
+state, so it is the clamped offset the frame drew) and `level`, which
+`Semantics.level` declares for a heading. The Windows host's elements
+add the Scroll pattern (a small step is a wheel notch, 40 layout units,
+and a large one the view's size; `SetScrollPercent` is a place in the
+content; an axis that does not move fails, and a percentage reads
+`UIA_ScrollPatternNoScroll` on it), `IRawElementProviderSimple2`'s
+`ShowContextMenu` as `show_menu`, the Window pattern's `Close` on a
+dialog as `dismiss`, and the heading level as `HeadingLevel1` to
+`HeadingLevel9`; scroll percentages join the property-changed events. A
+slider, a text field and a progress bar no longer offer Invoke beside
+their own pattern. A dropdown's open list closes by its combo box's
+Collapse, which slice 2 already made an `invoke`. zui-sokol's tour turns
+`features.semantics` on (`examples/kit.zig`). Two more conformance tests
+drive a real scroll container through UI Automation (a notch, then 100%,
+and a refused horizontal step), and a dialog's Close, a button's
+ShowContextMenu and a heading's level. Out of process, Windows
+PowerShell's UI Automation client read `zig build accessible`'s heading
+(Level1), button, label, checkbox, slider, text field, dropdown and
+scroll pane each with only its own patterns; toggled the checkbox off,
+set the slider to 0.8, expanded the dropdown and selected High (its
+value then read High, collapsed), scrolled the log by a notch and to
+100%, and invoked Save. Measured: the zui-counts executable's `.text`
+and `.rodata` are byte-identical to `7711b15`'s, so R1 counts are
+unchanged with the feature off; Box Storm's frame, timed headlessly over
+400 frames in ReleaseFast with Turbo Boost on, took a median of 198 and
+197 µs with semantics off and 195, 198 and 197 µs with it on, within the
+runs' spread; the tour on the Windows host with the bridge drew 300
+frames across every screen with diagnostics ok and idled at 0.0 ms of
+CPU over 10 s. A person's check with Narrator and Accessibility Insights
+on `zig build accessible` and the tour has not been made; the automated
+checks cover what it would see.
 
 ### G6. HDR and wide gamut
 
@@ -3515,174 +3716,7 @@ Done: G1, G2, G7, G3, G5 and G6 are in *Done*.
 
 ## Stage 9: seeing the UI
 
-### V2. Semantics and accessibility actions
-
-**Grounding.** `Frame.semantics()` lists each node in tree order
-(`src/context.zig:552-558`), in a slot beside its frame (`:739-749`)
-that is emptied when the frame is released (`:731`). A node has a `u64`
-id, the index of the node around it, a role, a label, a value,
-untransformed bounds in layout units, a state and its actions
-(`src/semantics.zig:120-134`). Parents always come earlier in the list
-(`context.zig:1505-1516`), so any prefix of it is a whole tree. An
-`action` event (`src/input.zig:240-242`) is answered by `applyAction`
-(`context.zig:1822-1837`); a disabled element takes none. `zui_app`
-hands the list to a host that declares `zuiSemantics`, on the UI thread,
-after `zuiObserve` and before submission (`zui_app/zui_app.zig:408`),
-and opens the window with room sized from `Config.limits`
-(`:371-373`). `checkHost` checks the call's signature from a table that
-H7's chrome regions can join (`src/contracts.zig:22`, `:124`). zui-host's
-Windows host keeps one `accessibility.Bridge` per window
-(`windows/host.zig:87`); `zuiSemantics` publishes into it (`:336`), the
-window thread answers `WM_GETOBJECT` (`:580`), raises events
-(`:576`) and disconnects at `WM_DESTROY` (`:482`), and runs in a
-single-threaded apartment (`:389`). The bridge's snapshots, elements and
-root are in `windows/accessibility.zig` (`Bridge` at `:28`, `publish` at
-`:77`, `Element` at `:644`, `Root` at `:1117`); patterns are offered in
-`patternProvider` (`:811`) and properties in `propertyValue` (`:832`),
-a request is delivered by `request` (`:795`), and `announceChanges`
-(`:141`) compares each node with its last `Summaries` (`:512`).
-
-**Plan.** `Element.semantics`, and `Frame.semantics()` filled with each
-node's role, label, value, state and actions, behind
-`features.semantics`, which C7 added with `semantics()` gated and empty;
-actions arrive as events and answer through the intent queries. The
-host receives each frame's list through an optional call,
-`zuiSemantics(window, nodes) SemanticsDropped`, which `zui_app` makes on
-the UI thread between `endFrame` and submission, so a render thread and
-`release` never race it. The host copies the list into two snapshots it
-took room for in `init`, sized by `WindowOptions.semantics`, and swaps
-them under a lock; UI Automation reads the front through providers
-written as hand-made COM vtables, and a request comes back as an
-`action` event through the host's inbox. In slices:
-1. **The contract, the tree and `invoke`** (zui and zui-host): the
-   contract and its compile error, `zui_app`'s call, notice and report,
-   the host suite's `invoke` step, and on Windows the fragment root, an
-   element per node with its name, control type, AutomationId (the id in
-   hex), runtime id (`[UiaAppendRuntimeId, low, high]`), bounds in
-   screen pixels and place in the tree, `ElementProviderFromPoint`,
-   `GetFocus`, `Invoke` and `SetFocus` as actions, and focus-changed and
-   structure-changed events raised on the window thread only while a
-   client listens; `examples/accessible.zig` for Narrator.
-2. **The control patterns and property events** (zui-host):
-   `IToggleProvider` for checkboxes and toggles through `invoke`;
-   `IExpandCollapseProvider` for a node whose `state.expanded` is set,
-   through `invoke` when the state differs; `IRangeValueProvider` for
-   sliders and progress bars, `SetValue` becoming `adjust` by
-   `round((new − value) / step)`, and by ±1 toward the target when `step`
-   is 0; `IValueProvider`, read-only, for text fields and combo boxes;
-   `ISelectionItemProvider` for options and radios and
-   `ISelectionProvider` on a `list_box`; and property-changed events for
-   name, value, toggle, expand, selection, range and enabled, compared
-   against a summary the window thread keeps. Tested through the client
-   against `zui_widgets` controls.
-3. **Scroll, the menu and dismissal** (zui, zui-host, zui-sokol):
-   `scroll: ?SemanticScroll` on `SemanticNode` (offset, content and
-   viewport per axis, filled from `ScrollState`, paid for only with the
-   feature on) and `IScrollProvider`;
-   `IRawElementProviderSimple2::ShowContextMenu` as `show_menu`;
-   `IWindowProvider.Close` on a dialog and `Collapse` on an open combo
-   box's list as `dismiss`; the heading level; and the tour with
-   semantics on, with Box Storm's frame time compared before and after.
-
-The provider does not set `ProviderOptions_UseComThreading`: it is
-free-threaded, reading snapshots under the bridge's lock, with atomic
-reference counts and elements assigned under a lock of their own, so it
-is correct on whatever thread UI Automation calls and in either
-apartment. It never holds a lock while calling into UI Automation or the
-host's inbox. A text field's `SetValue` stays read-only; typing reaches
-it through the keyboard.
-
-**Done when:** a widget test checks the list for each control; the
-Windows host bridges it to UI Automation, checked through the UI
-Automation client in-process (each slice's tests) and with Narrator and
-Accessibility Insights by a person; and with the feature off, R1 counts
-are unchanged.
-
-**Cost.** With the feature off nothing runs: `zui_app`'s call is behind
-`comptime Ui.features.semantics`, the check is comptime, and a window
-opened without room allocates no bridge and leaves `WM_GETOBJECT` to
-Windows. With it on, `zuiSemantics` copies the list, O(nodes + text
-bytes), and asks `UiaClientsAreListening` once; events are raised only
-while a client listens. The bridge takes 2 × (nodes × about 96 bytes +
-text bytes + an index of 8 to 16 bytes a node) and a pool of elements at
-`init`, from `std.heap.page_allocator`, since a host's `init` has no
-allocator. BSTRs and SAFEARRAYs handed to UI Automation are allocated by
-OLE for the caller to free, as the clipboard's `GlobalAlloc` is.
-
-**Spec.** §13.5, §16.3, §16.6.
-
-**Status.** The core and `zui_widgets` slice is done. `Element.semantics`
-declares a role, label, value, state and extra actions; `Frame.semantics()`
-lists each such element in tree order with its id, bounds, the index of
-the node around it, its state (with `disabled` and `focused` filled in) and
-its actions (with `invoke`, `focus`, `scroll` and `show_menu` taken from
-its flags and gestures). Labels and text values are copied into the
-frame's text bytes, counted against `max_text_bytes` and cut at a
-character when they do not fit. The list lives in a slot beside each
-frame, not in `Frame`: any field added to `Frame`, even a zero-size one,
-reordered its arrays and moved R1 counts by −0.33% to +0.49% with the
-feature off. `Event.action` carries an `ActionEvent`, answered by
-`clicked`, `focused`, `adjusted`, `manipulation` and a scroll,
-`contextRequested` and `dismissed`; a disabled element takes none, and
-without the feature the event is dropped. Every control in
-`zui_widgets` declares its semantics (button, checkbox, disclosure,
-slider with its range and `adjust`, text field, dropdown with its list
-and options), the slider steps through `adjusted`, the dropdown's list
-closes on `dismiss`, and `zui_reflect` names each control after its field.
-`zui_testing.Driver.action` sends one. Measured against `8911fb2` with
-`zig build counts`: with the feature off every scenario is identical to
-the instruction; with it on and nothing declared, declaration moves
-−1.28% to +0.52% and `endFrame` adds 2 to 7 instructions.
-
-Slice 1 is done, in zui and in zui-host (not pushed; zui-host's pin
-moves once zui is). zui gains `zuiSemantics`, `SemanticsCapacity`,
-`SemanticsDropped` and `WindowOptions.semantics`, the compile error
-`host_semantics_wrong_signature`, `zui_app`'s call with
-`Notice.semantics_dropped` and `Report.accessibility`, and the host
-suite's `invoke` step, which `QueueHost` passes and
-`QueueHost(.drops_actions)` fails. zui-host's Windows host passes the
-suite with the step answered through UI Automation's client in-process
-against a window that is never shown (UI Automation exposes it), and
-four tests of its own: the tree reads back with names, control types,
-AutomationIds, parent and siblings through the raw view, and bounds in
-screen pixels at a scale of 2; `SetFocus` arrives as a `focus` action and
-a disabled element offers no Invoke pattern; a window opened without
-room leaves `WM_GETOBJECT` to Windows; and a list past the room is cut
-from the end and reported. Out of process, Windows PowerShell's UI
-Automation client read `zig build accessible`'s Save button, label,
-checkbox, slider and text field with their roles and bounds, invoked
-Save (the label then read "Saved 1 times") and moved focus to the
-checkbox.
-
-Slice 2 is done, in zui-host alone. Each element offers the pattern that
-stands for what it does: Toggle for a node that says whether it is
-checked (not a radio or option), ExpandCollapse for one that says
-whether it is expanded, RangeValue for a range, Value for text,
-SelectionItem for an option or a radio and Selection for a list box,
-and Invoke only where none of those stands for the click, so a checkbox,
-an option and a combo box no longer offer it. Toggle, Expand, Collapse,
-Select and AddToSelection become `invoke` when the node is not already
-as asked; a range's SetValue becomes `adjust` by whole steps, or by one
-toward the target when the range has no step, and a target outside the
-range fails; RemoveFromSelection fails on the selected option, since one
-is always chosen. A text field's Value reads as editable while it is
-enabled, which it is from the keyboard, and its SetValue fails with
-UIA_E_INVALIDOPERATION, since zui has no action that replaces text; a
-combo box's Value is read-only. While a client listens, the window
-thread compares each node with a summary of what it last announced (a
-hash of its name and text, its range value, and its checked, expanded,
-selected and disabled state, in two buffers allocated in `init`) and
-raises property-changed events for name, value, range value, toggle
-state, expand state, selection and enabled, and the element-selected
-event. Three tests drive a window of `zui_widgets` controls through UI
-Automation's client: each control's pattern and state; Toggle, SetValue
-(0.5 to 0.8 at a step of 0.1), Expand and Select each arriving as the
-action that answers it and the next frame showing it, with the list's
-Selection naming the chosen option; and a property-changed handler,
-added from the test's thread, hearing the checkbox turn off. With no
-pattern code in zui, R1 counts cannot move. Next: slice 3, scrolling, the
-context menu and dismissal, and a person's check with Narrator and
-Accessibility Insights.
+Done: V1, V2, V3 and V4 are in *Done*.
 
 ---
 
@@ -3938,6 +3972,8 @@ Deliberate, and each a reason to choose zui:
 | Signals | lifecycle events; uncatchable signals are not representable |
 | Input | an ordered event log with host instants, many pointers (I4) |
 | Gesture arbitration | elements declare what they accept; one rule, by motion component (I5) |
+| How a frame's semantics reach a host (V2) | an optional host call, `zuiSemantics(window, nodes) SemanticsDropped`, which `zui_app` makes on the UI thread between `endFrame` and submission, into room the window opened with (`WindowOptions.semantics`, sized from `Config.limits`); not a field of `HostRequests`, which every `zuiApply` compares, nor a generic call taking the whole frame |
+| A text field's Value pattern (V2) | read: its `SetValue` fails with `UIA_E_INVALIDOPERATION`, since zui has no action that replaces text, but an enabled text field reports `IsReadOnly` false, since it is typed into from the keyboard and Narrator would otherwise call it read only; a combo box's Value is read-only |
 | A custom recognizer's decision lands a frame late (I5, open decision 1) | accepted: `claim` and `decline` apply at the next `beginFrame`, and a declined pointer is arbitrated over all its motion since the press, so nothing is lost; the lasso against a map's pan passes with it |
 | Custom recognizers (I5) | an element with `custom` holds each pointer pressed on it from every built-in gesture until it decides; `pointerEvents(id)` is an iterator, `zui.PointerEvents`, over the frame's events of the pointers it holds; a claimed pointer takes the press from what it pressed and is never a tap; one released undecided is a tap; the lasso is `zui_widgets.Widgets.lasso`, a pen drawing and every other pointer declined |
 | Momentum (I5) | a pan released faster than 50 units a second over its last 0.1 s coasts on its axes, slowing exponentially with a time constant of 0.325 s, moved to each record's `now` before its events through the pan's path; it stops below 10 units a second, at a scroll container's end, under a press, or when its element was not declared; it asks for frames 1/120 s apart; at most `max_input_contacts` elements coast, and a fling beyond them is reported on that limit |

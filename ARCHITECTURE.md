@@ -253,7 +253,7 @@ What exists today, by stage:
   narrow slots indexing dense entries that carry their region's flags; a
   press hit-tests once; and the string cache keeps a text's wrapped lines
   beside its entries, and its keys and ages apart from its values.
-- **Stage 9, begun:** `Frame.inspect`, and `zui_debug`'s inspector of
+- **Stage 9:** `Frame.inspect`, and `zui_debug`'s inspector of
   the frame's diagnostics and fallbacks, the zone times its
   `ZoneTimer` tracer takes, the element tree and the hovered element's
   configs, in a theme reloaded from its file through the host's file
@@ -263,7 +263,10 @@ What exists today, by stage:
   value, bounds, state and actions in tree order, kept beside its frame;
   `action` events answered by `clicked`, `focused`, `adjusted`,
   `manipulation`, `contextRequested` and `dismissed`; and every
-  `zui_widgets` control declaring its own. `Frame.sweep()` checks the
+  `zui_widgets` control declaring its own, each scroll container's view
+  and each heading's level; zui-host's Windows host bridges the list to
+  UI Automation through `zuiSemantics`, with every control's pattern,
+  state, changes and actions. `Frame.sweep()` checks the
   layout and command invariants a frame must keep, and with
   `features.safety_sweeps` `endFrame` panics on the first one broken.
   zui-web runs zui-sokol's tour in a browser: the tour in a Web Worker
@@ -278,7 +281,6 @@ roadmap item named:
 |---|---|---|---|
 | `Widgets(Ui)` with a `Theme` struct | `Widgets(Ui, Skin)` | `zui_widgets/` | K5 |
 | `zui_debug`'s inspector runs in the application's process; a frame on the wire carries no elements for it | over the wire, the inspector runs in another process (SPEC.md §19.7) | `zui_debug/`, `zui_wire/` | not yet queued |
-| zui-host's Windows host bridges `Frame.semantics()` to UI Automation through `zuiSemantics`, with each node's name, control type, id, bounds and place in the tree, the Invoke, Toggle, ExpandCollapse, RangeValue, Value (read-only), SelectionItem and Selection patterns, their requests as `action` events, and focus, structure and property-changed events; it offers no Scroll pattern, no context menu, no dismissal and no heading level | every action, and a scroll container's position, through UI Automation | `../zui-host` | V2 |
 | zui-host's Linux host speaks Wayland only, at whole buffer scales, and reports no low memory, clipboard, drops, file changes or IME; its environment comes from the desktop portal and UPower over D-Bus, and stays at the defaults without them | a Linux host on Wayland and X11 with every report the Windows host makes, and a system material where the compositor offers one | `../zui-host` | H4 |
 
 Unchanged in shape: element storage in pre-order structure-of-arrays, the

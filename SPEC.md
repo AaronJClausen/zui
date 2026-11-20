@@ -1475,9 +1475,11 @@ bar still lets the OS move, resize and snap the window.
 *With `features.semantics`.*
 
 `.semantics = .{ .role = .button, .label = "Save" }` adds an entry to
-`Frame.semantics()`: id, role, label, value, bounds, state and supported
-actions, in tree order, each with the index of the nearest entry around
-it. A host that declares `zuiSemantics` (§16.3) is handed the list after
+`Frame.semantics()`: id, role, label, value, bounds, state, supported
+actions and a heading's level, in tree order, each with the index of the
+nearest entry around it, and, for an element that scrolls, where its view
+lies over its content (`SemanticScroll`: offset, content and viewport
+sizes, and the axes it scrolls on, as the frame's layout placed them). A host that declares `zuiSemantics` (§16.3) is handed the list after
 each `endFrame` and bridges it to the platform's accessibility API; the
 window is opened with room for it (`WindowOptions.semantics`). Actions
 come back as `action` events naming the id, answered by the same queries
@@ -1493,6 +1495,7 @@ pub const Semantics = struct {
     value: SemanticValue = .none,  // .text (copied), or .range: value, min, max, step
     state: SemanticState = .{},    // checked, expanded, selected; zui adds disabled and focused
     actions: Actions = .initEmpty(),
+    level: u8 = 0,                 // a heading's level, 1 for the topmost; 0 for none
 };
 pub const Action = union(ActionKind) { invoke, focus, adjust: i32, scroll: [2]f32, show_menu, dismiss };
 ```

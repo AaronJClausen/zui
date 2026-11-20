@@ -109,6 +109,7 @@ pub const SemanticRole = semantics.Role;
 pub const SemanticValue = semantics.Value;
 pub const SemanticRange = semantics.Range;
 pub const SemanticState = semantics.State;
+pub const SemanticScroll = semantics.SemanticScroll;
 pub const Action = semantics.Action;
 pub const ActionKind = semantics.ActionKind;
 pub const Actions = semantics.Actions;

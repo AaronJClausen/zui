@@ -114,6 +114,21 @@ pub const Semantics = struct {
     /// interactive, `focus` when it is focusable, `scroll` when it
     /// scrolls or pans, and `show_menu` when it takes a long press.
     actions: Actions = .initEmpty(),
+    /// A heading's level, 1 for the topmost; 0 when it has none.
+    level: u8 = 0,
+};
+
+/// Where a scroll container's view lies over its content, in layout units,
+/// as its last layout placed it.
+pub const SemanticScroll = struct {
+    /// How far the view has moved from the content's start, per axis.
+    offset: [2]f32,
+    /// The size of everything it scrolls over, per axis.
+    content: [2]f32,
+    /// The size of the part it shows, per axis.
+    viewport: [2]f32,
+    /// Whether it scrolls horizontally, then vertically.
+    axes: [2]bool,
 };
 
 /// One accessible element, as `Frame.semantics()` lists it.
@@ -131,6 +146,10 @@ pub const SemanticNode = struct {
     state: State,
     /// Empty while it is disabled.
     actions: Actions,
+    /// As `Semantics.level` declares it.
+    level: u8 = 0,
+    /// For an element that scrolls; null for one that does not.
+    scroll: ?SemanticScroll = null,
 };
 
 /// How much of `Frame.semantics()` a window's accessibility bridge holds.

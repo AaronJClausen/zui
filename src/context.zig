@@ -1046,7 +1046,7 @@ pub fn Context(comptime config: Config) type {
 
             layout.run(Self, self, frame);
             @call(.never_inline, emission.run, .{ Self, self, frame });
-            if (features.semantics) finishSemantics(frame);
+            if (features.semantics) self.finishSemantics(frame);
             if (features.safety_sweeps) if (frame.sweep()) |failure| panicOnSweepFailure(frame, failure);
             if (self.text_input_caret) |caret| if (frame.rectOf(.{ .hash = caret })) |rect| {
                 frame.host_requests.text_input = .{ .caret = rect };
@@ -1482,6 +1482,7 @@ pub fn Context(comptime config: Config) type {
                 .bounds = undefined,
                 .state = node_state,
                 .actions = actions,
+                .level = declared.level,
             };
             list.count += 1;
         }
@@ -1501,8 +1502,9 @@ pub fn Context(comptime config: Config) type {
             return copy;
         }
 
-        /// Gives each node its laid-out bounds and the nearest node around it.
-        fn finishSemantics(frame: *Frame) void {
+        /// Gives each node its laid-out bounds, the nearest node around it,
+        /// and, for one that scrolls, where its view lies.
+        fn finishSemantics(self: *Self, frame: *Frame) void {
             var enclosing: [max_depth]u32 = undefined;
             var depth: usize = 0;
             const list = &frame.mutableFrameSlot().semantic_list;
@@ -1510,6 +1512,13 @@ pub fn Context(comptime config: Config) type {
                 while (depth > 0 and index >= frame.subtree_end[list.elements[enclosing[depth - 1]]]) depth -= 1;
                 node.parent = if (depth == 0) null else enclosing[depth - 1];
                 node.bounds = .{ .x = frame.position[index][0], .y = frame.position[index][1], .width = frame.size[index][0], .height = frame.size[index][1] };
+                const flags = frame.flags[index];
+                if (flags.scroll_x or flags.scroll_y) node.scroll = .{
+                    .offset = if (self.memory.states.get(frame.element_id[index], interaction.ScrollState, self.stateGeneration(), .existing_only)) |scroll| scroll.offset else .{ 0, 0 },
+                    .content = frame.content_size[index],
+                    .viewport = frame.size[index],
+                    .axes = .{ flags.scroll_x, flags.scroll_y },
+                };
                 enclosing[depth] = @intCast(node_index);
                 depth += 1;
             }

@@ -82,6 +82,12 @@ test "each element that declares semantics is listed in tree order, with what it
 
     const list = nodes[4];
     try testing.expect(list.actions.contains(.scroll));
+    const list_scroll = list.scroll.?;
+    try testing.expectEqual([2]bool{ false, true }, list_scroll.axes);
+    try testing.expectEqual([2]f32{ 0, 0 }, list_scroll.offset);
+    try testing.expectEqual(@as(f32, 80), list_scroll.content[1]);
+    try testing.expectEqual(@as(f32, 40), list_scroll.viewport[1]);
+    try testing.expectEqual(@as(?zui.SemanticScroll, null), save.scroll);
     for (nodes[5..9], 0..) |row, index| {
         try testing.expectEqual(@as(?u32, 4), row.parent);
         var expected: [16]u8 = undefined;
@@ -118,6 +124,7 @@ test "actions are answered by the queries of the input they stand in for" {
     try testing.expectEqual([2]f32{ 0, -15 }, ui.manipulation(ids.list).?.translation);
     frame = try dialog.act(ids.list, .{ .scroll = .{ 0, 500 } });
     try testing.expectEqual([2]f32{ 0, 40 }, ui.scrollOffset(ids.list));
+    try testing.expectEqual([2]f32{ 0, 40 }, frame.semantics()[4].scroll.?.offset);
 
     _ = try dialog.act(ids.save, .show_menu);
     try testing.expect(ui.contextRequested(ids.save));
@@ -158,4 +165,18 @@ test "without the feature, an action is ignored" {
     try testing.expect(!ui.clicked(save));
     ui.box(.{ .id = save, .focusable = true });
     _ = try harness.end();
+}
+
+test "a heading lists the level it declares" {
+    const Small = zui.Context(.{ .limits = .{ .max_elements = 8 }, .features = .{ .semantics = true } });
+    var ui: Small = try .init(testing.allocator, testing.io);
+    defer ui.deinit(testing.allocator);
+    ui.beginFrame(&support.record(.zero, &.{}));
+    ui.box(.{ .semantics = .{ .role = .heading, .label = "Settings", .level = 2 } });
+    ui.box(.{ .semantics = .{ .role = .label, .label = "Saved" } });
+    const frame = ui.endFrame();
+    defer ui.release(frame);
+
+    try testing.expectEqual(@as(u8, 2), frame.semantics()[0].level);
+    try testing.expectEqual(@as(u8, 0), frame.semantics()[1].level);
 }
