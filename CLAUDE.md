@@ -247,6 +247,35 @@ noise.
   and do not reference other files or the spec in comments.
 - LF line endings everywhere.
 
+## Packages and the build
+
+Zig 0.16's package manager behaves in ways that are easy to get wrong:
+
+- **One `zui` module needs one set of options.** A package passes a core
+  option to `b.dependency("zui_core", …)` only when the user gave it,
+  leaving it `null` otherwise, never an explicit default such as
+  `.@"zui-tracy" = false`. Two option sets instantiate core twice, and
+  the build fails with "file exists in modules 'zui' and 'zui0'".
+- **A renderer's or host's entry in the root `build.zig.zon` is not
+  lazy.** With `.lazy = true`, `zui.builder.dependency(…)` panics ("must
+  use the lazyDependency function"); a `.path` dependency fetches nothing
+  anyway, and its own third-party libraries stay lazy.
+- **A third-party library is lazy and reached with `lazyDependency`,**
+  and a package declares its modules only once its libraries are
+  fetched. A package that uses another's modules takes the dependency
+  only once it has declared the module it needs, as the hosts'
+  `sokolDeclaring` does, or it panics with "unable to find module" in
+  CI's empty cache while passing here.
+- **"Fetches nothing" is checked with an empty cache:** `zig build --help
+  --global-cache-dir <empty dir>` after deleting any `zig-pkg/`. With the
+  usual cache, Zig copies the lazy packages it already has into
+  `zig-pkg/` without the network, and a fetch goes unnoticed.
+- A dependency's build sees no `-- <args>` and installs into a prefix of
+  its own, which is why the root runs and installs core's benchmark
+  executables itself.
+- A `.path` cycle (a package naming the root) crashes the toolchain
+  before any `build()` runs.
+
 ## Commits
 
 - Commit messages follow the history: an imperative subject without a

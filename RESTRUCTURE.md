@@ -264,7 +264,9 @@ pub fn build(b: *std.Build) void {
   done by the owner, or with the owner's say in that session.
 - **Measured before and after.** Slice 1 records the baseline: `zig build
   counts -- --json` and the test, check and conformance results of each
-  sibling at its pin. A slice that touches a hot path compares against it.
+  sibling at its pin, in `RESTRUCTURE-BASELINE.md`, which slice 13
+  deletes with this document. A slice that touches a hot path compares
+  against it.
 
 ## Slices
 
@@ -464,8 +466,9 @@ and the rules for other repositories, which now describe packages) and
 `docs/` end to end, and make each correct for the arrangement with no
 trace of the move. SPEC.md's non-goals keep font loading, shaping and
 rasterization out of the core, naming the `text/` packages as where they
-go. Delete this document. The old repositories are then archived by the
-owner, each with a README naming its new directory.
+go. Delete this document and `RESTRUCTURE-BASELINE.md`. The old
+repositories are already archived, each with a README naming its new
+directory.
 
 ## Decided
 
