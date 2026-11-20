@@ -2759,9 +2759,10 @@ The order follows the dependencies of the design, not a calendar.
 | 7. Gestures | intents, gesture arbitration, momentum, custom recognizers, drag and drop | the nested-gesture scenes: a carousel in a list, a pinch starting on a list inside a map, a lasso module against a map's pan |
 | 8. Effects | optional commands, lowering, transforms with hit inversion, materials, `ExtendedColor` | lowering tested for each; one renderer draws each; HDR white brighter than SDR on the Windows host |
 | 9. Seeing the UI | `zui_debug`, semantics with accessibility actions, safety sweeps, the demo in a browser | the Windows host bridges semantics to UI Automation |
-| 10. Reach | macOS, Linux and web hosts; services; window decorations; many windows | each host passes its suite and runs the demo unchanged |
+| 10. Reach | Linux and web hosts; services; window decorations; many windows | each host passes its suite and runs the demo unchanged |
 | 11. Polish | `zui_motion` and exit ghosts; full text editing with IME; `zui_color`, `zui_icons`, skins and theme packs; samples and the template | each with `zui_testing` coverage; IME on Windows |
 | Later | docking, a grid layout, layout islands, static subtrees, SIMD | only with a measured win or a demonstrated need |
+| Set aside | the macOS host, and macOS's counters, skin and IME; the contracts keep their macOS shapes (the `cocoa` surface, vibrancy) | not built until macOS is taken up |
 
 Two rules hold throughout:
 - **One breaking release.** Everything that changes the shape of the

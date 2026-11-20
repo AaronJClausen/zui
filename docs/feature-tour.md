@@ -2201,7 +2201,7 @@ Build with `-Dzui-tracy=true` to link Tracy's client, then connect profiler 0.14
 
 These names compile, but they don't do anything yet. This list is from `ARCHITECTURE.md` §7 and the roadmap.
 
-- **Still to come**: Motion, multi-line text editing, skins, the inspector over the wire, and more hosts (macOS, Linux, web).
+- **Still to come**: Motion, multi-line text editing, skins, the inspector over the wire, and more hosts (Linux and web; macOS later).
 
 <a id="dx"></a>
 

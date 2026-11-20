@@ -170,7 +170,8 @@ The stage is the one in SPEC.md §21 that builds it.
 | accessibility | core semantics and actions; `zui_widgets` declares each control's; host bridges to the platform API | 9 |
 | safety sweeps | core, over a finished frame; `endFrame` runs them behind `features.safety_sweeps` | 9 |
 | the demo in a browser | `zui-web`: the application in a Web Worker, its frames drawn by a thin client over `zui_wire` | 9 |
-| macOS, Linux and web hosts; many windows | `zui-host`; one `Context` per window, each made and declared through `zui_app`, and one renderer with a surface per window | 10 |
+| Linux and web hosts; many windows | `zui-host`; one `Context` per window, each made and declared through `zui_app`, and one renderer with a surface per window | 10 |
+| the macOS host | `zui-host`, as the others; only its contract shapes exist (the `cocoa` surface, vibrancy as the system material), as stubs | set aside |
 | window decorations: a custom title bar the OS still moves, resizes and snaps | chrome regions in the core, beside the frame, behind `features.chrome_regions`; `zui_app` hands them to the host's `zuiChromeRegions`; each host answers its window manager | 10 |
 | host services: the clipboard, notifications, file dialogs, opening URLs, menus | the core's vocabulary and checks (`src/services.zig`); `zui_app.ServicesOf`'s guards; each host implements them, answering into a source the application chooses | 10 |
 | motion and exit animations | `zui_motion`; ghost buffer in the core | 11 |

@@ -68,7 +68,6 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
-| H3. macOS | 10 | `../zui-host` | | |
 | H4. Linux | 10 | `../zui-host`, `../zui-sokol` | | in progress; slice 3, fractional scale, the clipboard, drops and file watching, is next |
 | H5. Web | 10 | `../zui-web` | | |
 | H7. Window decorations | 10 | `src/chrome.zig`, `src/context.zig`, `zui_app/`, `../zui-host` | | waiting on a person: the checklist under H7's *Status*, on `zig build title-bar` in zui-host |
@@ -86,6 +85,10 @@ green, and its **Status** line below says which slice is next.
 | D3. A developer-experience audit | 11 | `../zui-examples`, `README.md`, `docs/` | D1, D2 | |
 
 After stage 10's rows come stage 11's, which has joined the queue in dependency order. Stage 10's items are listed under *Stage 10: reach* and stage 11's under *Stage 11: polish*; each is given its Grounding, Plan and Done when as it is taken.
+
+macOS is not in the queue. Its work is set aside under *macOS, for
+later* at the end of this file, and none of it is built until the owner
+chooses to take up macOS. Until then, a progress report leaves it out.
 
 Statuses: `next` (the first open row), `in progress` (a slice has
 landed), `waiting on <what>` (blocked by something the next session cannot
@@ -367,9 +370,10 @@ What remains, and where it went:
   resize it while the other draws. Move one to a monitor at another
   scale. Close the first window and see the others run on, then close
   the last and see the process end.
-- **H3 and H4:** macOS and Linux implement the same contract, and their
-  hosts stay `.one` until then. zui-sokol's EGL path would attach a
-  `wl_egl_window` and `EGLSurface` per window on one `EGLContext`.
+- **H4, and H3 once macOS is taken up:** Linux and macOS implement the
+  same contract, and their hosts stay `.one` until then. zui-sokol's EGL
+  path would attach a `wl_egl_window` and `EGLSurface` per window on one
+  `EGLContext`.
 - **`zui_wire`:** a connection carries one window. Many windows over the
   wire would take a connection per window, and is not queued.
 - **Docking and tear-off panels** (*Later*) can now build on it.
@@ -4260,7 +4264,6 @@ Done: V1, V2, V3 and V4 are in *Done*.
 
 ## Stage 10: reach
 
-- **H3. macOS** (Cocoa; vibrancy for H8).
 - **H4. Linux** (Wayland, then X11; KDE blur where offered).
 - **H5. Web** (a canvas surface; `tryBeginFrame`, since it cannot block).
 - **H6. Services:** clipboard, notifications, file dialogs, opening URLs,
@@ -4272,6 +4275,9 @@ Done: V1, V2, V3 and V4 are in *Done*.
 
 **Done when (each):** the host passes C3, and the demo runs on it
 unchanged.
+
+H3, the macOS host, is set aside under *macOS, for later*, and stage 10
+is done without it.
 
 ### H4. Linux
 
@@ -4611,7 +4617,8 @@ Once checked, H7 moves to *Done*.
 - **K2. The default skin:** light, dark and high contrast, following the
   environment.
 - **K3. `zui_icons`.**
-- **K4. `zui-themes`:** skins for Windows, macOS, GNOME and KDE.
+- **K4. `zui-themes`:** skins for Windows, GNOME and KDE. macOS's skin
+  is set aside under *macOS, for later*.
 - **K5. The skin contract:** `Widgets(Ui, Skin)` and `zuiStyle`, so a
   theme pack restyles every widget without forking it.
 - **D1. `zui-examples`** and a template project.
@@ -4788,6 +4795,7 @@ Deliberate, and each a reason to choose zui:
 | How the browser draws (V4) | the client lays every command out as zui-sokol's renderer does, triangle for triangle, and the page draws the triangles through WebGL 2, with four samples per pixel resolved to one, as zui-sokol's demo window smooths its edges; `test-draw` compares them with one sample per pixel too. A 2D canvas smooths every edge its own way and cannot fade a shadow's rings vertex by vertex, so its frames could not be compared with zui-sokol's pixel by pixel |
 | A web renderer or a thin client over the wire (V4) | a thin client over `zui_wire`, as planned, since F5 built it: zui-web's page draws the frames an application in a Web Worker writes. A web host with a canvas surface, the application on the page itself, is H5's |
 | A D-Bus client for the Linux host (H4) | the host's own, over a Unix socket into fixed buffers, not libdbus or sd-bus: no outside code shares the connection, as EGL shares libwayland's objects, and the portal and UPower need only a handshake, a few calls and three signals; libdbus allocates per message and is thread-unfriendly, sd-bus ties the host to systemd |
+| macOS (H3) | set aside by the owner, who has no macOS hardware: its work is listed under *macOS, for later*, out of the queue, until the owner chooses to take it up. What fixes a contract's shape for macOS stays in the code as a stub: the `cocoa` surface, the system material's vibrancy, and bench's `.macos` machine readings and counters message. CI keeps its macOS runners, which need no hardware here |
 | Where an element declares its material (G5) | `Ui.Decoration.material`, typed by the renderer's `MaterialHandle`: `Ui.Element`, `Ui.Decoration` and `Ui.Style` are the context's own, and are `zui.Element`, `zui.Decoration` and `zui.Style` without a handle, so no existing code changes. `open` taking `anytype` to accept both was rejected: a literal passed through `anytype` is not converted to `Ui.Element` |
 
 ### Open
@@ -4796,3 +4804,45 @@ Each is planned with its first option. SPEC.md §22 has those that change
 the spec.
 
 1. **Physical keys.** Planned: logical keys plus the opaque scancode.
+
+---
+
+## macOS, for later
+
+Not to be built until the owner chooses to take up macOS: there is no
+macOS hardware to run or check it on. Nothing here is in the queue, is
+next, or counts against a stage; stage 10 and stage 11 are done without
+it. When macOS is taken up, these items return to the queue in this
+order, each given its Grounding, Plan and Done when as it is taken.
+
+What fixes a contract's shape for macOS is already in the code, as a
+stub with nothing behind it, so taking up macOS changes no contract:
+- `zui.Surface.cocoa`, an `NSView` by pointer, and `.cocoa` among the
+  surface kinds (`src/surface.zig`);
+- `HostCapabilities.system_material` and `Environment.system_material`,
+  which name vibrancy beside Mica;
+- `Modifiers.super`, which a macOS host reports for Command;
+- bench's `Machine`, which reads a Mac's OS version and caches
+  (`bench/machine.zig`), and `--counters`, which says that kperf's
+  counters are not read (`bench/counters.zig`).
+
+zui-host's `zui_host.Host` stays a compile error on macOS until H3 adds
+its directory. CI's macOS runners stay: they are GitHub's, and they check
+that the core and its modules build and pass there.
+
+The items:
+- **H3. macOS** (stage 10, `../zui-host`): a Cocoa host passing C3, its
+  surface `.cocoa`, its event loop on the main thread as AppKit requires;
+  vibrancy through `NSVisualEffectView` as the system material (H8);
+  many windows, a context each, as H9 built on Windows; the EDR headroom
+  that G6 left unreported; a custom title bar's chrome regions (H7); and
+  the services of H6 (`NSPasteboard`, `NSOpenPanel`, the menu bar, user
+  notifications, `NSWorkspace`). zui-sokol draws into it through Metal,
+  which also first compiles the Metal that sokol-shdc wrote for G5's
+  material shader.
+- **macOS's hardware counters** (R9's remainder, `bench/counters.zig`):
+  `--counters` through kperf, which needs `sudo`.
+- **macOS's skin** (K4's remainder, `../zui-themes`), once K4 ships the
+  others.
+- **The IME on macOS** (E1's remainder): `NSTextInputClient` on H3's
+  view, against E1's composition events and IME area.
