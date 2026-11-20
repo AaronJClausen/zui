@@ -148,11 +148,9 @@ repositories.
 
 | Repository | Holds |
 |---|---|
-| `zui` | the core, the contracts, and the modules, as the package `zui_core` in `core/`; the package `zui` at its root, which re-exports them |
+| `zui` | the core, the contracts, and the modules, as the package `zui_core` in `core/`; the package `zui` at its root, which re-exports them; skins for OS design languages in `themes/`; samples and the template project in `examples/` |
 | `zui-host` | native hosts, one directory per OS |
 | `zui-raylib`, `zui-sokol`, `zui-terminal`, `zui-web` | renderers; `zui-raylib` also ships an adapter host |
-| `zui-themes` | skins for OS design languages |
-| `zui-examples` | samples and the template project |
 
 ### 3.3 The module boundary
 

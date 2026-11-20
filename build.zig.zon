@@ -10,6 +10,8 @@
         "build.zig",
         "build.zig.zon",
         "core",
+        "themes",
+        "examples",
         "LICENSE",
         "README.md",
         "SPEC.md",

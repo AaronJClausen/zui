@@ -4,13 +4,13 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const zui_dependency = b.dependency("zui", .{ .target = target, .optimize = optimize });
+    const core = b.dependency("zui_core", .{ .target = target, .optimize = optimize });
 
     const themes_module = b.addModule("zui_themes", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
-        .imports = &.{.{ .name = "zui", .module = zui_dependency.module("zui") }},
+        .imports = &.{.{ .name = "zui", .module = core.module("zui") }},
     });
 
     const unit_tests = b.addTest(.{ .root_module = themes_module });

@@ -2,7 +2,11 @@ const std = @import("std");
 
 /// Every package directory: `test-all` and `check-all` run in each, and
 /// `fmt` formats each.
-const packages = [_][]const u8{"core"};
+const packages = [_][]const u8{
+    "core",
+    "themes",
+    "examples",
+};
 
 const core_modules = [_][]const u8{ "zui", "zui_testing", "zui_widgets", "zui_async", "zui_tracy", "zui_reflect", "zui_app", "zui_wire", "zui_debug" };
 

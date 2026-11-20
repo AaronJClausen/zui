@@ -177,7 +177,7 @@ The stage is the one in SPEC.md §21 that builds it.
 | motion and exit animations | `zui_motion`; ghost buffer in the core | 11 |
 | text editing and IME | `zui_widgets`; composition events and the IME area from the core | 11 |
 | color spaces, palettes, icons | `zui_color`, `zui_icons` | 11 |
-| themes and skins | `zui_widgets`' default skin; `zui-themes` | 11 |
+| themes and skins | `zui_widgets`' default skin; `zui_themes`, in `themes/` | 11 |
 | fonts, shaping, bidirectional text | behind the text contract | — |
 | number, date and plural formatting | out of scope: a localization library | — |
 
@@ -299,11 +299,13 @@ parallel measurement and the module boundary.
 | `zui-host` | native hosts, one directory per OS, chosen by target: `windows/` (H2) and `linux/`, on Wayland (H4) |
 | `zui-raylib`, `zui-sokol`, `zui-terminal` | renderers; `zui-raylib` also ships the raylib adapter host |
 | `zui-web` | the browser: a thin client over `zui_wire` (V4), then a web host (H5); today the client's decoder, in WebAssembly, and its drawing of shapes, text, backdrop blurs and materials through WebGL 2 with four samples per pixel, checked against zui-sokol's renderer drawing the tour's frames, and the page's input written back as records the tour takes, with the cursor its frames ask for shown on the canvas; and zui-sokol's tour in a Web Worker on an `Io` of its own, whose tasks take turns on workers sharing its memory, drawing the frames it draws natively and timing them on the worker's clock; and the page that puts them together, published to GitHub Pages from CI and made cross-origin isolated by a service worker of its own |
-| `zui-themes` | skins for OS design languages (K4); a skeleton today |
-| `zui-examples` | samples and the template project (D1, D2); a skeleton today |
+| `zui`, in `themes/` | the package `zui_themes`: skins for OS design languages (K4); a skeleton today |
+| `zui`, in `examples/` | the package `zui_examples`: samples and the template project (D1, D2); a skeleton today |
 
-`zui-web`, `zui-themes` and `zui-examples` were created ahead of their
-items: each has its build, CI and an agent guide, and pins zui by commit.
+`zui-web`, `themes/` and `examples/` were created ahead of their items.
+`zui-web` has its build, CI and an agent guide, and pins zui by commit;
+`themes/` and `examples/` each have their build and CI jobs, and name
+core by path.
 
 The renderer repositories pin zui by commit, moved to stage 2 with it
 (C8), and to the end of stage 6 with C10: each declares `Text`, a text

@@ -50,6 +50,28 @@ jobs:
           version: ${{ env.ZIG_VERSION }}
       - run: zig build test -Doptimize=${{ matrix.optimize }}
 
+  themes-and-examples:
+    name: Test and check ${{ matrix.package }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [themes, examples]
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    defaults:
+      run:
+        working-directory: ${{ matrix.package }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - run: zig build test
+      - run: zig build test -Doptimize=ReleaseSafe
+      - run: zig build test -Doptimize=ReleaseFast
+      - run: zig build check
+
   tracy:
     name: Tracy (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

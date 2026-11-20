@@ -78,11 +78,11 @@ green, and its **Status** line below says which slice is next.
 | K2. The default skin | 11 | `core/zui_widgets/` | K5, K1 | |
 | E1. Text editing | 11 | `core/src/`, `core/zui_widgets/`, `../zui-host` | K5 | |
 | K3. `zui_icons` | 11 | `core/zui_icons/` | | |
-| K4. `zui-themes` | 11 | `../zui-themes` | K5, K2 | |
-| D1. `zui-examples` and the template | 11 | `../zui-examples` | | |
-| D2. Samples | 11 | `../zui-examples` | D1 | |
+| K4. `zui_themes` | 11 | `themes/` | K5, K2 | |
+| D1. The template project | 11 | `examples/` | | |
+| D2. Samples | 11 | `examples/` | D1 | |
 | D4. A profiling guide | 11 | `docs/` | | |
-| D3. A developer-experience audit | 11 | `../zui-examples`, `README.md`, `docs/` | D1, D2 | |
+| D3. A developer-experience audit | 11 | `examples/`, `README.md`, `docs/` | D1, D2 | |
 
 After stage 10's rows come stage 11's, which has joined the queue in dependency order. Stage 10's items are listed under *Stage 10: reach* and stage 11's under *Stage 11: polish*; each is given its Grounding, Plan and Done when as it is taken.
 
@@ -4687,11 +4687,11 @@ Once checked, H7 moves to *Done*.
 - **K2. The default skin:** light, dark and high contrast, following the
   environment.
 - **K3. `zui_icons`.**
-- **K4. `zui-themes`:** skins for Windows, GNOME and KDE. macOS's skin
+- **K4. `zui_themes`:** skins for Windows, GNOME and KDE, in `themes/`. macOS's skin
   is set aside under *macOS, for later*.
 - **K5. The skin contract:** `Widgets(Ui, Skin)` and `zuiStyle`, so a
   theme pack restyles every widget without forking it.
-- **D1. `zui-examples`** and a template project.
+- **D1. The template project,** in `examples/template/`.
 - **D2. Samples:** a settings screen with `zui_reflect` and ZON, a data
   feed, a multi-window tool, a remote session.
 - **D3. A developer-experience audit:** a new user builds each sample from
@@ -4912,7 +4912,7 @@ The items:
   material shader.
 - **macOS's hardware counters** (R9's remainder, `core/bench/counters.zig`):
   `--counters` through kperf, which needs `sudo`.
-- **macOS's skin** (K4's remainder, `../zui-themes`), once K4 ships the
+- **macOS's skin** (K4's remainder, `themes/`), once K4 ships the
   others.
 - **The IME on macOS** (E1's remainder): `NSTextInputClient` on H3's
   view, against E1's composition events and IME area.

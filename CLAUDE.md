@@ -67,6 +67,9 @@ Stop and ask the user instead of guessing when:
 | a conformance suite (`expect*Conforms`) | `core/zui_testing/zui_testing.zig` |
 | a benchmark scenario | `core/bench/bench.zig`; its budget, if any, comes from SPEC.md §20.2 |
 | CI | `.github/workflows/ci.yml` |
+| a skin for an OS design language | `themes/src/<design language>.zig`, exported from `themes/src/root.zig` (the `zui_themes` module), with its tests beside it. A skin is data, applied through `zui_widgets`' skin contract: it imports only `zui` and `zui_widgets`, and holds no drawing or OS code |
+| the template project | `examples/template/`, a package of its own, so it can be copied out as a new app |
+| a sample | `examples/samples/<name>/`, built and tested from `examples/build.zig` and imported from the `test` block of `examples/samples/root.zig`. A sample uses only the public APIs of zui, its modules, and the renderers and hosts, as a user would |
 | a package | its own directory, with its `build.zig` and `build.zig.zon`, naming other packages by `.path`; in the root, a line in `packages` in `build.zig` and in `.paths` in `build.zig.zon` |
 | renderer and adapter-host changes | `../zui-raylib`, `../zui-sokol`, `../zui-terminal`, tested against this checkout with `zig build test --fork=../zui` |
 | native hosts | `../zui-host`, which is created by H2 and not before |
@@ -107,7 +110,10 @@ reused (`ROADMAP.md` explains the letters).
 ## Verifying
 
 Run these from the repository's root, which runs core's steps under the
-same names; another package's own steps run from its directory.
+same names; another package's own steps run from its directory. In
+`themes/` and `examples/`, run `zig build test` in all three optimize
+modes and `zig build check` before committing; `test-all` and `check-all`
+run them from the root.
 
 | Command | When |
 |---|---|

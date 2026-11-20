@@ -374,8 +374,15 @@ while (to_release.next()) |released| if (released) |texture| unload(texture) els
 
 The engine and its modules are the package in `core/`; the repository's
 root is the package `zui` that users fetch, which re-exports core's
-modules and runs core's steps under the same names. Run these from the
-root:
+modules and runs core's steps under the same names. Beside core:
+
+- `themes/`, the package `zui_themes`: skins in the design languages of
+  Windows, macOS, GNOME and KDE, as data applied through `zui_widgets`'
+  skin contract (K4, after the skin contract, K5); a skeleton today.
+- `examples/`: a template project (D1) and samples (D2); a skeleton today.
+
+Each has its own `test` and `check`, run from its directory, and
+`test-all` and `check-all` run them. Run these from the root:
 
 | Command | What it does |
 |---|---|
@@ -410,7 +417,9 @@ CI runs:
   2% growth, with simulated cache and branch misses reported beside them;
 - the tests under ThreadSanitizer, which stress every `zui_async` source
   with producers on other threads;
-- `zui_tracy` with Tracy's client, on Linux, Windows and macOS.
+- `zui_tracy` with Tracy's client, on Linux, Windows and macOS;
+- the tests of `themes/` and `examples/` in three optimize modes, and
+  their `check`, on Linux, Windows and macOS, each run from its directory.
 
 Those targets exist to catch assumptions about the host machine early:
 the first 32-bit build found two places that used a 64-bit hash as an
