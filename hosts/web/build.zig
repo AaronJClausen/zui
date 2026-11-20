@@ -1,0 +1,266 @@
+const std = @import("std");
+
+pub fn build(b: *std.Build) void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
+
+    const web_module = webModule(b, "src/root.zig", target, optimize);
+    const unit_tests = b.addTest(.{ .root_module = web_module });
+    b.step("test", "Run the unit tests").dependOn(&b.addRunArtifact(unit_tests).step);
+
+    const browser_target = b.resolveTargetQuery(.{ .cpu_arch = .wasm32, .os_tag = .freestanding });
+    const client = browserModule(b, "zui-web", "src/browser.zig", browser_target, optimize);
+    b.getInstallStep().dependOn(&b.addInstallArtifact(client, .{ .dest_dir = .{ .override = .{ .custom = "web" } } }).step);
+    const check_step = b.step("check", "Compile the unit tests, and the client for the browser, without running them");
+    check_step.dependOn(&unit_tests.step);
+    check_step.dependOn(&client.step);
+
+    const test_demo = b.step("test-demo", "Stream zui-sokol's tour, headless, to the browser's client under Node, and check every frame decodes to what was drawn; run the tour in a worker under Node, and check every frame is the one it draws natively");
+    const test_draw = b.step("test-draw", "Draw frames of zui-sokol's tour in headless Chromium, with one sample per pixel and with four, and check each against zui-sokol's renderer drawing it alike; needs a display");
+    const test_input = b.step("test-input", "Give the client input in headless Chromium, run zui-sokol's tour on the records it writes, and check the tour took them and the page shows its cursor");
+    const site_step = b.step("site", "Write the published page, the client, the tour's worker and the tour's fonts to zig-out/site");
+    const test_site = b.step("test-site", "Serve the published page without isolation headers, open it in headless Chromium, and check its service worker isolates it, it draws the tour's frames, sleeps while idle, and its input wakes it and reaches the tour");
+    const browser = b.option([]const u8, "browser", "The Chromium that `test-draw` runs headless (default: chromium)") orelse "chromium";
+    const worker_target = b.resolveTargetQuery(.{
+        .cpu_arch = .wasm32,
+        .os_tag = .freestanding,
+        .cpu_features_add = std.Target.wasm.featureSet(&.{ .atomics, .bulk_memory }),
+    });
+    const tour_worker = if (b.lazyDependency("zui_sokol", .{ .target = worker_target, .optimize = optimize })) |worker_zui_sokol| tour_worker: {
+        const tour_worker = tourWorker(b, worker_zui_sokol, worker_target, optimize);
+        b.getInstallStep().dependOn(&b.addInstallArtifact(tour_worker, .{ .dest_dir = .{ .override = .{ .custom = "web" } } }).step);
+        check_step.dependOn(&tour_worker.step);
+        break :tour_worker tour_worker;
+    } else null;
+    if (b.lazyDependency("zui_sokol", .{ .target = target, .optimize = optimize })) |zui_sokol_dependency| {
+        const tour_imports: []const std.Build.Module.Import = &.{
+            .{ .name = "zui_sokol", .module = zui_sokol_dependency.module("zui_sokol") },
+            .{ .name = "zui_sokol_tour", .module = zui_sokol_dependency.module("zui_sokol_tour") },
+            .{ .name = "zui_wire", .module = b.dependency("zui", .{ .target = target, .optimize = optimize }).module("zui_wire") },
+        };
+        const demo_stream = tourTool(b, "demo-stream", "tools/demo_stream.zig", tour_imports, target, optimize);
+        const write_stream = b.addRunArtifact(demo_stream);
+        const stream = write_stream.addOutputFileArg("tour.zuiw");
+        const expected = write_stream.addOutputFileArg("tour.expected");
+
+        const wire_check = browserModule(b, "zui-web-wire-check", "src/browser_wire_check.zig", browser_target, optimize);
+        const decode_in_client = b.addSystemCommand(&.{"node"});
+        decode_in_client.addFileArg(b.path("web/check_stream.mjs"));
+        decode_in_client.addArtifactArg(wire_check);
+        decode_in_client.addFileArg(stream);
+        decode_in_client.addFileArg(expected);
+        decode_in_client.expectExitCode(0);
+        test_demo.dependOn(&decode_in_client.step);
+
+        if (tour_worker) |worker| {
+            const tour_session = b.createModule(.{ .root_source_file = b.path("src/tour_session.zig"), .target = target, .optimize = optimize, .imports = tourSessionImports(b, zui_sokol_dependency, target, optimize) });
+            const tour_frames = tourTool(b, "tour-frames", "tools/tour_frames.zig", &.{.{ .name = "tour_session", .module = tour_session }}, target, optimize);
+            const run_in_worker = b.addSystemCommand(&.{"node"});
+            run_in_worker.addFileArg(b.path("web/check_worker.mjs"));
+            run_in_worker.addArtifactArg(client);
+            run_in_worker.addArtifactArg(worker);
+            run_in_worker.addArtifactArg(tour_frames);
+            for ([_][]const u8{ "web/tour_worker.mjs", "web/tour_thread.mjs", "web/worker_port.mjs" }) |worker_file| run_in_worker.addFileInput(b.path(worker_file));
+            run_in_worker.expectExitCode(0);
+            test_demo.dependOn(&run_in_worker.step);
+        }
+
+        const draw_reference = tourTool(b, "draw-reference", "tools/draw_reference.zig", tour_imports, target, optimize);
+        const one_sample_reference = drawReference(b, draw_reference, stream, "1", "with-text");
+        const four_sample_reference = drawReference(b, draw_reference, stream, "4", "without-text");
+
+        const bitmap_fonts = tourTool(b, "bitmap-fonts", "tools/bitmap_fonts.zig", tour_imports, target, optimize);
+        const write_bitmap_fonts = b.addRunArtifact(bitmap_fonts);
+        const bitmap_font_rows = write_bitmap_fonts.addOutputFileArg("bitmap.fonts");
+
+        const draw_in_browser = b.addSystemCommand(&.{"node"});
+        draw_in_browser.addFileArg(b.path("web/check_draw.mjs"));
+        draw_in_browser.addArg(browser);
+        draw_in_browser.addArtifactArg(client);
+        draw_in_browser.addFileArg(stream);
+        draw_in_browser.addFileArg(one_sample_reference);
+        draw_in_browser.addFileArg(four_sample_reference);
+        draw_in_browser.addFileArg(bitmap_font_rows);
+        for (tour_truetype_fonts) |font| draw_in_browser.addFileArg(zui_sokol_dependency.path(font));
+        for ([_][]const u8{ "web/check_draw.html", "web/client.mjs", "web/frame_drawer.mjs", "web/headless_page.mjs" }) |page_file| draw_in_browser.addFileInput(b.path(page_file));
+        draw_in_browser.expectExitCode(0);
+        test_draw.dependOn(&draw_in_browser.step);
+
+        const replay_input = tourTool(b, "replay-input", "tools/replay_input.zig", tour_imports, target, optimize);
+        const input_in_browser = b.addSystemCommand(&.{"node"});
+        input_in_browser.addFileArg(b.path("web/check_input.mjs"));
+        input_in_browser.addArg(browser);
+        input_in_browser.addArtifactArg(client);
+        input_in_browser.addArtifactArg(replay_input);
+        for ([_][]const u8{ "web/check_input.html", "web/input_recorder.mjs", "web/headless_page.mjs" }) |page_file| input_in_browser.addFileInput(b.path(page_file));
+        input_in_browser.expectExitCode(0);
+        test_input.dependOn(&input_in_browser.step);
+
+        if (tour_worker) |worker| {
+            const site = siteFiles(b, client, worker, bitmap_font_rows, zui_sokol_dependency);
+            site_step.dependOn(&b.addInstallDirectory(.{ .source_dir = site.getDirectory(), .install_dir = .prefix, .install_subdir = "site" }).step);
+
+            const open_site = b.addSystemCommand(&.{"node"});
+            open_site.addFileArg(b.path("web/check_site.mjs"));
+            open_site.addArg(browser);
+            open_site.addDirectoryArg(site.getDirectory());
+            open_site.addFileInput(b.path("web/headless_page.mjs"));
+            open_site.expectExitCode(0);
+            test_site.dependOn(&open_site.step);
+        }
+    }
+
+    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "tools" };
+    b.step("fmt", "Format all Zig sources").dependOn(&b.addFmt(.{ .paths = formatted_paths }).step);
+    b.step("fmt-check", "Fail if any Zig source is not formatted").dependOn(&b.addFmt(.{ .paths = formatted_paths, .check = true }).step);
+}
+
+fn webModule(b: *std.Build, root_source_file: []const u8, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Module {
+    const zui_dependency = b.dependency("zui", .{ .target = target, .optimize = optimize });
+    return b.createModule(.{
+        .root_source_file = b.path(root_source_file),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zui", .module = zui_dependency.module("zui") },
+            .{ .name = "zui_wire", .module = zui_dependency.module("zui_wire") },
+            .{ .name = "stb_truetype", .module = stbTruetypeModule(b, target, optimize) },
+        },
+    });
+}
+
+/// stb_truetype's declarations, translated to Zig, with its implementation
+/// compiled in without a C library, at the commit zui-sokol rasterizes with.
+fn stbTruetypeModule(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Module {
+    const stb_dependency = b.dependency("stb", .{});
+    const translated = b.addTranslateC(.{
+        .root_source_file = stb_dependency.path("stb_truetype.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const module = translated.createModule();
+    module.link_libc = false;
+    module.addCSourceFile(.{ .file = b.path("src/stb_truetype.c"), .flags = &.{"-fvisibility=hidden"} });
+    module.addIncludePath(stb_dependency.path(""));
+    return module;
+}
+
+/// zui-sokol's renderer drawing `compared_frames` of `stream` with
+/// `samples_per_pixel`, and its text only `"with-text"`.
+fn drawReference(b: *std.Build, draw_reference: *std.Build.Step.Compile, stream: std.Build.LazyPath, samples_per_pixel: []const u8, text_choice: []const u8) std.Build.LazyPath {
+    const write_reference = b.addRunArtifact(draw_reference);
+    write_reference.addFileArg(stream);
+    const reference = write_reference.addOutputFileArg(b.fmt("tour-{s}-{s}.reference", .{ samples_per_pixel, text_choice }));
+    write_reference.addArgs(&.{ samples_per_pixel, text_choice });
+    for (compared_frames) |frame_number| write_reference.addArg(b.fmt("{d}", .{frame_number}));
+    return reference;
+}
+
+/// The frame of each of the tour's thirteen screens that `test-draw`
+/// compares: the middle one of the 24 that `tools/demo_stream.zig` streams.
+const compared_frames = compared: {
+    var numbers: [13]u64 = undefined;
+    for (&numbers, 0..) |*number, screen| number.* = 24 * screen + 12;
+    break :compared numbers;
+};
+
+/// The TrueType fonts zui-sokol's tour adds, in the order `kit.addFonts`
+/// adds them, so each takes the `FontId` the tour's text names.
+const tour_truetype_fonts = [_][]const u8{
+    "examples/fonts/AtkinsonHyperlegible-Regular.ttf",
+    "examples/fonts/AtkinsonHyperlegible-Bold.ttf",
+};
+
+/// What the published page loads, besides the client, the tour's worker and
+/// the fonts.
+const site_scripts = [_][]const u8{
+    "index.html",
+    "cross_origin_isolation.mjs",
+    "isolation_service_worker.js",
+    "tour_page.mjs",
+    "client.mjs",
+    "frame_drawer.mjs",
+    "input_recorder.mjs",
+    "worker_port.mjs",
+    "tour_worker.mjs",
+    "tour_thread.mjs",
+};
+
+/// The published site: the page, the client, the tour's worker, and the
+/// tour's fonts with their license.
+fn siteFiles(b: *std.Build, client: *std.Build.Step.Compile, worker: *std.Build.Step.Compile, bitmap_font_rows: std.Build.LazyPath, zui_sokol_dependency: *std.Build.Dependency) *std.Build.Step.WriteFile {
+    const site = b.addWriteFiles();
+    for (site_scripts) |script| _ = site.addCopyFile(b.path(b.fmt("web/{s}", .{script})), script);
+    _ = site.addCopyFile(client.getEmittedBin(), "zui-web.wasm");
+    _ = site.addCopyFile(worker.getEmittedBin(), "zui-web-tour.wasm");
+    _ = site.addCopyFile(bitmap_font_rows, "bitmap.fonts");
+    var font_urls: std.ArrayList(u8) = .empty;
+    font_urls.append(b.allocator, '[') catch @panic("out of memory");
+    for (tour_truetype_fonts, 0..) |font, index| {
+        const url = b.fmt("fonts/{s}", .{std.fs.path.basename(font)});
+        _ = site.addCopyFile(zui_sokol_dependency.path(font), url);
+        font_urls.print(b.allocator, "{s}\"{s}\"", .{ if (index == 0) "" else ",", url }) catch @panic("out of memory");
+    }
+    font_urls.append(b.allocator, ']') catch @panic("out of memory");
+    _ = site.add("truetype-fonts.json", font_urls.items);
+    _ = site.addCopyFile(zui_sokol_dependency.path("examples/fonts/OFL.txt"), "fonts/OFL.txt");
+    return site;
+}
+
+fn tourSessionImports(b: *std.Build, zui_sokol_dependency: *std.Build.Dependency, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) []const std.Build.Module.Import {
+    return b.allocator.dupe(std.Build.Module.Import, &.{
+        .{ .name = "zui_sokol_ui", .module = zui_sokol_dependency.module("zui_sokol_ui") },
+        .{ .name = "zui_sokol_tour", .module = zui_sokol_dependency.module("zui_sokol_tour") },
+        .{ .name = "zui_wire", .module = b.dependency("zui", .{ .target = target, .optimize = optimize }).module("zui_wire") },
+    }) catch @panic("out of memory");
+}
+
+/// zui-sokol's tour for a Web Worker: WebAssembly on memory the page
+/// shares with the workers the tour's tasks run on, each of which sets its
+/// own stack pointer and thread-local storage.
+fn tourWorker(b: *std.Build, zui_sokol_dependency: *std.Build.Dependency, worker_target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Step.Compile {
+    const module = b.createModule(.{
+        .root_source_file = b.path("src/tour_worker.zig"),
+        .target = worker_target,
+        .optimize = optimize,
+        .single_threaded = false,
+        .imports = tourSessionImports(b, zui_sokol_dependency, worker_target, optimize),
+    });
+    module.export_symbol_names = &.{ "__stack_pointer", "__wasm_init_tls" };
+    const worker = b.addExecutable(.{ .name = "zui-web-tour", .root_module = module });
+    worker.entry = .disabled;
+    worker.rdynamic = true;
+    worker.import_memory = true;
+    worker.shared_memory = true;
+    worker.stack_size = 4 << 20;
+    worker.max_memory = 1 << 30;
+    return worker;
+}
+
+/// A native program that runs zui-sokol's tour.
+fn tourTool(b: *std.Build, name: []const u8, root_source_file: []const u8, imports: []const std.Build.Module.Import, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Step.Compile {
+    const tool = b.addExecutable(.{
+        .name = name,
+        .root_module = b.createModule(.{ .root_source_file = b.path(root_source_file), .target = target, .optimize = optimize, .imports = imports }),
+    });
+    linkThroughLlvmOnLinux(tool);
+    return tool;
+}
+
+/// A WebAssembly module with no entry point, whose exports the page calls.
+fn browserModule(b: *std.Build, name: []const u8, root_source_file: []const u8, browser_target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Step.Compile {
+    const module = b.addExecutable(.{ .name = name, .root_module = webModule(b, root_source_file, browser_target, optimize) });
+    module.entry = .disabled;
+    module.rdynamic = true;
+    return module;
+}
+
+/// As zui-sokol links: Zig 0.16's ELF linker rejects the R_X86_64_PC64
+/// relocations that GCC 16's crt1.o carries, and LLD crashes the compiler
+/// unless the LLVM backend produced the objects.
+fn linkThroughLlvmOnLinux(compile: *std.Build.Step.Compile) void {
+    if (compile.rootModuleTarget().os.tag == .linux) {
+        compile.use_llvm = true;
+        compile.use_lld = true;
+    }
+}

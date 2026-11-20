@@ -1,0 +1,39 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>zui-web input check</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+</style>
+<canvas id="frame"></canvas>
+<script type="module">
+  import { InputRecorder } from "./input_recorder.mjs";
+
+  const { instance } = await WebAssembly.instantiateStreaming(fetch("zui-web.wasm"), {});
+  const wasm = instance.exports;
+  if (!wasm.zuiWebInit()) throw new Error("the client could not reserve its memory");
+  const canvas = document.getElementById("frame");
+  const recorder = new InputRecorder(canvas, wasm);
+  canvas.focus();
+
+  // The record the page would send now, in base64, or null.
+  window.takeRecord = () => recorder.takeRecord()?.toBase64() ?? null;
+
+  // Decodes a stream of frames, applying each one's host requests, and
+  // returns the canvas's cursor after each.
+  window.receiveFrames = (base64) => {
+    const stream = Uint8Array.fromBase64(base64);
+    const room = wasm.zuiWebRoomFor(stream.length) >>> 0;
+    if (room === 0) throw new Error(`no room for ${stream.length} bytes: ${recorder.errorName()}`);
+    new Uint8Array(wasm.memory.buffer, room, stream.length).set(stream);
+    wasm.zuiWebReceived(stream.length);
+    const cursors = [];
+    for (let status = wasm.zuiWebNextFrame(); status !== 0; status = wasm.zuiWebNextFrame()) {
+      if (status < 0) throw new Error(recorder.errorName());
+      recorder.applyHostRequests();
+      cursors.push(canvas.style.cursor);
+    }
+    return cursors;
+  };
+  window.ready = true;
+</script>
