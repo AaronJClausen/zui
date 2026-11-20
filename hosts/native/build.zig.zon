@@ -1,0 +1,18 @@
+.{
+    .name = .zui_host,
+    .version = "0.1.0",
+    .fingerprint = 0x9d3967d40b2a21d4, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        .zui = .{
+            .url = "git+https://github.com/AaronJClausen/zui#7d9117acf92b4041044b64e9604392a0def59b5d",
+            .hash = "zui-0.5.0-xfvfqi7vHABEAXHqjHlbLr7xqQ4rLAjOituFbaNLEPG_",
+        },
+        .zui_sokol = .{
+            .url = "git+https://github.com/AaronJClausen/zui-sokol#f03fb362c5cebdc6d9316803e01362323d00c3dd",
+            .hash = "zui_sokol-0.2.0-LHR9oZxGCgAqsNg5G7POvV5gQc1BTiwnFEhzsvnayZjT",
+            .lazy = true,
+        },
+    },
+    .paths = .{ "build.zig", "build.zig.zon", "zui_host.zig", "windows", "linux", "examples", "README.md", "LICENSE" },
+}
