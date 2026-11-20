@@ -147,8 +147,8 @@ The stage is the one in SPEC.md §21 that builds it.
 | Feature | Lives in | Stage |
 |---|---|---|
 | instruction counts, trace zones | CI; the tracer contract in the core; the Tracy binding in `zui_tracy` | 1 |
-| hardware counters | `bench/counters.zig`, through Linux's `perf_event_open`; read by `bench --counters` and `bench-compare --metric`, never by the core | 1 |
-| trustworthy times: pinned runs, shuffled scenarios, random code and memory layouts, intervals against a noise band; simulated misses; machines side by side | `bench/` (`machine.zig`, `statistics.zig`, `compare.zig`, `counts.zig`, `report.zig`), never the core | 1, redone after 7 |
+| hardware counters | `core/bench/counters.zig`, through Linux's `perf_event_open`; read by `bench --counters` and `bench-compare --metric`, never by the core | 1 |
+| trustworthy times: pinned runs, shuffled scenarios, random code and memory layouts, intervals against a noise band; simulated misses; machines side by side | `core/bench/` (`machine.zig`, `statistics.zig`, `compare.zig`, `counts.zig`, `report.zig`), never the core | 1, redone after 7 |
 | frame record, time as an instant, scale and zoom | core | 2 |
 | input as events, many pointers, environment | host reports; core applies | 2 |
 | outside data, demand, `Status`, `Waker` | core contract; default sources in `zui_async` | 2 |
@@ -173,7 +173,7 @@ The stage is the one in SPEC.md §21 that builds it.
 | Linux and web hosts; many windows | `zui-host`; one `Context` per window, each made and declared through `zui_app`, and one renderer with a surface per window | 10 |
 | the macOS host | `zui-host`, as the others; only its contract shapes exist (the `cocoa` surface, vibrancy as the system material), as stubs | set aside |
 | window decorations: a custom title bar the OS still moves, resizes and snaps | chrome regions in the core, beside the frame, behind `features.chrome_regions`; `zui_app` hands them to the host's `zuiChromeRegions`; each host answers its window manager | 10 |
-| host services: the clipboard, notifications, file dialogs, opening URLs, menus | the core's vocabulary and checks (`src/services.zig`); `zui_app.ServicesOf`'s guards; each host implements them, answering into a source the application chooses | 10 |
+| host services: the clipboard, notifications, file dialogs, opening URLs, menus | the core's vocabulary and checks (`core/src/services.zig`); `zui_app.ServicesOf`'s guards; each host implements them, answering into a source the application chooses | 10 |
 | motion and exit animations | `zui_motion`; ghost buffer in the core | 11 |
 | text editing and IME | `zui_widgets`; composition events and the IME area from the core | 11 |
 | color spaces, palettes, icons | `zui_color`, `zui_icons` | 11 |
@@ -282,9 +282,9 @@ roadmap item named:
 
 | Today | The spec | Where today | Item |
 |---|---|---|---|
-| `Widgets(Ui)` with a `Theme` struct | `Widgets(Ui, Skin)` | `zui_widgets/` | K5 |
-| `zui_debug`'s inspector runs in the application's process; a frame on the wire carries no elements for it | over the wire, the inspector runs in another process (SPEC.md §19.7) | `zui_debug/`, `zui_wire/` | not yet queued |
-| a frame on the wire carries no chrome regions, and the wire host declares no `zuiChromeRegions`, so a remote window keeps the system's title bar | chrome over the wire | `zui_wire/` | not yet queued |
+| `Widgets(Ui)` with a `Theme` struct | `Widgets(Ui, Skin)` | `core/zui_widgets/` | K5 |
+| `zui_debug`'s inspector runs in the application's process; a frame on the wire carries no elements for it | over the wire, the inspector runs in another process (SPEC.md §19.7) | `core/zui_debug/`, `core/zui_wire/` | not yet queued |
+| a frame on the wire carries no chrome regions, and the wire host declares no `zuiChromeRegions`, so a remote window keeps the system's title bar | chrome over the wire | `core/zui_wire/` | not yet queued |
 | zui-host's Linux host speaks Wayland only, opens one window, reports no low memory, IME or semantics, and keeps the compositor's title bar; its environment comes from the desktop portal and UPower over D-Bus, and stays at the defaults without them; its services have no menus, which Wayland lacks | a Linux host on Wayland and X11 with every report the Windows host makes, and a system material where the compositor offers one | `../zui-host` | H4 |
 
 Unchanged in shape: element storage in pre-order structure-of-arrays, the
@@ -295,7 +295,7 @@ parallel measurement and the module boundary.
 
 | Repository | Holds |
 |---|---|
-| `zui` | the core, the contracts, and the modules: async, widgets, reflect, testing, tracy, app, wire, debug, motion, color, icons |
+| `zui` | in `core/`, the package `zui_core`: the core, the contracts, and the modules: async, widgets, reflect, testing, tracy, app, wire, debug, motion, color, icons; at the root, the package `zui` that users fetch, which re-exports core's modules and runs every package's steps |
 | `zui-host` | native hosts, one directory per OS, chosen by target: `windows/` (H2) and `linux/`, on Wayland (H4) |
 | `zui-raylib`, `zui-sokol`, `zui-terminal` | renderers; `zui-raylib` also ships the raylib adapter host |
 | `zui-web` | the browser: a thin client over `zui_wire` (V4), then a web host (H5); today the client's decoder, in WebAssembly, and its drawing of shapes, text, backdrop blurs and materials through WebGL 2 with four samples per pixel, checked against zui-sokol's renderer drawing the tour's frames, and the page's input written back as records the tour takes, with the cursor its frames ask for shown on the canvas; and zui-sokol's tour in a Web Worker on an `Io` of its own, whose tasks take turns on workers sharing its memory, drawing the frames it draws natively and timing them on the worker's clock; and the page that puts them together, published to GitHub Pages from CI and made cross-origin isolated by a service worker of its own |

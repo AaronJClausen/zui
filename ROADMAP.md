@@ -70,14 +70,14 @@ green, and its **Status** line below says which slice is next.
 |---|---|---|---|---|
 | H4. Linux | 10 | `../zui-host`, `../zui-sokol` | | in progress; slice 5, the IME, is next |
 | H5. Web | 10 | `../zui-web` | | |
-| H7. Window decorations | 10 | `src/chrome.zig`, `src/context.zig`, `zui_app/`, `../zui-host` | | waiting on a person: the checklist under H7's *Status*, on `zig build title-bar` in zui-host |
-| M1. `zui_motion` | 11 | `zui_motion/` | | |
-| M2. Exit animations | 11 | `src/`, `zui_motion/` | M1 | |
-| K1. `zui_color` | 11 | `zui_color/` | | |
-| K5. The skin contract | 11 | `zui_widgets/` | | |
-| K2. The default skin | 11 | `zui_widgets/` | K5, K1 | |
-| E1. Text editing | 11 | `src/`, `zui_widgets/`, `../zui-host` | K5 | |
-| K3. `zui_icons` | 11 | `zui_icons/` | | |
+| H7. Window decorations | 10 | `core/src/chrome.zig`, `core/src/context.zig`, `core/zui_app/`, `../zui-host` | | waiting on a person: the checklist under H7's *Status*, on `zig build title-bar` in zui-host |
+| M1. `zui_motion` | 11 | `core/zui_motion/` | | |
+| M2. Exit animations | 11 | `core/src/`, `core/zui_motion/` | M1 | |
+| K1. `zui_color` | 11 | `core/zui_color/` | | |
+| K5. The skin contract | 11 | `core/zui_widgets/` | | |
+| K2. The default skin | 11 | `core/zui_widgets/` | K5, K1 | |
+| E1. Text editing | 11 | `core/src/`, `core/zui_widgets/`, `../zui-host` | K5 | |
+| K3. `zui_icons` | 11 | `core/zui_icons/` | | |
 | K4. `zui-themes` | 11 | `../zui-themes` | K5, K2 | |
 | D1. `zui-examples` and the template | 11 | `../zui-examples` | | |
 | D2. Samples | 11 | `../zui-examples` | D1 | |
@@ -4293,7 +4293,7 @@ would, synchronously, to the host's own handlers
 of its own (`:348`) only because Windows runs moves and resizes in a
 modal loop; a Wayland client has no such loop, so one thread suffices.
 SPEC.md §16.4's `wayland` surface is a display and a surface
-(`src/surface.zig:48`), the objects of libwayland-client: EGL's and
+(`core/src/surface.zig:48`), the objects of libwayland-client: EGL's and
 Vulkan's Wayland platforms take exactly those, so a host that spoke the
 protocol itself would give a surface no GPU driver can draw into.
 sokol-zig links libwayland-client, libwayland-egl, libxkbcommon and EGL
@@ -4498,12 +4498,12 @@ Decided here:
 - Before H7, nothing implemented chrome regions. SPEC.md listed
   `Frame.chromeRegions()` (§6.5), and §13.4 had one sentence about them.
 - Hit regions are not a list in the frame. Emission writes them into the
-  context's `memory.results` (`src/emission.zig:65-66`, `:328-331`), so
+  context's `memory.results` (`core/src/emission.zig:65-66`, `:328-331`), so
   chrome is computed beside the frame instead, after layout, and emission
   is not touched. Its walk is copied per frame kind because any change to
-  it moved `endFrame` by up to 5% (`src/emission.zig:56-61`).
+  it moved `endFrame` by up to 5% (`core/src/emission.zig:56-61`).
 - The pattern for data beside a frame is V2's: a list in `FrameSlot`
-  (`src/context.zig:771`). Any field added to `Frame` moved R1 counts.
+  (`core/src/context.zig:771`). Any field added to `Frame` moved R1 counts.
 - `appendElement` is `inline`, so an `Element` field left at its default
   costs nothing. V2's `semantics` field left the counts identical with the
   feature off.
@@ -4528,15 +4528,15 @@ application marks its parts with `Element.chrome`, behind
 host keeps a snapshot, answers `WM_NCHITTEST` from it, and works the
 caption buttons itself.
 1. **The core, `zui_app` and `zui_testing`** (zui only):
-   - `ChromeKind`, `ChromeRegion` (`src/chrome.zig`).
+   - `ChromeKind`, `ChromeRegion` (`core/src/chrome.zig`).
    - `TitleBar`, `WindowOptions.title_bar` and
-     `HostCapabilities.custom_title_bar` (`src/host.zig`).
+     `HostCapabilities.custom_title_bar` (`core/src/host.zig`).
    - `Environment.custom_title_bar` and `.window_maximized`, with their
-     changes (`src/input.zig`).
+     changes (`core/src/input.zig`).
    - `Features.chrome_regions`, `Element.chrome`, `Frame.chromeRegions()`,
-     and the list in `FrameSlot` (`src/context.zig`).
+     and the list in `FrameSlot` (`core/src/context.zig`).
    - `zuiChromeRegions` checked as a frame call, and `custom_title_bar`
-     checked against it (`src/contracts.zig`).
+     checked against it (`core/src/contracts.zig`).
    - `zui_app.Options.title_bar`.
    - A step in the host suite.
 2. **The Windows host** (zui-host, then a zui commit for the documents):
@@ -4888,13 +4888,13 @@ order, each given its Grounding, Plan and Done when as it is taken.
 What fixes a contract's shape for macOS is already in the code, as a
 stub with nothing behind it, so taking up macOS changes no contract:
 - `zui.Surface.cocoa`, an `NSView` by pointer, and `.cocoa` among the
-  surface kinds (`src/surface.zig`);
+  surface kinds (`core/src/surface.zig`);
 - `HostCapabilities.system_material` and `Environment.system_material`,
   which name vibrancy beside Mica;
 - `Modifiers.super`, which a macOS host reports for Command;
 - bench's `Machine`, which reads a Mac's OS version and caches
-  (`bench/machine.zig`), and `--counters`, which says that kperf's
-  counters are not read (`bench/counters.zig`).
+  (`core/bench/machine.zig`), and `--counters`, which says that kperf's
+  counters are not read (`core/bench/counters.zig`).
 
 zui-host's `zui_host.Host` stays a compile error on macOS until H3 adds
 its directory. CI's macOS runners stay: they are GitHub's, and they check
@@ -4910,7 +4910,7 @@ The items:
   notifications, `NSWorkspace`). zui-sokol draws into it through Metal,
   which also first compiles the Metal that sokol-shdc wrote for G5's
   material shader.
-- **macOS's hardware counters** (R9's remainder, `bench/counters.zig`):
+- **macOS's hardware counters** (R9's remainder, `core/bench/counters.zig`):
   `--counters` through kperf, which needs `sudo`.
 - **macOS's skin** (K4's remainder, `../zui-themes`), once K4 ships the
   others.

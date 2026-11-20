@@ -148,7 +148,7 @@ repositories.
 
 | Repository | Holds |
 |---|---|
-| `zui` | the core, the contracts, and the modules |
+| `zui` | the core, the contracts, and the modules, as the package `zui_core` in `core/`; the package `zui` at its root, which re-exports them |
 | `zui-host` | native hosts, one directory per OS |
 | `zui-raylib`, `zui-sokol`, `zui-terminal`, `zui-web` | renderers; `zui-raylib` also ships an adapter host |
 | `zui-themes` | skins for OS design languages |
@@ -156,7 +156,7 @@ repositories.
 
 ### 3.3 The module boundary
 
-Each module's root file is named after it (`zui_widgets/zui_widgets.zig`),
+Each module's root file is named after it (`core/zui_widgets/zui_widgets.zig`),
 because Zig names types after their file and users read those names in
 compile errors. A module can import only files in its own directory, so
 modules reach zui only through `@import("zui")`: **the compiler keeps

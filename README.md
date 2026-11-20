@@ -372,6 +372,11 @@ while (to_release.next()) |released| if (released) |texture| unload(texture) els
 
 ## Development
 
+The engine and its modules are the package in `core/`; the repository's
+root is the package `zui` that users fetch, which re-exports core's
+modules and runs core's steps under the same names. Run these from the
+root:
+
 | Command | What it does |
 |---|---|
 | `zig build test` | run the unit, golden, randomized-invariant, widget and compile-error tests (add `-Doptimize=ReleaseSafe` or `ReleaseFast` to test other modes) |
@@ -386,6 +391,8 @@ while (to_release.next()) |released| if (released) |texture| unload(texture) els
 | `zig build bench-install` | install the benchmark executable into `zig-out/bin`, as `bench-compare` does to run one scenario at a time; a base from before this step is compared one whole run at a time instead, which a scenario's position in the run can bias |
 | `zig build bench-compare -- --calibrate` | compare `HEAD` with itself and save each time's noise band for this machine's setup; run it once per machine, and again after changing the setup |
 | `zig build docs` | generate API documentation into `zig-out/docs` |
+| `zig build test-all` | run `zig build test` in every package's directory, each as a process of its own |
+| `zig build check-all` | run `zig build check` in every package's directory; `-Dtarget` and `-Doptimize` are passed on |
 | `zig build fmt` | format every Zig source file |
 | `zig build fmt-check` | fail if any file is not formatted, as CI does |
 

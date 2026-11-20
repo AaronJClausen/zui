@@ -58,15 +58,16 @@ Stop and ask the user instead of guessing when:
 
 | Change | Goes in |
 |---|---|
-| core engine and vocabulary | `src/<topic>.zig`; public names are exported from `src/root.zig` |
-| a contract check (`zui`-prefixed declarations) | `src/contracts.zig` |
-| core tests | `src/tests/<area>.zig`, imported from the `test` block of `src/root.zig`; shared helpers in `src/tests/support.zig` |
-| a compile-error message | `tests/compile_errors/<case>.zig`, plus a row in `compile_error_cases` in `build.zig` with the complete message. Every message SPEC.md quotes has one |
-| a new public API that is generic | exercised in `tests/instantiate.zig`, so `zig build check` type-checks it on every target |
-| a module `zui_<name>` | `zui_<name>/zui_<name>.zig` and `zui_<name>/tests.zig`. In `build.zig`: `b.addModule`, the test loop, the `check` imports and `formatted_paths`. Also `.paths` in `build.zig.zon` and the import snippet in `README.md`. A module imports only its own directory and `@import("zui")` (SPEC.md §3.3) |
-| a conformance suite (`expect*Conforms`) | `zui_testing/zui_testing.zig` |
-| a benchmark scenario | `bench/bench.zig`; its budget, if any, comes from SPEC.md §20.2 |
+| core engine and vocabulary | `core/src/<topic>.zig`; public names are exported from `core/src/root.zig` |
+| a contract check (`zui`-prefixed declarations) | `core/src/contracts.zig` |
+| core tests | `core/src/tests/<area>.zig`, imported from the `test` block of `core/src/root.zig`; shared helpers in `core/src/tests/support.zig` |
+| a compile-error message | `core/tests/compile_errors/<case>.zig`, plus a row in `compile_error_cases` in `core/build.zig` with the complete message. Every message SPEC.md quotes has one |
+| a new public API that is generic | exercised in `core/tests/instantiate.zig`, so `zig build check` type-checks it on every target |
+| a module `zui_<name>` | `core/zui_<name>/zui_<name>.zig` and `core/zui_<name>/tests.zig`. In `core/build.zig`: `b.addModule`, the test loop, the `check` imports and `formatted_paths`. Also `.paths` in `core/build.zig.zon`, `core_modules` in the root `build.zig`, which re-exports it, and the import snippet in `README.md`. A module imports only its own directory and `@import("zui")` (SPEC.md §3.3) |
+| a conformance suite (`expect*Conforms`) | `core/zui_testing/zui_testing.zig` |
+| a benchmark scenario | `core/bench/bench.zig`; its budget, if any, comes from SPEC.md §20.2 |
 | CI | `.github/workflows/ci.yml` |
+| a package | its own directory, with its `build.zig` and `build.zig.zon`, naming other packages by `.path`; in the root, a line in `packages` in `build.zig` and in `.paths` in `build.zig.zon` |
 | renderer and adapter-host changes | `../zui-raylib`, `../zui-sokol`, `../zui-terminal`, tested against this checkout with `zig build test --fork=../zui` |
 | native hosts | `../zui-host`, which is created by H2 and not before |
 
@@ -105,14 +106,18 @@ reused (`ROADMAP.md` explains the letters).
 
 ## Verifying
 
+Run these from the repository's root, which runs core's steps under the
+same names; another package's own steps run from its directory.
+
 | Command | When |
 |---|---|
 | `zig build test` | always; about 25 s |
 | `zig build test -Doptimize=ReleaseFast` and `-Doptimize=ReleaseSafe` | before committing; CI runs all three |
-| `zig build check -Dtarget=wasm32-freestanding` and `-Dtarget=powerpc-linux` | any change to `src/` (freestanding and big-endian) |
+| `zig build check -Dtarget=wasm32-freestanding` and `-Dtarget=powerpc-linux` | any change to `core/src/` (freestanding and big-endian) |
 | `zig build test -Dtarget=x86-linux` | any index or hash arithmetic; catches 64-bit assumptions |
 | `zig build test -Dzui-sanitize-thread=true` | any change to a source, an atomic or the conformance suite; on Linux only, so here in a container run with `--security-opt seccomp=unconfined` |
 | `zig build test -Dzui-tracy=true` | any change to `zui_tracy` or the trace zones; fetches Tracy |
+| `zig build test-all` and `zig build check-all` | any change a package other than core could feel; each runs the step in every package's directory |
 | `zig build fmt` | before committing; CI runs `fmt-check` |
 | `zig build bench -- --check-targets` | any change to a hot path; in benchmarking mode, as SPEC.md §20.2's budgets are set |
 | `zig build bench-compare -- <base>` | any change claiming a speedup or risking a slowdown |

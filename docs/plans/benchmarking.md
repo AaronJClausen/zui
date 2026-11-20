@@ -19,9 +19,9 @@ their measurements are recorded:
 
 | Tool | Measures | Defends against noise by |
 |---|---|---|
-| `zig build bench` (`bench/bench.zig`) | wall-clock time of 15 scenarios, split into declaration and `endFrame`, plus startup and first frames; 20 warm-up frames, then 400 timed | taking each scenario's fastest frame; `doNotOptimizeAway`; failing on any allocation after `init` |
-| `zig build bench-compare` (`bench/compare.zig`) | two commits, each built in its own worktree and run with its own `zig build bench` | throwing away a warm-up run; rounds that alternate which side goes first (ABBA); the median of paired head/base ratios; calling a change only when the middle half of those ratios is more than 2% from no change |
-| `zig build counts` (`bench/counts.zig`) | instructions per frame under Callgrind, collected only during the phase | one fixed CPU model (x86-64-v3, no libc), so the counts are the same on every machine; CI fails on more than 2% growth |
+| `zig build bench` (`core/bench/bench.zig`) | wall-clock time of 15 scenarios, split into declaration and `endFrame`, plus startup and first frames; 20 warm-up frames, then 400 timed | taking each scenario's fastest frame; `doNotOptimizeAway`; failing on any allocation after `init` |
+| `zig build bench-compare` (`core/bench/compare.zig`) | two commits, each built in its own worktree and run with its own `zig build bench` | throwing away a warm-up run; rounds that alternate which side goes first (ABBA); the median of paired head/base ratios; calling a change only when the middle half of those ratios is more than 2% from no change |
+| `zig build counts` (`core/bench/counts.zig`) | instructions per frame under Callgrind, collected only during the phase | one fixed CPU model (x86-64-v3, no libc), so the counts are the same on every machine; CI fails on more than 2% growth |
 
 What it already got right:
 - **Fastest frame as the estimator:** Chen, Revels and Edelman found the

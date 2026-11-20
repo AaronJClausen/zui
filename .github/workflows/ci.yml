@@ -22,7 +22,7 @@ env:
 
 jobs:
   lint:
-    name: Format and docs
+    name: Format, docs and every package's check
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -32,6 +32,7 @@ jobs:
           version: ${{ env.ZIG_VERSION }}
       - run: zig build fmt-check
       - run: zig build docs
+      - run: zig build check-all
 
   test:
     name: Test (${{ matrix.os }}, ${{ matrix.optimize }})
