@@ -7,7 +7,7 @@
 
 const std = @import("std");
 const zui_sokol = @import("zui_sokol");
-const zui = zui_sokol.zui;
+const zui = @import("zui");
 const sokol = zui_sokol.sokol;
 const sapp = sokol.app;
 const sg = sokol.gfx;

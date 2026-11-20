@@ -8,6 +8,14 @@ const packages = [_][]const u8{
     "examples",
     "renderers/terminal",
     "renderers/raylib",
+    "renderers/sokol",
+};
+
+/// Checked in as sokol-shdc writes them, so formatting leaves them alone.
+const generated_sources = [_][]const u8{
+    "renderers/sokol/src/material.glsl.zig",
+    "renderers/sokol/src/linear_light.glsl.zig",
+    "renderers/sokol/src/present_scrgb.glsl.zig",
 };
 
 const core_modules = [_][]const u8{ "zui", "zui_testing", "zui_widgets", "zui_async", "zui_tracy", "zui_reflect", "zui_app", "zui_wire", "zui_debug" };
@@ -57,11 +65,12 @@ pub fn build(b: *std.Build) void {
     addStepInEveryPackage(b, "check-all", "check", "Type-check every package for the selected target, each in its own directory");
 
     const formatted_paths = [_][]const u8{ "build.zig", "build.zig.zon" } ++ packages;
-    var excluded_paths: [2 * packages.len][]const u8 = undefined;
+    var excluded_paths: [2 * packages.len + generated_sources.len][]const u8 = undefined;
     for (packages, 0..) |package, index| {
         excluded_paths[2 * index] = b.pathJoin(&.{ package, "zig-out" });
         excluded_paths[2 * index + 1] = b.pathJoin(&.{ package, "zig-pkg" });
     }
+    @memcpy(excluded_paths[2 * packages.len ..], &generated_sources);
     b.step("fmt", "Format all Zig sources").dependOn(&b.addFmt(.{ .paths = &formatted_paths, .exclude_paths = &excluded_paths }).step);
     b.step("fmt-check", "Fail if any Zig source is not formatted").dependOn(&b.addFmt(.{ .paths = &formatted_paths, .exclude_paths = &excluded_paths, .check = true }).step);
 }

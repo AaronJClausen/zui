@@ -1,8 +1,5 @@
 const std = @import("std");
-
-/// The zui these types are built against; import it from here so the
-/// application and the renderer always agree on zui's types.
-pub const zui = @import("zui");
+const zui = @import("zui");
 
 pub const Material = @import("material.zig").Material;
 pub const truetype = @import("truetype.zig");

@@ -3,7 +3,7 @@
 
 const std = @import("std");
 const zui_sokol_ui = @import("zui_sokol_ui");
-pub const zui = zui_sokol_ui.zui;
+pub const zui = @import("zui");
 pub const zui_widgets = @import("zui_widgets");
 pub const zui_reflect = @import("zui_reflect");
 pub const zui_async = @import("zui_async");

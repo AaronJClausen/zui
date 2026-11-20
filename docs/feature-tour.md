@@ -274,7 +274,7 @@ fn photoCard(app: *App, ui: *Ui, photo: *const Photo, index: usize) void {
 
 ### Gradients, shadows, glow and backdrop blur · *shipped*
 
-`effects` points at a `zui.Effects`: a linear `gradient`, interpolated in OKLab, and a `shadow`, which with no offset is a glow. They take the shape of the element's decoration and its corner radius, and paint from the bottom up as shadow, background, gradient, then the element's content. A `backdrop_blur` is frosted glass: it blurs what zui drew beneath the element, within its rounded box, and lays its `tint` over it, painted between the shadow and the background. A renderer that does not declare `.backdrop_blur` draws the tint alone, so pick a tint that reads well unblurred. zui-sokol blurs it; the raylib and terminal renderers draw the tint. The effects are copied when the element is declared, so a pointer to a local works, and an element without effects pays nothing for them, nor does a frame without any. Up to `limits.max_effects` elements a frame keep their effects, 256 by default; past it, an element is drawn without them and the diagnostics name the limit. A renderer that declares `.gradient` and `.shadow` in `zui_commands` gets those commands. For any other renderer, a gradient is lowered to a rectangle in its middle color and a shadow to nothing, and `frame.diagnostics.lowered` names what was lowered. zui-sokol draws both and the backdrop blur, and its tour shows them on its Light & Depth screen; the raylib and terminal renderers draw the lowered forms.
+`effects` points at a `zui.Effects`: a linear `gradient`, interpolated in OKLab, and a `shadow`, which with no offset is a glow. They take the shape of the element's decoration and its corner radius, and paint from the bottom up as shadow, background, gradient, then the element's content. A `backdrop_blur` is frosted glass: it blurs what zui drew beneath the element, within its rounded box, and lays its `tint` over it, painted between the shadow and the background. A renderer that does not declare `.backdrop_blur` draws the tint alone, so pick a tint that reads well unblurred. The sokol renderer blurs it; the raylib and terminal renderers draw the tint. The effects are copied when the element is declared, so a pointer to a local works, and an element without effects pays nothing for them, nor does a frame without any. Up to `limits.max_effects` elements a frame keep their effects, 256 by default; past it, an element is drawn without them and the diagnostics name the limit. A renderer that declares `.gradient` and `.shadow` in `zui_commands` gets those commands. For any other renderer, a gradient is lowered to a rectangle in its middle color and a shadow to nothing, and `frame.diagnostics.lowered` names what was lowered. The sokol renderer draws both and the backdrop blur, and its tour shows them on its Light & Depth screen; the raylib and terminal renderers draw the lowered forms.
 
 `src/ui/viewer.zig`
 
@@ -319,7 +319,7 @@ fn photoCard(ui: *Ui, photo: *const Photo) void {
 
 ### Transforms · *shipped*
 
-`effects` can also hold a `transform`: a translation, a scale and a rotation about an `origin` inside the element's box, applied to the element, its other effects and everything inside it as they are painted. Layout ignores it, so `rectOf` is still the box the element was laid out in and its neighbours stay put, which suits animation: a dialog that grows in, a card that tilts while dragged. A pointer hits a transformed element where it is drawn, through nested transforms and the clips around them. A renderer that declares `.transform` gets `transform_begin` and `transform_end` around the element's commands, and `affine(bounds)` maps its units to its parent's; for any other, the element is drawn and hit as laid out, and `frame.diagnostics.lowered` names `.transform`. zui-sokol draws transforms, on its tour's Transforms screen; the raylib and terminal renderers draw the element as laid out.
+`effects` can also hold a `transform`: a translation, a scale and a rotation about an `origin` inside the element's box, applied to the element, its other effects and everything inside it as they are painted. Layout ignores it, so `rectOf` is still the box the element was laid out in and its neighbours stay put, which suits animation: a dialog that grows in, a card that tilts while dragged. A pointer hits a transformed element where it is drawn, through nested transforms and the clips around them. A renderer that declares `.transform` gets `transform_begin` and `transform_end` around the element's commands, and `affine(bounds)` maps its units to its parent's; for any other, the element is drawn and hit as laid out, and `frame.diagnostics.lowered` names `.transform`. The sokol renderer draws transforms, on its tour's Transforms screen; the raylib and terminal renderers draw the element as laid out.
 
 `src/ui/import.zig`
 
@@ -347,7 +347,7 @@ fn draggedCard(ui: *Ui, photo: *const Photo, drag: zui.Drag) void {
 
 ### Materials · *shipped*
 
-A renderer with shaders of its own names them in `MaterialHandle`, an enum or an id, and the context's decoration gains a `material`: drawn over the element's box, in its corners, in place of its `background`. The background is the material's fallback, so a renderer that does not declare `.material` draws the background instead and `frame.diagnostics.lowered` names `.material`. A material sits under the gradient and over the shadow and backdrop blur, and a static style can carry one. Without a `MaterialHandle` the field is `void` and `Ui.Element`, `Ui.Decoration` and `Ui.Style` are `zui.Element`, `zui.Decoration` and `zui.Style`; with one they are the context's own, so a helper that returns an element names `Ui.Element`. zui-sokol draws its own, `zui_sokol.Material`: a pattern between two colors (`solid`, `sheen`, `aurora`) drawn by its shader and moved by a phase the application turns, on its tour's Materials screen. the raylib and terminal renderers draw the fallback.
+A renderer with shaders of its own names them in `MaterialHandle`, an enum or an id, and the context's decoration gains a `material`: drawn over the element's box, in its corners, in place of its `background`. The background is the material's fallback, so a renderer that does not declare `.material` draws the background instead and `frame.diagnostics.lowered` names `.material`. A material sits under the gradient and over the shadow and backdrop blur, and a static style can carry one. Without a `MaterialHandle` the field is `void` and `Ui.Element`, `Ui.Decoration` and `Ui.Style` are `zui.Element`, `zui.Decoration` and `zui.Style`; with one they are the context's own, so a helper that returns an element names `Ui.Element`. The sokol renderer draws its own, `zui_sokol.Material`: a pattern between two colors (`solid`, `sheen`, `aurora`) drawn by its shader and moved by a phase the application turns, on its tour's Materials screen. the raylib and terminal renderers draw the fallback.
 
 `src/ui/panels.zig`
 
@@ -374,7 +374,7 @@ fn panelFor(id: zui.Id) Ui.Element {
 
 ### HDR and wide-gamut color · *shipped*
 
-`Config.Color = zui.ExtendedColor` declares colors in linear scRGB, where 1.0 is SDR white: above it for HDR, outside 0 to 1 for wide gamut, written `.linear(4, 4, 4, 1)` or with `Color`'s own `.rgb(0x3366ff)`. Every type that holds a color follows it: `Ui.Decoration`, `Ui.Border`, `Ui.Effects`, `Ui.TextStyle`. For a renderer that draws only `zui.Color`, each is clamped as it is emitted, and `frame.diagnostics.clamped_colors` says when that changed one; `zui_wire` carries them unclamped when its context's renderer draws them. A host and a renderer that both declare `.scrgb_fp16` in `zui_output_formats` open the window with it in `WindowOptions.output_formats`, and the host picks it while its display shows HDR; `surface.outputFormat()` says which it chose. zui-host's Windows host picks it on a monitor in HDR and reports `ui.environment().hdr_headroom`, the monitor's peak over SDR white (1 in SDR), so a theme can tell how bright a highlight may go. zui-sokol draws that window into a half-float scRGB swapchain, with SDR white where other windows show theirs, and zui-host's `zig build hdr` shows two and four times SDR white beside it, measured off the desktop at 2.00× and 4.00×. The renderer suite reads an FP16 target back and expects HDR white there at four times SDR white.
+`Config.Color = zui.ExtendedColor` declares colors in linear scRGB, where 1.0 is SDR white: above it for HDR, outside 0 to 1 for wide gamut, written `.linear(4, 4, 4, 1)` or with `Color`'s own `.rgb(0x3366ff)`. Every type that holds a color follows it: `Ui.Decoration`, `Ui.Border`, `Ui.Effects`, `Ui.TextStyle`. For a renderer that draws only `zui.Color`, each is clamped as it is emitted, and `frame.diagnostics.clamped_colors` says when that changed one; `zui_wire` carries them unclamped when its context's renderer draws them. A host and a renderer that both declare `.scrgb_fp16` in `zui_output_formats` open the window with it in `WindowOptions.output_formats`, and the host picks it while its display shows HDR; `surface.outputFormat()` says which it chose. zui-host's Windows host picks it on a monitor in HDR and reports `ui.environment().hdr_headroom`, the monitor's peak over SDR white (1 in SDR), so a theme can tell how bright a highlight may go. The sokol renderer draws that window into a half-float scRGB swapchain, with SDR white where other windows show theirs, and zui-host's `zig build hdr` shows two and four times SDR white beside it, measured off the desktop at 2.00× and 4.00×. The renderer suite reads an FP16 target back and expects HDR white there at four times SDR white.
 
 `src/ui/exposure.zig`
 
@@ -505,7 +505,7 @@ pub const Fonts = struct {
 
 ### Images and self-drawn elements · *shipped*
 
-`ui.image` places the renderer's own image handle. `ui.custom` places a payload your renderer draws itself, such as a 3D viewport or a histogram. Both are leaves that take an `Element`, so they size, clip and hit-test like any box. Give an image its `natural_size` and a `fit` image takes it, keeping its proportions when its width grows or is squeezed. Its `tint` is multiplied into its pixels and its `corner_radius` rounds each corner; both reach the renderer in the `image` command, and the raylib renderer and zui-sokol draw them.
+`ui.image` places the renderer's own image handle. `ui.custom` places a payload your renderer draws itself, such as a 3D viewport or a histogram. Both are leaves that take an `Element`, so they size, clip and hit-test like any box. Give an image its `natural_size` and a `fit` image takes it, keeping its proportions when its width grows or is squeezed. Its `tint` is multiplied into its pixels and its `corner_radius` rounds each corner; both reach the renderer in the `image` command, and the raylib and sokol renderers draw them.
 
 `src/ui/viewer.zig`
 
@@ -1755,13 +1755,13 @@ pub const App = struct {
 };
 ```
 
-On zui-host's Windows host, up to four windows open at once, and zui-sokol draws each through its own swapchain on one device: two windows animating at once each hold a 144 Hz display's rate, and two idle windows use no CPU.
+On zui-host's Windows host, up to four windows open at once, and the sokol renderer draws each through its own swapchain on one device: two windows animating at once each hold a 144 Hz display's rate, and two idle windows use no CPU.
 
 <a id="contracts"></a>
 
 ## 06. The backend contracts
 
-zui draws nothing and opens no windows itself. Renderers and hosts are plain types checked at compile time, with conformance suites they run in their own CI. Today there are the raylib renderer and adapter host in `renderers/raylib/`, zui-sokol, the terminal renderer in `renderers/terminal/`, and zui-host's Windows host (message loop on its own thread, per-monitor DPI, Mica, IME, clipboard, opening URLs, dropped files, file watching), and its Linux host, on Wayland so far (fractional and buffer scale, pointer, wheel, keys through the compositor's keymap with their repeats, typed text, focus, cursor shapes, clipboard, dropped files, file watching through inotify, notifications, the portal's file dialogs and opening URLs, the environment from the desktop portal and UPower over D-Bus, and signals, sleep and waking as lifecycle events).
+zui draws nothing and opens no windows itself. Renderers and hosts are plain types checked at compile time, with conformance suites they run in their own CI. Today there are the raylib renderer and adapter host in `renderers/raylib/`, the sokol renderer in `renderers/sokol/`, the terminal renderer in `renderers/terminal/`, and zui-host's Windows host (message loop on its own thread, per-monitor DPI, Mica, IME, clipboard, opening URLs, dropped files, file watching), and its Linux host, on Wayland so far (fractional and buffer scale, pointer, wheel, keys through the compositor's keymap with their repeats, typed text, focus, cursor shapes, clipboard, dropped files, file watching through inotify, notifications, the portal's file dialogs and opening URLs, the environment from the desktop portal and UPower over D-Bus, and signals, sleep and waking as lifecycle events).
 
 <a id="renderer"></a>
 
@@ -1916,7 +1916,7 @@ test "the D3D11 renderer passes zui's renderer suite" {
 }
 ```
 
-The harness method signatures above are simplified. The exact set of declarations a harness needs is listed in the doc comments of `expectRendererConforms` and `expectHostConforms`. `renderers/raylib/`, zui-sokol and `renderers/terminal/` each have a `src/conformance.zig` you can copy.
+The harness method signatures above are simplified. The exact set of declarations a harness needs is listed in the doc comments of `expectRendererConforms` and `expectHostConforms`. `renderers/raylib/`, `renderers/sokol/` and `renderers/terminal/` each have a `src/conformance.zig` you can copy.
 
 <a id="tooling"></a>
 
@@ -2007,7 +2007,7 @@ The golden text above is illustrative. The format, one line per command in paint
 
 ### Record and replay · *shipped*
 
-`ui.relayTo(listener)` hands a listener each record as it is applied, together with what each source delivered. `Recording` keeps them, and `driver.replay` runs them again with no loader. A recorded session of zui-sokol's tour replays to identical commands without starting any work. This makes a bug report a file you can step through.
+`ui.relayTo(listener)` hands a listener each record as it is applied, together with what each source delivered. `Recording` keeps them, and `driver.replay` runs them again with no loader. A recorded session of the sokol renderer's tour replays to identical commands without starting any work. This makes a bug report a file you can step through.
 
 `tests/replay.zig`
 
@@ -2042,7 +2042,7 @@ test "a recorded import session replays to the same frames" {
 
 ### `zui_wire`: sessions as bytes · *shipped*
 
-`zui_wire` writes records in and frames out as bytes, with each frame encoded as the changes from the one before. zui-sokol's tour averages 240 bytes a frame against 24 KB for full frames. The header carries a fingerprint of the fonts, so a reader that measures with other fonts refuses the stream instead of drawing misplaced text.
+`zui_wire` writes records in and frames out as bytes, with each frame encoded as the changes from the one before. The sokol renderer's tour averages 240 bytes a frame against 24 KB for full frames. The header carries a fingerprint of the fonts, so a reader that measures with other fonts refuses the stream instead of drawing misplaced text.
 
 `src/session_recorder.zig`
 
@@ -2082,7 +2082,7 @@ fn playBack(gpa: std.mem.Allocator, reader: *std.Io.Reader, renderer: *Renderer,
 
 ### Running in one process, drawing in another · *shipped*
 
-`zui_wire.Host(Ui)` is a host whose surface is a socket, and `zui_wire.Renderer(Ui)` writes frames into it. On the other end, `zui_wire.Client(Ui)` joins any real host and renderer to the socket, sending input one way and drawing frames that come back. zui-host's `zig build remote` runs zui-sokol's tour this way. The wire renderer declares `Ui`'s commands, colors and payload types, so an application with images, custom payloads or materials runs over the wire unchanged. The wire host passes the host conformance suite.
+`zui_wire.Host(Ui)` is a host whose surface is a socket, and `zui_wire.Renderer(Ui)` writes frames into it. On the other end, `zui_wire.Client(Ui)` joins any real host and renderer to the socket, sending input one way and drawing frames that come back. zui-host's `zig build remote` runs the sokol renderer's tour this way. The wire renderer declares `Ui`'s commands, colors and payload types, so an application with images, custom payloads or materials runs over the wire unchanged. The wire host passes the host conformance suite.
 
 `tools/remote_viewer.zig`
 
@@ -2118,7 +2118,7 @@ const RemoteApp = struct {
 
 ### Running in a browser · *shipped*
 
-zui-web runs an application in a browser over `zui_wire`, as zui-sokol's tour runs at <https://aaronjclausen.github.io/zui-web/>. The application is built for `wasm32-freestanding` and runs in a Web Worker on an `Io` that steps to the page's clock. The page sleeps between frames as a native host does: it steps the application when its `ui.nextFrame()` says, at once or at a deadline, or when the canvas's input, a resize or a change of `devicePixelRatio` arrives, sending it that instant and the records its canvas's input wrote, and draws the frame bytes it answers with through WebGL 2, with four samples per pixel, as a native window with `sample_count = 4` smooths its edges, and with the cursor the frame asks for. A worker shares its memory with its threads only on a cross-origin isolated page, so the published page isolates itself with a service worker. Durations inside a frame are timed on the worker's `performance.now()`, imported by the module, since the stepped `Io` holds one instant for the whole frame. Its tasks run only while a frame waits for them, so the page also wakes when the earliest of their sleeps ends, where a native host is woken by a task's thread.
+zui-web runs an application in a browser over `zui_wire`, as the sokol renderer's tour runs at <https://aaronjclausen.github.io/zui-web/>. The application is built for `wasm32-freestanding` and runs in a Web Worker on an `Io` that steps to the page's clock. The page sleeps between frames as a native host does: it steps the application when its `ui.nextFrame()` says, at once or at a deadline, or when the canvas's input, a resize or a change of `devicePixelRatio` arrives, sending it that instant and the records its canvas's input wrote, and draws the frame bytes it answers with through WebGL 2, with four samples per pixel, as a native window with `sample_count = 4` smooths its edges, and with the cursor the frame asks for. A worker shares its memory with its threads only on a cross-origin isolated page, so the published page isolates itself with a service worker. Durations inside a frame are timed on the worker's `performance.now()`, imported by the module, since the stepped `Io` holds one instant for the whole frame. Its tasks run only while a frame waits for them, so the page also wakes when the earliest of their sleeps ends, where a native host is woken by a task's thread.
 
 `src/browser_worker.zig`
 
@@ -2220,5 +2220,5 @@ These names compile, but they don't do anything yet. This list is from `ARCHITEC
 - Writing UI by hand in core is verbose. Nested `.layout = .{ .sizing = .{ .width = ... } }` literals pile up, and static styles are the main relief today.
 - Interactive elements take three steps: declare, query by id, then pick colors from the state yourself. Widgets hide it, but there is nothing in between.
 - `labeledRow` leaves you to close the row, an asymmetry that's easy to get wrong.
-- Only zui-sokol draws gradients and shadows so far; the raylib and terminal renderers show a gradient as one flat color and no shadow. Only zui-sokol blurs a backdrop; the others draw its tint. Only zui-sokol draws a transform; the others draw the element as laid out. Only zui-sokol draws a material; the others draw its fallback background.
-- There's no examples repository or template yet. The best references are zui-sokol's tour and the raylib renderer's tour in `renderers/raylib/`.
+- Only the sokol renderer draws gradients and shadows so far; the raylib and terminal renderers show a gradient as one flat color and no shadow. Only the sokol renderer blurs a backdrop; the others draw its tint. Only the sokol renderer draws a transform; the others draw the element as laid out. Only the sokol renderer draws a material; the others draw its fallback background.
+- There's no examples repository or template yet. The best references are the sokol and raylib renderers' tours, in `renderers/sokol/` and `renderers/raylib/`.

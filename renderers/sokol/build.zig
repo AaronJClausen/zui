@@ -1,32 +1,32 @@
 const std = @import("std");
-const sokol = @import("sokol");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const force_opengl = b.option(bool, "gl", "Render with OpenGL instead of D3D11 or Metal") orelse false;
 
-    const tour_modules = addTourModules(b, target, optimize, .exported);
+    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "examples" };
+    b.step("fmt", "Format all Zig sources").dependOn(&b.addFmt(.{ .paths = formatted_paths, .exclude_paths = &generated_paths }).step);
+    b.step("fmt-check", "Fail if any Zig source is not formatted").dependOn(&b.addFmt(.{ .paths = formatted_paths, .exclude_paths = &generated_paths, .check = true }).step);
+
     const check = b.step("check", "Compile the backend and the demo, and link the tour for wasm32-freestanding, without installing them");
+    const stb_dependency = b.lazyDependency("stb", .{}) orelse return;
+    const tour_modules = addTourModules(b, stb_dependency, target, optimize, .exported);
     if (target.result.os.tag == .freestanding) return;
 
-    const zui_dependency = b.dependency("zui", .{ .target = target, .optimize = optimize });
-    const force_opengl = b.option(bool, "gl", "Render with OpenGL instead of D3D11 or Metal") orelse false;
-    const sokol_dependency = b.dependency("sokol", .{ .target = target, .optimize = optimize, .gl = force_opengl });
-    const zui_module = zui_dependency.module("zui");
-    const zui_widgets_module = zui_dependency.module("zui_widgets");
+    const core = b.dependency("zui_core", .{ .target = target, .optimize = optimize });
+    const sokol_dependency = b.lazyDependency("sokol", .{ .target = target, .optimize = optimize, .gl = force_opengl }) orelse return;
+    const zui_module = core.module("zui");
 
-    const backend_imports: []const std.Build.Module.Import = &.{
-        .{ .name = "zui", .module = zui_module },
-        .{ .name = "zui_widgets", .module = zui_widgets_module },
-        .{ .name = "zui_reflect", .module = zui_dependency.module("zui_reflect") },
-        .{ .name = "zui_sokol_ui", .module = tour_modules.ui },
-        .{ .name = "sokol", .module = sokol_dependency.module("sokol") },
-    };
     const backend_module = b.addModule("zui_sokol", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
-        .imports = backend_imports,
+        .imports = &.{
+            .{ .name = "zui", .module = zui_module },
+            .{ .name = "zui_sokol_ui", .module = tour_modules.ui },
+            .{ .name = "sokol", .module = sokol_dependency.module("sokol") },
+        },
     });
     addRendererOptions(b, backend_module, force_opengl);
 
@@ -62,7 +62,7 @@ pub fn build(b: *std.Build) void {
 
     check.dependOn(&demo.step);
     const freestanding_target = b.resolveTargetQuery(.{ .cpu_arch = .wasm32, .os_tag = .freestanding });
-    const freestanding_tour_modules = addTourModules(b, freestanding_target, optimize, .private);
+    const freestanding_tour_modules = addTourModules(b, stb_dependency, freestanding_target, optimize, .private);
     const freestanding_tour = b.addExecutable(.{
         .name = "zui-sokol-tour-freestanding",
         .root_module = b.createModule(.{
@@ -82,15 +82,13 @@ pub fn build(b: *std.Build) void {
 
     // The renderer suite reads frames back with glReadPixels, so it always
     // renders with OpenGL, and needs a window: on Linux CI, under Xvfb.
-    const gl_sokol_dependency = b.dependency("sokol", .{ .target = target, .optimize = optimize, .gl = true });
+    const gl_sokol_dependency = b.lazyDependency("sokol", .{ .target = target, .optimize = optimize, .gl = true }) orelse return;
     const gl_backend_module = b.createModule(.{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{
             .{ .name = "zui", .module = zui_module },
-            .{ .name = "zui_widgets", .module = zui_widgets_module },
-            .{ .name = "zui_reflect", .module = zui_dependency.module("zui_reflect") },
             .{ .name = "zui_sokol_ui", .module = tour_modules.ui },
             .{ .name = "sokol", .module = gl_sokol_dependency.module("sokol") },
         },
@@ -104,7 +102,8 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "zui_sokol", .module = gl_backend_module },
-                .{ .name = "zui_testing", .module = zui_dependency.module("zui_testing") },
+                .{ .name = "zui", .module = zui_module },
+                .{ .name = "zui_testing", .module = core.module("zui_testing") },
             },
         }),
     });
@@ -112,28 +111,26 @@ pub fn build(b: *std.Build) void {
     b.step("conformance", "Run zui's renderer suite against the renderer, in a window, with OpenGL").dependOn(&b.addRunArtifact(conformance).step);
 
     const regenerate_shaders = b.step("shaders", "Regenerate each src/*.glsl.zig from its GLSL with sokol-shdc");
-    inline for (shaders) |shader| {
-        regenerate_shaders.dependOn(sokol.shdc.createSourceFile(b, .{
-            .shdc_dep = sokol_dependency.builder.dependency("shdc", .{}),
-            .input = shader ++ ".glsl",
-            .output = shader ++ ".glsl.zig",
-            .slang = .{ .glsl410 = true, .hlsl5 = true, .metal_macos = true },
-        }) catch |err| std.debug.panic("sokol-shdc cannot run here: {t}", .{err}));
+    if (b.lazyImport(@This(), "sokol")) |sokol| {
+        inline for (shaders) |shader| {
+            regenerate_shaders.dependOn(sokol.shdc.createSourceFile(b, .{
+                .shdc_dep = sokol_dependency.builder.dependency("shdc", .{}),
+                .input = shader ++ ".glsl",
+                .output = shader ++ ".glsl.zig",
+                .slang = .{ .glsl410 = true, .hlsl5 = true, .metal_macos = true },
+            }) catch |err| std.debug.panic("sokol-shdc cannot run here: {t}", .{err}));
+        }
     }
-
-    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "examples" };
-    const generated_paths = comptime generated: {
-        var paths: [shaders.len][]const u8 = undefined;
-        for (shaders, &paths) |shader, *path| path.* = shader ++ ".glsl.zig";
-        break :generated paths;
-    };
-    b.step("fmt", "Format all Zig sources").dependOn(&b.addFmt(.{ .paths = formatted_paths, .exclude_paths = &generated_paths }).step);
-    b.step("fmt-check", "Fail if any Zig source is not formatted").dependOn(&b.addFmt(.{ .paths = formatted_paths, .exclude_paths = &generated_paths, .check = true }).step);
 }
 
 /// Checked in as `.glsl.zig`, so that building zui_sokol never runs sokol-shdc.
 const shaders = [_][]const u8{ "src/material", "src/linear_light", "src/present_scrgb" };
 
+const generated_paths = generated: {
+    var paths: [shaders.len][]const u8 = undefined;
+    for (shaders, &paths) |shader, *path| path.* = shader ++ ".glsl.zig";
+    break :generated paths;
+};
 /// Zig 0.16's own ELF linker rejects the R_X86_64_PC64 relocations in the
 /// `.sframe` section that GCC 16's crt1.o carries, and LLD crashes the
 /// compiler unless the LLVM backend produced the objects.
@@ -171,7 +168,7 @@ fn addRendererOptions(b: *std.Build, module: *std.Build.Module, opengl: bool) vo
 }
 
 const TourModules = struct {
-    /// `zui_sokol_ui`: the types a context drawn by zui-sokol declares.
+    /// `zui_sokol_ui`: the types a context drawn by `zui_sokol` declares.
     ui: *std.Build.Module,
     /// `zui_sokol_tour`: the tour's application, which declares its frames
     /// through `zui_sokol_ui` alone, so it builds where sokol does not.
@@ -182,24 +179,24 @@ const TourModules = struct {
 
 /// `.exported` adds the modules for dependents to import; `.private`
 /// makes them for this build alone, as for a second target.
-fn addTourModules(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, visibility: enum { exported, private }) TourModules {
-    const zui_dependency = b.dependency("zui", .{ .target = target, .optimize = optimize });
+fn addTourModules(b: *std.Build, stb_dependency: *std.Build.Dependency, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, visibility: enum { exported, private }) TourModules {
+    const core = b.dependency("zui_core", .{ .target = target, .optimize = optimize });
     const ui_options: std.Build.Module.CreateOptions = .{
         .root_source_file = b.path("src/ui/root.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{
-            .{ .name = "zui", .module = zui_dependency.module("zui") },
-            .{ .name = "stb_truetype", .module = stbTruetypeModule(b, target, optimize) },
+            .{ .name = "zui", .module = core.module("zui") },
+            .{ .name = "stb_truetype", .module = stbTruetypeModule(b, stb_dependency, target, optimize) },
         },
     };
     const ui = if (visibility == .exported) b.addModule("zui_sokol_ui", ui_options) else b.createModule(ui_options);
     const imports = b.allocator.dupe(std.Build.Module.Import, &.{
         .{ .name = "zui_sokol_ui", .module = ui },
-        .{ .name = "zui", .module = zui_dependency.module("zui") },
-        .{ .name = "zui_widgets", .module = zui_dependency.module("zui_widgets") },
-        .{ .name = "zui_reflect", .module = zui_dependency.module("zui_reflect") },
-        .{ .name = "zui_async", .module = zui_dependency.module("zui_async") },
+        .{ .name = "zui", .module = core.module("zui") },
+        .{ .name = "zui_widgets", .module = core.module("zui_widgets") },
+        .{ .name = "zui_reflect", .module = core.module("zui_reflect") },
+        .{ .name = "zui_async", .module = core.module("zui_async") },
     }) catch @panic("out of memory");
     const tour_options: std.Build.Module.CreateOptions = .{ .root_source_file = b.path("examples/tour_app.zig"), .target = target, .optimize = optimize, .imports = imports };
     const tour = if (visibility == .exported) b.addModule("zui_sokol_tour", tour_options) else b.createModule(tour_options);
@@ -210,9 +207,8 @@ fn addTourModules(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std
 /// compiled in, for the TrueType fonts of `zui_sokol.Text`. Without a C
 /// library, as on `wasm32-freestanding`, it allocates nothing, so it
 /// measures but rasterizes no glyph.
-fn stbTruetypeModule(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Module {
+fn stbTruetypeModule(b: *std.Build, stb_dependency: *std.Build.Dependency, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Module {
     const has_libc = target.result.os.tag != .freestanding;
-    const stb_dependency = b.dependency("stb", .{});
     const translated = b.addTranslateC(.{
         .root_source_file = stb_dependency.path("stb_truetype.h"),
         .target = target,

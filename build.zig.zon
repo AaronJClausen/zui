@@ -7,6 +7,7 @@
         .zui_core = .{ .path = "core" },
         .zui_terminal = .{ .path = "renderers/terminal" },
         .zui_raylib = .{ .path = "renderers/raylib" },
+        .zui_sokol = .{ .path = "renderers/sokol" },
     },
     .paths = .{
         "build.zig",
@@ -16,6 +17,7 @@
         "examples",
         "renderers/terminal",
         "renderers/raylib",
+        "renderers/sokol",
         "LICENSE",
         "README.md",
         "SPEC.md",

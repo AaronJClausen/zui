@@ -71,8 +71,7 @@ Stop and ask the user instead of guessing when:
 | the template project | `examples/template/`, a package of its own, so it can be copied out as a new app |
 | a sample | `examples/samples/<name>/`, built and tested from `examples/build.zig` and imported from the `test` block of `examples/samples/root.zig`. A sample uses only the public APIs of zui, its modules, and the renderers and hosts, as a user would |
 | a package | its own directory, with its `build.zig` and `build.zig.zon`, naming other packages by `.path`; in the root, a line in `packages` in `build.zig` and in `.paths` in `build.zig.zon`. A renderer or host package is also a `.path` entry in the root's `.dependencies`, so users reach it as `zui.builder.dependency("<name>", …)`; the root's `build()` never instantiates it |
-| renderer changes | `renderers/<name>/`, which names `core/` by path, so it is tested in place from its directory: `renderers/raylib/`, `renderers/terminal/` |
-| renderer and adapter-host changes outside this repository | `../zui-sokol`, tested against this checkout with `zig build test --fork=../zui` |
+| renderer changes | `renderers/<name>/`, which names `core/` by path, so it is tested in place from its directory: `renderers/raylib/`, `renderers/sokol/`, `renderers/terminal/` |
 | native hosts | `../zui-host`, which is created by H2 and not before |
 
 Each stage's features and their layer are listed in `ARCHITECTURE.md` §6.
@@ -131,6 +130,18 @@ windows, so they need a display (CI runs them under `xvfb-run`); never
 run `zig build demo` without `--hidden --frames`, `--screenshot` or
 `--measure-idle`, since its window stays open until closed. Its links on
 Linux print `warning(link): unexpected LLD stderr` and still succeed.
+In `renderers/sokol/`, run `zig build test`, `zig build check` (which
+also links the tour for `wasm32-freestanding`), the same `check` with
+`-Dtarget=wasm32-freestanding`, with `-Dtarget=x86_64-windows` and with
+`-Dgl=true -Dtarget=x86_64-windows`, `zig build test-tour`,
+`zig build conformance`, which opens a window and must print that
+`zui_sokol.Renderer` passes zui's renderer suite, and the tour's cycle,
+`zig build demo -- --frames 900 --cycle 40`, which must print
+`diagnostics ok: true`; never run `zig build demo` without `--frames`,
+since its window stays open until closed. After changing a shader's GLSL,
+run `zig build shaders` and commit the regenerated `.glsl.zig`. Its links
+on Linux print `warning(link): unexpected LLD stderr` and a `failed
+command:` line and still succeed.
 
 | Command | When |
 |---|---|
