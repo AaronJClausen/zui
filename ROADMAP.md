@@ -71,7 +71,7 @@ green, and its **Status** line below says which slice is next.
 | H3. macOS | 10 | `../zui-host` | | |
 | H4. Linux | 10 | `../zui-host`, `../zui-sokol` | | in progress; slice 3, fractional scale, the clipboard, drops and file watching, is next |
 | H5. Web | 10 | `../zui-web` | | |
-| H6. Services | 10 | `src/services.zig`, `zui_app/`, `zui_testing/`, `../zui-host` | | in progress; slice 3, file dialogs, is next |
+| H6. Services | 10 | `src/services.zig`, `zui_app/`, `zui_testing/`, `../zui-host` | | in progress; slice 4, menus, is next |
 | H7. Window decorations | 10 | `src/host.zig`, `../zui-host` | | |
 | H9. Many windows | 10 | `zui_app/`, `../zui-host` | | |
 
@@ -3800,9 +3800,9 @@ build on one reviewed contract.
    copies the dialog's strings into a fixed buffer, posts it and returns;
    the dialog's modal loop keeps dispatching the window's messages, and
    its paths (`SIGDN_FILESYSPATH`) or `.canceled` are published. One
-   dialog or menu at a time. The vtables go in `windows/com.zig`; the fake
-   builds and configures the real dialog and reads `GetOptions` back
-   without `Show`.
+   dialog or menu at a time. The vtables go in `windows/file_dialog.zig`;
+   the fake builds and configures the real dialog and reads `GetOptions`
+   back without `Show`.
 4. **Menus** (zui-host): `popup` builds a menu with `CreatePopupMenu` and
    `AppendMenuW` on the window thread, converts the position to screen
    pixels, and shows it with `TrackPopupMenuEx(TPM_RETURNCMD)`; `setBar`
@@ -3893,7 +3893,62 @@ the host idles as before (15.6 ms of CPU over 10 s and 10 frames on the
 Welcome screen in ReleaseSafe) and `zui_app` now reports only file dialogs
 and menus missing. Not detected: notifications the user turned off, or Do
 Not Disturb, neither of which a balloon reports, so the Windows host never
-answers `.failed = .denied`. Next: slice 3, file dialogs.
+answers `.failed = .denied`.
+
+Slice 3 is done, in zui-host alone (not pushed).
+`zuiFileDialogs.show(host, window, request, dialog, sink)` copies the
+dialog's strings into one fixed buffer of 8,192 UTF-16 units: the title,
+the directory made absolute (`GetFullPathNameW`, since the shell takes only
+absolute ones), the suggested name, and up to 16 filters as patterns
+(`*.zon;*.json`, or `*.*` for one without extensions). Past either limit it
+is `error.TooLarge`, and text that is not UTF-8 is `error.InvalidUtf8`. It
+then posts to the window thread, which is already a single-threaded
+apartment. That thread makes `IFileOpenDialog`, or `IFileSaveDialog` for
+`.save_file`, through `CoCreateInstance` (`windows/file_dialog.zig`, its
+vtables written by hand). It always sets `FOS_FORCEFILESYSTEM`,
+`FOS_NOCHANGEDIR` (so the process's working directory never moves) and
+`FOS_PATHMUSTEXIST`. Open dialogs add `FOS_FILEMUSTEXIST`, and
+`.open_files` adds `FOS_ALLOWMULTISELECT`. `.save_file` adds
+`FOS_OVERWRITEPROMPT` and the first filter's first extension as the
+default, and `.choose_folder` adds `FOS_PICKFOLDERS`. The thread then runs
+`Show` owned by the window. Its modal loop keeps dispatching the window's
+messages. The answer is `.files_chosen` with each `SIGDN_FILESYSPATH`
+path in UTF-8 (up to 32 KiB, paths past it counted as left out), or
+`.canceled`. A dialog the shell cannot make is `.failed = .unavailable`. A
+second `show` while one waits or is open is `error.Busy`. A dialog still
+open when the host closes is cancelled first, and its answer is not
+published, since the application's sources may be gone by then. The
+window closes once `Show` has returned. `IFileDialog.Close` called from
+outside the dialog's own events returned `S_OK` but did not end `Show`,
+so the host posts `WM_CLOSE` to the dialog's window, found through
+`IOleWindow`, which cancels it as the Cancel button does.
+
+The fake makes and configures the real dialog and stands in for `Show`.
+It reads back the options, the suggested name and the folder from the
+dialog's own getters, records the filters it was given (the shell has no
+getter for them), and answers what the harness's `scriptServices` scripts.
+It can also hold the dialog open, dispatching the window's messages as
+`Show` would. The host suite now checks file dialogs through the window
+thread. The host's own tests check an open dialog's options, folder and
+filters and its paths; a save dialog's name, overwrite prompt and cancel;
+a folder dialog; `Busy` while one is open; paths past the reply's room
+counted; `TooLarge` and `InvalidUtf8` showing nothing; and a dialog open at
+close answered with nothing. Two checks of the real `Show`, run once by
+hand and not committed, showed a dialog on the desktop. One, given the name
+`C:\Windows\win.ini` and sent its OK command, answered `.files_chosen`
+with that path. The other, open when the host closed, returned
+`0x800704C7` (cancelled) and closed the host about 0.1 s later, with
+nothing answered.
+
+Found and fixed: a clipboard read and a file dialog published their answer
+before releasing their slot, so a call made as soon as the answer arrived
+could be `error.Busy`. Two of about 20 runs of the ReleaseSafe suite failed
+this way. Each now releases first. The bytes it answers with stay put,
+since only the window thread writes them. Twenty runs each in Debug and
+ReleaseSafe then passed. zui-sokol's tour on the host, in ReleaseSafe with
+`--measure-idle`, idled at 31.3 ms of CPU over 10 s and 10 frames on the
+Welcome screen, two of Windows' 15.6 ms ticks, against one in slice 2.
+`zui_app` now reports only menus missing. Next: slice 4, menus.
 
 ### H4. Linux
 

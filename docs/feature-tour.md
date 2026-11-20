@@ -1356,7 +1356,7 @@ fn reloadThemeOnSave(app: *App, ui: *Ui) void {
 
 ### Host services · *shipped*
 
-Services are what the system does for an application: the clipboard, notifications, file dialogs, opening a URL, menus. Each is an optional host declaration with a checked shape. They are work, so declaration only notes that you want one, and you call it between frames, from `zuiLoader`, through `zui_app.ServicesOf(Host)`, whose `has_*` guards are known at compile time. Every call returns at once, and its answer is published into a source you choose, so a replay sees what the user chose without opening a dialog. zui-host's Windows host reads and writes the clipboard, opens URLs, refusing paths and `file:` URLs, and shows notifications as toasts.
+Services are what the system does for an application: the clipboard, notifications, file dialogs, opening a URL, menus. Each is an optional host declaration with a checked shape. They are work, so declaration only notes that you want one, and you call it between frames, from `zuiLoader`, through `zui_app.ServicesOf(Host)`, whose `has_*` guards are known at compile time. Every call returns at once, and its answer is published into a source you choose, so a replay sees what the user chose without opening a dialog. zui-host's Windows host reads and writes the clipboard, opens URLs, refusing paths and `file:` URLs, shows notifications as toasts, and shows the shell's file dialogs, answering the paths chosen.
 
 `src/app.zig`
 
@@ -2094,7 +2094,7 @@ Build with `-Dzui-tracy=true` to link Tracy's client, then connect profiler 0.14
 
 These names compile, but they don't do anything yet. This list is from `ARCHITECTURE.md` §7 and the roadmap.
 
-- **File dialogs and menus** *(declared, not yet on a host)*: their shapes are checked and `zui_testing`'s host suite tests them, but no host implements them yet. The Windows host's are the rest of H6.
+- **Menus** *(declared, not yet on a host)*: their shape is checked and `zui_testing`'s host suite tests it, but no host implements them yet. The Windows host's are the rest of H6.
 - **Still to come**: Motion, multi-line text editing, skins, the inspector over the wire, and more hosts (macOS, Linux, web).
 
 <a id="dx"></a>
