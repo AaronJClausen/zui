@@ -1356,19 +1356,26 @@ fn reloadThemeOnSave(app: *App, ui: *Ui) void {
 
 ### Host services · *shipped*
 
-Services are what the system does for an application: the clipboard, notifications, file dialogs, opening a URL, menus. Each is an optional host declaration with a checked shape. They are work, so declaration only notes that you want one, and you call it between frames, from `zuiLoader`, through `zui_app.ServicesOf(Host)`, whose `has_*` guards are known at compile time. Every call returns at once, and its answer is published into a source you choose, so a replay sees what the user chose without opening a dialog. zui-host's Windows host reads and writes the clipboard, opens URLs, refusing paths and `file:` URLs, shows notifications as toasts, and shows the shell's file dialogs, answering the paths chosen.
+Services are what the system does for an application: the clipboard, notifications, file dialogs, opening a URL, menus. Each is an optional host declaration with a checked shape. They are work, so declaration only notes that you want one, and you call it between frames, from `zuiLoader`, through `zui_app.ServicesOf(Host)`, whose `has_*` guards are known at compile time. Every call returns at once, and its answer is published into a source you choose, so a replay sees what the user chose without opening a dialog. zui-host's Windows host reads and writes the clipboard, opens URLs, refusing paths and `file:` URLs, shows notifications as toasts, shows the shell's file dialogs, answering the paths chosen, and shows Windows' own context menus and menu bars, answering the item chosen.
 
 `src/app.zig`
 
 ```zig
 const services = zui_app.ServicesOf(App.Host);
 const paste: zui.ServiceRequest = .of("paste");
+const photo_menu: zui.ServiceRequest = .of("photo menu");
+const rename: zui.MenuItemId = @enumFromInt(1);
+const reveal: zui.MenuItemId = @enumFromInt(2);
 
 pub fn zuiDeclare(app: *App, ui: *Ui) void {
     if (ui.chordPressed(.{ .key = .v, .modifiers = .{ .control = true } })) app.wants_paste = true;
+    if (ui.contextRequested(.of("photo"))) if (ui.primaryPointer()) |pointer| {
+        app.menu_at = pointer.position;
+    };
     var replies = ui.source(.replies).items();
     while (replies.next()) |reply| {
         if (reply.request == paste and reply.kind == .clipboard_text) app.insert(reply.text());
+        if (reply.request == photo_menu and reply.kind == .menu_item_chosen and reply.menu_item == rename) app.beginRename();
     }
 }
 
@@ -1377,6 +1384,11 @@ pub fn zuiLoader(app: *App, _: *const Ui, _: std.Io) void {
         app.wants_paste = false;
         services.clipboard.read(app.host, paste, .of(&app.sources.replies)) catch {};
     }
+    if (services.has_menus) if (app.menu_at) |position| {
+        app.menu_at = null;
+        const items = [_]zui.MenuItem{ .{ .id = rename, .label = "Rename", .shortcut = .{ .key = .f2 } }, .separator, .{ .id = reveal, .label = "Show in folder" } };
+        services.menus.popup(app.host, .main, photo_menu, &items, position, .of(&app.sources.replies)) catch {};
+    };
 }
 ```
 
@@ -2094,7 +2106,6 @@ Build with `-Dzui-tracy=true` to link Tracy's client, then connect profiler 0.14
 
 These names compile, but they don't do anything yet. This list is from `ARCHITECTURE.md` §7 and the roadmap.
 
-- **Menus** *(declared, not yet on a host)*: their shape is checked and `zui_testing`'s host suite tests it, but no host implements them yet. The Windows host's are the rest of H6.
 - **Still to come**: Motion, multi-line text editing, skins, the inspector over the wire, and more hosts (macOS, Linux, web).
 
 <a id="dx"></a>

@@ -1991,7 +1991,10 @@ pub fn checkHostAndRenderer(comptime Host: type, comptime Renderer: type) void  
 - **Calls that attach to a window** (dialogs, menus) name it. A host
   shows one dialog or menu at a time, and refuses another with
   `error.Busy`, as it refuses a call of a kind it is still answering.
-  Positions are in layout units from the window's top-left.
+  Positions are in layout units from the window's top-left. `setBar`
+  replaces the window's menu bar, or removes it given no items; a choice
+  the user made from a bar before it was replaced is still answered, to
+  that bar's request.
 - **Opening a URL** hands it to the system's handler for its scheme. A
   path, or a `file:` URL, is refused with `error.InvalidUrl`, since
   opening it would run what it names (`zui.isOpenableUrl`). A URL the

@@ -71,7 +71,7 @@ green, and its **Status** line below says which slice is next.
 | H3. macOS | 10 | `../zui-host` | | |
 | H4. Linux | 10 | `../zui-host`, `../zui-sokol` | | in progress; slice 3, fractional scale, the clipboard, drops and file watching, is next |
 | H5. Web | 10 | `../zui-web` | | |
-| H6. Services | 10 | `src/services.zig`, `zui_app/`, `zui_testing/`, `../zui-host` | | in progress; slice 4, menus, is next |
+| H6. Services | 10 | `src/services.zig`, `zui_app/`, `zui_testing/`, `../zui-host` | | in progress; slice 5, the example and closing H6, is next |
 | H7. Window decorations | 10 | `src/host.zig`, `../zui-host` | | |
 | H9. Many windows | 10 | `zui_app/`, `../zui-host` | | |
 
@@ -3940,15 +3940,66 @@ with that path. The other, open when the host closed, returned
 `0x800704C7` (cancelled) and closed the host about 0.1 s later, with
 nothing answered.
 
-Found and fixed: a clipboard read and a file dialog published their answer
-before releasing their slot, so a call made as soon as the answer arrived
-could be `error.Busy`. Two of about 20 runs of the ReleaseSafe suite failed
+Found and fixed: a clipboard read (since slice 1) and a file dialog
+published their answer before releasing their slot, so a call made as
+soon as the answer arrived could be `error.Busy`. Two of about 20 runs of the ReleaseSafe suite failed
 this way. Each now releases first. The bytes it answers with stay put,
 since only the window thread writes them. Twenty runs each in Debug and
 ReleaseSafe then passed. zui-sokol's tour on the host, in ReleaseSafe with
 `--measure-idle`, idled at 31.3 ms of CPU over 10 s and 10 frames on the
 Welcome screen, two of Windows' 15.6 ms ticks, against one in slice 2.
-`zui_app` now reports only menus missing. Next: slice 4, menus.
+`zui_app` now reports only menus missing.
+
+Slice 4 is done, in zui-host, with one sentence added to SPEC.md §16.3
+(not pushed). `zuiMenus.popup(host, window, request, items, position,
+sink)` and `setBar(host, window, request, items, sink)` copy the items
+into a fixed menu of up to 256 entries and 8,192 UTF-16 units, at most
+eight submenus deep (`windows/menu.zig`). Each label is shown as written,
+its `&` doubled so Windows underlines nothing, with its shortcut after a
+tab as Windows' own menus spell it (`Ctrl+Shift+S`, `F1`). Past a limit
+it is `error.TooLarge`, and a label that is not UTF-8 is
+`error.InvalidUtf8`. `popup` converts the position to client pixels with
+the last poll's scale and posts to the window thread, which builds the
+menu with `CreatePopupMenu` and `AppendMenuW`, converts the position to
+the screen, and shows it with `TrackPopupMenuEx(TPM_RETURNCMD |
+TPM_NONOTIFY)`. It answers `.menu_item_chosen` with the application's own
+id, or `.canceled`, and `.failed = .unavailable` while the user is in the
+bar's menus, since Windows shows one menu at a time. A file dialog and a
+popup now share one claim, so either one while the other waits or is
+open is `error.Busy`. A popup still open when the host closes is ended
+with `EndMenu`, not answered, and the window closes after it, as an open
+dialog does. `setBar` builds the bar with `CreateMenu`, sets it with
+`SetMenu` and destroys the one it replaced; given no items it removes the
+bar. Each `WM_COMMAND` from it answers `.menu_item_chosen` to its request.
+A bar set while the user is in the old bar's menus waits until they
+close (`WM_EXITMENULOOP`), so a tracked menu is never destroyed. Each bar
+and each popup numbers its items from a range of its own, two bars'
+ranges in turn, so a command Windows reports after the bar was replaced
+still names the bar it came from and is answered to that bar's request.
+SPEC.md now says so, and that `setBar` with no items removes the bar.
+
+The fake builds the real `HMENU` and stands in for `TrackPopupMenuEx`. It
+reads the menu back item by item (`GetMenuStringW`, `GetMenuState`,
+`GetMenuItemID`), records the position in screen pixels, and answers the
+item the harness's `scriptServices` scripts. It can also hold the menu
+open, dispatching the window's messages. The host suite now checks menus
+through the window thread, so it checks all five services. The host's own
+tests check a popup's items, separator, submenu, grayed and checked
+states, doubled `&` and shortcut read back from the `HMENU`, and its
+position in screen pixels at a forced scale of 2; `Busy` across popups
+and dialogs both ways, and a closed menu answering `.canceled`;
+`TooLarge` and `InvalidUtf8` showing neither a popup nor a bar; a popup
+open at close answered with nothing; and a menu bar read back from the
+window's own `GetMenu`, answering two choices sent as `WM_COMMAND`,
+waiting while its menus are open, answering a late choice from the bar it
+replaced, and removed. zui-host's tests (63) passed six times each in
+Debug and ReleaseSafe. zui-sokol's tour on the host, in ReleaseSafe
+with `--measure-idle`, idled at 0.0 to 31.3 ms of CPU over 10 s with 9 to
+14 frames in three runs on the Welcome screen; a fourth drew 96 frames for
+the pointer over the window. `zui_app` now reports no service missing.
+Not seen on the desktop yet: the real `TrackPopupMenuEx` and a bar's menus
+opened by hand, which slice 5's example shows. Next: slice 5, the example
+and closing H6.
 
 ### H4. Linux
 

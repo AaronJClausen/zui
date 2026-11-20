@@ -282,7 +282,6 @@ roadmap item named:
 |---|---|---|---|
 | `Widgets(Ui)` with a `Theme` struct | `Widgets(Ui, Skin)` | `zui_widgets/` | K5 |
 | `zui_debug`'s inspector runs in the application's process; a frame on the wire carries no elements for it | over the wire, the inspector runs in another process (SPEC.md §19.7) | `zui_debug/`, `zui_wire/` | not yet queued |
-| `zuiMenus` has a checked shape, but the Windows host implements only the clipboard, opening URLs, notifications and file dialogs | the Windows host implements all five services | `../zui-host` | H6 |
 | zui-host's Linux host speaks Wayland only, at whole buffer scales, and reports no low memory, clipboard, drops, file changes or IME; its environment comes from the desktop portal and UPower over D-Bus, and stays at the defaults without them | a Linux host on Wayland and X11 with every report the Windows host makes, and a system material where the compositor offers one | `../zui-host` | H4 |
 
 Unchanged in shape: element storage in pre-order structure-of-arrays, the
