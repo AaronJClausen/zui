@@ -289,6 +289,14 @@ Implemented so far:
   them, so Windows still drags, snaps, maximizes and resizes a window
   whose title bar the application draws, and shows snap layouts over its
   maximize button: zui-host's `zig build title-bar`.
+  Many windows: an application whose `zuiDeclare(app, ui, window)` takes
+  the window declares each one in a context of its own, opening and
+  closing them between frames through `Start(App).windows`, with each
+  window's sources its own and one wait for all. zui-host's Windows host
+  opens up to four windows, and zui-sokol draws each through its own
+  swapchain on one device. In zui-host's `zig build many-windows`, two
+  windows animating at once each hold the display's rate, and two idle
+  windows use no CPU.
 
 The reference backend, its adapter host and the demo application live in
 [zui-raylib](https://github.com/AaronJClausen/zui-raylib); the other

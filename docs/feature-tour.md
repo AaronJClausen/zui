@@ -1691,6 +1691,72 @@ pub fn main(init: std.process.Init) !void {
 
 Some of the notices it logs: *"limits.max_elements is 4096, but a frame needed 5210; what fit was drawn"*, and *"the full source `import_log` refused 12 publishes; raise its capacity"*. On raylib, the first frame appears about 290 ms after the process starts, and all but 5 ms of that is raylib opening its window.
 
+<a id="many-windows"></a>
+
+### Many windows · *shipped*
+
+Declare `zuiDeclare(app, ui, window)` and every window gets a context of its own: each hook takes the window, `zuiSources(app, window)` gives each window its sources, and data shared between windows is published into each. `Start(App).windows` opens and closes windows between frames, never in declaration, and on a host with one window `open` is a compile error unless guarded by `has_many_windows`. Each turn declares only the windows with input or a frame due, then waits once for all; the run ends with the last window. A renderer that keeps a swapchain per window declares `zuiAttachSurface` and `zuiDetachSurface`.
+
+`src/app.zig`
+
+```zig
+const std = @import("std");
+const zui = @import("zui");
+const zui_app = @import("zui_app");
+const zui_async = @import("zui_async");
+const zui_sokol = @import("zui_sokol");
+const zui_host = @import("zui_host");
+
+const WindowSources = struct { selection: zui_async.Latest(PhotoId) = .{} };
+
+pub const App = struct {
+    pub const Host = zui_host.Host;
+    pub const Renderer = zui_sokol.Renderer;
+    pub const Text = Fonts;
+    pub const Ui = zui.Context(zui_app.contextConfig(Renderer, .{ .Text = Fonts, .Sources = WindowSources }));
+
+    windows: zui_app.Windows(App) = undefined,
+    waker: zui.Waker = undefined,
+    main_sources: WindowSources = .{},
+    loupe_sources: WindowSources = .{},
+    loupe: ?zui.WindowId = null,
+    wants_loupe: bool = false,
+    selected: ?PhotoId = null,
+
+    pub fn init(app: *App, start: zui_app.Start(App)) !void {
+        app.* = .{ .windows = start.windows, .waker = start.waker };
+    }
+
+    pub fn zuiSources(app: *App, window: zui.WindowId) *WindowSources {
+        return if (window == app.loupe) &app.loupe_sources else &app.main_sources;
+    }
+
+    pub fn zuiDeclare(app: *App, ui: *Ui, window: zui.WindowId) void {
+        if (window == app.loupe) return declareLoupe(ui, ui.source(.selection).get());
+        if (declareLibrary(ui)) |photo| app.selected = photo;
+        if (app.loupe == null and openLoupeClicked(ui)) app.wants_loupe = true;
+    }
+
+    pub fn zuiLoader(app: *App, _: *const Ui, window: zui.WindowId, _: std.Io) void {
+        if (window != .main) return;
+        if (app.wants_loupe and zui_app.Windows(App).has_many_windows) {
+            app.wants_loupe = false;
+            app.loupe = app.windows.open(.{ .title = "Loupe", .size = .{ 640, 640 } }) catch null;
+        }
+        if (app.selected) |photo| app.waker.wakeIf(app.loupe_sources.selection.publish(photo));
+    }
+
+    pub fn zuiWindowClosed(app: *App, window: zui.WindowId) void {
+        if (window == app.loupe) {
+            app.loupe = null;
+            app.loupe_sources = .{};
+        }
+    }
+};
+```
+
+On zui-host's Windows host, up to four windows open at once, and zui-sokol draws each through its own swapchain on one device: two windows animating at once each hold a 144 Hz display's rate, and two idle windows use no CPU.
+
 <a id="contracts"></a>
 
 ## 06. The backend contracts
@@ -2135,7 +2201,6 @@ Build with `-Dzui-tracy=true` to link Tracy's client, then connect profiler 0.14
 
 These names compile, but they don't do anything yet. This list is from `ARCHITECTURE.md` §7 and the roadmap.
 
-- **Many windows**: `zui_app` declares each window in a context of its own, with `zuiDeclare(app, ui, window)` and `Start(App).windows.open`, and the Windows host opens up to four windows, but zui-sokol does not yet draw into more than one.
 - **Still to come**: Motion, multi-line text editing, skins, the inspector over the wire, and more hosts (macOS, Linux, web).
 
 <a id="dx"></a>

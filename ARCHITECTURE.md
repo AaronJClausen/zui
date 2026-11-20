@@ -108,10 +108,10 @@ only plain names are types the application uses directly: a source's
 |---|---|---|---|---|
 | Text | a renderer or a font library | `zuiMeasure` | `zuiSegment`, `zui_thread_safe`, `zuiFingerprint` | §9.4 |
 | Source | `zui_async` or the application | `Delivery`, `View`, `zuiSwap`, `zuiView`, `zuiDelivery`, `zuiInject` | `zuiPending`, `zuiEndFrame`, `zuiRefusedCount` | §14.2 |
-| Renderer | a renderer | `zuiSubmit`, `zui_surfaces` | `zui_commands`, `zui_extended_color`, `zui_render_thread`, payload types | §16.2 |
-| Host | a host | `zuiPoll`, `zuiWaker`, `zuiWait`, `zuiSurface`, `zuiApply`, `zui_surfaces` | `zui_capabilities`, `zuiSemantics`, services (`zuiClipboard`, `zuiNotifications`, `zuiFileDialogs`, `zuiOpenUrl`, `zuiMenus`, `zuiFileWatch`), each a struct of functions whose types are checked | §16.3 |
+| Renderer | a renderer | `zuiSubmit`, `zui_surfaces` | `zui_commands`, `zui_extended_color`, `zui_render_thread`, payload types, `zuiAttachSurface` with `zuiDetachSurface` | §16.2 |
+| Host | a host | `zuiPoll`, `zuiWaker`, `zuiWait`, `zuiSurface`, `zuiApply`, `zui_surfaces` | `zui_capabilities`, `zuiOpenWindow` and `zuiCloseWindow` (exactly when `.many`), `zuiSemantics`, `zuiChromeRegions`, services (`zuiClipboard`, `zuiNotifications`, `zuiFileDialogs`, `zuiOpenUrl`, `zuiMenus`, `zuiFileWatch`), each a struct of functions whose types are checked | §16.3 |
 | Tracer | a profiler binding | `zuiBegin`, `zuiEnd` | | §16.5 |
-| Application | the application, run by `zui_app` | `Host`, `Renderer`, `zuiDeclare` | `Text`, `zuiRecord`, `zuiObserve`, `zuiLoader`, `init`, `deinit` | §19.5 |
+| Application | the application, run by `zui_app` | `Host`, `Renderer`, `zuiDeclare` | `Text`, `zuiRecord`, `zuiObserve`, `zuiLoader`, `init`, `deinit`; with many windows, `zuiDeclare` and each hook take the window, and `zuiSources`, `zuiWindowClosed` | §19.5 |
 | Skin | a theme pack or the application | `zuiStyle` | | §19.2 |
 | Wire payload | an application type with pointers | `zuiSerialize`, `zuiDeserialize` | | §19.6 |
 
@@ -284,7 +284,6 @@ roadmap item named:
 | `Widgets(Ui)` with a `Theme` struct | `Widgets(Ui, Skin)` | `zui_widgets/` | K5 |
 | `zui_debug`'s inspector runs in the application's process; a frame on the wire carries no elements for it | over the wire, the inspector runs in another process (SPEC.md §19.7) | `zui_debug/`, `zui_wire/` | not yet queued |
 | a frame on the wire carries no chrome regions, and the wire host declares no `zuiChromeRegions`, so a remote window keeps the system's title bar | chrome over the wire | `zui_wire/` | not yet queued |
-| `zui_app` runs many windows, a context each, and the Windows host opens up to four, but zui-sokol draws into one window only | zui-sokol draws each window through its own swapchain | `../zui-host`, `../zui-sokol` | H9 |
 | zui-host's Linux host speaks Wayland only, at whole buffer scales, and reports no low memory, clipboard, drops, file changes or IME, and keeps the compositor's title bar; its environment comes from the desktop portal and UPower over D-Bus, and stays at the defaults without them | a Linux host on Wayland and X11 with every report the Windows host makes, and a system material where the compositor offers one | `../zui-host` | H4 |
 
 Unchanged in shape: element storage in pre-order structure-of-arrays, the
