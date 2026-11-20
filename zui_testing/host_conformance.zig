@@ -33,6 +33,19 @@ pub const HostError = error{
     ClosedWindowPolled,
     SemanticsDropped,
     ActionLost,
+    ServiceNotAnswered,
+    ServiceAnsweredWrongly,
+    UrlNotRefused,
+    UrlNotOpened,
+};
+
+/// What the user does when the suite calls a service the harness fakes.
+pub const ServiceScript = struct {
+    /// Chosen in the next file dialog, each followed by a 0 byte; empty cancels it.
+    chosen_paths: []const u8 = "",
+    /// Chosen in the next menu; null closes it.
+    chosen_menu_item: ?zui.MenuItemId = null,
+    notification: enum { activated, dismissed } = .activated,
 };
 pub const HostViolation = DescribedViolation(HostError);
 
@@ -55,6 +68,14 @@ const other_thread_wake_ns = 20 * std.time.ns_per_ms;
 /// - with `zuiSemantics` and a harness `invoke`, a button invoked through
 ///   the platform's accessibility API arrives as an `action` event naming
 ///   it;
+/// - with `zuiClipboard`, text written is read back, answered once for its
+///   request within `event_arrival_ns`;
+/// - with `zuiOpenUrl`, a path, a `file:` URL and a word are refused with
+///   `error.InvalidUrl`, and with a harness `openedUrl`, a URL reaches the
+///   system;
+/// - with a harness `scriptServices`, a file dialog answers the paths the
+///   user chose, or `.canceled`; a menu the item chosen; a notification
+///   its activation; each naming its request and window;
 /// - when the harness can close the window, `zuiPoll` returns false after
 ///   it is closed.
 ///
@@ -69,6 +90,11 @@ const other_thread_wake_ns = 20 * std.time.ns_per_ms;
 ///   platform's accessibility API to invoke the element labelled `label`,
 ///   or return false when this host cannot, which the suite then skips. The
 ///   harness opens its window with room for at least one semantic node;
+/// - optionally `fn openedUrl(self) ?[]const u8`: the last URL the host
+///   handed to the system, which the harness fakes so no browser opens;
+/// - optionally `fn scriptServices(self, script: zui_testing.ServiceScript)
+///   void`: make the host's next dialog, menu or notification answer as the
+///   script says, without showing anything;
 /// - optionally `fn close(self) void`, closing the window as the user would.
 ///
 /// ```zig
@@ -141,6 +167,7 @@ pub fn findHostViolation(comptime Host: type, harness: anytype, conformance: Hos
     if (@hasDecl(Host, "zuiSemantics") and @hasDecl(Harness, "invoke")) {
         if (try expectInvokedAction(host, harness, &builder, conformance)) |violation| return violation;
     }
+    if (expectServicesAnswer(Host, host, harness, conformance)) |violation| return violation;
     if (@hasDecl(Harness, "close")) {
         harness.close();
         if (host.zuiPoll(window, &builder)) return .init(error.ClosedWindowPolled, "polled true after its window was closed", .{});
@@ -220,6 +247,121 @@ fn expectInvokedAction(host: anytype, harness: anytype, builder: *zui.RecordBuil
         }
     }
     return .init(error.ActionLost, "did not report the invoke an assistive technology asked for within {d} ms", .{milliseconds(conformance.event_arrival_ns)});
+}
+
+const SuiteReply = zui.ServiceReply(256);
+
+/// Takes one answer at a time, as a host never publishes from two threads
+/// at once.
+const SuiteReplies = struct {
+    replies: [4]SuiteReply = undefined,
+    published: std.atomic.Value(u32) = .init(0),
+
+    pub fn publish(self: *SuiteReplies, reply: SuiteReply) error{Full}!zui.Wake {
+        const count = self.published.load(.monotonic);
+        if (count == self.replies.len) return error.Full;
+        self.replies[count] = reply;
+        self.published.store(count + 1, .release);
+        return if (count == 0) .needed else .already_pending;
+    }
+};
+
+const reply_poll_ns = 5 * std.time.ns_per_ms;
+const copied_text = "zui \u{2713} clipboard";
+const refused_urls = [_][]const u8{ "C:\\Windows\\notepad.exe", "file:///C:/Windows/notepad.exe", "notepad" };
+const opened_url = "https://ziglang.org/";
+
+fn expectServicesAnswer(comptime Host: type, host: *Host, harness: anytype, conformance: HostConformance) ?HostViolation {
+    const Harness = @typeInfo(@TypeOf(harness)).pointer.child;
+    const window = conformance.window;
+    if (@hasDecl(Host, "zuiClipboard")) {
+        Host.zuiClipboard.write(host, copied_text) catch |err| return .init(error.ServiceAnsweredWrongly, "refused to copy text to the clipboard: {t}", .{err});
+        var replies: SuiteReplies = .{};
+        const paste: zui.ServiceRequest = .of("suite paste");
+        Host.zuiClipboard.read(host, paste, .of(&replies)) catch |err| return .init(error.ServiceAnsweredWrongly, "refused to read the clipboard: {t}", .{err});
+        const reply = awaitReply(host, &replies, conformance) orelse return notAnswered("the clipboard read", conformance);
+        if (wrongRequest(reply, paste, .main, "the clipboard read")) |violation| return violation;
+        if (reply.kind != .clipboard_text or !std.mem.eql(u8, reply.text(), copied_text)) {
+            return .init(error.ServiceAnsweredWrongly, "answered the clipboard read with .{t} \"{s}\", not the text it was given", .{ reply.kind, reply.text() });
+        }
+    }
+    if (@hasDecl(Host, "zuiOpenUrl")) {
+        for (refused_urls) |not_a_url| {
+            if (Host.zuiOpenUrl.open(host, not_a_url)) |_| {
+                return .init(error.UrlNotRefused, "handed \"{s}\" to the system rather than refusing it", .{not_a_url});
+            } else |err| if (err != error.InvalidUrl) {
+                return .init(error.UrlNotRefused, "refused \"{s}\" with error.{t}, not error.InvalidUrl", .{ not_a_url, err });
+            }
+        }
+        if (@hasDecl(Harness, "openedUrl")) {
+            Host.zuiOpenUrl.open(host, opened_url) catch |err| return .init(error.UrlNotOpened, "refused to open {s}: {t}", .{ opened_url, err });
+            const deadline = now(conformance.io).addNanoseconds(conformance.event_arrival_ns);
+            while (!std.mem.eql(u8, harness.openedUrl() orelse "", opened_url)) {
+                if (!now(conformance.io).isBefore(deadline)) return .init(error.UrlNotOpened, "did not hand {s} to the system within {d} ms", .{ opened_url, milliseconds(conformance.event_arrival_ns) });
+                host.zuiWait(.{ .at = now(conformance.io).addNanoseconds(reply_poll_ns) });
+            }
+        }
+    }
+    if (!@hasDecl(Harness, "scriptServices")) return null;
+    if (@hasDecl(Host, "zuiFileDialogs")) {
+        const dialog: zui.FileDialog = .{ .kind = .open_files, .title = "Open themes", .filters = &.{.{ .name = "Themes", .extensions = &.{"zon"} }} };
+        for ([_][]const u8{ "zui/a.zon\x00zui/b.zon\x00", "" }) |chosen_paths| {
+            harness.scriptServices(.{ .chosen_paths = chosen_paths });
+            var replies: SuiteReplies = .{};
+            const open: zui.ServiceRequest = .of("suite open");
+            Host.zuiFileDialogs.show(host, window, open, dialog, .of(&replies)) catch |err| return .init(error.ServiceAnsweredWrongly, "refused to show a file dialog: {t}", .{err});
+            const reply = awaitReply(host, &replies, conformance) orelse return notAnswered("the file dialog", conformance);
+            if (wrongRequest(reply, open, window, "the file dialog")) |violation| return violation;
+            const expected: SuiteReply.Kind = if (chosen_paths.len == 0) .canceled else .files_chosen;
+            if (reply.kind != expected or !std.mem.eql(u8, reply.bytes[0..reply.len], chosen_paths)) {
+                return .init(error.ServiceAnsweredWrongly, "answered a file dialog with .{t}, not .{t} with the paths chosen", .{ reply.kind, expected });
+            }
+        }
+    }
+    if (@hasDecl(Host, "zuiMenus")) {
+        const chosen: zui.MenuItemId = @enumFromInt(7);
+        harness.scriptServices(.{ .chosen_menu_item = chosen });
+        var replies: SuiteReplies = .{};
+        const edit: zui.ServiceRequest = .of("suite menu");
+        const items = [_]zui.MenuItem{ .{ .id = @enumFromInt(6), .label = "Cut" }, .separator, .{ .id = chosen, .label = "Paste" } };
+        Host.zuiMenus.popup(host, window, edit, &items, .{ 10, 10 }, .of(&replies)) catch |err| return .init(error.ServiceAnsweredWrongly, "refused to show a menu: {t}", .{err});
+        const reply = awaitReply(host, &replies, conformance) orelse return notAnswered("the menu", conformance);
+        if (wrongRequest(reply, edit, window, "the menu")) |violation| return violation;
+        if (reply.kind != .menu_item_chosen or reply.menu_item != chosen) {
+            return .init(error.ServiceAnsweredWrongly, "answered a menu with .{t} item {d}, not the item chosen, {d}", .{ reply.kind, @intFromEnum(reply.menu_item), @intFromEnum(chosen) });
+        }
+    }
+    if (@hasDecl(Host, "zuiNotifications")) {
+        harness.scriptServices(.{ .notification = .activated });
+        var replies: SuiteReplies = .{};
+        const saved: zui.ServiceRequest = .of("suite notification");
+        Host.zuiNotifications.show(host, saved, .{ .title = "Saved", .body = "zui's host suite" }, .of(&replies)) catch |err| return .init(error.ServiceAnsweredWrongly, "refused to show a notification: {t}", .{err});
+        const reply = awaitReply(host, &replies, conformance) orelse return notAnswered("the notification", conformance);
+        if (wrongRequest(reply, saved, .main, "the notification")) |violation| return violation;
+        if (reply.kind != .notification_activated) return .init(error.ServiceAnsweredWrongly, "answered a notification the user clicked with .{t}", .{reply.kind});
+    }
+    return null;
+}
+
+/// The first answer, waiting on the host meanwhile, so a host whose answers
+/// arrive while it waits can publish them.
+fn awaitReply(host: anytype, replies: *SuiteReplies, conformance: HostConformance) ?*const SuiteReply {
+    const deadline = now(conformance.io).addNanoseconds(conformance.event_arrival_ns);
+    while (replies.published.load(.acquire) == 0) {
+        if (!now(conformance.io).isBefore(deadline)) return null;
+        host.zuiWait(.{ .at = now(conformance.io).addNanoseconds(reply_poll_ns) });
+    }
+    return &replies.replies[0];
+}
+
+fn notAnswered(comptime service: []const u8, conformance: HostConformance) HostViolation {
+    return .init(error.ServiceNotAnswered, "did not answer " ++ service ++ " within {d} ms", .{milliseconds(conformance.event_arrival_ns)});
+}
+
+fn wrongRequest(reply: *const SuiteReply, request: zui.ServiceRequest, window: zui.WindowId, comptime service: []const u8) ?HostViolation {
+    if (reply.request != request) return .init(error.ServiceAnsweredWrongly, "answered " ++ service ++ " naming request {d}, not {d}", .{ @intFromEnum(reply.request), @intFromEnum(request) });
+    if (reply.window != window) return .init(error.ServiceAnsweredWrongly, "answered " ++ service ++ " naming window {d}, not {d}", .{ @intFromEnum(reply.window), @intFromEnum(window) });
+    return null;
 }
 
 fn sameEvent(event: zui.Event, posted: zui.Event) bool {
@@ -310,6 +452,10 @@ const QueueHostFlaw = enum {
     gives_undeclared_hdr_surface,
     /// Its accessibility bridge keeps nothing, so an invoke names no element.
     drops_actions,
+    /// Its clipboard answers a read naming the next request.
+    answers_another_request,
+    /// Its URL opener hands anything to the system.
+    opens_paths,
 };
 
 /// Reports what its harness posts, and waits on an `Io.Event` for the
@@ -327,8 +473,59 @@ fn QueueHost(comptime flaw: QueueHostFlaw) type {
         applied: zui.HostRequests = .{},
         bridged: [4]zui.SemanticNode = undefined,
         bridged_count: usize = 0,
+        copied: [64]u8 = undefined,
+        copied_len: usize = 0,
+        opened_url: ?[]const u8 = null,
+        script: ServiceScript = .{},
 
         const longest_wait_ns = 10 * std.time.ns_per_s;
+
+        pub const zuiClipboard = struct {
+            pub fn write(self: *Self, text: []const u8) zui.ServiceError!void {
+                if (text.len > self.copied.len) return error.TooLarge;
+                @memcpy(self.copied[0..text.len], text);
+                self.copied_len = text.len;
+            }
+
+            pub fn read(self: *Self, request: zui.ServiceRequest, sink: zui.ServiceSink) zui.ServiceError!void {
+                const answered: zui.ServiceRequest = if (flaw == .answers_another_request) @enumFromInt(@intFromEnum(request) +% 1) else request;
+                self.answer(sink, .{ .request = answered, .outcome = .{ .clipboard_text = self.copied[0..self.copied_len] } });
+            }
+        };
+
+        pub const zuiOpenUrl = struct {
+            pub fn open(self: *Self, url: []const u8) zui.ServiceError!void {
+                if (flaw != .opens_paths and !zui.isOpenableUrl(url)) return error.InvalidUrl;
+                self.opened_url = url;
+            }
+        };
+
+        pub const zuiFileDialogs = struct {
+            pub fn show(self: *Self, window: zui.WindowId, request: zui.ServiceRequest, _: zui.FileDialog, sink: zui.ServiceSink) zui.ServiceError!void {
+                const chosen = self.script.chosen_paths;
+                self.answer(sink, .{ .request = request, .window = window, .outcome = if (chosen.len == 0) .canceled else .{ .files_chosen = chosen } });
+            }
+        };
+
+        pub const zuiMenus = struct {
+            pub fn popup(self: *Self, window: zui.WindowId, request: zui.ServiceRequest, _: []const zui.MenuItem, _: [2]f32, sink: zui.ServiceSink) zui.ServiceError!void {
+                const chosen = self.script.chosen_menu_item;
+                self.answer(sink, .{ .request = request, .window = window, .outcome = if (chosen) |item| .{ .menu_item_chosen = item } else .canceled });
+            }
+        };
+
+        pub const zuiNotifications = struct {
+            pub fn show(self: *Self, request: zui.ServiceRequest, _: zui.Notification, sink: zui.ServiceSink) zui.ServiceError!void {
+                self.answer(sink, .{ .request = request, .outcome = switch (self.script.notification) {
+                    .activated => .notification_activated,
+                    .dismissed => .notification_dismissed,
+                } });
+            }
+        };
+
+        fn answer(self: *Self, sink: zui.ServiceSink, answered: zui.ServiceAnswer) void {
+            self.zuiWaker().wakeIf(sink.publish(&answered));
+        }
 
         pub fn zuiPoll(self: *Self, window: zui.WindowId, record: *zui.RecordBuilder) bool {
             std.debug.assert(window == .main);
@@ -416,6 +613,14 @@ fn QueueHostHarness(comptime Host: type) type {
             return true;
         }
 
+        pub fn openedUrl(self: *Self) ?[]const u8 {
+            return self.queue_host.opened_url;
+        }
+
+        pub fn scriptServices(self: *Self, script: ServiceScript) void {
+            self.queue_host.script = script;
+        }
+
         pub fn close(self: *Self) void {
             self.queue_host.window_open = false;
         }
@@ -451,4 +656,20 @@ test "a host whose accessibility bridge loses what it is handed fails the suite"
     const violation = (try findHostViolation(Host, &harness, .{ .io = std.testing.io, .event_arrival_ns = 50 * std.time.ns_per_ms })).?;
     try std.testing.expectEqual(error.ActionLost, violation.kind);
     try std.testing.expectEqualStrings("did not report the invoke an assistive technology asked for within 50 ms", violation.description());
+}
+
+test "a host whose service answers another request fails the suite" {
+    const Host = QueueHost(.answers_another_request);
+    var harness: QueueHostHarness(Host) = .{ .queue_host = .{ .io = std.testing.io } };
+    const violation = (try findHostViolation(Host, &harness, .{ .io = std.testing.io })).?;
+    try std.testing.expectEqual(error.ServiceAnsweredWrongly, violation.kind);
+    try std.testing.expect(std.mem.startsWith(u8, violation.description(), "answered the clipboard read naming request "));
+}
+
+test "a host whose URL opener hands a path to the system fails the suite" {
+    const Host = QueueHost(.opens_paths);
+    var harness: QueueHostHarness(Host) = .{ .queue_host = .{ .io = std.testing.io } };
+    const violation = (try findHostViolation(Host, &harness, .{ .io = std.testing.io })).?;
+    try std.testing.expectEqual(error.UrlNotRefused, violation.kind);
+    try std.testing.expect(std.mem.endsWith(u8, violation.description(), "notepad.exe\" to the system rather than refusing it"));
 }

@@ -12,7 +12,17 @@ const frame_interval_ns = 16 * std.time.ns_per_ms;
 const TestHost = struct {
     pub const zui_surfaces: zui.SurfaceKinds = .initOne(.offscreen);
     pub const zui_output_formats: zui.OutputFormats = .initMany(&.{ .sdr, .scrgb_fp16 });
-    pub const zuiClipboard = struct {};
+    pub const zuiClipboard = struct {
+        pub fn write(host: *TestHost, text: []const u8) zui.ServiceError!void {
+            if (text.len > host.clipboard.len) return error.TooLarge;
+            @memcpy(host.clipboard[0..text.len], text);
+            host.clipboard_len = text.len;
+        }
+
+        pub fn read(host: *TestHost, request: zui.ServiceRequest, sink: zui.ServiceSink) zui.ServiceError!void {
+            _ = sink.publish(&.{ .request = request, .outcome = .{ .clipboard_text = host.clipboard[0..host.clipboard_len] } });
+        }
+    };
 
     window: zui.WindowOptions,
     /// A setting made on the type, which `init` keeps.
@@ -26,6 +36,8 @@ const TestHost = struct {
     wait_count: usize = 0,
     applied: zui.HostRequests = .{},
     closed: bool = false,
+    clipboard: [64]u8 = undefined,
+    clipboard_len: usize = 0,
 
     pub fn init(self: *TestHost, _: std.Io, window: zui.WindowOptions) !void {
         self.* = .{ .window = window, .scale = self.scale };
@@ -744,4 +756,29 @@ test "a bridge without room for the list is reported once" {
     const described = try std.fmt.allocPrint(testing.allocator, "{f}", .{Notices.first(.semantics_dropped)});
     defer testing.allocator.free(described);
     try testing.expectEqualStrings("the host's accessibility bridge had no room for 2 semantic nodes and 5 bytes of their text; an assistive technology sees the rest", described);
+}
+
+const LastReply = struct {
+    reply: ?zui.ServiceReply(16) = null,
+
+    pub fn publish(self: *LastReply, reply: zui.ServiceReply(16)) zui.Wake {
+        self.reply = reply;
+        return .needed;
+    }
+};
+
+test "ServicesOf guards each service the host has, and reaches it" {
+    const Services = zui_app.ServicesOf(TestHost);
+    try testing.expect(Services.has_clipboard and !Services.has_notifications and !Services.has_file_dialogs);
+    try testing.expect(!Services.has_open_url and !Services.has_menus and !Services.has_menu_bar and !Services.has_file_watch);
+
+    var host: TestHost = undefined;
+    try host.init(testing.io, .{});
+    try Services.clipboard.write(&host, "copied");
+    var last: LastReply = .{};
+    const paste: zui.ServiceRequest = .of("paste");
+    try Services.clipboard.read(&host, paste, .of(&last));
+    try testing.expectEqual(paste, last.reply.?.request);
+    try testing.expectEqualStrings("copied", last.reply.?.text());
+    if (Services.has_notifications) try Services.notifications.show(&host, paste, .{ .title = "never compiled" }, .of(&last));
 }

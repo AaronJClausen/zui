@@ -109,7 +109,7 @@ only plain names are types the application uses directly: a source's
 | Text | a renderer or a font library | `zuiMeasure` | `zuiSegment`, `zui_thread_safe`, `zuiFingerprint` | §9.4 |
 | Source | `zui_async` or the application | `Delivery`, `View`, `zuiSwap`, `zuiView`, `zuiDelivery`, `zuiInject` | `zuiPending`, `zuiEndFrame`, `zuiRefusedCount` | §14.2 |
 | Renderer | a renderer | `zuiSubmit`, `zui_surfaces` | `zui_commands`, `zui_extended_color`, `zui_render_thread`, payload types | §16.2 |
-| Host | a host | `zuiPoll`, `zuiWaker`, `zuiWait`, `zuiSurface`, `zuiApply`, `zui_surfaces` | `zui_capabilities`, `zuiSemantics`, services (`zuiClipboard`, `zuiFileDialogs`, …) | §16.3 |
+| Host | a host | `zuiPoll`, `zuiWaker`, `zuiWait`, `zuiSurface`, `zuiApply`, `zui_surfaces` | `zui_capabilities`, `zuiSemantics`, services (`zuiClipboard`, `zuiNotifications`, `zuiFileDialogs`, `zuiOpenUrl`, `zuiMenus`, `zuiFileWatch`), each a struct of functions whose types are checked | §16.3 |
 | Tracer | a profiler binding | `zuiBegin`, `zuiEnd` | | §16.5 |
 | Application | the application, run by `zui_app` | `Host`, `Renderer`, `zuiDeclare` | `Text`, `zuiRecord`, `zuiObserve`, `zuiLoader`, `init`, `deinit` | §19.5 |
 | Skin | a theme pack or the application | `zuiStyle` | | §19.2 |
@@ -170,7 +170,8 @@ The stage is the one in SPEC.md §21 that builds it.
 | accessibility | core semantics and actions; `zui_widgets` declares each control's; host bridges to the platform API | 9 |
 | safety sweeps | core, over a finished frame; `endFrame` runs them behind `features.safety_sweeps` | 9 |
 | the demo in a browser | `zui-web`: the application in a Web Worker, its frames drawn by a thin client over `zui_wire` | 9 |
-| macOS, Linux and web hosts; services; decorations; many windows | `zui-host`; one `Context` per window | 10 |
+| macOS, Linux and web hosts; decorations; many windows | `zui-host`; one `Context` per window | 10 |
+| host services: the clipboard, notifications, file dialogs, opening URLs, menus | the core's vocabulary and checks (`src/services.zig`); `zui_app.ServicesOf`'s guards; each host implements them, answering into a source the application chooses | 10 |
 | motion and exit animations | `zui_motion`; ghost buffer in the core | 11 |
 | text editing and IME | `zui_widgets`; composition events and the IME area from the core | 11 |
 | color spaces, palettes, icons | `zui_color`, `zui_icons` | 11 |
@@ -281,6 +282,7 @@ roadmap item named:
 |---|---|---|---|
 | `Widgets(Ui)` with a `Theme` struct | `Widgets(Ui, Skin)` | `zui_widgets/` | K5 |
 | `zui_debug`'s inspector runs in the application's process; a frame on the wire carries no elements for it | over the wire, the inspector runs in another process (SPEC.md §19.7) | `zui_debug/`, `zui_wire/` | not yet queued |
+| `zuiNotifications`, `zuiFileDialogs` and `zuiMenus` have checked shapes, but the Windows host implements only the clipboard and opening URLs | the Windows host implements all five services | `../zui-host` | H6 |
 | zui-host's Linux host speaks Wayland only, at whole buffer scales, and reports no low memory, clipboard, drops, file changes or IME; its environment comes from the desktop portal and UPower over D-Bus, and stays at the defaults without them | a Linux host on Wayland and X11 with every report the Windows host makes, and a system material where the compositor offers one | `../zui-host` | H4 |
 
 Unchanged in shape: element storage in pre-order structure-of-arrays, the

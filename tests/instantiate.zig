@@ -775,6 +775,97 @@ export fn zuiCheckFileWatch(path_len: usize) usize {
     return total;
 }
 
+/// Answers each service at once, as a host whose system answers before the
+/// call returns would.
+const ServicesHost = struct {
+    pub const zui_surfaces: zui.SurfaceKinds = .initOne(.offscreen);
+
+    copied: [32]u8 = undefined,
+    copied_len: usize = 0,
+    opened: usize = 0,
+
+    pub fn zuiPoll(_: *ServicesHost, _: zui.WindowId, _: *zui.RecordBuilder) bool {
+        return false;
+    }
+
+    pub fn zuiWaker(self: *ServicesHost) zui.Waker {
+        return .{ .context = self, .wakeFn = wakeNothing };
+    }
+
+    pub fn zuiWait(_: *ServicesHost, _: zui.NextFrame) void {}
+
+    pub fn zuiSurface(_: *ServicesHost, _: zui.WindowId) zui.Surface {
+        return .{ .offscreen = .{ .size = .{ 1, 1 } } };
+    }
+
+    pub fn zuiApply(_: *ServicesHost, _: zui.WindowId, _: zui.HostRequests) void {}
+
+    pub const zuiClipboard = struct {
+        pub fn write(host: *ServicesHost, text: []const u8) zui.ServiceError!void {
+            if (text.len > host.copied.len) return error.TooLarge;
+            @memcpy(host.copied[0..text.len], text);
+            host.copied_len = text.len;
+        }
+
+        pub fn read(host: *ServicesHost, request: zui.ServiceRequest, sink: zui.ServiceSink) zui.ServiceError!void {
+            host.answer(sink, .{ .request = request, .outcome = .{ .clipboard_text = host.copied[0..host.copied_len] } });
+        }
+    };
+
+    pub const zuiNotifications = struct {
+        pub fn show(host: *ServicesHost, request: zui.ServiceRequest, notification: zui.Notification, sink: zui.ServiceSink) zui.ServiceError!void {
+            host.answer(sink, .{ .request = request, .outcome = if (notification.title.len == 0) .{ .failed = .denied } else .notification_activated });
+        }
+    };
+
+    pub const zuiFileDialogs = struct {
+        pub fn show(host: *ServicesHost, window: zui.WindowId, request: zui.ServiceRequest, dialog: zui.FileDialog, sink: zui.ServiceSink) zui.ServiceError!void {
+            host.answer(sink, .{ .request = request, .window = window, .outcome = if (dialog.file_name.len == 0) .canceled else .{ .files_chosen = dialog.file_name } });
+        }
+    };
+
+    pub const zuiOpenUrl = struct {
+        pub fn open(host: *ServicesHost, url: []const u8) zui.ServiceError!void {
+            if (!zui.isOpenableUrl(url)) return error.InvalidUrl;
+            host.opened += 1;
+        }
+    };
+
+    pub const zuiMenus = struct {
+        pub fn popup(host: *ServicesHost, window: zui.WindowId, request: zui.ServiceRequest, items: []const zui.MenuItem, _: [2]f32, sink: zui.ServiceSink) zui.ServiceError!void {
+            if (items.len == 0) return error.TooLarge;
+            host.answer(sink, .{ .request = request, .window = window, .outcome = .{ .menu_item_chosen = items[items.len - 1].id } });
+        }
+
+        pub fn setBar(_: *ServicesHost, _: zui.WindowId, _: zui.ServiceRequest, _: []const zui.MenuItem, _: zui.ServiceSink) zui.ServiceError!void {}
+    };
+
+    fn answer(self: *ServicesHost, sink: zui.ServiceSink, answered: zui.ServiceAnswer) void {
+        self.zuiWaker().wakeIf(sink.publish(&answered));
+    }
+};
+
+var service_replies: zui_async.Stream(zui.ServiceReply(16), .{ .capacity = 8 }) = .{};
+
+export fn zuiCheckServices(text_len: usize) usize {
+    comptime zui.checkHost(ServicesHost);
+    var host: ServicesHost = .{};
+    const sink: zui.ServiceSink = .of(&service_replies);
+    const text = "copied, then pasted";
+    ServicesHost.zuiClipboard.write(&host, text[0..@min(text_len, text.len)]) catch return 0;
+    ServicesHost.zuiClipboard.read(&host, .of("paste"), sink) catch return 0;
+    ServicesHost.zuiNotifications.show(&host, .of("saved"), .{ .title = "Saved" }, sink) catch return 0;
+    ServicesHost.zuiFileDialogs.show(&host, .main, .of("open"), .{ .kind = .open_files, .file_name = "a.zon", .filters = &.{.{ .name = "Themes", .extensions = &.{"zon"} }} }, sink) catch return 0;
+    ServicesHost.zuiOpenUrl.open(&host, "https://ziglang.org/") catch return 0;
+    const items = [_]zui.MenuItem{ .{ .id = @enumFromInt(1), .label = "Cut", .shortcut = .{ .key = .x, .modifiers = .{ .control = true } } }, .separator, .{ .label = "More", .submenu = &.{.{ .id = @enumFromInt(2), .label = "Wrap", .checked = true }} } };
+    ServicesHost.zuiMenus.popup(&host, .main, .of("edit"), &items, .{ 10, 20 }, sink) catch return 0;
+    service_replies.zuiSwap();
+    var replies = service_replies.zuiView().items();
+    var total: usize = host.opened;
+    while (replies.next()) |reply| total += reply.len + @intFromEnum(reply.kind) + @intFromEnum(reply.menu_item) + reply.left_out_bytes;
+    return total;
+}
+
 const WireSources = struct {
     catalog: CheckSource = .{},
     log: zui_async.Stream(u32, .{ .capacity = 4 }) = .{},

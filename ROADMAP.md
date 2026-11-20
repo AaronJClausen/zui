@@ -71,7 +71,7 @@ green, and its **Status** line below says which slice is next.
 | H3. macOS | 10 | `../zui-host` | | |
 | H4. Linux | 10 | `../zui-host`, `../zui-sokol` | | in progress; slice 3, fractional scale, the clipboard, drops and file watching, is next |
 | H5. Web | 10 | `../zui-web` | | |
-| H6. Services | 10 | `src/host.zig`, `../zui-host` | | |
+| H6. Services | 10 | `src/services.zig`, `zui_app/`, `zui_testing/`, `../zui-host` | | in progress; slice 2, notifications, is next |
 | H7. Window decorations | 10 | `src/host.zig`, `../zui-host` | | |
 | H9. Many windows | 10 | `zui_app/`, `../zui-host` | | |
 
@@ -3735,6 +3735,140 @@ Done: V1, V2, V3 and V4 are in *Done*.
 **Done when (each):** the host passes C3, and the demo runs on it
 unchanged.
 
+### H6. Services
+
+**Grounding** (at zui `62d0813` and zui-host `16a9235`, before the first
+slice). The host contract listed six optional services by name
+(`src/contracts.zig:23`), and `checkHost` only checked that each was a type
+(`:100-102`). Only `zuiFileWatch` had a checked shape (`checkFileWatch`,
+`:143`), pinned by `host_file_watch_wrong_signature`. The pattern it set
+(F6) is a sink: `zui.FileChangeSink`, a pointer and a function, made by
+`.of(&source)` from any source whose `publish` returns `Wake` or
+`error{Full}!Wake` (`src/host.zig`). SPEC.md showed the other five only as
+`struct { ... }` (§16.3) and said they are reached through `zui_app` with
+`has_*` guards (§16.6), but nothing declared a guard. `zui_app` named the
+services (`zui_app/zui_app.zig:177`) only to report the missing ones
+(`:375`); an application reaches its host only through `Start(App).host`
+(`:198`), and `zuiLoader` gets the context and the `Io`, not the host
+(`:552`). `zui_app`'s test host declared `zuiClipboard = struct {}`
+(`zui_app/tests.zig:15`).
+
+The frame boundary had no channel for a service: `HostRequests` holds the
+cursor and the IME area, diffed as state by `zuiApply`, and a new kind of
+event would need a variant, storage in the context and a limit, as dropped
+files have. V2 found that even a zero-size field added to `Frame` moved R1
+counts. `zui_wire`'s host declares no services. A `zui_async.Stream` with
+one producer panics in safe builds when two publish at once.
+
+On Windows only the clipboard existed, unchecked
+(`zui-host/windows/host.zig:40`): `read(host, buffer) ?[]u8` copied
+`CF_UNICODETEXT` on the caller's thread (`:860`), and `write(host, text)`
+returned `error{InvalidUtf8, ClipboardUnavailable, OutOfMemory}` (`:873`),
+where `OutOfMemory` was `GlobalAlloc` failing (`:875`): the OS's memory,
+handed to the clipboard, so not the host's allocation, but named as if it
+were. A synchronous read is Windows' alone: on Wayland the selection is
+read from a pipe the copying client writes into (H4 slice 3), and in a
+browser `navigator.clipboard.readText` is a promise (H5). The window
+thread runs the message loop in a single-threaded apartment (`:387-389`),
+dispatches everything through `handleMessage` (`:467`), and takes work
+from the UI thread as `WM_APP` messages (`:93`). A modal loop on it, such
+as a move or resize, keeps dispatching the window's messages. Test-only
+settings are fields set before `init` (`:62`), and the harness sends what
+the OS would (`windows/conformance.zig:43`).
+
+**Plan.** Five slices; the first fixes every shape at once, so H3 and H4
+build on one reviewed contract.
+
+1. **The shapes, checked; the clipboard and URLs on Windows.** zui: the
+   vocabulary in `src/services.zig`; `checkHost` checks every service's
+   functions, with a compile-error case for each function, one for a
+   service that is not a struct and one for `ServiceSink.of`;
+   `zui_app.ServicesOf(Host)`, its `has_*` guards and the unguarded-call
+   error; `tests/instantiate.zig` declares a host with all five;
+   `zui_testing`'s host suite checks the services a host declares.
+   zui-host: the clipboard moves to the new shape and `zuiOpenUrl` is
+   added, both answered from the window thread (`windows/services.zig`).
+2. **Notifications** (zui-host): `Shell_NotifyIconW` with `NIF_INFO` and
+   `NOTIFYICON_VERSION_4`, the icon added on the first `show` and removed
+   when the balloon ends or at `deinit`; `NIN_BALLOONUSERCLICK` answers
+   `.notification_activated`, `NIN_BALLOONTIMEOUT` and `NIN_BALLOONHIDE`
+   `.notification_dismissed`, as does a notification replaced by the next.
+   The fake records `NIM_ADD` and `NIM_MODIFY`, and the tests send the
+   callback messages Windows would.
+3. **File dialogs** (zui-host): `IFileOpenDialog` and `IFileSaveDialog`
+   created and shown on the window thread, owned by the window; `show`
+   copies the dialog's strings into a fixed buffer, posts it and returns;
+   the dialog's modal loop keeps dispatching the window's messages, and
+   its paths (`SIGDN_FILESYSPATH`) or `.canceled` are published. One
+   dialog or menu at a time. The vtables go in `windows/com.zig`; the fake
+   builds and configures the real dialog and reads `GetOptions` back
+   without `Show`.
+4. **Menus** (zui-host): `popup` builds a menu with `CreatePopupMenu` and
+   `AppendMenuW` on the window thread, converts the position to screen
+   pixels, and shows it with `TrackPopupMenuEx(TPM_RETURNCMD)`; `setBar`
+   builds one with `CreateMenu` and answers each `WM_COMMAND`. Items are
+   numbered by the host (`WM_COMMAND` carries 16 bits) and mapped back.
+   A menu bar's `HMENU` lives in one struct of per-window service state,
+   for H9 to move into its window slots; with H7's custom title bar,
+   `setBar` may answer `error.Unavailable`.
+5. **The example, and closing H6** (zui-host and zui):
+   `examples/services.zig` and `zig build services` on `zui_app`, with a
+   menu bar, a context menu, and buttons to copy, paste, notify, open,
+   save, choose a folder and open a URL, each answer shown; one
+   `Stream(zui.ServiceReply(16 * 1024))`, every call from `zuiLoader`
+   through `ServicesOf`; `-- --check` scripts what shows nothing.
+
+**Done when.** Automated: zui's tests in Debug, ReleaseFast and
+ReleaseSafe and its `wasm32-freestanding`, `powerpc-linux` and `x86-linux`
+checks; each compile-error case fails with its message; zui-host's tests
+in Debug and ReleaseSafe, `check` and `fmt-check`, with the host suite
+passing every service the host has built, faked through
+`Host.service_fake`; the host's own tests of `error.Busy`,
+`error.TooLarge`, the menu built (read back from the `HMENU`), the
+popup's position in screen pixels, a menu bar's `WM_COMMAND`, the dialog's
+configuration, the notification's callbacks, and `ShellExecuteW` never
+reached with a refused URL; zui-sokol's tour runs unchanged; R1 counts
+unchanged. By a person, in slice 5: `zig build services` in zui-host,
+choosing a file, saving, choosing a folder, a notification clicked, a
+context menu and the menu bar, a URL opened in the browser, copy and
+paste, each in a screenshot.
+
+**Spec.** §14.1, §16.3, §16.6, §19.5, §19.6.
+
+**Status.** Slice 1 is done, in zui and zui-host (not pushed). zui gained
+`src/services.zig`: `zui.ServiceRequest` (`.of(name)`), `ServiceAnswer`
+(the outcome, borrowed, and the bytes the host could not hold),
+`ServiceReply(n)` (the plain-data copy, text cut at a character and paths
+kept whole, the rest counted), `ServiceSink` (`.of(&source)` for any source
+whose `publish` takes a `ServiceReply(n)`), `ServiceError`,
+`ServiceFailure`, `Notification`, `FileDialog`, `FileFilter`, `MenuItem`,
+`MenuItemId` and `isOpenableUrl`. `checkHost` checks each service is a
+struct and each function's type, `checkFileWatch` folded into the same
+table with its message unchanged; ten compile-error cases pin the
+messages. `zui_app.ServicesOf(Host)` gives `has_clipboard` through
+`has_file_watch` and `has_menu_bar`, and each service behind its guard.
+`zui_testing.expectHostConforms` checks a clipboard round trip, that a
+path, a `file:` URL and a word are refused, and with the harness's
+`openedUrl` that a URL reaches the system, and with `scriptServices` that
+dialogs, menus and notifications answer as scripted, each naming its
+request and window; its test host passes, and one answering another
+request and one opening a path fail. A delivery of replies round-trips
+through `zui_wire`. On Windows, `zuiClipboard.read` and `zuiOpenUrl.open`
+claim a slot and post to the window thread, which reads the clipboard
+(up to 64 KiB of UTF-8, lone surrogates replaced, the rest counted as left
+out) or calls `ShellExecuteW`, so every answer comes from one thread;
+`write` reports `GlobalAlloc` failing as `error.Unavailable`. The host
+suite passes against a hidden window with the URL opener faked. Measured:
+the zui-counts executable's .text and .rodata are byte-identical to
+`62d0813`'s (sha256 6ac82a44... and d05b536a...), so R1 counts are
+unchanged; zui-sokol's tour on the host, in ReleaseSafe with
+`--measure-idle`, idled at 0.0 ms of CPU over 10 s, and `zui_app` now
+reports only notifications, file dialogs and menus missing. Decided in
+the slice, beyond the plan: `Busy` also refuses a clipboard read or a URL
+still waiting for the window thread; `ServiceAnswer.left_out_bytes`
+carries what the host itself could not hold; `zui.isOpenableUrl` is core,
+so every host refuses the same URLs. Next: slice 2, notifications.
+
 ### H4. Linux
 
 **Grounding.** zui-host has one directory per OS, and `zui_host.Host`
@@ -4041,7 +4175,13 @@ Deliberate, and each a reason to choose zui:
 | Whether a system material shows (H8) | `Environment.system_material`, reported by the host, so it is in the record and replays |
 | A renderer over a system material (H8) | composes with alpha: zui-sokol draws a native window through a DirectComposition swapchain, since Windows ignores an OpenGL or window swapchain's alpha |
 | A terminate request (H2) | delivered in one record; the host's next `zuiPoll` returns false |
-| The clipboard service before H6 (H2) | `zuiClipboard`, a type with `read(host, buffer)` and `write(host, text)` |
+| The clipboard service before H6 (H2) | `zuiClipboard`, a type with `read(host, buffer)` and `write(host, text)`; H6 gave it the services' shape |
+| How a service answers (H6, decision 1) | published into a `zui.ServiceSink` made from a source the application chooses, usually a `Stream(zui.ServiceReply(n))`, as file changes are, chosen by the owner: nothing on a hot path changes and answers relay and replay. Events in the record, which would need storage and limits in the context, and demand in `HostRequests`, carried by every frame, were the other options; E1 may add the latter for the clipboard alone |
+| Where a service is called (H6) | by the application, between frames, usually from `zuiLoader`, through `zui_app.ServicesOf(Host)`'s comptime `has_*` guards; never from declaration, since a call is work that replay would repeat |
+| Where a modal dialog runs on Windows (H6, decision 2) | on the window thread, chosen by the owner: its modal loop keeps dispatching the window's messages, as a move or resize does, and menus must run there anyway; a dialog thread of its own would join the two threads' input queues |
+| Notifications on Windows (H6, decision 3) | `Shell_NotifyIconW` balloons, which Windows 10 and 11 show as toasts, chosen by the owner; WinRT's toasts need package identity or a registered activator for an unpackaged application |
+| Text longer than the system shows (H6, decision 4) | cut at a character, as a label is, chosen by the owner, since the lengths differ by system and the application cannot know them |
+| A URL the system then fails to open (H6, decision 5) | not answered: `open` takes no sink, chosen by the owner; the system shows its own error |
 | What a relay listener gets (F2) | the record as applied: the events kept, and deliveries from `zuiDelivery`, filled in the reservation, or a replay's own |
 | A frame on the wire (F3) | number, parameters, host requests and commands, as changes from the last frame written; hit regions and semantics stay with the context |
 | A wire message beyond the decoder's capacity (F3) | `error.CapacityExceeded`, since a delta cannot be applied in part |

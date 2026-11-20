@@ -219,6 +219,75 @@ test "a file change whose path does not fit asks for a rescan rather than naming
     try testing.expectEqualStrings("", too_long.pathBytes());
 }
 
+fn TwoReplies(comptime byte_capacity: u32) type {
+    return struct {
+        const Self = @This();
+        replies: [2]zui.ServiceReply(byte_capacity) = undefined,
+        len: usize = 0,
+        refused: u32 = 0,
+
+        pub fn publish(self: *Self, reply: zui.ServiceReply(byte_capacity)) error{Full}!zui.Wake {
+            if (self.len == self.replies.len) {
+                self.refused += 1;
+                return error.Full;
+            }
+            self.replies[self.len] = reply;
+            self.len += 1;
+            return if (self.len == 1) .needed else .already_pending;
+        }
+    };
+}
+
+test "a service's answer is published into a source as a reply, waking for the first, and a full source refuses" {
+    var replies: TwoReplies(32) = .{};
+    const sink: zui.ServiceSink = .of(&replies);
+    const open_theme: zui.ServiceRequest = .of("open theme");
+    try testing.expectEqual(zui.Wake.needed, sink.publish(&.{ .request = open_theme, .outcome = .{ .files_chosen = "C:\\dark.zon\x00" } }));
+    try testing.expectEqual(zui.Wake.already_pending, sink.publish(&.{ .request = .of("menu"), .window = @enumFromInt(2), .outcome = .{ .menu_item_chosen = @enumFromInt(7) } }));
+    try testing.expectEqual(zui.Wake.already_pending, sink.publish(&.{ .request = open_theme, .outcome = .canceled }));
+    try testing.expectEqual(@as(u32, 1), replies.refused);
+
+    try testing.expectEqual(open_theme, replies.replies[0].request);
+    try testing.expectEqual(.files_chosen, replies.replies[0].kind);
+    var paths = replies.replies[0].paths();
+    try testing.expectEqualStrings("C:\\dark.zon", paths.next().?);
+    try testing.expectEqual(@as(?[]const u8, null), paths.next());
+    try testing.expectEqual(@as(zui.WindowId, @enumFromInt(2)), replies.replies[1].window);
+    try testing.expectEqual(@as(zui.MenuItemId, @enumFromInt(7)), replies.replies[1].menu_item);
+}
+
+test "a reply keeps what fits: text cut at a character, paths whole, and counts the rest" {
+    const Reply = zui.ServiceReply(8);
+    const pasted = "zui \u{2192} ok";
+    const text = zui.ServiceReply(6).of(&.{ .request = .of("paste"), .outcome = .{ .clipboard_text = pasted } });
+    try testing.expectEqualStrings("zui ", text.text());
+    try testing.expectEqual(@as(u32, pasted.len - 4), text.left_out_bytes);
+    const held_in_part = Reply.of(&.{ .request = .of("paste"), .outcome = .{ .clipboard_text = "head" }, .left_out_bytes = 4096 });
+    try testing.expectEqualStrings("head", held_in_part.text());
+    try testing.expectEqual(@as(u32, 4096), held_in_part.left_out_bytes);
+
+    const chosen = Reply.of(&.{ .request = .of("open"), .outcome = .{ .files_chosen = "a.zon\x00much-too-long.zon\x00b\x00" } });
+    var paths = chosen.paths();
+    try testing.expectEqualStrings("a.zon", paths.next().?);
+    try testing.expectEqualStrings("b", paths.next().?);
+    try testing.expectEqual(@as(?[]const u8, null), paths.next());
+    try testing.expectEqual(@as(u32, "much-too-long.zon".len + 1), chosen.left_out_bytes);
+
+    const failed = Reply.of(&.{ .request = .of("notify"), .outcome = .{ .failed = .denied } });
+    try testing.expectEqual(.failed, failed.kind);
+    try testing.expectEqual(zui.ServiceFailure.denied, failed.failure);
+    try testing.expectEqual(@as(u32, 0), failed.len);
+}
+
+test "a URL opener takes URLs, and refuses paths, files and what has no scheme" {
+    for ([_][]const u8{ "https://ziglang.org/", "mailto:someone@example.com", "ms-settings:display", "x-zui+test.v1:go" }) |url| {
+        try testing.expect(zui.isOpenableUrl(url));
+    }
+    for ([_][]const u8{ "C:\\Windows\\notepad.exe", "file:///C:/Windows/notepad.exe", "FILE:x", "notepad", "\\\\server\\share", ":nothing", "1http://x", "a b:c" }) |url| {
+        try testing.expect(!zui.isOpenableUrl(url));
+    }
+}
+
 test "a record builder keeps events in order and drops the newest that do not fit" {
     var event_buffer: [2]zui.Event = undefined;
     var text_buffer: [4]u8 = undefined;

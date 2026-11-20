@@ -1831,14 +1831,60 @@ const Win32Host = struct {
     pub fn zuiApply(self: *Win32Host, window: zui.WindowId, requests: zui.HostRequests) void { ... } // cursor, IME window
     pub fn zuiSemantics(self: *Win32Host, window: zui.WindowId, nodes: []const zui.SemanticNode) zui.SemanticsDropped { ... } // optional: the accessibility bridge
 
-    pub const zuiClipboard = struct { ... };       // optional services
-    pub const zuiNotifications = struct { ... };
-    pub const zuiFileDialogs = struct { ... };
-    pub const zuiOpenUrl = struct { ... };
-    pub const zuiMenus = struct { ... };
+    pub const zuiClipboard = struct { ... };       // optional services: write(host, text); read(host, request, sink)
+    pub const zuiNotifications = struct { ... };   // show(host, request, notification, sink)
+    pub const zuiFileDialogs = struct { ... };     // show(host, window, request, dialog, sink)
+    pub const zuiOpenUrl = struct { ... };         // open(host, url)
+    pub const zuiMenus = struct { ... };           // popup(host, window, request, items, position, sink); setBar, optional
     pub const zuiFileWatch = struct { ... };       // watch(host, directory, sink): file changes into a source
 };
 ```
+
+```zig
+/// Names one call to a service, so its answer can be told from others'.
+pub const ServiceRequest = enum(u32) { _, pub fn of(comptime name: []const u8) ServiceRequest };
+/// What one call answered, borrowed for the publish.
+pub const ServiceAnswer = struct {
+    request: ServiceRequest,
+    window: WindowId = .main,
+    outcome: union(enum) { clipboard_text: []const u8, files_chosen: []const u8, menu_item_chosen: MenuItemId,
+                           notification_activated, notification_dismissed, canceled, failed: ServiceFailure },
+    left_out_bytes: u32 = 0,        // what the host itself could not hold
+};
+/// Where a host publishes answers, as `FileChangeSink` is a pointer and a function.
+pub const ServiceSink = struct {
+    context: *anyopaque,
+    publishFn: *const fn (*anyopaque, *const ServiceAnswer) Wake,
+    pub fn of(source: anytype) ServiceSink   // any source whose publish takes a ServiceReply(n)
+};
+/// The answer as plain data, `n` bytes of text or paths inline: text cut at a character, paths whole, the rest counted.
+pub fn ServiceReply(comptime n: u32) type   // .request, .window, .kind, .menu_item, .failure, .left_out_bytes; text(), paths()
+pub const ServiceError = error{ Busy, TooLarge, InvalidUtf8, InvalidUrl, Unavailable };
+pub const ServiceFailure = enum(u8) { unavailable, denied };
+pub const Notification = struct { title: []const u8, body: []const u8 = "" };
+pub const FileDialog = struct { kind: Kind = .open_file, title, directory, file_name: []const u8 = "", filters: []const FileFilter = &.{} };   // open_file, open_files, save_file, choose_folder
+pub const FileFilter = struct { name: []const u8, extensions: []const []const u8 };   // .{ .name = "Themes", .extensions = &.{"zon"} }
+pub const MenuItem = struct { id: MenuItemId, label: []const u8 = "", submenu: []const MenuItem = &.{}, enabled: bool = true, checked: ?bool = null, shortcut: ?Chord = null };   // MenuItem.separator
+pub fn isOpenableUrl(url: []const u8) bool   // a scheme of two letters or more, and not `file:`
+```
+
+`checkHost` checks each function's type exactly:
+
+| Service | Function | Type (`Host` is the host) |
+|---|---|---|
+| `zuiClipboard` | `write` | `fn (*Host, []const u8) zui.ServiceError!void` |
+| | `read` | `fn (*Host, zui.ServiceRequest, zui.ServiceSink) zui.ServiceError!void` |
+| `zuiNotifications` | `show` | `fn (*Host, zui.ServiceRequest, zui.Notification, zui.ServiceSink) zui.ServiceError!void` |
+| `zuiFileDialogs` | `show` | `fn (*Host, zui.WindowId, zui.ServiceRequest, zui.FileDialog, zui.ServiceSink) zui.ServiceError!void` |
+| `zuiOpenUrl` | `open` | `fn (*Host, []const u8) zui.ServiceError!void` |
+| `zuiMenus` | `popup` | `fn (*Host, zui.WindowId, zui.ServiceRequest, []const zui.MenuItem, [2]f32, zui.ServiceSink) zui.ServiceError!void` |
+| | `setBar`, optional | `fn (*Host, zui.WindowId, zui.ServiceRequest, []const zui.MenuItem, zui.ServiceSink) zui.ServiceError!void` |
+| `zuiFileWatch` | `watch` | `fn (*Host, []const u8, zui.FileChangeSink) zui.FileWatchError!void` |
+
+A service that is not a struct, a function missing or of another type, is
+a compile error:
+``"zui: demo.Host.zuiClipboard is missing `read`, which must be fn (*demo.Host, zui.ServiceRequest, zui.ServiceSink) zui.ServiceError!void"``.
+A service may declare more functions than these, which are not checked.
 
 ```zig
 /// One change in a watched directory; plain data, so it relays and replays.
@@ -1925,8 +1971,37 @@ pub fn checkHostAndRenderer(comptime Host: type, comptime Renderer: type) void  
 - **Signal handlers** only set an atomic flag and wake; the lifecycle
   event arrives in the next record. SIGKILL and SIGSTOP cannot be caught,
   so they are not values of `Lifecycle`.
-- **Services** are optional nested declarations, reached through
-  `zui_app` with `has_*` guards (§16.6).
+- **Services** are optional nested declarations, each a struct of
+  functions taking the host first. They are work, so declaration never
+  calls one (§14.1): declaration records that the application wants one,
+  and the application calls it between frames, usually from `zuiLoader`,
+  through `zui_app.ServicesOf(Host)` and its `has_*` guards (§16.6).
+- **Every call returns at once.** One that may take the user's time (a
+  dialog, a menu, a notification) or the OS's (reading the clipboard,
+  which is asynchronous on Wayland and the web) names a
+  `zui.ServiceRequest` and a `zui.ServiceSink`, and a call that returns
+  without an error publishes exactly one answer for its request into the
+  sink later, never from two threads at once, waking for it; a menu bar
+  answers once for each choice. The sink is usually a
+  `zui_async.Stream(zui.ServiceReply(n), ...)` in the application's
+  `Sources`, so answers are deliveries that relay and replay, and a
+  replayed session sees the file the user chose without opening a
+  dialog. An answer that does not fit `n` bytes keeps what fits, text cut
+  at a character and paths whole, and counts the rest.
+- **Calls that attach to a window** (dialogs, menus) name it. A host
+  shows one dialog or menu at a time, and refuses another with
+  `error.Busy`, as it refuses a call of a kind it is still answering.
+  Positions are in layout units from the window's top-left.
+- **Opening a URL** hands it to the system's handler for its scheme. A
+  path, or a `file:` URL, is refused with `error.InvalidUrl`, since
+  opening it would run what it names (`zui.isOpenableUrl`). A URL the
+  system then fails to open is not answered: the system shows its own
+  error.
+- **Clipboard text** is copied by `write` at once, into the OS's memory
+  or, on a host that serves the selection itself, into its own fixed
+  buffer (`error.TooLarge` past it).
+- **Text the system cannot show whole,** such as a notification's title
+  past its length, is cut at a character, as a label is.
 - **Watching files** is the service that is a source:
   `zuiFileWatch.watch(host, directory, sink)` watches a directory and its
   subdirectories until the host's `deinit`, and publishes each change into
@@ -2000,6 +2075,13 @@ build's instruction counts are unchanged.
 
 `zui_app` reports every fallback in effect at run time, and the inspector
 lists them, so none is silent to a developer who looks.
+
+The guards are `zui_app.ServicesOf(Host)`'s `has_clipboard`,
+`has_notifications`, `has_file_dialogs`, `has_open_url`, `has_menus`,
+`has_menu_bar` and `has_file_watch`, each known at compile time, so a call
+inside one is not compiled for a host without the service; a call outside
+its guard on such a host fails naming the guard:
+``"zui_app: zui_raylib.Host has no `zuiNotifications`; guard the call with `if (zui_app.ServicesOf(zui_raylib.Host).has_notifications)`"``.
 
 ---
 
@@ -2316,6 +2398,9 @@ const App = struct {
   host lacks; then the first time input is dropped by the record
   builder, each limit is exceeded, a source refuses, ids repeat or the
   tree is unbalanced.
+- **The host's services** are reached through `ServicesOf(App.Host)`,
+  with the host `init` was given (`start.host`), from `zuiLoader` or other
+  code outside declaration (§16.3).
 - **`Runner(App)`** is `run` one frame at a time, for tests and hosts
   that drive the loop. Each mistake in `App` is a compile error naming
   it: ``"zui_app: demo.App declares unknown `zuiLoder`"``.
@@ -2384,7 +2469,8 @@ while (try client.frame(&host, &renderer)) {}
   wait and a record made after a wake keep the clock the client's events
   carry. The connection ending is the window closing: the next poll
   returns false. Host requests go back with the frame, for the client's
-  host to apply.
+  host to apply. It declares no services, so an application behind it
+  finds every `has_*` false and falls back as on a host without them.
 - **The wire renderer** writes each frame as changes from the last, after
   a header with the application's fonts' fingerprint, and declares the
   commands, colors and payload types `Ui` generates, so `zui_app`

@@ -177,6 +177,47 @@ pub const Submission = union(enum) {
 pub const Service = enum { clipboard, notifications, file_dialogs, open_url, menus, file_watch };
 pub const Services = std.EnumSet(Service);
 
+/// The host's services, each behind a guard known at compile time, so a
+/// call inside it is not compiled for a host without the service, and a
+/// call outside it is a compile error naming the guard. Services are work:
+/// call them between frames, as from `zuiLoader`, never from declaration.
+///
+/// ```zig
+/// const services = zui_app.ServicesOf(App.Host);
+///
+/// pub fn zuiLoader(app: *App, _: *const Ui, _: std.Io) void {
+///     if (services.has_file_dialogs and app.wants_theme) {
+///         app.wants_theme = false;
+///         services.file_dialogs.show(app.host, .main, open_theme, .{ .filters = &.{themes} }, .of(&app.sources.replies)) catch {};
+///     }
+/// }
+/// ```
+pub fn ServicesOf(comptime Host: type) type {
+    return struct {
+        pub const has_clipboard = @hasDecl(Host, "zuiClipboard");
+        pub const has_notifications = @hasDecl(Host, "zuiNotifications");
+        pub const has_file_dialogs = @hasDecl(Host, "zuiFileDialogs");
+        pub const has_open_url = @hasDecl(Host, "zuiOpenUrl");
+        pub const has_menus = @hasDecl(Host, "zuiMenus");
+        pub const has_menu_bar = if (has_menus) @hasDecl(Host.zuiMenus, "setBar") else false;
+        pub const has_file_watch = @hasDecl(Host, "zuiFileWatch");
+
+        pub const clipboard = serviceOrGuardError(Host, .clipboard);
+        pub const notifications = serviceOrGuardError(Host, .notifications);
+        pub const file_dialogs = serviceOrGuardError(Host, .file_dialogs);
+        pub const open_url = serviceOrGuardError(Host, .open_url);
+        pub const menus = serviceOrGuardError(Host, .menus);
+        pub const file_watch = serviceOrGuardError(Host, .file_watch);
+    };
+}
+
+fn serviceOrGuardError(comptime Host: type, comptime service: Service) type {
+    const declaration = serviceDeclaration(service);
+    if (@hasDecl(Host, declaration)) return @field(Host, declaration);
+    @compileError("zui_app: " ++ @typeName(Host) ++ " has no `" ++ declaration ++ "`; guard the call with `if (zui_app.ServicesOf(" ++
+        @typeName(Host) ++ ").has_" ++ @tagName(service) ++ ")`");
+}
+
 fn serviceDeclaration(service: Service) []const u8 {
     return switch (service) {
         .clipboard => "zuiClipboard",

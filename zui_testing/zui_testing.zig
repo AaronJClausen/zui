@@ -31,6 +31,7 @@ const host_conformance = @import("host_conformance.zig");
 pub const HostConformance = host_conformance.HostConformance;
 pub const HostError = host_conformance.HostError;
 pub const HostViolation = host_conformance.HostViolation;
+pub const ServiceScript = host_conformance.ServiceScript;
 pub const expectHostConforms = host_conformance.expectHostConforms;
 pub const findHostViolation = host_conformance.findHostViolation;
 

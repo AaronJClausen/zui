@@ -1352,6 +1352,34 @@ fn reloadThemeOnSave(app: *App, ui: *Ui) void {
 }
 ```
 
+<a id="services"></a>
+
+### Host services · *shipped*
+
+Services are what the system does for an application: the clipboard, notifications, file dialogs, opening a URL, menus. Each is an optional host declaration with a checked shape. They are work, so declaration only notes that you want one, and you call it between frames, from `zuiLoader`, through `zui_app.ServicesOf(Host)`, whose `has_*` guards are known at compile time. Every call returns at once, and its answer is published into a source you choose, so a replay sees what the user chose without opening a dialog. zui-host's Windows host reads and writes the clipboard and opens URLs, refusing paths and `file:` URLs.
+
+`src/app.zig`
+
+```zig
+const services = zui_app.ServicesOf(App.Host);
+const paste: zui.ServiceRequest = .of("paste");
+
+pub fn zuiDeclare(app: *App, ui: *Ui) void {
+    if (ui.chordPressed(.{ .key = .v, .modifiers = .{ .control = true } })) app.wants_paste = true;
+    var replies = ui.source(.replies).items();
+    while (replies.next()) |reply| {
+        if (reply.request == paste and reply.kind == .clipboard_text) app.insert(reply.text());
+    }
+}
+
+pub fn zuiLoader(app: *App, _: *const Ui, _: std.Io) void {
+    if (services.has_clipboard and app.wants_paste) {
+        app.wants_paste = false;
+        services.clipboard.read(app.host, paste, .of(&app.sources.replies)) catch {};
+    }
+}
+```
+
 <a id="modules"></a>
 
 ## 05. Widgets, the inspector and `zui_app`
@@ -1626,7 +1654,7 @@ Some of the notices it logs: *"limits.max_elements is 4096, but a frame needed 5
 
 ## 06. The backend contracts
 
-zui draws nothing and opens no windows itself. Renderers and hosts are plain types checked at compile time, with conformance suites they run in their own CI. Today there are zui-raylib (a renderer and adapter host), zui-sokol, zui-terminal, and zui-host's Windows host (message loop on its own thread, per-monitor DPI, Mica, IME, clipboard, dropped files, file watching), and its Linux host, on Wayland so far (buffer scale, pointer, wheel, keys through the compositor's keymap with their repeats, typed text, focus, cursor shapes, the environment from the desktop portal and UPower over D-Bus, and signals, sleep and waking as lifecycle events).
+zui draws nothing and opens no windows itself. Renderers and hosts are plain types checked at compile time, with conformance suites they run in their own CI. Today there are zui-raylib (a renderer and adapter host), zui-sokol, zui-terminal, and zui-host's Windows host (message loop on its own thread, per-monitor DPI, Mica, IME, clipboard, opening URLs, dropped files, file watching), and its Linux host, on Wayland so far (buffer scale, pointer, wheel, keys through the compositor's keymap with their repeats, typed text, focus, cursor shapes, the environment from the desktop portal and UPower over D-Bus, and signals, sleep and waking as lifecycle events).
 
 <a id="renderer"></a>
 
@@ -2066,6 +2094,7 @@ Build with `-Dzui-tracy=true` to link Tracy's client, then connect profiler 0.14
 
 These names compile, but they don't do anything yet. This list is from `ARCHITECTURE.md` §7 and the roadmap.
 
+- **Notifications, file dialogs and menus** *(declared, not yet on a host)*: their shapes are checked and `zui_testing`'s host suite tests them, but no host implements them yet. The Windows host's are the rest of H6.
 - **Still to come**: Motion, multi-line text editing, skins, the inspector over the wire, and more hosts (macOS, Linux, web).
 
 <a id="dx"></a>

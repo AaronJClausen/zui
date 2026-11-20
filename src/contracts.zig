@@ -8,6 +8,7 @@ const surface = @import("surface.zig");
 const host = @import("host.zig");
 const record = @import("record.zig");
 const semantics = @import("semantics.zig");
+const services = @import("services.zig");
 
 /// Every `zui`-prefixed declaration of every contract. One that is not
 /// here belongs to no contract, which is almost always a misspelling.
@@ -85,7 +86,8 @@ pub fn checkRenderer(comptime Renderer: type) void {
 }
 
 /// The host contract: the five calls of the loop and `zui_surfaces`, and
-/// optionally `zui_capabilities` and the services, each a type.
+/// optionally `zui_capabilities`, the frame calls and the services, each a
+/// struct of functions whose types are checked.
 pub fn checkHost(comptime Host: type) void {
     if (@typeInfo(Host) != .@"struct") @compileError("zui: a host must be a struct type, got " ++ @typeName(Host));
     const name = @typeName(Host);
@@ -98,7 +100,11 @@ pub fn checkHost(comptime Host: type) void {
     if (@hasDecl(Host, "zui_capabilities")) expectDeclarationType(Host, "zui_capabilities", host.HostCapabilities, "zui.HostCapabilities");
     checkOutputFormats(Host);
     for (host_services) |service| {
-        if (@hasDecl(Host, service)) expectDeclarationType(Host, service, type, "type");
+        if (!@hasDecl(Host, service)) continue;
+        expectDeclarationType(Host, service, type, "type");
+        if (@typeInfo(@field(Host, service)) != .@"struct") {
+            @compileError("zui: " ++ name ++ "." ++ service ++ " must be a struct type, got " ++ @typeName(@field(Host, service)));
+        }
     }
 
     const host_pointer = "*" ++ name;
@@ -110,7 +116,82 @@ pub fn checkHost(comptime Host: type) void {
     inline for (hostFrameCalls(Host)) |call| {
         if (@hasDecl(Host, call.declaration)) expectHostCall(Host, call.declaration, call.Expected, call.expected_name);
     }
-    if (@hasDecl(Host, "zuiFileWatch")) checkFileWatch(Host);
+    inline for (serviceFunctions(Host)) |function| {
+        if (!@hasDecl(Host, function.service)) continue;
+        const Service = @field(Host, function.service);
+        const service_name = name ++ "." ++ function.service;
+        if (!@hasDecl(Service, function.name)) {
+            if (function.optional) continue;
+            @compileError("zui: " ++ service_name ++ " is missing `" ++ function.name ++ "`, which must be " ++ function.expected_name);
+        }
+        const Found = @TypeOf(@field(Service, function.name));
+        if (Found != function.Expected) @compileError("zui: " ++ service_name ++ "." ++ function.name ++ " must be " ++ function.expected_name ++ ", found " ++ @typeName(Found));
+    }
+}
+
+const ServiceFunction = struct {
+    service: []const u8,
+    name: []const u8,
+    Expected: type,
+    expected_name: []const u8,
+    optional: bool = false,
+};
+
+/// Each function of each service, in the order they are checked.
+fn serviceFunctions(comptime Host: type) []const ServiceFunction {
+    const host_pointer = "*" ++ @typeName(Host);
+    const ServiceError = services.ServiceError;
+    return &.{
+        .{
+            .service = "zuiClipboard",
+            .name = "write",
+            .Expected = fn (*Host, []const u8) ServiceError!void,
+            .expected_name = "fn (" ++ host_pointer ++ ", []const u8) zui.ServiceError!void",
+        },
+        .{
+            .service = "zuiClipboard",
+            .name = "read",
+            .Expected = fn (*Host, services.ServiceRequest, services.ServiceSink) ServiceError!void,
+            .expected_name = "fn (" ++ host_pointer ++ ", zui.ServiceRequest, zui.ServiceSink) zui.ServiceError!void",
+        },
+        .{
+            .service = "zuiNotifications",
+            .name = "show",
+            .Expected = fn (*Host, services.ServiceRequest, services.Notification, services.ServiceSink) ServiceError!void,
+            .expected_name = "fn (" ++ host_pointer ++ ", zui.ServiceRequest, zui.Notification, zui.ServiceSink) zui.ServiceError!void",
+        },
+        .{
+            .service = "zuiFileDialogs",
+            .name = "show",
+            .Expected = fn (*Host, host.WindowId, services.ServiceRequest, services.FileDialog, services.ServiceSink) ServiceError!void,
+            .expected_name = "fn (" ++ host_pointer ++ ", zui.WindowId, zui.ServiceRequest, zui.FileDialog, zui.ServiceSink) zui.ServiceError!void",
+        },
+        .{
+            .service = "zuiOpenUrl",
+            .name = "open",
+            .Expected = fn (*Host, []const u8) ServiceError!void,
+            .expected_name = "fn (" ++ host_pointer ++ ", []const u8) zui.ServiceError!void",
+        },
+        .{
+            .service = "zuiMenus",
+            .name = "popup",
+            .Expected = fn (*Host, host.WindowId, services.ServiceRequest, []const services.MenuItem, [2]f32, services.ServiceSink) ServiceError!void,
+            .expected_name = "fn (" ++ host_pointer ++ ", zui.WindowId, zui.ServiceRequest, []const zui.MenuItem, [2]f32, zui.ServiceSink) zui.ServiceError!void",
+        },
+        .{
+            .service = "zuiMenus",
+            .name = "setBar",
+            .Expected = fn (*Host, host.WindowId, services.ServiceRequest, []const services.MenuItem, services.ServiceSink) ServiceError!void,
+            .expected_name = "fn (" ++ host_pointer ++ ", zui.WindowId, zui.ServiceRequest, []const zui.MenuItem, zui.ServiceSink) zui.ServiceError!void",
+            .optional = true,
+        },
+        .{
+            .service = "zuiFileWatch",
+            .name = "watch",
+            .Expected = fn (*Host, []const u8, host.FileChangeSink) host.FileWatchError!void,
+            .expected_name = "fn (" ++ host_pointer ++ ", []const u8, zui.FileChangeSink) zui.FileWatchError!void",
+        },
+    };
 }
 
 const HostFrameCall = struct {
@@ -138,15 +219,6 @@ fn checkOutputFormats(comptime Party: type) void {
     if (!Party.zui_output_formats.contains(.sdr)) {
         @compileError("zui: " ++ @typeName(Party) ++ ".zui_output_formats does not include .sdr, which every window falls back to");
     }
-}
-
-fn checkFileWatch(comptime Host: type) void {
-    const name = @typeName(Host) ++ ".zuiFileWatch";
-    const Watch = fn (*Host, []const u8, host.FileChangeSink) host.FileWatchError!void;
-    const expected = "fn (*" ++ @typeName(Host) ++ ", []const u8, zui.FileChangeSink) zui.FileWatchError!void";
-    if (!@hasDecl(Host.zuiFileWatch, "watch")) @compileError("zui: " ++ name ++ " is missing `watch`, which must be " ++ expected);
-    const Found = @TypeOf(Host.zuiFileWatch.watch);
-    if (Found != Watch) @compileError("zui: " ++ name ++ ".watch must be " ++ expected ++ ", found " ++ @typeName(Found));
 }
 
 /// `expected_name` spells zui's types as the application does: their own
