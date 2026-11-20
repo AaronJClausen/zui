@@ -37,6 +37,11 @@ pub const HostError = error{
     ServiceAnsweredWrongly,
     UrlNotRefused,
     UrlNotOpened,
+    SecondWindowNotOpened,
+    WindowsShareSurface,
+    EventReachedWrongWindow,
+    WindowIdReused,
+    ClosingOneClosedAnother,
 };
 
 /// What the user does when the suite calls a service the harness fakes.
@@ -79,6 +84,10 @@ const other_thread_wake_ns = 20 * std.time.ns_per_ms;
 /// - with a harness `scriptServices`, a file dialog answers the paths the
 ///   user chose, or `.canceled`; a menu the item chosen; a notification
 ///   its activation; each naming its request and window;
+/// - with `zui_capabilities.windows = .many`, a second window opens with
+///   its own id, viewport and surface, an event posted to either window is
+///   reported by that window alone, closing the second leaves the first
+///   polling, and a window opened after it has a new id;
 /// - when the harness can close the window, `zuiPoll` returns false after
 ///   it is closed.
 ///
@@ -98,6 +107,8 @@ const other_thread_wake_ns = 20 * std.time.ns_per_ms;
 /// - optionally `fn scriptServices(self, script: zui_testing.ServiceScript)
 ///   void`: make the host's next dialog, menu or notification answer as the
 ///   script says, without showing anything;
+/// - for a host with many windows, `fn postTo(self, window: zui.WindowId,
+///   event: zui.Event) bool`, as `post` for that window;
 /// - optionally `fn close(self) void`, closing the window as the user would.
 ///
 /// ```zig
@@ -117,6 +128,10 @@ pub fn expectHostConforms(comptime Host: type, harness: anytype, conformance: Ho
 pub fn findHostViolation(comptime Host: type, harness: anytype, conformance: HostConformance) !?HostViolation {
     comptime zui.checkHost(Host);
     const Harness = @typeInfo(@TypeOf(harness)).pointer.child;
+    const opens_many_windows = comptime @hasDecl(Host, "zui_capabilities") and Host.zui_capabilities.windows == .many;
+    if (opens_many_windows and !@hasDecl(Harness, "postTo")) {
+        @compileError("zui_testing: " ++ @typeName(Harness) ++ " tests a host with many windows, so it must declare `fn postTo(self, window: zui.WindowId, event: zui.Event) bool`");
+    }
     const host: *Host = harness.host();
     const window = conformance.window;
     const io = conformance.io;
@@ -180,6 +195,9 @@ pub fn findHostViolation(comptime Host: type, harness: anytype, conformance: Hos
         if (try expectInvokedAction(host, harness, &builder, conformance)) |violation| return violation;
     }
     if (expectServicesAnswer(Host, host, harness, conformance)) |violation| return violation;
+    if (opens_many_windows) {
+        if (try expectWindowsKeptApart(host, harness, &builder, conformance)) |violation| return violation;
+    }
     if (@hasDecl(Harness, "close")) {
         harness.close();
         if (host.zuiPoll(window, &builder)) return .init(error.ClosedWindowPolled, "polled true after its window was closed", .{});
@@ -232,6 +250,54 @@ fn expectPostedEvents(host: anytype, harness: anytype, builder: *zui.RecordBuild
     return .init(error.EventLost, "reported the posted {t} (event {d} of {d}) out of order or not at all", .{
         std.meta.activeTag(posted[arrived]), arrived + 1, posted_count,
     });
+}
+
+/// Opens a second window, posts a key to the first and a move to the
+/// second, and expects each in its own window only; then closes it, and
+/// opens and closes a third.
+fn expectWindowsKeptApart(host: anytype, harness: anytype, builder: *zui.RecordBuilder, conformance: HostConformance) !?HostViolation {
+    const first = conformance.window;
+    const second_options: zui.WindowOptions = .{ .title = "zui host suite, second window", .size = .{ 320, 240 }, .visible = false };
+    const second = host.zuiOpenWindow(second_options) catch |err| return .init(error.SecondWindowNotOpened, "could not open a second window: {t}", .{err});
+    var second_events: [64]zui.Event = undefined;
+    var second_text: [64]u8 = undefined;
+    var second_builder: zui.RecordBuilder = .init(&second_events, &second_text);
+    if (second == first) return .init(error.WindowIdReused, "gave its second window the first one's id, {d}", .{@intFromEnum(second)});
+    if (!host.zuiPoll(second, &second_builder)) return .init(error.SecondWindowNotOpened, "polled its second window false as soon as it opened", .{});
+    const viewport = second_builder.params.viewport;
+    if (!(viewport[0] > 0 and viewport[1] > 0)) return .init(error.NoViewport, "reported a viewport of {d} by {d} for its second window", .{ viewport[0], viewport[1] });
+    if (std.meta.eql(host.zuiSurface(first), host.zuiSurface(second))) return .init(error.WindowsShareSurface, "gave both windows the same surface", .{});
+
+    const at = second_builder.params.now;
+    const moved_in_second: zui.Event = .{ .pointer_move = .{ .pointer = .{ .id = .mouse, .kind = .mouse, .position = .{ 15, 25 }, .at = at } } };
+    const key_in_first: zui.Event = .{ .key_down = .{ .key = .k, .at = at } };
+    const posted = [2]bool{ harness.postTo(first, key_in_first), harness.postTo(second, moved_in_second) };
+    var arrived = [2]bool{ false, false };
+    const started = now(conformance.io);
+    while (!std.meta.eql(arrived, posted) and now(conformance.io).nanoseconds -| started.nanoseconds <= conformance.event_arrival_ns) {
+        host.zuiWait(.immediately);
+        if (!host.zuiPoll(first, builder)) return .init(error.WindowClosed, "closed its first window while the suite polled both", .{});
+        if (!host.zuiPoll(second, &second_builder)) return .init(error.WindowClosed, "closed its second window while the suite polled both", .{});
+        for (builder.events()) |event| {
+            if (sameEvent(event, moved_in_second)) return .init(error.EventReachedWrongWindow, "reported a move posted to its second window in the first", .{});
+            if (sameEvent(event, key_in_first)) arrived[0] = true;
+        }
+        for (second_builder.events()) |event| {
+            if (sameEvent(event, key_in_first)) return .init(error.EventReachedWrongWindow, "reported a key posted to its first window in the second", .{});
+            if (sameEvent(event, moved_in_second)) arrived[1] = true;
+        }
+    }
+    for (posted, arrived, [_][]const u8{ "key posted to its first", "move posted to its second" }) |was_posted, did_arrive, what| {
+        if (was_posted and !did_arrive) return .init(error.EventLost, "did not report the {s} window within {d} ms", .{ what, milliseconds(conformance.event_arrival_ns) });
+    }
+
+    host.zuiCloseWindow(second);
+    if (host.zuiPoll(second, &second_builder)) return .init(error.ClosedWindowPolled, "polled its second window true after closing it", .{});
+    if (!host.zuiPoll(first, builder)) return .init(error.ClosingOneClosedAnother, "closed its first window when it closed the second", .{});
+    const third = host.zuiOpenWindow(second_options) catch |err| return .init(error.SecondWindowNotOpened, "could not open a window after closing one: {t}", .{err});
+    defer host.zuiCloseWindow(third);
+    if (third == second or third == first) return .init(error.WindowIdReused, "gave a new window the id {d}, which an earlier window had", .{@intFromEnum(third)});
+    return null;
 }
 
 /// Both halves of the id are non-zero, so a host that keeps only one fails.
@@ -637,6 +703,146 @@ fn QueueHostHarness(comptime Host: type) type {
             self.queue_host.window_open = false;
         }
     };
+}
+
+/// A mistake `WindowsQueueHost` makes, which the suite must catch.
+const WindowsQueueHostFlaw = enum {
+    none,
+    routes_every_event_to_main,
+    reuses_closed_ids,
+};
+
+/// `QueueHost`'s polls and waits over four windows, each with its own
+/// queue and surface.
+fn WindowsQueueHost(comptime flaw: WindowsQueueHostFlaw) type {
+    return struct {
+        const Self = @This();
+        pub const zui_surfaces: zui.SurfaceKinds = .initOne(.offscreen);
+        pub const zui_capabilities: zui.HostCapabilities = .{ .windows = .many };
+
+        const Window = struct {
+            id: zui.WindowId = .main,
+            open: bool = false,
+            queued: [8]zui.Event = undefined,
+            queued_count: usize = 0,
+        };
+
+        io: std.Io,
+        woken: std.Io.Event = .unset,
+        windows: [4]Window = .{ .{ .open = true }, .{}, .{}, .{} },
+        next_id: u32 = 1,
+
+        pub fn zuiOpenWindow(self: *Self, _: zui.WindowOptions) zui.OpenWindowError!zui.WindowId {
+            const window = for (&self.windows) |*window| {
+                if (!window.open) break window;
+            } else return error.TooManyWindows;
+            const id: zui.WindowId = @enumFromInt(self.next_id);
+            if (flaw != .reuses_closed_ids) self.next_id += 1;
+            window.* = .{ .id = id, .open = true };
+            return id;
+        }
+
+        pub fn zuiCloseWindow(self: *Self, id: zui.WindowId) void {
+            if (self.find(id)) |window| window.open = false;
+        }
+
+        fn find(self: *Self, id: zui.WindowId) ?*Window {
+            for (&self.windows) |*window| if (window.open and window.id == id) return window;
+            return null;
+        }
+
+        fn queue(self: *Self, id: zui.WindowId, event: zui.Event) bool {
+            const window = self.find(if (flaw == .routes_every_event_to_main) .main else id) orelse return false;
+            window.queued[window.queued_count] = event;
+            window.queued_count += 1;
+            return true;
+        }
+
+        pub fn zuiPoll(self: *Self, id: zui.WindowId, record: *zui.RecordBuilder) bool {
+            const window = self.find(id) orelse return false;
+            record.begin(.{ .now = now(self.io), .viewport = .{ 800, 600 }, .scale = 2 });
+            for (window.queued[0..window.queued_count]) |event| switch (event) {
+                .text => |text| record.appendText(text),
+                else => record.append(event),
+            };
+            window.queued_count = 0;
+            return true;
+        }
+
+        pub fn zuiWaker(self: *Self) zui.Waker {
+            return .{ .context = self, .wakeFn = wake };
+        }
+
+        pub fn zuiWait(self: *Self, next: zui.NextFrame) void {
+            const deadline: zui.Instant = switch (next) {
+                .immediately => now(self.io),
+                .at => |instant| instant,
+                .on_event => now(self.io).addNanoseconds(10 * std.time.ns_per_s),
+            };
+            const awake_deadline: std.Io.Clock.Timestamp = .{ .raw = .{ .nanoseconds = deadline.nanoseconds }, .clock = .awake };
+            while (!self.woken.isSet() and now(self.io).isBefore(deadline)) {
+                self.woken.waitTimeout(self.io, .{ .deadline = awake_deadline }) catch {};
+            }
+            self.woken.reset();
+        }
+
+        pub fn zuiSurface(_: *Self, id: zui.WindowId) zui.Surface {
+            return .{ .offscreen = .{ .size = .{ 100 + @intFromEnum(id), 100 } } };
+        }
+
+        pub fn zuiApply(_: *Self, _: zui.WindowId, _: zui.HostRequests) void {}
+
+        fn wake(context: *anyopaque) void {
+            const self: *Self = @ptrCast(@alignCast(context));
+            self.woken.set(self.io);
+        }
+    };
+}
+
+fn WindowsQueueHostHarness(comptime Host: type) type {
+    return struct {
+        const Self = @This();
+
+        windows_host: Host,
+
+        pub fn host(self: *Self) *Host {
+            return &self.windows_host;
+        }
+
+        pub fn post(self: *Self, event: zui.Event) bool {
+            return self.windows_host.queue(.main, event);
+        }
+
+        pub fn postTo(self: *Self, window: zui.WindowId, event: zui.Event) bool {
+            return self.windows_host.queue(window, event);
+        }
+
+        pub fn close(self: *Self) void {
+            self.windows_host.zuiCloseWindow(.main);
+        }
+    };
+}
+
+test "a host with many windows that keeps each apart passes the suite" {
+    const Host = WindowsQueueHost(.none);
+    var harness: WindowsQueueHostHarness(Host) = .{ .windows_host = .{ .io = std.testing.io } };
+    try expectHostConforms(Host, &harness, .{ .io = std.testing.io });
+}
+
+test "a host that reports every window's events in the first fails the suite" {
+    const Host = WindowsQueueHost(.routes_every_event_to_main);
+    var harness: WindowsQueueHostHarness(Host) = .{ .windows_host = .{ .io = std.testing.io } };
+    const violation = (try findHostViolation(Host, &harness, .{ .io = std.testing.io })).?;
+    try std.testing.expectEqual(error.EventReachedWrongWindow, violation.kind);
+    try std.testing.expectEqualStrings("reported a move posted to its second window in the first", violation.description());
+}
+
+test "a host that gives a closed window's id to a new one fails the suite" {
+    const Host = WindowsQueueHost(.reuses_closed_ids);
+    var harness: WindowsQueueHostHarness(Host) = .{ .windows_host = .{ .io = std.testing.io } };
+    const violation = (try findHostViolation(Host, &harness, .{ .io = std.testing.io })).?;
+    try std.testing.expectEqual(error.WindowIdReused, violation.kind);
+    try std.testing.expectEqualStrings("gave a new window the id 1, which an earlier window had", violation.description());
 }
 
 test "a host that keeps the contract passes the suite" {

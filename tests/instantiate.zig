@@ -287,6 +287,8 @@ const OffscreenHost = struct {
     chrome_region_count: usize = 0,
     applied: zui.HostRequests = .{},
     format: zui.OutputFormat = .sdr,
+    windows_opened: u32 = 0,
+    windows_closed: u32 = 0,
 
     pub fn init(self: *OffscreenHost, _: std.Io, window: zui.WindowOptions) !void {
         self.* = .{ .format = if (window.output_formats.contains(.scrgb_fp16)) .scrgb_fp16 else .sdr };
@@ -317,6 +319,15 @@ const OffscreenHost = struct {
 
     pub fn zuiChromeRegions(self: *OffscreenHost, _: zui.WindowId, regions: []const zui.ChromeRegion) void {
         self.chrome_region_count = regions.len;
+    }
+
+    pub fn zuiOpenWindow(self: *OffscreenHost, _: zui.WindowOptions) zui.OpenWindowError!zui.WindowId {
+        self.windows_opened += 1;
+        return @enumFromInt(self.windows_opened);
+    }
+
+    pub fn zuiCloseWindow(self: *OffscreenHost, _: zui.WindowId) void {
+        self.windows_closed += 1;
     }
 };
 
@@ -424,6 +435,71 @@ export fn zuiCheckAppWithText(io: *const std.Io) usize {
     return text_app_runner.renderer.drawn;
 }
 
+const SurfaceKeepingRenderer = struct {
+    pub const zui_surfaces: zui.SurfaceKinds = .initOne(.offscreen);
+    pub const zui_render_thread = true;
+
+    drawn: usize = 0,
+    attached: usize = 0,
+
+    pub fn zuiSubmit(self: *SurfaceKeepingRenderer, _: zui.Surface, frame: anytype) !void {
+        self.drawn += frame.commands().len;
+    }
+
+    pub fn zuiAttachSurface(self: *SurfaceKeepingRenderer, _: zui.Surface) error{OutOfMemory}!void {
+        self.attached += 1;
+    }
+
+    pub fn zuiDetachSurface(self: *SurfaceKeepingRenderer, _: zui.Surface) void {
+        self.attached -= 1;
+    }
+};
+
+const WindowSources = struct { counter: zui_async.Latest(u32) = .{} };
+
+const WindowsCheckApp = struct {
+    pub const Host = OffscreenHost;
+    pub const Renderer = SurfaceKeepingRenderer;
+    const AppUi = zui.Context(zui_app.contextConfig(SurfaceKeepingRenderer, .{ .limits = .{ .max_elements = 16 }, .frames_in_flight = 2, .Sources = WindowSources }));
+
+    windows: zui_app.Windows(WindowsCheckApp) = undefined,
+    sources: [2]WindowSources = .{ .{}, .{} },
+    closed: u32 = 0,
+
+    pub fn init(app: *WindowsCheckApp, start: zui_app.Start(WindowsCheckApp)) !void {
+        app.* = .{ .windows = start.windows };
+        if (comptime zui_app.Windows(WindowsCheckApp).has_many_windows) _ = try app.windows.open(.{ .title = "second", .visible = false });
+    }
+
+    pub fn zuiSources(app: *WindowsCheckApp, window: zui.WindowId) *WindowSources {
+        return &app.sources[@min(@intFromEnum(window), 1)];
+    }
+
+    pub fn zuiDeclare(_: *WindowsCheckApp, ui: *AppUi, window: zui.WindowId) void {
+        if (ui.source(.counter).get()) |count| ui.requestFrameAt(.fromNanoseconds(count));
+        ui.box(.{ .decoration = .{ .background = if (window == .main) .black else .white } });
+    }
+
+    pub fn zuiLoader(app: *WindowsCheckApp, _: *const AppUi, window: zui.WindowId, _: std.Io) void {
+        if (window != .main) app.windows.close(window);
+    }
+
+    pub fn zuiWindowClosed(app: *WindowsCheckApp, _: zui.WindowId) void {
+        app.closed += 1;
+    }
+};
+
+var windows_app_runner: zui_app.Runner(WindowsCheckApp) = undefined;
+var windows_app_memory: [3 * WindowsCheckApp.AppUi.required_bytes + 64 * 1024]u8 = undefined;
+
+export fn zuiCheckAppWithWindows(io: *const std.Io) usize {
+    var fixed: std.heap.FixedBufferAllocator = .init(&windows_app_memory);
+    windows_app_runner.start(.{ .gpa = fixed.allocator(), .io = io.* }, .{ .notify = ignoreNotice }) catch return 0;
+    defer windows_app_runner.stop();
+    while (windows_app_runner.frame() catch return 0) {}
+    return windows_app_runner.renderer.drawn + windows_app_runner.app.closed;
+}
+
 const EveryCommandHarness = struct {
     pub const config: zui.Config = every_command_config;
 
@@ -459,6 +535,10 @@ const EveryCommandHarness = struct {
     }
 
     pub fn post(_: *EveryCommandHarness, _: zui.Event) bool {
+        return false;
+    }
+
+    pub fn postTo(_: *EveryCommandHarness, _: zui.WindowId, _: zui.Event) bool {
         return false;
     }
 };

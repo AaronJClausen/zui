@@ -72,7 +72,7 @@ green, and its **Status** line below says which slice is next.
 | H4. Linux | 10 | `../zui-host`, `../zui-sokol` | | in progress; slice 3, fractional scale, the clipboard, drops and file watching, is next |
 | H5. Web | 10 | `../zui-web` | | |
 | H7. Window decorations | 10 | `src/chrome.zig`, `src/context.zig`, `zui_app/`, `../zui-host` | | waiting on a person: the checklist under H7's *Status*, on `zig build title-bar` in zui-host |
-| H9. Many windows | 10 | `zui_app/`, `../zui-host` | | |
+| H9. Many windows | 10 | `zui_app/`, `zui_testing/`, `../zui-host`, `../zui-sokol` | | in progress; slice 2, the Windows host, is next |
 
 After the queue comes stage 11 in the order of SPEC.md §21. It joins the queue as it runs short. Stage 10's items are listed under *Stage 10: reach*; each is given its Grounding, Plan and Done when as it is taken.
 
@@ -4378,6 +4378,134 @@ without `--no-system-material`, in light and dark mode:
 - Moving the window to a monitor at another scale keeps the parts where
   they are drawn.
 Once checked, H7 moves to *Done*.
+
+### H9. Many windows
+
+**Grounding.** Where the code stood when H9 was taken (zui `daba4a7`,
+zui-host `3435b8a`, zui-sokol `8f6811d`):
+- *The core.* A window is a `zui.WindowId` (`src/host.zig:5-8`), and a host
+  says how many it opens in `HostCapabilities.windows`, default `.one`
+  (`:14-24`). `zuiPoll`, `zuiSurface` and `zuiApply` already take a
+  `WindowId`; `zuiWaker` and `zuiWait` take none, so one wake and one wait
+  serve the whole host (`src/contracts.zig:117-121`). No host call opened
+  or closed a window, and nothing told a renderer that a surface went
+  away.
+- *Contexts and sources.* SPEC.md §15.4 already settled the shape:
+  contexts share nothing, each has its own sources, and data shared
+  between windows is published into each. A source has one reader
+  (§14.8). `nextFrame(sources)` is `.immediately` when a source with
+  `zuiPending` holds something (`src/context.zig`'s `nextFrameWithSources`),
+  and every `zui_async` source declares `zuiPending`.
+- *`zui_app`.* `Runner` hard-coded `const window: zui.WindowId = .main`
+  (`zui_app/zui_app.zig:324`) and owned one `Ui`, one `RecordBuilder` and
+  one render-thread queue (`:327-345`). `frame` polled, declared, handed
+  the frame to the host and the renderer, and waited on that one
+  context's `nextFrame` (`:442-477`). `checkApp` accepted only
+  `zuiDeclare(app, ui)` (`:592-600`).
+- *The Windows host* is `.one` (`zui-host/windows/host.zig:43`). It holds
+  one `hwnd`, one `Inbox`, one `requests`, one `WindowThreadState`, one
+  chrome snapshot, one accessibility bridge and one set of service state
+  (`:191-220`), and asserts `.main` in every call that takes a window
+  (`:122`, `:144`, `:157`, `:395`, `:489-518`). Its waits are already
+  host-wide. The window procedure finds the host through `GWLP_USERDATA`
+  (`:619`, `:671`), and `WM_DESTROY` ends the window thread (`:695`).
+- *zui-sokol* draws a `.win32` surface through one `native.Context`
+  (`zui-sokol/src/renderer.zig:92`), made in `initForSurface`, which also
+  runs `sg.setup` on its device (`:139-146`). sokol_gfx is process-wide, so
+  a second window needs a second swapchain on the same device, not a
+  second renderer. `zuiSubmit` uses the one context for any `.win32`
+  surface (`:184`, `:221`). The scRGB and backdrop-blur targets are made
+  again whenever the size changes (`src/destination.zig`'s `prepare`,
+  `src/backdrop_blur.zig`'s `prepare`).
+
+**Plan.** An application opens a window through `zui_app`, between
+frames, never in declaration. `zui_app` gives each window a context of
+its own, made with `gpa` when the window opens, and the application
+declares each window with `zuiDeclare(app, ui, window)`. Sources stay one
+per context: the application returns each window's from
+`zuiSources(app, window)`. One `zuiWait` covers every window: it waits for
+the earliest of the contexts' `nextFrame`, and after it only the windows
+that are due run a frame. The renderer stays one, with per-surface state
+it attaches when a window opens and detaches before it closes. The
+one-window form is untouched. In three slices:
+1. **The contract and `zui_app`** (zui only): `zui.OpenWindowError`;
+   `zuiOpenWindow` and `zuiCloseWindow`, required with `.many` and refused
+   with `.one`; `zuiAttachSurface` and `zuiDetachSurface`, declared
+   together; `zui_app`'s windowed form, `Windows(App)`, `max_windows`;
+   the host suite's many-windows steps; the compile-error cases.
+2. **The Windows host opens many windows** (zui-host): a slot per window,
+   `max_windows = 4`, each with its id, `hwnd`, inbox, requests, window
+   thread state, chrome snapshot, accessibility bridge and per-window
+   service state (the menu bar); a message-only window that anchors the
+   window thread and owns the clipboard, so `.main` closes like any
+   other; ids never reused; the console's terminate and low memory to
+   every window; hosts in the conformance tests off the stack; the
+   harness's `postTo`.
+3. **Two windows drawn by zui-sokol** (zui-sokol, then zui-host): one
+   D3D11 device shared by a composition swapchain per window, found by
+   `hwnd`, each with its own scRGB and backdrop-blur targets;
+   `zuiAttachSurface` and `zuiDetachSurface`; zui-host's
+   `examples/many_windows.zig`, with `--check` and `--measure-idle`.
+
+**When a window is due.** After the wait, each open window is polled and
+given to `zuiRecord`. It is declared only when its record has an event,
+its viewport, scale, zoom or output format changed, its `nextFrame` asked
+again is `.immediately` or an instant that has passed, or it has not had
+a frame. When a source of `Ui.Sources` lacks `zuiPending`, a wake cannot
+be told apart, so every window is due on every turn.
+
+**Done when.**
+- `zui_app`'s tests, with a host of many windows: input reaches only its
+  window; a window the user closes is closed and the others go on; the
+  wait is the earliest `nextFrame`; a publish makes only its own window
+  due; a render thread runs every window's frames, attaches and
+  detaches; opening past the host's or `zui_app`'s limit is refused; a
+  one-window application runs as before on a host with many.
+- The host suite's many-windows steps pass on a host that keeps windows
+  apart, and fail on one that reports every event in the first or reuses
+  a closed window's id.
+- zui-host's `zig build test`: the suite passes on the Windows host, now
+  `.many`, against hidden windows; `WM_CLOSE` closes one window; a DPI
+  change moves one window's scale; Ctrl+C reaches every window; a fifth
+  window is refused; the clipboard works after `.main` closes.
+- `zig build many-windows -- --check` draws two windows, a click changes
+  only its window, and the first draws on after the second closes.
+- By a person: on `zig build many-windows`, each window's counter moves
+  alone and the shared one in both; closing one leaves the other running;
+  two windows idle at 0% CPU; two animating windows both hold the
+  display's rate.
+- Unchanged: zui-host's tour, zui-raylib's `zig build check`, and R1.
+
+**Spec.** §6.1, §6.8, §15.4, §16.2, §16.3, §16.6, §19.4, §19.5.
+
+**Status.** Slice 1, the contract and `zui_app`, is done:
+- `zui.OpenWindowError` (`TooManyWindows`, `WindowNotCreated`).
+  `checkHost` requires `zuiOpenWindow(options) OpenWindowError!WindowId`
+  and `zuiCloseWindow(window)` of a host whose `zui_capabilities.windows`
+  is `.many`, and refuses them on `.one`. `checkRenderer` checks
+  `zuiAttachSurface(surface) !void` and `zuiDetachSurface(surface)`, and
+  that they come together.
+- `zui_app`'s windowed form: `zuiDeclare(app, ui, window)`, each hook with
+  the window, `zuiSources(app, window)` in place of the `sources` field,
+  and an optional `zuiWindowClosed(app, window)`. `Start(App).windows`, a
+  `Windows(App)`, opens and closes windows; `open` on a host with one
+  window is a compile error unless guarded by `has_many_windows`, and
+  opening one during `zuiDeclare` panics. `max_windows` is 8.
+- Each window is a heap `Window` holding its context and its record
+  builder, made when it opens. The render thread's queue carries frames
+  tagged with their context, and attaches and detaches that the UI thread
+  waits for, so the renderer is used by one thread at a time and a
+  closed window's frames are released before its context is freed.
+- The one-window form keeps its fields and its path: a frame every turn.
+- `expectHostConforms` opens a second window on a host with many, posts
+  to each through the harness's `postTo`, closes it, and opens a third.
+- R1: `src/` gains an error set and comptime checks only. The
+  `zui-counts` executable's `.text` (1,171,081 bytes) and `.rodata`
+  (145,243 bytes) are byte-identical to `daba4a7`'s, so the counts cannot
+  move. Callgrind needs Valgrind, which this machine lacks, so CI's counts
+  job confirms it after the push.
+
+Next: slice 2, the Windows host.
 
 ---
 

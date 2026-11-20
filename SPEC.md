@@ -362,6 +362,8 @@ while (host.zuiPoll(window, &builder)) {   // builder: a zui.RecordBuilder (§16
 
 The loader runs after `endFrame`, so it sees the demand of the frame just
 declared, and before the wait, so work it starts can wake the next one.
+With many windows, each window is a context of its own, and the loop
+polls each and waits once for all (§19.5).
 
 ### 6.2 The frame record
 
@@ -517,6 +519,9 @@ pub fn Relay(comptime Record: type) type {   // as `Waker`: the listener's point
   enforced. Text measurement is the one outside call during a frame; it
   is deterministic for a given set of fonts, which the wire format
   fingerprints (§19.6).
+- **Windows.** Opening and closing windows is in no record: each window's
+  context relays and replays its own records, and a replay opens no
+  window.
 
 ---
 
@@ -1779,7 +1784,9 @@ the measurements made and passes the cancelation on.
 Contexts share nothing, so separate windows, an offscreen panel or a
 thumbnail render run their frames concurrently with no code in zui. Each
 context has its own sources; data shared between windows is published
-into each.
+into each. `zui_app` runs one context per window (§19.5). Opening a window
+makes its context, which allocates as `init` does; its frames allocate
+nothing.
 
 ---
 
@@ -1846,6 +1853,15 @@ on a thread other than the one that made the renderer and its surface,
 so `zui_app` may submit from a render thread of its own. A renderer bound
 to its thread's graphics context, as raylib's is, leaves it out.
 
+`zuiAttachSurface(self, surface) !void` and `zuiDetachSurface(self,
+surface) void` (optional, declared together) give a renderer each window
+after the first that `zui_app` opens, and take back each window before it
+closes, the first included, on the thread that submits. A renderer that
+keeps a swapchain per window makes and frees it there. Without them a
+renderer draws any surface it is given as it is. One without the other is
+a compile error:
+``"zui: SokolRenderer declares `zuiAttachSurface` without `zuiDetachSurface`; a renderer that keeps something per window declares both"``.
+
 `zui_app.contextConfig(Renderer, .{ ... })` builds a `Config` from a
 renderer's declarations (commands, payload types, and text unless the
 overrides name a `Text`), so the renderer's vocabulary and the core's
@@ -1864,6 +1880,8 @@ const Win32Host = struct {
     pub fn zuiWait(self: *Win32Host, next: zui.NextFrame) void { ... }
     pub fn zuiSurface(self: *Win32Host, window: zui.WindowId) zui.Surface { ... }
     pub fn zuiApply(self: *Win32Host, window: zui.WindowId, requests: zui.HostRequests) void { ... } // cursor, IME window
+    pub fn zuiOpenWindow(self: *Win32Host, options: zui.WindowOptions) zui.OpenWindowError!zui.WindowId { ... } // with .many
+    pub fn zuiCloseWindow(self: *Win32Host, window: zui.WindowId) void { ... }                                  // with .many
     pub fn zuiSemantics(self: *Win32Host, window: zui.WindowId, nodes: []const zui.SemanticNode) zui.SemanticsDropped { ... } // optional: the accessibility bridge
     pub fn zuiChromeRegions(self: *Win32Host, window: zui.WindowId, regions: []const zui.ChromeRegion) void { ... } // optional: a custom title bar
 
@@ -1939,13 +1957,14 @@ pub const FileWatchError = error{ TooManyWatches, DirectoryUnavailable };
 ```
 
 ```zig
-pub const WindowId = enum(u32) { main = 0, _ };
+pub const WindowId = enum(u32) { main = 0, _ };   // `init` opens `.main`; ids are never given twice in a run
+pub const OpenWindowError = error{ TooManyWindows, WindowNotCreated };
 pub const HostCapabilities = struct {
-    windows: enum { one, many } = .one,
+    windows: enum { one, many } = .one,   // .many: the host declares zuiOpenWindow and zuiCloseWindow
     system_material: bool = false,
     custom_title_bar: bool = false,   // leaves the title bar to the application; needs `zuiChromeRegions`
 };
-/// What a host opens a window with (`zui_app` passes it to the host's `init`).
+/// What a host opens a window with (`zui_app` passes it to the host's `init`, and to `zuiOpenWindow`).
 pub const WindowOptions = struct { title: [:0]const u8 = "zui", size: [2]u32 = .{ 1280, 720 }, visible: bool = true, resizable: bool = true, material: SystemMaterial = .none, semantics: SemanticsCapacity = .{}, title_bar: TitleBar = .native };
 /// Who draws a window's title bar: the system, or the application (§13.4).
 pub const TitleBar = enum { native, custom };
@@ -1983,6 +2002,19 @@ pub fn checkHostAndRenderer(comptime Host: type, comptime Renderer: type) void  
   `nextFrame` and the wait ends the wait.
 - **`zuiApply`** takes the frame's `HostRequests`, setting the cursor and
   placing the IME window.
+- **Many windows.** A host whose `zui_capabilities.windows` is `.many`
+  declares `zuiOpenWindow` and `zuiCloseWindow`; one whose windows are
+  `.one` declares neither, each a compile error otherwise:
+  ``"zui: Win32Host declares zui_capabilities.windows = .many but not `zuiOpenWindow`, which must be fn (*Win32Host, zui.WindowOptions) zui.OpenWindowError!zui.WindowId"``.
+  `init` opens `.main`. `zuiOpenWindow` opens another, on the thread that
+  polls, with an id the host never gives again in the run, and returns
+  `error.TooManyWindows` past the windows it holds. Each window has its
+  own events, viewport, scale and requests, polled with its id;
+  `zuiWaker` and `zuiWait` are the host's, so a wake or input in any
+  window ends the one wait. `zuiCloseWindow` closes any window, `.main`
+  included, after its last frame has been submitted; its id then polls
+  false. Lifecycle events reach every open window, since each window's
+  context reacts to them.
 - **`zuiSemantics`**, optional, is handed `Frame.semantics()` on the UI
   thread after `endFrame` and before the frame is submitted, so a render
   thread never races it; the nodes are valid only during the call. The
@@ -2119,7 +2151,7 @@ build's instruction counts are unchanged.
 |---|---|---|
 | zui needs it | **a compile error** naming it | `zuiMeasure`; a base command a renderer cannot draw; a host without `zuiPoll` |
 | zui uses it implicitly | **a documented fallback** | no material: the fallback background; no blur: the tint; an unhandled lifecycle event: the OS default; no `zuiSemantics`: an assistive technology sees only the window |
-| the application asks for it by name | **a compile error at the call**, unless guarded by `has_*` | notifications on a target without them |
+| the application asks for it by name | **a compile error at the call**, unless guarded by `has_*` | notifications on a target without them; a second window on a host with one |
 | the target has it, this machine does not | **a returned status** | Mica on Windows 10; notifications the user denied |
 
 `zui_app` reports every fallback in effect at run time, and the inspector
@@ -2131,6 +2163,8 @@ The guards are `zui_app.ServicesOf(Host)`'s `has_clipboard`,
 inside one is not compiled for a host without the service; a call outside
 its guard on such a host fails naming the guard:
 ``"zui_app: zui_raylib.Host has no `zuiNotifications`; guard the call with `if (zui_app.ServicesOf(zui_raylib.Host).has_notifications)`"``.
+`zui_app.Windows(App).has_many_windows` guards opening a window:
+``"zui_app: zui_raylib.Host opens one window (its zui_capabilities.windows is .one), so demo.App cannot open another"``.
 
 ---
 
@@ -2379,6 +2413,11 @@ edit (the message quotes the `.hidden = true` line that fixes it).
     and is then cleared, that a wake from another thread ends an
     `.on_event` wait, and that an `.at` wait ends at its instant. Every
     wait it starts is bounded: a lost wake fails the suite, never hangs it.
+    For a host with many windows it also opens a second window, checks
+    that it has its own id, viewport and surface, that an event posted to
+    either window is reported by that window alone, that closing it
+    leaves the first polling, and that a window opened after it has a new
+    id; that harness declares `postTo(window, event)`.
   - `expectSourceConforms(Source, harness, .{ .io })` stresses publish,
     swap, inject and refusal under many producers, on any `Io`, with a
     harness that publishes, since publishing is not part of the contract.
@@ -2452,6 +2491,32 @@ const App = struct {
 - **The host's services** are reached through `ServicesOf(App.Host)`,
   with the host `init` was given (`start.host`), from `zuiLoader` or other
   code outside declaration (§16.3).
+- **Many windows.** An application whose `zuiDeclare` takes a
+  `zui.WindowId` declares each of its windows, and every hook takes the
+  window too:
+
+  ```zig
+  pub fn zuiDeclare(app: *App, ui: *Ui, window: zui.WindowId) void { ... }
+  pub fn zuiSources(app: *App, window: zui.WindowId) *AppSources { ... }      // with Sources, in place of the field
+  pub fn zuiRecord(app: *App, window: zui.WindowId, record: *zui.RecordBuilder) void { ... }
+  pub fn zuiObserve(app: *App, ui: *const Ui, window: zui.WindowId, frame: *const Ui.Frame) void { ... }
+  pub fn zuiLoader(app: *App, ui: *const Ui, window: zui.WindowId, io: std.Io) void { ... }
+  pub fn zuiWindowClosed(app: *App, window: zui.WindowId) void { ... }       // after its context is freed
+  ```
+
+  Each window has a context of its own, and a source has one reader
+  (§14.8), so each window's sources are its own: data shared between
+  windows is published into each. `Start(App).windows`, a
+  `zui_app.Windows(App)`, opens a window and its context and closes one,
+  between frames: opening one during `zuiDeclare` panics. At most
+  `zui_app.max_windows` are open. Each turn polls every window, runs
+  `zuiRecord`, and declares only those with an event, a new viewport,
+  scale, zoom or output format, a `nextFrame` that is due, or no frame
+  yet; when a source lacks `zuiPending`, every window is due on every
+  turn. It then waits once for the earliest `nextFrame` of all. A window
+  the user closes is closed; `run` returns once none is open. Frames,
+  attaches and detaches share the render thread's queue, so a closed
+  window's frames are released before its context is freed.
 - **`Runner(App)`** is `run` one frame at a time, for tests and hosts
   that drive the loop. Each mistake in `App` is a compile error naming
   it: ``"zui_app: demo.App declares unknown `zuiLoder`"``.

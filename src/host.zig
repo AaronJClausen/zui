@@ -2,7 +2,9 @@ const Wake = @import("sources.zig").Wake;
 const OutputFormats = @import("surface.zig").OutputFormats;
 const SemanticsCapacity = @import("semantics.zig").SemanticsCapacity;
 
-/// One of a host's windows. A host with one window calls it `.main`.
+/// One of a host's windows. `init` opens `.main`; a host whose
+/// `zui_capabilities.windows` is `.many` opens others with `zuiOpenWindow`,
+/// each with an id it never gives again in the run.
 pub const WindowId = enum(u32) {
     main = 0,
     _,
@@ -12,6 +14,7 @@ pub const WindowId = enum(u32) {
 /// them through `zui_app`; what this machine lacks at run time is a status
 /// returned by the call instead.
 pub const HostCapabilities = struct {
+    /// `.many`: the host declares `zuiOpenWindow` and `zuiCloseWindow`.
     windows: Windows = .one,
     /// The desktop can show through the window, as Mica or vibrancy.
     system_material: bool = false,
@@ -24,7 +27,7 @@ pub const HostCapabilities = struct {
 };
 
 /// What a host opens a window with: `zui_app` passes it to the host's
-/// `init`, and a host with many windows will open each one with it.
+/// `init`, and to `zuiOpenWindow` for each window after the first.
 pub const WindowOptions = struct {
     /// UTF-8.
     title: [:0]const u8 = "zui",
@@ -52,6 +55,14 @@ pub const WindowOptions = struct {
     /// it and marks its parts with `Element.chrome`. Whether the window got
     /// one arrives as `Environment.custom_title_bar`.
     title_bar: TitleBar = .native,
+};
+
+/// Why `zuiOpenWindow` could not open a window.
+pub const OpenWindowError = error{
+    /// The host has as many windows open as it holds.
+    TooManyWindows,
+    /// The OS refused the window, or its surface.
+    WindowNotCreated,
 };
 
 /// Who draws a window's title bar.

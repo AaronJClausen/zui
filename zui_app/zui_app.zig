@@ -248,6 +248,56 @@ pub fn Start(comptime App: type) type {
         renderer: *App.Renderer,
         /// For the application's producers, as a source's publish asks.
         waker: zui.Waker,
+        /// Opens and closes windows, for an application whose `zuiDeclare`
+        /// takes a `zui.WindowId`; `void` for one with one window.
+        windows: if (declaresWindows(App)) Windows(App) else void,
+    };
+}
+
+/// How many windows `zui_app` runs at once: opening one more fails with
+/// `error.TooManyWindows`.
+pub const max_windows = 8;
+
+/// The windows of an application whose `zuiDeclare` takes a
+/// `zui.WindowId`, from `Start(App).windows`. Keep it to open and close
+/// windows from `init`, `zuiLoader` or `zuiWindowClosed`: opening one
+/// during `zuiDeclare` panics, since declaration does no I/O and a
+/// replayed frame must open no window.
+///
+/// ```zig
+/// pub fn zuiLoader(app: *App, _: *const Ui, window: zui.WindowId, _: std.Io) void {
+///     if (window == .main and app.wants_inspector) {
+///         app.wants_inspector = false;
+///         app.inspector_window = app.windows.open(.{ .title = "Inspector", .size = .{ 480, 720 } }) catch null;
+///     }
+/// }
+/// ```
+pub fn Windows(comptime App: type) type {
+    return struct {
+        const Self = @This();
+        /// The host opens more than one window; guard `open` with it.
+        pub const has_many_windows = hostOpensManyWindows(App.Host);
+
+        runner: *anyopaque,
+        openFn: *const fn (*anyopaque, zui.WindowOptions) anyerror!zui.WindowId,
+        closeFn: *const fn (*anyopaque, zui.WindowId) void,
+
+        /// Opens a window and its context, which allocates as `init` does;
+        /// its first frame runs by the next turn. `output_formats` and
+        /// `semantics` are `zui_app`'s. On a host with one window this is a
+        /// compile error.
+        pub fn open(self: Self, options: zui.WindowOptions) anyerror!zui.WindowId {
+            if (comptime !has_many_windows) {
+                @compileError("zui_app: " ++ @typeName(App.Host) ++ " opens one window (its zui_capabilities.windows is .one), so " ++ @typeName(App) ++ " cannot open another");
+            }
+            return self.openFn(self.runner, options);
+        }
+
+        /// Closes `window` once this turn's frames are done; then
+        /// `zuiWindowClosed` runs. A window that is not open is ignored.
+        pub fn close(self: Self, window: zui.WindowId) void {
+            self.closeFn(self.runner, window);
+        }
     };
 }
 
@@ -286,6 +336,19 @@ pub const Setup = struct {
 ///   and `pub fn deinit(app: *App) void`; without `init`, every field
 ///   needs a default.
 ///
+/// An application with many windows declares `zuiDeclare(app: *App, ui:
+/// *Ui, window: zui.WindowId)`, and each hook takes the window too:
+/// `zuiRecord(app, window, record)`, `zuiObserve(app, ui, window, frame)`
+/// and `zuiLoader(app, ui, window, io)`. Each window has a context of its
+/// own, and a source has one reader, so with `Sources` it declares
+/// `zuiSources(app: *App, window: zui.WindowId) *Ui.Sources` in place of
+/// the field, and optionally `zuiWindowClosed(app: *App, window:
+/// zui.WindowId) void`, run once a window's context is freed. Each turn
+/// polls every window and declares only those with input, a new viewport,
+/// scale, zoom or output format, or a `nextFrame` that is due, then waits
+/// once for the earliest `nextFrame` of all. A window the user closes is
+/// closed, and `run` returns once none is open.
+///
 /// The host declares `pub fn init(self: *Host, io: std.Io, window:
 /// zui.WindowOptions) !void` and `pub fn deinit(self: *Host) void`. With
 /// `features.semantics`, a host that declares `zuiSemantics` opens the
@@ -321,24 +384,63 @@ pub fn Runner(comptime App: type) type {
         /// measures, or nothing does.
         pub const Text = SeparateText(App);
 
-        const window: zui.WindowId = .main;
-        const Pending = struct { frame: *const Ui.Frame, surface: zui.Surface };
+        const windowed = declaresWindows(App);
+        const host_opens_many_windows = hostOpensManyWindows(Host);
+        const renderer_keeps_surfaces = @hasDecl(Renderer, "zuiAttachSurface");
+        const EventBuffer = [Ui.limits.max_events_per_frame]zui.Event;
+        const TextBuffer = [Ui.limits.max_text_input_bytes + Ui.limits.max_dropped_path_bytes]u8;
+
+        /// One open window of an application with many: its context and
+        /// what the loop keeps for it between turns.
+        const Window = struct {
+            id: zui.WindowId,
+            ui: Ui,
+            event_buffer: EventBuffer,
+            text_buffer: TextBuffer,
+            builder: zui.RecordBuilder,
+            has_drawn: bool = false,
+            drawn_params: zui.FrameParams = undefined,
+            drawn_format: zui.OutputFormat = .sdr,
+            closing: bool = false,
+        };
+
+        const OneWindowPending = struct { frame: *const Ui.Frame, surface: zui.Surface };
+        /// What the UI thread asks of the render thread for a window, which
+        /// it waits for, so the renderer is used by one thread at a time.
+        const SurfaceChange = struct {
+            surface: zui.Surface,
+            done: std.Io.Event = .unset,
+            error_code: u16 = 0,
+        };
+        const WindowedPending = union(enum) {
+            frame: struct { frame: *const Ui.Frame, surface: zui.Surface, ui: *Ui },
+            attach: *SurfaceChange,
+            /// Comes after the window's last frame, so when it is done every
+            /// frame of the window has been released.
+            detach: *SurfaceChange,
+        };
+        const Pending = if (windowed) WindowedPending else OneWindowPending;
+        const pending_capacity = if (windowed) Ui.frames_in_flight * max_windows + 1 else Ui.frames_in_flight;
 
         app: App,
         host: Host,
         text: Text,
         renderer: Renderer,
-        ui: Ui,
+        ui: if (windowed) void else Ui,
         gpa: std.mem.Allocator,
         io: std.Io,
         notify: *const fn (Notice) void,
         report: Report,
-        event_buffer: [Ui.limits.max_events_per_frame]zui.Event,
-        text_buffer: [Ui.limits.max_text_input_bytes + Ui.limits.max_dropped_path_bytes]u8,
-        builder: zui.RecordBuilder,
-        pending_buffer: [Ui.frames_in_flight]Pending,
+        event_buffer: if (windowed) void else EventBuffer,
+        text_buffer: if (windowed) void else TextBuffer,
+        builder: if (windowed) void else zui.RecordBuilder,
+        windows: if (windowed) [max_windows]?*Window else void,
+        /// Set while `zuiDeclare` runs, when opening a window panics.
+        declaring: bool,
+        pending_buffer: [pending_capacity]Pending,
         pending: std.Io.Queue(Pending),
         render_task: std.Io.Group,
+        render_thread_started: bool,
         /// The first error the render thread's `zuiSubmit` returned, as
         /// `@intFromError`; 0 for none.
         render_error: std.atomic.Value(u16),
@@ -360,6 +462,9 @@ pub fn Runner(comptime App: type) type {
             self.noticed = .{};
             self.render_error = .init(0);
             self.render_task = .init;
+            self.render_thread_started = false;
+            self.declaring = false;
+            self.pending = .init(&self.pending_buffer);
 
             if (options.title_bar == .custom and !Ui.features.chrome_regions) return error.CustomTitleBarWithoutChromeRegions;
             setFieldDefaults(Host, &self.host);
@@ -377,31 +482,38 @@ pub fn Runner(comptime App: type) type {
             if (@hasDecl(Renderer, "init")) {
                 setFieldDefaults(Renderer, &self.renderer);
                 if (comptime rendererInitTakesText(App)) {
-                    try self.renderer.init(self.host.zuiSurface(window), &self.text);
+                    try self.renderer.init(self.host.zuiSurface(.main), &self.text);
                 } else {
-                    try self.renderer.init(self.host.zuiSurface(window));
+                    try self.renderer.init(self.host.zuiSurface(.main));
                 }
             } else {
                 self.renderer = .{};
             }
             errdefer if (@hasDecl(Renderer, "deinit")) self.renderer.deinit();
-            self.ui = if (!Ui.has_text)
-                try Ui.init(setup.gpa, setup.io)
-            else if (Text != void)
-                try Ui.init(setup.gpa, setup.io, &self.text)
-            else
-                try Ui.init(setup.gpa, setup.io, &self.renderer);
-            errdefer self.ui.deinit(setup.gpa);
+            if (windowed) {
+                self.windows = @splat(null);
+                self.windows[0] = try self.makeWindow(.main, options.zoom);
+            } else {
+                self.ui = try self.initUi();
+                self.builder = .init(&self.event_buffer, &self.text_buffer);
+                self.builder.params.zoom = options.zoom;
+            }
+            errdefer self.freeWindows();
             if (@hasDecl(App, "init")) {
-                try self.app.init(.{ .gpa = setup.gpa, .io = setup.io, .process = setup.process, .host = &self.host, .renderer = &self.renderer, .waker = self.host.zuiWaker() });
+                try self.app.init(.{
+                    .gpa = setup.gpa,
+                    .io = setup.io,
+                    .process = setup.process,
+                    .host = &self.host,
+                    .renderer = &self.renderer,
+                    .waker = self.host.zuiWaker(),
+                    .windows = if (windowed) .{ .runner = self, .openFn = openWindow, .closeFn = closeWindow } else {},
+                });
             } else {
                 self.app = .{};
             }
             errdefer if (@hasDecl(App, "deinit")) self.app.deinit();
 
-            self.builder = .init(&self.event_buffer, &self.text_buffer);
-            self.builder.params.zoom = options.zoom;
-            self.pending = .init(&self.pending_buffer);
             self.report = .{
                 .host = @typeName(Host),
                 .renderer = @typeName(Renderer),
@@ -429,67 +541,247 @@ pub fn Runner(comptime App: type) type {
             }
             break :blk missing;
         };
+        /// A wake can be told apart only when every source reports what it
+        /// holds: otherwise every window is due on every turn.
+        const sources_report_pending = blk: {
+            if (!Ui.has_sources) break :blk true;
+            for (@typeInfo(Ui.Sources).@"struct".fields) |field| {
+                if (!@hasDecl(field.type, "zuiPending")) break :blk false;
+            }
+            break :blk true;
+        };
+
+        fn initUi(self: *Self) !Ui {
+            if (!Ui.has_text) return Ui.init(self.gpa, self.io);
+            if (Text != void) return Ui.init(self.gpa, self.io, &self.text);
+            return Ui.init(self.gpa, self.io, &self.renderer);
+        }
+
+        fn makeWindow(self: *Self, id: zui.WindowId, zoom: f32) !*Window {
+            const window = try self.gpa.create(Window);
+            errdefer self.gpa.destroy(window);
+            window.* = .{ .id = id, .ui = try self.initUi(), .event_buffer = undefined, .text_buffer = undefined, .builder = undefined };
+            window.builder = .init(&window.event_buffer, &window.text_buffer);
+            window.builder.params.zoom = zoom;
+            return window;
+        }
+
+        fn destroyWindow(self: *Self, window: *Window) void {
+            window.ui.deinit(self.gpa);
+            self.gpa.destroy(window);
+        }
+
+        fn freeWindows(self: *Self) void {
+            if (!windowed) return self.ui.deinit(self.gpa);
+            for (&self.windows) |*slot| if (slot.*) |window| {
+                self.destroyWindow(window);
+                slot.* = null;
+            };
+        }
 
         fn startRenderThread(self: *Self, options: Options) Submission {
             if (!(@hasDecl(Renderer, "zui_render_thread") and Renderer.zui_render_thread)) return .{ .ui_thread = .renderer_needs_its_thread };
             if (Ui.frames_in_flight < 2) return .{ .ui_thread = .one_frame_in_flight };
             if (!options.render_thread) return .{ .ui_thread = .turned_off_in_options };
             self.render_task.concurrent(self.io, submitPending, .{self}) catch return .{ .ui_thread = .io_cannot_run_concurrently };
+            self.render_thread_started = true;
             return .render_thread;
         }
 
-        /// One turn of the loop: false once the window has closed.
+        /// One turn of the loop: false once every window has closed.
         pub fn frame(self: *Self) !bool {
             const render_error = self.render_error.load(.acquire);
             if (render_error != 0) return @errorFromInt(render_error);
-            if (!self.host.zuiPoll(window, &self.builder)) return false;
-            if (@hasDecl(App, "zuiRecord")) self.app.zuiRecord(&self.builder);
-            self.noticeDroppedInput();
+            if (windowed) return self.frameEveryDueWindow();
 
-            if (Ui.has_sources) {
-                self.ui.beginFrame(&self.builder.recordWith(Ui.Deliveries), self.sources());
-            } else {
-                self.ui.beginFrame(&self.builder.record());
+            if (!self.host.zuiPoll(.main, &self.builder)) return false;
+            if (@hasDecl(App, "zuiRecord")) self.app.zuiRecord(&self.builder);
+            self.noticeDroppedInput(&self.builder);
+            try self.frameWindow(&self.ui, &self.builder, .main);
+            self.host.zuiWait(self.nextFrameOf(&self.ui, .main));
+            return true;
+        }
+
+        fn frameEveryDueWindow(self: *Self) !bool {
+            for (&self.windows) |*slot| {
+                const window = slot.* orelse continue;
+                if (window.closing) continue;
+                if (!self.host.zuiPoll(window.id, &window.builder)) {
+                    window.closing = true;
+                    continue;
+                }
+                if (@hasDecl(App, "zuiRecord")) self.app.zuiRecord(window.id, &window.builder);
+                self.noticeDroppedInput(&window.builder);
+                const format = self.host.zuiSurface(window.id).outputFormat();
+                if (!self.isDue(window, format)) continue;
+                window.has_drawn = true;
+                window.drawn_params = window.builder.params;
+                window.drawn_format = format;
+                try self.frameWindow(&window.ui, &window.builder, window.id);
             }
-            self.app.zuiDeclare(&self.ui);
-            const drawn = self.ui.endFrame();
+            while (self.closeOneClosingWindow()) {}
+            const next = self.earliestNextFrame() orelse return false;
+            self.host.zuiWait(next);
+            return true;
+        }
+
+        fn isDue(self: *Self, window: *Window, format: zui.OutputFormat) bool {
+            if (!sources_report_pending or !window.has_drawn) return true;
+            const params = window.builder.params;
+            const drawn = window.drawn_params;
+            if (window.builder.events().len != 0) return true;
+            if (!std.meta.eql(params.viewport, drawn.viewport) or params.scale != drawn.scale or params.zoom != drawn.zoom) return true;
+            if (format != window.drawn_format) return true;
+            return switch (self.nextFrameOf(&window.ui, window.id)) {
+                .immediately => true,
+                .at => |instant| !params.now.isBefore(instant),
+                .on_event => false,
+            };
+        }
+
+        /// The soonest any open window needs a frame; null when none is open.
+        fn earliestNextFrame(self: *Self) ?zui.NextFrame {
+            var earliest: ?zui.NextFrame = null;
+            for (self.windows) |slot| {
+                const window = slot orelse continue;
+                const next = if (window.has_drawn) self.nextFrameOf(&window.ui, window.id) else .immediately;
+                earliest = switch (next) {
+                    .immediately => return .immediately,
+                    .at => |instant| if (earliest) |sooner| switch (sooner) {
+                        .at => |other| .{ .at = if (other.isBefore(instant)) other else instant },
+                        else => next,
+                    } else next,
+                    .on_event => earliest orelse next,
+                };
+            }
+            return earliest;
+        }
+
+        /// Begins, declares and ends one frame of `ui`, hands it to the host
+        /// and the renderer, and runs the loader.
+        fn frameWindow(self: *Self, ui: *Ui, builder: *zui.RecordBuilder, window: zui.WindowId) !void {
+            if (Ui.has_sources) {
+                ui.beginFrame(&builder.recordWith(Ui.Deliveries), self.sourcesOf(window));
+            } else {
+                ui.beginFrame(&builder.record());
+            }
+            if (windowed) {
+                self.declaring = true;
+                self.app.zuiDeclare(ui, window);
+                self.declaring = false;
+            } else {
+                self.app.zuiDeclare(ui);
+            }
+            const drawn = ui.endFrame();
             self.noticeDiagnostics(drawn.diagnostics);
-            if (@hasDecl(App, "zuiObserve")) self.app.zuiObserve(&self.ui, drawn);
+            if (@hasDecl(App, "zuiObserve")) {
+                if (windowed) self.app.zuiObserve(ui, window, drawn) else self.app.zuiObserve(ui, drawn);
+            }
             if (bridges_semantics) self.noticeDroppedSemantics(self.host.zuiSemantics(window, drawn.semantics()));
             if (hands_over_chrome) self.host.zuiChromeRegions(window, drawn.chromeRegions());
 
             const surface = self.host.zuiSurface(window);
-            if (self.report.submission == .render_thread) {
+            if (self.render_thread_started) {
                 self.host.zuiApply(window, drawn.requests());
-                self.pending.putOneUncancelable(self.io, .{ .frame = drawn, .surface = surface }) catch unreachable;
+                const pending: Pending = if (windowed) .{ .frame = .{ .frame = drawn, .surface = surface, .ui = ui } } else .{ .frame = drawn, .surface = surface };
+                self.pending.putOneUncancelable(self.io, pending) catch unreachable;
             } else {
                 self.renderer.zuiSubmit(surface, drawn) catch |err| {
-                    self.ui.release(drawn);
+                    ui.release(drawn);
                     return err;
                 };
                 self.host.zuiApply(window, drawn.requests());
-                self.ui.release(drawn);
+                ui.release(drawn);
             }
 
-            if (@hasDecl(App, "zuiLoader")) self.app.zuiLoader(&self.ui, self.io);
-            self.host.zuiWait(if (Ui.has_sources) self.ui.nextFrame(self.sources()) else self.ui.nextFrame());
+            if (@hasDecl(App, "zuiLoader")) {
+                if (windowed) self.app.zuiLoader(ui, window, self.io) else self.app.zuiLoader(ui, self.io);
+            }
+        }
+
+        fn nextFrameOf(self: *Self, ui: *const Ui, window: zui.WindowId) zui.NextFrame {
+            return if (Ui.has_sources) ui.nextFrame(self.sourcesOf(window)) else ui.nextFrame();
+        }
+
+        fn sourcesOf(self: *Self, window: zui.WindowId) *Ui.Sources {
+            if (windowed) return self.app.zuiSources(window);
+            return if (@FieldType(App, "sources") == Ui.Sources) &self.app.sources else self.app.sources;
+        }
+
+        fn openWindow(context: *anyopaque, options: zui.WindowOptions) anyerror!zui.WindowId {
+            const self: *Self = @ptrCast(@alignCast(context));
+            if (!host_opens_many_windows) unreachable;
+            if (self.declaring) @panic("zui_app: a window was opened during zuiDeclare; declaration does no I/O, so open it from init, zuiLoader or zuiWindowClosed");
+            const slot = for (&self.windows) |*slot| {
+                if (slot.* == null) break slot;
+            } else return error.TooManyWindows;
+            if (options.title_bar == .custom and !Ui.features.chrome_regions) return error.CustomTitleBarWithoutChromeRegions;
+            var window_options = options;
+            window_options.output_formats = output_formats;
+            window_options.semantics = window_semantics;
+            const id = try self.host.zuiOpenWindow(window_options);
+            errdefer self.host.zuiCloseWindow(id);
+            const surface = self.host.zuiSurface(id);
+            try self.attachSurface(surface);
+            errdefer self.detachSurface(surface);
+            slot.* = try self.makeWindow(id, 1);
+            return id;
+        }
+
+        fn closeWindow(context: *anyopaque, id: zui.WindowId) void {
+            const self: *Self = @ptrCast(@alignCast(context));
+            for (self.windows) |slot| if (slot) |window| if (window.id == id) {
+                window.closing = true;
+            };
+        }
+
+        /// Closes one window marked closing, and false when there is none.
+        /// The application's `zuiWindowClosed` may mark another.
+        fn closeOneClosingWindow(self: *Self) bool {
+            const slot = for (&self.windows) |*slot| {
+                if (slot.*) |window| if (window.closing) break slot;
+            } else return false;
+            const window = slot.*.?;
+            const id = window.id;
+            slot.* = null;
+            self.detachSurface(self.host.zuiSurface(id));
+            self.destroyWindow(window);
+            if (host_opens_many_windows) self.host.zuiCloseWindow(id);
+            if (@hasDecl(App, "zuiWindowClosed")) self.app.zuiWindowClosed(id);
             return true;
         }
 
-        fn sources(self: *Self) *Ui.Sources {
-            return if (@FieldType(App, "sources") == Ui.Sources) &self.app.sources else self.app.sources;
+        fn attachSurface(self: *Self, surface: zui.Surface) !void {
+            if (!renderer_keeps_surfaces) return;
+            if (!self.render_thread_started) return self.renderer.zuiAttachSurface(surface);
+            var change: SurfaceChange = .{ .surface = surface };
+            self.pending.putOneUncancelable(self.io, .{ .attach = &change }) catch unreachable;
+            change.done.waitUncancelable(self.io);
+            if (change.error_code != 0) return @errorFromInt(change.error_code);
+        }
+
+        /// On the render thread, also waits until it has released every
+        /// frame queued before.
+        fn detachSurface(self: *Self, surface: zui.Surface) void {
+            if (!self.render_thread_started) {
+                if (renderer_keeps_surfaces) self.renderer.zuiDetachSurface(surface);
+                return;
+            }
+            var change: SurfaceChange = .{ .surface = surface };
+            self.pending.putOneUncancelable(self.io, .{ .detach = &change }) catch unreachable;
+            change.done.waitUncancelable(self.io);
         }
 
         /// Submits what is left on the render thread, then frees everything
         /// `start` made, the application first, so it can join its work
         /// before its sources go.
         pub fn stop(self: *Self) void {
-            if (self.report.submission == .render_thread) {
+            if (self.render_thread_started) {
                 self.pending.close(self.io);
                 self.render_task.await(self.io) catch {};
             }
             if (@hasDecl(App, "deinit")) self.app.deinit();
-            self.ui.deinit(self.gpa);
+            self.freeWindows();
             if (@hasDecl(Renderer, "deinit")) self.renderer.deinit();
             if (Text != void and @hasDecl(Text, "deinit")) self.text.deinit();
             self.host.deinit();
@@ -497,11 +789,29 @@ pub fn Runner(comptime App: type) type {
 
         fn submitPending(self: *Self) void {
             while (self.pending.getOneUncancelable(self.io)) |pending| {
-                self.renderer.zuiSubmit(pending.surface, pending.frame) catch |err| {
-                    _ = self.render_error.cmpxchgStrong(0, @intFromError(err), .release, .monotonic);
-                };
-                self.ui.release(pending.frame);
+                if (!windowed) {
+                    self.submitOnRenderThread(pending.surface, pending.frame, &self.ui);
+                } else switch (pending) {
+                    .frame => |queued| self.submitOnRenderThread(queued.surface, queued.frame, queued.ui),
+                    .attach => |change| {
+                        if (renderer_keeps_surfaces) self.renderer.zuiAttachSurface(change.surface) catch |err| {
+                            change.error_code = @intFromError(err);
+                        };
+                        change.done.set(self.io);
+                    },
+                    .detach => |change| {
+                        if (renderer_keeps_surfaces) self.renderer.zuiDetachSurface(change.surface);
+                        change.done.set(self.io);
+                    },
+                }
             } else |_| {}
+        }
+
+        fn submitOnRenderThread(self: *Self, surface: zui.Surface, drawn: *const Ui.Frame, ui: *Ui) void {
+            self.renderer.zuiSubmit(surface, drawn) catch |err| {
+                _ = self.render_error.cmpxchgStrong(0, @intFromError(err), .release, .monotonic);
+            };
+            ui.release(drawn);
         }
 
         fn noticeDroppedSemantics(self: *Self, dropped: zui.SemanticsDropped) void {
@@ -510,11 +820,11 @@ pub fn Runner(comptime App: type) type {
             self.notify(.{ .semantics_dropped = dropped });
         }
 
-        fn noticeDroppedInput(self: *Self) void {
+        fn noticeDroppedInput(self: *Self, builder: *const zui.RecordBuilder) void {
             if (self.noticed.input_dropped) return;
-            if (self.builder.dropped_events == 0 and self.builder.dropped_text_bytes == 0) return;
+            if (builder.dropped_events == 0 and builder.dropped_text_bytes == 0) return;
             self.noticed.input_dropped = true;
-            self.notify(.{ .input_dropped = .{ .events = self.builder.dropped_events, .text_bytes = self.builder.dropped_text_bytes } });
+            self.notify(.{ .input_dropped = .{ .events = builder.dropped_events, .text_bytes = builder.dropped_text_bytes } });
         }
 
         fn noticeDiagnostics(self: *Self, diagnostics: zui.Diagnostics) void {
@@ -543,6 +853,18 @@ pub fn Runner(comptime App: type) type {
             };
         }
     };
+}
+
+/// The application's `zuiDeclare` takes a `zui.WindowId`, so it declares
+/// each of many windows.
+fn declaresWindows(comptime App: type) bool {
+    if (!@hasDecl(App, "zuiDeclare")) return false;
+    const info = @typeInfo(@TypeOf(App.zuiDeclare));
+    return info == .@"fn" and info.@"fn".params.len == 3 and info.@"fn".params[2].type == zui.WindowId;
+}
+
+fn hostOpensManyWindows(comptime Host: type) bool {
+    return @hasDecl(Host, "zui_capabilities") and Host.zui_capabilities.windows == .many;
 }
 
 fn UiOf(comptime App: type) type {
@@ -577,7 +899,7 @@ pub fn checkApp(comptime App: type) void {
     if (@typeInfo(App) != .@"struct") @compileError("zui_app: an application must be a struct type, got " ++ name);
     for (@typeInfo(App).@"struct".decls) |declaration| {
         if (!std.mem.startsWith(u8, declaration.name, "zui")) continue;
-        const known = for ([_][]const u8{ "zuiDeclare", "zuiLoader", "zuiObserve", "zuiRecord" }) |known_name| {
+        const known = for ([_][]const u8{ "zuiDeclare", "zuiLoader", "zuiObserve", "zuiRecord", "zuiSources", "zuiWindowClosed" }) |known_name| {
             if (std.mem.eql(u8, declaration.name, known_name)) break true;
         } else false;
         if (!known) {
@@ -589,24 +911,38 @@ pub fn checkApp(comptime App: type) void {
     if (!@hasDecl(App, "zuiDeclare")) @compileError("zui_app: " ++ name ++ " does not implement zui_app's application: missing `zuiDeclare`");
     zui.checkHostAndRenderer(App.Host, App.Renderer);
 
-    const expected_declare = "fn (*" ++ name ++ ", *Ui) void, where Ui is a zui.Context";
+    const expected_declare = "fn (*" ++ name ++ ", *Ui) void, or fn (*" ++ name ++ ", *Ui, zui.WindowId) void for many windows, where Ui is a zui.Context";
     const Declare = @TypeOf(App.zuiDeclare);
     const declares_a_frame = switch (@typeInfo(Declare)) {
-        .@"fn" => |function| function.params.len == 2 and function.return_type == void and
-            function.params[0].type == *App and function.params[1].type != null and isContextPointer(function.params[1].type.?),
+        .@"fn" => |function| (function.params.len == 2 or (function.params.len == 3 and function.params[2].type == zui.WindowId)) and
+            function.return_type == void and function.params[0].type == *App and function.params[1].type != null and isContextPointer(function.params[1].type.?),
         else => false,
     };
     // Not "found ...": a Context's type name spells out its whole Config.
     if (!declares_a_frame) @compileError("zui_app: " ++ name ++ ".zuiDeclare must be " ++ expected_declare);
     const Ui = UiOf(App);
-    if (@hasDecl(App, "zuiLoader") and @TypeOf(App.zuiLoader) != fn (*App, *const Ui, std.Io) void) {
-        @compileError("zui_app: " ++ name ++ ".zuiLoader must be fn (*" ++ name ++ ", *const Ui, std.Io) void, found " ++ @typeName(@TypeOf(App.zuiLoader)));
+    const windowed = declaresWindows(App);
+    const window_parameter = if (windowed) ", zui.WindowId" else "";
+    const because_windowed = if (windowed) ", since its zuiDeclare takes a zui.WindowId" else "";
+    const Loader = if (windowed) fn (*App, *const Ui, zui.WindowId, std.Io) void else fn (*App, *const Ui, std.Io) void;
+    if (@hasDecl(App, "zuiLoader") and @TypeOf(App.zuiLoader) != Loader) {
+        @compileError("zui_app: " ++ name ++ ".zuiLoader must be fn (*" ++ name ++ ", *const Ui" ++ window_parameter ++ ", std.Io) void" ++ because_windowed ++ ", found " ++ @typeName(@TypeOf(App.zuiLoader)));
     }
-    if (@hasDecl(App, "zuiObserve") and @TypeOf(App.zuiObserve) != fn (*App, *const Ui, *const Ui.Frame) void) {
-        @compileError("zui_app: " ++ name ++ ".zuiObserve must be fn (*" ++ name ++ ", *const Ui, *const Ui.Frame) void");
+    const Observe = if (windowed) fn (*App, *const Ui, zui.WindowId, *const Ui.Frame) void else fn (*App, *const Ui, *const Ui.Frame) void;
+    if (@hasDecl(App, "zuiObserve") and @TypeOf(App.zuiObserve) != Observe) {
+        @compileError("zui_app: " ++ name ++ ".zuiObserve must be fn (*" ++ name ++ ", *const Ui" ++ window_parameter ++ ", *const Ui.Frame) void" ++ because_windowed);
     }
-    if (@hasDecl(App, "zuiRecord") and @TypeOf(App.zuiRecord) != fn (*App, *zui.RecordBuilder) void) {
-        @compileError("zui_app: " ++ name ++ ".zuiRecord must be fn (*" ++ name ++ ", *zui.RecordBuilder) void, found " ++ @typeName(@TypeOf(App.zuiRecord)));
+    const Record = if (windowed) fn (*App, zui.WindowId, *zui.RecordBuilder) void else fn (*App, *zui.RecordBuilder) void;
+    if (@hasDecl(App, "zuiRecord") and @TypeOf(App.zuiRecord) != Record) {
+        @compileError("zui_app: " ++ name ++ ".zuiRecord must be fn (*" ++ name ++ window_parameter ++ ", *zui.RecordBuilder) void" ++ because_windowed ++ ", found " ++ @typeName(@TypeOf(App.zuiRecord)));
+    }
+    for ([_][]const u8{ "zuiSources", "zuiWindowClosed" }) |window_hook| {
+        if (!windowed and @hasDecl(App, window_hook)) {
+            @compileError("zui_app: " ++ name ++ " declares `" ++ window_hook ++ "`, but its zuiDeclare takes no zui.WindowId, so it has one window");
+        }
+    }
+    if (@hasDecl(App, "zuiWindowClosed") and @TypeOf(App.zuiWindowClosed) != fn (*App, zui.WindowId) void) {
+        @compileError("zui_app: " ++ name ++ ".zuiWindowClosed must be fn (*" ++ name ++ ", zui.WindowId) void, found " ++ @typeName(@TypeOf(App.zuiWindowClosed)));
     }
     if (@hasDecl(App, "Text")) {
         if (Ui.Text != App.Text) @compileError("zui_app: " ++ name ++ ".Text is " ++ @typeName(App.Text) ++ ", but its Ui measures text with " ++ @typeName(Ui.Text));
@@ -623,8 +959,17 @@ pub fn checkApp(comptime App: type) void {
         }
         if (@hasDecl(Text, "deinit")) expectFunction(Text, "deinit", fn (*Text) void, "fn (*" ++ text_name ++ ") void");
     }
+    if (windowed and Ui.has_sources) {
+        const expected_sources = "fn (*" ++ name ++ ", zui.WindowId) *" ++ @typeName(Ui.Sources);
+        if (!@hasDecl(App, "zuiSources")) {
+            @compileError("zui_app: " ++ name ++ " declares each window's UI, so it needs `pub fn zuiSources(app: *" ++ name ++ ", window: zui.WindowId) *" ++ @typeName(Ui.Sources) ++ "`, the sources of each window's context");
+        }
+        if (@TypeOf(App.zuiSources) != fn (*App, zui.WindowId) *Ui.Sources) {
+            @compileError("zui_app: " ++ name ++ ".zuiSources must be " ++ expected_sources ++ ", found " ++ @typeName(@TypeOf(App.zuiSources)));
+        }
+    }
     const holds_sources = @hasField(App, "sources") and (@FieldType(App, "sources") == Ui.Sources or @FieldType(App, "sources") == *Ui.Sources);
-    if (Ui.has_sources and !holds_sources) {
+    if (!windowed and Ui.has_sources and !holds_sources) {
         @compileError("zui_app: " ++ name ++ " needs a field `sources: " ++ @typeName(Ui.Sources) ++ "`, the Config's Sources or a pointer to them, for zui_app to swap");
     }
     if (@hasDecl(App, "init")) {

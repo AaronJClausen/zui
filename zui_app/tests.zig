@@ -880,3 +880,403 @@ test "ServicesOf guards each service the host has, and reaches it" {
     try testing.expectEqualStrings("copied", last.reply.?.text());
     if (Services.has_notifications) try Services.notifications.show(&host, paste, .{ .title = "never compiled" }, .of(&last));
 }
+
+/// Offscreen windows, each with its own script of events, one list per
+/// turn, on a clock that advances a frame per wait. Each window's surface
+/// is 100 times one more than its id wide, so a renderer can tell them
+/// apart.
+const WindowsHost = struct {
+    pub const zui_surfaces: zui.SurfaceKinds = .initOne(.offscreen);
+    pub const zui_capabilities: zui.HostCapabilities = .{ .windows = .many };
+    const capacity = 16;
+
+    const Window = struct {
+        open: bool = false,
+        /// The user closes the window at this turn.
+        closes_at_turn: u32 = std.math.maxInt(u32),
+        script: []const []const zui.Event = &.{},
+        applied: zui.HostRequests = .{},
+    };
+
+    windows: [capacity]Window = @splat(.{}),
+    /// How many windows the host holds at once.
+    holds: u32 = 4,
+    next_id: u32 = 1,
+    turn: u32 = 0,
+    waits: [16]zui.NextFrame = undefined,
+    closed: [16]zui.WindowId = undefined,
+    closed_count: usize = 0,
+    deinitialized: bool = false,
+
+    pub fn init(self: *WindowsHost, _: std.Io, _: zui.WindowOptions) !void {
+        self.* = .{};
+        self.windows[0] = .{ .open = true };
+    }
+
+    pub fn deinit(self: *WindowsHost) void {
+        self.deinitialized = true;
+    }
+
+    pub fn zuiOpenWindow(self: *WindowsHost, _: zui.WindowOptions) zui.OpenWindowError!zui.WindowId {
+        var open_count: u32 = 0;
+        for (self.windows) |window| open_count += @intFromBool(window.open);
+        if (open_count == self.holds or self.next_id == capacity) return error.TooManyWindows;
+        const id = self.next_id;
+        self.next_id += 1;
+        self.windows[id] = .{ .open = true };
+        return @enumFromInt(id);
+    }
+
+    pub fn zuiCloseWindow(self: *WindowsHost, window: zui.WindowId) void {
+        self.windows[@intFromEnum(window)].open = false;
+        self.closed[self.closed_count] = window;
+        self.closed_count += 1;
+    }
+
+    pub fn zuiPoll(self: *WindowsHost, id: zui.WindowId, record: *zui.RecordBuilder) bool {
+        const window = &self.windows[@intFromEnum(id)];
+        if (!window.open or self.turn >= window.closes_at_turn) return false;
+        record.begin(.{ .now = self.now(), .viewport = .{ 400, 300 }, .scale = 1 });
+        if (self.turn < window.script.len) for (window.script[self.turn]) |event| record.append(event);
+        return true;
+    }
+
+    pub fn zuiWaker(self: *WindowsHost) zui.Waker {
+        return .{ .context = self, .wakeFn = ignoreWake };
+    }
+
+    pub fn zuiWait(self: *WindowsHost, next: zui.NextFrame) void {
+        if (self.turn < self.waits.len) self.waits[self.turn] = next;
+        self.turn += 1;
+    }
+
+    pub fn zuiSurface(_: *WindowsHost, id: zui.WindowId) zui.Surface {
+        return .{ .offscreen = .{ .size = .{ 100 * (@intFromEnum(id) + 1), 100 } } };
+    }
+
+    pub fn zuiApply(self: *WindowsHost, id: zui.WindowId, requests: zui.HostRequests) void {
+        self.windows[@intFromEnum(id)].applied = requests;
+    }
+
+    fn now(self: *const WindowsHost) zui.Instant {
+        return .fromNanoseconds(@as(u64, self.turn + 1) * frame_interval_ns);
+    }
+
+    fn ignoreWake(_: *anyopaque) void {}
+
+    fn waitsSoFar(self: *const WindowsHost) []const zui.NextFrame {
+        return self.waits[0..@min(self.turn, self.waits.len)];
+    }
+};
+
+/// Records which window each frame was drawn for, by its surface's width,
+/// and the thread of every call.
+fn WindowsRenderer(comptime submits_on_any_thread: bool) type {
+    return struct {
+        const Self = @This();
+        pub const zui_surfaces: zui.SurfaceKinds = .initOne(.offscreen);
+        pub const zui_render_thread = submits_on_any_thread;
+
+        drawn_for: [32]u32 = undefined,
+        submitted: usize = 0,
+        attached: [8]u32 = undefined,
+        attached_count: usize = 0,
+        detached: [8]u32 = undefined,
+        detached_count: usize = 0,
+        threads: [48]std.Thread.Id = undefined,
+        thread_count: usize = 0,
+
+        pub fn zuiSubmit(self: *Self, surface: zui.Surface, _: anytype) !void {
+            self.drawn_for[self.submitted] = windowOf(surface);
+            self.submitted += 1;
+            self.recordThread();
+        }
+
+        pub fn zuiAttachSurface(self: *Self, surface: zui.Surface) error{UnsupportedSurface}!void {
+            self.attached[self.attached_count] = windowOf(surface);
+            self.attached_count += 1;
+            self.recordThread();
+        }
+
+        pub fn zuiDetachSurface(self: *Self, surface: zui.Surface) void {
+            self.detached[self.detached_count] = windowOf(surface);
+            self.detached_count += 1;
+            self.recordThread();
+        }
+
+        fn windowOf(surface: zui.Surface) u32 {
+            return surface.offscreen.size[0] / 100 - 1;
+        }
+
+        fn recordThread(self: *Self) void {
+            self.threads[self.thread_count] = std.Thread.getCurrentId();
+            self.thread_count += 1;
+        }
+
+        fn drawnFor(self: *const Self, window: u32) usize {
+            return std.mem.count(u32, self.drawn_for[0..self.submitted], &.{window});
+        }
+    };
+}
+
+const click_at_save = [_]zui.Event{
+    .{ .pointer_move = .{ .pointer = pointer_at_save } },
+    .{ .pointer_down = .{ .pointer = pointer_at_save } },
+    .{ .pointer_up = .{ .pointer = pointer_at_save } },
+};
+
+fn TwoWindowsApp(comptime Renderer_: type) type {
+    return struct {
+        const Self = @This();
+        pub const Host = WindowsHost;
+        pub const Renderer = Renderer_;
+        pub const Ui = zui.Context(zui_app.contextConfig(Renderer, .{ .limits = .{ .max_elements = 16 }, .frames_in_flight = 2 }));
+
+        windows: zui_app.Windows(Self) = undefined,
+        second: zui.WindowId = .main,
+        clicks: [2]u32 = .{ 0, 0 },
+        declarations: [2]u32 = .{ 0, 0 },
+        loads: [2]u32 = .{ 0, 0 },
+        closed: [2]zui.WindowId = undefined,
+        closed_count: usize = 0,
+
+        pub fn init(app: *Self, start: zui_app.Start(Self)) !void {
+            app.* = .{ .windows = start.windows };
+            app.second = try app.windows.open(.{ .title = "second", .visible = false });
+            start.host.windows[0].closes_at_turn = 4;
+            start.host.windows[1].closes_at_turn = 3;
+            start.host.windows[1].script = &.{ &.{}, &click_at_save };
+        }
+
+        pub fn zuiDeclare(app: *Self, ui: *Ui, window: zui.WindowId) void {
+            const index = @intFromEnum(window);
+            app.declarations[index] += 1;
+            if (ui.clicked(save)) app.clicks[index] += 1;
+            ui.box(.{ .id = save, .interactive = true, .cursor = if (window == .main) .default else .pointer, .layout = .{ .sizing = .{ .width = .fixed(100), .height = .fixed(40) } } });
+        }
+
+        pub fn zuiLoader(app: *Self, _: *const Ui, window: zui.WindowId, _: std.Io) void {
+            app.loads[@intFromEnum(window)] += 1;
+        }
+
+        pub fn zuiWindowClosed(app: *Self, window: zui.WindowId) void {
+            app.closed[app.closed_count] = window;
+            app.closed_count += 1;
+        }
+    };
+}
+
+fn expectTwoWindowsRan(runner: anytype) !void {
+    const second: zui.WindowId = @enumFromInt(1);
+    try testing.expectEqual(second, runner.app.second);
+    try testing.expectEqual([2]u32{ 0, 1 }, runner.app.clicks);
+    // Each window draws its first frame, and then only when it has input.
+    try testing.expectEqual([2]u32{ 1, 2 }, runner.app.declarations);
+    try testing.expectEqual(runner.app.declarations, runner.app.loads);
+    try testing.expectEqual(zui.Cursor.pointer, runner.host.windows[1].applied.cursor);
+    try testing.expectEqual(zui.Cursor.default, runner.host.windows[0].applied.cursor);
+    try testing.expectEqualSlices(zui.WindowId, &.{ second, .main }, runner.app.closed[0..runner.app.closed_count]);
+    try testing.expectEqualSlices(zui.WindowId, &.{ second, .main }, runner.host.closed[0..runner.host.closed_count]);
+    try testing.expectEqual(@as(usize, 1), runner.renderer.drawnFor(0));
+    try testing.expectEqual(@as(usize, 2), runner.renderer.drawnFor(1));
+    try testing.expectEqualSlices(u32, &.{1}, runner.renderer.attached[0..runner.renderer.attached_count]);
+    try testing.expectEqualSlices(u32, &.{ 1, 0 }, runner.renderer.detached[0..runner.renderer.detached_count]);
+}
+
+test "an application with many windows declares each in a context of its own, and input reaches only its window" {
+    const App = TwoWindowsApp(WindowsRenderer(false));
+    var runner: zui_app.Runner(App) = undefined;
+    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+    try testing.expectEqual(@as(u32, 4), try runToClose(&runner));
+    runner.stop();
+    try expectTwoWindowsRan(&runner);
+    try testing.expect(runner.host.deinitialized);
+    for (runner.renderer.threads[0..runner.renderer.thread_count]) |thread| try testing.expectEqual(std.Thread.getCurrentId(), thread);
+}
+
+test "with a render thread, every window's frames and surfaces go through it, and a window closes after its frames" {
+    const App = TwoWindowsApp(WindowsRenderer(true));
+    var runner: zui_app.Runner(App) = undefined;
+    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+    try testing.expectEqual(zui_app.Submission.render_thread, runner.report.submission);
+    try testing.expectEqual(@as(u32, 4), try runToClose(&runner));
+    runner.stop();
+    try expectTwoWindowsRan(&runner);
+    // The second window was attached in `init`, before the render thread started.
+    try testing.expectEqual(std.Thread.getCurrentId(), runner.renderer.threads[0]);
+    for (runner.renderer.threads[1..runner.renderer.thread_count]) |thread| try testing.expect(thread != std.Thread.getCurrentId());
+}
+
+const PacedWindowsApp = struct {
+    pub const Host = WindowsHost;
+    pub const Renderer = WindowsRenderer(false);
+    pub const Ui = zui.Context(zui_app.contextConfig(Renderer, .{ .limits = .{ .max_elements = 8 }, .Sources = Sources }));
+    const Sources = struct { counter: Counter = .{} };
+    const main_deadline: zui.Instant = .fromNanoseconds(1_000 * frame_interval_ns);
+
+    sources: [2]Sources = .{ .{}, .{} },
+    declarations: [2]u32 = .{ 0, 0 },
+    seen: [2]?u32 = .{ null, null },
+
+    pub fn init(app: *PacedWindowsApp, start: zui_app.Start(PacedWindowsApp)) !void {
+        app.* = .{};
+        _ = try start.windows.open(.{ .title = "second" });
+        start.host.windows[0].closes_at_turn = 4;
+        start.host.windows[1].closes_at_turn = 4;
+    }
+
+    pub fn zuiSources(app: *PacedWindowsApp, window: zui.WindowId) *Sources {
+        return &app.sources[@intFromEnum(window)];
+    }
+
+    pub fn zuiDeclare(app: *PacedWindowsApp, ui: *Ui, window: zui.WindowId) void {
+        const index = @intFromEnum(window);
+        app.declarations[index] += 1;
+        if (ui.source(.counter)) |value| app.seen[index] = value;
+        if (window == .main) ui.requestFrameAt(main_deadline);
+        if (window != .main and app.declarations[index] == 1) ui.requestFrame();
+        ui.box(.{});
+    }
+
+    pub fn zuiLoader(app: *PacedWindowsApp, _: *const Ui, window: zui.WindowId, _: std.Io) void {
+        if (window != .main and app.declarations[1] == 2) app.sources[1].counter.published = 7;
+    }
+};
+
+test "the host waits for the earliest nextFrame of every window, and a publish makes only its own window due" {
+    var runner: zui_app.Runner(PacedWindowsApp) = undefined;
+    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+    defer runner.stop();
+    try testing.expectEqual(@as(u32, 4), try runToClose(&runner));
+
+    const at_main_deadline: zui.NextFrame = .{ .at = PacedWindowsApp.main_deadline };
+    try testing.expectEqualSlices(zui.NextFrame, &.{ .immediately, .immediately, at_main_deadline, at_main_deadline }, runner.host.waitsSoFar());
+    try testing.expectEqual([2]u32{ 1, 3 }, runner.app.declarations);
+    try testing.expectEqual([2]?u32{ null, 7 }, runner.app.seen);
+}
+
+fn ManyWindowsApp(comptime host_holds: u32) type {
+    return struct {
+        const Self = @This();
+        pub const Host = WindowsHost;
+        pub const Renderer = WindowsRenderer(false);
+        pub const Ui = zui.Context(zui_app.contextConfig(Renderer, .{ .limits = .{ .max_elements = 8 } }));
+
+        opened: u32 = 0,
+        refused: ?anyerror = null,
+
+        pub fn init(app: *Self, start: zui_app.Start(Self)) !void {
+            app.* = .{};
+            start.host.holds = host_holds;
+            while (start.windows.open(.{})) |_| app.opened += 1 else |err| app.refused = err;
+        }
+
+        pub fn zuiDeclare(_: *Self, ui: *Ui, _: zui.WindowId) void {
+            ui.box(.{});
+        }
+    };
+}
+
+test "past the windows the host or zui_app holds, opening one more is refused" {
+    inline for (.{ .{ 4, 3 }, .{ WindowsHost.capacity, zui_app.max_windows - 1 } }) |case| {
+        var runner: zui_app.Runner(ManyWindowsApp(case[0])) = undefined;
+        try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+        defer runner.stop();
+        try testing.expectEqual(@as(u32, case[1]), runner.app.opened);
+        try testing.expectEqual(@as(?anyerror, error.TooManyWindows), runner.app.refused);
+    }
+}
+
+const ClosingWindowApp = struct {
+    pub const Host = WindowsHost;
+    pub const Renderer = WindowsRenderer(false);
+    pub const Ui = zui.Context(zui_app.contextConfig(Renderer, .{ .limits = .{ .max_elements = 8 } }));
+
+    windows: zui_app.Windows(ClosingWindowApp) = undefined,
+    declarations: u32 = 0,
+
+    pub fn init(app: *ClosingWindowApp, start: zui_app.Start(ClosingWindowApp)) !void {
+        app.* = .{ .windows = start.windows };
+        _ = try app.windows.open(.{});
+    }
+
+    pub fn zuiDeclare(app: *ClosingWindowApp, ui: *Ui, _: zui.WindowId) void {
+        app.declarations += 1;
+        ui.requestFrame();
+        ui.box(.{});
+    }
+
+    pub fn zuiLoader(app: *ClosingWindowApp, _: *const Ui, window: zui.WindowId, _: std.Io) void {
+        app.windows.close(window);
+    }
+};
+
+test "a window the application closes runs no frame after that turn, and the run ends with the last" {
+    var runner: zui_app.Runner(ClosingWindowApp) = undefined;
+    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+    defer runner.stop();
+    try testing.expectEqual(@as(u32, 0), try runToClose(&runner));
+    try testing.expectEqual(@as(u32, 2), runner.app.declarations);
+    try testing.expectEqual(@as(usize, 2), runner.host.closed_count);
+}
+
+const OneWindowOnManyApp = struct {
+    pub const Host = WindowsHost;
+    pub const Renderer = WindowsRenderer(false);
+    pub const Ui = zui.Context(zui_app.contextConfig(Renderer, .{ .limits = .{ .max_elements = 8 } }));
+
+    declarations: u32 = 0,
+
+    pub fn init(app: *OneWindowOnManyApp, start: zui_app.Start(OneWindowOnManyApp)) !void {
+        app.* = .{};
+        start.host.windows[0].closes_at_turn = 3;
+    }
+
+    pub fn zuiDeclare(app: *OneWindowOnManyApp, ui: *Ui) void {
+        app.declarations += 1;
+        ui.box(.{});
+    }
+};
+
+test "an application with one window runs a frame every turn on a host with many, and ends when it closes" {
+    var runner: zui_app.Runner(OneWindowOnManyApp) = undefined;
+    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+    defer runner.stop();
+    try testing.expectEqual(@as(u32, 3), try runToClose(&runner));
+    try testing.expectEqual(@as(u32, 3), runner.app.declarations);
+    try testing.expectEqual(@as(usize, 0), runner.host.closed_count);
+}
+
+const WindowedAppOnOneWindow = struct {
+    pub const Host = TestHost;
+    pub const Renderer = TestRenderer(false);
+    pub const Ui = zui.Context(zui_app.contextConfig(Renderer, .{ .limits = .{ .max_elements = 8 } }));
+
+    declared_in: ?zui.WindowId = null,
+    closed: ?zui.WindowId = null,
+
+    pub fn init(app: *WindowedAppOnOneWindow, start: zui_app.Start(WindowedAppOnOneWindow)) !void {
+        app.* = .{};
+        start.host.closes_after_polls = 2;
+        if (zui_app.Windows(WindowedAppOnOneWindow).has_many_windows) _ = try start.windows.open(.{});
+    }
+
+    pub fn zuiDeclare(app: *WindowedAppOnOneWindow, ui: *Ui, window: zui.WindowId) void {
+        app.declared_in = window;
+        ui.box(.{});
+    }
+
+    pub fn zuiWindowClosed(app: *WindowedAppOnOneWindow, window: zui.WindowId) void {
+        app.closed = window;
+    }
+};
+
+test "an application that declares windows runs on a host with one, in its main window" {
+    var runner: zui_app.Runner(WindowedAppOnOneWindow) = undefined;
+    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+    defer runner.stop();
+    try testing.expectEqual(@as(u32, 2), try runToClose(&runner));
+    try testing.expectEqual(@as(?zui.WindowId, .main), runner.app.declared_in);
+    try testing.expectEqual(@as(?zui.WindowId, .main), runner.app.closed);
+    try testing.expectEqual(@as(usize, 1), runner.renderer.submitted);
+}

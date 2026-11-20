@@ -18,8 +18,12 @@ const known_declarations = text_declarations ++ source_declarations ++ renderer_
 
 const text_declarations = [_][]const u8{ "zuiMeasure", "zuiSegment", "zui_thread_safe", "zuiFingerprint" };
 const source_declarations = [_][]const u8{ "zuiSwap", "zuiView", "zuiDelivery", "zuiInject", "zuiPending", "zuiEndFrame", "zuiRefusedCount" };
-const renderer_declarations = [_][]const u8{ "zuiSubmit", "zui_surfaces", "zui_commands", "zui_extended_color", "zui_render_thread", "zui_output_formats" };
-const host_declarations = [_][]const u8{ "zuiPoll", "zuiWaker", "zuiWait", "zuiSurface", "zuiApply", "zui_capabilities", "zui_output_formats" } ++ host_frame_calls ++ host_services;
+const renderer_declarations = [_][]const u8{ "zuiSubmit", "zui_surfaces", "zui_commands", "zui_extended_color", "zui_render_thread", "zui_output_formats" } ++ renderer_surface_calls;
+/// Called as each window after the first opens, and as each window closes.
+const renderer_surface_calls = [_][]const u8{ "zuiAttachSurface", "zuiDetachSurface" };
+const host_declarations = [_][]const u8{ "zuiPoll", "zuiWaker", "zuiWait", "zuiSurface", "zuiApply", "zui_capabilities", "zui_output_formats" } ++ host_window_calls ++ host_frame_calls ++ host_services;
+/// Declared exactly when `zui_capabilities.windows` is `.many`.
+const host_window_calls = [_][]const u8{ "zuiOpenWindow", "zuiCloseWindow" };
 /// What `zui_app` hands the host from each frame, besides its requests.
 const host_frame_calls = [_][]const u8{ "zuiSemantics", "zuiChromeRegions" };
 const host_services = [_][]const u8{ "zuiClipboard", "zuiNotifications", "zuiFileDialogs", "zuiOpenUrl", "zuiMenus", "zuiFileWatch" };
@@ -84,6 +88,27 @@ pub fn checkRenderer(comptime Renderer: type) void {
     };
     // Not "found ...": a generic function's type name spells out its inferred error set in builtins.
     if (!submits_a_frame) @compileError("zui: " ++ name ++ ".zuiSubmit must be " ++ expected_submit);
+    checkSurfaceCalls(Renderer);
+}
+
+fn checkSurfaceCalls(comptime Renderer: type) void {
+    const name = @typeName(Renderer);
+    const attaches = @hasDecl(Renderer, "zuiAttachSurface");
+    const detaches = @hasDecl(Renderer, "zuiDetachSurface");
+    if (attaches != detaches) {
+        const declared, const missing = if (attaches) .{ "zuiAttachSurface", "zuiDetachSurface" } else .{ "zuiDetachSurface", "zuiAttachSurface" };
+        @compileError("zui: " ++ name ++ " declares `" ++ declared ++ "` without `" ++ missing ++ "`; a renderer that keeps something per window declares both");
+    }
+    if (!attaches) return;
+    const Attach = @TypeOf(Renderer.zuiAttachSurface);
+    const attaches_a_surface = switch (@typeInfo(Attach)) {
+        .@"fn" => |function| function.params.len == 2 and function.params[0].type == *Renderer and function.params[1].type == surface.Surface and
+            if (function.return_type) |Returned| @typeInfo(Returned) == .error_union and @typeInfo(Returned).error_union.payload == void else false,
+        else => false,
+    };
+    if (!attaches_a_surface) @compileError("zui: " ++ name ++ ".zuiAttachSurface must be fn (*" ++ name ++ ", zui.Surface) !void, found " ++ @typeName(Attach));
+    const Detach = @TypeOf(Renderer.zuiDetachSurface);
+    if (Detach != fn (*Renderer, surface.Surface) void) @compileError("zui: " ++ name ++ ".zuiDetachSurface must be fn (*" ++ name ++ ", zui.Surface) void, found " ++ @typeName(Detach));
 }
 
 /// The host contract: the five calls of the loop and `zui_surfaces`, and
@@ -119,6 +144,7 @@ pub fn checkHost(comptime Host: type) void {
     expectHostCall(Host, "zuiWait", fn (*Host, record.NextFrame) void, "fn (" ++ host_pointer ++ ", zui.NextFrame) void");
     expectHostCall(Host, "zuiSurface", fn (*Host, host.WindowId) surface.Surface, "fn (" ++ host_pointer ++ ", zui.WindowId) zui.Surface");
     expectHostCall(Host, "zuiApply", fn (*Host, host.WindowId, record.HostRequests) void, "fn (" ++ host_pointer ++ ", zui.WindowId, zui.HostRequests) void");
+    checkWindowCalls(Host);
     inline for (hostFrameCalls(Host)) |call| {
         if (@hasDecl(Host, call.declaration)) expectHostCall(Host, call.declaration, call.Expected, call.expected_name);
     }
@@ -200,7 +226,33 @@ fn serviceFunctions(comptime Host: type) []const ServiceFunction {
     };
 }
 
-const HostFrameCall = struct {
+fn checkWindowCalls(comptime Host: type) void {
+    const name = @typeName(Host);
+    const host_pointer = "*" ++ name;
+    const many_windows = @hasDecl(Host, "zui_capabilities") and Host.zui_capabilities.windows == .many;
+    const calls = [_]HostCall{
+        .{
+            .declaration = "zuiOpenWindow",
+            .Expected = fn (*Host, host.WindowOptions) host.OpenWindowError!host.WindowId,
+            .expected_name = "fn (" ++ host_pointer ++ ", zui.WindowOptions) zui.OpenWindowError!zui.WindowId",
+        },
+        .{
+            .declaration = "zuiCloseWindow",
+            .Expected = fn (*Host, host.WindowId) void,
+            .expected_name = "fn (" ++ host_pointer ++ ", zui.WindowId) void",
+        },
+    };
+    inline for (calls) |call| {
+        const declared = @hasDecl(Host, call.declaration);
+        if (many_windows and !declared) {
+            @compileError("zui: " ++ name ++ " declares zui_capabilities.windows = .many but not `" ++ call.declaration ++ "`, which must be " ++ call.expected_name);
+        }
+        if (!many_windows and declared) @compileError("zui: " ++ name ++ " declares `" ++ call.declaration ++ "`, but its zui_capabilities.windows is .one");
+        if (declared) expectHostCall(Host, call.declaration, call.Expected, call.expected_name);
+    }
+}
+
+const HostCall = struct {
     declaration: []const u8,
     Expected: type,
     expected_name: []const u8,
@@ -208,7 +260,7 @@ const HostFrameCall = struct {
 
 /// Each takes the window and a slice of the frame's data, which is valid
 /// only during the call.
-fn hostFrameCalls(comptime Host: type) []const HostFrameCall {
+fn hostFrameCalls(comptime Host: type) []const HostCall {
     const host_pointer = "*" ++ @typeName(Host);
     return &.{
         .{

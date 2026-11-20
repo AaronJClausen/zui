@@ -64,6 +64,7 @@ pub const checkRenderer = contracts.checkRenderer;
 pub const WindowId = host.WindowId;
 pub const HostCapabilities = host.HostCapabilities;
 pub const WindowOptions = host.WindowOptions;
+pub const OpenWindowError = host.OpenWindowError;
 pub const SystemMaterial = host.SystemMaterial;
 pub const TitleBar = host.TitleBar;
 pub const FileChange = host.FileChange;

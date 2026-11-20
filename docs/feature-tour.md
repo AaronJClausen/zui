@@ -2135,6 +2135,7 @@ Build with `-Dzui-tracy=true` to link Tracy's client, then connect profiler 0.14
 
 These names compile, but they don't do anything yet. This list is from `ARCHITECTURE.md` §7 and the roadmap.
 
+- **Many windows**: `zui_app` declares each window in a context of its own, with `zuiDeclare(app, ui, window)` and `Start(App).windows.open`, and checks a host's `zuiOpenWindow`, but no native host opens a second window yet.
 - **Still to come**: Motion, multi-line text editing, skins, the inspector over the wire, and more hosts (macOS, Linux, web).
 
 <a id="dx"></a>
