@@ -30,8 +30,8 @@ jobs:
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: ${{ env.ZIG_VERSION }}
-      - name: Install sokol's X11, OpenGL and PulseAudio dependencies, which the bitmap fonts' tool links
-        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxi-dev libxcursor-dev libgl1-mesa-dev libpulse-dev
+      - name: Install sokol's X11, OpenGL, PulseAudio, EGL and Wayland dependencies, which the bitmap fonts' tool links
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxi-dev libxcursor-dev libgl1-mesa-dev libpulse-dev libegl-dev libwayland-dev
       - run: zig build site -Doptimize=ReleaseSmall
       - run: google-chrome --version
       - run: zig build test-site -Doptimize=ReleaseSmall -Dbrowser=google-chrome
