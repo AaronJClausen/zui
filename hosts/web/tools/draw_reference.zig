@@ -8,6 +8,7 @@
 //! RGBA pixels, bottom row first, as OpenGL and WebGL read them back.
 
 const std = @import("std");
+const zui = @import("zui");
 const zui_sokol = @import("zui_sokol");
 const zui_wire = @import("zui_wire");
 const tour = @import("zui_sokol_tour");
@@ -34,7 +35,7 @@ fn isDrawnInBrowser(command: Command, draws_text: bool) bool {
 const TextChoice = enum { @"with-text", @"without-text" };
 
 const KeptFrame = struct {
-    params: zui_sokol.zui.FrameParams,
+    params: zui.FrameParams,
     kept: []const Command,
 
     pub fn commands(self: *const KeptFrame) []const Command {

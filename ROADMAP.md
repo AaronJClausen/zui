@@ -69,7 +69,7 @@ green, and its **Status** line below says which slice is next.
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
 | H4. Linux | 10 | `hosts/native/`, `renderers/sokol/` | | in progress; slice 5, the IME, is next |
-| H5. Web | 10 | `../zui-web` | | |
+| H5. Web | 10 | `hosts/web/`, `renderers/webgl/` | | |
 | H7. Window decorations | 10 | `core/src/chrome.zig`, `core/src/context.zig`, `core/zui_app/`, `hosts/native/` | | waiting on a person: the checklist under H7's *Status*, on `zig build title-bar` in `hosts/native/` |
 | M1. `zui_motion` | 11 | `core/zui_motion/` | | |
 | M2. Exit animations | 11 | `core/src/`, `core/zui_motion/` | M1 | |
@@ -117,14 +117,12 @@ Things to know:
   still missing is listed in ARCHITECTURE.md §7 with the item that adds
   it. With `TaskPool` deleted, outside data reaches a frame only through
   sources: `zui_async`'s (A4) or the application's own (A3).
-- **A core change reaches the renderers and the native hosts at once,
-  and the web host by a pin.** `renderers/raylib/`, `renderers/sokol/`,
-  `renderers/terminal/` and `hosts/native/` name `core/` by path, and
-  `zig build test-all` tests them with the change; the raylib renderer's
-  tour, run from `renderers/raylib/`, checks the idle budget with
-  `--measure-idle` and the trace with `-Dzui-tracy=true`. zui-web pins
-  zui by commit; develop it against this checkout with `--fork=../zui`,
-  push zui, then move its pin with `zig fetch --save=zui`.
+- **A core change reaches every renderer and host at once.** Every
+  package names `core/` by path, and `zig build test-all` tests them all
+  with the change; the raylib renderer's tour, run from
+  `renderers/raylib/`, checks the idle budget with `--measure-idle` and
+  the trace with `-Dzui-tracy=true`, and the web host's checks, run from
+  `hosts/web/`, draw and run the sokol renderer's tour in a browser.
 - **`bench --check-targets` checks §20.2's budgets,** including
   declaration for the box tree, judged in benchmarking mode (Turbo Boost
   off, the `performance` governor), the mode `bench-compare` measures in.
@@ -4866,7 +4864,7 @@ Deliberate, and each a reason to choose zui:
 | How the tour's tasks run in the browser's worker (V4) | on an `Io` of the worker's own, `SteppedIo`, chosen in V4's worker part: its clocks read the page's instant, and the tour's tasks take turns on a fixed set of threads, each a worker on the tour's shared memory, one at a time and only while the frame waits for them, so the worker draws on the page's clock exactly the frames the tour draws natively on the same ticks, which `test-demo` checks byte for byte. A worker per loader was the other option: without shared memory it cannot reach the sources and loads the loaders write, so the tour's loaders would have been rewritten around messages, and with it, it is the same threads without the turns that keep frames alike. Its cost is a page served cross-origin isolated |
 | How the published page is isolated (V4) | on GitHub Pages, by a service worker of the page's own, chosen in V4's slice 5: it serves the page and everything it loads again with `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp`, which GitHub Pages cannot send, and the page reloads once after registering it. A host that sends the headers itself was the other option; it would add an account and a deploy outside the repository's own CI for two headers |
 | How the browser draws (V4) | the client lays every command out as the sokol renderer does, triangle for triangle, and the page draws the triangles through WebGL 2, with four samples per pixel resolved to one, as the sokol renderer's demo window smooths its edges; `test-draw` compares them with one sample per pixel too. A 2D canvas smooths every edge its own way and cannot fade a shadow's rings vertex by vertex, so its frames could not be compared with the sokol renderer's pixel by pixel |
-| A web renderer or a thin client over the wire (V4) | a thin client over `zui_wire`, as planned, since F5 built it: zui-web's page draws the frames an application in a Web Worker writes. A web host with a canvas surface, the application on the page itself, is H5's |
+| A web renderer or a thin client over the wire (V4) | a thin client over `zui_wire`, as planned, since F5 built it: the web host's page draws the frames an application in a Web Worker writes. A web host with a canvas surface, the application on the page itself, is H5's |
 | A D-Bus client for the Linux host (H4) | the host's own, over a Unix socket into fixed buffers, not libdbus or sd-bus: no outside code shares the connection, as EGL shares libwayland's objects, and the portal and UPower need only a handshake, a few calls and three signals; libdbus allocates per message and is thread-unfriendly, sd-bus ties the host to systemd |
 | macOS (H3) | set aside by the owner, who has no macOS hardware: its work is listed under *macOS, for later*, out of the queue, until the owner chooses to take it up. What fixes a contract's shape for macOS stays in the code as a stub: the `cocoa` surface, the system material's vibrancy, and bench's `.macos` machine readings and counters message. CI keeps its macOS runners, which need no hardware here |
 | Where an element declares its material (G5) | `Ui.Decoration.material`, typed by the renderer's `MaterialHandle`: `Ui.Element`, `Ui.Decoration` and `Ui.Style` are the context's own, and are `zui.Element`, `zui.Decoration` and `zui.Style` without a handle, so no existing code changes. `open` taking `anytype` to accept both was rejected: a literal passed through `anytype` is not converted to `Ui.Element` |

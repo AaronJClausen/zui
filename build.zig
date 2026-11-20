@@ -9,7 +9,9 @@ const packages = [_][]const u8{
     "renderers/terminal",
     "renderers/raylib",
     "renderers/sokol",
+    "renderers/webgl",
     "hosts/native",
+    "hosts/web",
 };
 
 /// Checked in as sokol-shdc writes them, so formatting leaves them alone.

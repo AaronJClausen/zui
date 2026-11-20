@@ -7,7 +7,7 @@ and each has one job:
 |---|---|---|
 | `SPEC.md` | the contract: what zui is, every API, every budget | the implementation proves it wrong, or an open question (§22) is settled |
 | `ROADMAP.md` | **the queue** of work, each item's plan and test, and what is done | every item, every slice of an item |
-| `ARCHITECTURE.md` | the map: which layer and repository holds each part, and how today's code still differs from the spec (§7) | a difference closes or opens, or a feature moves layer or stage |
+| `ARCHITECTURE.md` | the map: which layer and package holds each part, and how today's code still differs from the spec (§7) | a difference closes or opens, or a feature moves layer or stage |
 | `README.md` | what a user sees: status, today's API, the build commands | a stage or a user-visible API ships, or a build step changes |
 
 The code and these documents move together. A commit that changes one and
@@ -66,13 +66,24 @@ Stop and ask the user instead of guessing when:
 | a module `zui_<name>` | `core/zui_<name>/zui_<name>.zig` and `core/zui_<name>/tests.zig`. In `core/build.zig`: `b.addModule`, the test loop, the `check` imports and `formatted_paths`. Also `.paths` in `core/build.zig.zon`, `core_modules` in the root `build.zig`, which re-exports it, and the import snippet in `README.md`. A module imports only its own directory and `@import("zui")` (SPEC.md §3.3) |
 | a conformance suite (`expect*Conforms`) | `core/zui_testing/zui_testing.zig` |
 | a benchmark scenario | `core/bench/bench.zig`; its budget, if any, comes from SPEC.md §20.2 |
-| CI | `.github/workflows/ci.yml` |
+| CI | `.github/workflows/ci.yml`; publishing the web host's page, `.github/workflows/pages.yml` |
 | a skin for an OS design language | `themes/src/<design language>.zig`, exported from `themes/src/root.zig` (the `zui_themes` module), with its tests beside it. A skin is data, applied through `zui_widgets`' skin contract: it imports only `zui` and `zui_widgets`, and holds no drawing or OS code |
 | the template project | `examples/template/`, a package of its own, so it can be copied out as a new app |
 | a sample | `examples/samples/<name>/`, built and tested from `examples/build.zig` and imported from the `test` block of `examples/samples/root.zig`. A sample uses only the public APIs of zui, its modules, and the renderers and hosts, as a user would |
 | a package | its own directory, with its `build.zig` and `build.zig.zon`, naming other packages by `.path`; in the root, a line in `packages` in `build.zig` and in `.paths` in `build.zig.zon`. A renderer or host package is also a `.path` entry in the root's `.dependencies`, so users reach it as `zui.builder.dependency("<name>", …)`; the root's `build()` never instantiates it |
-| renderer changes | `renderers/<name>/`, which names `core/` by path, so it is tested in place from its directory: `renderers/raylib/`, `renderers/sokol/`, `renderers/terminal/` |
+| renderer changes | `renderers/<name>/`, which names `core/` by path, so it is tested in place from its directory: `renderers/raylib/`, `renderers/sokol/`, `renderers/terminal/`, `renderers/webgl/` |
 | native hosts | `hosts/native/<os>/`, in the package `zui_host`, which names `core/` and `renderers/sokol/` by path, so it is tested in place from `hosts/native/`; its examples are `hosts/native/examples/` |
+| the browser's drawing of a frame | `renderers/webgl/src/<topic>.zig`, reached from `renderers/webgl/src/root.zig` (the module `zui_webgl`); the page's WebGL 2 drawing of it, `renderers/webgl/web/frame_drawer.mjs`. It never imports anything of `hosts/web/` |
+| the web client and, later, the web host | `hosts/web/src/<topic>.zig`, reached from `hosts/web/src/root.zig`, in the package `zui_web`, which names `core/`, `renderers/webgl/` and `renderers/sokol/` by path, so it is tested in place from `hosts/web/` |
+| what the browser runs | reached from `hosts/web/src/browser.zig`, the client's WebAssembly exports, or `hosts/web/src/tour_worker.zig`, the tour's in a worker, which `zig build check` compiles for `wasm32-freestanding` |
+| what only a check needs in the browser | `hosts/web/src/browser_wire_check.zig`, which adds exports to the client's for `zig build test-demo`; `hosts/web/web/check_*`, the pages and Node scripts the checks run |
+| native programs the web checks run, such as the tour's stream | `hosts/web/tools/` |
+| JavaScript and HTML glue | `hosts/web/web/` |
+| the published page | `hosts/web/web/index.html` and what it loads, listed in `site_scripts` in `hosts/web/build.zig`, which `zig build site` writes with the client, the frame drawer, the worker and the fonts |
+
+Everything under `renderers/webgl/src/` and `hosts/web/src/` that the
+browser runs must compile for `wasm32-freestanding`: no `std.fs`, threads
+or OS calls there.
 
 Each stage's features and their layer are listed in `ARCHITECTURE.md` §6.
 If an item puts something in a different layer, change §6 too.
@@ -157,6 +168,31 @@ must print the frame it restyled in; the tour's cycle,
 a Wayland compositor (CI runs a headless Weston); never run an example
 without `--check`, `--frames` or `--measure-idle`, since its window
 stays open until closed. Its links on Linux print the same LLD noise.
+In `renderers/webgl/`, run `zig build test` in all three optimize modes
+and `zig build check`, which also compiles the tests for
+`wasm32-freestanding`. In `hosts/web/`, run `zig build test` in all three
+optimize modes and `zig build check`, which compiles the client and the
+tour's worker for `wasm32-freestanding`, so a browser break fails there;
+and, each with `timeout` in front:
+`zig build test-demo` (and with `-Doptimize=ReleaseSafe`) after any
+change to the client, `hosts/web/src/demo_ui.zig`, the tour's worker
+(`hosts/web/src/tour_*.zig`, `hosts/web/src/stepped_io.zig`,
+`hosts/web/web/tour_*.mjs`), core or the sokol renderer's tour; it needs
+Node. `zig build test-draw` after any change to how the client lays
+frames out or the page draws them (`renderers/webgl/`), or to the sokol
+renderer; it needs Node, Chromium (`-Dbrowser=<path>` names another) and
+a display, and `ZUI_WEB_DRAW_FAILURES=<dir>` keeps its failing frames.
+`zig build test-input` after any change to how the client writes records
+or the page reads input or applies host requests; it needs Node and
+Chromium, run headless, and no display. `zig build test-site`, and
+`zig build site -Doptimize=ReleaseSmall` with `test-site` in ReleaseSmall,
+after any change to the published page, its service worker,
+`hosts/web/web/tour_page.mjs` or what it loads, or `site_scripts`; it
+needs Node and Chromium, run headless, and no display, and the Pages
+workflow runs it before publishing. Chromium runs headless here, under
+`timeout`, and must leave no Chromium process behind (`pgrep -af --
+--headless`). Its tools that run the tour natively print the same LLD
+noise.
 
 | Command | When |
 |---|---|
@@ -211,15 +247,13 @@ stays open until closed. Its links on Linux print the same LLD noise.
   and do not reference other files or the spec in comments.
 - LF line endings everywhere.
 
-## Commits and other repositories
+## Commits
 
 - Commit messages follow the history: an imperative subject without a
   prefix ("Add the tracer contract"), and a body that says what changed
   and why, with measurements.
 - Work on `main`, as the history does. **Do not push or tag** unless the
-  user says to in this session. Packages in this repository name `core/`
-  by path and need no pin. Sibling repositories pin zui by commit,
-  so they cannot take a zui change until it is pushed. Until then, test
-  them with `--fork=../zui`.
-- Work in a sibling repository only for an item whose *Where* names it,
-  and leave that repository's own README current in the same way.
+  user says to in this session. Every package names `core/`, and any
+  other package it uses, by path, so a change is built and tested against
+  all of them in place: `zig build test-all` and `zig build check-all`
+  run every package's steps.

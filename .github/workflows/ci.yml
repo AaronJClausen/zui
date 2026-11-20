@@ -275,6 +275,76 @@ jobs:
       - run: zig build check -Dtarget=x86_64-windows
       - run: zig build check -Dtarget=aarch64-windows
 
+  web:
+    name: "Web: test and check ${{ matrix.package }} (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [renderers/webgl, hosts/web]
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    defaults:
+      run:
+        working-directory: ${{ matrix.package }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - run: zig build test
+      - run: zig build test -Doptimize=ReleaseSafe
+      - run: zig build test -Doptimize=ReleaseFast
+      - name: Check, including the drawing, the client and the tour's worker compiled for wasm32-freestanding
+        run: zig build check
+
+  web-demo:
+    name: "Web host: the tour's stream decoded, and its input written, by the browser's client, the tour run in a worker, and its published page (Linux, Node, headless Chrome)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: hosts/web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - name: Install sokol's X11, OpenGL and PulseAudio dependencies, which the tour links
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxi-dev libxcursor-dev libgl1-mesa-dev libpulse-dev
+      - run: node --version
+      - run: zig build test-demo
+      - run: zig build test-demo -Doptimize=ReleaseSafe
+      - run: google-chrome --version
+      - run: zig build test-input -Dbrowser=google-chrome
+      - run: zig build test-site -Dbrowser=google-chrome
+
+  web-draw:
+    name: "Web host: the tour's frames drawn in headless Chrome by the WebGL renderer, against the sokol renderer (Linux, Xvfb)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: hosts/web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - name: Install sokol's X11, OpenGL and PulseAudio dependencies, which the tour links, and Xvfb
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxi-dev libxcursor-dev libgl1-mesa-dev libpulse-dev xvfb
+      - run: google-chrome --version
+      - run: xvfb-run --auto-servernum zig build test-draw -Dbrowser=google-chrome
+        env:
+          ZUI_WEB_DRAW_FAILURES: ${{ runner.temp }}/draw-failures
+      - name: Upload each frame that did not match, drawn and reference
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: draw-failures
+          path: ${{ runner.temp }}/draw-failures
+          if-no-files-found: ignore
+
   tracy:
     name: Tracy (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

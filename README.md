@@ -259,7 +259,7 @@ Implemented so far:
   `features.safety_sweeps`, on by default in safe builds, `endFrame`
   panics on it.
   The sokol renderer's tour runs in a browser, at
-  <https://aaronjclausen.github.io/zui-web/>: zui-web builds it for
+  <https://aaronjclausen.github.io/zui-web/>: the web host builds it for
   `wasm32-freestanding` and runs it in a Web Worker, and its page draws
   the tour's frames over `zui_wire` through WebGL 2, with four samples
   per pixel as a native window with `sample_count = 4` has, and sends
@@ -386,9 +386,13 @@ modules and runs core's steps under the same names. Beside core:
   the tour on it (see *The sokol renderer* below).
 - `renderers/terminal/`, the package `zui_terminal`: the terminal
   renderer (see *The terminal renderer* below).
+- `renderers/webgl/`, the package `zui_webgl`: the browser's drawing of
+  a frame through WebGL 2 (see *The WebGL renderer* below).
 - `hosts/native/`, the package `zui_host`: the native hosts, for Windows
   and for Linux on Wayland, and their examples (see *The native hosts*
   below).
+- `hosts/web/`, the package `zui_web`: the browser's client, the tour in
+  a Web Worker, and the published page (see *The web host* below).
 
 Each has its own `test` and `check`, run from its directory, and
 `test-all` and `check-all` run them. The raylib renderer has these too,
@@ -457,6 +461,40 @@ for the examples sokol's
 | `zig build title-bar` | a title bar the application draws, which Windows still drags, snaps and resizes; `-- --check` hit-tests it hidden (Windows) |
 | `zig build many-windows` | one application in two windows, each with its own UI; `-- --check` clicks and closes them hidden (Windows) |
 
+The WebGL renderer has `test` and `check`, run from `renderers/webgl/`;
+the first build fetches stb:
+
+| Command | What it does |
+|---|---|
+| `zig build test` | run the draw list's, text's, glyph atlas's and blur's unit tests |
+| `zig build check` | compile the unit tests natively and for `wasm32-freestanding` without running them |
+
+The web host has these, run from `hosts/web/`. The steps besides `test`
+and `check` fetch sokol-zig for the tour, and on Linux need sokol's
+`libx11-dev libxi-dev libxcursor-dev libgl1-mesa-dev libpulse-dev`, since
+the tools that run the tour natively link it; `test-demo` needs Node on
+the `PATH`, with `worker_threads`; `test-draw`, `test-input` and
+`test-site` also need Chromium or Google Chrome (`chromium` on the
+`PATH`, or `-Dbrowser=<path>`), run headless; and `test-draw` needs a
+display for the sokol renderer's OpenGL window (CI runs it under
+`xvfb-run`):
+
+| Command | What it does |
+|---|---|
+| `zig build test` | run the client's and the stepped `Io`'s unit tests |
+| `zig build` | write the client, `zig-out/web/zui-web.wasm`, and the tour for a worker, `zig-out/web/zui-web-tour.wasm` |
+| `zig build check` | compile without running, and compile the client and the tour's worker for `wasm32-freestanding` |
+| `zig build test-demo` | stream the sokol renderer's tour to the client under Node, and check every frame decodes to what was drawn; run the tour in a worker under Node, and check every frame is the one the tour draws natively |
+| `zig build test-draw` | draw a frame of each of the tour's screens in headless Chromium, with one sample per pixel and with four, and check each against the sokol renderer drawing it alike |
+| `zig build test-input` | give the page input in headless Chromium, run the tour on the records the client wrote of it, and check the tour took them and the page shows the cursor it asks for |
+| `zig build site` | write the published page, the client, the frame drawer, the tour's worker and its fonts to `zig-out/site`; serve that directory over HTTP (or HTTPS, off `localhost`) to run the tour in a browser |
+| `zig build test-site` | serve the site without isolation headers, open it in headless Chromium, and check its service worker isolates it, it draws the tour's frames, sleeps while idle, and its input wakes it and reaches the tour |
+
+When `test-draw` fails, it prints each failing frame's numbers and writes
+the frame drawn and its reference as PPM images to a new temporary
+directory, or to the one `ZUI_WEB_DRAW_FAILURES` names; CI uploads them as
+the `draw-failures` artifact.
+
 Run these from the root:
 
 | Command | What it does |
@@ -508,7 +546,14 @@ CI runs:
 - the native hosts' tests in Debug and ReleaseSafe and their `check`, on
   Windows, and on Linux under a headless Weston with a D-Bus daemon of
   its own, and `check` for x86-64 and ARM64 Windows from Linux, from
-  `hosts/native/`. The examples are compiled there and run on a desktop.
+  `hosts/native/`. The examples are compiled there and run on a desktop;
+- the WebGL renderer's and the web host's tests in three optimize modes
+  and their `check`, on Linux, Windows and macOS, each from its
+  directory; and on Linux, from `hosts/web/`, `test-demo` in Debug and
+  ReleaseSafe, `test-input` and `test-site` in headless Google Chrome, and
+  `test-draw` under `xvfb-run`, keeping the frames that do not match as
+  the run's artifacts. On every push to `main`, the Pages workflow builds
+  the site in ReleaseSmall, runs `test-site` on it, and publishes it.
 
 Those targets exist to catch assumptions about the host machine early:
 the first 32-bit build found two places that used a 64-bit hash as an
@@ -669,7 +714,7 @@ _ = zui_reflect.inspector(widgets, ui, .of("settings"), &settings);
 SPEC.md §19.2 lists the widgets, and §19.3 covers the inspector's typed
 options.
 
-Renderers and the native hosts are packages of their own, reached
+Renderers and hosts are packages of their own, reached
 through the `zui` dependency's builder as the next sections show, so an
 application fetches only the libraries of the renderers it uses.
 
@@ -1067,7 +1112,7 @@ module.addImport("zui_sokol_tour", zui_sokol.module("zui_sokol_tour"));
 the tour declaring a frame for `wasm32-freestanding`, so the tour keeps
 building there. Nothing the tour draws depends on the target's pointer
 width, so on the same clock and input it draws the same frames in
-WebAssembly as natively, which zui-web's `test-demo` checks.
+WebAssembly as natively, which the web host's `test-demo` checks.
 
 #### The tour on sokol
 
@@ -1161,6 +1206,50 @@ What a terminal cannot do:
   children, so a border cell that already holds text keeps it.
 - **No cursor shapes or IME window.** The frame's host requests are not
   applied.
+
+### The WebGL renderer
+
+`zui_webgl` is the browser's drawing of a frame, in
+[renderers/webgl/](renderers/webgl/): `DrawList` lays a frame's commands
+out as triangles, as the sokol renderer does, in batches that each draw
+under one scissor rectangle, and `web/frame_drawer.mjs` draws them on a
+canvas through WebGL 2, with four samples per pixel resolved to one,
+which smooth every edge as the sokol renderer's demo window does with its
+`sample_count = 4`: rectangles, borders, clips, gradients, shadows and
+transforms, and text, once the page hands over the stream's fonts.
+`Text` holds them: TrueType glyphs are rasterized by stb_truetype,
+compiled in without a C library, into an atlas packed as the sokol
+renderer packs its own, and bitmap text uses sokol_debugtext's six fonts.
+A backdrop blur copies what was drawn beneath it and blurs it as the sokol
+renderer does, along x and then y into two float targets, before the pane
+is drawn from them; a material is drawn by the sokol renderer's material
+shader, ported to GLSL ES. The blur is summed in RGBA32F where WebGL can
+render, blend and filter it (`EXT_color_buffer_float`, `EXT_float_blend`,
+`OES_texture_float_linear`), as the sokol renderer sums it where its GPU
+can, and otherwise in RGBA16F, whose rounding differs between drivers by
+several color steps; without `EXT_color_buffer_float`, blurs are drawn as
+their tint alone. Images are not drawn yet. It lays out frames of a
+context with the sokol renderer's commands and payload types, as the web
+host's `DemoUi` has them. Everything in it compiles for
+`wasm32-freestanding`; it reserves its memory in `init`.
+
+```zig
+// build.zig, with `zui` the dependency above, for a module the browser runs
+const browser = b.resolveTargetQuery(.{ .cpu_arch = .wasm32, .os_tag = .freestanding });
+const zui_webgl = zui.builder.dependency("zui_webgl", .{ .target = browser, .optimize = optimize });
+client.root_module.addImport("zui_webgl", zui_webgl.module("zui_webgl"));
+```
+
+```zig
+var text: zui_webgl.Text = try .init(gpa);
+var draw_list: zui_webgl.DrawList = try .init(gpa);
+draw_list.layOut(frame.commands(), frame.params, &text);
+// hand draw_list.batches(), .vertices(), .backdropBlurs(), .blurTaps() and
+// .materials() to the page's FrameDrawer, as hosts/web's client does
+```
+
+The web host's `test-draw` checks it against the sokol renderer (see
+*The web host*).
 
 ### The native hosts
 
@@ -1654,6 +1743,114 @@ zig build remote -- --connect 7420       # only the viewer, joining a tour serve
 `--check` fails if a screen does not come back within 20 s, and when the
 tour's process does not exit with 0. On the reference machine it takes
 under a second: the first frame arrives about 3 ms after connecting.
+
+### The web host
+
+`zui_web`, in [hosts/web/](hosts/web/), is zui in the browser: today a
+thin client that draws an application streamed over `zui_wire` (V4), the
+sokol renderer's tour in a Web Worker, and the page that puts them
+together, published at <https://aaronjclausen.github.io/zui-web/>; later
+a web host with a canvas surface (H5). It exports no module yet: its
+steps run from `hosts/web/` (see *Development*). Everything under its
+`src/` that the browser runs compiles for `wasm32-freestanding`.
+
+**The client.** `zig build` writes `zig-out/web/zui-web.wasm` (35 MiB of
+memory once `zuiWebInit` reserves it), which takes
+a `zui_wire` stream in pieces of any size, as a socket delivers it,
+decodes each frame once all of it has arrived, and lays it out with the
+WebGL renderer for `frame_drawer.mjs` to draw. `zig build test-demo`
+declares every screen of the sokol renderer's tour headlessly, streams
+its frames to that client under Node in pieces of 1 to 16,384 bytes, and
+checks that each of the 312 frames decodes to what the tour drew.
+`zig build test-draw` draws a frame of each of the tour's screens with the
+sokol renderer and with the client in headless Chromium, twice. With one
+sample per pixel, it checks that every pixel matches, within 2 of each
+color or a pixel's neighbor: shapes, text, blurs and materials alike. A
+frame may have one pixel that matches nothing nearby: a glyph's partial
+coverage at its edge is a color no neighbor has, and the two rasterizers
+decide a pixel that close to a turned glyph's edge differently. Of the 13
+frames, only the Transforms screen's has such a pixel. With four samples
+per pixel and without text, it checks that every pixel of each image also
+matches the other's, so an edge smoothed in one alone fails, allowing one
+sample's share of the colors around a pixel, since SwiftShader snaps
+vertices to a sixteenth of a pixel, and four pixels a frame where a line
+thinner than a pixel has two samples decided differently; a frame drawn
+unsmoothed has hundreds that match nothing. Text is left out there, since
+where a glyph's quad covers part of a pixel a GPU may sample the glyph
+anywhere in the pixel. It fails, rather than compare them, if either side
+cannot sum blurs in RGBA32F.
+
+**Input** goes back the other way. `web/input_recorder.mjs` turns a
+canvas's pointer, wheel, key and text events, its size and
+`devicePixelRatio` into calls the client makes records of, as
+`zui_wire.Client` does: a record is written only when it holds events or
+the canvas's size or scale changed, the stream's header before the first,
+and the application's host counts the time between them. A key is the one
+its `key` names, or for a digit or a mark, the one its `code` places, so
+Ctrl+2 is Ctrl+2 on any layout; a key that types a character also sends
+it as text. The cursor each frame asks for is set on the canvas.
+`zig build test-input` gives the page a mouse, keys, the wheel, a touch
+and a resize through headless Chromium, runs the tour on the records the
+client wrote, checks that each holds what the page was given and that the
+tour moved between screens on the click and the shortcuts, and sends the
+tour's frames back to the page, which must show the pointer cursor over
+the rail.
+
+**The tour in a worker.** `zig build` also writes
+`zig-out/web/zui-web-tour.wasm`, the sokol renderer's tour built for
+`wasm32-freestanding` with shared memory (about 49 MiB of memory once
+`zuiTourInit` reserves it). `web/tour_worker.mjs` takes the page's clock
+and records each frame and posts back the frame's wire bytes. The tour's
+strip and frame inspector time each frame's beginFrame, declaration and
+layout on the worker's `performance.now()`, and show the page's time to
+draw the frame before as its submit time. The tour's loaders, the
+Gallery's tiles and Mission Control's producers, run on an `Io` of the
+worker's own, `SteppedIo`: its clocks read the page's instant, and its
+tasks take turns on 16 threads, each a worker of its own on the same
+memory (`web/tour_thread.mjs`), one at a time and only while the frame
+waits for them, so the tour draws the same frames for the same clock and
+input wherever it runs. A worker can share its memory only on a page that
+is cross-origin isolated, served with `Cross-Origin-Opener-Policy:
+same-origin` and `Cross-Origin-Embedder-Policy: require-corp`.
+`zig build test-demo` also runs the tour in that worker under Node, on
+the records the client wrote of the mouse crossing each screen and
+Ctrl+PageDown between them, and checks that each of the 312 frames is,
+byte for byte, the frame the tour draws natively on the same ticks
+(`tools/tour_frames.zig`), that its tasks ran alike, and that the client
+decodes every frame. Real timings differ from run to run, so there both
+time frames on a steady stopwatch, 1 µs a reading.
+
+**The published page** puts it all together: `web/index.html` starts the
+tour's worker, draws each frame it sends on the canvas, and sends it the
+canvas's input as records. It sleeps between frames as a native host
+does: each answer from the worker carries when to step the tour again,
+which is the tour's `ui.nextFrame()`, at once, at a deadline or on input,
+or sooner, when one of its tasks' sleeps ends, since under `SteppedIo`
+tasks run only while a frame waits for them. The page then asks for an
+animation frame at once, sets a timer for the deadline, or waits for the
+canvas's input, a resize or a change of `devicePixelRatio`, and a step
+that finds no frame due declares none. Idle, the tour draws only its
+heartbeat, once a second; the Box Storm, Typography, Light and Depth,
+Transforms and Materials screens animate, and ask for every frame, as
+they do natively. GitHub Pages cannot send the headers that make a page
+cross-origin isolated, so the page registers a service worker of its own,
+`web/isolation_service_worker.js`, which serves the page and everything
+it loads again with them, and reloads once. `zig build site` writes the
+page, the client, the frame drawer, the tour's worker and the tour's fonts
+to `zig-out/site` (in ReleaseSmall, `zui-web.wasm` is 78 KB and
+`zui-web-tour.wasm` 845 KB), and the Pages workflow
+(`.github/workflows/pages.yml`) builds it in ReleaseSmall, checks it, and
+publishes it from `main`. `zig build test-site` serves that site without
+the isolation headers, as GitHub Pages does, opens it in headless
+Chromium, and checks that the service worker isolated it after one
+reload, that the page draws the worker's frames, timed above 0 µs, that
+it sleeps while idle, drawing 1 frame a second on Welcome while the
+display runs at 60, and that input wakes it and reaches the tour: the
+mouse over the rail shows the pointer cursor the tour asks for,
+Ctrl+PageDown draws the next screen, and a click on Mission Control starts
+its producers' tasks, whose frames keep coming without input. Then, on
+the Gallery, every tile's load must finish without input, and the page
+sleep again.
 
 ## License
 

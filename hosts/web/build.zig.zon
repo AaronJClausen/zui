@@ -4,19 +4,9 @@
     .fingerprint = 0x635f27e251b03f0d, // Changing this has security and trust implications.
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
-        .zui = .{
-            .url = "git+https://github.com/AaronJClausen/zui#a4f7c66574d4ebd559e5f38e9aeff10c60882e9e",
-            .hash = "zui-0.5.0-xfvfqtAvGgCYFsRPGKDph0T_Tqqgb3MQF_-hNPgD_2r-",
-        },
-        .stb = .{
-            .url = "git+https://github.com/nothings/stb#4e9b368bfc071e97206ea5c6adba68dd0cbf8897",
-            .hash = "N-V-__8AAFRGTgBWHIQULKwDqlrvga2AR9enp42AsQ7z-yXN",
-        },
-        .zui_sokol = .{
-            .url = "git+https://github.com/AaronJClausen/zui-sokol#73f36122199d186f671ecf5e126f3426c1de5aa1",
-            .hash = "zui_sokol-0.2.0-LHR9oZF1CQC7gA3EofGgtFeJiYQaTBGuJB-2cMDGMIL_",
-            .lazy = true,
-        },
+        .zui_core = .{ .path = "../../core" },
+        .zui_webgl = .{ .path = "../../renderers/webgl" },
+        .zui_sokol = .{ .path = "../../renderers/sokol", .lazy = true },
     },
-    .paths = .{ "build.zig", "build.zig.zon", "src", "tools", "web", "README.md", "LICENSE" },
+    .paths = .{ "build.zig", "build.zig.zon", "src", "tools", "web" },
 }

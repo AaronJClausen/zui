@@ -6,10 +6,10 @@
 //! its command count (u32) and the Wyhash of it written whole (u64).
 
 const std = @import("std");
+const zui = @import("zui");
 const zui_sokol = @import("zui_sokol");
 const zui_wire = @import("zui_wire");
 const tour = @import("zui_sokol_tour");
-const zui = zui_sokol.zui;
 const Ui = tour.kit.Ui;
 
 const frames_per_screen = 24;

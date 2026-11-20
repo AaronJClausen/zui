@@ -1,4 +1,4 @@
-// [ZUI_WEB_DRAW_FAILURES=<directory>] node check_draw.mjs <chromium> <client wasm> <stream>
+// [ZUI_WEB_DRAW_FAILURES=<directory>] node check_draw.mjs <chromium> <client wasm> <frame drawer> <stream>
 //     <one-sample reference> <four-sample reference without text> <bitmap fonts> <TrueType font>...
 // Each frame that fails is written there as PPM, drawn and reference;
 // without it, to a new temporary directory.
@@ -39,13 +39,13 @@ const sampleShareReach = 2;
 const maxUnmatchedPixelsPerFrame = { 1: 1, 4: 4 };
 const watchdogMilliseconds = 300_000;
 
-const [chromiumPath, wasmPath, streamPath, oneSampleReferencePath, fourSampleReferencePath, bitmapFontsPath, ...trueTypeFontPaths] = process.argv.slice(2);
+const [chromiumPath, wasmPath, frameDrawerPath, streamPath, oneSampleReferencePath, fourSampleReferencePath, bitmapFontsPath, ...trueTypeFontPaths] = process.argv.slice(2);
 const webDirectory = dirname(fileURLToPath(import.meta.url));
 
 const served = {
   "/": { path: join(webDirectory, "check_draw.html"), type: "text/html" },
   "/client.mjs": { path: join(webDirectory, "client.mjs"), type: "text/javascript" },
-  "/frame_drawer.mjs": { path: join(webDirectory, "frame_drawer.mjs"), type: "text/javascript" },
+  "/frame_drawer.mjs": { path: frameDrawerPath, type: "text/javascript" },
   "/zui-web.wasm": { path: wasmPath, type: "application/wasm" },
   "/tour.zuiw": { path: streamPath, type: "application/octet-stream" },
   "/bitmap.fonts": { path: bitmapFontsPath, type: "application/octet-stream" },

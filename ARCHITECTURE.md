@@ -169,8 +169,8 @@ The stage is the one in SPEC.md §21 that builds it.
 | inspector, and its overlay of zone times | `zui_debug` over `Frame.inspect`, and its `ZoneTimer` tracer over the tracer contract | 9 |
 | accessibility | core semantics and actions; `zui_widgets` declares each control's; host bridges to the platform API | 9 |
 | safety sweeps | core, over a finished frame; `endFrame` runs them behind `features.safety_sweeps` | 9 |
-| the demo in a browser | `zui-web`: the application in a Web Worker, its frames drawn by a thin client over `zui_wire` | 9 |
-| Linux and web hosts; many windows | `zui_host` in `hosts/native/`; one `Context` per window, each made and declared through `zui_app`, and one renderer with a surface per window | 10 |
+| the demo in a browser | `zui_web` in `hosts/web/`: the application in a Web Worker, its frames drawn by a thin client over `zui_wire` through `zui_webgl` in `renderers/webgl/` | 9 |
+| Linux and web hosts; many windows | `zui_host` in `hosts/native/`, and `zui_web` in `hosts/web/`; one `Context` per window, each made and declared through `zui_app`, and one renderer with a surface per window | 10 |
 | the macOS host | `zui_host`, as the others; only its contract shapes exist (the `cocoa` surface, vibrancy as the system material), as stubs | set aside |
 | window decorations: a custom title bar the OS still moves, resizes and snaps | chrome regions in the core, beside the frame, behind `features.chrome_regions`; `zui_app` hands them to the host's `zuiChromeRegions`; each host answers its window manager | 10 |
 | host services: the clipboard, notifications, file dialogs, opening URLs, menus | the core's vocabulary and checks (`core/src/services.zig`); `zui_app.ServicesOf`'s guards; each host implements them, answering into a source the application chooses | 10 |
@@ -272,7 +272,7 @@ What exists today, by stage:
   state, changes and actions. `Frame.sweep()` checks the
   layout and command invariants a frame must keep, and with
   `features.safety_sweeps` `endFrame` panics on the first one broken.
-  zui-web runs the sokol renderer's tour in a browser: the tour in a Web Worker
+  The web host runs the sokol renderer's tour in a browser: the tour in a Web Worker
   on an `Io` stepped to the page's clock, its frames drawn over
   `zui_wire` through WebGL 2 with four samples per pixel and the
   canvas's input sent back as records, published to GitHub Pages.
@@ -299,15 +299,14 @@ parallel measurement and the module boundary.
 | `zui`, in `renderers/raylib/` | the package `zui_raylib`: the raylib renderer and the raylib adapter host, their conformance harness, and the tour, with its fonts; raylib, fetched lazily |
 | `zui`, in `renderers/sokol/` | the package `zui_sokol`: the sokol renderer, on sokol_gfx through sokol-zig, its sokol_app input collector, its conformance harness, its shaders, and the tour, with its fonts; `zui_sokol_ui`, the tour's context types without sokol, and `zui_sokol_tour`, the tour's application; sokol and stb, fetched lazily |
 | `zui`, in `renderers/terminal/` | the package `zui_terminal`: the terminal renderer, its input decoder and raw-mode terminal, its conformance harness and its demo; no third-party library |
+| `zui`, in `renderers/webgl/` | the package `zui_webgl`: the browser's drawing of a frame, laid out in WebAssembly as triangles, as the sokol renderer lays it out, and drawn through WebGL 2 with four samples per pixel: shapes, text (TrueType glyphs rasterized by stb_truetype into an atlas, and sokol_debugtext's bitmap fonts), backdrop blurs and materials; stb, fetched lazily |
 | `zui`, in `hosts/native/` | the package `zui_host`: native hosts, one directory per OS, chosen by target: `windows/` (H2) and `linux/`, on Wayland (H4), their conformance harnesses, and their examples, drawn by the sokol renderer; sokol and stb, fetched lazily through `renderers/sokol/` for the examples alone |
-| `zui-web` | the browser: a thin client over `zui_wire` (V4), then a web host (H5); today the client's decoder, in WebAssembly, and its drawing of shapes, text, backdrop blurs and materials through WebGL 2 with four samples per pixel, checked against the sokol renderer drawing the tour's frames, and the page's input written back as records the tour takes, with the cursor its frames ask for shown on the canvas; and the sokol renderer's tour in a Web Worker on an `Io` of its own, whose tasks take turns on workers sharing its memory, drawing the frames it draws natively and timing them on the worker's clock; and the page that puts them together, published to GitHub Pages from CI and made cross-origin isolated by a service worker of its own |
+| `zui`, in `hosts/web/` | the package `zui_web`: the browser, as a thin client over `zui_wire` (V4), then a web host (H5); today the client's decoder, in WebAssembly, which draws through `renderers/webgl/` and is checked against the sokol renderer drawing the tour's frames, and the page's input written back as records the tour takes, with the cursor its frames ask for shown on the canvas; and the sokol renderer's tour in a Web Worker on an `Io` of its own, whose tasks take turns on workers sharing its memory, drawing the frames it draws natively and timing them on the worker's clock; and the page that puts them together, published to GitHub Pages from CI and made cross-origin isolated by a service worker of its own; the sokol renderer, reached lazily by path for the tour |
 | `zui`, in `themes/` | the package `zui_themes`: skins for OS design languages (K4); a skeleton today |
 | `zui`, in `examples/` | the package `zui_examples`: samples and the template project (D1, D2); a skeleton today |
 
-`zui-web`, `themes/` and `examples/` were created ahead of their items.
-`zui-web` has its build, CI and an agent guide, and pins zui by commit;
-`themes/`, `examples/`, `renderers/raylib/`, `renderers/sokol/`, `renderers/terminal/` and `hosts/native/` each have their build
-and CI jobs, and name core by path, so a change to core is built and
+`hosts/web/`, `themes/` and `examples/` were created ahead of their items.
+Every package has its build and CI jobs, and names core by path, so a change to core is built and
 tested against each of them in place; each runs its own steps from its
 own directory, and the root's `test-all` and `check-all` run them all.
 
@@ -334,8 +333,8 @@ the Windows host and the sokol renderer (F5), and its `theme` example
 restyles a window when its theme file changes, through the host's file
 watch (F6). `zui_sokol`'s context types (`Text`, `Image`, `Material`, its
 `config`) live in `zui_sokol_ui`, which does not import sokol, so its
-tour builds for `wasm32-freestanding`, for zui-web to run in a worker
-(V4).
+tour builds for `wasm32-freestanding`, for the web host to run in a
+worker (V4).
 
 The terminal renderer, `zui_terminal`, keeps layout in pixel-like units,
 `Text.cell_size` (8×16) to a cell, and paints a cell when its center lies
@@ -411,3 +410,29 @@ The examples in `examples/` are drawn by the sokol renderer, which the
 package names by path as a lazy dependency, so sokol-zig and stb are
 fetched only when its own `build()` runs, as the root's does not. On
 Linux its build links through LLVM and LLD, as the renderers' do.
+
+The WebGL renderer, `zui_webgl`, is the drawing half of the browser's
+client: `src/draw_list.zig` lays a frame's commands out as triangles in
+batches, with `src/backdrop_blur.zig`'s taps for each blur, and
+`src/text.zig` holds the fonts, its TrueType glyphs rasterized by
+`src/truetype.zig` through stb_truetype, compiled in from
+`src/stb_truetype.c` without a C library, into `src/glyph_atlas.zig`'s
+RG8 atlas. `web/frame_drawer.mjs` draws what the draw list holds through
+WebGL 2. It names stb as a lazy dependency, and it never depends on a
+host; its `check` compiles its tests for `wasm32-freestanding`.
+
+The web host, `zui_web`, names `renderers/webgl/` by path for the
+client's drawing and `renderers/sokol/` by path, lazily, for the tour.
+`src/browser.zig` is the client's WebAssembly exports, decoding a stream
+with `src/frame_stream.zig` and writing input records with
+`src/record_stream.zig` and `src/browser_input.zig`, for a context of the
+tour's shape (`src/demo_ui.zig`); `src/tour_worker.zig` runs the tour in
+a Web Worker through `src/tour_session.zig` on `src/stepped_io.zig`'s
+`Io`. `web/` holds the page, its service worker, the worker glue and the
+Node scripts the checks run, and `tools/` the native programs they run:
+the tour's stream (`demo_stream.zig`), its frames in a worker's ticks
+(`tour_frames.zig`), the sokol renderer's drawing of them
+(`draw_reference.zig`), its replay of the page's records
+(`replay_input.zig`) and sokol_debugtext's fonts (`bitmap_fonts.zig`).
+`test-draw` lives here, since it draws through the client and its page.
+On Linux the tools link through LLVM and LLD, as the renderers' do.

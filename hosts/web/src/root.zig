@@ -4,11 +4,11 @@ const zui_wire = @import("zui_wire");
 
 pub const FrameStream = @import("frame_stream.zig").FrameStream;
 pub const DemoUi = @import("demo_ui.zig").DemoUi;
-pub const DrawList = @import("draw_list.zig").DrawList;
-pub const Text = @import("text.zig").Text;
 pub const RecordStream = @import("record_stream.zig").RecordStream;
 pub const SteppedIo = @import("stepped_io.zig").SteppedIo;
 const browser_input = @import("browser_input.zig");
+const DrawList = @import("zui_webgl").DrawList;
+const Text = @import("zui_webgl").Text;
 
 const testing = std.testing;
 
@@ -540,9 +540,5 @@ test "a material is a batch of its own, its vertices at their place in the eleme
 }
 
 test {
-    _ = @import("backdrop_blur.zig");
-    _ = @import("draw_list.zig");
-    _ = @import("glyph_atlas.zig");
     _ = @import("stepped_io.zig");
-    _ = @import("text.zig");
 }

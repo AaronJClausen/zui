@@ -26,7 +26,7 @@ This document is the contract. Where it states a number, it is a
 **budget** the implementation is measured against (§20). §21 orders the
 work; ROADMAP.md says what exists today and where each stage stands, and
 ARCHITECTURE.md maps where each feature lives across the layers and
-repositories.
+packages.
 
 ---
 
@@ -144,12 +144,18 @@ repositories.
 - **The application, or `zui_app`, is the composition root.** It is the
   only place that names a concrete host and renderer.
 
-### 3.2 Repositories
+### 3.2 The repository
 
-| Repository | Holds |
+zui is one repository, `zui`, of packages:
+
+| Directory | Holds |
 |---|---|
-| `zui` | the core, the contracts, and the modules, as the package `zui_core` in `core/`; the package `zui` at its root, which re-exports them; skins for OS design languages in `themes/`; samples and the template project in `examples/`; renderers in `renderers/`, one package each: `renderers/raylib/` (`zui_raylib`, which also holds an adapter host), `renderers/sokol/` (`zui_sokol`) and `renderers/terminal/` (`zui_terminal`); hosts in `hosts/`: native hosts in `hosts/native/` (`zui_host`), one directory per OS |
-| `zui-web` | a renderer |
+| the root | the package `zui`, which re-exports core's modules |
+| `core/` | the core, the contracts, and the modules, as the package `zui_core` |
+| `themes/` | skins for OS design languages (`zui_themes`) |
+| `examples/` | samples and the template project |
+| `renderers/` | renderers, one package each: `raylib/` (`zui_raylib`, which also holds an adapter host), `sokol/` (`zui_sokol`), `terminal/` (`zui_terminal`) and `webgl/` (`zui_webgl`, the browser's drawing) |
+| `hosts/` | hosts, one package each: native hosts in `native/` (`zui_host`), one directory per OS, and the web host in `web/` (`zui_web`) |
 
 ### 3.3 The module boundary
 

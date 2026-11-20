@@ -1,8 +1,8 @@
 const std = @import("std");
 const zui = @import("zui");
 const DemoUi = @import("demo_ui.zig").DemoUi;
-const DrawList = @import("draw_list.zig").DrawList;
-const Text = @import("text.zig").Text;
+const DrawList = @import("zui_webgl").DrawList;
+const Text = @import("zui_webgl").Text;
 const browser_input = @import("browser_input.zig");
 
 pub const DemoStream = @import("frame_stream.zig").FrameStream(DemoUi);

@@ -7,10 +7,10 @@
 //! sends them.
 
 const std = @import("std");
+const zui = @import("zui");
 const zui_sokol = @import("zui_sokol");
 const zui_wire = @import("zui_wire");
 const tour = @import("zui_sokol_tour");
-const zui = zui_sokol.zui;
 const Ui = tour.kit.Ui;
 const Screen = tour.kit.Screen;
 
