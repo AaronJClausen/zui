@@ -248,8 +248,9 @@ Implemented so far:
   `dismissed`. Every `zui_widgets` control declares its own. A host that
   declares `zuiSemantics` is handed the list with each frame; zui-host's
   Windows host bridges it to UI Automation, so Narrator reads each
-  control's name, role and bounds, and its `Invoke` and `SetFocus` arrive
-  as `action` events; the control patterns are next.
+  control's name, role, bounds and state, and a client's Invoke, Toggle,
+  Expand, Collapse, Select, a range's SetValue and SetFocus arrive as
+  `action` events; scrolling, the context menu and dismissal are next.
   `frame.sweep()` checks the invariants every laid-out frame keeps
   (finite sizes, consistent child lists, free space and overflow shared
   as the sizing rules say, commands in nondecreasing layers with
@@ -285,8 +286,8 @@ shipped feature in the code a consumer writes, with semantic highlighting;
 open it in a browser, or read [docs/feature-tour.md](docs/feature-tour.md).
 
 Next, in the order of SPEC.md §21: the rest of the effects and of the
-inspector, the control patterns of the Windows host's accessibility
-bridge, more hosts, motion and
+inspector, scrolling and the context menu in the Windows host's
+accessibility bridge, more hosts, motion and
 text editing.
 [ROADMAP.md](ROADMAP.md) keeps the queue of work in order, and
 [ARCHITECTURE.md](ARCHITECTURE.md) shows how the pieces connect.

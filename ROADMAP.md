@@ -68,7 +68,7 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
-| V2. Semantics and accessibility actions | 9 | `src/context.zig`, `zui_widgets/`, `../zui-host` | | in progress; slice 2, the control patterns and property events, is next |
+| V2. Semantics and accessibility actions | 9 | `src/context.zig`, `zui_widgets/`, `../zui-host` | | in progress; slice 3, scrolling, the context menu and dismissal, is next |
 | H3. macOS | 10 | `../zui-host` | | |
 | H4. Linux | 10 | `../zui-host`, `../zui-sokol` | | in progress; slice 3, fractional scale, the clipboard, drops and file watching, is next |
 | H5. Web | 10 | `../zui-web` | | |
@@ -3537,9 +3537,10 @@ window thread answers `WM_GETOBJECT` (`:580`), raises events
 (`:576`) and disconnects at `WM_DESTROY` (`:482`), and runs in a
 single-threaded apartment (`:389`). The bridge's snapshots, elements and
 root are in `windows/accessibility.zig` (`Bridge` at `:28`, `publish` at
-`:72`, `Element` at `:415`, `Root` at `:616`); patterns are offered in
-`patternProvider` (`:485`) and properties in `propertyValue` (`:498`),
-and a request is delivered by `request` (`:602`).
+`:77`, `Element` at `:644`, `Root` at `:1117`); patterns are offered in
+`patternProvider` (`:811`) and properties in `propertyValue` (`:832`),
+a request is delivered by `request` (`:795`), and `announceChanges`
+(`:141`) compares each node with its last `Summaries` (`:512`).
 
 **Plan.** `Element.semantics`, and `Frame.semantics()` filled with each
 node's role, label, value, state and actions, behind
@@ -3651,8 +3652,37 @@ from the end and reported. Out of process, Windows PowerShell's UI
 Automation client read `zig build accessible`'s Save button, label,
 checkbox, slider and text field with their roles and bounds, invoked
 Save (the label then read "Saved 1 times") and moved focus to the
-checkbox. Next: slice 2, the control patterns and property events, and a
-person's check of slice 1 with Narrator and Accessibility Insights.
+checkbox.
+
+Slice 2 is done, in zui-host alone. Each element offers the pattern that
+stands for what it does: Toggle for a node that says whether it is
+checked (not a radio or option), ExpandCollapse for one that says
+whether it is expanded, RangeValue for a range, Value for text,
+SelectionItem for an option or a radio and Selection for a list box,
+and Invoke only where none of those stands for the click, so a checkbox,
+an option and a combo box no longer offer it. Toggle, Expand, Collapse,
+Select and AddToSelection become `invoke` when the node is not already
+as asked; a range's SetValue becomes `adjust` by whole steps, or by one
+toward the target when the range has no step, and a target outside the
+range fails; RemoveFromSelection fails on the selected option, since one
+is always chosen. A text field's Value reads as editable while it is
+enabled, which it is from the keyboard, and its SetValue fails with
+UIA_E_INVALIDOPERATION, since zui has no action that replaces text; a
+combo box's Value is read-only. While a client listens, the window
+thread compares each node with a summary of what it last announced (a
+hash of its name and text, its range value, and its checked, expanded,
+selected and disabled state, in two buffers allocated in `init`) and
+raises property-changed events for name, value, range value, toggle
+state, expand state, selection and enabled, and the element-selected
+event. Three tests drive a window of `zui_widgets` controls through UI
+Automation's client: each control's pattern and state; Toggle, SetValue
+(0.5 to 0.8 at a step of 0.1), Expand and Select each arriving as the
+action that answers it and the next frame showing it, with the list's
+Selection naming the chosen option; and a property-changed handler,
+added from the test's thread, hearing the checkbox turn off. With no
+pattern code in zui, R1 counts cannot move. Next: slice 3, scrolling, the
+context menu and dismissal, and a person's check with Narrator and
+Accessibility Insights.
 
 ---
 
