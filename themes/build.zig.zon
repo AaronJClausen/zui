@@ -1,0 +1,13 @@
+.{
+    .name = .zui_themes,
+    .version = "0.1.0",
+    .fingerprint = 0x66c4a0e69be5934, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        .zui = .{
+            .url = "git+https://github.com/AaronJClausen/zui#075fbbd22acc33ef921a5a043bba29556604a49f",
+            .hash = "zui-0.5.0-xfvfqgOrEABvDEtQNP8VXx56wh-nYkwXz_lr1dofLqbo",
+        },
+    },
+    .paths = .{ "build.zig", "build.zig.zon", "src", "README.md", "LICENSE" },
+}
