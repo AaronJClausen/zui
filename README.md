@@ -61,7 +61,7 @@ Implemented so far:
   it draws into, the optional commands it draws), checked at compile time
   by `zui.checkRenderer`, and a `RenderCommand` union generated with
   exactly the variants a renderer draws, so its exhaustive `switch` names
-  nothing else. zui-raylib, zui-sokol and `zui_terminal` are renderers.
+  nothing else. `zui_raylib`, zui-sokol and `zui_terminal` are renderers.
   The host contract (`zuiPoll`, `zuiWaker`, `zuiWait`, `zuiSurface`,
   `zuiApply`), checked by `zui.checkHost`, with `zui.RecordBuilder` for
   the record a host fills and `zui.checkHostAndRenderer` failing to
@@ -76,7 +76,7 @@ Implemented so far:
   compile, naming the field to set. And `zui_app`, which runs the whole
   loop from one call, `zui_app.run(App, init, .{ .title = "demo" })`,
   submitting on a render thread when the renderer allows and reporting
-  its capabilities, fallbacks and every exceeded limit once. zui-raylib is
+  its capabilities, fallbacks and every exceeded limit once. `zui_raylib` is
   the first host: the demo runs through `zui_app` on it, and presents its
   first frame about 290 ms after the process starts, all but 5 ms of it
   raylib opening its window.
@@ -136,7 +136,7 @@ Implemented so far:
   grows or shrinks. A border's `.between_children = 1` draws a divider
   between each two children, centered in the gap, and an image's `tint`
   is multiplied into its pixels and its `corner_radius` rounds it, as
-  zui-raylib and zui-sokol draw it and the renderer suite checks. A
+  `zui_raylib` and zui-sokol draw it and the renderer suite checks. A
   floating element may attach to an element declared after it; with
   `.capture = false` it lets the pointer through to what it covers, as a
   tooltip should, and with `.clip = .target` it is cut off where its
@@ -231,7 +231,7 @@ Implemented so far:
   text style that differs from the default. `observe(frame, pointer)`
   after `endFrame` copies what it shows, and `declare(ui)` draws it in
   the next frame; `zui_app` hands an application each frame, before it
-  is submitted, through its `zuiObserve` hook, and zui-raylib's tour
+  is submitted, through its `zuiObserve` hook, and the raylib renderer's tour
   opens the panel with F12. With `zui_debug.ZoneTimer(Inner)` as the
   tracer, the panel also shows each zone's time in the last frame and its mean and
   peak over the last 60, while passing the zones on to `Inner`, such as
@@ -303,9 +303,9 @@ Implemented so far:
   windows use no CPU.
 
 The reference backend, its adapter host and the demo application live in
-[zui-raylib](https://github.com/AaronJClausen/zui-raylib); the other
-backends are [zui-sokol](https://github.com/AaronJClausen/zui-sokol) and
-the terminal renderer in [renderers/terminal/](renderers/terminal/); native
+[renderers/raylib/](renderers/raylib/); the other backends are
+[zui-sokol](https://github.com/AaronJClausen/zui-sokol) and the terminal
+renderer in [renderers/terminal/](renderers/terminal/); native
 hosts live in [zui-host](https://github.com/AaronJClausen/zui-host).
 
 [docs/feature-tour.html](docs/feature-tour.html) walks through every
@@ -380,12 +380,32 @@ modules and runs core's steps under the same names. Beside core:
   Windows, macOS, GNOME and KDE, as data applied through `zui_widgets`'
   skin contract (K4, after the skin contract, K5); a skeleton today.
 - `examples/`: a template project (D1) and samples (D2); a skeleton today.
+- `renderers/raylib/`, the package `zui_raylib`: the raylib renderer and
+  adapter host, and the tour (see *The raylib renderer* below).
 - `renderers/terminal/`, the package `zui_terminal`: the terminal
   renderer (see *The terminal renderer* below).
 
 Each has its own `test` and `check`, run from its directory, and
-`test-all` and `check-all` run them. The terminal renderer has these too,
-run from `renderers/terminal/`:
+`test-all` and `check-all` run them. The raylib renderer has these too,
+run from `renderers/raylib/`; the first build fetches raylib and compiles
+it:
+
+| Command | What it does |
+|---|---|
+| `zig build test` | run the renderer's and host's unit tests |
+| `zig build conformance` | run zui's renderer and host suites against them, in hidden windows; needs a display |
+| `zig build test-tour` | declare every screen of the tour headlessly, and fail if one exceeds its limits or does not fit the default window |
+| `zig build check` | compile the renderer, the tour, its tests and the conformance suites without producing output |
+| `zig build demo` | run the tour |
+| `zig build demo -- --screen gallery` | start on one screen |
+| `zig build demo -- --frames 900 --cycle 40` | visit every screen, 40 frames each, then quit; add `--hidden` to do it in a hidden window |
+| `zig build demo -- --screenshot <absolute path> --screen typography` | render offscreen in live mode, save a PNG, quit |
+| `zig build demo -- --measure-idle` | report the CPU used over 10 idle seconds |
+| `zig build demo -- --measure-startup` | report the time from process start to the first presented frame (Windows) |
+| `zig build demo -- --zui-debug` | open `zui_debug`'s inspector, which F12 toggles |
+| `zig build demo -Dzui-tracy=true` | trace zui's zones into Tracy 0.14.1 |
+
+The terminal renderer has them too, run from `renderers/terminal/`:
 
 | Command | What it does |
 |---|---|
@@ -433,6 +453,11 @@ CI runs:
 - `zui_tracy` with Tracy's client, on Linux, Windows and macOS;
 - the tests of `themes/` and `examples/` in three optimize modes, and
   their `check`, on Linux, Windows and macOS, each run from its directory;
+- the raylib renderer's tests, `test-tour` and `check` on Windows, `check`
+  on macOS, and on Linux, under `xvfb-run`, its conformance, a visit of
+  every screen of the tour, five screenshots, kept as the run's
+  artifacts, and the CPU the tour uses while idle, in the job summary,
+  from `renderers/raylib/`;
 - the terminal renderer's tests, its conformance, its `check` and its
   demo's `--dump`, on Linux, Windows and macOS, from `renderers/terminal/`.
 
@@ -446,8 +471,8 @@ Set `.features = .{ .Tracer = zui_tracy.Tracer }` in the `Config`, call
 `zui_tracy.frameMark()` after each presented frame, build with
 `-Dzui-tracy=true`, and connect Tracy's profiler of the same version
 (0.14.1). Every step of `beginFrame` and `endFrame` is a zone.
-zui-raylib's demo does all of this with `zig build demo
--Dzui-tracy=true`. Without the profiler's window, Tracy's
+The raylib renderer's tour does all of this with `zig build demo
+-Dzui-tracy=true`, run from `renderers/raylib/`. Without the profiler's window, Tracy's
 `tracy-capture -o demo.tracy` saves a trace (run the demo with
 `TRACY_NO_EXIT=1` so it waits for the capture to finish) and
 `tracy-csvexport demo.tracy` lists its zones.
@@ -556,7 +581,7 @@ The recipe the backends follow:
 `zui_testing.findRendererViolation` and `findHostViolation` return the
 first violation instead of failing, and the doc comments of
 `expectRendererConforms` and `expectHostConforms` list what a harness
-declares. zui-raylib, zui-sokol and `renderers/terminal/` each have a
+declares. `renderers/raylib/`, zui-sokol and `renderers/terminal/` each have a
 `src/conformance.zig` to copy.
 
 The repository uses LF line endings everywhere (see `.gitattributes`),
@@ -594,6 +619,193 @@ _ = zui_reflect.inspector(widgets, ui, .of("settings"), &settings);
 
 SPEC.md §19.2 lists the widgets, and §19.3 covers the inspector's typed
 options.
+
+Renderers are packages of their own, reached through the `zui`
+dependency's builder as the next sections show, so an application
+fetches only the libraries of the renderers it uses.
+
+### The raylib renderer
+
+`zui_raylib` is a [raylib](https://www.raylib.com) renderer (zui's
+renderer and text contracts, with raylib's fonts) and an adapter host
+(zui's host contract on raylib's window), so an application runs on it
+through `zui_app` in one call. It needs raylib **6.0**, the newest raylib
+release whose build supports Zig 0.16, which is fetched the first time it
+is built; on Linux, raylib's X11 and OpenGL development packages:
+`libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev`.
+
+![The tour's welcome screen](renderers/raylib/docs/demo.png)
+
+```zig
+// build.zig, with `zui` the dependency above
+const zui_raylib = zui.builder.dependency("zui_raylib", .{ .target = target, .optimize = optimize });
+exe.root_module.addImport("zui_raylib", zui_raylib.module("zui_raylib"));
+```
+
+Give `zui_raylib` the same `.@"zui-tracy"` you give `zui`, if any, so the
+two build one `zui` module and their types match.
+
+```zig
+const zui = @import("zui");
+const zui_app = @import("zui_app");
+const zui_raylib = @import("zui_raylib");
+
+const App = struct {
+    pub const Host = zui_raylib.Host;
+    pub const Renderer = zui_raylib.Renderer;
+    pub const Ui = zui.Context(zui_app.contextConfig(Renderer, .{ .Sources = AppSources }));
+
+    sources: AppSources = .{},
+
+    pub fn zuiDeclare(app: *App, ui: *Ui) void {
+        // ... declare your UI ...
+    }
+
+    pub fn zuiLoader(app: *App, ui: *const Ui, io: std.Io) void {
+        // ... start what the frame asked for ...
+    }
+};
+
+pub fn main(init: std.process.Init) !void {
+    try zui_app.run(App, init, .{ .title = "My app", .size = .{ 1100, 700 } });
+}
+```
+
+`zui_raylib.Renderer` implements zui's renderer and text contracts. Its
+surface is `.library`: raylib's own window between `BeginDrawing` and
+`EndDrawing`, or a render texture between `BeginTextureMode` and
+`EndTextureMode`. It draws each frame scaled by the record's zoom, and the
+host divides the viewport and the pointer by it. Its `fonts` are raylib
+`Font`s, indexed by `FontId`; an id past them draws in raylib's built-in
+font. `zui_raylib.loadTrueTypeFont(data, pixel_size)` rasterizes a
+TrueType font's printable ASCII into a mipmapped atlas, and measures
+without a window, so a headless test lays text out as the window will;
+`zui_raylib.unloadFont` frees it. `zui_app.contextConfig` builds the
+`Config` from its declarations: the renderer measures text,
+`ImageHandle` is raylib's `Texture2D`, so `ui.image(.{ .handle = texture
+}, ...)` draws directly, and there are no optional commands and no
+`CustomData`. The renderer's `switch` over the commands therefore names
+exactly the base commands and `image`. raylib's OpenGL context belongs to
+the thread that opened the window, so it does not declare
+`zui_render_thread`, and `zui_app` submits on the UI thread.
+
+`zui_raylib.Host` implements zui's host contract with one window and no
+system material. `zuiPoll` samples raylib's input and begins drawing;
+`zuiWait` presents, then sleeps in GLFW (compiled into raylib's default
+desktop platform) until input arrives, the host is woken, or the instant
+`nextFrame` names, and `.immediately` waits out the monitor's refresh
+interval. Its `zuiWaker` sets a flag and posts an empty GLFW event, which
+any thread may do; the flag is cleared only after a wait, so a wake
+between `nextFrame` and the wait is not lost. Escape does not close the
+window, since the application may want it. Beyond the contract:
+- `drawOffscreen()` and `saveScreenshot(path)` draw into a texture and
+  save it, as the tour's `--screenshot` does;
+- `script(sample)` replaces raylib's input for one poll, as the host
+  suite and the tour's screenshots do;
+- `close()` closes the window as its close button would;
+- `clear_color` is what each frame is cleared to.
+
+| zui | raylib |
+|---|---|
+| `rectangle` | `DrawRectangleRec`, or `DrawRectangleRounded` with a corner radius |
+| `border` | four bands inside the bounds; `DrawRectangleRoundedLinesEx` when uniform and rounded |
+| `text` | `DrawTextCodepoint` per glyph, advanced by the glyph's metrics and the style's letter spacing |
+| `image` | `DrawTexturePro` with the tint; with a corner radius, a fan of textured triangles through rlgl, each corner with its own radius |
+| `clip_begin` / `clip_end` | `BeginScissorMode` / `EndScissorMode` with a stack, at the record's zoom |
+| `gradient` / `shadow` | not drawn: zui lowers a gradient to its middle color and a shadow to nothing |
+| zoom | rlgl's matrix scaled by `FrameParams.zoom`; the viewport and the pointer divided by it |
+| pointer and keys | raylib's polled state, through `zui.InputSampler`; keys from `GetKeyPressed`, letters, digits and function keys included |
+| wheel | `GetMouseWheelMoveV`, flipped and scaled by `InputOptions.wheel_step` |
+| focus | `IsWindowFocused` changes, as the environment's `window_focused` |
+| scale | `GetRenderWidth() / GetScreenWidth()`, as the record's scale |
+| cursor request | `SetMouseCursor`, in `Host.zuiApply` |
+| waits and wakes | GLFW's `glfwWaitEvents`, `glfwWaitEventsTimeout` and `glfwPostEmptyEvent` |
+
+What raylib cannot do:
+- **Sampled input.** raylib reports state once per frame, so a press and
+  release between two frames is lost, as it is to raylib itself.
+- **Corner radii.** raylib rounds all four corners of a rectangle or a
+  border the same, so the largest of zui's four radii is used; an image
+  rounds each corner by its own.
+- **Letter spacing.** Text is measured glyph by glyph with the spacing
+  after each glyph included: a glyph with no advance of its own, as in
+  raylib's built-in font, takes `Renderer.bitmap_glyph_spacing` of the
+  size, and the style adds its own. zui measures words and spaces
+  separately and adds them up, so measurement has to be additive, and
+  raylib's own `MeasureTextEx` leaves out the spacing after the last
+  glyph.
+- **One raster size per font.** A font's glyphs are rasterized once;
+  smaller text is drawn from its mipmaps, and larger text is scaled up
+  and softens. Only printable ASCII is loaded; other code points draw
+  as `?`.
+- **No IME window.** raylib cannot place one, so a text-input request is
+  not applied.
+- **One window.** `zui_capabilities.windows` is `.one`.
+
+`zig build conformance`, run from `renderers/raylib/`, runs zui's two
+suites in hidden windows: the renderer suite draws each frame into a
+render texture and reads it back with `LoadImageFromTexture`, so it
+checks every clip and fill, and the image's tint and rounded corners, by
+their pixels; the host suite scripts the state `zui.InputSampler` reads
+(`Host.script`), since raylib reports state, not events, and checks the
+events' order, the waits and the wakes against the real window.
+
+#### The tour
+
+`zig build demo`, run from `renderers/raylib/` (see *Development* for its
+flags), is a tour of what zui does today, one screen per feature. A
+strip along the bottom times every zui frame: how many frames were
+declared, and in the last second; why each frame was declared (input, a
+resize, `requestFrame`, a `requestFrameAt` deadline, a source); what
+`nextFrame` asked for; the cost of `beginFrame`, declaration, layout and
+emission, and raylib's drawing; element and command counts; and how many
+texts missed the measurement cache. **Ctrl+I** opens a draggable frame
+inspector with the last 120 frames, the frame's limits and diagnostics,
+and the environment. **F12** opens zui's own inspector, `zui_debug`,
+along the right edge: the frame's diagnostics, the fallbacks in effect
+(what this renderer lowers and the host lacks), each zone's time from
+its `ZoneTimer` tracer, the element tree, and the configs of the element
+under the pointer. `zui_app`'s `zuiObserve` hands it each frame. Its
+theme does not reload from a file here, since this host has no file
+watch.
+
+| Screen | What it shows |
+|---|---|
+| Welcome | `requestFrameAt` ticking a clock once a second with no frames between; floating hints; focusable cards |
+| Layout Lab | every sizing rule, alignment and gap on a live container; the knobs generated by `zui_reflect`; sizes read back with `rectOf`; the same layout printed as Zig |
+| Box Storm | up to 14,000 animated boxes, a 90-deep spiral of `percent` containers, and text walls that either hit the whole-string cache or miss it every frame |
+| Infinite Gallery | 10,000 tiles in a virtualized scroll container, loaded through `KeyedLoads` on other threads with progress, failures and cancellation; a hand-made scrollbar |
+| Mission Control | `Latest` telemetry, a `Stream` log that a burst overflows into the diagnostics, a `Task` rocket launch with abort; producers run only while `framesSinceRead` says someone is watching |
+| Window Manager | draggable floating windows with z order, a taskbar with tooltips, `attach_to = .element` with every anchor pair, a modal dialog in a focus scope |
+| Robot Workshop | a robot editor generated by `zui_reflect` from nested structs, and environment changes (theme, contrast, reduced motion, text scale) as if the OS sent them |
+| Pixel Pad | painting through `pointerLocal` on one element, tools on keys, undo with chords, and a live view of `keyEvents` and `typedText` |
+| Typography | three TrueType fonts and raylib's built-in one, size, letter spacing, line height, wrap and alignment, a column to drag-resize, and a marquee looped with `measureText` and `setScrollOffset` |
+| Light & Depth | `zui.Effects` on sliders with their declaration printed as Zig. This renderer does not draw `gradient` or `shadow`, so zui lowers them: a gradient to its middle color, a shadow to nothing |
+| Classic | `examples/showcase.zig`, the UI every zui backend's demo shares, so the renderers can be compared |
+
+Ctrl+1 to Ctrl+0 jump to the first ten screens, Ctrl+PgDn and Ctrl+PgUp
+to the next and previous, Ctrl+= and Ctrl+- zoom (through
+`FrameParams.zoom`), Ctrl+L declares a frame at every refresh to watch the
+costs live, and Tab moves focus.
+
+![The gallery loading tiles on other threads](renderers/raylib/docs/gallery.png)
+
+`examples/demo.zig` is the tour's application as `zui_app` runs it: it
+loads the fonts into the renderer, sets the record's zoom and the
+environment changes the tour makes up, hands each frame to `zui_debug`
+while its panel is open, and times each step for the strip;
+`kit.Renderer` wraps `zui_raylib.Renderer` to time its submits. The tour
+itself (`app.zig`, `kit.zig`, `perf.zig` and `screens/`) is zui-sokol's,
+with raylib's fonts in place of sokol_debugtext's and stb_truetype's,
+and `zui_debug`'s panel on F12, which zui-sokol's does not have yet.
+
+`--measure-idle` runs the tour in a hidden window and reads its own CPU
+time at two frames it asks for with `requestFrameAt`, 10 seconds apart,
+after 5 seconds of warm-up, with the strip's once-a-second refresh off.
+The Welcome screen's clock still ticks, so it declares about 10 frames.
+`--measure-startup` reports how long after the OS created the process the
+first frame was presented (Windows only: it reads the process's creation
+time).
 
 ### The terminal renderer
 
@@ -681,3 +893,11 @@ The zui logo is adapted from the [Zig logo](https://codeberg.org/ziglang/logo)
 and, like it, is licensed under CC BY-SA 4.0; see
 [assets/LICENSE.md](assets/LICENSE.md). zui is not affiliated with or endorsed
 by the Zig Software Foundation.
+
+The raylib renderer's tour uses fonts under the SIL Open Font License
+1.1: Atkinson Hyperlegible, copyright 2020 Braille Institute of America,
+Inc. (see
+[renderers/raylib/examples/fonts/OFL.txt](renderers/raylib/examples/fonts/OFL.txt)),
+and Liberation Mono, copyright 2010 Google Corporation and 2012 Red Hat,
+Inc. (see
+[renderers/raylib/examples/fonts/LiberationMono-LICENSE.txt](renderers/raylib/examples/fonts/LiberationMono-LICENSE.txt)).

@@ -274,7 +274,7 @@ fn photoCard(app: *App, ui: *Ui, photo: *const Photo, index: usize) void {
 
 ### Gradients, shadows, glow and backdrop blur · *shipped*
 
-`effects` points at a `zui.Effects`: a linear `gradient`, interpolated in OKLab, and a `shadow`, which with no offset is a glow. They take the shape of the element's decoration and its corner radius, and paint from the bottom up as shadow, background, gradient, then the element's content. A `backdrop_blur` is frosted glass: it blurs what zui drew beneath the element, within its rounded box, and lays its `tint` over it, painted between the shadow and the background. A renderer that does not declare `.backdrop_blur` draws the tint alone, so pick a tint that reads well unblurred. zui-sokol blurs it; zui-raylib and the terminal renderer draw the tint. The effects are copied when the element is declared, so a pointer to a local works, and an element without effects pays nothing for them, nor does a frame without any. Up to `limits.max_effects` elements a frame keep their effects, 256 by default; past it, an element is drawn without them and the diagnostics name the limit. A renderer that declares `.gradient` and `.shadow` in `zui_commands` gets those commands. For any other renderer, a gradient is lowered to a rectangle in its middle color and a shadow to nothing, and `frame.diagnostics.lowered` names what was lowered. zui-sokol draws both and the backdrop blur, and its tour shows them on its Light & Depth screen; zui-raylib and the terminal renderer draw the lowered forms.
+`effects` points at a `zui.Effects`: a linear `gradient`, interpolated in OKLab, and a `shadow`, which with no offset is a glow. They take the shape of the element's decoration and its corner radius, and paint from the bottom up as shadow, background, gradient, then the element's content. A `backdrop_blur` is frosted glass: it blurs what zui drew beneath the element, within its rounded box, and lays its `tint` over it, painted between the shadow and the background. A renderer that does not declare `.backdrop_blur` draws the tint alone, so pick a tint that reads well unblurred. zui-sokol blurs it; the raylib and terminal renderers draw the tint. The effects are copied when the element is declared, so a pointer to a local works, and an element without effects pays nothing for them, nor does a frame without any. Up to `limits.max_effects` elements a frame keep their effects, 256 by default; past it, an element is drawn without them and the diagnostics name the limit. A renderer that declares `.gradient` and `.shadow` in `zui_commands` gets those commands. For any other renderer, a gradient is lowered to a rectangle in its middle color and a shadow to nothing, and `frame.diagnostics.lowered` names what was lowered. zui-sokol draws both and the backdrop blur, and its tour shows them on its Light & Depth screen; the raylib and terminal renderers draw the lowered forms.
 
 `src/ui/viewer.zig`
 
@@ -319,7 +319,7 @@ fn photoCard(ui: *Ui, photo: *const Photo) void {
 
 ### Transforms · *shipped*
 
-`effects` can also hold a `transform`: a translation, a scale and a rotation about an `origin` inside the element's box, applied to the element, its other effects and everything inside it as they are painted. Layout ignores it, so `rectOf` is still the box the element was laid out in and its neighbours stay put, which suits animation: a dialog that grows in, a card that tilts while dragged. A pointer hits a transformed element where it is drawn, through nested transforms and the clips around them. A renderer that declares `.transform` gets `transform_begin` and `transform_end` around the element's commands, and `affine(bounds)` maps its units to its parent's; for any other, the element is drawn and hit as laid out, and `frame.diagnostics.lowered` names `.transform`. zui-sokol draws transforms, on its tour's Transforms screen; zui-raylib and the terminal renderer draw the element as laid out.
+`effects` can also hold a `transform`: a translation, a scale and a rotation about an `origin` inside the element's box, applied to the element, its other effects and everything inside it as they are painted. Layout ignores it, so `rectOf` is still the box the element was laid out in and its neighbours stay put, which suits animation: a dialog that grows in, a card that tilts while dragged. A pointer hits a transformed element where it is drawn, through nested transforms and the clips around them. A renderer that declares `.transform` gets `transform_begin` and `transform_end` around the element's commands, and `affine(bounds)` maps its units to its parent's; for any other, the element is drawn and hit as laid out, and `frame.diagnostics.lowered` names `.transform`. zui-sokol draws transforms, on its tour's Transforms screen; the raylib and terminal renderers draw the element as laid out.
 
 `src/ui/import.zig`
 
@@ -347,7 +347,7 @@ fn draggedCard(ui: *Ui, photo: *const Photo, drag: zui.Drag) void {
 
 ### Materials · *shipped*
 
-A renderer with shaders of its own names them in `MaterialHandle`, an enum or an id, and the context's decoration gains a `material`: drawn over the element's box, in its corners, in place of its `background`. The background is the material's fallback, so a renderer that does not declare `.material` draws the background instead and `frame.diagnostics.lowered` names `.material`. A material sits under the gradient and over the shadow and backdrop blur, and a static style can carry one. Without a `MaterialHandle` the field is `void` and `Ui.Element`, `Ui.Decoration` and `Ui.Style` are `zui.Element`, `zui.Decoration` and `zui.Style`; with one they are the context's own, so a helper that returns an element names `Ui.Element`. zui-sokol draws its own, `zui_sokol.Material`: a pattern between two colors (`solid`, `sheen`, `aurora`) drawn by its shader and moved by a phase the application turns, on its tour's Materials screen. zui-raylib and the terminal renderer draw the fallback.
+A renderer with shaders of its own names them in `MaterialHandle`, an enum or an id, and the context's decoration gains a `material`: drawn over the element's box, in its corners, in place of its `background`. The background is the material's fallback, so a renderer that does not declare `.material` draws the background instead and `frame.diagnostics.lowered` names `.material`. A material sits under the gradient and over the shadow and backdrop blur, and a static style can carry one. Without a `MaterialHandle` the field is `void` and `Ui.Element`, `Ui.Decoration` and `Ui.Style` are `zui.Element`, `zui.Decoration` and `zui.Style`; with one they are the context's own, so a helper that returns an element names `Ui.Element`. zui-sokol draws its own, `zui_sokol.Material`: a pattern between two colors (`solid`, `sheen`, `aurora`) drawn by its shader and moved by a phase the application turns, on its tour's Materials screen. the raylib and terminal renderers draw the fallback.
 
 `src/ui/panels.zig`
 
@@ -505,7 +505,7 @@ pub const Fonts = struct {
 
 ### Images and self-drawn elements · *shipped*
 
-`ui.image` places the renderer's own image handle. `ui.custom` places a payload your renderer draws itself, such as a 3D viewport or a histogram. Both are leaves that take an `Element`, so they size, clip and hit-test like any box. Give an image its `natural_size` and a `fit` image takes it, keeping its proportions when its width grows or is squeezed. Its `tint` is multiplied into its pixels and its `corner_radius` rounds each corner; both reach the renderer in the `image` command, and zui-raylib and zui-sokol draw them.
+`ui.image` places the renderer's own image handle. `ui.custom` places a payload your renderer draws itself, such as a 3D viewport or a histogram. Both are leaves that take an `Element`, so they size, clip and hit-test like any box. Give an image its `natural_size` and a `fit` image takes it, keeping its proportions when its width grows or is squeezed. Its `tint` is multiplied into its pixels and its `corner_radius` rounds each corner; both reach the renderer in the `image` command, and the raylib renderer and zui-sokol draw them.
 
 `src/ui/viewer.zig`
 
@@ -1354,7 +1354,7 @@ pub fn runLoader(app: *App, ui: *const Ui, io: std.Io) void {
 }
 ```
 
-zui-raylib's demo loads its thumbnail grid this way and idles at 0% CPU.
+The raylib renderer's tour loads its thumbnail grid this way and idles at 0% CPU.
 
 <a id="file-watch"></a>
 
@@ -1761,7 +1761,7 @@ On zui-host's Windows host, up to four windows open at once, and zui-sokol draws
 
 ## 06. The backend contracts
 
-zui draws nothing and opens no windows itself. Renderers and hosts are plain types checked at compile time, with conformance suites they run in their own CI. Today there are zui-raylib (a renderer and adapter host), zui-sokol, the terminal renderer in `renderers/terminal/`, and zui-host's Windows host (message loop on its own thread, per-monitor DPI, Mica, IME, clipboard, opening URLs, dropped files, file watching), and its Linux host, on Wayland so far (fractional and buffer scale, pointer, wheel, keys through the compositor's keymap with their repeats, typed text, focus, cursor shapes, clipboard, dropped files, file watching through inotify, notifications, the portal's file dialogs and opening URLs, the environment from the desktop portal and UPower over D-Bus, and signals, sleep and waking as lifecycle events).
+zui draws nothing and opens no windows itself. Renderers and hosts are plain types checked at compile time, with conformance suites they run in their own CI. Today there are the raylib renderer and adapter host in `renderers/raylib/`, zui-sokol, the terminal renderer in `renderers/terminal/`, and zui-host's Windows host (message loop on its own thread, per-monitor DPI, Mica, IME, clipboard, opening URLs, dropped files, file watching), and its Linux host, on Wayland so far (fractional and buffer scale, pointer, wheel, keys through the compositor's keymap with their repeats, typed text, focus, cursor shapes, clipboard, dropped files, file watching through inotify, notifications, the portal's file dialogs and opening URLs, the environment from the desktop portal and UPower over D-Bus, and signals, sleep and waking as lifecycle events).
 
 <a id="renderer"></a>
 
@@ -1916,7 +1916,7 @@ test "the D3D11 renderer passes zui's renderer suite" {
 }
 ```
 
-The harness method signatures above are simplified. The exact set of declarations a harness needs is listed in the doc comments of `expectRendererConforms` and `expectHostConforms`. zui-raylib, zui-sokol and `renderers/terminal/` each have a `src/conformance.zig` you can copy.
+The harness method signatures above are simplified. The exact set of declarations a harness needs is listed in the doc comments of `expectRendererConforms` and `expectHostConforms`. `renderers/raylib/`, zui-sokol and `renderers/terminal/` each have a `src/conformance.zig` you can copy.
 
 <a id="tooling"></a>
 
@@ -2220,5 +2220,5 @@ These names compile, but they don't do anything yet. This list is from `ARCHITEC
 - Writing UI by hand in core is verbose. Nested `.layout = .{ .sizing = .{ .width = ... } }` literals pile up, and static styles are the main relief today.
 - Interactive elements take three steps: declare, query by id, then pick colors from the state yourself. Widgets hide it, but there is nothing in between.
 - `labeledRow` leaves you to close the row, an asymmetry that's easy to get wrong.
-- Only zui-sokol draws gradients and shadows so far; zui-raylib and the terminal renderer show a gradient as one flat color and no shadow. Only zui-sokol blurs a backdrop; the others draw its tint. Only zui-sokol draws a transform; the others draw the element as laid out. Only zui-sokol draws a material; the others draw its fallback background.
-- There's no examples repository or template yet. The best references are zui-sokol's tour and zui-raylib's demo.
+- Only zui-sokol draws gradients and shadows so far; the raylib and terminal renderers show a gradient as one flat color and no shadow. Only zui-sokol blurs a backdrop; the others draw its tint. Only zui-sokol draws a transform; the others draw the element as laid out. Only zui-sokol draws a material; the others draw its fallback background.
+- There's no examples repository or template yet. The best references are zui-sokol's tour and the raylib renderer's tour in `renderers/raylib/`.

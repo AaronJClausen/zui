@@ -71,8 +71,8 @@ Stop and ask the user instead of guessing when:
 | the template project | `examples/template/`, a package of its own, so it can be copied out as a new app |
 | a sample | `examples/samples/<name>/`, built and tested from `examples/build.zig` and imported from the `test` block of `examples/samples/root.zig`. A sample uses only the public APIs of zui, its modules, and the renderers and hosts, as a user would |
 | a package | its own directory, with its `build.zig` and `build.zig.zon`, naming other packages by `.path`; in the root, a line in `packages` in `build.zig` and in `.paths` in `build.zig.zon`. A renderer or host package is also a `.path` entry in the root's `.dependencies`, so users reach it as `zui.builder.dependency("<name>", …)`; the root's `build()` never instantiates it |
-| renderer changes | `renderers/<name>/`, which names `core/` by path, so it is tested in place from its directory: `renderers/terminal/` |
-| renderer and adapter-host changes outside this repository | `../zui-raylib`, `../zui-sokol`, tested against this checkout with `zig build test --fork=../zui` |
+| renderer changes | `renderers/<name>/`, which names `core/` by path, so it is tested in place from its directory: `renderers/raylib/`, `renderers/terminal/` |
+| renderer and adapter-host changes outside this repository | `../zui-sokol`, tested against this checkout with `zig build test --fork=../zui` |
 | native hosts | `../zui-host`, which is created by H2 and not before |
 
 Each stage's features and their layer are listed in `ARCHITECTURE.md` §6.
@@ -119,6 +119,18 @@ run them from the root. In `renderers/terminal/`, run `zig build test`
 `-Dtarget=x86_64-windows` and `-Dtarget=aarch64-macos`, and
 `zig build demo -- --dump`, which prints the demo's glyphs and must
 contain "zui + terminal" (without `--dump` the demo is interactive).
+In `renderers/raylib/`, run `zig build test`, `zig build check`,
+`zig build conformance` and `zig build test-tour`; the tour's cycle,
+`zig build demo -- --hidden --frames 600 --cycle 50`, which must print
+`diagnostics ok: true`; a screenshot of each of `welcome`, `gallery`,
+`mission_control`, `typography` and `light_and_depth` with
+`zig build demo -- --screenshot <absolute path> --screen <name>`;
+`zig build demo -- --measure-idle`; and `check` with `-Dzui-tracy=true`
+and with `-Dtarget=x86_64-windows`. Conformance and the demo open hidden
+windows, so they need a display (CI runs them under `xvfb-run`); never
+run `zig build demo` without `--hidden --frames`, `--screenshot` or
+`--measure-idle`, since its window stays open until closed. Its links on
+Linux print `warning(link): unexpected LLD stderr` and still succeed.
 
 | Command | When |
 |---|---|

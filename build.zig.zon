@@ -6,6 +6,7 @@
     .dependencies = .{
         .zui_core = .{ .path = "core" },
         .zui_terminal = .{ .path = "renderers/terminal" },
+        .zui_raylib = .{ .path = "renderers/raylib" },
     },
     .paths = .{
         "build.zig",
@@ -14,6 +15,7 @@
         "themes",
         "examples",
         "renderers/terminal",
+        "renderers/raylib",
         "LICENSE",
         "README.md",
         "SPEC.md",

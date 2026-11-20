@@ -3,13 +3,17 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    const tracy = b.option(bool, "zui-tracy", "Link Tracy's client, so the demo traces zui's zones into the Tracy profiler") orelse false;
+    // Passed on only when given: core instantiated with different options is a second `zui` module, whose types match no one else's.
+    const tracy = b.option(bool, "zui-tracy", "Link Tracy's client, so the demo traces zui's zones into the Tracy profiler");
 
-    const zui_dependency = b.dependency("zui", .{ .target = target, .optimize = optimize, .@"zui-tracy" = tracy });
-    const raylib_dependency = b.dependency("raylib", .{ .target = target, .optimize = optimize });
-    const zui_module = zui_dependency.module("zui");
-    const zui_testing_module = zui_dependency.module("zui_testing");
-    const raylib_module = raylib_dependency.module("raylib");
+    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "examples" };
+    b.step("fmt", "Format all Zig sources").dependOn(&b.addFmt(.{ .paths = formatted_paths }).step);
+    b.step("fmt-check", "Fail if any Zig source is not formatted").dependOn(&b.addFmt(.{ .paths = formatted_paths, .check = true }).step);
+
+    const core = b.dependency("zui_core", .{ .target = target, .optimize = optimize, .@"zui-tracy" = tracy });
+    const raylib_dependency = b.lazyDependency("raylib", .{ .target = target, .optimize = optimize }) orelse return;
+    const zui_module = core.module("zui");
+    const zui_app_module = core.module("zui_app");
 
     const backend_module = b.addModule("zui_raylib", .{
         .root_source_file = b.path("src/root.zig"),
@@ -17,13 +21,8 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{
             .{ .name = "zui", .module = zui_module },
-            .{ .name = "zui_app", .module = zui_dependency.module("zui_app") },
-            .{ .name = "zui_widgets", .module = zui_dependency.module("zui_widgets") },
-            .{ .name = "zui_reflect", .module = zui_dependency.module("zui_reflect") },
-            .{ .name = "zui_async", .module = zui_dependency.module("zui_async") },
-            .{ .name = "zui_tracy", .module = zui_dependency.module("zui_tracy") },
-            .{ .name = "zui_debug", .module = zui_dependency.module("zui_debug") },
-            .{ .name = "raylib", .module = raylib_module },
+            .{ .name = "zui_app", .module = zui_app_module },
+            .{ .name = "raylib", .module = raylib_dependency.module("raylib") },
             .{ .name = "rlgl", .module = raylib_dependency.module("rlgl") },
         },
     });
@@ -41,7 +40,9 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{
             .{ .name = "zui_raylib", .module = backend_module },
-            .{ .name = "zui_testing", .module = zui_testing_module },
+            .{ .name = "zui", .module = zui_module },
+            .{ .name = "zui_app", .module = zui_app_module },
+            .{ .name = "zui_testing", .module = core.module("zui_testing") },
         },
     }) });
     linkThroughLlvmOnLinux(conformance_tests);
@@ -50,7 +51,12 @@ pub fn build(b: *std.Build) void {
     const demo_imports: []const std.Build.Module.Import = &.{
         .{ .name = "zui_raylib", .module = backend_module },
         .{ .name = "zui", .module = zui_module },
-        .{ .name = "zui_widgets", .module = zui_dependency.module("zui_widgets") },
+        .{ .name = "zui_app", .module = zui_app_module },
+        .{ .name = "zui_widgets", .module = core.module("zui_widgets") },
+        .{ .name = "zui_reflect", .module = core.module("zui_reflect") },
+        .{ .name = "zui_async", .module = core.module("zui_async") },
+        .{ .name = "zui_tracy", .module = core.module("zui_tracy") },
+        .{ .name = "zui_debug", .module = core.module("zui_debug") },
     };
     const demo = b.addExecutable(.{
         .name = "zui-demo",
@@ -72,10 +78,6 @@ pub fn build(b: *std.Build) void {
     check_step.dependOn(&demo.step);
     check_step.dependOn(&tour_tests.step);
     check_step.dependOn(&conformance_tests.step);
-
-    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "examples" };
-    b.step("fmt", "Format all Zig sources").dependOn(&b.addFmt(.{ .paths = formatted_paths }).step);
-    b.step("fmt-check", "Fail if any Zig source is not formatted").dependOn(&b.addFmt(.{ .paths = formatted_paths, .check = true }).step);
 }
 
 /// Zig 0.16's own ELF linker rejects the R_X86_64_PC64 relocations in the

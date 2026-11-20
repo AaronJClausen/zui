@@ -1,6 +1,6 @@
 const std = @import("std");
 const zui_raylib = @import("zui_raylib");
-const zui = zui_raylib.zui;
+const zui = @import("zui");
 
 /// Why zui_app declared a frame: what ended the host's last wait.
 pub const FrameReason = enum {

@@ -3,13 +3,13 @@
 
 const std = @import("std");
 const zui_raylib = @import("zui_raylib");
-pub const zui = zui_raylib.zui;
-pub const zui_app = zui_raylib.zui_app;
-pub const zui_widgets = zui_raylib.zui_widgets;
-pub const zui_reflect = zui_raylib.zui_reflect;
-pub const zui_async = zui_raylib.zui_async;
-pub const zui_tracy = zui_raylib.zui_tracy;
-pub const zui_debug = zui_raylib.zui_debug;
+pub const zui = @import("zui");
+pub const zui_app = @import("zui_app");
+pub const zui_widgets = @import("zui_widgets");
+pub const zui_reflect = @import("zui_reflect");
+pub const zui_async = @import("zui_async");
+pub const zui_tracy = @import("zui_tracy");
+pub const zui_debug = @import("zui_debug");
 pub const Perf = @import("perf.zig").Perf;
 pub const Renderer = @import("perf.zig").TimedRenderer;
 const mission = @import("screens/mission_control.zig");

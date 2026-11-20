@@ -1,16 +1,8 @@
-//! zui-raylib: a zui renderer and adapter host on raylib. See README.md.
+//! zui_raylib: a zui renderer and adapter host on raylib.
 
 const std = @import("std");
-
-/// The zui this backend is built against; import it from here so the
-/// application and the backend always agree on zui's types.
-pub const zui = @import("zui");
-pub const zui_app = @import("zui_app");
-pub const zui_widgets = @import("zui_widgets");
-pub const zui_reflect = @import("zui_reflect");
-pub const zui_async = @import("zui_async");
-pub const zui_tracy = @import("zui_tracy");
-pub const zui_debug = @import("zui_debug");
+const zui = @import("zui");
+const zui_app = @import("zui_app");
 
 /// The raw raylib bindings, translated from raylib.h.
 pub const c = @import("raylib");

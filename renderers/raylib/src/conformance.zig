@@ -1,13 +1,14 @@
 const std = @import("std");
 const zui_raylib = @import("zui_raylib");
-const zui = zui_raylib.zui;
+const zui = @import("zui");
+const zui_app = @import("zui_app");
 const c = zui_raylib.c;
 const zui_testing = @import("zui_testing");
 
 /// Draws into a render texture of a hidden window, and reads each frame
 /// back as an image.
 const RenderTextureHarness = struct {
-    pub const config = zui_raylib.zui_app.contextConfig(zui_raylib.Renderer, .{});
+    pub const config = zui_app.contextConfig(zui_raylib.Renderer, .{});
 
     drawn: zui_raylib.Renderer = .{},
     target: c.RenderTexture2D,

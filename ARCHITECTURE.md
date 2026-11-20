@@ -204,7 +204,7 @@ What exists today, by stage:
   generated from `Config.commands` and the payload types, with the three
   backends as renderers; the host contract, with `RecordBuilder` and the
   check that a host and a renderer share a surface kind, proven by
-  zui-raylib's adapter host (H1); the conformance suites for renderers
+  the raylib renderer's adapter host (H1); the conformance suites for renderers
   and hosts in `zui_testing`, whose renderer suite the three backends run
   in CI and whose host suite raylib's host runs; `Features`, whose fields
   gate their APIs with compile errors naming them; and `zui_app`, the
@@ -229,7 +229,7 @@ What exists today, by stage:
   grow basis, `grow` starting from the content and `grow_from_min` from
   `min`; the `aspect_ratio` rule and images' natural sizes; dividers,
   `Border.between_children`, and images' tint and corner radius in the
-  `image` command, which zui-raylib and zui-sokol draw and the renderer
+  `image` command, which `zui_raylib` and zui-sokol draw and the renderer
   suite checks; the floating options, targets declared later,
   `Floating.capture` and `Floating.clip`; right-to-left layout,
   `Layout.mirrored` inherited from the environment's direction and
@@ -261,7 +261,7 @@ What exists today, by stage:
   `ZoneTimer` tracer takes, the element tree and the hovered element's
   configs, in a theme reloaded from its file through the host's file
   watch; `zui_app` hands it each frame through `zuiObserve`, and
-  zui-raylib's tour opens it with F12. Behind `features.semantics`,
+  the raylib renderer's tour opens it with F12. Behind `features.semantics`,
   `Element.semantics` and `Frame.semantics()`, each node's role, label,
   value, bounds, state and actions in tree order, kept beside its frame;
   `action` events answered by `clicked`, `focused`, `adjusted`,
@@ -297,7 +297,8 @@ parallel measurement and the module boundary.
 |---|---|
 | `zui` | in `core/`, the package `zui_core`: the core, the contracts, and the modules: async, widgets, reflect, testing, tracy, app, wire, debug, motion, color, icons; at the root, the package `zui` that users fetch, which re-exports core's modules and runs every package's steps |
 | `zui-host` | native hosts, one directory per OS, chosen by target: `windows/` (H2) and `linux/`, on Wayland (H4) |
-| `zui-raylib`, `zui-sokol` | renderers; `zui-raylib` also ships the raylib adapter host |
+| `zui-sokol` | a renderer |
+| `zui`, in `renderers/raylib/` | the package `zui_raylib`: the raylib renderer and the raylib adapter host, their conformance harness, and the tour, with its fonts; raylib, fetched lazily |
 | `zui`, in `renderers/terminal/` | the package `zui_terminal`: the terminal renderer, its input decoder and raw-mode terminal, its conformance harness and its demo; no third-party library |
 | `zui-web` | the browser: a thin client over `zui_wire` (V4), then a web host (H5); today the client's decoder, in WebAssembly, and its drawing of shapes, text, backdrop blurs and materials through WebGL 2 with four samples per pixel, checked against zui-sokol's renderer drawing the tour's frames, and the page's input written back as records the tour takes, with the cursor its frames ask for shown on the canvas; and zui-sokol's tour in a Web Worker on an `Io` of its own, whose tasks take turns on workers sharing its memory, drawing the frames it draws natively and timing them on the worker's clock; and the page that puts them together, published to GitHub Pages from CI and made cross-origin isolated by a service worker of its own |
 | `zui`, in `themes/` | the package `zui_themes`: skins for OS design languages (K4); a skeleton today |
@@ -305,20 +306,20 @@ parallel measurement and the module boundary.
 
 `zui-web`, `themes/` and `examples/` were created ahead of their items.
 `zui-web` has its build, CI and an agent guide, and pins zui by commit;
-`themes/`, `examples/` and `renderers/terminal/` each have their build
+`themes/`, `examples/`, `renderers/raylib/` and `renderers/terminal/` each have their build
 and CI jobs, and name core by path, so a change to core is built and
 tested against each of them in place; each runs its own steps from its
 own directory, and the root's `test-all` and `check-all` run them all.
 
-zui-raylib and zui-sokol pin zui by commit, moved to stage 2 with it
+zui-sokol pins zui by commit, moved to stage 2 with it
 (C8), and to the end of stage 6 with C10. Each renderer declares `Text`, a text
 contract, and its loop builds a `FrameRecord`, from events where its library reports them and through
 `zui.InputSampler` where it reports state (raylib), then waits as
 `nextFrame` says. Each is a renderer (C1): a `Renderer` type implementing
-the renderer contract, whose `config()` (zui-raylib's through
+the renderer contract, whose `config()` (`zui_raylib`'s through
 `zui_app.contextConfig`) builds the `Config` from its
 declarations, so its `switch` over the commands names exactly what it
-draws (the terminal's names only the five base commands). zui-raylib is
+draws (the terminal's names only the five base commands). `zui_raylib` is
 also a host (H1): `zui_raylib.Host` waits in GLFW and samples raylib's
 input, and its demo runs through `zui_app`. zui-sokol's and
 the terminal renderer's loops still do a host's work by hand, but zui-sokol's
@@ -350,3 +351,20 @@ and a pipe elsewhere. Its conformance harness reads each pixel back as
 the cell covering it, so it passes the renderer suite at a tolerance of
 0, and its `test` step runs the suite too. It builds `examples/demo.zig`,
 which draws `examples/showcase.zig`, the same UI as zui-sokol's demo.
+
+The raylib renderer, `zui_raylib`, names raylib as a lazy dependency, so
+raylib is fetched only when the package's own `build()` runs, as the
+root's does not. `src/root.zig` holds the `Renderer`, which draws into raylib's own
+window or a render texture (`.library`) and measures text with raylib
+`Font`s, and the `Host`, which samples raylib's state through
+`zui.InputSampler` and waits in GLFW past raylib, with a timeout for an
+instant. `src/conformance.zig` runs both suites in hidden
+windows: the renderer suite reads each frame back from a render texture,
+and the host suite scripts the sampled state through `Host.script`.
+`examples/` holds the tour, `examples/demo.zig` running it through
+`zui_app` with its frame-timing strip and `zui_debug`'s panel, and
+`examples/tour_test.zig` declaring every screen headlessly. On Linux its
+build links through LLVM and LLD, because Zig's own ELF linker rejects
+the `.sframe` relocations in the system's crt1.o, and moves raylib's
+system libraries from its static library onto the module, because LLD
+fails the link on the shared libraries Zig would archive into it.

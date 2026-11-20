@@ -148,9 +148,9 @@ repositories.
 
 | Repository | Holds |
 |---|---|
-| `zui` | the core, the contracts, and the modules, as the package `zui_core` in `core/`; the package `zui` at its root, which re-exports them; skins for OS design languages in `themes/`; samples and the template project in `examples/`; renderers in `renderers/`, one package each: `renderers/terminal/` (`zui_terminal`) |
+| `zui` | the core, the contracts, and the modules, as the package `zui_core` in `core/`; the package `zui` at its root, which re-exports them; skins for OS design languages in `themes/`; samples and the template project in `examples/`; renderers in `renderers/`, one package each: `renderers/raylib/` (`zui_raylib`, which also holds an adapter host) and `renderers/terminal/` (`zui_terminal`) |
 | `zui-host` | native hosts, one directory per OS |
-| `zui-raylib`, `zui-sokol`, `zui-web` | renderers; `zui-raylib` also ships an adapter host |
+| `zui-sokol`, `zui-web` | renderers |
 
 ### 3.3 The module boundary
 
