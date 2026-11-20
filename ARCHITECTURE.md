@@ -302,8 +302,8 @@ parallel measurement and the module boundary.
 | `zui`, in `text/truetype/` | the package `zui_truetype`: `Text`, the text contract on stb_truetype, its fonts added from embedded bytes or memory reserved for fonts that arrive at run time, Atkinson Hyperlegible Regular as font 0 when none is added, and `zuiFingerprint` over its fonts and placement; stb, fetched lazily, so users reach it through `zui.builder.dependency("zui_truetype", .{})` |
 | `zui`, in `text/fonts/` | the package `zui_fonts`: Atkinson Hyperlegible Regular and Bold and Liberation Mono, each a `pub const` of its bytes, with their licences; no third-party library, so the root re-exports it |
 | `zui`, in `renderers/raylib/` | the package `zui_raylib`: the raylib renderer and the raylib adapter host, their conformance harness, and the tour; raylib, fetched lazily |
-| `zui`, in `renderers/sokol/` | the package `zui_sokol`: the sokol renderer, on sokol_gfx through sokol-zig, its sokol_app input collector, its conformance harness, its shaders, and the tour; `zui_sokol_ui`, the tour's context types without sokol, and `zui_sokol_tour`, the tour's application; sokol, fetched lazily |
-| `zui`, in `renderers/terminal/` | the package `zui_terminal`: the terminal renderer, its input decoder and raw-mode terminal, its conformance harness and its demo; no third-party library |
+| `zui`, in `renderers/sokol/` | the package `zui_sokol`: the sokol renderer, on sokol_gfx through sokol-zig, its conformance harness, its shaders, and the tour; `zui_sokol_ui`, the tour's context types without sokol, and `zui_sokol_tour`, the tour's application; sokol, fetched lazily |
+| `zui`, in `renderers/terminal/` | the package `zui_terminal`: the terminal renderer, the terminal host, its input decoder and raw-mode terminal, its conformance harness and its demo; no third-party library |
 | `zui`, in `renderers/webgl/` | the package `zui_webgl`: the browser's drawing of a frame, laid out in WebAssembly as triangles, as the sokol renderer lays it out, and drawn through WebGL 2 with four samples per pixel: shapes, text (TrueType glyphs from a `zui_glyphs` atlas, and sokol_debugtext's bitmap fonts), backdrop blurs and materials; no third-party library |
 | `zui`, in `hosts/native/` | the package `zui_host`: native hosts, one directory per OS, chosen by target: `windows/` (H2) and `linux/`, on Wayland (H4), their conformance harnesses, and their examples, drawn by the sokol renderer; sokol and stb, fetched lazily through `renderers/sokol/` and `text/truetype/` for the examples alone |
 | `zui`, in `hosts/web/` | the package `zui_web`: the browser, as a thin client over `zui_wire` (V4), then a web host (H5); today the client's decoder, in WebAssembly, which draws through `renderers/webgl/` and is checked against the sokol renderer drawing the tour's frames, and the page's input written back as records the tour takes, with the cursor its frames ask for shown on the canvas; and the sokol renderer's tour in a Web Worker on an `Io` of its own, whose tasks take turns on workers sharing its memory, drawing the frames it draws natively and timing them on the worker's clock; and the page that puts them together, published to GitHub Pages from CI and made cross-origin isolated by a service worker of its own; the sokol renderer, reached lazily by path for the tour |
@@ -333,9 +333,9 @@ Every package has its build and CI jobs, and names core by path, so a change to 
 tested against each of them in place; each runs its own steps from its
 own directory, and the root's `test-all` and `check-all` run them all.
 
-Each renderer's demo names a text contract (the terminal's `Text`,
+Each renderer's demo or tour names a text contract (the terminal's `Text`,
 measured in cells; `zui_sokol_ui.Text`; the raylib tour's, on
-`zui_truetype`), and its loop builds a `FrameRecord`, from events where its library reports them and through
+`zui_truetype`), and its host builds a `FrameRecord`, from events where its library reports them and through
 `zui.InputSampler` where it reports state (raylib), then waits as
 `nextFrame` says. Each is a renderer (C1): a `Renderer` type implementing
 the renderer contract, whose `config()` (`zui_raylib`'s through
@@ -343,9 +343,10 @@ the renderer contract, whose `config()` (`zui_raylib`'s through
 declarations, so its `switch` over the commands names exactly what it
 draws (the terminal's names only the five base commands). `zui_raylib` is
 also a host (H1): `zui_raylib.Host` waits in GLFW and samples raylib's
-input, and its demo runs through `zui_app`. The sokol and
-terminal renderers' loops still do a host's work by hand, but the sokol
-renderer also draws into a native host's `win32` window without
+input, and its demo runs through `zui_app`; so is `zui_terminal`:
+`zui_terminal.Host` decodes the terminal's input and waits on it, and its
+demo runs through `zui_app`. The sokol renderer has no host of its own:
+it draws into a native host's `win32` window without
 sokol_app, with D3D11 through a DirectComposition swapchain that keeps
 alpha so a system material shows (H8), and `zui_host` runs its tour
 that way (H2), through `zui_app` with the tour's own text contract (C9);
@@ -369,10 +370,12 @@ cells that changed; `src/input.zig`'s `InputDecoder` turns UTF-8, VT key
 sequences, SGR mouse reports and focus reports into a frame record's
 events; `src/terminal.zig` enters raw mode on the alternate screen, waits
 as `nextFrame` says, and wakes through a console input record on Windows
-and a pipe elsewhere. Its conformance harness reads each pixel back as
+and a pipe elsewhere; `src/host.zig`'s `Host` puts them together as
+zui's host contract, handing the `Renderer` its stdout writer in each
+`.terminal` surface. Its conformance harness reads each pixel back as
 the cell covering it, so it passes the renderer suite at a tolerance of
 0, and its `test` step runs the suite too. It builds `examples/demo.zig`,
-which draws `examples/showcase.zig`, the same UI as the sokol renderer's demo.
+which draws `examples/showcase.zig`, the same UI as the tour's Classic screen.
 
 The raylib renderer, `zui_raylib`, names raylib as a lazy dependency, so
 raylib is fetched only when the package's own `build()` runs, as the
@@ -403,8 +406,7 @@ own, on D3D11 (Windows), Metal (macOS) or OpenGL (Linux, and with
 `-Dgl=true` anywhere), into sokol_app's swapchain (`.library`), an
 offscreen image in `.sdr` or `.scrgb_fp16` (`.offscreen`), a native
 host's `win32` window, or its `wayland` surface through EGL
-(`src/egl.zig`); `src/input.zig` collects sokol_app's events into a frame
-record. sokol_gl and sokol_debugtext each batch their own draws, so the
+(`src/egl.zig`). sokol_gl and sokol_debugtext each batch their own draws, so the
 renderer starts a layer whenever a shape follows text or the clip
 changes, and replays the layers in order, each under its own scissor
 rectangle. `src/ui/` is `zui_sokol_ui`: `Text`, which measures
@@ -418,8 +420,8 @@ GLSL 410, HLSL 5 and Metal, so a build never runs sokol-shdc; its
 first frame, into the swapchain and into offscreen images, always with
 OpenGL, since sokol_gfx cannot read a frame back and the harness reads
 it with `glReadPixels` and `glGetTexImage`. `examples/` holds the tour,
-`examples/demo.zig` running it in sokol_app's loop with its frame-timing
-strip, `examples/tour_test.zig` declaring every screen headlessly, and
+which `zui_host`'s tour example runs through `zui_app`,
+`examples/tour_test.zig` declaring every screen headlessly, and
 `examples/tour_freestanding.zig`, which `check` links for
 `wasm32-freestanding`. On Linux its build links through LLVM and LLD, as
 the raylib renderer's does.

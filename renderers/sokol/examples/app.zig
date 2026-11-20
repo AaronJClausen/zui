@@ -90,9 +90,8 @@ pub const App = struct {
         return .{ .context = app, .wakeFn = countWake };
     }
 
-    /// Counts each wake, and passes it on to a host that sleeps between
-    /// frames. sokol_app polls at every display refresh, so under it
-    /// counting is enough: its next poll of `nextFrame` sees the source.
+    /// Counts each wake, and passes it on to the host, which may be
+    /// sleeping until the next frame.
     fn countWake(context: *anyopaque) void {
         const app: *App = @ptrCast(@alignCast(context));
         _ = app.wakes.fetchAdd(1, .monotonic);

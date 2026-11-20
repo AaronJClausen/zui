@@ -11,6 +11,7 @@ pub const render = cells.render;
 pub const Screen = @import("screen.zig").Screen;
 pub const InputDecoder = @import("input.zig").InputDecoder;
 pub const Terminal = @import("terminal.zig").Terminal;
+pub const Host = @import("host.zig").Host;
 
 /// Layout units per terminal cell. Layout stays in pixel-like units so that
 /// UIs written for pixel renderers lay out sensibly in a terminal too.
@@ -30,14 +31,17 @@ pub fn config(overrides: zui.Config) zui.Config {
     return result;
 }
 
-/// The renderer contract for a terminal: paints each frame into `screen`'s
-/// cells and writes what changed to `output`. Its surface is `.terminal`,
-/// which carries the terminal's size in cells.
+/// The renderer contract for a terminal: paints each frame into its
+/// screen's cells and writes what changed to the surface's output. Its
+/// surface is `.terminal`, which carries the terminal's size in cells and
+/// that writer. `zui_app` calls `init`; on a loop of your own, call it too,
+/// or set `cell_size` and let the first frame size the screen:
 ///
 /// ```zig
-/// var renderer: zui_terminal.Renderer = .{ .gpa = gpa, .screen = &screen, .output = stdout };
+/// var renderer: zui_terminal.Renderer = .{ .gpa = gpa };
+/// defer renderer.deinit();
 /// const frame = ui.endFrame();
-/// try renderer.zuiSubmit(terminal.surface(), frame);
+/// try renderer.zuiSubmit(terminal.surface(&stdout_writer.interface), frame);
 /// ui.release(frame);
 /// ```
 pub const Renderer = struct {
@@ -46,21 +50,36 @@ pub const Renderer = struct {
     /// `zui_glyphs`' cells of `cell_size` is drawn where it was measured.
     pub const glyph_placement: zui_glyphs.Placement = .{ .cells = default_cell_size };
 
-    gpa: std.mem.Allocator,
-    screen: *Screen,
-    output: *std.Io.Writer,
+    /// Holds the screen's cells, which grow when the terminal does.
+    gpa: std.mem.Allocator = std.heap.page_allocator,
+    screen: Screen = .{},
     /// `Text.cell_size`.
     cell_size: [2]f32 = default_cell_size,
     /// The color of cells no command paints.
     background: zui.Color = .black,
 
-    pub fn zuiSubmit(self: *Renderer, surface: zui.Surface, frame: anytype) !void {
-        const size: [2]u16 = switch (surface) {
-            .terminal => |cells_on_screen| .{ cells_on_screen.columns, cells_on_screen.rows },
+    /// Sizes the screen to `surface`, so frames at that size allocate
+    /// nothing, and paints in the cells `text` measures.
+    pub fn init(self: *Renderer, surface: zui.Surface, text: *const Text) !void {
+        const terminal = switch (surface) {
+            .terminal => |terminal| terminal,
             else => return error.UnsupportedSurface,
         };
-        render(try self.screen.begin(self.gpa, size, self.background), self.cell_size, frame.commands());
-        try self.screen.present(self.output);
+        self.cell_size = text.cell_size;
+        _ = try self.screen.begin(self.gpa, .{ terminal.columns, terminal.rows }, self.background);
+    }
+
+    pub fn deinit(self: *Renderer) void {
+        self.screen.deinit(self.gpa);
+    }
+
+    pub fn zuiSubmit(self: *Renderer, surface: zui.Surface, frame: anytype) !void {
+        const terminal = switch (surface) {
+            .terminal => |terminal| terminal,
+            else => return error.UnsupportedSurface,
+        };
+        render(try self.screen.begin(self.gpa, .{ terminal.columns, terminal.rows }, self.background), self.cell_size, frame.commands());
+        try self.screen.present(terminal.output);
     }
 };
 
@@ -99,14 +118,24 @@ test "the renderer draws the base commands only, into a terminal" {
     const frame = ui.endFrame();
     defer ui.release(frame);
 
-    var screen: Screen = .{};
-    defer screen.deinit(std.testing.allocator);
     var written: [256]u8 = undefined;
     var output: std.Io.Writer = .fixed(&written);
-    var renderer: Renderer = .{ .gpa = std.testing.allocator, .screen = &screen, .output = &output };
+    var renderer: Renderer = .{ .gpa = std.testing.allocator };
+    defer renderer.deinit();
     try std.testing.expectError(error.UnsupportedSurface, renderer.zuiSubmit(.library, frame));
-    try renderer.zuiSubmit(.{ .terminal = .{ .columns = 4, .rows = 1 } }, frame);
+    try renderer.zuiSubmit(.{ .terminal = .{ .columns = 4, .rows = 1, .output = &output } }, frame);
     try std.testing.expect(std.mem.indexOf(u8, output.buffered(), "zui") != null);
+}
+
+test "init sizes the screen to the surface and paints in the text's cells" {
+    var discarding: std.Io.Writer.Discarding = .init(&.{});
+    var renderer: Renderer = .{ .gpa = std.testing.allocator };
+    defer renderer.deinit();
+    const text: Text = .{ .cell_size = .{ 10, 20 } };
+    try std.testing.expectError(error.UnsupportedSurface, renderer.init(.library, &text));
+    try renderer.init(.{ .terminal = .{ .columns = 6, .rows = 2, .output = &discarding.writer } }, &text);
+    try std.testing.expectEqual([2]f32{ 10, 20 }, renderer.cell_size);
+    try std.testing.expectEqual(@as(usize, 12), renderer.screen.back.cells.len);
 }
 
 test "letter spacing follows every code point, so measurement stays additive" {
@@ -127,4 +156,5 @@ test {
     _ = @import("screen.zig");
     _ = @import("input.zig");
     _ = @import("terminal.zig");
+    _ = @import("host.zig");
 }

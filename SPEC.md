@@ -2106,7 +2106,8 @@ pub fn checkHostAndRenderer(comptime Host: type, comptime Renderer: type) void  
 
 `zui.Surface` is a tagged union of native handles: `win32`, `cocoa`,
 `wayland`, `x11`, `web`, `offscreen`; plus `terminal`, a character grid
-by its size in cells; `library`, a window that a library such as
+by its size in cells, with the `*std.Io.Writer` the host gives its
+renderer to write the grid through; `library`, a window that a library such as
 raylib or sokol_app creates and draws into itself, which only that
 library's adapter host provides; and `wire`, a connection to another
 process that `zui_wire`'s host makes and only its renderer writes into

@@ -62,10 +62,11 @@ pub const Terminal = struct {
         return .{ window_size.col, window_size.row };
     }
 
-    /// What a `Renderer` draws into: the terminal at its current size.
-    pub fn surface(self: *Terminal) zui.Surface {
+    /// What a `Renderer` draws into: the terminal at its current size,
+    /// written through `output`, a writer on `stdout`.
+    pub fn surface(self: *Terminal, output: *std.Io.Writer) zui.Surface {
         const columns, const rows = self.size();
-        return .{ .terminal = .{ .columns = columns, .rows = rows } };
+        return .{ .terminal = .{ .columns = columns, .rows = rows, .output = output } };
     }
 
     /// The host's monotonic clock, for frame records.

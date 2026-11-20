@@ -396,7 +396,8 @@ test "a host and a renderer share SDR output, and HDR only when both declare it"
 test "a native surface carries its output format, and every other surface is SDR" {
     const hdr_surface: zui.Surface = .{ .offscreen = .{ .size = .{ 4, 4 }, .format = .scrgb_fp16 } };
     const default_surface: zui.Surface = .{ .offscreen = .{ .size = .{ 4, 4 } } };
-    const grid: zui.Surface = .{ .terminal = .{ .columns = 80, .rows = 24 } };
+    var discarding: std.Io.Writer.Discarding = .init(&.{});
+    const grid: zui.Surface = .{ .terminal = .{ .columns = 80, .rows = 24, .output = &discarding.writer } };
     try testing.expectEqual(zui.OutputFormat.scrgb_fp16, hdr_surface.outputFormat());
     try testing.expectEqual(zui.OutputFormat.sdr, default_surface.outputFormat());
     try testing.expectEqual(zui.OutputFormat.sdr, grid.outputFormat());

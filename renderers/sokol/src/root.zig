@@ -3,7 +3,6 @@ const zui = @import("zui");
 pub const sokol = @import("sokol");
 
 pub const Renderer = @import("renderer.zig").Renderer;
-pub const InputCollector = @import("input.zig").InputCollector;
 
 /// The types a context drawn by `Renderer` declares, which build without
 /// sokol: an application that only declares frames, for a renderer
@@ -30,34 +29,6 @@ pub fn config(overrides: zui.Config) zui.Config {
     return zui_sokol_ui.config(overrides);
 }
 
-/// Applies what a frame asks of the host that sokol_app can do: the cursor.
-/// It has no IME window to place.
-pub const HostRequestApplier = struct {
-    applied_cursor: ?zui.Cursor = null,
-
-    pub fn apply(self: *HostRequestApplier, requests: zui.HostRequests) void {
-        if (self.applied_cursor == requests.cursor) return;
-        self.applied_cursor = requests.cursor;
-        sokol.app.setMouseCursor(mouseCursorFor(requests.cursor));
-    }
-};
-
-/// The nearest of sokol_app's cursors.
-pub fn mouseCursorFor(cursor: zui.Cursor) sokol.app.MouseCursor {
-    return switch (cursor) {
-        .default, .wait, .progress, .help => .DEFAULT,
-        .pointer, .grab => .POINTING_HAND,
-        .text => .IBEAM,
-        .crosshair => .CROSSHAIR,
-        .move, .grabbing => .RESIZE_ALL,
-        .not_allowed => .NOT_ALLOWED,
-        .resize_horizontal => .RESIZE_EW,
-        .resize_vertical => .RESIZE_NS,
-        .resize_nwse => .RESIZE_NWSE,
-        .resize_nesw => .RESIZE_NESW,
-    };
-}
-
 test "config makes images sokol textures and text debugtext's" {
     const derived = config(.{ .limits = .{ .max_elements = 128 }, .CustomData = u32 });
     try std.testing.expect(derived.ImageHandle == Image);
@@ -79,16 +50,10 @@ test "the renderer draws the base commands, images, gradients, shadows, backdrop
     const frame = ui.endFrame();
     defer ui.release(frame);
     var renderer: Renderer = .{ .fonts = .of(&text), .pipeline = .{}, .alpha_coverage_pipeline = .{} };
-    try std.testing.expectError(error.UnsupportedSurface, renderer.zuiSubmit(.{ .terminal = .{ .columns = 80, .rows = 24 } }, frame));
-}
-
-test "every cursor maps to one of sokol's" {
-    try std.testing.expectEqual(sokol.app.MouseCursor.IBEAM, mouseCursorFor(.text));
-    try std.testing.expectEqual(sokol.app.MouseCursor.POINTING_HAND, mouseCursorFor(.pointer));
+    try std.testing.expectError(error.UnsupportedSurface, renderer.zuiSubmit(.{ .web = .{ .canvas = 0 } }, frame));
 }
 
 test {
-    _ = @import("input.zig");
     _ = @import("renderer.zig");
     _ = @import("backdrop_blur.zig");
     _ = @import("materials.zig");

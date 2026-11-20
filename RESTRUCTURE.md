@@ -64,7 +64,7 @@ zui/                         the aggregator package `zui`: build.zig, build.zig.
 │   └── fonts/               package `zui_fonts`: the bundled typefaces and their licences
 ├── renderers/
 │   ├── raylib/              package `zui_raylib`: Renderer, raylib Host, conformance, tour and showcase targets
-│   ├── sokol/               package `zui_sokol`: Renderer, sokol_app Host, conformance, shaders, targets
+│   ├── sokol/               package `zui_sokol`: Renderer, conformance, shaders
 │   ├── terminal/            package `zui_terminal`: Renderer, terminal Host, conformance, targets
 │   └── webgl/               package `zui_webgl`: the browser's drawing of a frame
 ├── hosts/
@@ -390,11 +390,16 @@ Done when:
 
 ### 9. Every renderer's host runs through `zui_app`
 
-A `zui_sokol.Host` on sokol_app and a `zui_terminal.Host`, each a
-`zui_app` host as `zui_raylib.Host` is. Their demos' loops by hand go.
+A `zui_terminal.Host`, a `zui_app` host as `zui_raylib.Host` is, which
+hands its renderer the terminal's writer in its surface. A host belongs
+to an OS, not a renderer, so sokol has none of its own: its hand-written
+sokol_app demo goes, and its tour runs on `zui_host` through `zui_app`.
+How a host whose platform owns the loop (the browser, macOS, mobile) runs
+through `zui_app` is a roadmap item of its own after this work.
 
-Done when each demo runs through `zui_app.run`, and the terminal's and
-sokol's CI checks (`--dump`, conformance, screenshots) pass.
+Done when the terminal's demo runs through `zui_app.run`, its `--dump`
+and conformance pass, and `hosts/native`'s sokol tour cycle prints
+`diagnostics ok: true` with no overflows.
 
 ### 10. One portable tour and one showcase in `apps/`
 
@@ -419,7 +424,7 @@ Done when one copy of each exists and the headless test passes.
 ### 11. Targets in place of the copies
 
 Each renderer and host package gets a `tour` and a `showcase` target, the
-terminal included, each a `main` naming the app, the host, the renderer
+terminal included, sokol's in `hosts/native`, each a `main` naming the app, the host, the renderer
 and the font system. The terminal runs the whole tour; a screen whose
 commands it does not draw is left out by the same capability test as on
 any other renderer. zui-host's adapter shrinks to the target plus what its

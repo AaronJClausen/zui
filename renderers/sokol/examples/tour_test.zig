@@ -71,7 +71,7 @@ fn stageOverflow(frame: *const Ui.Frame) [2]f32 {
     return .{ @max(0, content[0] - stage.width), @max(0, content[1] - stage.height) };
 }
 
-/// The window the demo opens with.
+/// The window the tour opens with.
 const default_window: [2]f32 = .{ 1440, 900 };
 
 fn settledFrame(harness: *Harness, screen: kit.Screen, viewport: [2]f32) *const Ui.Frame {

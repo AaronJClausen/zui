@@ -8,6 +8,7 @@ pub fn build(b: *std.Build) void {
     const zui_module = core.module("zui");
     const zui_testing_module = core.module("zui_testing");
     const zui_glyphs_module = b.dependency("zui_glyphs", .{ .target = target, .optimize = optimize }).module("zui_glyphs");
+    const zui_app_module = core.module("zui_app");
 
     const backend_module = b.addModule("zui_terminal", .{
         .root_source_file = b.path("src/root.zig"),
@@ -41,6 +42,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "zui_terminal", .module = backend_module },
             .{ .name = "zui", .module = zui_module },
             .{ .name = "zui_testing", .module = zui_testing_module },
+            .{ .name = "zui_app", .module = zui_app_module },
         },
     }) });
     const run_conformance = b.addRunArtifact(conformance_tests);
@@ -56,6 +58,7 @@ pub fn build(b: *std.Build) void {
             .imports = &.{
                 .{ .name = "zui_terminal", .module = backend_module },
                 .{ .name = "zui", .module = zui_module },
+                .{ .name = "zui_app", .module = zui_app_module },
                 .{ .name = "zui_widgets", .module = core.module("zui_widgets") },
             },
         }),

@@ -9,7 +9,7 @@ pub fn build(b: *std.Build) void {
     b.step("fmt", "Format all Zig sources").dependOn(&b.addFmt(.{ .paths = formatted_paths, .exclude_paths = &generated_paths }).step);
     b.step("fmt-check", "Fail if any Zig source is not formatted").dependOn(&b.addFmt(.{ .paths = formatted_paths, .exclude_paths = &generated_paths, .check = true }).step);
 
-    const check = b.step("check", "Compile the backend and the demo, and link the tour for wasm32-freestanding, without installing them");
+    const check = b.step("check", "Compile the backend and its tests, and link the tour for wasm32-freestanding, without running them");
     const truetype_dependency = truetypeDeclaring(b, .{ .target = target, .optimize = optimize }) orelse return;
     const tour_modules = addTourModules(b, truetype_dependency, target, optimize, .exported);
     if (target.result.os.tag == .freestanding) return;
@@ -40,14 +40,6 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&b.addRunArtifact(unit_tests).step);
     test_step.dependOn(&b.addRunArtifact(ui_unit_tests).step);
 
-    const demo_imports = std.mem.concat(b.allocator, std.Build.Module.Import, &.{ tour_modules.imports, &.{.{ .name = "zui_sokol", .module = backend_module }} }) catch @panic("out of memory");
-    const demo = b.addExecutable(.{
-        .name = "zui-sokol-demo",
-        .root_module = b.createModule(.{ .root_source_file = b.path("examples/demo.zig"), .target = target, .optimize = optimize, .imports = demo_imports }),
-    });
-    if (target.result.os.tag == .windows) demo.subsystem = .windows;
-    linkThroughLlvmOnLinux(demo);
-
     const tour_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("examples/tour_test.zig"),
         .target = target,
@@ -55,14 +47,9 @@ pub fn build(b: *std.Build) void {
         .imports = tour_modules.imports,
     }) });
     linkThroughLlvmOnLinux(tour_tests);
-    b.step("test-tour", "Declare every screen of the demo headlessly; fail if one exceeds its limits or does not fit the default window").dependOn(&b.addRunArtifact(tour_tests).step);
-    b.installArtifact(demo);
-
-    const run_demo = b.addRunArtifact(demo);
-    if (b.args) |arguments| run_demo.addArgs(arguments);
-    b.step("demo", "Run the demo (`-- --frames 120` quits after 120 frames)").dependOn(&run_demo.step);
-
-    check.dependOn(&demo.step);
+    b.step("test-tour", "Declare every screen of the tour headlessly; fail if one exceeds its limits or does not fit the default window").dependOn(&b.addRunArtifact(tour_tests).step);
+    check.dependOn(&unit_tests.step);
+    check.dependOn(&tour_tests.step);
     const freestanding_target = b.resolveTargetQuery(.{ .cpu_arch = .wasm32, .os_tag = .freestanding });
     const freestanding_truetype_dependency = truetypeDeclaring(b, .{ .target = freestanding_target, .optimize = optimize }) orelse return;
     const freestanding_tour_modules = addTourModules(b, freestanding_truetype_dependency, freestanding_target, optimize, .private);

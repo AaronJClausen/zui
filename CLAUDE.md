@@ -151,11 +151,9 @@ In `renderers/sokol/`, run `zig build test`, `zig build check` (which
 also links the tour for `wasm32-freestanding`), the same `check` with
 `-Dtarget=wasm32-freestanding`, with `-Dtarget=x86_64-windows` and with
 `-Dgl=true -Dtarget=x86_64-windows`, `zig build test-tour`,
-`zig build conformance`, which opens a window and must print that
-`zui_sokol.Renderer` passes zui's renderer suite, and the tour's cycle,
-`zig build demo -- --frames 900 --cycle 40`, which must print
-`diagnostics ok: true`; never run `zig build demo` without `--frames`,
-since its window stays open until closed. After changing a shader's GLSL,
+and `zig build conformance`, which opens a window and must print that
+`zui_sokol.Renderer` passes zui's renderer suite; the tour it draws is
+run by `hosts/native/`'s tour, below. After changing a shader's GLSL,
 run `zig build shaders` and commit the regenerated `.glsl.zig`. Its links
 on Linux print `warning(link): unexpected LLD stderr` and a `failed
 command:` line and still succeed.
@@ -170,7 +168,8 @@ kept running) and run with its address in `ZUI_HOST_TEST_SESSION_BUS`
 print that every service answered; `zig build theme -- --check`, which
 must print the frame it restyled in; the tour's cycle,
 `zig build tour -- --frames 300 --cycle 30`, which must print
-`diagnostics ok: true`; and `zig build tour -- --measure-idle`. They need
+`0 layer overflows, 0 glyph atlas overflows, diagnostics ok: true`, also
+after any change to the sokol renderer or its tour; and `zig build tour -- --measure-idle`. They need
 a Wayland compositor (CI runs a headless Weston); never run an example
 without `--check`, `--frames` or `--measure-idle`, since its window
 stays open until closed. Its links on Linux print the same LLD noise.

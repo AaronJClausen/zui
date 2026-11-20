@@ -259,6 +259,15 @@ jobs:
         run: zig build test --summary all
       - run: zig build test -Doptimize=ReleaseSafe
       - run: zig build check
+      # The headless Weston draws in software, so Mesa's EGL hands it
+      # shared-memory buffers.
+      - name: Visit every screen of the tour, drawn by the sokol renderer
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: |
+          set -o pipefail
+          timeout 300 zig build tour -- --frames 300 --cycle 30 2>&1 | tee cycle.log
+          grep "0 layer overflows, 0 glyph atlas overflows, diagnostics ok: true" cycle.log
 
   host-cross:
     name: "Native host: cross-compile for Windows (Linux)"

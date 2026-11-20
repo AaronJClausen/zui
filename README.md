@@ -394,9 +394,10 @@ modules and runs core's steps under the same names. Beside core:
 - `renderers/raylib/`, the package `zui_raylib`: the raylib renderer and
   adapter host, and the tour (see *The raylib renderer* below).
 - `renderers/sokol/`, the package `zui_sokol`: the sokol renderer, and
-  the tour on it (see *The sokol renderer* below).
+  the tour it draws, which `hosts/native/` runs (see *The sokol renderer*
+  below).
 - `renderers/terminal/`, the package `zui_terminal`: the terminal
-  renderer (see *The terminal renderer* below).
+  renderer and host (see *The terminal renderer* below).
 - `renderers/webgl/`, the package `zui_webgl`: the browser's drawing of
   a frame through WebGL 2 (see *The WebGL renderer* below).
 - `hosts/native/`, the package `zui_host`: the native hosts, for Windows
@@ -436,11 +437,8 @@ build fetches sokol-zig and stb, and on Linux needs
 | `zig build test` | run the renderer's and `zui_sokol_ui`'s unit tests |
 | `zig build conformance` | run zui's renderer suite against it in a window, always with OpenGL; needs a display |
 | `zig build test-tour` | declare every screen of the tour headlessly, and fail if one exceeds its limits or does not fit the default window |
-| `zig build check` | compile the renderer and the demo, and link the tour for `wasm32-freestanding`, without producing output |
-| `zig build demo` | run the tour |
-| `zig build demo -- --screen gallery` | start on one screen |
-| `zig build demo -- --frames 900 --cycle 40` | visit every screen, 40 zui frames each, then quit |
-| `zig build demo -Dgl=true` | render with OpenGL instead of D3D11 or Metal |
+| `zig build check` | compile the renderer and its tests, and link the tour for `wasm32-freestanding`, without running them |
+| `zig build check -Dgl=true` | the same, rendering into a native host's window with OpenGL instead of D3D11 |
 | `zig build shaders` | regenerate each `src/*.glsl.zig` from its GLSL with sokol-shdc, after the GLSL changes |
 
 The terminal renderer has them too, run from `renderers/terminal/`:
@@ -557,8 +555,10 @@ CI runs:
   demo's `--dump`, on Linux, Windows and macOS, from `renderers/terminal/`;
 - the native hosts' tests in Debug and ReleaseSafe and their `check`, on
   Windows, and on Linux under a headless Weston with a D-Bus daemon of
-  its own, and `check` for x86-64 and ARM64 Windows from Linux, from
-  `hosts/native/`. The examples are compiled there and run on a desktop;
+  its own, where the tour also visits every screen and must report no
+  layer or glyph atlas overflow and clean diagnostics, and `check` for
+  x86-64 and ARM64 Windows from Linux, from `hosts/native/`. The other
+  examples are compiled there and run on a desktop;
 - the WebGL renderer's and the web host's tests in three optimize modes
   and their `check`, on Linux, Windows and macOS, each from its
   directory; and on Linux, from `hosts/web/`, `test-demo` in Debug and
@@ -954,9 +954,8 @@ time).
 ### The sokol renderer
 
 `zui_sokol` is a [sokol](https://github.com/floooh/sokol) renderer,
-through [sokol-zig](https://github.com/floooh/sokol-zig): it collects
-sokol_app events into zui's frame records, measures text through zui's
-text contract, and draws zui's frames as a renderer with sokol_gl,
+through [sokol-zig](https://github.com/floooh/sokol-zig): it measures
+text through zui's text contract, and draws zui's frames as a renderer with sokol_gl,
 sokol_debugtext and shaders of its own, on D3D11 (Windows), Metal
 (macOS) or OpenGL (Linux), its TrueType text from a `zui_glyphs` atlas
 where `zui_glyphs` laid it out. It draws every optional command,
@@ -984,18 +983,16 @@ const body_font = try text.addTrueTypeFont(zui_fonts.atkinson_hyperlegible_regul
 renderer = .init(&text);
 renderer.clear_color = background;
 
-// in the event callback:
-input.handleEvent(event, sapp.dpiScale(), now());
-
-// in the frame callback:
-const params: zui.FrameParams = .{ .now = now(), .viewport = viewport, .scale = sapp.dpiScale() };
-ui.beginFrame(&.{ .params = params, .events = input.take() });
+// in the frame callback, with the record your event callback built:
+ui.beginFrame(&record);
 // ... declare your UI ...
 const frame = ui.endFrame();
-host_requests.apply(frame.requests());
 try renderer.zuiSubmit(.library, frame); // one swapchain pass, cleared to clear_color
 ui.release(frame);
 ```
+
+zui has no host on sokol_app: `zui_app` runs the renderer on `zui_host`'s
+native hosts (see *The tour on a native host*).
 
 `zui_sokol.Renderer` implements zui's renderer contract. Its surfaces are
 `.library`, sokol_app's swapchain; `.offscreen`, an image of the renderer's
@@ -1072,11 +1069,6 @@ fn panel(seconds: f32) Ui.Decoration {
 | colors | `zui.ExtendedColor` (the renderer declares `zui_extended_color`) or `zui.Color`, as the application declares them. Into an 8-bit target an extended color is clamped into SDR and sRGB's gamut and encoded to 8 bits, as `ExtendedColor.toColor` does. Into an `.scrgb_fp16` offscreen image (RGBA16F) the frame is drawn in linear light through a shader of the renderer's own, which decodes each 8-bit sRGB vertex color and texel; a color brighter than SDR white is carried divided by its brightest channel, with that channel in sokol_gl's per-vertex point size, which the shader multiplies back. Negative (out-of-sRGB-gamut) channels are still clamped there, bitmap text is drawn by sokol_gl rather than sokol_debugtext, and materials mix their colors in linear light |
 | `clip_begin` / `clip_end` | `sg.applyScissorRect` per layer, at the record's `scale × zoom`; inside a transform, the box around the clip in the window |
 | `transform_begin` / `transform_end` | sokol_gl's modelview matrix, loaded with the composed transform; a backdrop blur inside one blurs the box around it in the window and samples where it is drawn, and bitmap text inside one is drawn as sokol_gl quads from sokol_debugtext's own font bits, since sokol_debugtext has no matrix |
-| mouse and touch | `MOUSE_*` and `TOUCHES_*` events, in order; each touch is a pointer of its own |
-| wheel | `MOUSE_SCROLL` events, flipped and scaled by `InputCollector.wheel_step` |
-| keys | `KEY_DOWN` and `KEY_UP` with their modifiers, repeat flag and key code as the scancode; `CHAR` as text |
-| focus | `FOCUSED` and `UNFOCUSED` as the environment's `window_focused` |
-| cursor request | `sapp.setMouseCursor`, through `HostRequestApplier` |
 
 sokol_gl and sokol_debugtext each batch their own draws. To keep zui's
 paint order, the renderer starts a new layer whenever a shape follows text
@@ -1118,12 +1110,6 @@ Current limits:
   holds, it starts over, and `Renderer.glyphOverflows()` counts frames
   whose glyphs still did not fit. Text larger than 160 physical pixels is
   drawn from 160-pixel glyphs.
-- **No idle sleep.** sokol_app presents at every display refresh, so the
-  process never sleeps. The demo declares a zui frame only when
-  `nextFrame` or new input calls for one, and otherwise redraws the frame
-  it holds; untick "1 Hz" in its header and an idle screen declares none.
-- **No IME window.** sokol_app cannot place one, so a text-input request
-  is not applied.
 
 `zig build conformance`, run from `renderers/sokol/`, runs zui's renderer
 suite (`zui_testing.expectRendererConforms`) against the renderer, in the
@@ -1168,8 +1154,8 @@ WebAssembly as natively, which the web host's `test-demo` checks.
 
 #### The tour on sokol
 
-`zig build demo`, run from `renderers/sokol/` (see *Development* for its
-flags), is the raylib renderer's tour on sokol: the same screens, the
+`zig build tour`, run from `hosts/native/` (see *The tour on a native
+host*), is the raylib renderer's tour on sokol: the same screens, the
 strip of frame costs along the bottom, **Ctrl+I**'s frame inspector and
 the same keys, but no `zui_debug` panel. Its Typography screen shows
 sokol_debugtext's six bitmap fonts beside the TrueType ones, its Light &
@@ -1185,7 +1171,9 @@ raylib renderer lowers, and two screens are its own:
 
 `zui_terminal` decodes keys, mouse reports and focus reports into the
 events of zui's frame records, measures text in cells through zui's text
-contract, and paints zui's frames as 24-bit-color cells, as a renderer.
+contract, and paints zui's frames as 24-bit-color cells, as a renderer;
+`zui_terminal.Host` is a host on the terminal the process runs in, so
+`zui_app` runs an application there.
 It declares cell placement (`Renderer.glyph_placement`), so its `Text`,
 or any font system laid out for it, measures every glyph one cell wide,
 as it is drawn.
@@ -1201,19 +1189,44 @@ exe.root_module.addImport("zui_terminal", zui_terminal.module("zui_terminal"));
 
 ```zig
 const zui = @import("zui");
+const zui_app = @import("zui_app");
 const zui_terminal = @import("zui_terminal");
 const Ui = zui.Context(zui_terminal.config(.{}));
 
+const App = struct {
+    pub const Host = zui_terminal.Host;
+    pub const Renderer = zui_terminal.Renderer;
+    pub const Text = zui_terminal.Text;
+
+    pub fn zuiDeclare(app: *App, ui: *Ui) void {
+        // ... declare your UI ...
+    }
+};
+
+pub fn main(init: std.process.Init) !void {
+    try zui_app.run(App, init, .{}); // until Ctrl+C or Ctrl+Q
+}
+```
+
+The host enters raw mode on the alternate screen, decodes what the
+terminal sends into each record, and hands the renderer, in each
+`.terminal` surface, the size in cells and its writer on stdout. The
+renderer keeps the screen, which `init` sizes to the first surface. A
+line written to stdout or stderr meanwhile stays among the
+cells until they change, so the demo passes `zui_app` a `notify` that
+leaves out the `.started` report. The same parts make a loop of your own:
+
+```zig
 var terminal = try zui_terminal.Terminal.enter(io);
 defer terminal.leave();
 var text: zui_terminal.Text = .{};
 var ui = try Ui.init(gpa, io, &text);
-var screen: zui_terminal.Screen = .{};
-var renderer: zui_terminal.Renderer = .{ .gpa = gpa, .screen = &screen, .output = stdout, .background = background };
+var renderer: zui_terminal.Renderer = .{ .gpa = gpa, .background = background };
+defer renderer.deinit();
 var decoder: zui_terminal.InputDecoder = .{};
 
 while (!decoder.quit_requested) {
-    const surface = terminal.surface(); // .terminal, with the size in cells
+    const surface = terminal.surface(stdout); // .terminal: the size in cells and the writer
     ui.beginFrame(&.{ .params = .{ .now = terminal.now(), .viewport = viewportFor(surface) }, .events = decoder.take() });
     // ... declare your UI ...
     const frame = ui.endFrame();
@@ -1229,9 +1242,9 @@ declarations: it declares no optional commands and no payload types, so
 its `switch` over the commands names only the five base commands. To
 paint into a `CellBuffer` of your own, call `zui_terminal.render` instead.
 
-`terminal.wait` sleeps as `nextFrame` says: not at all, until a
+`terminal.wait`, and the host's `zuiWait`, sleep as `nextFrame` says: not at all, until a
 requested instant, or until input, a resize or a wake, so an idle UI uses
-no CPU. `terminal.waker()` is a `zui.Waker` for sources' producers: on
+no CPU. `terminal.waker()`, and the host's `zuiWaker`, is a `zui.Waker` for sources' producers: on
 Windows it writes a console input record, elsewhere it writes to a pipe,
 and either way a wake that arrives before the wait still ends it. On
 Linux and macOS a resize does not wake `poll`, so an idle wait looks at
@@ -1270,7 +1283,7 @@ What a terminal cannot do:
 out as triangles, as the sokol renderer does, in batches that each draw
 under one scissor rectangle, and `web/frame_drawer.mjs` draws them on a
 canvas through WebGL 2, with four samples per pixel resolved to one,
-which smooth every edge as the sokol renderer's demo window does with its
+which smooth every edge as the sokol renderer's multisampled targets do with
 `sample_count = 4`: rectangles, borders, clips, gradients, shadows and
 transforms, and text, once the page hands over the stream's fonts:
 TrueType glyphs placed where `zui_glyphs` lays them out, from a
@@ -1782,7 +1795,10 @@ screen used 0.0 ms of CPU over 10 s with no frames and no wakes in three
 runs of four (Windows counts CPU time in 15.6 ms ticks). On Linux, under
 Hyprland with an NVIDIA RTX 2060 SUPER, it used 1.2 to 4.4 ms over 10 s,
 with 0 or 1 frames and no wakes, in five runs of six. `--screenshot` saves
-the window on Windows only so far.
+the window on Windows only so far. With `--frames`, it prints the frames
+drawn, the sokol renderer's layer and glyph atlas overflows, and whether
+every frame's diagnostics were clean (`diagnostics ok: true`), which CI
+checks on Linux under a headless Weston.
 
 #### The tour in another process
 

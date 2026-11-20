@@ -81,7 +81,8 @@ const TourOnHost = struct {
     pub fn deinit(app: *TourOnHost) void {
         app.tour.deinit();
         if (app.options.frame_limit != null) {
-            std.debug.print("drew {d} frames, {d} layer overflows, diagnostics ok: {}\n", .{ app.frames, app.renderer.sokol.layer_overflows, app.tour.perf.diagnostics.ok() });
+            const perf = &app.tour.perf;
+            std.debug.print("drew {d} frames, {d} layer overflows, {d} glyph atlas overflows, diagnostics ok: {}\n", .{ app.frames, perf.layer_overflows, perf.glyph_overflows, perf.diagnostics.ok() });
         }
     }
 
@@ -165,6 +166,8 @@ const TourOnHost = struct {
         perf.display_frames += 1;
         perf.submit_us = microsecondsBetween(submitted.started_at, submitted.ended_at);
         perf.diagnostics = submitted.diagnostics;
+        perf.layer_overflows = app.renderer.sokol.layer_overflows;
+        perf.glyph_overflows = app.renderer.sokol.glyphOverflows();
         perf.wakes = app.tour.wakes.load(.monotonic);
     }
 };
@@ -175,6 +178,9 @@ const TourOnHost = struct {
 const SokolRenderer = struct {
     pub const zui_surfaces: zui.SurfaceKinds = zui_host.Host.zui_surfaces;
     pub const ImageHandle = zui_sokol.Renderer.ImageHandle;
+    pub const MaterialHandle = zui_sokol.Renderer.MaterialHandle;
+    pub const zui_commands = zui_sokol.Renderer.zui_commands;
+    pub const zui_extended_color = zui_sokol.Renderer.zui_extended_color;
 
     sokol: zui_sokol.Renderer,
     /// Set by the application, which has the `Io`; until then submits are not timed.

@@ -51,7 +51,9 @@ pub const Surface = union(SurfaceKind) {
     web: struct { canvas: u32, format: OutputFormat = .sdr },
     /// Physical pixels.
     offscreen: struct { size: [2]u32, format: OutputFormat = .sdr },
-    terminal: struct { columns: u16, rows: u16 },
+    /// The terminal's size in cells, and where the host lets the renderer
+    /// write the sequences that draw them.
+    terminal: struct { columns: u16, rows: u16, output: *std.Io.Writer },
     library,
     wire: struct { connection: *anyopaque },
 
