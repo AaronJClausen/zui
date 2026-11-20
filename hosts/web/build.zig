@@ -26,13 +26,13 @@ pub fn build(b: *std.Build) void {
         .os_tag = .freestanding,
         .cpu_features_add = std.Target.wasm.featureSet(&.{ .atomics, .bulk_memory }),
     });
-    const tour_worker = if (b.lazyDependency("zui_sokol", .{ .target = worker_target, .optimize = optimize })) |worker_zui_sokol| tour_worker: {
+    const tour_worker = if (sokolDeclaring(b, .{ .target = worker_target, .optimize = optimize }, "zui_sokol_tour")) |worker_zui_sokol| tour_worker: {
         const tour_worker = tourWorker(b, worker_zui_sokol, worker_target, optimize);
         b.getInstallStep().dependOn(&b.addInstallArtifact(tour_worker, .{ .dest_dir = .{ .override = .{ .custom = "web" } } }).step);
         check_step.dependOn(&tour_worker.step);
         break :tour_worker tour_worker;
     } else null;
-    if (b.lazyDependency("zui_sokol", .{ .target = target, .optimize = optimize })) |zui_sokol_dependency| {
+    if (sokolDeclaring(b, .{ .target = target, .optimize = optimize }, "zui_sokol")) |zui_sokol_dependency| {
         const tour_imports: []const std.Build.Module.Import = &.{
             .{ .name = "zui", .module = b.dependency("zui_core", .{ .target = target, .optimize = optimize }).module("zui") },
             .{ .name = "zui_sokol", .module = zui_sokol_dependency.module("zui_sokol") },
@@ -254,4 +254,12 @@ fn linkThroughLlvmOnLinux(compile: *std.Build.Step.Compile) void {
         compile.use_llvm = true;
         compile.use_lld = true;
     }
+}
+
+/// The sokol renderer's package, once it has declared `module_name`: until its
+/// own lazy libraries are fetched it returns from `build()` before declaring
+/// any, and asking for a module it lacks panics.
+fn sokolDeclaring(b: *std.Build, args: anytype, module_name: []const u8) ?*std.Build.Dependency {
+    const dependency = b.lazyDependency("zui_sokol", args) orelse return null;
+    return if (dependency.builder.modules.contains(module_name)) dependency else null;
 }

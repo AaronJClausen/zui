@@ -74,7 +74,7 @@ fn linkThroughLlvmOnLinux(compile: *std.Build.Step.Compile) void {
 /// Windows through a Direct3D 11 swapchain that DirectComposition composes
 /// over the window's backdrop, on Linux with OpenGL through EGL.
 fn addTour(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, host_module: *std.Build.Module, core: *std.Build.Dependency, check_step: *std.Build.Step) void {
-    const zui_sokol_dependency = b.lazyDependency("zui_sokol", .{ .target = target, .optimize = optimize }) orelse return;
+    const zui_sokol_dependency = sokolDeclaring(b, .{ .target = target, .optimize = optimize }, "zui_sokol") orelse return;
     const tour = b.addExecutable(.{
         .name = "zui-host-tour",
         .root_module = b.createModule(.{
@@ -101,7 +101,7 @@ fn addTour(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builti
 /// A window styled by a ZON file that the host's file watch reloads, on
 /// either host.
 fn addTheme(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, host_module: *std.Build.Module, core: *std.Build.Dependency, check_step: *std.Build.Step) void {
-    const zui_sokol_dependency = b.lazyDependency("zui_sokol", .{ .target = target, .optimize = optimize }) orelse return;
+    const zui_sokol_dependency = sokolDeclaring(b, .{ .target = target, .optimize = optimize }, "zui_sokol") orelse return;
     const theme = b.addExecutable(.{
         .name = "zui-host-theme",
         .root_module = b.createModule(.{
@@ -126,7 +126,7 @@ fn addTheme(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.built
 
 /// Every host service from buttons, on Windows and on Linux.
 fn addServicesExample(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, host_module: *std.Build.Module, core: *std.Build.Dependency, check_step: *std.Build.Step) void {
-    const zui_sokol_dependency = b.lazyDependency("zui_sokol", .{ .target = target, .optimize = optimize }) orelse return;
+    const zui_sokol_dependency = sokolDeclaring(b, .{ .target = target, .optimize = optimize }, "zui_sokol") orelse return;
     const services = b.addExecutable(.{
         .name = "zui-host-services",
         .root_module = b.createModule(.{
@@ -155,7 +155,7 @@ fn addServicesExample(b: *std.Build, target: std.Build.ResolvedTarget, optimize:
 /// only on the Windows host so far.
 fn addWindowsExamples(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, host_module: *std.Build.Module, core: *std.Build.Dependency, check_step: *std.Build.Step) void {
     const app_module = core.module("zui_app");
-    const zui_sokol_dependency = b.lazyDependency("zui_sokol", .{ .target = target, .optimize = optimize }) orelse return;
+    const zui_sokol_dependency = sokolDeclaring(b, .{ .target = target, .optimize = optimize }, "zui_sokol") orelse return;
 
     const remote = b.addExecutable(.{
         .name = "zui-host-remote",
@@ -280,4 +280,12 @@ fn addWindowsExamples(b: *std.Build, target: std.Build.ResolvedTarget, optimize:
     if (b.args) |arguments| run_many_windows.addArgs(arguments);
     b.step("many-windows", "Run one application in two windows, each with its own UI (`-- --check` clicks and closes them hidden and quits; `--measure-idle`, `--measure-animation`)").dependOn(&run_many_windows.step);
     check_step.dependOn(&many_windows.step);
+}
+
+/// The sokol renderer's package, once it has declared `module_name`: until its
+/// own lazy libraries are fetched it returns from `build()` before declaring
+/// any, and asking for a module it lacks panics.
+fn sokolDeclaring(b: *std.Build, args: anytype, module_name: []const u8) ?*std.Build.Dependency {
+    const dependency = b.lazyDependency("zui_sokol", args) orelse return null;
+    return if (dependency.builder.modules.contains(module_name)) dependency else null;
 }
