@@ -2083,7 +2083,9 @@ pub fn checkHostAndRenderer(comptime Host: type, comptime Renderer: type) void  
   error.
 - **Clipboard text** is copied by `write` at once, into the OS's memory
   or, on a host that serves the selection itself, into its own fixed
-  buffer (`error.TooLarge` past it).
+  buffer (`error.TooLarge` past it). Where the platform offers no
+  clipboard, as a compositor without a data device does, `write` and
+  `read` are refused with `error.Unavailable`.
 - **Text the system cannot show whole,** such as a notification's title
   past its length, is cut at a character, as a label is.
 - **Watching files** is the service that is a source:

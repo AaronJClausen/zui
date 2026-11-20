@@ -77,7 +77,9 @@ const other_thread_wake_ns = 20 * std.time.ns_per_ms;
 ///   the platform's accessibility API arrives as an `action` event naming
 ///   it;
 /// - with `zuiClipboard`, text written is read back, answered once for its
-///   request within `event_arrival_ns`;
+///   request within `event_arrival_ns`; when the harness's
+///   `platformOffersClipboard` says the platform has none, writing is
+///   refused with `error.Unavailable` instead;
 /// - with `zuiOpenUrl`, a path, a `file:` URL and a word are refused with
 ///   `error.InvalidUrl`, and with a harness `openedUrl`, a URL reaches the
 ///   system;
@@ -104,6 +106,9 @@ const other_thread_wake_ns = 20 * std.time.ns_per_ms;
 ///   harness opens its window with room for at least one semantic node;
 /// - optionally `fn openedUrl(self) ?[]const u8`: the last URL the host
 ///   handed to the system, which the harness fakes so no browser opens;
+/// - optionally `fn platformOffersClipboard(self) bool`: false when the
+///   platform the host runs on has no clipboard, as a headless compositor
+///   may not; without it, the platform is taken to have one;
 /// - optionally `fn scriptServices(self, script: zui_testing.ServiceScript)
 ///   void`: make the host's next dialog, menu or notification answer as the
 ///   script says, without showing anything;
@@ -352,7 +357,14 @@ const opened_url = "https://ziglang.org/";
 fn expectServicesAnswer(comptime Host: type, host: *Host, harness: anytype, conformance: HostConformance) ?HostViolation {
     const Harness = @typeInfo(@TypeOf(harness)).pointer.child;
     const window = conformance.window;
-    if (@hasDecl(Host, "zuiClipboard")) {
+    const platform_offers_clipboard = !@hasDecl(Harness, "platformOffersClipboard") or harness.platformOffersClipboard();
+    if (@hasDecl(Host, "zuiClipboard") and !platform_offers_clipboard) {
+        if (Host.zuiClipboard.write(host, copied_text)) |_| {
+            return .init(error.ServiceAnsweredWrongly, "copied text to a clipboard its platform does not offer, rather than refusing with Unavailable", .{});
+        } else |err| if (err != error.Unavailable) {
+            return .init(error.ServiceAnsweredWrongly, "refused to copy text to a clipboard its platform does not offer with {t}, not Unavailable", .{err});
+        }
+    } else if (@hasDecl(Host, "zuiClipboard")) {
         Host.zuiClipboard.write(host, copied_text) catch |err| return .init(error.ServiceAnsweredWrongly, "refused to copy text to the clipboard: {t}", .{err});
         var replies: SuiteReplies = .{};
         const paste: zui.ServiceRequest = .of("suite paste");
@@ -534,6 +546,8 @@ const QueueHostFlaw = enum {
     answers_another_request,
     /// Its URL opener hands anything to the system.
     opens_paths,
+    /// It copies text when its platform offers no clipboard.
+    copies_without_clipboard,
 };
 
 /// Reports what its harness posts, and waits on an `Io.Event` for the
@@ -555,11 +569,13 @@ fn QueueHost(comptime flaw: QueueHostFlaw) type {
         copied_len: usize = 0,
         opened_url: ?[]const u8 = null,
         script: ServiceScript = .{},
+        platform_offers_clipboard: bool = true,
 
         const longest_wait_ns = 10 * std.time.ns_per_s;
 
         pub const zuiClipboard = struct {
             pub fn write(self: *Self, text: []const u8) zui.ServiceError!void {
+                if (!self.platform_offers_clipboard and flaw != .copies_without_clipboard) return error.Unavailable;
                 if (text.len > self.copied.len) return error.TooLarge;
                 @memcpy(self.copied[0..text.len], text);
                 self.copied_len = text.len;
@@ -693,6 +709,10 @@ fn QueueHostHarness(comptime Host: type) type {
 
         pub fn openedUrl(self: *Self) ?[]const u8 {
             return self.queue_host.opened_url;
+        }
+
+        pub fn platformOffersClipboard(self: *Self) bool {
+            return self.queue_host.platform_offers_clipboard;
         }
 
         pub fn scriptServices(self: *Self, script: ServiceScript) void {
@@ -882,6 +902,20 @@ test "a host whose service answers another request fails the suite" {
     const violation = (try findHostViolation(Host, &harness, .{ .io = std.testing.io })).?;
     try std.testing.expectEqual(error.ServiceAnsweredWrongly, violation.kind);
     try std.testing.expect(std.mem.startsWith(u8, violation.description(), "answered the clipboard read naming request "));
+}
+
+test "a host whose platform offers no clipboard passes the suite by refusing to copy with Unavailable" {
+    const Host = QueueHost(.none);
+    var harness: QueueHostHarness(Host) = .{ .queue_host = .{ .io = std.testing.io, .platform_offers_clipboard = false } };
+    try expectHostConforms(Host, &harness, .{ .io = std.testing.io });
+}
+
+test "a host that copies text when its platform offers no clipboard fails the suite" {
+    const Host = QueueHost(.copies_without_clipboard);
+    var harness: QueueHostHarness(Host) = .{ .queue_host = .{ .io = std.testing.io, .platform_offers_clipboard = false } };
+    const violation = (try findHostViolation(Host, &harness, .{ .io = std.testing.io })).?;
+    try std.testing.expectEqual(error.ServiceAnsweredWrongly, violation.kind);
+    try std.testing.expectEqualStrings("copied text to a clipboard its platform does not offer, rather than refusing with Unavailable", violation.description());
 }
 
 test "a host whose URL opener hands a path to the system fails the suite" {

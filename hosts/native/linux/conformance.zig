@@ -90,6 +90,10 @@ const CompositorHarness = struct {
     pub fn close(self: *CompositorHarness) void {
         self.host().close();
     }
+
+    pub fn platformOffersClipboard(self: *CompositorHarness) bool {
+        return self.host().data_device.device != null;
+    }
 };
 
 fn surfaceCoordinates(window_host: *const Host, position: [2]f32) [2]f32 {
