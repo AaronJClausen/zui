@@ -2246,7 +2246,7 @@ fn present(renderer: *Renderer, surface: zui.Surface, frame: *const Ui.Frame) !v
       <div class="group-head"><span class="group-index">08</span><h2>Declared but not working yet</h2></div>
       <p class="group-intro">These names compile, but they don't do anything yet. This list is from <code>ARCHITECTURE.md</code> §7 and the roadmap.</p>
       <ul class="gap-list">
-        <li><b>Many windows</b><span><code>zui_app</code> declares each window in a context of its own, with <code class="z">zuiDeclare(app, ui, window)</code> and <code class="z">Start(App).windows.open</code>, and checks a host's <code class="z">zuiOpenWindow</code>, but no native host opens a second window yet.</span></li>
+        <li><b>Many windows</b><span><code>zui_app</code> declares each window in a context of its own, with <code class="z">zuiDeclare(app, ui, window)</code> and <code class="z">Start(App).windows.open</code>, and the Windows host opens up to four windows, but zui-sokol does not yet draw into more than one.</span></li>
         <li><b>Still to come</b><span>Motion, multi-line text editing, skins, the inspector over the wire, and more hosts (macOS, Linux, web).</span></li>
       </ul>
     </section>

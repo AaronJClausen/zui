@@ -72,7 +72,7 @@ green, and its **Status** line below says which slice is next.
 | H4. Linux | 10 | `../zui-host`, `../zui-sokol` | | in progress; slice 3, fractional scale, the clipboard, drops and file watching, is next |
 | H5. Web | 10 | `../zui-web` | | |
 | H7. Window decorations | 10 | `src/chrome.zig`, `src/context.zig`, `zui_app/`, `../zui-host` | | waiting on a person: the checklist under H7's *Status*, on `zig build title-bar` in zui-host |
-| H9. Many windows | 10 | `zui_app/`, `zui_testing/`, `../zui-host`, `../zui-sokol` | | in progress; slice 2, the Windows host, is next |
+| H9. Many windows | 10 | `zui_app/`, `zui_testing/`, `../zui-host`, `../zui-sokol` | | in progress; slice 3, zui-sokol drawing many windows and the example, is next |
 
 After the queue comes stage 11 in the order of SPEC.md §21. It joins the queue as it runs short. Stage 10's items are listed under *Stage 10: reach*; each is given its Grounding, Plan and Done when as it is taken.
 
@@ -4499,13 +4499,40 @@ be told apart, so every window is due on every turn.
 - The one-window form keeps its fields and its path: a frame every turn.
 - `expectHostConforms` opens a second window on a host with many, posts
   to each through the harness's `postTo`, closes it, and opens a third.
-- R1: `src/` gains an error set and comptime checks only. The
+- R1, measured by CI's counts job on `ea5ab47`: every scenario's count is
+  identical to `6b6ce6f`'s run, its code parent (`daba4a7` changed only
+  documents). `src/` gains an error set and comptime checks only, and the
   `zui-counts` executable's `.text` (1,171,081 bytes) and `.rodata`
-  (145,243 bytes) are byte-identical to `daba4a7`'s, so the counts cannot
-  move. Callgrind needs Valgrind, which this machine lacks, so CI's counts
-  job confirms it after the push.
+  (145,243 bytes) are byte-identical to `daba4a7`'s.
 
-Next: slice 2, the Windows host.
+Slice 2, the Windows host (zui-host `75d8b93`), is done:
+- The host is `.many`, with `Host.max_windows = 4` slots. Each slot holds
+  the window's `HWND`, inbox, requests, scale, terminate and low-memory
+  state, window-thread state, chrome snapshot, accessibility bridge and
+  menu bar (`services.MenuBar`). Every call that takes a window finds its
+  slot by id; the `.main` asserts are gone, and ids are never reused.
+- `zuiOpenWindow` creates a window on the window thread before it
+  returns. `zuiCloseWindow` closes any window, `.main` included, once a
+  dialog or menu open over it has closed, and the window thread frees the
+  slot at `WM_NCDESTROY`.
+- A message-only window anchors the window thread. It opens and closes
+  the windows, owns the clipboard and the notification icon, and answers
+  clipboard reads, URLs and notifications, so every service works after
+  `.main` closes. File dialogs and popup menus are owned by the window
+  named and answer with its id. The console's terminate and low memory
+  reach every window.
+- The conformance harness declares `postTo`, so the host suite opens a
+  second hidden window, routes input to each and closes it. The host's
+  own tests close one window alone, change one window's DPI, deliver
+  Ctrl+C to every window, refuse a fifth window and give a new id after
+  one closes, and use the clipboard and a dialog over a second window
+  after `.main` has closed.
+- `zig build test` passes in Debug and ReleaseSafe, `zig build
+  conformance` passed 12 runs of 12 with fresh seeds, `services` and
+  `title-bar -- --check` pass, and the tour idles at 0.0 ms of CPU over
+  10 s.
+
+Next: slice 3, zui-sokol drawing two windows, and the many-windows example.
 
 ---
 
