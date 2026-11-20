@@ -11,7 +11,7 @@ const zui_host = @import("zui_host");
 const zui_sokol = @import("zui_sokol");
 const zui_app = @import("zui_app");
 const zui_widgets = @import("zui_widgets");
-const zui = zui_host.zui;
+const zui = @import("zui");
 
 const Ui = zui.Context(zui_sokol.config(.{ .features = .{ .semantics = true } }));
 const Widgets = zui_widgets.Widgets(Ui);

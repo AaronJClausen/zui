@@ -32,7 +32,7 @@ const Object = extern struct {
     vtable: [*]const *const anyopaque,
 
     fn method(self: *Object, comptime index: usize, comptime Function: type) *const Function {
-        return @ptrCast(self.vtable[index]);
+        return @ptrCast(@alignCast(self.vtable[index]));
     }
 
     fn release(self: *Object) void {

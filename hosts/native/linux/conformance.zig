@@ -6,7 +6,7 @@
 
 const std = @import("std");
 const zui_host = @import("zui_host");
-const zui = zui_host.zui;
+const zui = @import("zui");
 const zui_testing = @import("zui_testing");
 const Host = zui_host.Host;
 const keys = zui_host.linux.keys;

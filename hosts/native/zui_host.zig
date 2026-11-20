@@ -1,9 +1,5 @@
 const builtin = @import("builtin");
 
-/// The zui this host is built against; import it from here so the
-/// application and the host always agree on zui's types.
-pub const zui = @import("zui");
-
 /// The native host for the target's OS: Win32 on Windows, Wayland on Linux.
 pub const Host = switch (builtin.os.tag) {
     .windows => windows.Host,

@@ -4,7 +4,7 @@
 
 const std = @import("std");
 const zui_host = @import("zui_host");
-const zui = zui_host.zui;
+const zui = @import("zui");
 const zui_testing = @import("zui_testing");
 const zui_async = @import("zui_async");
 const zui_widgets = @import("zui_widgets");

@@ -12,7 +12,7 @@ const zui_app = @import("zui_app");
 const zui_wire = @import("zui_wire");
 const tour = @import("zui_sokol_tour");
 const capture = @import("capture.zig");
-const zui = zui_host.zui;
+const zui = @import("zui");
 const Ui = tour.kit.Ui;
 
 const Mode = union(enum) {

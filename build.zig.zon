@@ -8,6 +8,7 @@
         .zui_terminal = .{ .path = "renderers/terminal" },
         .zui_raylib = .{ .path = "renderers/raylib" },
         .zui_sokol = .{ .path = "renderers/sokol" },
+        .zui_host = .{ .path = "hosts/native" },
     },
     .paths = .{
         "build.zig",
@@ -18,6 +19,7 @@
         "renderers/terminal",
         "renderers/raylib",
         "renderers/sokol",
+        "hosts/native",
         "LICENSE",
         "README.md",
         "SPEC.md",

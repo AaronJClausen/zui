@@ -7,8 +7,8 @@ pub fn build(b: *std.Build) void {
     const linux = target.result.os.tag == .linux;
     const has_host = windows or linux;
 
-    const zui_dependency = b.dependency("zui", .{ .target = target, .optimize = optimize });
-    const zui_module = zui_dependency.module("zui");
+    const core = b.dependency("zui_core", .{ .target = target, .optimize = optimize });
+    const zui_module = core.module("zui");
 
     const host_module = b.addModule("zui_host", .{
         .root_source_file = b.path("zui_host.zig"),
@@ -35,9 +35,10 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{
             .{ .name = "zui_host", .module = host_module },
-            .{ .name = "zui_testing", .module = zui_dependency.module("zui_testing") },
-            .{ .name = "zui_async", .module = zui_dependency.module("zui_async") },
-            .{ .name = "zui_widgets", .module = zui_dependency.module("zui_widgets") },
+            .{ .name = "zui", .module = zui_module },
+            .{ .name = "zui_testing", .module = core.module("zui_testing") },
+            .{ .name = "zui_async", .module = core.module("zui_async") },
+            .{ .name = "zui_widgets", .module = core.module("zui_widgets") },
         },
     }) });
     linkThroughLlvmOnLinux(conformance_tests);
@@ -49,10 +50,10 @@ pub fn build(b: *std.Build) void {
     check_step.dependOn(&unit_tests.step);
     if (has_host) check_step.dependOn(&conformance_tests.step);
 
-    if (has_host) addTour(b, target, optimize, host_module, zui_dependency, check_step);
-    if (has_host) addTheme(b, target, optimize, host_module, zui_dependency, check_step);
-    if (has_host) addServicesExample(b, target, optimize, host_module, zui_dependency, check_step);
-    if (windows) addWindowsExamples(b, target, optimize, host_module, zui_dependency, check_step);
+    if (has_host) addTour(b, target, optimize, host_module, core, check_step);
+    if (has_host) addTheme(b, target, optimize, host_module, core, check_step);
+    if (has_host) addServicesExample(b, target, optimize, host_module, core, check_step);
+    if (windows) addWindowsExamples(b, target, optimize, host_module, core, check_step);
 
     const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "zui_host.zig", "windows", "linux", "examples" };
     b.step("fmt", "Format all Zig sources").dependOn(&b.addFmt(.{ .paths = formatted_paths }).step);
@@ -69,10 +70,10 @@ fn linkThroughLlvmOnLinux(compile: *std.Build.Step.Compile) void {
     }
 }
 
-/// zui-sokol's tour on this host, drawn by zui-sokol's renderer: on
+/// The sokol renderer's tour on this host, drawn by that renderer: on
 /// Windows through a Direct3D 11 swapchain that DirectComposition composes
 /// over the window's backdrop, on Linux with OpenGL through EGL.
-fn addTour(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, host_module: *std.Build.Module, zui_dependency: *std.Build.Dependency, check_step: *std.Build.Step) void {
+fn addTour(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, host_module: *std.Build.Module, core: *std.Build.Dependency, check_step: *std.Build.Step) void {
     const zui_sokol_dependency = b.lazyDependency("zui_sokol", .{ .target = target, .optimize = optimize }) orelse return;
     const tour = b.addExecutable(.{
         .name = "zui-host-tour",
@@ -82,7 +83,8 @@ fn addTour(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builti
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "zui_host", .module = host_module },
-                .{ .name = "zui_app", .module = zui_dependency.module("zui_app") },
+                .{ .name = "zui", .module = core.module("zui") },
+                .{ .name = "zui_app", .module = core.module("zui_app") },
                 .{ .name = "zui_sokol", .module = zui_sokol_dependency.module("zui_sokol") },
                 .{ .name = "zui_sokol_tour", .module = zui_sokol_dependency.module("zui_sokol_tour") },
             },
@@ -92,13 +94,13 @@ fn addTour(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builti
     b.installArtifact(tour);
     const run_tour = b.addRunArtifact(tour);
     if (b.args) |arguments| run_tour.addArgs(arguments);
-    b.step("tour", "Run zui-sokol's tour on this host (`-- --measure-idle` reports its idle CPU time)").dependOn(&run_tour.step);
+    b.step("tour", "Run the sokol renderer's tour on this host (`-- --measure-idle` reports its idle CPU time)").dependOn(&run_tour.step);
     check_step.dependOn(&tour.step);
 }
 
 /// A window styled by a ZON file that the host's file watch reloads, on
 /// either host.
-fn addTheme(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, host_module: *std.Build.Module, zui_dependency: *std.Build.Dependency, check_step: *std.Build.Step) void {
+fn addTheme(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, host_module: *std.Build.Module, core: *std.Build.Dependency, check_step: *std.Build.Step) void {
     const zui_sokol_dependency = b.lazyDependency("zui_sokol", .{ .target = target, .optimize = optimize }) orelse return;
     const theme = b.addExecutable(.{
         .name = "zui-host-theme",
@@ -108,7 +110,8 @@ fn addTheme(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.built
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "zui_host", .module = host_module },
-                .{ .name = "zui_async", .module = zui_dependency.module("zui_async") },
+                .{ .name = "zui", .module = core.module("zui") },
+                .{ .name = "zui_async", .module = core.module("zui_async") },
                 .{ .name = "zui_sokol", .module = zui_sokol_dependency.module("zui_sokol") },
             },
         }),
@@ -122,7 +125,7 @@ fn addTheme(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.built
 }
 
 /// Every host service from buttons, on Windows and on Linux.
-fn addServicesExample(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, host_module: *std.Build.Module, zui_dependency: *std.Build.Dependency, check_step: *std.Build.Step) void {
+fn addServicesExample(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, host_module: *std.Build.Module, core: *std.Build.Dependency, check_step: *std.Build.Step) void {
     const zui_sokol_dependency = b.lazyDependency("zui_sokol", .{ .target = target, .optimize = optimize }) orelse return;
     const services = b.addExecutable(.{
         .name = "zui-host-services",
@@ -132,9 +135,10 @@ fn addServicesExample(b: *std.Build, target: std.Build.ResolvedTarget, optimize:
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "zui_host", .module = host_module },
-                .{ .name = "zui_app", .module = zui_dependency.module("zui_app") },
-                .{ .name = "zui_async", .module = zui_dependency.module("zui_async") },
-                .{ .name = "zui_widgets", .module = zui_dependency.module("zui_widgets") },
+                .{ .name = "zui", .module = core.module("zui") },
+                .{ .name = "zui_app", .module = core.module("zui_app") },
+                .{ .name = "zui_async", .module = core.module("zui_async") },
+                .{ .name = "zui_widgets", .module = core.module("zui_widgets") },
                 .{ .name = "zui_sokol", .module = zui_sokol_dependency.module("zui_sokol") },
             },
         }),
@@ -149,8 +153,8 @@ fn addServicesExample(b: *std.Build, target: std.Build.ResolvedTarget, optimize:
 
 /// The remote, material, HDR, accessibility, title bar and many-windows examples, which run
 /// only on the Windows host so far.
-fn addWindowsExamples(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, host_module: *std.Build.Module, zui_dependency: *std.Build.Dependency, check_step: *std.Build.Step) void {
-    const app_module = zui_dependency.module("zui_app");
+fn addWindowsExamples(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, host_module: *std.Build.Module, core: *std.Build.Dependency, check_step: *std.Build.Step) void {
+    const app_module = core.module("zui_app");
     const zui_sokol_dependency = b.lazyDependency("zui_sokol", .{ .target = target, .optimize = optimize }) orelse return;
 
     const remote = b.addExecutable(.{
@@ -161,8 +165,9 @@ fn addWindowsExamples(b: *std.Build, target: std.Build.ResolvedTarget, optimize:
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "zui_host", .module = host_module },
+                .{ .name = "zui", .module = core.module("zui") },
                 .{ .name = "zui_app", .module = app_module },
-                .{ .name = "zui_wire", .module = zui_dependency.module("zui_wire") },
+                .{ .name = "zui_wire", .module = core.module("zui_wire") },
                 .{ .name = "zui_sokol", .module = zui_sokol_dependency.module("zui_sokol") },
                 .{ .name = "zui_sokol_tour", .module = zui_sokol_dependency.module("zui_sokol_tour") },
             },
@@ -182,6 +187,7 @@ fn addWindowsExamples(b: *std.Build, target: std.Build.ResolvedTarget, optimize:
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "zui_host", .module = host_module },
+                .{ .name = "zui", .module = core.module("zui") },
                 .{ .name = "zui_sokol", .module = zui_sokol_dependency.module("zui_sokol") },
             },
         }),
@@ -200,6 +206,7 @@ fn addWindowsExamples(b: *std.Build, target: std.Build.ResolvedTarget, optimize:
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "zui_host", .module = host_module },
+                .{ .name = "zui", .module = core.module("zui") },
                 .{ .name = "zui_sokol", .module = zui_sokol_dependency.module("zui_sokol") },
             },
         }),
@@ -218,8 +225,9 @@ fn addWindowsExamples(b: *std.Build, target: std.Build.ResolvedTarget, optimize:
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "zui_host", .module = host_module },
+                .{ .name = "zui", .module = core.module("zui") },
                 .{ .name = "zui_app", .module = app_module },
-                .{ .name = "zui_widgets", .module = zui_dependency.module("zui_widgets") },
+                .{ .name = "zui_widgets", .module = core.module("zui_widgets") },
                 .{ .name = "zui_sokol", .module = zui_sokol_dependency.module("zui_sokol") },
             },
         }),
@@ -238,8 +246,9 @@ fn addWindowsExamples(b: *std.Build, target: std.Build.ResolvedTarget, optimize:
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "zui_host", .module = host_module },
+                .{ .name = "zui", .module = core.module("zui") },
                 .{ .name = "zui_app", .module = app_module },
-                .{ .name = "zui_widgets", .module = zui_dependency.module("zui_widgets") },
+                .{ .name = "zui_widgets", .module = core.module("zui_widgets") },
                 .{ .name = "zui_sokol", .module = zui_sokol_dependency.module("zui_sokol") },
             },
         }),
@@ -258,9 +267,10 @@ fn addWindowsExamples(b: *std.Build, target: std.Build.ResolvedTarget, optimize:
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "zui_host", .module = host_module },
+                .{ .name = "zui", .module = core.module("zui") },
                 .{ .name = "zui_app", .module = app_module },
-                .{ .name = "zui_async", .module = zui_dependency.module("zui_async") },
-                .{ .name = "zui_widgets", .module = zui_dependency.module("zui_widgets") },
+                .{ .name = "zui_async", .module = core.module("zui_async") },
+                .{ .name = "zui_widgets", .module = core.module("zui_widgets") },
                 .{ .name = "zui_sokol", .module = zui_sokol_dependency.module("zui_sokol") },
             },
         }),

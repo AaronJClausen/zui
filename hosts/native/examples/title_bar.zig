@@ -15,7 +15,7 @@ const zui_host = @import("zui_host");
 const zui_sokol = @import("zui_sokol");
 const zui_app = @import("zui_app");
 const zui_widgets = @import("zui_widgets");
-const zui = zui_host.zui;
+const zui = @import("zui");
 const win32 = zui_host.windows.win32;
 
 const Ui = zui.Context(zui_sokol.config(.{ .features = .{ .semantics = true, .chrome_regions = true } }));

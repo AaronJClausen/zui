@@ -31,7 +31,7 @@ Each item says:
 | stage 7 | gestures (I5): arbitration by motion component, zoom, long press, double tap, momentum, the intents and custom recognizers; drag and drop between elements (I1) | done: a carousel in a list, a pinch starting on a list inside a map, a lasso module against a map's pan, and `zui_testing.Driver.drag` moving an item between two lists, out of one that scrolls by dragging |
 | after stage 7: the foundation | G1's first slice ran 5.5% to 7.7% more instructions in scenes that draw no effect, so the work turned to what lay under it: benchmarks that can be trusted (R3 to R9) and the data-oriented design audit's findings (P6 to P10) | done; a commit compared with itself over three code layouts calls nothing, its intervals 0.52% wide on average, and a change that only moves code is not called; a tooltip declared before a 3,000-cell grid lays out in 79 µs, not 671 µs (P6); warm text −43% (P9); `init` from 138 µs to 92 µs (P7, P10); the budgets judged in benchmarking mode |
 | stage 8 | gradients, shadows and glow (G1); backdrop blur (G2); effects in the corners of a decoration that draws nothing (G7); transforms with hit inversion (G3); materials (G5); HDR and wide gamut (G6) | done: the sokol renderer draws gradients, shadows, backdrop blurs, transforms and materials through a shader of its own and passes the renderer suite, its effects rounded by a decoration that draws nothing, a pointer hits a turned button where it is drawn, and a frame without effects runs no more instructions than before; `zui.ExtendedColor` is clamped for a renderer that draws only `Color`, and on a monitor in HDR the Windows host opens the window in scRGB and reports its headroom, and the sokol renderer shows twice SDR white at 2.00× and four times it at 4.00×, measured off the desktop |
-| stage 9 | `zui_debug` (V1); semantics and accessibility actions (V2); safety sweeps (V3); the demo in a browser (V4) | done. V2: every `zui_widgets` control lists its semantics, and the Windows host bridges them to UI Automation with each control's pattern, its state and changes, and every action, so a client out of process toggles, sets, expands, selects, scrolls and invokes zui-host's accessibility example; V4: the sokol renderer's tour runs in a browser at the display's frame rate, from <https://aaronjclausen.github.io/zui-web/>, in a Web Worker behind a page that draws its frames over `zui_wire` and sleeps between the frames the tour needs; V1 done: `Frame.inspect` and the inspector's diagnostics, fallbacks, zone times from its `ZoneTimer` tracer, element tree and hovered element's configs, and its theme reloaded from a watched file; the raylib renderer's tour opens it with F12 through `zui_app`'s `zuiObserve`, and draws every screen with it open within its limits |
+| stage 9 | `zui_debug` (V1); semantics and accessibility actions (V2); safety sweeps (V3); the demo in a browser (V4) | done. V2: every `zui_widgets` control lists its semantics, and the Windows host bridges them to UI Automation with each control's pattern, its state and changes, and every action, so a client out of process toggles, sets, expands, selects, scrolls and invokes the native hosts' accessibility example; V4: the sokol renderer's tour runs in a browser at the display's frame rate, from <https://aaronjclausen.github.io/zui-web/>, in a Web Worker behind a page that draws its frames over `zui_wire` and sleeps between the frames the tour needs; V1 done: `Frame.inspect` and the inspector's diagnostics, fallbacks, zone times from its `ZoneTimer` tracer, element tree and hovered element's configs, and its theme reloaded from a watched file; the raylib renderer's tour opens it with F12 through `zui_app`'s `zuiObserve`, and draws every screen with it open within its limits |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
@@ -68,15 +68,15 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
-| H4. Linux | 10 | `../zui-host`, `renderers/sokol/` | | in progress; slice 5, the IME, is next |
+| H4. Linux | 10 | `hosts/native/`, `renderers/sokol/` | | in progress; slice 5, the IME, is next |
 | H5. Web | 10 | `../zui-web` | | |
-| H7. Window decorations | 10 | `core/src/chrome.zig`, `core/src/context.zig`, `core/zui_app/`, `../zui-host` | | waiting on a person: the checklist under H7's *Status*, on `zig build title-bar` in zui-host |
+| H7. Window decorations | 10 | `core/src/chrome.zig`, `core/src/context.zig`, `core/zui_app/`, `hosts/native/` | | waiting on a person: the checklist under H7's *Status*, on `zig build title-bar` in `hosts/native/` |
 | M1. `zui_motion` | 11 | `core/zui_motion/` | | |
 | M2. Exit animations | 11 | `core/src/`, `core/zui_motion/` | M1 | |
 | K1. `zui_color` | 11 | `core/zui_color/` | | |
 | K5. The skin contract | 11 | `core/zui_widgets/` | | |
 | K2. The default skin | 11 | `core/zui_widgets/` | K5, K1 | |
-| E1. Text editing | 11 | `core/src/`, `core/zui_widgets/`, `../zui-host` | K5 | |
+| E1. Text editing | 11 | `core/src/`, `core/zui_widgets/`, `hosts/native/` | K5 | |
 | K3. `zui_icons` | 11 | `core/zui_icons/` | | |
 | K4. `zui_themes` | 11 | `themes/` | K5, K2 | |
 | D1. The template project | 11 | `examples/` | | |
@@ -117,14 +117,14 @@ Things to know:
   still missing is listed in ARCHITECTURE.md §7 with the item that adds
   it. With `TaskPool` deleted, outside data reaches a frame only through
   sources: `zui_async`'s (A4) or the application's own (A3).
-- **A core change reaches the renderers at once, and the hosts outside
-  this repository by a pin.** `renderers/raylib/`, `renderers/sokol/`
-  and `renderers/terminal/` name `core/` by path, and `zig build
-  test-all` tests them with the change; the raylib renderer's tour, run
-  from `renderers/raylib/`, checks the idle budget with `--measure-idle`
-  and the trace with `-Dzui-tracy=true`. zui-host and zui-web pin zui by
-  commit; develop them against this checkout with `--fork=../zui`, push
-  zui, then move their pins with `zig fetch --save=zui`.
+- **A core change reaches the renderers and the native hosts at once,
+  and the web host by a pin.** `renderers/raylib/`, `renderers/sokol/`,
+  `renderers/terminal/` and `hosts/native/` name `core/` by path, and
+  `zig build test-all` tests them with the change; the raylib renderer's
+  tour, run from `renderers/raylib/`, checks the idle budget with
+  `--measure-idle` and the trace with `-Dzui-tracy=true`. zui-web pins
+  zui by commit; develop it against this checkout with `--fork=../zui`,
+  push zui, then move its pin with `zig fetch --save=zui`.
 - **`bench --check-targets` checks §20.2's budgets,** including
   declaration for the box tree, judged in benchmarking mode (Turbo Boost
   off, the `performance` governor), the mode `bench-compare` measures in.
@@ -4284,15 +4284,15 @@ is done without it.
 
 ### H4. Linux
 
-**Grounding.** zui-host has one directory per OS, and `zui_host.Host`
-is a compile error on anything but Windows (`zui_host.zig:8-11`); its
+**Grounding.** `hosts/native/` has one directory per OS, and `zui_host.Host`
+is a compile error on anything but Windows (`hosts/native/zui_host.zig:8-11`); its
 build links Win32 libraries and builds the examples only there
-(`build.zig:17-19`, `build.zig:43`). The Windows host is the shape to
-follow: an `Inbox` of events in physical pixels (`windows/host.zig:84`),
+(`hosts/native/build.zig:17-19`, `hosts/native/build.zig:43`). The Windows host is the shape to
+follow: an `Inbox` of events in physical pixels (`hosts/native/windows/host.zig:84`),
 converted to layout units at `zuiPoll` (`:203`, `:245`), a sticky wake
 cleared after the wait (`:272`), and a harness that delivers what the OS
 would, synchronously, to the host's own handlers
-(`windows/conformance.zig:36`, `:66`). Its message loop runs on a thread
+(`hosts/native/windows/conformance.zig:36`, `:66`). Its message loop runs on a thread
 of its own (`:348`) only because Windows runs moves and resizes in a
 modal loop; a Wayland client has no such loop, so one thread suffices.
 SPEC.md §16.4's `wayland` surface is a display and a surface
@@ -4305,11 +4305,11 @@ linking them is the ecosystem's way. `zui_sokol` draws into a native window
 only on Windows (`renderers/sokol/src/renderer.zig:29`, `:50`, `:119`), through a context
 of its own, as `renderers/sokol/src/wgl.zig` does with WGL; on Linux sokol_gfx draws with
 OpenGL, so a `.wayland` surface is an EGL context on a `wl_egl_window`.
-The tour on the host (`examples/tour.zig:171`, `:114`, `:217`) names
+The tour on the host (`hosts/native/examples/tour.zig:171`, `:114`, `:217`) names
 `.win32` and reads the process's CPU time and the screen through Win32.
 
 **Plan.** In slices, each passing C3 where it can run:
-1. **A Wayland window** (`linux/`): libwayland-client with xdg-shell's
+1. **A Wayland window** (`hosts/native/linux/`): libwayland-client with xdg-shell's
    interfaces written in Zig, a `.wayland` surface, integer scale from
    `wl_surface.preferred_buffer_scale`, the pointer, the wheel by
    notch, keys through xkbcommon with modifiers, the evdev code and
@@ -4359,8 +4359,8 @@ idles at 0% CPU; and the theme example restyles on a file change.
 
 **Spec.** §7, §16.3, §16.4, §21 (stage 10).
 
-**Status.** Slice 1 is done: zui-host `e9607a3` (`linux/host.zig`,
-`linux/wayland.zig`, `linux/xkb.zig`, `linux/keys.zig`) and zui-sokol
+**Status.** Slice 1 is done: zui-host `e9607a3` (`hosts/native/linux/host.zig`,
+`hosts/native/linux/wayland.zig`, `hosts/native/linux/xkb.zig`, `hosts/native/linux/keys.zig`) and zui-sokol
 `301765b` (`src/egl.zig`), neither pushed; zui-host's pin moves to
 zui-sokol `301765b` once it is. On Hyprland with an NVIDIA RTX 2060
 SUPER, the host suite and six tests of the host's own pass in Debug,
@@ -4372,9 +4372,9 @@ with 0 or 1 frames and no wakes, in five ReleaseSafe runs of six (the
 sixth drew 96 frames for the pointer over the window). zui-host's CI
 gains a Linux job under a headless Weston, which passes (`a141d78`).
 
-Slice 2 is done in zui-host alone, `96d3720` (`linux/host.zig`,
-`linux/dbus.zig`, `linux/desktop_bus.zig`), not pushed, reporting what the Windows host reports
-(`windows/host.zig:504`, `:534-544`, `:672-706`, `:768-777`) where Linux
+Slice 2 is done in zui-host alone, `96d3720` (`hosts/native/linux/host.zig`,
+`hosts/native/linux/dbus.zig`, `hosts/native/linux/desktop_bus.zig`), not pushed, reporting what the Windows host reports
+(`hosts/native/windows/host.zig:504`, `:534-544`, `:672-706`, `:768-777`) where Linux
 has it. A held key repeats at `repeat_info`'s rate and delay, each repeat
 a `key_down` with `repeat` set that types again, and a wait ends at the
 next repeat. SIGINT, SIGTERM and SIGHUP set a flag and wake, and the next
@@ -4403,8 +4403,8 @@ memory notification has no unprivileged counterpart but pressure
 triggers), reduced transparency and text scale, which the portal does not
 carry.
 
-Slice 3 is done in zui-host alone, `09ccf9d` (`linux/data_device.zig`,
-`linux/file_watch.zig`), pushed. With `wp_fractional_scale_v1` and
+Slice 3 is done in zui-host alone, `09ccf9d` (`hosts/native/linux/data_device.zig`,
+`hosts/native/linux/file_watch.zig`), pushed. With `wp_fractional_scale_v1` and
 `wp_viewporter` both offered, the record's scale is `preferred_scale /
 120` and the buffer `round(size × scale)` with a buffer scale of 1; one
 function, `pixelsPerSurfaceCoordinate`, converts surface coordinates, and
@@ -4428,8 +4428,8 @@ over 10 s, 9 and 10 frames, no wakes. Not run: a drag from another
 application, and a fractional scale on a monitor (the tests convert at
 1.25 and 1.5 through the listeners).
 
-Slice 4 is done in zui-host alone, `e2b15ad` (`linux/services.zig`,
-`linux/dbus.zig`), pushed: H6's shapes on a second session-bus
+Slice 4 is done in zui-host alone, `e2b15ad` (`hosts/native/linux/services.zig`,
+`hosts/native/linux/dbus.zig`), pushed: H6's shapes on a second session-bus
 connection of the host's own, its socket in the same `ppoll`. A call
 only writes, at most 100 ms, and answers are published from `zuiPoll`
 and `zuiWait`. `zuiNotifications` calls `org.freedesktop.Notifications`'
@@ -4511,8 +4511,8 @@ Decided here:
   costs nothing. V2's `semantics` field left the counts identical with the
   feature off.
 - The Windows host:
-  - runs its message loop on a thread of its own (zui-host
-    `windows/host.zig:541`);
+  - runs its message loop on a thread of its own
+    (`hosts/native/windows/host.zig:541`);
   - sizes the window with `AdjustWindowRectExForDpi` (`:588`);
   - handles no non-client message, and sets the application's cursor only
     over `HTCLIENT` (`:724`);
@@ -4520,7 +4520,7 @@ Decided here:
     window thread to apply (`:864`);
   - extends the frame over the client for Mica (`:900`), and sets dark
     mode in `reportEnvironment` (`:914`).
-- H6's `zuiMenus.setBar` (`windows/host.zig:150`) sets a native menu bar,
+- H6's `zuiMenus.setBar` (`hosts/native/windows/host.zig:150`) sets a native menu bar,
   which is non-client.
 
 **Plan.** A custom title bar is asked for in `WindowOptions`. The
@@ -4542,7 +4542,7 @@ caption buttons itself.
      checked against it (`core/src/contracts.zig`).
    - `zui_app.Options.title_bar`.
    - A step in the host suite.
-2. **The Windows host** (zui-host, then a zui commit for the documents):
+2. **The Windows host** (`hosts/native/`, then the documents):
    - `WM_NCCALCSIZE` removes only the caption, so DWM keeps the border,
      the rounded corners and the shadow. A maximized window is inset by
      the frame's thickness.
@@ -4568,7 +4568,7 @@ caption buttons itself.
      `init`.
    - Conformance tests send `WM_NCHITTEST` and the non-client mouse
      messages to hidden windows.
-   - `examples/title_bar.zig` and `zig build title-bar`.
+   - `hosts/native/examples/title_bar.zig` and `zig build title-bar`.
    - Under a custom title bar `zuiMenus.setBar` answers
      `error.Unavailable`, since a native bar would sit hidden under the
      drawn one.
@@ -4590,13 +4590,13 @@ caption buttons itself.
 - The Windows host makes the top resize band itself.
 - The title bar's state is reported in `Environment`.
 - `zui_app.start` refuses `.custom` without the feature.
-- A person checks it on a new `zui-host/examples/title_bar.zig`.
+- A person checks it on a new `hosts/native/examples/title_bar.zig`.
 
 **Done when:**
 - A core test lists declared chrome with its bounds and its `.client`
   regions.
 - `zui_app` hands the host each frame's list.
-- zui-host's tests get `HTCAPTION`, `HTMAXBUTTON`, `HTMINBUTTON`,
+- `zui_host`'s tests get `HTCAPTION`, `HTMAXBUTTON`, `HTMINBUTTON`,
   `HTCLOSE`, `HTCLIENT` and the edges from `WM_NCHITTEST`, and the host
   suite passes on a custom window.
 - A person drags, double-clicks, snaps with Win+arrows, sees snap layouts
@@ -4659,7 +4659,7 @@ Slice 2, the Windows host (zui-host `38d2be5`), is done:
 - `zig build title-bar -- --check` hit-tests each part as `zui_app` laid
   it out in a hidden window, and exits 0.
 
-Waiting on a person, on `zig build title-bar` in zui-host, with and
+Waiting on a person, on `zig build title-bar` in `hosts/native/`, with and
 without `--no-system-material`, in light and dark mode:
 - Dragging the title bar moves the window, double-clicking it maximizes
   and restores it, and right-clicking it opens the system menu.
@@ -4765,7 +4765,7 @@ Deliberate, and each a reason to choose zui:
 | Config references (L8) | pointers in element storage, the default layout one constant; an element's own `layout` or `decoration` replaces the style's whole |
 | Budgets | as in SPEC.md §20.2, judged in benchmarking mode (Turbo Boost off, the `performance` governor) from after the audit's P10: the box tree < 125 µs and its declaration < 69 µs, warm text < 150 µs, each the earlier turbo-on budget × 1.25 |
 | Where the contracts live | in the `zui` repo |
-| Native hosts | one `zui-host` repo, one directory per OS |
+| Native hosts | one package, `zui_host` in `hosts/native/`, one directory per OS |
 | Who orchestrates | the host, through one contract; adapters for libraries that own their window (H1) |
 | Signals | lifecycle events; uncatchable signals are not representable |
 | Input | an ordered event log with host instants, many pointers (I4) |
@@ -4899,12 +4899,12 @@ stub with nothing behind it, so taking up macOS changes no contract:
   (`core/bench/machine.zig`), and `--counters`, which says that kperf's
   counters are not read (`core/bench/counters.zig`).
 
-zui-host's `zui_host.Host` stays a compile error on macOS until H3 adds
-its directory. CI's macOS runners stay: they are GitHub's, and they check
+`zui_host.Host` stays a compile error on macOS until H3 adds
+its directory to `hosts/native/`. CI's macOS runners stay: they are GitHub's, and they check
 that the core and its modules build and pass there.
 
 The items:
-- **H3. macOS** (stage 10, `../zui-host`): a Cocoa host passing C3, its
+- **H3. macOS** (stage 10, `hosts/native/`): a Cocoa host passing C3, its
   surface `.cocoa`, its event loop on the main thread as AppKit requires;
   vibrancy through `NSVisualEffectView` as the system material (H8);
   many windows, a context each, as H9 built on Windows; the EDR headroom

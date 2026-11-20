@@ -72,7 +72,7 @@ Stop and ask the user instead of guessing when:
 | a sample | `examples/samples/<name>/`, built and tested from `examples/build.zig` and imported from the `test` block of `examples/samples/root.zig`. A sample uses only the public APIs of zui, its modules, and the renderers and hosts, as a user would |
 | a package | its own directory, with its `build.zig` and `build.zig.zon`, naming other packages by `.path`; in the root, a line in `packages` in `build.zig` and in `.paths` in `build.zig.zon`. A renderer or host package is also a `.path` entry in the root's `.dependencies`, so users reach it as `zui.builder.dependency("<name>", …)`; the root's `build()` never instantiates it |
 | renderer changes | `renderers/<name>/`, which names `core/` by path, so it is tested in place from its directory: `renderers/raylib/`, `renderers/sokol/`, `renderers/terminal/` |
-| native hosts | `../zui-host`, which is created by H2 and not before |
+| native hosts | `hosts/native/<os>/`, in the package `zui_host`, which names `core/` and `renderers/sokol/` by path, so it is tested in place from `hosts/native/`; its examples are `hosts/native/examples/` |
 
 Each stage's features and their layer are listed in `ARCHITECTURE.md` §6.
 If an item puts something in a different layer, change §6 too.
@@ -142,6 +142,21 @@ since its window stays open until closed. After changing a shader's GLSL,
 run `zig build shaders` and commit the regenerated `.glsl.zig`. Its links
 on Linux print `warning(link): unexpected LLD stderr` and a `failed
 command:` line and still succeed.
+In `hosts/native/`, start a session bus of the tests' own
+(`dbus-daemon --session --nofork --address=unix:abstract=/zui-host-test --print-address`,
+kept running) and run with its address in `ZUI_HOST_TEST_SESSION_BUS`
+`zig build test --summary all` and the same with
+`-Doptimize=ReleaseSafe`, which skip only the test that needs
+`ZUI_HOST_TEST_SHOWN_WINDOW` (without the bus, four are skipped);
+`zig build check`, and the same with `-Dtarget=x86_64-windows` and
+`-Dtarget=aarch64-windows`; `zig build services -- --check`, which must
+print that every service answered; `zig build theme -- --check`, which
+must print the frame it restyled in; the tour's cycle,
+`zig build tour -- --frames 300 --cycle 30`, which must print
+`diagnostics ok: true`; and `zig build tour -- --measure-idle`. They need
+a Wayland compositor (CI runs a headless Weston); never run an example
+without `--check`, `--frames` or `--measure-idle`, since its window
+stays open until closed. Its links on Linux print the same LLD noise.
 
 | Command | When |
 |---|---|

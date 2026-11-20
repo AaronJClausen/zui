@@ -170,8 +170,8 @@ The stage is the one in SPEC.md §21 that builds it.
 | accessibility | core semantics and actions; `zui_widgets` declares each control's; host bridges to the platform API | 9 |
 | safety sweeps | core, over a finished frame; `endFrame` runs them behind `features.safety_sweeps` | 9 |
 | the demo in a browser | `zui-web`: the application in a Web Worker, its frames drawn by a thin client over `zui_wire` | 9 |
-| Linux and web hosts; many windows | `zui-host`; one `Context` per window, each made and declared through `zui_app`, and one renderer with a surface per window | 10 |
-| the macOS host | `zui-host`, as the others; only its contract shapes exist (the `cocoa` surface, vibrancy as the system material), as stubs | set aside |
+| Linux and web hosts; many windows | `zui_host` in `hosts/native/`; one `Context` per window, each made and declared through `zui_app`, and one renderer with a surface per window | 10 |
+| the macOS host | `zui_host`, as the others; only its contract shapes exist (the `cocoa` surface, vibrancy as the system material), as stubs | set aside |
 | window decorations: a custom title bar the OS still moves, resizes and snaps | chrome regions in the core, beside the frame, behind `features.chrome_regions`; `zui_app` hands them to the host's `zuiChromeRegions`; each host answers its window manager | 10 |
 | host services: the clipboard, notifications, file dialogs, opening URLs, menus | the core's vocabulary and checks (`core/src/services.zig`); `zui_app.ServicesOf`'s guards; each host implements them, answering into a source the application chooses | 10 |
 | motion and exit animations | `zui_motion`; ghost buffer in the core | 11 |
@@ -210,7 +210,7 @@ What exists today, by stage:
   gate their APIs with compile errors naming them; and `zui_app`, the
   loop of SPEC.md §6.1 as a library, with a render thread, pacing and its
   reports, running the demo on raylib's host.
-- **Stage 4:** the Windows host in `zui-host`, with dropped files and
+- **Stage 4:** the Windows host in `hosts/native/`, with dropped files and
   lifecycle events in the record and the system material reported in the
   environment; the sokol renderer draws into its `win32` window,
   composed with alpha.
@@ -221,7 +221,7 @@ What exists today, by stage:
   over a `.wire` surface; `zui_testing`'s `Recording` and
   `Driver.replay`; and file watching, a host service that publishes
   `zui.FileChange`s into a source the application chooses, which
-  zui-host's Windows host implements.
+  `zui_host`'s Windows host implements.
 - **Stage 6:** the single-line fast path, the whole-string cache and
   static styles: element storage holds config references, pointers into
   the frame arena or to a style made at comptime with `zui.static`;
@@ -267,7 +267,7 @@ What exists today, by stage:
   `action` events answered by `clicked`, `focused`, `adjusted`,
   `manipulation`, `contextRequested` and `dismissed`; and every
   `zui_widgets` control declaring its own, each scroll container's view
-  and each heading's level; zui-host's Windows host bridges the list to
+  and each heading's level; `zui_host`'s Windows host bridges the list to
   UI Automation through `zuiSemantics`, with every control's pattern,
   state, changes and actions. `Frame.sweep()` checks the
   layout and command invariants a frame must keep, and with
@@ -285,7 +285,7 @@ roadmap item named:
 | `Widgets(Ui)` with a `Theme` struct | `Widgets(Ui, Skin)` | `core/zui_widgets/` | K5 |
 | `zui_debug`'s inspector runs in the application's process; a frame on the wire carries no elements for it | over the wire, the inspector runs in another process (SPEC.md §19.7) | `core/zui_debug/`, `core/zui_wire/` | not yet queued |
 | a frame on the wire carries no chrome regions, and the wire host declares no `zuiChromeRegions`, so a remote window keeps the system's title bar | chrome over the wire | `core/zui_wire/` | not yet queued |
-| zui-host's Linux host speaks Wayland only, opens one window, reports no low memory, IME or semantics, and keeps the compositor's title bar; its environment comes from the desktop portal and UPower over D-Bus, and stays at the defaults without them; its services have no menus, which Wayland lacks | a Linux host on Wayland and X11 with every report the Windows host makes, and a system material where the compositor offers one | `../zui-host` | H4 |
+| `zui_host`'s Linux host speaks Wayland only, opens one window, reports no low memory, IME or semantics, and keeps the compositor's title bar; its environment comes from the desktop portal and UPower over D-Bus, and stays at the defaults without them; its services have no menus, which Wayland lacks | a Linux host on Wayland and X11 with every report the Windows host makes, and a system material where the compositor offers one | `hosts/native/` | H4 |
 
 Unchanged in shape: element storage in pre-order structure-of-arrays, the
 layout passes, the segment cache, ids, the state table, the frame arenas,
@@ -296,17 +296,17 @@ parallel measurement and the module boundary.
 | Repository | Holds |
 |---|---|
 | `zui` | in `core/`, the package `zui_core`: the core, the contracts, and the modules: async, widgets, reflect, testing, tracy, app, wire, debug, motion, color, icons; at the root, the package `zui` that users fetch, which re-exports core's modules and runs every package's steps |
-| `zui-host` | native hosts, one directory per OS, chosen by target: `windows/` (H2) and `linux/`, on Wayland (H4) |
 | `zui`, in `renderers/raylib/` | the package `zui_raylib`: the raylib renderer and the raylib adapter host, their conformance harness, and the tour, with its fonts; raylib, fetched lazily |
 | `zui`, in `renderers/sokol/` | the package `zui_sokol`: the sokol renderer, on sokol_gfx through sokol-zig, its sokol_app input collector, its conformance harness, its shaders, and the tour, with its fonts; `zui_sokol_ui`, the tour's context types without sokol, and `zui_sokol_tour`, the tour's application; sokol and stb, fetched lazily |
 | `zui`, in `renderers/terminal/` | the package `zui_terminal`: the terminal renderer, its input decoder and raw-mode terminal, its conformance harness and its demo; no third-party library |
+| `zui`, in `hosts/native/` | the package `zui_host`: native hosts, one directory per OS, chosen by target: `windows/` (H2) and `linux/`, on Wayland (H4), their conformance harnesses, and their examples, drawn by the sokol renderer; sokol and stb, fetched lazily through `renderers/sokol/` for the examples alone |
 | `zui-web` | the browser: a thin client over `zui_wire` (V4), then a web host (H5); today the client's decoder, in WebAssembly, and its drawing of shapes, text, backdrop blurs and materials through WebGL 2 with four samples per pixel, checked against the sokol renderer drawing the tour's frames, and the page's input written back as records the tour takes, with the cursor its frames ask for shown on the canvas; and the sokol renderer's tour in a Web Worker on an `Io` of its own, whose tasks take turns on workers sharing its memory, drawing the frames it draws natively and timing them on the worker's clock; and the page that puts them together, published to GitHub Pages from CI and made cross-origin isolated by a service worker of its own |
 | `zui`, in `themes/` | the package `zui_themes`: skins for OS design languages (K4); a skeleton today |
 | `zui`, in `examples/` | the package `zui_examples`: samples and the template project (D1, D2); a skeleton today |
 
 `zui-web`, `themes/` and `examples/` were created ahead of their items.
 `zui-web` has its build, CI and an agent guide, and pins zui by commit;
-`themes/`, `examples/`, `renderers/raylib/`, `renderers/sokol/` and `renderers/terminal/` each have their build
+`themes/`, `examples/`, `renderers/raylib/`, `renderers/sokol/`, `renderers/terminal/` and `hosts/native/` each have their build
 and CI jobs, and name core by path, so a change to core is built and
 tested against each of them in place; each runs its own steps from its
 own directory, and the root's `test-all` and `check-all` run them all.
@@ -324,10 +324,10 @@ input, and its demo runs through `zui_app`. The sokol and
 terminal renderers' loops still do a host's work by hand, but the sokol
 renderer also draws into a native host's `win32` window without
 sokol_app, with D3D11 through a DirectComposition swapchain that keeps
-alpha so a system material shows (H8), and zui-host runs its tour
+alpha so a system material shows (H8), and `zui_host` runs its tour
 that way (H2), through `zui_app` with the tour's own text contract (C9);
 on Linux it draws into a native host's `wayland` surface with OpenGL
-through EGL, and zui-host's Linux host runs the same tour (H4). zui-host pins zui and zui-sokol by commit; its Windows host runs its message loop on a thread of its own. Its
+through EGL, and `zui_host`'s Linux host runs the same tour (H4). Its Windows host runs its message loop on a thread of its own. Its
 `remote` example runs the sokol renderer's tour on `zui_wire`'s host and renderer
 in one process, and draws it in another, through a `zui_wire.Client` over
 the Windows host and the sokol renderer (F5), and its `theme` example
@@ -396,3 +396,18 @@ strip, `examples/tour_test.zig` declaring every screen headlessly, and
 `examples/tour_freestanding.zig`, which `check` links for
 `wasm32-freestanding`. On Linux its build links through LLVM and LLD, as
 the raylib renderer's does.
+
+The native hosts, `zui_host`, choose their directory by the target's OS:
+`zui_host.Host` is `windows.Host` or `linux.Host`, and any other OS is a
+compile error naming it. On Windows the module links the Win32, DWM,
+DXGI, COM and UI Automation libraries; on Linux it links libc,
+libwayland-client and libxkbcommon, and speaks D-Bus through a client of
+its own (`linux/dbus.zig`). Its `test` step runs the unit tests and
+`windows/conformance.zig` or `linux/conformance.zig`, which run zui's
+host suite and the host's own tests against windows the user never sees,
+reading the Windows host's through a UI Automation client
+(`windows/uia_client.zig`); `check` compiles them and every example.
+The examples in `examples/` are drawn by the sokol renderer, which the
+package names by path as a lazy dependency, so sokol-zig and stb are
+fetched only when its own `build()` runs, as the root's does not. On
+Linux its build links through LLVM and LLD, as the renderers' do.

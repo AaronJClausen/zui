@@ -16,7 +16,7 @@ const zui_sokol = @import("zui_sokol");
 const zui_app = @import("zui_app");
 const zui_async = @import("zui_async");
 const zui_widgets = @import("zui_widgets");
-const zui = zui_host.zui;
+const zui = @import("zui");
 const win32 = zui_host.windows.win32;
 const host_services = if (builtin.os.tag == .windows) zui_host.windows.services else zui_host.linux.services;
 

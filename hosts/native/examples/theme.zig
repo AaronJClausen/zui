@@ -14,7 +14,7 @@ const builtin = @import("builtin");
 const zui_host = @import("zui_host");
 const zui_async = @import("zui_async");
 const zui_sokol = @import("zui_sokol");
-const zui = zui_host.zui;
+const zui = @import("zui");
 const Host = zui_host.Host;
 const Renderer = zui_sokol.Renderer;
 

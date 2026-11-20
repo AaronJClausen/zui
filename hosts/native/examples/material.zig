@@ -14,7 +14,7 @@ const std = @import("std");
 const zui_host = @import("zui_host");
 const zui_sokol = @import("zui_sokol");
 const capture = @import("capture.zig");
-const zui = zui_host.zui;
+const zui = @import("zui");
 const Host = zui_host.Host;
 const Renderer = zui_sokol.Renderer;
 
