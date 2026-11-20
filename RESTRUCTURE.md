@@ -235,13 +235,17 @@ pub fn build(b: *std.Build) void {
 ## Rules while this is under way
 
 - **Each slice is one commit on `main`** (or, for a repository's arrival,
-  the subtree merge plus one commit) and leaves every check green: the
+  the history's merge plus one commit) and leaves every check green: the
   commands in `CLAUDE.md`'s *Verifying*, `zig build test-all`, and each
   moved package's own steps. Nothing is pushed unless the owner says so in
   that session.
-- **History is kept.** A sibling arrives with `git subtree add
-  --prefix=<dir> ../<repo> main`, without `--squash`, so its commits stay
-  in `git log -- <dir>`.
+- **History is kept.** A sibling's `main` is cloned into a scratch
+  directory, rewritten with `git filter-branch --index-filter` so every
+  commit's files sit under `<dir>/`, and merged with
+  `--allow-unrelated-histories --no-ff`, so its commits, with their
+  authors, dates and messages, stay in `git log -- <dir>`. (`git subtree
+  add` keeps the original hashes, but its commits touch the old root
+  paths, so `git log -- <dir>` shows only the merge.)
 - **The documents teleport.** `SPEC.md`, `ROADMAP.md`, `ARCHITECTURE.md`,
   `README.md`, `CLAUDE.md` and `docs/` change only to stay correct about
   the new arrangement: paths, commands, which package holds what, and how
@@ -295,7 +299,7 @@ Done when:
 
 ### 2. zui-terminal into `renderers/terminal/`
 
-Subtree-merge, then: its zui pin becomes `.path = "../../core"`, its
+Merge its history in, then: its zui pin becomes `.path = "../../core"`, its
 re-exports of `zui` and the modules go, its CI jobs move into this
 repository's workflow, each running in its directory
 (`working-directory: renderers/terminal`), its README's content goes into
@@ -326,7 +330,7 @@ Its `windows` and `linux` CI jobs move, the Windows cross-checks
 
 ### 6. zui-web into `renderers/webgl/` and `hosts/web/`
 
-Subtree-merge into `hosts/web/`, then move the drawing into
+Merge its history into `hosts/web/`, then move the drawing into
 `renderers/webgl/`, with git's rename detection keeping each file's
 history. Proposed split, confirmed by what each file imports:
 
@@ -344,7 +348,7 @@ pass in headless Chromium from its directory, and `site` builds in
 
 ### 7. zui-themes and zui-examples into `themes/` and `examples/`
 
-Subtree-merge both skeletons; their agent guides fold into the root's
+Merge both skeletons' histories in; their agent guides fold into the root's
 `CLAUDE.md`, and their CI into the workflow.
 
 ### 8. `text/`: one layout for measuring and drawing
