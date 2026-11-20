@@ -72,8 +72,20 @@ green, and its **Status** line below says which slice is next.
 | H4. Linux | 10 | `../zui-host`, `../zui-sokol` | | in progress; slice 3, fractional scale, the clipboard, drops and file watching, is next |
 | H5. Web | 10 | `../zui-web` | | |
 | H7. Window decorations | 10 | `src/chrome.zig`, `src/context.zig`, `zui_app/`, `../zui-host` | | waiting on a person: the checklist under H7's *Status*, on `zig build title-bar` in zui-host |
+| M1. `zui_motion` | 11 | `zui_motion/` | | |
+| M2. Exit animations | 11 | `src/`, `zui_motion/` | M1 | |
+| K1. `zui_color` | 11 | `zui_color/` | | |
+| K5. The skin contract | 11 | `zui_widgets/` | | |
+| K2. The default skin | 11 | `zui_widgets/` | K5, K1 | |
+| E1. Text editing | 11 | `src/`, `zui_widgets/`, `../zui-host` | K5 | |
+| K3. `zui_icons` | 11 | `zui_icons/` | | |
+| K4. `zui-themes` | 11 | `../zui-themes` | K5, K2 | |
+| D1. `zui-examples` and the template | 11 | `../zui-examples` | | |
+| D2. Samples | 11 | `../zui-examples` | D1 | |
+| D4. A profiling guide | 11 | `docs/` | | |
+| D3. A developer-experience audit | 11 | `../zui-examples`, `README.md`, `docs/` | D1, D2 | |
 
-After the queue comes stage 11 in the order of SPEC.md §21. It joins the queue as it runs short. Stage 10's items are listed under *Stage 10: reach*; each is given its Grounding, Plan and Done when as it is taken.
+After stage 10's rows come stage 11's, which has joined the queue in dependency order. Stage 10's items are listed under *Stage 10: reach* and stage 11's under *Stage 11: polish*; each is given its Grounding, Plan and Done when as it is taken.
 
 Statuses: `next` (the first open row), `in progress` (a slice has
 landed), `waiting on <what>` (blocked by something the next session cannot
