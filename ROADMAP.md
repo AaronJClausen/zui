@@ -71,7 +71,6 @@ green, and its **Status** line below says which slice is next.
 | H3. macOS | 10 | `../zui-host` | | |
 | H4. Linux | 10 | `../zui-host`, `../zui-sokol` | | in progress; slice 3, fractional scale, the clipboard, drops and file watching, is next |
 | H5. Web | 10 | `../zui-web` | | |
-| H6. Services | 10 | `src/services.zig`, `zui_app/`, `zui_testing/`, `../zui-host` | | in progress; slice 5, the example and closing H6, is next |
 | H7. Window decorations | 10 | `src/host.zig`, `../zui-host` | | |
 | H9. Many windows | 10 | `zui_app/`, `../zui-host` | | |
 
@@ -157,6 +156,326 @@ Things to know:
 ---
 
 ## Done
+
+### H6. Services
+
+**Grounding** (at zui `62d0813` and zui-host `16a9235`, before the first
+slice). The host contract listed six optional services by name
+(`src/contracts.zig:23`), and `checkHost` only checked that each was a type
+(`:100-102`). Only `zuiFileWatch` had a checked shape (`checkFileWatch`,
+`:143`), pinned by `host_file_watch_wrong_signature`. The pattern it set
+(F6) is a sink: `zui.FileChangeSink`, a pointer and a function, made by
+`.of(&source)` from any source whose `publish` returns `Wake` or
+`error{Full}!Wake` (`src/host.zig`). SPEC.md showed the other five only as
+`struct { ... }` (§16.3) and said they are reached through `zui_app` with
+`has_*` guards (§16.6), but nothing declared a guard. `zui_app` named the
+services (`zui_app/zui_app.zig:177`) only to report the missing ones
+(`:375`); an application reaches its host only through `Start(App).host`
+(`:198`), and `zuiLoader` gets the context and the `Io`, not the host
+(`:552`). `zui_app`'s test host declared `zuiClipboard = struct {}`
+(`zui_app/tests.zig:15`).
+
+The frame boundary had no channel for a service: `HostRequests` holds the
+cursor and the IME area, diffed as state by `zuiApply`, and a new kind of
+event would need a variant, storage in the context and a limit, as dropped
+files have. V2 found that even a zero-size field added to `Frame` moved R1
+counts. `zui_wire`'s host declares no services. A `zui_async.Stream` with
+one producer panics in safe builds when two publish at once.
+
+On Windows only the clipboard existed, unchecked
+(`zui-host/windows/host.zig:40`): `read(host, buffer) ?[]u8` copied
+`CF_UNICODETEXT` on the caller's thread (`:860`), and `write(host, text)`
+returned `error{InvalidUtf8, ClipboardUnavailable, OutOfMemory}` (`:873`),
+where `OutOfMemory` was `GlobalAlloc` failing (`:875`): the OS's memory,
+handed to the clipboard, so not the host's allocation, but named as if it
+were. A synchronous read is Windows' alone: on Wayland the selection is
+read from a pipe the copying client writes into (H4 slice 3), and in a
+browser `navigator.clipboard.readText` is a promise (H5). The window
+thread runs the message loop in a single-threaded apartment (`:387-389`),
+dispatches everything through `handleMessage` (`:467`), and takes work
+from the UI thread as `WM_APP` messages (`:93`). A modal loop on it, such
+as a move or resize, keeps dispatching the window's messages. Test-only
+settings are fields set before `init` (`:62`), and the harness sends what
+the OS would (`windows/conformance.zig:43`).
+
+**Plan.** Five slices; the first fixes every shape at once, so H3 and H4
+build on one reviewed contract.
+
+1. **The shapes, checked; the clipboard and URLs on Windows.** zui: the
+   vocabulary in `src/services.zig`; `checkHost` checks every service's
+   functions, with a compile-error case for each function, one for a
+   service that is not a struct and one for `ServiceSink.of`;
+   `zui_app.ServicesOf(Host)`, its `has_*` guards and the unguarded-call
+   error; `tests/instantiate.zig` declares a host with all five;
+   `zui_testing`'s host suite checks the services a host declares.
+   zui-host: the clipboard moves to the new shape and `zuiOpenUrl` is
+   added, both answered from the window thread (`windows/services.zig`).
+2. **Notifications** (zui-host): `Shell_NotifyIconW` with `NIF_INFO` and
+   `NOTIFYICON_VERSION_4`, the icon added on the first `show` and removed
+   when the balloon ends or at `deinit`; `NIN_BALLOONUSERCLICK` answers
+   `.notification_activated`, `NIN_BALLOONTIMEOUT` and `NIN_BALLOONHIDE`
+   `.notification_dismissed`, as does a notification replaced by the next.
+   The fake records `NIM_ADD` and `NIM_MODIFY`, and the tests send the
+   callback messages Windows would.
+3. **File dialogs** (zui-host): `IFileOpenDialog` and `IFileSaveDialog`
+   created and shown on the window thread, owned by the window; `show`
+   copies the dialog's strings into a fixed buffer, posts it and returns;
+   the dialog's modal loop keeps dispatching the window's messages, and
+   its paths (`SIGDN_FILESYSPATH`) or `.canceled` are published. One
+   dialog or menu at a time. The vtables go in `windows/file_dialog.zig`;
+   the fake builds and configures the real dialog and reads `GetOptions`
+   back without `Show`.
+4. **Menus** (zui-host): `popup` builds a menu with `CreatePopupMenu` and
+   `AppendMenuW` on the window thread, converts the position to screen
+   pixels, and shows it with `TrackPopupMenuEx(TPM_RETURNCMD)`; `setBar`
+   builds one with `CreateMenu` and answers each `WM_COMMAND`. Items are
+   numbered by the host (`WM_COMMAND` carries 16 bits) and mapped back.
+   A menu bar's `HMENU` lives in one struct of per-window service state,
+   for H9 to move into its window slots; with H7's custom title bar,
+   `setBar` may answer `error.Unavailable`.
+5. **The example, and closing H6** (zui-host and zui):
+   `examples/services.zig` and `zig build services` on `zui_app`, with a
+   menu bar, a context menu, and buttons to copy, paste, notify, open,
+   save, choose a folder and open a URL, each answer shown; one
+   `Stream(zui.ServiceReply(16 * 1024))`, every call from `zuiLoader`
+   through `ServicesOf`; `-- --check` scripts what shows nothing.
+
+**Done when.** Automated: zui's tests in Debug, ReleaseFast and
+ReleaseSafe and its `wasm32-freestanding`, `powerpc-linux` and `x86-linux`
+checks; each compile-error case fails with its message; zui-host's tests
+in Debug and ReleaseSafe, `check` and `fmt-check`, with the host suite
+passing every service the host has built, faked through
+`Host.service_fake`; the host's own tests of `error.Busy`,
+`error.TooLarge`, the menu built (read back from the `HMENU`), the
+popup's position in screen pixels, a menu bar's `WM_COMMAND`, the dialog's
+configuration, the notification's callbacks, and `ShellExecuteW` never
+reached with a refused URL; zui-sokol's tour runs unchanged; R1 counts
+unchanged. By a person, in slice 5: `zig build services` in zui-host,
+choosing a file, saving, choosing a folder, a notification clicked, a
+context menu and the menu bar, a URL opened in the browser, copy and
+paste, each in a screenshot.
+
+**Spec.** §14.1, §16.3, §16.6, §19.5, §19.6.
+
+Done in five slices. Slice 1, in zui `578b8c1` and zui-host `c5d01f3`: zui gained
+`src/services.zig`: `zui.ServiceRequest` (`.of(name)`), `ServiceAnswer`
+(the outcome, borrowed, and the bytes the host could not hold),
+`ServiceReply(n)` (the plain-data copy, text cut at a character and paths
+kept whole, the rest counted), `ServiceSink` (`.of(&source)` for any source
+whose `publish` takes a `ServiceReply(n)`), `ServiceError`,
+`ServiceFailure`, `Notification`, `FileDialog`, `FileFilter`, `MenuItem`,
+`MenuItemId` and `isOpenableUrl`. `checkHost` checks each service is a
+struct and each function's type, `checkFileWatch` folded into the same
+table with its message unchanged; ten compile-error cases pin the
+messages. `zui_app.ServicesOf(Host)` gives `has_clipboard` through
+`has_file_watch` and `has_menu_bar`, and each service behind its guard.
+`zui_testing.expectHostConforms` checks a clipboard round trip, that a
+path, a `file:` URL and a word are refused, and with the harness's
+`openedUrl` that a URL reaches the system, and with `scriptServices` that
+dialogs, menus and notifications answer as scripted, each naming its
+request and window; its test host passes, and one answering another
+request and one opening a path fail. A delivery of replies round-trips
+through `zui_wire`. On Windows, `zuiClipboard.read` and `zuiOpenUrl.open`
+claim a slot and post to the window thread, which reads the clipboard
+(up to 64 KiB of UTF-8, lone surrogates replaced, the rest counted as left
+out) or calls `ShellExecuteW`, so every answer comes from one thread;
+`write` reports `GlobalAlloc` failing as `error.Unavailable`. The host
+suite passes against a hidden window with the URL opener faked. Measured:
+the zui-counts executable's .text and .rodata are byte-identical to
+`62d0813`'s (sha256 6ac82a44... and d05b536a...), so R1 counts are
+unchanged; zui-sokol's tour on the host, in ReleaseSafe with
+`--measure-idle`, idled at 0.0 ms of CPU over 10 s, and `zui_app` now
+reports only notifications, file dialogs and menus missing. Decided in
+the slice, beyond the plan: `Busy` also refuses a clipboard read or a URL
+still waiting for the window thread; `ServiceAnswer.left_out_bytes`
+carries what the host itself could not hold; `zui.isOpenableUrl` is core,
+so every host refuses the same URLs.
+
+Slice 2, in zui-host alone (`2e06e20`): `zuiNotifications.show`
+checks the text is UTF-8, copies the title and body into fixed buffers cut
+at a character to what `NOTIFYICONDATAW` holds (63 and 255 UTF-16 units),
+and posts to the window thread, which adds the window's notification-area
+icon on first use (`NIM_ADD`, then `NIM_SETVERSION` to version 4) and
+shows the balloon (`NIM_MODIFY` with `NIF_INFO`), which Windows 10 and 11
+show as a toast. The icon's callback message answers
+`.notification_activated` for `NIN_BALLOONUSERCLICK` and
+`.notification_dismissed` for `NIN_BALLOONTIMEOUT` and `NIN_BALLOONHIDE`,
+then removes the icon; a notification replaced by the next is answered
+`.notification_dismissed` and the icon stays; `Shell_NotifyIconW` failing
+is `.failed = .unavailable`; the icon goes when the window is destroyed,
+and one still showing then is not answered. A second `show` while the
+first waits for the window thread is `error.Busy`. The fake records each
+`Shell_NotifyIconW` call by message and the balloon's text, and answers
+as the harness's `scriptServices` says by posting the callback message
+Windows would, so the host suite now checks a notification through the
+real callback path; the host's own tests check the calls made, the title
+cut at a character, a click, a replacement, a time-out removing the icon,
+and a callback with nothing showing answering nothing. zui-sokol's tour on
+the host idles as before (15.6 ms of CPU over 10 s and 10 frames on the
+Welcome screen in ReleaseSafe) and `zui_app` now reports only file dialogs
+and menus missing. Not detected: notifications the user turned off, or Do
+Not Disturb, neither of which a balloon reports, so the Windows host never
+answers `.failed = .denied`.
+
+Slice 3, in zui-host alone (`2da9ccd`):
+`zuiFileDialogs.show(host, window, request, dialog, sink)` copies the
+dialog's strings into one fixed buffer of 8,192 UTF-16 units: the title,
+the directory made absolute (`GetFullPathNameW`, since the shell takes only
+absolute ones), the suggested name, and up to 16 filters as patterns
+(`*.zon;*.json`, or `*.*` for one without extensions). Past either limit it
+is `error.TooLarge`, and text that is not UTF-8 is `error.InvalidUtf8`. It
+then posts to the window thread, which is already a single-threaded
+apartment. That thread makes `IFileOpenDialog`, or `IFileSaveDialog` for
+`.save_file`, through `CoCreateInstance` (`windows/file_dialog.zig`, its
+vtables written by hand). It always sets `FOS_FORCEFILESYSTEM`,
+`FOS_NOCHANGEDIR` (so the process's working directory never moves) and
+`FOS_PATHMUSTEXIST`. Open dialogs add `FOS_FILEMUSTEXIST`, and
+`.open_files` adds `FOS_ALLOWMULTISELECT`. `.save_file` adds
+`FOS_OVERWRITEPROMPT` and the first filter's first extension as the
+default, and `.choose_folder` adds `FOS_PICKFOLDERS`. The thread then runs
+`Show` owned by the window. Its modal loop keeps dispatching the window's
+messages. The answer is `.files_chosen` with each `SIGDN_FILESYSPATH`
+path in UTF-8 (up to 32 KiB, paths past it counted as left out), or
+`.canceled`. A dialog the shell cannot make is `.failed = .unavailable`. A
+second `show` while one waits or is open is `error.Busy`. A dialog still
+open when the host closes is cancelled first, and its answer is not
+published, since the application's sources may be gone by then. The
+window closes once `Show` has returned. `IFileDialog.Close` called from
+outside the dialog's own events returned `S_OK` but did not end `Show`,
+so the host posts `WM_CLOSE` to the dialog's window, found through
+`IOleWindow`, which cancels it as the Cancel button does.
+
+The fake makes and configures the real dialog and stands in for `Show`.
+It reads back the options, the suggested name and the folder from the
+dialog's own getters, records the filters it was given (the shell has no
+getter for them), and answers what the harness's `scriptServices` scripts.
+It can also hold the dialog open, dispatching the window's messages as
+`Show` would. The host suite now checks file dialogs through the window
+thread. The host's own tests check an open dialog's options, folder and
+filters and its paths; a save dialog's name, overwrite prompt and cancel;
+a folder dialog; `Busy` while one is open; paths past the reply's room
+counted; `TooLarge` and `InvalidUtf8` showing nothing; and a dialog open at
+close answered with nothing. Two checks of the real `Show`, run once by
+hand and not committed, showed a dialog on the desktop. One, given the name
+`C:\Windows\win.ini` and sent its OK command, answered `.files_chosen`
+with that path. The other, open when the host closed, returned
+`0x800704C7` (cancelled) and closed the host about 0.1 s later, with
+nothing answered.
+
+Found and fixed: a clipboard read (since slice 1) and a file dialog
+published their answer before releasing their slot, so a call made as
+soon as the answer arrived could be `error.Busy`. Two of about 20 runs of the ReleaseSafe suite failed
+this way. Each now releases first. The bytes it answers with stay put,
+since only the window thread writes them. Twenty runs each in Debug and
+ReleaseSafe then passed. zui-sokol's tour on the host, in ReleaseSafe with
+`--measure-idle`, idled at 31.3 ms of CPU over 10 s and 10 frames on the
+Welcome screen, two of Windows' 15.6 ms ticks, against one in slice 2.
+`zui_app` now reports only menus missing.
+
+Slice 4, in zui-host (`621c6e0`), with one sentence added to SPEC.md
+§16.3 (`fcdef0e`): `zuiMenus.popup(host, window, request, items, position,
+sink)` and `setBar(host, window, request, items, sink)` copy the items
+into a fixed menu of up to 256 entries and 8,192 UTF-16 units, at most
+eight submenus deep (`windows/menu.zig`). Each label is shown as written,
+its `&` doubled so Windows underlines nothing, with its shortcut after a
+tab as Windows' own menus spell it (`Ctrl+Shift+S`, `F1`). Past a limit
+it is `error.TooLarge`, and a label that is not UTF-8 is
+`error.InvalidUtf8`. `popup` converts the position to client pixels with
+the last poll's scale and posts to the window thread, which builds the
+menu with `CreatePopupMenu` and `AppendMenuW`, converts the position to
+the screen, and shows it with `TrackPopupMenuEx(TPM_RETURNCMD |
+TPM_NONOTIFY)`. It answers `.menu_item_chosen` with the application's own
+id, or `.canceled`, and `.failed = .unavailable` while the user is in the
+bar's menus, since Windows shows one menu at a time. A file dialog and a
+popup now share one claim, so either one while the other waits or is
+open is `error.Busy`. A popup still open when the host closes is ended
+with `EndMenu`, not answered, and the window closes after it, as an open
+dialog does. `setBar` builds the bar with `CreateMenu`, sets it with
+`SetMenu` and destroys the one it replaced; given no items it removes the
+bar. Each `WM_COMMAND` from it answers `.menu_item_chosen` to its request.
+A bar set while the user is in the old bar's menus waits until they
+close (`WM_EXITMENULOOP`), so a tracked menu is never destroyed. Each bar
+and each popup numbers its items from a range of its own, two bars'
+ranges in turn, so a command Windows reports after the bar was replaced
+still names the bar it came from and is answered to that bar's request.
+SPEC.md now says so, and that `setBar` with no items removes the bar.
+
+The fake builds the real `HMENU` and stands in for `TrackPopupMenuEx`. It
+reads the menu back item by item (`GetMenuStringW`, `GetMenuState`,
+`GetMenuItemID`), records the position in screen pixels, and answers the
+item the harness's `scriptServices` scripts. It can also hold the menu
+open, dispatching the window's messages. The host suite now checks menus
+through the window thread, so it checks all five services. The host's own
+tests check a popup's items, separator, submenu, grayed and checked
+states, doubled `&` and shortcut read back from the `HMENU`, and its
+position in screen pixels at a forced scale of 2; `Busy` across popups
+and dialogs both ways, and a closed menu answering `.canceled`;
+`TooLarge` and `InvalidUtf8` showing neither a popup nor a bar; a popup
+open at close answered with nothing; and a menu bar read back from the
+window's own `GetMenu`, answering two choices sent as `WM_COMMAND`,
+waiting while its menus are open, answering a late choice from the bar it
+replaced, and removed. zui-host's tests (63) passed six times each in
+Debug and ReleaseSafe. zui-sokol's tour on the host, in ReleaseSafe
+with `--measure-idle`, idled at 0.0 to 31.3 ms of CPU over 10 s with 9 to
+14 frames in three runs on the Welcome screen; a fourth drew 96 frames for
+the pointer over the window. `zui_app` now reports no service missing.
+
+Slice 5, in zui-host alone, after `621c6e0`: `zig build services`
+(`examples/services.zig`), a window on `zui_app` with a button for each
+service: pick a file, save a file, show a notification, open a popup
+menu, set or clear the menu bar, copy, paste, and open
+<https://ziglang.org>. Each answer shows beside its button. A right click
+anywhere opens the context menu, and Ctrl+C, Ctrl+V, Ctrl+O and Ctrl+S do
+what the menus say. Declaration only notes what was asked for, and reads
+the answers from one `Stream(zui.ServiceReply(16 * 1024))`; a popup's or
+the bar's choice asks for the action it names. The loader makes every
+call through `zui_app.ServicesOf`, behind its guards. The host gained
+`Host.fakeServices(fake)`, the fake set after `init`, since `zui_app`
+starts every host field at its default. `-- --check` runs the window
+hidden, with the fake answering as a user would. It presses each button
+in turn, chooses File > Pick a file from the bar by sending the
+`WM_COMMAND` Windows would, and passes once each answer shows in a
+frame's text and the bar is on, then off, the window (`GetMenu`). It
+fails after 10 s. The paste right after the copy usually found the
+clipboard held by another application (clipboard history, which opens it
+after every change) and answered `.failed = .unavailable`, as the
+contract says: four of the first five runs failed this way. The check now
+presses Paste again, as a user would, and says how often. It then passed
+in seven of seven runs, six in Debug and one in ReleaseSafe, each
+pressing Paste once or twice more. zui-host's 63 tests pass in Debug and ReleaseSafe, with
+`check` and `fmt-check`. zui-sokol's tour on the host, in ReleaseSafe
+with `--measure-idle`, idled at 0.0 ms of CPU over 10 s, with 12 frames
+and no wakes.
+
+Measured across the item: R1 counts unchanged, since the zui-counts
+executable's code was byte-identical (slice 1); no host frame path
+changed; the host's fixed buffers for services are part of `Host`, so
+calls allocate nothing of the process's.
+
+What remains, and where it went:
+- **Seen by a person, owed:** `zig build services` on the desktop, with
+  a screenshot of each: the real toast, and clicking it to see
+  "clicked"; the real open and save dialogs choosing a file; the real
+  popup from a right click and from its button; the real menu bar, its
+  menus opened by hand and an item chosen; and the browser opening
+  <https://ziglang.org>. The hidden window, the fake and the hand-run
+  `Show` of slice 3 cover everything else.
+- **The menu bar shrinks the client area** by its height: `setBar`
+  resizes the window's content, so the next record's viewport is
+  smaller, and removing the bar gives it back. A window opened at a
+  size keeps its outer size, not its content's.
+- **H7:** a custom title bar has no caption for Windows' menu bar to sit
+  under. H7 decides whether `setBar` then answers `error.Unavailable`, or
+  the application draws its own bar and uses `popup` for its menus. A
+  popup's position, in the client area's layout units, holds either way.
+- **H9:** dialogs and menus name their `WindowId`, and the Windows host
+  asserts `.main` until H9 maps ids to windows; the menu bar's state is
+  one struct for H9 to keep per window.
+- **H4:** the Linux host implements these shapes; `zuiMenus` has no
+  Wayland counterpart, so it may declare none.
+- **Not detected on Windows:** notifications turned off or Do Not
+  Disturb, which a balloon does not report, so `.failed = .denied` is
+  never answered there.
 
 ### V2. Semantics and accessibility actions
 
@@ -3734,272 +4053,6 @@ Done: V1, V2, V3 and V4 are in *Done*.
 
 **Done when (each):** the host passes C3, and the demo runs on it
 unchanged.
-
-### H6. Services
-
-**Grounding** (at zui `62d0813` and zui-host `16a9235`, before the first
-slice). The host contract listed six optional services by name
-(`src/contracts.zig:23`), and `checkHost` only checked that each was a type
-(`:100-102`). Only `zuiFileWatch` had a checked shape (`checkFileWatch`,
-`:143`), pinned by `host_file_watch_wrong_signature`. The pattern it set
-(F6) is a sink: `zui.FileChangeSink`, a pointer and a function, made by
-`.of(&source)` from any source whose `publish` returns `Wake` or
-`error{Full}!Wake` (`src/host.zig`). SPEC.md showed the other five only as
-`struct { ... }` (§16.3) and said they are reached through `zui_app` with
-`has_*` guards (§16.6), but nothing declared a guard. `zui_app` named the
-services (`zui_app/zui_app.zig:177`) only to report the missing ones
-(`:375`); an application reaches its host only through `Start(App).host`
-(`:198`), and `zuiLoader` gets the context and the `Io`, not the host
-(`:552`). `zui_app`'s test host declared `zuiClipboard = struct {}`
-(`zui_app/tests.zig:15`).
-
-The frame boundary had no channel for a service: `HostRequests` holds the
-cursor and the IME area, diffed as state by `zuiApply`, and a new kind of
-event would need a variant, storage in the context and a limit, as dropped
-files have. V2 found that even a zero-size field added to `Frame` moved R1
-counts. `zui_wire`'s host declares no services. A `zui_async.Stream` with
-one producer panics in safe builds when two publish at once.
-
-On Windows only the clipboard existed, unchecked
-(`zui-host/windows/host.zig:40`): `read(host, buffer) ?[]u8` copied
-`CF_UNICODETEXT` on the caller's thread (`:860`), and `write(host, text)`
-returned `error{InvalidUtf8, ClipboardUnavailable, OutOfMemory}` (`:873`),
-where `OutOfMemory` was `GlobalAlloc` failing (`:875`): the OS's memory,
-handed to the clipboard, so not the host's allocation, but named as if it
-were. A synchronous read is Windows' alone: on Wayland the selection is
-read from a pipe the copying client writes into (H4 slice 3), and in a
-browser `navigator.clipboard.readText` is a promise (H5). The window
-thread runs the message loop in a single-threaded apartment (`:387-389`),
-dispatches everything through `handleMessage` (`:467`), and takes work
-from the UI thread as `WM_APP` messages (`:93`). A modal loop on it, such
-as a move or resize, keeps dispatching the window's messages. Test-only
-settings are fields set before `init` (`:62`), and the harness sends what
-the OS would (`windows/conformance.zig:43`).
-
-**Plan.** Five slices; the first fixes every shape at once, so H3 and H4
-build on one reviewed contract.
-
-1. **The shapes, checked; the clipboard and URLs on Windows.** zui: the
-   vocabulary in `src/services.zig`; `checkHost` checks every service's
-   functions, with a compile-error case for each function, one for a
-   service that is not a struct and one for `ServiceSink.of`;
-   `zui_app.ServicesOf(Host)`, its `has_*` guards and the unguarded-call
-   error; `tests/instantiate.zig` declares a host with all five;
-   `zui_testing`'s host suite checks the services a host declares.
-   zui-host: the clipboard moves to the new shape and `zuiOpenUrl` is
-   added, both answered from the window thread (`windows/services.zig`).
-2. **Notifications** (zui-host): `Shell_NotifyIconW` with `NIF_INFO` and
-   `NOTIFYICON_VERSION_4`, the icon added on the first `show` and removed
-   when the balloon ends or at `deinit`; `NIN_BALLOONUSERCLICK` answers
-   `.notification_activated`, `NIN_BALLOONTIMEOUT` and `NIN_BALLOONHIDE`
-   `.notification_dismissed`, as does a notification replaced by the next.
-   The fake records `NIM_ADD` and `NIM_MODIFY`, and the tests send the
-   callback messages Windows would.
-3. **File dialogs** (zui-host): `IFileOpenDialog` and `IFileSaveDialog`
-   created and shown on the window thread, owned by the window; `show`
-   copies the dialog's strings into a fixed buffer, posts it and returns;
-   the dialog's modal loop keeps dispatching the window's messages, and
-   its paths (`SIGDN_FILESYSPATH`) or `.canceled` are published. One
-   dialog or menu at a time. The vtables go in `windows/file_dialog.zig`;
-   the fake builds and configures the real dialog and reads `GetOptions`
-   back without `Show`.
-4. **Menus** (zui-host): `popup` builds a menu with `CreatePopupMenu` and
-   `AppendMenuW` on the window thread, converts the position to screen
-   pixels, and shows it with `TrackPopupMenuEx(TPM_RETURNCMD)`; `setBar`
-   builds one with `CreateMenu` and answers each `WM_COMMAND`. Items are
-   numbered by the host (`WM_COMMAND` carries 16 bits) and mapped back.
-   A menu bar's `HMENU` lives in one struct of per-window service state,
-   for H9 to move into its window slots; with H7's custom title bar,
-   `setBar` may answer `error.Unavailable`.
-5. **The example, and closing H6** (zui-host and zui):
-   `examples/services.zig` and `zig build services` on `zui_app`, with a
-   menu bar, a context menu, and buttons to copy, paste, notify, open,
-   save, choose a folder and open a URL, each answer shown; one
-   `Stream(zui.ServiceReply(16 * 1024))`, every call from `zuiLoader`
-   through `ServicesOf`; `-- --check` scripts what shows nothing.
-
-**Done when.** Automated: zui's tests in Debug, ReleaseFast and
-ReleaseSafe and its `wasm32-freestanding`, `powerpc-linux` and `x86-linux`
-checks; each compile-error case fails with its message; zui-host's tests
-in Debug and ReleaseSafe, `check` and `fmt-check`, with the host suite
-passing every service the host has built, faked through
-`Host.service_fake`; the host's own tests of `error.Busy`,
-`error.TooLarge`, the menu built (read back from the `HMENU`), the
-popup's position in screen pixels, a menu bar's `WM_COMMAND`, the dialog's
-configuration, the notification's callbacks, and `ShellExecuteW` never
-reached with a refused URL; zui-sokol's tour runs unchanged; R1 counts
-unchanged. By a person, in slice 5: `zig build services` in zui-host,
-choosing a file, saving, choosing a folder, a notification clicked, a
-context menu and the menu bar, a URL opened in the browser, copy and
-paste, each in a screenshot.
-
-**Spec.** §14.1, §16.3, §16.6, §19.5, §19.6.
-
-**Status.** Slice 1 is done, in zui and zui-host (not pushed). zui gained
-`src/services.zig`: `zui.ServiceRequest` (`.of(name)`), `ServiceAnswer`
-(the outcome, borrowed, and the bytes the host could not hold),
-`ServiceReply(n)` (the plain-data copy, text cut at a character and paths
-kept whole, the rest counted), `ServiceSink` (`.of(&source)` for any source
-whose `publish` takes a `ServiceReply(n)`), `ServiceError`,
-`ServiceFailure`, `Notification`, `FileDialog`, `FileFilter`, `MenuItem`,
-`MenuItemId` and `isOpenableUrl`. `checkHost` checks each service is a
-struct and each function's type, `checkFileWatch` folded into the same
-table with its message unchanged; ten compile-error cases pin the
-messages. `zui_app.ServicesOf(Host)` gives `has_clipboard` through
-`has_file_watch` and `has_menu_bar`, and each service behind its guard.
-`zui_testing.expectHostConforms` checks a clipboard round trip, that a
-path, a `file:` URL and a word are refused, and with the harness's
-`openedUrl` that a URL reaches the system, and with `scriptServices` that
-dialogs, menus and notifications answer as scripted, each naming its
-request and window; its test host passes, and one answering another
-request and one opening a path fail. A delivery of replies round-trips
-through `zui_wire`. On Windows, `zuiClipboard.read` and `zuiOpenUrl.open`
-claim a slot and post to the window thread, which reads the clipboard
-(up to 64 KiB of UTF-8, lone surrogates replaced, the rest counted as left
-out) or calls `ShellExecuteW`, so every answer comes from one thread;
-`write` reports `GlobalAlloc` failing as `error.Unavailable`. The host
-suite passes against a hidden window with the URL opener faked. Measured:
-the zui-counts executable's .text and .rodata are byte-identical to
-`62d0813`'s (sha256 6ac82a44... and d05b536a...), so R1 counts are
-unchanged; zui-sokol's tour on the host, in ReleaseSafe with
-`--measure-idle`, idled at 0.0 ms of CPU over 10 s, and `zui_app` now
-reports only notifications, file dialogs and menus missing. Decided in
-the slice, beyond the plan: `Busy` also refuses a clipboard read or a URL
-still waiting for the window thread; `ServiceAnswer.left_out_bytes`
-carries what the host itself could not hold; `zui.isOpenableUrl` is core,
-so every host refuses the same URLs.
-
-Slice 2 is done, in zui-host alone (not pushed). `zuiNotifications.show`
-checks the text is UTF-8, copies the title and body into fixed buffers cut
-at a character to what `NOTIFYICONDATAW` holds (63 and 255 UTF-16 units),
-and posts to the window thread, which adds the window's notification-area
-icon on first use (`NIM_ADD`, then `NIM_SETVERSION` to version 4) and
-shows the balloon (`NIM_MODIFY` with `NIF_INFO`), which Windows 10 and 11
-show as a toast. The icon's callback message answers
-`.notification_activated` for `NIN_BALLOONUSERCLICK` and
-`.notification_dismissed` for `NIN_BALLOONTIMEOUT` and `NIN_BALLOONHIDE`,
-then removes the icon; a notification replaced by the next is answered
-`.notification_dismissed` and the icon stays; `Shell_NotifyIconW` failing
-is `.failed = .unavailable`; the icon goes when the window is destroyed,
-and one still showing then is not answered. A second `show` while the
-first waits for the window thread is `error.Busy`. The fake records each
-`Shell_NotifyIconW` call by message and the balloon's text, and answers
-as the harness's `scriptServices` says by posting the callback message
-Windows would, so the host suite now checks a notification through the
-real callback path; the host's own tests check the calls made, the title
-cut at a character, a click, a replacement, a time-out removing the icon,
-and a callback with nothing showing answering nothing. zui-sokol's tour on
-the host idles as before (15.6 ms of CPU over 10 s and 10 frames on the
-Welcome screen in ReleaseSafe) and `zui_app` now reports only file dialogs
-and menus missing. Not detected: notifications the user turned off, or Do
-Not Disturb, neither of which a balloon reports, so the Windows host never
-answers `.failed = .denied`.
-
-Slice 3 is done, in zui-host alone (not pushed).
-`zuiFileDialogs.show(host, window, request, dialog, sink)` copies the
-dialog's strings into one fixed buffer of 8,192 UTF-16 units: the title,
-the directory made absolute (`GetFullPathNameW`, since the shell takes only
-absolute ones), the suggested name, and up to 16 filters as patterns
-(`*.zon;*.json`, or `*.*` for one without extensions). Past either limit it
-is `error.TooLarge`, and text that is not UTF-8 is `error.InvalidUtf8`. It
-then posts to the window thread, which is already a single-threaded
-apartment. That thread makes `IFileOpenDialog`, or `IFileSaveDialog` for
-`.save_file`, through `CoCreateInstance` (`windows/file_dialog.zig`, its
-vtables written by hand). It always sets `FOS_FORCEFILESYSTEM`,
-`FOS_NOCHANGEDIR` (so the process's working directory never moves) and
-`FOS_PATHMUSTEXIST`. Open dialogs add `FOS_FILEMUSTEXIST`, and
-`.open_files` adds `FOS_ALLOWMULTISELECT`. `.save_file` adds
-`FOS_OVERWRITEPROMPT` and the first filter's first extension as the
-default, and `.choose_folder` adds `FOS_PICKFOLDERS`. The thread then runs
-`Show` owned by the window. Its modal loop keeps dispatching the window's
-messages. The answer is `.files_chosen` with each `SIGDN_FILESYSPATH`
-path in UTF-8 (up to 32 KiB, paths past it counted as left out), or
-`.canceled`. A dialog the shell cannot make is `.failed = .unavailable`. A
-second `show` while one waits or is open is `error.Busy`. A dialog still
-open when the host closes is cancelled first, and its answer is not
-published, since the application's sources may be gone by then. The
-window closes once `Show` has returned. `IFileDialog.Close` called from
-outside the dialog's own events returned `S_OK` but did not end `Show`,
-so the host posts `WM_CLOSE` to the dialog's window, found through
-`IOleWindow`, which cancels it as the Cancel button does.
-
-The fake makes and configures the real dialog and stands in for `Show`.
-It reads back the options, the suggested name and the folder from the
-dialog's own getters, records the filters it was given (the shell has no
-getter for them), and answers what the harness's `scriptServices` scripts.
-It can also hold the dialog open, dispatching the window's messages as
-`Show` would. The host suite now checks file dialogs through the window
-thread. The host's own tests check an open dialog's options, folder and
-filters and its paths; a save dialog's name, overwrite prompt and cancel;
-a folder dialog; `Busy` while one is open; paths past the reply's room
-counted; `TooLarge` and `InvalidUtf8` showing nothing; and a dialog open at
-close answered with nothing. Two checks of the real `Show`, run once by
-hand and not committed, showed a dialog on the desktop. One, given the name
-`C:\Windows\win.ini` and sent its OK command, answered `.files_chosen`
-with that path. The other, open when the host closed, returned
-`0x800704C7` (cancelled) and closed the host about 0.1 s later, with
-nothing answered.
-
-Found and fixed: a clipboard read (since slice 1) and a file dialog
-published their answer before releasing their slot, so a call made as
-soon as the answer arrived could be `error.Busy`. Two of about 20 runs of the ReleaseSafe suite failed
-this way. Each now releases first. The bytes it answers with stay put,
-since only the window thread writes them. Twenty runs each in Debug and
-ReleaseSafe then passed. zui-sokol's tour on the host, in ReleaseSafe with
-`--measure-idle`, idled at 31.3 ms of CPU over 10 s and 10 frames on the
-Welcome screen, two of Windows' 15.6 ms ticks, against one in slice 2.
-`zui_app` now reports only menus missing.
-
-Slice 4 is done, in zui-host, with one sentence added to SPEC.md §16.3
-(not pushed). `zuiMenus.popup(host, window, request, items, position,
-sink)` and `setBar(host, window, request, items, sink)` copy the items
-into a fixed menu of up to 256 entries and 8,192 UTF-16 units, at most
-eight submenus deep (`windows/menu.zig`). Each label is shown as written,
-its `&` doubled so Windows underlines nothing, with its shortcut after a
-tab as Windows' own menus spell it (`Ctrl+Shift+S`, `F1`). Past a limit
-it is `error.TooLarge`, and a label that is not UTF-8 is
-`error.InvalidUtf8`. `popup` converts the position to client pixels with
-the last poll's scale and posts to the window thread, which builds the
-menu with `CreatePopupMenu` and `AppendMenuW`, converts the position to
-the screen, and shows it with `TrackPopupMenuEx(TPM_RETURNCMD |
-TPM_NONOTIFY)`. It answers `.menu_item_chosen` with the application's own
-id, or `.canceled`, and `.failed = .unavailable` while the user is in the
-bar's menus, since Windows shows one menu at a time. A file dialog and a
-popup now share one claim, so either one while the other waits or is
-open is `error.Busy`. A popup still open when the host closes is ended
-with `EndMenu`, not answered, and the window closes after it, as an open
-dialog does. `setBar` builds the bar with `CreateMenu`, sets it with
-`SetMenu` and destroys the one it replaced; given no items it removes the
-bar. Each `WM_COMMAND` from it answers `.menu_item_chosen` to its request.
-A bar set while the user is in the old bar's menus waits until they
-close (`WM_EXITMENULOOP`), so a tracked menu is never destroyed. Each bar
-and each popup numbers its items from a range of its own, two bars'
-ranges in turn, so a command Windows reports after the bar was replaced
-still names the bar it came from and is answered to that bar's request.
-SPEC.md now says so, and that `setBar` with no items removes the bar.
-
-The fake builds the real `HMENU` and stands in for `TrackPopupMenuEx`. It
-reads the menu back item by item (`GetMenuStringW`, `GetMenuState`,
-`GetMenuItemID`), records the position in screen pixels, and answers the
-item the harness's `scriptServices` scripts. It can also hold the menu
-open, dispatching the window's messages. The host suite now checks menus
-through the window thread, so it checks all five services. The host's own
-tests check a popup's items, separator, submenu, grayed and checked
-states, doubled `&` and shortcut read back from the `HMENU`, and its
-position in screen pixels at a forced scale of 2; `Busy` across popups
-and dialogs both ways, and a closed menu answering `.canceled`;
-`TooLarge` and `InvalidUtf8` showing neither a popup nor a bar; a popup
-open at close answered with nothing; and a menu bar read back from the
-window's own `GetMenu`, answering two choices sent as `WM_COMMAND`,
-waiting while its menus are open, answering a late choice from the bar it
-replaced, and removed. zui-host's tests (63) passed six times each in
-Debug and ReleaseSafe. zui-sokol's tour on the host, in ReleaseSafe
-with `--measure-idle`, idled at 0.0 to 31.3 ms of CPU over 10 s with 9 to
-14 frames in three runs on the Welcome screen; a fourth drew 96 frames for
-the pointer over the window. `zui_app` now reports no service missing.
-Not seen on the desktop yet: the real `TrackPopupMenuEx` and a bar's menus
-opened by hand, which slice 5's example shows. Next: slice 5, the example
-and closing H6.
 
 ### H4. Linux
 

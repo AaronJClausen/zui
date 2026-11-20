@@ -280,7 +280,7 @@ Implemented so far:
   chooses (`zui.ServiceReply`), so it relays and replays; the Windows
   host reads and writes the clipboard, opens URLs, and shows
   notifications, file dialogs, context menus and a menu bar through
-  them.
+  them, all five from one window in zui-host's `zig build services`.
 
 The reference backend, its adapter host and the demo application live in
 [zui-raylib](https://github.com/AaronJClausen/zui-raylib); the other
