@@ -68,7 +68,7 @@ green, and its **Status** line below says which slice is next.
 
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
-| H4. Linux | 10 | `../zui-host`, `../zui-sokol` | | in progress; slice 3, fractional scale, the clipboard, drops and file watching, is next |
+| H4. Linux | 10 | `../zui-host`, `../zui-sokol` | | in progress; slice 5, the IME, is next |
 | H5. Web | 10 | `../zui-web` | | |
 | H7. Window decorations | 10 | `src/chrome.zig`, `src/context.zig`, `zui_app/`, `../zui-host` | | waiting on a person: the checklist under H7's *Status*, on `zig build title-bar` in zui-host |
 | M1. `zui_motion` | 11 | `zui_motion/` | | |
@@ -4324,14 +4324,31 @@ The tour on the host (`examples/tour.zig:171`, `:114`, `:217`) names
    `wp_fractional_scale_v1` with `wp_viewporter`, `wl_data_device`'s
    selection as `zuiClipboard` and its drops as `files_dropped`,
    `zuiFileWatch` through inotify; `zig build theme` on Linux.
-4. **The IME:** `zwp_text_input_v3`, enabled while a frame asks for text
+4. **Services,** H6's shapes on Linux: notifications through
+   `org.freedesktop.Notifications`, file dialogs through the desktop
+   portal's `FileChooser`, URLs through its `OpenURI`, on the host's own
+   D-Bus client; no `zuiMenus`, which Wayland lacks; `zig build services`
+   on Linux.
+5. **The IME:** `zwp_text_input_v3`, enabled while a frame asks for text
    input, its cursor rectangle at the caret, committed text as `text`.
-5. **The material:** an alpha surface, KDE's `org_kde_kwin_blur` where
+6. **A custom title bar,** H7's on Linux: `xdg-decoration` asked for
+   client-side, presses on `.caption` and the edges handed to
+   `xdg_toplevel.move` and `resize`, the caption buttons worked by the
+   host, `window_maximized` from the toplevel's states; `zig build
+   title-bar` on Linux.
+7. **Many windows,** H9's on Linux: the host `.many`, a toplevel and a
+   surface per window, and zui-sokol attaching a `wl_egl_window` and
+   `EGLSurface` per window on one `EGLContext`; `zig build many-windows`
+   on Linux.
+8. **The material:** an alpha surface, KDE's `org_kde_kwin_blur` where
    KWin offers it, and `ext_background_effect_v1` where a compositor
    offers that, reported as `Environment.system_material`.
-6. **X11:** an X11 host with the same reports, and `zui_host.Host`
+9. **X11:** an X11 host with the same reports, and `zui_host.Host`
    choosing Wayland when a compositor answers and X11 otherwise, its
    surface `.wayland` or `.x11`; zui-sokol draws both through EGL.
+
+Slices 4, 6 and 7 were added when the Windows host's H6, H7 and H9 had
+landed, so that the Linux host makes every report the Windows host makes.
 
 **Done when:** the host passes C3 on Wayland and on X11, in CI under a
 headless compositor and Xvfb; zui-sokol's tour runs on it unchanged and
@@ -4381,7 +4398,60 @@ counted no reads of either bus while idle, and the frames come from the
 compositor's events. Not reported yet: `.low_memory` (the Windows host's
 memory notification has no unprivileged counterpart but pressure
 triggers), reduced transparency and text scale, which the portal does not
-carry. Slice 3 is next.
+carry.
+
+Slice 3 is done in zui-host alone, `09ccf9d` (`linux/data_device.zig`,
+`linux/file_watch.zig`), pushed. With `wp_fractional_scale_v1` and
+`wp_viewporter` both offered, the record's scale is `preferred_scale /
+120` and the buffer `round(size × scale)` with a buffer scale of 1; one
+function, `pixelsPerSurfaceCoordinate`, converts surface coordinates, and
+`forced_scale` still wins. `zuiClipboard`, in H6's shape, offers a
+`wl_data_source` of three text types and reads the selection through a
+pipe from the wait loop, each transfer bounded at 2 s, into 64 KiB with
+text past it cut at a character and counted; until another selection is
+named, a read answers the last text written. Hyprland names a selection
+only to the focused client, so the unshown suite reads its own text, and
+an opt-in test (`ZUI_HOST_TEST_SHOWN_WINDOW=1`) shows a window for a
+moment and reads back through the compositor; the suite leaves the
+desktop's clipboard empty, as the Windows host's overwrites it. Drops of
+`text/uri-list` arrive as one `files_dropped` at the drag position,
+`file://` URIs percent-decoded. `zuiFileWatch` reads one inotify
+descriptor in the same `ppoll`, without threads: 4 roots and 256
+directory watches, a subdirectory watched as it appears and what it
+already holds reported as added, overflow published as a rescan. `zig
+build theme -- --check` restyled 18.7 ms after the file was rewritten,
+against 2 to 4 ms on Windows. The tour idled at 10.3 and 10.8 ms of CPU
+over 10 s, 9 and 10 frames, no wakes. Not run: a drag from another
+application, and a fractional scale on a monitor (the tests convert at
+1.25 and 1.5 through the listeners).
+
+Slice 4 is done in zui-host alone, `e2b15ad` (`linux/services.zig`,
+`linux/dbus.zig`), pushed: H6's shapes on a second session-bus
+connection of the host's own, its socket in the same `ppoll`. A call
+only writes, at most 100 ms, and answers are published from `zuiPoll`
+and `zuiWait`. `zuiNotifications` calls `org.freedesktop.Notifications`'
+`Notify` with a `default` action, `ActionInvoked` answering
+`.notification_activated` and `NotificationClosed` (or a replacement)
+`.notification_dismissed`, from the daemon's unique name only, its match
+rule added only while one shows, so an idle host reads no other
+application's notifications. `zuiFileDialogs` calls the portal's
+`FileChooser`, its `Response` match on the predicted request path added
+before the call; `file://` URIs are decoded to paths. `zuiOpenUrl` calls
+the portal's `OpenURI` without a reply. No `zuiMenus`. Without a bus a
+call is `error.Unavailable` at once; without the daemon or the portal it
+answers `.failed = .unavailable`. With `ZUI_HOST_TEST_SESSION_BUS` on a
+private `dbus-daemon`, tests play the daemon and the portal: a
+notification's arguments and signals, an impostor's ignored, a dialog's
+paths and cancel, `OpenURI`'s URL; 57 of 58 tests pass in Debug,
+ReleaseFast and ReleaseSafe with both slices, one opt-in skip. `zig
+build services -- --check` exits 0, copying and pasting through slice
+3's clipboard; against the real desktop, quickshell numbered a
+notification and the portal answered `OpenFile`. Tour idle: 10.2 to 13.9
+ms of CPU over 10 s, 9 to 11 frames, no wakes, as without the change.
+The Linux check draws nothing: zui-sokol drawing a surface the
+compositor never shows waits in `eglSwapBuffers` for a frame callback
+that never comes, which slice 7's hidden many-windows check will meet.
+Slice 5 is next.
 
 Decided here:
 - **libwayland-client, linked,** as sokol-zig links it, since the surface

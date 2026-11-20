@@ -878,7 +878,7 @@ fn shouldAnimate(ui: *const Ui) bool {
 
 ### Dropped files and lifecycle events · *shipped*
 
-Files dropped onto the window arrive with their drop position and paths. Lifecycle events cover suspend, resume, a termination request (Ctrl+C, a closing console, the session ending) and low memory. zui-host's Windows host reports all of them; its Linux host reports SIGINT, SIGTERM and SIGHUP as termination requests, and the system sleeping and waking as suspend and resume.
+Files dropped onto the window arrive with their drop position and paths. Lifecycle events cover suspend, resume, a termination request (Ctrl+C, a closing console, the session ending) and low memory. zui-host's Windows host reports all of them; its Linux host reports dropped files, SIGINT, SIGTERM and SIGHUP as termination requests, and the system sleeping and waking as suspend and resume.
 
 `src/ui/system.zig`
 
@@ -1385,7 +1385,7 @@ fn reloadThemeOnSave(app: *App, ui: *Ui) void {
 
 ### Host services · *shipped*
 
-Services are what the system does for an application: the clipboard, notifications, file dialogs, opening a URL, menus. Each is an optional host declaration with a checked shape. They are work, so declaration only notes that you want one, and you call it between frames, from `zuiLoader`, through `zui_app.ServicesOf(Host)`, whose `has_*` guards are known at compile time. Every call returns at once, and its answer is published into a source you choose, so a replay sees what the user chose without opening a dialog. zui-host's Windows host reads and writes the clipboard, opens URLs, refusing paths and `file:` URLs, shows notifications as toasts, shows the shell's file dialogs, answering the paths chosen, and shows Windows' own context menus and menu bars, answering the item chosen. zui-host's `zig build services` calls every one of them from a button and shows each answer beside it.
+Services are what the system does for an application: the clipboard, notifications, file dialogs, opening a URL, menus. Each is an optional host declaration with a checked shape. They are work, so declaration only notes that you want one, and you call it between frames, from `zuiLoader`, through `zui_app.ServicesOf(Host)`, whose `has_*` guards are known at compile time. Every call returns at once, and its answer is published into a source you choose, so a replay sees what the user chose without opening a dialog. zui-host's Windows host reads and writes the clipboard, opens URLs, refusing paths and `file:` URLs, shows notifications as toasts, shows the shell's file dialogs, answering the paths chosen, and shows Windows' own context menus and menu bars, answering the item chosen. Its Linux host reads and writes the clipboard through the compositor's selection, shows notifications through the desktop's notification daemon, shows the desktop portal's file dialogs and hands URLs to the portal; Wayland has no native menus, so it declares none. zui-host's `zig build services` calls every one of them from a button and shows each answer beside it.
 
 `src/app.zig`
 
@@ -1761,7 +1761,7 @@ On zui-host's Windows host, up to four windows open at once, and zui-sokol draws
 
 ## 06. The backend contracts
 
-zui draws nothing and opens no windows itself. Renderers and hosts are plain types checked at compile time, with conformance suites they run in their own CI. Today there are zui-raylib (a renderer and adapter host), zui-sokol, zui-terminal, and zui-host's Windows host (message loop on its own thread, per-monitor DPI, Mica, IME, clipboard, opening URLs, dropped files, file watching), and its Linux host, on Wayland so far (buffer scale, pointer, wheel, keys through the compositor's keymap with their repeats, typed text, focus, cursor shapes, the environment from the desktop portal and UPower over D-Bus, and signals, sleep and waking as lifecycle events).
+zui draws nothing and opens no windows itself. Renderers and hosts are plain types checked at compile time, with conformance suites they run in their own CI. Today there are zui-raylib (a renderer and adapter host), zui-sokol, zui-terminal, and zui-host's Windows host (message loop on its own thread, per-monitor DPI, Mica, IME, clipboard, opening URLs, dropped files, file watching), and its Linux host, on Wayland so far (fractional and buffer scale, pointer, wheel, keys through the compositor's keymap with their repeats, typed text, focus, cursor shapes, clipboard, dropped files, file watching through inotify, notifications, the portal's file dialogs and opening URLs, the environment from the desktop portal and UPower over D-Bus, and signals, sleep and waking as lifecycle events).
 
 <a id="renderer"></a>
 

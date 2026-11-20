@@ -273,8 +273,12 @@ Implemented so far:
   and SIGHUP are terminate requests, and sleeping and waking suspend and
   resume; the theme, contrast and reduced motion come from the XDG
   desktop portal and power from UPower, over a D-Bus client of the
-  host's own. X11, fractional scale, the clipboard, drops, file watching
-  and the IME come next. Host services have one checked shape each,
+  host's own. It scales by fractions through `wp_fractional_scale_v1`,
+  reads and writes the clipboard, takes dropped files, watches files
+  through inotify, shows notifications, the desktop portal's file
+  dialogs and opens URLs, and `zig build theme` and `zig build services`
+  run on it. The IME, a custom title bar, many windows, a system material
+  and X11 come next. Host services have one checked shape each,
   reached through `zui_app.ServicesOf(Host)`'s compile-time `has_*`
   guards, with every answer published into a source the application
   chooses (`zui.ServiceReply`), so it relays and replays; the Windows
