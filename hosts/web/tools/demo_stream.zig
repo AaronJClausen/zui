@@ -1,16 +1,16 @@
 //! ```sh
 //! demo-stream <stream path> <expected path>
 //! ```
-//! Writes the tour's frames as the wire renderer sends them, and for each
-//! what the browser must decode it to, little-endian: its number (u64),
+//! Writes the tour's frames, as the browser draws them, as the wire
+//! renderer sends them, and for each what the browser must decode it to, little-endian: its number (u64),
 //! its command count (u32) and the Wyhash of it written whole (u64).
 
 const std = @import("std");
 const zui = @import("zui");
-const zui_sokol = @import("zui_sokol");
 const zui_wire = @import("zui_wire");
-const tour = @import("zui_sokol_tour");
-const Ui = tour.kit.Ui;
+const tour_session = @import("tour_session");
+const kit = tour_session.kit;
+const Ui = tour_session.Ui;
 
 const frames_per_screen = 24;
 const window: [2]f32 = .{ 1440, 900 };
@@ -24,13 +24,14 @@ pub fn main(init: std.process.Init) !void {
     const io = init.io;
     const gpa = init.gpa;
 
-    var text: zui_sokol.Text = .{};
-    try tour.kit.addFonts(&text);
+    var text: kit.Text = undefined;
+    try text.init();
+    defer text.deinit();
     var ui: Ui = try .init(gpa, io, &text);
     defer ui.deinit(gpa);
-    const app = try gpa.create(tour.App);
+    const app = try gpa.create(tour_session.Tour);
     defer gpa.destroy(app);
-    app.init(io, .zero);
+    app.init(io, .zero, text.fonts);
     defer app.deinit();
     app.heartbeat = false;
 
@@ -50,8 +51,8 @@ pub fn main(init: std.process.Init) !void {
     try zui_wire.writeHeader(&stream_writer.interface, zui_wire.fingerprintOf(&text));
 
     var frame_number: u64 = 0;
-    for (std.enums.values(tour.kit.Screen)) |screen| {
-        app.current = screen;
+    for (kit.offered_screens) |screen| {
+        app.show(screen);
         for (0..frames_per_screen) |step| {
             frame_number += 1;
             const now: zui.Instant = .fromNanoseconds(frame_number * std.time.ns_per_s / 60);
@@ -68,6 +69,7 @@ pub fn main(init: std.process.Init) !void {
             ui.beginFrame(&.{ .params = .{ .now = now, .viewport = window }, .events = events[0..event_count] }, &app.sources);
             app.declare(&ui);
             const frame = ui.endFrame();
+            app.observe(&ui, frame);
             app.afterFrame(&ui);
             defer ui.release(frame);
 

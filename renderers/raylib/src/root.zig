@@ -496,8 +496,8 @@ pub const GlyphAtlas = zui_glyphs.Atlas(.rgba8);
 /// texture between `BeginTextureMode` and `EndTextureMode`. raylib owns
 /// that window, so its surface is `.library`. Text is drawn in the fonts
 /// of the text contract `init` is given, from a `zui_glyphs` atlas, where
-/// `zui_glyphs` laid it out; a font id that text has no face for is drawn
-/// in raylib's built-in font, which `measureInBuiltInFont` measures.
+/// `zui_glyphs` laid it out; text in a font id that text has no face for
+/// is not drawn.
 /// raylib's GL context belongs to the thread that opened the window, so
 /// it does not declare `zui_render_thread`.
 ///
@@ -564,9 +564,7 @@ pub const Renderer = struct {
             switch (command.payload) {
                 .rectangle => |rectangle| drawRectangle(bounds, rectangle.color, rectangle.corner_radius, self.corner_segments),
                 .border => |border| drawBorder(bounds, border.color, border.widths, border.corner_radius, self.corner_segments),
-                .text => |line| if (self.fonts.fontMetrics(line.style.font) != null) {
-                    if (self.glyphs) |atlas| self.drawTrueTypeText(atlas, line.content, bounds, line.style, pixels_per_unit);
-                } else drawInBuiltInFont(line.content, bounds, line.style),
+                .text => |line| if (self.glyphs) |atlas| self.drawText(atlas, line.content, bounds, line.style, pixels_per_unit),
                 .image => |image| drawImage(image.handle, bounds, image.tint, image.corner_radius, self.corner_segments),
                 .clip_begin => |clip| scissors.push(clip),
                 .clip_end => scissors.pop(),
@@ -592,7 +590,7 @@ pub const Renderer = struct {
 
     /// raylib multiplies each texel by the vertex color, which is the
     /// text's.
-    fn drawTrueTypeText(self: *const Renderer, atlas: *const GlyphAtlas, content: []const u8, bounds: zui.Rect, style: anytype, pixels_per_unit: f32) void {
+    fn drawText(self: *const Renderer, atlas: *const GlyphAtlas, content: []const u8, bounds: zui.Rect, style: anytype, pixels_per_unit: f32) void {
         var quads = zui_glyphs.glyphQuads(self.fonts, atlas, content, bounds, style, pixels_per_unit) orelse return;
         const color = toRaylibColor(style.color);
         while (quads.next()) |glyph| {
@@ -613,68 +611,6 @@ pub const Renderer = struct {
             rlgl.rlEnd();
         }
         rlgl.rlSetTexture(0);
-    }
-};
-
-/// Space after a glyph of raylib's built-in font, which has no advances of
-/// its own, as a fraction of the size, as raylib's `DrawText` gives it.
-pub const built_in_glyph_spacing = 0.1;
-
-/// Text in raylib's built-in font, as `Renderer` draws a font id its text
-/// has no face for. Each glyph counts its advance plus the spacing after
-/// it, so that measuring "a", " " and "b" separately adds up to measuring
-/// "a b", which zui relies on when it wraps. Before raylib's window opens
-/// the font has no glyphs, and measures only the letter spacing.
-pub fn measureInBuiltInFont(run: []const u8, key: zui.MeasureKey(u16)) [2]f32 {
-    const font = c.GetFontDefault();
-    var width: f32 = 0;
-    var codepoints: Codepoints = .{ .text = run };
-    while (codepoints.next()) |codepoint| width += builtInAdvance(font, codepoint, key.size, key.letter_spacing);
-    return .{ width, key.size };
-}
-
-/// How far a glyph of a raylib font moves the pen at `size`, the style's
-/// letter spacing included: its own advance, or else its width and
-/// `built_in_glyph_spacing`.
-fn builtInAdvance(font: c.Font, codepoint: c_int, size: f32, letter_spacing: f32) f32 {
-    if (font.glyphs == null or font.glyphCount == 0 or font.baseSize <= 0) return letter_spacing;
-    const index: usize = @intCast(c.GetGlyphIndex(font, codepoint));
-    const glyph = font.glyphs[index];
-    const scale = size / @as(f32, @floatFromInt(font.baseSize));
-    if (glyph.advanceX > 0) return @as(f32, @floatFromInt(glyph.advanceX)) * scale + letter_spacing;
-    const glyph_width = font.recs[index].width + @as(f32, @floatFromInt(glyph.offsetX));
-    return glyph_width * scale + size * built_in_glyph_spacing + letter_spacing;
-}
-
-fn drawInBuiltInFont(content: []const u8, bounds: zui.Rect, style: anytype) void {
-    const font = c.GetFontDefault();
-    const color = toRaylibColor(style.color);
-    var x = bounds.x;
-    var codepoints: Codepoints = .{ .text = content };
-    while (codepoints.next()) |codepoint| {
-        if (codepoint != ' ' and codepoint != '\t') c.DrawTextCodepoint(font, codepoint, .{ .x = x, .y = bounds.y }, style.size, color);
-        x += builtInAdvance(font, codepoint, style.size, style.letter_spacing);
-    }
-}
-
-/// The code points of UTF-8 text; a byte that starts no valid sequence is
-/// a '?', as raylib reads it.
-const Codepoints = struct {
-    text: []const u8,
-    index: usize = 0,
-
-    fn next(self: *Codepoints) ?c_int {
-        if (self.index == self.text.len) return null;
-        const decoded: ?u21 = decoded: {
-            const length = std.unicode.utf8ByteSequenceLength(self.text[self.index]) catch break :decoded null;
-            if (self.index + length > self.text.len) break :decoded null;
-            const codepoint = std.unicode.utf8Decode(self.text[self.index..][0..length]) catch break :decoded null;
-            self.index += length;
-            break :decoded codepoint;
-        };
-        if (decoded) |codepoint| return codepoint;
-        self.index += 1;
-        return '?';
     }
 };
 
@@ -830,15 +766,6 @@ const ScissorStack = struct {
     }
 };
 
-test "invalid UTF-8 reads as '?', as raylib reads it" {
-    var codepoints: Codepoints = .{ .text = "a\xffé\xc3" };
-    try std.testing.expectEqual(@as(?c_int, 'a'), codepoints.next());
-    try std.testing.expectEqual(@as(?c_int, '?'), codepoints.next());
-    try std.testing.expectEqual(@as(?c_int, 'é'), codepoints.next());
-    try std.testing.expectEqual(@as(?c_int, '?'), codepoints.next());
-    try std.testing.expectEqual(@as(?c_int, null), codepoints.next());
-}
-
 test "roundness uses the largest radius against the shorter side" {
     const bounds: zui.Rect = .{ .width = 100, .height = 40 };
     try std.testing.expectEqual(@as(f32, 0), roundness(bounds, .zero));
@@ -884,26 +811,14 @@ test "raylib's keys map to zui's, letters and function keys included" {
     try std.testing.expectEqual(zui.Key.unidentified, keyFor(c.KEY_KP_5));
 }
 
-test "a built-in glyph advances by its own advance, or by its width and the glyph spacing, then the letter spacing" {
-    var glyphs = [_]c.GlyphInfo{
-        .{ .value = 'a', .offsetX = 1, .advanceX = 12 },
-        .{ .value = 'b', .offsetX = 1, .advanceX = 0 },
-    };
-    var recs = [_]c.Rectangle{ .{ .width = 9 }, .{ .width = 9 } };
-    const font: c.Font = .{ .baseSize = 10, .glyphCount = glyphs.len, .glyphs = &glyphs, .recs = &recs };
-    try std.testing.expectEqual(@as(f32, 24), builtInAdvance(font, 'a', 20, 0));
-    try std.testing.expectEqual(@as(f32, 27), builtInAdvance(font, 'a', 20, 3));
-    try std.testing.expectEqual(@as(f32, 20 + 2), builtInAdvance(font, 'b', 20, 0));
-}
-
-/// What a test measures with: raylib's built-in font.
-const BuiltInFontText = struct {
-    pub fn zuiMeasure(_: *BuiltInFontText, run: []const u8, key: zui.MeasureKey(u16)) [2]f32 {
-        return measureInBuiltInFont(run, key);
+/// Measures every byte as 8 by 16 units, for a test that draws no glyphs.
+const FixedWidthText = struct {
+    pub fn zuiMeasure(_: *FixedWidthText, run: []const u8, key: zui.MeasureKey(u16)) [2]f32 {
+        return .{ @as(f32, @floatFromInt(run.len)) * 8, key.size };
     }
 };
 
-test "the renderer draws the fonts of the text it is given, and the rest in raylib's built-in font" {
+test "the renderer draws the fonts of the text it is given" {
     var renderer: Renderer = .{};
     try std.testing.expectError(error.UnsupportedSurface, renderer.init(.{ .offscreen = .{ .size = .{ 1, 1 } } }, &zui_glyphs.testing.BoxFonts{}));
     const boxes: zui_glyphs.testing.BoxFonts = .{};
@@ -920,19 +835,19 @@ test "every cursor maps to one of raylib's" {
 }
 
 test "zui_app's config makes images raylib textures, and keeps the application's text" {
-    const derived = zui_app.contextConfig(Renderer, .{ .limits = .{ .max_elements = 128 }, .CustomData = u32, .Text = BuiltInFontText });
+    const derived = zui_app.contextConfig(Renderer, .{ .limits = .{ .max_elements = 128 }, .CustomData = u32, .Text = FixedWidthText });
     try std.testing.expect(derived.ImageHandle == Texture);
-    try std.testing.expect(derived.Text == BuiltInFontText);
+    try std.testing.expect(derived.Text == FixedWidthText);
     try std.testing.expect(derived.CustomData == void);
     try std.testing.expectEqual(@as(u32, 128), derived.limits.max_elements);
 }
 
 test "the renderer draws exactly the base commands and images, into raylib's own window" {
     comptime zui.checkHostAndRenderer(Host, Renderer);
-    const Ui = zui.Context(zui_app.contextConfig(Renderer, .{ .limits = .{ .max_elements = 8 }, .Text = BuiltInFontText }));
+    const Ui = zui.Context(zui_app.contextConfig(Renderer, .{ .limits = .{ .max_elements = 8 }, .Text = FixedWidthText }));
     try std.testing.expectEqual(6, @typeInfo(Ui.RenderCommand.Payload).@"union".fields.len);
     var renderer: Renderer = .{};
-    var text: BuiltInFontText = .{};
+    var text: FixedWidthText = .{};
     var ui = try Ui.init(std.testing.allocator, std.testing.io, &text);
     defer ui.deinit(std.testing.allocator);
     ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 100, 100 } } });

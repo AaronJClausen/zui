@@ -505,7 +505,7 @@ pub const Fonts = struct {
 
 ### Fonts out of the box · *shipped*
 
-`zui_truetype.Text` is a text contract you do not write: TrueType fonts on stb_truetype, laid out through `zui_glyphs`, whose one layout both measures a run and tells every renderer where to draw each glyph, so text is drawn where it was measured. Given no fonts it draws in Atkinson Hyperlegible Regular as font 0; `zui_fonts` bundles that, its bold and Liberation Mono, and only the ones you reference are embedded. Each renderer declares how it places glyphs, on the pixel grid or one per terminal cell, and the text lays out for it. Its fingerprint covers its fonts and placement, so a remote renderer with other fonts refuses your stream. Reach it through the `zui` dependency: `zui.builder.dependency("zui_truetype", .{})`.
+`zui_truetype.Text` is a text contract you do not write: TrueType fonts on stb_truetype, laid out through `zui_glyphs`, whose one layout both measures a run and tells every renderer where to draw each glyph, so text is drawn where it was measured. Given no fonts it draws in Atkinson Hyperlegible Regular as font 0; `zui_fonts` bundles that, its bold and Liberation Mono, and only the ones you reference are embedded. Each renderer declares how it places glyphs, on the pixel grid or one per terminal cell, and the text lays out for it; a renderer has no fonts of its own, so the same typefaces draw on raylib, sokol, the browser and the terminal, and text in a font the text lacks is not drawn. Its fingerprint covers its fonts and placement, so a remote renderer with other fonts refuses your stream. Reach it through the `zui` dependency: `zui.builder.dependency("zui_truetype", .{})`.
 
 `src/typefaces.zig`
 

@@ -2,54 +2,61 @@ const std = @import("std");
 const zui = @import("zui");
 pub const sokol = @import("sokol");
 
+/// Draws zui frames through sokol_gfx. A context drawn by it is configured
+/// with `zui_app.contextConfig`, with the font system its text is measured
+/// in:
+///
+/// ```zig
+/// const Ui = zui.Context(zui_app.contextConfig(zui_sokol.Renderer, .{ .Text = zui_truetype.Text }));
+/// var text: zui_truetype.Text = .{};
+/// var renderer: zui_sokol.Renderer = .init(&text);
+/// ```
 pub const Renderer = @import("renderer.zig").Renderer;
+/// The renderer's `MaterialHandle`.
+pub const Material = @import("material.zig").Material;
 
-/// The types a context drawn by `Renderer` declares, which build without
-/// sokol: an application that only declares frames, for a renderer
-/// elsewhere to draw, can import `zui_sokol_ui` alone.
-pub const zui_sokol_ui = @import("zui_sokol_ui");
-pub const Text = zui_sokol_ui.Text;
-pub const Image = zui_sokol_ui.Image;
-pub const Material = zui_sokol_ui.Material;
+/// The renderer's `ImageHandle`: a texture as sokol_gl samples it, by the
+/// ids of a sokol_gfx view and of the sampler to draw it with, which
+/// `imageOf` makes from sokol's own handles.
+pub const Image = struct {
+    view: SokolId,
+    sampler: SokolId,
+
+    pub const SokolId = struct { id: u32 = 0 };
+};
 
 /// The `Image` for a sokol_gfx view and the sampler to draw it with.
 pub fn imageOf(view: sokol.gfx.View, sampler: sokol.gfx.Sampler) Image {
     return .{ .view = .{ .id = view.id }, .sampler = .{ .id = sampler.id } };
 }
 
-/// A `zui.Config` for `Renderer`: text measured by `Text`, images that are
-/// `Image`s, materials that are `Material`s, and exactly the commands
-/// `Renderer` draws, gradients, shadows, backdrop blurs, transforms and
-/// materials among them. The renderer draws `zui.ExtendedColor`, clamped
-/// into an 8-bit sRGB target and as declared into an `.scrgb_fp16` one, so
-/// an application may declare its colors in either. Override any other field:
-/// `zui.Context(zui_sokol.config(.{ .Color = zui.ExtendedColor, .limits = .{ .max_elements = 8192 } }))`.
-pub fn config(overrides: zui.Config) zui.Config {
-    comptime zui.checkRenderer(Renderer);
-    return zui_sokol_ui.config(overrides);
-}
-
-test "config makes images sokol textures and text debugtext's" {
-    const derived = config(.{ .limits = .{ .max_elements = 128 }, .CustomData = u32 });
-    try std.testing.expect(derived.ImageHandle == Image);
-    try std.testing.expect(derived.MaterialHandle == Material);
-    try std.testing.expect(derived.Text == Text);
-    try std.testing.expect(derived.CustomData == void);
-    try std.testing.expectEqual(@as(u32, 128), derived.limits.max_elements);
-}
+/// Measures every byte as 8 by 16 units, for a test that draws no glyphs.
+const FixedWidthText = struct {
+    pub fn zuiMeasure(_: *FixedWidthText, run: []const u8, key: zui.MeasureKey(u16)) [2]f32 {
+        return .{ @as(f32, @floatFromInt(run.len)) * 8, key.size };
+    }
+};
 
 test "the renderer draws the base commands, images, gradients, shadows, backdrop blurs, transforms and materials, into sokol_app's swapchain or an image of its own" {
-    const Ui = zui.Context(config(.{ .limits = .{ .max_elements = 8 } }));
+    const Ui = zui.Context(.{
+        .Text = FixedWidthText,
+        .commands = Renderer.zui_commands,
+        .extended_color = Renderer.zui_extended_color,
+        .ImageHandle = Renderer.ImageHandle,
+        .MaterialHandle = Renderer.MaterialHandle,
+        .limits = .{ .max_elements = 8 },
+    });
+    comptime zui.checkRenderer(Renderer);
     const Payload = Ui.RenderCommand.Payload;
     try std.testing.expectEqual(12, @typeInfo(Payload).@"union".fields.len);
     inline for (.{ "gradient", "shadow", "backdrop_blur", "transform_begin", "transform_end", "material" }) |optional| try std.testing.expect(@hasField(Payload, optional));
-    var text: Text = .{};
+    var text: FixedWidthText = .{};
     var ui = try Ui.init(std.testing.allocator, std.testing.io, &text);
     defer ui.deinit(std.testing.allocator);
     ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 100, 100 } } });
     const frame = ui.endFrame();
     defer ui.release(frame);
-    var renderer: Renderer = .{ .fonts = .of(&text), .pipeline = .{}, .alpha_coverage_pipeline = .{} };
+    var renderer: Renderer = .{ .pipeline = .{} };
     try std.testing.expectError(error.UnsupportedSurface, renderer.zuiSubmit(.{ .web = .{ .canvas = 0 } }, frame));
 }
 
@@ -57,6 +64,6 @@ test {
     _ = @import("renderer.zig");
     _ = @import("backdrop_blur.zig");
     _ = @import("materials.zig");
+    _ = @import("material.zig");
     _ = @import("destination.zig");
-    _ = @import("bitmap_glyphs.zig");
 }

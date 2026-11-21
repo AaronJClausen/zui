@@ -6,13 +6,11 @@ pub fn build(b: *std.Build) void {
     const core_options: CoreOptions = .declare(b);
     const force_opengl = b.option(bool, "gl", "Render with OpenGL instead of D3D11 or Metal") orelse false;
 
-    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "examples" };
+    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src" };
     b.step("fmt", "Format all Zig sources").dependOn(&b.addFmt(.{ .paths = formatted_paths, .exclude_paths = &generated_paths }).step);
     b.step("fmt-check", "Fail if any Zig source is not formatted").dependOn(&b.addFmt(.{ .paths = formatted_paths, .exclude_paths = &generated_paths, .check = true }).step);
 
-    const check = b.step("check", "Compile the backend and its tests, and link the tour for wasm32-freestanding, without running them");
-    const truetype_dependency = truetypeDeclaring(b, core_options.on(target, optimize)) orelse return;
-    const tour_modules = addTourModules(b, truetype_dependency, target, optimize, .exported, core_options);
+    const check = b.step("check", "Compile the backend, its tests and the renderer suite without running them");
     if (target.result.os.tag == .freestanding) return;
 
     const core = b.dependency("zui_core", core_options.on(target, optimize));
@@ -27,7 +25,6 @@ pub fn build(b: *std.Build) void {
         .imports = &.{
             .{ .name = "zui", .module = zui_module },
             .{ .name = "zui_glyphs", .module = glyphs_module },
-            .{ .name = "zui_sokol_ui", .module = tour_modules.ui },
             .{ .name = "sokol", .module = sokol_dependency.module("sokol") },
         },
     });
@@ -35,41 +32,8 @@ pub fn build(b: *std.Build) void {
 
     const unit_tests = b.addTest(.{ .root_module = backend_module });
     linkThroughLlvmOnLinux(unit_tests);
-    const ui_unit_tests = b.addTest(.{ .root_module = tour_modules.ui });
-    linkThroughLlvmOnLinux(ui_unit_tests);
-    const test_step = b.step("test", "Run the backend's unit tests");
-    test_step.dependOn(&b.addRunArtifact(unit_tests).step);
-    test_step.dependOn(&b.addRunArtifact(ui_unit_tests).step);
-
-    const tour_tests = b.addTest(.{ .root_module = b.createModule(.{
-        .root_source_file = b.path("examples/tour_test.zig"),
-        .target = target,
-        .optimize = optimize,
-        .imports = tour_modules.imports,
-    }) });
-    linkThroughLlvmOnLinux(tour_tests);
-    b.step("test-tour", "Declare every screen of the tour headlessly; fail if one exceeds its limits or does not fit the default window").dependOn(&b.addRunArtifact(tour_tests).step);
+    b.step("test", "Run the backend's unit tests").dependOn(&b.addRunArtifact(unit_tests).step);
     check.dependOn(&unit_tests.step);
-    check.dependOn(&tour_tests.step);
-    const freestanding_target = b.resolveTargetQuery(.{ .cpu_arch = .wasm32, .os_tag = .freestanding });
-    const freestanding_truetype_dependency = truetypeDeclaring(b, core_options.on(freestanding_target, optimize)) orelse return;
-    const freestanding_tour_modules = addTourModules(b, freestanding_truetype_dependency, freestanding_target, optimize, .private, core_options);
-    const freestanding_tour = b.addExecutable(.{
-        .name = "zui-sokol-tour-freestanding",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("examples/tour_freestanding.zig"),
-            .target = freestanding_target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "zui_sokol_ui", .module = freestanding_tour_modules.ui },
-                .{ .name = "zui_sokol_tour", .module = freestanding_tour_modules.tour },
-            },
-        }),
-    });
-    freestanding_tour.entry = .disabled;
-    freestanding_tour.rdynamic = true;
-    _ = freestanding_tour.getEmittedBin();
-    check.dependOn(&freestanding_tour.step);
 
     // The renderer suite reads frames back with glReadPixels, so it always
     // renders with OpenGL, and needs a window: on Linux CI, under Xvfb.
@@ -81,26 +45,32 @@ pub fn build(b: *std.Build) void {
         .imports = &.{
             .{ .name = "zui", .module = zui_module },
             .{ .name = "zui_glyphs", .module = glyphs_module },
-            .{ .name = "zui_sokol_ui", .module = tour_modules.ui },
             .{ .name = "sokol", .module = gl_sokol_dependency.module("sokol") },
         },
     });
     addRendererOptions(b, gl_backend_module, true);
-    const conformance = b.addExecutable(.{
-        .name = "zui-sokol-conformance",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/conformance.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "zui_sokol", .module = gl_backend_module },
-                .{ .name = "zui", .module = zui_module },
-                .{ .name = "zui_testing", .module = core.module("zui_testing") },
-            },
-        }),
-    });
-    linkThroughLlvmOnLinux(conformance);
-    b.step("conformance", "Run zui's renderer suite against the renderer, in a window, with OpenGL").dependOn(&b.addRunArtifact(conformance).step);
+    // Until stb is fetched, the font system the suite measures with declares
+    // no module.
+    if (truetypeDeclaring(b, core_options.on(target, optimize))) |truetype_dependency| {
+        const conformance = b.addExecutable(.{
+            .name = "zui-sokol-conformance",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/conformance.zig"),
+                .target = target,
+                .optimize = optimize,
+                .imports = &.{
+                    .{ .name = "zui_sokol", .module = gl_backend_module },
+                    .{ .name = "zui", .module = zui_module },
+                    .{ .name = "zui_testing", .module = core.module("zui_testing") },
+                    .{ .name = "zui_app", .module = core.module("zui_app") },
+                    .{ .name = "zui_truetype", .module = truetype_dependency.module("zui_truetype") },
+                },
+            }),
+        });
+        linkThroughLlvmOnLinux(conformance);
+        check.dependOn(&conformance.step);
+        b.step("conformance", "Run zui's renderer suite against the renderer, in a window, with OpenGL").dependOn(&b.addRunArtifact(conformance).step);
+    }
 
     const regenerate_shaders = b.step("shaders", "Regenerate each src/*.glsl.zig from its GLSL with sokol-shdc");
     if (b.lazyImport(@This(), "sokol")) |sokol| {
@@ -159,50 +129,9 @@ fn addRendererOptions(b: *std.Build, module: *std.Build.Module, opengl: bool) vo
     }
 }
 
-const TourModules = struct {
-    /// `zui_sokol_ui`: the types a context drawn by `zui_sokol` declares.
-    ui: *std.Build.Module,
-    /// `zui_sokol_tour`: the tour's application, which declares its frames
-    /// through `zui_sokol_ui` alone, so it builds where sokol does not.
-    tour: *std.Build.Module,
-    /// What the tour's modules import.
-    imports: []const std.Build.Module.Import,
-};
-
-/// `.exported` adds the modules for dependents to import; `.private`
-/// makes them for this build alone, as for a second target.
-fn addTourModules(b: *std.Build, truetype_dependency: *std.Build.Dependency, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, visibility: enum { exported, private }, core_options: CoreOptions) TourModules {
-    const core = b.dependency("zui_core", core_options.on(target, optimize));
-    const fonts_module = b.dependency("zui_fonts", .{ .target = target, .optimize = optimize }).module("zui_fonts");
-    const ui_options: std.Build.Module.CreateOptions = .{
-        .root_source_file = b.path("src/ui/root.zig"),
-        .target = target,
-        .optimize = optimize,
-        .imports = b.allocator.dupe(std.Build.Module.Import, &.{
-            .{ .name = "zui", .module = core.module("zui") },
-            .{ .name = "zui_glyphs", .module = b.dependency("zui_glyphs", .{ .target = target, .optimize = optimize }).module("zui_glyphs") },
-            .{ .name = "zui_truetype", .module = truetype_dependency.module("zui_truetype") },
-            .{ .name = "zui_fonts", .module = fonts_module },
-        }) catch @panic("out of memory"),
-    };
-    const ui = if (visibility == .exported) b.addModule("zui_sokol_ui", ui_options) else b.createModule(ui_options);
-    const imports = b.allocator.dupe(std.Build.Module.Import, &.{
-        .{ .name = "zui_sokol_ui", .module = ui },
-        .{ .name = "zui", .module = core.module("zui") },
-        .{ .name = "zui_widgets", .module = core.module("zui_widgets") },
-        .{ .name = "zui_reflect", .module = core.module("zui_reflect") },
-        .{ .name = "zui_async", .module = core.module("zui_async") },
-        .{ .name = "zui_fonts", .module = fonts_module },
-        .{ .name = "zui_showcase", .module = b.dependency("zui_showcase", core_options.on(target, optimize)).module("zui_showcase") },
-    }) catch @panic("out of memory");
-    const tour_options: std.Build.Module.CreateOptions = .{ .root_source_file = b.path("examples/tour_app.zig"), .target = target, .optimize = optimize, .imports = imports };
-    const tour = if (visibility == .exported) b.addModule("zui_sokol_tour", tour_options) else b.createModule(tour_options);
-    return .{ .ui = ui, .tour = tour, .imports = imports };
-}
-
-/// The font system the tour's text delegates its TrueType fonts to, once
-/// it has declared its module: until stb is fetched it returns from
-/// `build()` before declaring it.
+/// The font system the renderer suite measures with, once it has declared
+/// its module: until stb is fetched it returns from `build()` before
+/// declaring it.
 fn truetypeDeclaring(b: *std.Build, args: anytype) ?*std.Build.Dependency {
     const dependency = b.dependency("zui_truetype", args);
     return if (dependency.builder.modules.contains("zui_truetype")) dependency else null;

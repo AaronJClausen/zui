@@ -5,6 +5,10 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const core_options: CoreOptions = .declare(b);
 
+    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "examples" };
+    b.step("fmt", "Format all Zig sources").dependOn(&b.addFmt(.{ .paths = formatted_paths }).step);
+    b.step("fmt-check", "Fail if any Zig source is not formatted").dependOn(&b.addFmt(.{ .paths = formatted_paths, .check = true }).step);
+
     const core = b.dependency("zui_core", core_options.on(target, optimize));
     const zui_module = core.module("zui");
     const zui_testing_module = core.module("zui_testing");
@@ -50,33 +54,45 @@ pub fn build(b: *std.Build) void {
     b.step("conformance", "Run zui's renderer suite against the renderer").dependOn(&run_conformance.step);
     test_step.dependOn(&run_conformance.step);
 
-    const demo = b.addExecutable(.{
-        .name = "zui-terminal-demo",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("examples/demo.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "zui_terminal", .module = backend_module },
-                .{ .name = "zui", .module = zui_module },
-                .{ .name = "zui_app", .module = zui_app_module },
-                .{ .name = "zui_widgets", .module = core.module("zui_widgets") },
-                .{ .name = "zui_showcase", .module = b.dependency("zui_showcase", core_options.on(target, optimize)).module("zui_showcase") },
-            },
-        }),
-    });
-    b.installArtifact(demo);
+    const check_step = b.step("check", "Compile the backend and the targets without producing output");
+    check_step.dependOn(&unit_tests.step);
+    const tour_step = b.step("tour", "Run zui's tour in this terminal (Ctrl+C or Ctrl+Q quits); --dump --screen <name> prints a screen's glyphs");
+    const showcase_step = b.step("showcase", "Run zui's showcase in this terminal (Ctrl+C or Ctrl+Q quits); --dump prints its glyphs");
+    // Until stb is fetched, the font system the targets name declares no
+    // module.
+    const truetype_dependency = truetypeDeclaring(b, core_options.on(target, optimize)) orelse return;
+    const target_imports: []const std.Build.Module.Import = &.{
+        .{ .name = "zui_terminal", .module = backend_module },
+        .{ .name = "zui", .module = zui_module },
+        .{ .name = "zui_app", .module = zui_app_module },
+        .{ .name = "zui_truetype", .module = truetype_dependency.module("zui_truetype") },
+        .{ .name = "zui_tour", .module = b.dependency("zui_tour", core_options.on(target, optimize)).module("zui_tour") },
+        .{ .name = "zui_showcase", .module = b.dependency("zui_showcase", core_options.on(target, optimize)).module("zui_showcase") },
+    };
+    for ([_]struct { name: []const u8, step: *std.Build.Step }{ .{ .name = "tour", .step = tour_step }, .{ .name = "showcase", .step = showcase_step } }) |app| {
+        const executable = b.addExecutable(.{
+            .name = b.fmt("zui-terminal-{s}", .{app.name}),
+            .root_module = b.createModule(.{
+                .root_source_file = b.path(b.fmt("examples/{s}.zig", .{app.name})),
+                .target = target,
+                .optimize = optimize,
+                .imports = target_imports,
+            }),
+        });
+        b.installArtifact(executable);
+        check_step.dependOn(&executable.step);
+        const run = b.addRunArtifact(executable);
+        run.stdio = .inherit;
+        if (b.args) |arguments| run.addArgs(arguments);
+        app.step.dependOn(&run.step);
+    }
+}
 
-    const run_demo = b.addRunArtifact(demo);
-    run_demo.stdio = .inherit;
-    if (b.args) |arguments| run_demo.addArgs(arguments);
-    b.step("demo", "Run the demo in this terminal (Ctrl+C or Ctrl+Q quits)").dependOn(&run_demo.step);
-
-    b.step("check", "Compile the backend and the demo without producing output").dependOn(&demo.step);
-
-    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "examples" };
-    b.step("fmt", "Format all Zig sources").dependOn(&b.addFmt(.{ .paths = formatted_paths }).step);
-    b.step("fmt-check", "Fail if any Zig source is not formatted").dependOn(&b.addFmt(.{ .paths = formatted_paths, .check = true }).step);
+/// The font system the targets name, once it has declared its module:
+/// until stb is fetched it returns from `build()` before declaring it.
+fn truetypeDeclaring(b: *std.Build, args: anytype) ?*std.Build.Dependency {
+    const dependency = b.dependency("zui_truetype", args);
+    return if (dependency.builder.modules.contains("zui_truetype")) dependency else null;
 }
 
 /// Core's options as the package depending on this one gave them, each

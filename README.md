@@ -258,7 +258,7 @@ Implemented so far:
   balanced clips) and names the first one broken; with
   `features.safety_sweeps`, on by default in safe builds, `endFrame`
   panics on it.
-  The sokol renderer's tour runs in a browser, at
+  The tour runs in a browser, at
   <https://aaronjclausen.github.io/zui-web/>: the web host builds it for
   `wasm32-freestanding` and runs it in a Web Worker, and its page draws
   the tour's frames over `zui_wire` through WebGL 2, with four samples
@@ -302,8 +302,8 @@ Implemented so far:
   windows animating at once each hold the display's rate, and two idle
   windows use no CPU.
 
-The reference backend, its adapter host and the demo application live in
-[renderers/raylib/](renderers/raylib/); the other backends are
+The reference backend, its adapter host and its `tour` and `showcase`
+targets live in [renderers/raylib/](renderers/raylib/); the other backends are
 the sokol renderer in [renderers/sokol/](renderers/sokol/) and the
 terminal renderer in [renderers/terminal/](renderers/terminal/); native
 hosts live in [hosts/native/](hosts/native/).
@@ -431,16 +431,16 @@ it:
 |---|---|
 | `zig build test` | run the renderer's and host's unit tests |
 | `zig build conformance` | run zui's renderer and host suites against them, in hidden windows; needs a display |
-| `zig build test-tour` | declare every screen of the tour headlessly, and fail if one exceeds its limits or does not fit the default window |
-| `zig build check` | compile the renderer, the tour, its tests and the conformance suites without producing output |
-| `zig build demo` | run the tour |
-| `zig build demo -- --screen gallery` | start on one screen |
-| `zig build demo -- --frames 900 --cycle 40` | visit every screen, 40 frames each, then quit; add `--hidden` to do it in a hidden window |
-| `zig build demo -- --screenshot <absolute path> --screen typography` | render offscreen in live mode, save a PNG, quit |
-| `zig build demo -- --measure-idle` | report the CPU used over 10 idle seconds |
-| `zig build demo -- --measure-startup` | report the time from process start to the first presented frame (Windows) |
-| `zig build demo -- --zui-debug` | open `zui_debug`'s inspector, which F12 toggles |
-| `zig build demo -Dzui-tracy=true` | trace zui's zones into Tracy 0.14.1 |
+| `zig build check` | compile the renderer, its tests, the conformance suites and the targets without producing output |
+| `zig build tour` | run the tour |
+| `zig build tour -- --screen gallery` | start on one screen |
+| `zig build tour -- --frames 900 --cycle 40` | visit every screen, 40 frames each, then quit; add `--hidden` to do it in a hidden window |
+| `zig build tour -- --screenshot <absolute path> --screen typography` | render offscreen in live mode, save a PNG, quit |
+| `zig build tour -- --measure-idle` | report the CPU used over 10 idle seconds |
+| `zig build tour -- --measure-startup` | report the time from process start to the first presented frame (Windows) |
+| `zig build tour -- --zui-debug` | open `zui_debug`'s inspector, which F12 toggles |
+| `zig build tour -Dzui-tracy=true` | trace zui's zones into Tracy 0.14.1 |
+| `zig build showcase` | run the showcase; `-- --hidden --frames 60` draws 60 frames in a hidden window and quits |
 
 The sokol renderer has them too, run from `renderers/sokol/`; the first
 build fetches sokol-zig and stb, and on Linux needs
@@ -448,22 +448,27 @@ build fetches sokol-zig and stb, and on Linux needs
 
 | Command | What it does |
 |---|---|
-| `zig build test` | run the renderer's and `zui_sokol_ui`'s unit tests |
+| `zig build test` | run the renderer's unit tests |
 | `zig build conformance` | run zui's renderer suite against it in a window, always with OpenGL; needs a display |
-| `zig build test-tour` | declare every screen of the tour headlessly, and fail if one exceeds its limits or does not fit the default window |
-| `zig build check` | compile the renderer and its tests, and link the tour for `wasm32-freestanding`, without running them |
+| `zig build check` | compile the renderer, its tests and the conformance suite without running them |
 | `zig build check -Dgl=true` | the same, rendering into a native host's window with OpenGL instead of D3D11 |
 | `zig build shaders` | regenerate each `src/*.glsl.zig` from its GLSL with sokol-shdc, after the GLSL changes |
 
-The terminal renderer has them too, run from `renderers/terminal/`:
+The tour and the showcase on the sokol renderer run on the native hosts, below.
+
+The terminal renderer has them too, run from `renderers/terminal/`; the
+targets fetch stb for `zui_truetype`, whose fonts they lay out one glyph
+per cell:
 
 | Command | What it does |
 |---|---|
 | `zig build test` | run its unit tests and zui's renderer suite against it |
 | `zig build conformance` | run zui's renderer suite alone |
-| `zig build check` | compile the renderer and the demo without producing output |
-| `zig build demo` | run the demo in this terminal; Ctrl+C or Ctrl+Q quits |
-| `zig build demo -- --dump` | render the demo offscreen at 100×30 and print its glyphs |
+| `zig build check` | compile the renderer and the targets without producing output |
+| `zig build tour` | run the tour in this terminal, every screen whose commands a terminal draws; Ctrl+C or Ctrl+Q quits, and `-- --frames <count>` quits after that many frames |
+| `zig build tour -- --dump --screen typography` | render a screen offscreen at 180×56 and print its glyphs |
+| `zig build showcase` | run the showcase in this terminal |
+| `zig build showcase -- --dump` | render the showcase offscreen at 100×30 and print its glyphs |
 
 The native hosts have them too, run from `hosts/native/`; the examples
 fetch sokol-zig and stb for the sokol renderer that draws them, and on
@@ -476,7 +481,8 @@ for the examples sokol's
 | `zig build test` | the unit tests, and zui's host suite and the host's own tests against a window the user never sees (on Linux, skipped without a Wayland compositor) |
 | `zig build conformance` | only the host suite and the host's own tests |
 | `zig build check` | compile the host, its tests and the examples; add `-Dtarget=x86_64-windows` or `aarch64-windows` to cross-compile |
-| `zig build tour` | run the tour (Windows, Direct3D 11; Linux, OpenGL through EGL on Wayland) |
+| `zig build tour` | run the tour, drawn by the sokol renderer (Windows, Direct3D 11; Linux, OpenGL through EGL on Wayland); `-- --frames 300 --cycle 30` visits every screen and quits, `-- --measure-idle` reports the CPU used over 10 idle seconds |
+| `zig build showcase` | run the showcase, drawn by the sokol renderer; `-- --frames 60` quits after 60 frames |
 | `zig build material` | show the system material, or its fallback (Windows) |
 | `zig build hdr` | show HDR white beside SDR white (Windows) |
 | `zig build remote` | run the tour in another process and draw it here, over `zui_wire` (Windows) |
@@ -490,13 +496,13 @@ The WebGL renderer has `test` and `check`, run from `renderers/webgl/`:
 
 | Command | What it does |
 |---|---|
-| `zig build test` | run the draw list's, bitmap fonts' and blur's unit tests |
+| `zig build test` | run the draw list's and blur's unit tests |
 | `zig build check` | compile the unit tests natively and for `wasm32-freestanding` without running them |
 
-The web host has these, run from `hosts/web/`. The steps besides `test`
-and `check` fetch sokol-zig for the tour, and on Linux need sokol's
-`libx11-dev libxi-dev libxcursor-dev libgl1-mesa-dev libpulse-dev`, since
-the tools that run the tour natively link it; `test-demo` needs Node on
+The web host has these, run from `hosts/web/`. The first build fetches
+stb, and sokol-zig, which only `test-draw` compiles, for the sokol
+renderer that draws its reference; on Linux `test-draw` needs sokol's
+`libx11-dev libxi-dev libxcursor-dev libgl1-mesa-dev libpulse-dev`; `test-demo` needs Node on
 the `PATH`, with `worker_threads`; `test-draw`, `test-input` and
 `test-site` also need Chromium or Google Chrome (`chromium` on the
 `PATH`, or `-Dbrowser=<path>`), run headless; and `test-draw` needs a
@@ -507,8 +513,8 @@ display for the sokol renderer's OpenGL window (CI runs it under
 |---|---|
 | `zig build test` | run the client's and the stepped `Io`'s unit tests |
 | `zig build` | write the client, `zig-out/web/zui-web.wasm`, and the tour for a worker, `zig-out/web/zui-web-tour.wasm` |
-| `zig build check` | compile without running, and compile the client and the tour's worker for `wasm32-freestanding` |
-| `zig build test-demo` | stream the sokol renderer's tour to the client under Node, and check every frame decodes to what was drawn; run the tour in a worker under Node, and check every frame is the one the tour draws natively |
+| `zig build check` | compile without running: the client and the tour's worker for `wasm32-freestanding`, and the native tools that run the tour |
+| `zig build test-demo` | stream the tour to the client under Node, and check every frame decodes to what was drawn; run the tour in a worker under Node, and check every frame is the one the tour draws natively |
 | `zig build test-draw` | draw a frame of each of the tour's screens in headless Chromium, with one sample per pixel and with four, and check each against the sokol renderer drawing it alike |
 | `zig build test-input` | give the page input in headless Chromium, run the tour on the records the client wrote of it, and check the tour took them and the page shows the cursor it asks for |
 | `zig build site` | write the published page, the client, the frame drawer, the tour's worker and its fonts to `zig-out/site`; serve that directory over HTTP (or HTTPS, off `localhost`) to run the tour in a browser |
@@ -559,20 +565,23 @@ CI runs:
   `apps/showcase/`, `apps/tour/`, `themes/` and `examples/` in three
   optimize modes, and their `check`, on Linux, Windows and macOS, each run
   from its directory;
-- the raylib renderer's tests, `test-tour` and `check` on Windows, `check`
-  on macOS, and on Linux, under `xvfb-run`, its conformance, a visit of
-  every screen of the tour, five screenshots, kept as the run's
-  artifacts, and the CPU the tour uses while idle, in the job summary,
-  from `renderers/raylib/`;
-- the sokol renderer's tests, `check` and `test-tour` on Linux, Windows
-  and macOS, its `check -Dgl=true` on Windows, and its conformance on
-  Linux under `xvfb-run`, from `renderers/sokol/`;
-- the terminal renderer's tests, its conformance, its `check` and its
-  demo's `--dump`, on Linux, Windows and macOS, from `renderers/terminal/`;
+- the raylib renderer's tests and `check` on Windows, `check` on macOS,
+  and on Linux, under `xvfb-run`, its conformance, the `tour` target's
+  visit of every screen, five screenshots, kept as the run's artifacts,
+  and the CPU the tour uses while idle, in the job summary, and the
+  `showcase` target's frames, from `renderers/raylib/`;
+- the sokol renderer's tests and `check` on Linux, Windows and macOS, its
+  `check -Dgl=true` on Windows, and its conformance on Linux under
+  `xvfb-run`, from `renderers/sokol/`;
+- the terminal renderer's tests, its conformance, its `check`, the
+  `showcase` target's `--dump` and the `tour` target's `--dump` of every
+  screen it is offered, on Linux, Windows and macOS, from
+  `renderers/terminal/`;
 - the native hosts' tests in Debug and ReleaseSafe and their `check`, on
   Windows, and on Linux under a headless Weston with a D-Bus daemon of
-  its own, where the tour also visits every screen and must report no
-  layer or glyph atlas overflow and clean diagnostics, and `check` for
+  its own, where the `tour` target also visits every screen and must
+  report no layer or glyph atlas overflow and clean diagnostics, and the
+  `showcase` target draws its frames, and `check` for
   x86-64 and ARM64 Windows from Linux, from `hosts/native/`. The other
   examples are compiled there and run on a desktop;
 - the WebGL renderer's and the web host's tests in three optimize modes
@@ -593,11 +602,11 @@ Set `.features = .{ .Tracer = zui_tracy.Tracer }` in the `Config`, call
 `zui_tracy.frameMark()` after each presented frame, build with
 `-Dzui-tracy=true`, and connect Tracy's profiler of the same version
 (0.14.1). Every step of `beginFrame` and `endFrame` is a zone.
-The raylib renderer's tour does all of this with `zig build demo
--Dzui-tracy=true`, run from `renderers/raylib/`. Without the profiler's window, Tracy's
-`tracy-capture -o demo.tracy` saves a trace (run the demo with
+The tour does all of this with `zig build tour -Dzui-tracy=true`, run
+from `renderers/raylib/`. Without the profiler's window, Tracy's
+`tracy-capture -o tour.tracy` saves a trace (run the tour with
 `TRACY_NO_EXIT=1` so it waits for the capture to finish) and
-`tracy-csvexport demo.tracy` lists its zones.
+`tracy-csvexport tour.tracy` lists its zones.
 
 To keep noise out of a profile or a timing:
 - pin the process to one core (`taskset -c 2` on Linux, `start /affinity 4`
@@ -732,7 +741,7 @@ exe.root_module.addImport("zui_tracy", zui.module("zui_tracy"));
 // Text: what font systems and renderers share, and the bundled typefaces.
 exe.root_module.addImport("zui_glyphs", zui.module("zui_glyphs"));
 exe.root_module.addImport("zui_fonts", zui.module("zui_fonts"));
-// The tour and the showcase, for a renderer's or a host's demo.
+// The tour and the showcase, which a renderer's or a host's targets run.
 exe.root_module.addImport("zui_tour", zui.module("zui_tour"));
 exe.root_module.addImport("zui_showcase", zui.module("zui_showcase"));
 // The default font system, which builds stb_truetype, so it is a package of its own.
@@ -844,9 +853,8 @@ draws each frame scaled by the record's zoom, and the host divides the
 viewport and the pointer by it. `zui_app` hands its `init` the
 application's `Text`, whose glyphs it rasterizes on first use into a
 `zui_glyphs` atlas reserved there and uploaded as one texture, and draws
-where `zui_glyphs` laid them out; a font id that text has no face for
-draws in raylib's built-in font, which `zui_raylib.measureInBuiltInFont`
-measures. `zui_app.contextConfig` builds the `Config` from its
+where `zui_glyphs` laid them out; text in a font id that text has no
+face for is not drawn. `zui_app.contextConfig` builds the `Config` from its
 declarations: `ImageHandle` is raylib's `Texture2D`, so `ui.image(.{ .handle = texture
 }, ...)` draws directly, and there are no optional commands and no
 `CustomData`. The renderer's `switch` over the commands therefore names
@@ -874,7 +882,7 @@ window, since the application may want it. Beyond the contract:
 |---|---|
 | `rectangle` | `DrawRectangleRec`, or `DrawRectangleRounded` with a corner radius |
 | `border` | four bands inside the bounds; `DrawRectangleRoundedLinesEx` when uniform and rounded |
-| `text` | `DrawTextCodepoint` per glyph, advanced by the glyph's metrics and the style's letter spacing |
+| `text` | a textured quad per glyph through rlgl, from the `zui_glyphs` atlas, where `zui_glyphs` laid it out |
 | `image` | `DrawTexturePro` with the tint; with a corner radius, a fan of textured triangles through rlgl, each corner with its own radius |
 | `clip_begin` / `clip_end` | `BeginScissorMode` / `EndScissorMode` with a stack, at the record's zoom |
 | `gradient` / `shadow` | not drawn: zui lowers a gradient to its middle color and a shadow to nothing |
@@ -892,13 +900,6 @@ What raylib cannot do:
 - **Corner radii.** raylib rounds all four corners of a rectangle or a
   border the same, so the largest of zui's four radii is used; an image
   rounds each corner by its own.
-- **Letter spacing in the built-in font.** raylib's built-in font is
-  measured glyph by glyph with the spacing after each glyph included: a
-  glyph with no advance of its own takes `built_in_glyph_spacing` of the
-  size, and the style adds its own. zui measures words and spaces
-  separately and adds them up, so measurement has to be additive, and
-  raylib's own `MeasureTextEx` leaves out the spacing after the last
-  glyph.
 - **No IME window.** raylib cannot place one, so a text-input request is
   not applied.
 - **One window.** `zui_capabilities.windows` is `.one`.
@@ -913,7 +914,7 @@ events' order, the waits and the wakes against the real window.
 
 #### The tour
 
-`zig build demo`, run from `renderers/raylib/` (see *Development* for its
+`zig build tour`, run from `renderers/raylib/` (see *Development* for its
 flags), is a tour of what zui does today, one screen per feature. A
 strip along the bottom times every zui frame: how many frames were
 declared, and in the last second; why each frame was declared (input, a
@@ -940,9 +941,9 @@ watch.
 | Window Manager | draggable floating windows with z order, a taskbar with tooltips, `attach_to = .element` with every anchor pair, a modal dialog in a focus scope |
 | Robot Workshop | a robot editor generated by `zui_reflect` from nested structs, and environment changes (theme, contrast, reduced motion, text scale) as if the OS sent them |
 | Pixel Pad | painting through `pointerLocal` on one element, tools on keys, undo with chords, and a live view of `keyEvents` and `typedText` |
-| Typography | three TrueType fonts and raylib's built-in one, size, letter spacing, line height, wrap and alignment, a column to drag-resize, and a marquee looped with `measureText` and `setScrollOffset` |
+| Typography | three TrueType fonts, size, letter spacing, line height, wrap and alignment, a column to drag-resize, and a marquee looped with `measureText` and `setScrollOffset` |
 | Light & Depth | `zui.Effects` on sliders with their declaration printed as Zig. This renderer does not draw `gradient` or `shadow`, so zui lowers them: a gradient to its middle color, a shadow to nothing |
-| Classic | `zui_showcase`, in `apps/showcase/`, the UI every zui renderer's demo shares, so the renderers can be compared |
+| Classic | `zui_showcase`, in `apps/showcase/`, the UI every zui renderer's `showcase` target draws, so the renderers can be compared |
 
 Ctrl+1 to Ctrl+0 jump to the first ten screens, Ctrl+PgDn and Ctrl+PgUp
 to the next and previous, Ctrl+= and Ctrl+- zoom (through
@@ -951,16 +952,21 @@ costs live, and Tab moves focus.
 
 ![The gallery loading tiles on other threads](renderers/raylib/docs/gallery.png)
 
-`examples/demo.zig` is the tour's application as `zui_app` runs it: it
-names the tour's text, `kit.Text`, whose `zui_truetype.Text` holds
-`zui_fonts`' three typefaces and whose fourth font is raylib's built-in
-one, sets the record's zoom and the
-environment changes the tour makes up, hands each frame to `zui_debug`
-while its panel is open, and times each step for the strip;
-`kit.Renderer` wraps `zui_raylib.Renderer` to time its submits. The tour
-itself (`app.zig`, `kit.zig`, `perf.zig` and `screens/`) is the sokol renderer's,
-with Liberation Mono and raylib's built-in font in place of sokol_debugtext's
-fonts, and `zui_debug`'s panel on F12, which the sokol renderer's does not have yet.
+The tour is `zui_tour`, in `apps/tour/`, the same on every renderer:
+`examples/tour.zig` is the target that names it on raylib's host and
+renderer, in `zui_truetype`'s text, which the tour gives `zui_fonts`'
+three typefaces:
+
+```zig
+const Tour = zui_tour.App(.{ .Host = zui_raylib.Host, .Renderer = zui_raylib.Renderer, .Text = zui_truetype.Text, .renderer_name = "raylib" });
+```
+
+and adds what raylib's window gives: screenshots drawn offscreen, the
+startup measurement, and the run's report in `zui_debug`'s panel. The
+tour sets the record's zoom and the environment changes it makes up,
+hands each frame to `zui_debug` while its panel is open, and times each
+step for the strip. `examples/showcase.zig` runs `zui_showcase` the
+same way.
 
 `--measure-idle` runs the tour in a hidden window and reads its own CPU
 time at two frames it asks for with `requestFrameAt`, 10 seconds apart,
@@ -974,14 +980,14 @@ time).
 
 `zui_sokol` is a [sokol](https://github.com/floooh/sokol) renderer,
 through [sokol-zig](https://github.com/floooh/sokol-zig): it measures
-text through zui's text contract, and draws zui's frames as a renderer with sokol_gl,
-sokol_debugtext and shaders of its own, on D3D11 (Windows), Metal
-(macOS) or OpenGL (Linux), its TrueType text from a `zui_glyphs` atlas
-where `zui_glyphs` laid it out. It draws every optional command,
-gradients, shadows, backdrop blurs, transforms and materials, and
-extended colors. sokol-zig, and stb_truetype (from
-[stb](https://github.com/nothings/stb)) for `zui_truetype`, are fetched
-the first time it is built; on Linux it needs
+text through zui's text contract, and draws zui's frames as a renderer with sokol_gl
+and shaders of its own, on D3D11 (Windows), Metal (macOS) or OpenGL
+(Linux), its text in the fonts of the text contract it is given, from a
+`zui_glyphs` atlas where `zui_glyphs` laid it out. It draws every
+optional command, gradients, shadows, backdrop blurs, transforms and
+materials, and extended colors. sokol-zig, and stb_truetype (from
+[stb](https://github.com/nothings/stb)) for the conformance harness's
+`zui_truetype`, are fetched the first time it is built; on Linux it needs
 `libx11-dev libxi-dev libxcursor-dev libgl1-mesa-dev libpulse-dev libegl-dev libwayland-dev`.
 
 ```zig
@@ -992,11 +998,14 @@ exe.root_module.addImport("zui_sokol", zui_sokol.module("zui_sokol"));
 
 ```zig
 const zui = @import("zui");
+const zui_app = @import("zui_app");
 const zui_sokol = @import("zui_sokol");
-const Ui = zui.Context(zui_sokol.config(.{}));
+const zui_truetype = @import("zui_truetype");
+const Ui = zui.Context(zui_app.contextConfig(zui_sokol.Renderer, .{ .Text = zui_truetype.Text }));
 
-// before the first frame, to draw TrueType text with `.font = body_font`:
-const body_font = try text.addTrueTypeFont(zui_fonts.atkinson_hyperlegible_regular);
+// before the first frame; given no fonts, font 0 is Atkinson Hyperlegible:
+var text: zui_truetype.Text = .{};
+const bold_font = try text.addFont(zui_fonts.atkinson_hyperlegible_bold);
 
 // in sokol_app's init callback, after sg.setup:
 renderer = .init(&text);
@@ -1050,10 +1059,9 @@ renderer.clear_color = .{ .r = 0, .g = 0, .b = 0, .a = 0 }; // let the backdrop 
 try renderer.zuiSubmit(host.zuiSurface(.main), frame);
 ```
 
-`zui_host` runs the tour this way: `zui_sokol_tour` exports the tour's
-application, so another loop can run it unchanged. `zui_sokol.config(...)`
-builds the `Config` from its declarations: `Text` is `zui_sokol.Text`,
-`ImageHandle` is `zui_sokol.Image` (the ids of a view and a sampler, made
+`zui_host` runs the tour and the showcase this way, through `zui_app`.
+`zui_app.contextConfig(zui_sokol.Renderer, .{ .Text = … })` builds the
+`Config` from the renderer's declarations: `ImageHandle` is `zui_sokol.Image` (the ids of a view and a sampler, made
 by `zui_sokol.imageOf(view, sampler)`), `MaterialHandle` is
 `zui_sokol.Material`, the optional commands are `gradient`, `shadow`,
 `backdrop_blur`, `transform` and `material`, the renderer draws extended
@@ -1079,20 +1087,21 @@ fn panel(seconds: f32) Ui.Decoration {
 |---|---|
 | `rectangle` | sokol_gl quads, or a triangle fan with each corner's own radius |
 | `border` | a ring of triangles inside the bounds, with per-edge widths and per-corner radii |
-| `text` | `FontId` 0–5: sokol_debugtext, one call per wrapped line, with letter spacing placing each glyph on its own. From 6: a TrueType font added with `Text.addTrueTypeFont`, laid out by `zui_glyphs` as it was measured, its glyphs rasterized at the text's size in physical pixels into a `zui_glyphs` atlas and drawn as sokol_gl quads |
+| `text` | laid out by `zui_glyphs` as it was measured, in the fonts of the text contract `init` was given, its glyphs rasterized at the text's size in physical pixels into a `zui_glyphs` atlas and drawn as sokol_gl quads; text in a font id those fonts lack is not drawn |
 | `image` | a textured sokol_gl quad colored by the tint, or a triangle fan with each corner's own radius |
 | `gradient` | the rounded outline cut into bands at most 4 units long across the gradient (64 at most), each vertex colored by `colorAt`, so sokol_gl's sRGB blend between vertices stays within a step of zui's OKLab one |
 | `shadow` | the rounded box at the offset, grown by the spread, in the shadow's color, then six rings out to the blur, fading to clear along a smoothstep |
 | `backdrop_blur` | the frame is drawn into an offscreen target like the swapchain, and paused at each blur: a Gaussian along x, then along y, of what lies under the element, its edge pixels repeated, summed tap by tap into two float targets the size of the frame: RGBA32F (16 bytes a pixel), or RGBA16F where the GPU cannot render, blend and filter that, though half floats round each sum as the driver chooses, and one driver's blur can differ from another's by several color steps; the frame resumes with the result drawn inside the rounded outline and the tint over it, and is copied to the swapchain at the end. A frame without one is drawn as before |
 | `material` | `zui_sokol.Material`, a pattern between two colors (`solid`, `sheen`, `aurora`) moved by its phase: the rounded outline as a triangle fan, drawn by the material shader at the start of its own layer, before the layer's sokol_gl shapes. The shader and pipeline are made on the first frame with a material |
-| colors | `zui.ExtendedColor` (the renderer declares `zui_extended_color`) or `zui.Color`, as the application declares them. Into an 8-bit target an extended color is clamped into SDR and sRGB's gamut and encoded to 8 bits, as `ExtendedColor.toColor` does. Into an `.scrgb_fp16` offscreen image (RGBA16F) the frame is drawn in linear light through a shader of the renderer's own, which decodes each 8-bit sRGB vertex color and texel; a color brighter than SDR white is carried divided by its brightest channel, with that channel in sokol_gl's per-vertex point size, which the shader multiplies back. Negative (out-of-sRGB-gamut) channels are still clamped there, bitmap text is drawn by sokol_gl rather than sokol_debugtext, and materials mix their colors in linear light |
+| colors | `zui.ExtendedColor` (the renderer declares `zui_extended_color`) or `zui.Color`, as the application declares them. Into an 8-bit target an extended color is clamped into SDR and sRGB's gamut and encoded to 8 bits, as `ExtendedColor.toColor` does. Into an `.scrgb_fp16` offscreen image (RGBA16F) the frame is drawn in linear light through a shader of the renderer's own, which decodes each 8-bit sRGB vertex color and texel; a color brighter than SDR white is carried divided by its brightest channel, with that channel in sokol_gl's per-vertex point size, which the shader multiplies back. Negative (out-of-sRGB-gamut) channels are still clamped there, and materials mix their colors in linear light |
 | `clip_begin` / `clip_end` | `sg.applyScissorRect` per layer, at the record's `scale × zoom`; inside a transform, the box around the clip in the window |
-| `transform_begin` / `transform_end` | sokol_gl's modelview matrix, loaded with the composed transform; a backdrop blur inside one blurs the box around it in the window and samples where it is drawn, and bitmap text inside one is drawn as sokol_gl quads from sokol_debugtext's own font bits, since sokol_debugtext has no matrix |
+| `transform_begin` / `transform_end` | sokol_gl's modelview matrix, loaded with the composed transform; a backdrop blur inside one blurs the box around it in the window and samples where it is drawn |
 
-sokol_gl and sokol_debugtext each batch their own draws. To keep zui's
-paint order, the renderer starts a new layer whenever a shape follows text
-or the clip changes, then replays the layers in order, each under its own
-scissor rectangle. The shaders, the material's, the linear-light one and
+To keep zui's paint order around what sokol_gl cannot draw in a batch of
+its own, the renderer starts a new layer whenever the clip changes, a
+backdrop blur must sample what came before it, or a material follows
+shapes, then replays the layers in order, each under its own scissor
+rectangle. The shaders, the material's, the linear-light one and
 the scRGB present, are written in `src/*.glsl` and checked in as their
 `.glsl.zig`, translated by sokol-shdc to GLSL 410, HLSL 5 and Metal, so
 building `zui_sokol` never runs sokol-shdc; after changing the GLSL, run
@@ -1118,10 +1127,7 @@ Current limits:
 - **A shadow is geometry, not a blur.** Its fade is drawn in rings, so a
   wide blur on a small box shows faint steps, and a translucent element
   shows its own shadow through it.
-- **Bitmap fonts are ASCII.** sokol_debugtext's fonts are 8×8 and printable
-  ASCII only; other code points draw as `?`. Their glyphs are
-  `Text.glyph_scale` of the text size, and every glyph has the same advance.
-- **TrueType text has no kerning or shaping.** Each codepoint is one
+- **Text has no kerning or shaping.** Each codepoint is one
   glyph, advanced by its own width, so measuring a run split at any word
   gives the same width. The atlas is one 1024×1024 image, reserved by
   `init` and remade whenever a frame needs glyphs it lacks (sokol_gfx
@@ -1141,49 +1147,25 @@ the suite checks every clip and fill, the image's tint and rounded
 corners, and a drawn gradient, shadow, backdrop blur, transform and
 material, by their pixels. The harness's material is `Material.solid`,
 drawn through the shader. The suite declares its scene in
-`zui.ExtendedColor`, HDR white among it, and checks that each color is
+`zui.ExtendedColor`, HDR white among it, measured with `zui_truetype.Text`, and checks that each color is
 encoded as `ExtendedColor.toColor` does in an 8-bit target, and that HDR
 white reads back four times SDR white, with colors blended and blurs
 averaged in linear light, in the FP16 one. sokol_gfx cannot read a frame
 back, so the suite always renders with OpenGL, whatever `-Dgl` says. CI
 runs it on Linux under `xvfb-run`, and it passes on Windows.
 
-#### Without sokol
-
-An application that only declares frames, for a renderer elsewhere to
-draw, imports `zui_sokol_ui`, which does not import sokol: `Text`,
-`Material`, `Image`, the commands the renderer draws, and `config`,
-which `zui_sokol` re-exports and checks against its renderer. Its `Text`
-hands TrueType fonts to `zui_truetype`, which builds without a C library,
-as on `wasm32-freestanding`. The tour declares its `Ui` through it, so
-`zui_sokol_tour` builds where
-sokol does not, and given a freestanding target, the package's build
-fetches stb alone and makes only those two modules:
-
-```zig
-const zui_sokol = zui.builder.dependency("zui_sokol", .{ .target = b.resolveTargetQuery(.{ .cpu_arch = .wasm32, .os_tag = .freestanding }) });
-module.addImport("zui_sokol_tour", zui_sokol.module("zui_sokol_tour"));
-```
-
-`zig build check` compiles and links `examples/tour_freestanding.zig`,
-the tour declaring a frame for `wasm32-freestanding`, so the tour keeps
-building there. Nothing the tour draws depends on the target's pointer
-width, so on the same clock and input it draws the same frames in
-WebAssembly as natively, which the web host's `test-demo` checks.
-
 #### The tour on sokol
 
 `zig build tour`, run from `hosts/native/` (see *The tour on a native
-host*), is the raylib renderer's tour on sokol: the same screens, the
-strip of frame costs along the bottom, **Ctrl+I**'s frame inspector and
-the same keys, but no `zui_debug` panel. Its Typography screen shows
-sokol_debugtext's six bitmap fonts beside the TrueType ones, its Light &
-Depth screen draws the gradients, shadows and frosted pane that the
-raylib renderer lowers, and two screens are its own:
+host*), is the same `zui_tour` as raylib's: the same screens, the strip
+of frame costs along the bottom, **Ctrl+I**'s frame inspector, **F12**'s
+`zui_debug` panel and the same keys. Its Light & Depth screen draws the
+gradients, shadows and frosted pane that the raylib renderer lowers, and
+two screens are offered only to a renderer that draws what they need:
 
 | Screen | What it shows |
 |---|---|
-| Transforms | `zui.Transform`: a card turned, moved and scaled about its origin from sliders, its declaration printed as Zig and its button pressed where it is drawn; turned tiles that hover and press where drawn; clock hands turned about their foot; the six bitmap fonts, turned |
+| Transforms | `zui.Transform`: a card turned, moved and scaled about its origin from sliders, its declaration printed as Zig and its button pressed where it is drawn; turned tiles that hover and press where drawn; clock hands turned about their foot; the tour's three fonts, turned |
 | Materials | `zui_sokol.Material`: a card drawn by the renderer's own shader, its pattern, colors, wave and phase on sliders and its declaration printed as Zig; every pattern side by side; the material beside its fallback background, as a renderer without `.material` draws it; a shadow beneath one and a border and button over it |
 
 ### The terminal renderer
@@ -1232,7 +1214,7 @@ terminal sends into each record, and hands the renderer, in each
 `.terminal` surface, the size in cells and its writer on stdout. The
 renderer keeps the screen, which `init` sizes to the first surface. A
 line written to stdout or stderr meanwhile stays among the
-cells until they change, so the demo passes `zui_app` a `notify` that
+cells until they change, so its targets pass `zui_app` a `notify` that
 leaves out the `.started` report. The same parts make a loop of your own:
 
 ```zig
@@ -1295,6 +1277,17 @@ What a terminal cannot do:
 - **No cursor shapes or IME window.** The frame's host requests are not
   applied.
 
+Its targets, run from `renderers/terminal/`, name the terminal's host and
+renderer and `zui_truetype.Text`, laid out one glyph per cell: `zig build
+tour` runs the whole tour, less the screens whose commands a terminal
+does not draw (Transforms and Materials), which `zui_tour` leaves out as
+it does on any renderer, and `zig build showcase` the showcase, its
+controls on whole cells. `--dump` draws either into cells without a
+terminal and prints the glyphs: the tour's a screen at 180×56 cells
+(`--screen <name>`), the showcase's three frames at 100×30 with the
+pointer on "Hover me". `--frames <count>` ends a run after that many
+frames, through `Host.close`.
+
 ### The WebGL renderer
 
 `zui_webgl` is the browser's drawing of a frame, in
@@ -1305,11 +1298,10 @@ canvas through WebGL 2, with four samples per pixel resolved to one,
 which smooth every edge as the sokol renderer's multisampled targets do with
 `sample_count = 4`: rectangles, borders, clips, gradients, shadows and
 transforms, and text, once the page hands over the stream's fonts:
-TrueType glyphs placed where `zui_glyphs` lays them out, from a
-`zui_glyphs` atlas of RG8 texels, as the sokol renderer places and packs
-its own, and bitmap text in sokol_debugtext's six fonts, `BitmapFonts`,
-for a font id the text has no face for. It draws any text's fonts, taken
-as `anytype`, and depends on no font system or third-party library.
+glyphs placed where `zui_glyphs` lays them out, from a `zui_glyphs` atlas
+of RG8 texels, as the sokol renderer places and packs its own; text in a
+font id the text has no face for is not drawn. It draws any text's fonts,
+taken as `anytype`, and depends on no font system or third-party library.
 A backdrop blur copies what was drawn beneath it and blurs it as the sokol
 renderer does, along x and then y into two float targets, before the pane
 is drawn from them; a material is drawn by the sokol renderer's material
@@ -1318,9 +1310,15 @@ render, blend and filter it (`EXT_color_buffer_float`, `EXT_float_blend`,
 `OES_texture_float_linear`), as the sokol renderer sums it where its GPU
 can, and otherwise in RGBA16F, whose rounding differs between drivers by
 several color steps; without `EXT_color_buffer_float`, blurs are drawn as
-their tint alone. Images are not drawn yet. It lays out frames of a
-context with the sokol renderer's commands and payload types, as the web
-host's `DemoUi` has them. Everything in it compiles for
+their tint alone. Images are not drawn yet. `zui_webgl.Drawing` declares
+what it draws as a renderer declares it, with the sokol renderer's image
+and material shapes, so an application whose frames a page draws
+configures its context for it, as the web host's tour does:
+
+```zig
+const Ui = zui.Context(zui_app.contextConfig(zui_webgl.Drawing, .{ .Text = zui_truetype.Text }));
+```
+ Everything in it compiles for
 `wasm32-freestanding`; it reserves its memory in `init`.
 
 ```zig
@@ -1333,7 +1331,6 @@ client.root_module.addImport("zui_webgl", zui_webgl.module("zui_webgl"));
 ```zig
 var text: zui_truetype.Text = .{}; // or any text contract `zui_glyphs.Fonts.of` erases
 var draw_list: zui_webgl.DrawList = try .init(gpa);
-draw_list.bitmap_fonts.load(&sokol_debugtext_rows);
 draw_list.layOut(frame.commands(), frame.params, &text);
 // hand draw_list.batches(), .vertices(), .backdropBlurs(), .blurTaps(),
 // .materials() and, when it changed, draw_list.glyph_atlas.texels to the
@@ -1615,7 +1612,7 @@ Windows' default accessibility.
 `zig build accessible` shows a heading, a button, a checkbox, a slider, a
 text field, a dropdown and a scrolling log, from `zui_widgets` and zui,
 for trying with Narrator or Accessibility Insights; `-- --frames 30`
-draws 30 frames and quits. The sokol renderer's tour declares its
+draws 30 frames and quits. The tour declares its
 semantics too, so the tour on this host can be read the same way. The
 host's tests read their windows through UI Automation's own client,
 in-process, from a thread that owns no window: a window that was never
@@ -1792,14 +1789,22 @@ windows use no CPU.
 
 #### The tour on a native host
 
-`zig build tour` runs the sokol renderer's tour on this host, drawn by
-the sokol renderer, which draws into a `win32` window through sokol_gfx
-with D3D11, or into a `wayland` surface with OpenGL through EGL, without
-sokol_app. The tour's application is the sokol renderer's own (its
-`zui_sokol_tour` module), unchanged, and `zui_app.run` runs it:
-`hosts/native/examples/tour.zig` names this host, the sokol renderer and
-the tour's text contract (`pub const Text = zui_sokol.Text`, since that
-renderer does not measure), and passes each step to the tour.
+`zig build tour` runs `zui_tour` on this host, drawn by the sokol
+renderer, which draws into a `win32` window through sokol_gfx with
+D3D11, or into a `wayland` surface with OpenGL through EGL, without
+sokol_app, and `zig build showcase` runs `zui_showcase` the same way.
+`hosts/native/examples/tour.zig` is the target: it names the tour, this
+host, the sokol renderer and the font system, and adds the screenshot
+this host's window gives:
+
+```zig
+const Tour = zui_tour.App(.{ .Host = zui_host.Host, .Renderer = SokolRenderer, .Text = zui_truetype.Text, .renderer_name = "sokol" });
+```
+
+`SokolRenderer` (`examples/sokol_renderer.zig`) opens the sokol renderer
+on the host's window as `zui_app` opens a renderer. The window is always
+shown, since the sokol renderer draws only into a window the compositor
+shows.
 
 ```sh
 zig build tour                               # interactive window
@@ -1807,6 +1812,7 @@ zig build tour -- --screen box_storm         # start on one screen
 zig build tour -- --frames 300 --cycle 30    # visit every screen, 30 frames each, then quit
 zig build tour -- --measure-idle             # report the CPU time used over 10 idle seconds
 zig build tour -- --screenshot tour.bmp      # save the window after a few frames, then quit
+zig build showcase -- --frames 60            # draw the showcase for 60 frames, then quit
 ```
 
 Idle, it uses no CPU: on an i9-10900K in ReleaseSafe, the Layout Lab
@@ -1821,7 +1827,9 @@ checks on Linux under a headless Weston.
 
 #### The tour in another process
 
-`zig build remote` runs the same tour in a second process, on
+`zig build remote` runs the same tour in a second process, declared for
+the sokol renderer that draws it here and measured in the same fonts,
+added in the same order, so the stream's fingerprint matches, on
 `zui_wire`'s host and renderer, and draws it here: a `zui_wire.Client`
 joins this host and the sokol renderer to it over a loopback TCP
 connection, sending this window's input and drawing the frames that come
@@ -1843,7 +1851,7 @@ under a second: the first frame arrives about 3 ms after connecting.
 
 `zui_web`, in [hosts/web/](hosts/web/), is zui in the browser: today a
 thin client that draws an application streamed over `zui_wire` (V4), the
-sokol renderer's tour in a Web Worker, and the page that puts them
+tour in a Web Worker, and the page that puts them
 together, published at <https://aaronjclausen.github.io/zui-web/>; later
 a web host with a canvas surface (H5). It exports no module yet: its
 steps run from `hosts/web/` (see *Development*). Everything under its
@@ -1853,14 +1861,14 @@ steps run from `hosts/web/` (see *Development*). Everything under its
 memory once `zuiWebInit` reserves it), which takes
 a `zui_wire` stream in pieces of any size, as a socket delivers it,
 decodes each frame once all of it has arrived, and lays it out with the
-WebGL renderer for `frame_drawer.mjs` to draw. Its text is the sokol
-renderer's bitmap font ids followed by the TrueType fonts the page hands
-over, laid out through a `zui_truetype.Text` with no default font, so the
-client embeds none; once the page hands fonts over, a stream whose header
+WebGL renderer for `frame_drawer.mjs` to draw. Its text is the TrueType
+fonts the page hands over, in the order the tour added them, laid out
+through a `zui_truetype.Text` with no default font, so the client embeds
+none; once the page hands fonts over, a stream whose header
 carries another fingerprint, measured with other fonts or the same fonts
 in another order, is refused with `FontsDiffer` rather than drawn.
-`zig build test-demo` declares every screen of the sokol renderer's tour
-headlessly, streams its frames to that client, handed the tour's fonts,
+`zig build test-demo` declares every screen of the tour, as the browser
+draws it, headlessly, streams its frames to that client, handed the tour's fonts,
 under Node in pieces of 1 to 16,384 bytes, checks that each of the 312
 frames decodes to what the tour drew, and that a client handed the fonts
 in the other order refuses the stream.
@@ -1868,10 +1876,10 @@ in the other order refuses the stream.
 sokol renderer and with the client in headless Chromium, twice. With one
 sample per pixel, it checks that every pixel matches, within 2 of each
 color or a pixel's neighbor: shapes, text, blurs and materials alike. A
-frame may have one pixel that matches nothing nearby: a glyph's partial
-coverage at its edge is a color no neighbor has, and the two rasterizers
-decide a pixel that close to a turned glyph's edge differently. Of the 13
-frames, only the Transforms screen's has such a pixel. With four samples
+frame may have one pixel that matches nothing nearby, where the two
+rasterizers decide a pixel on an edge differently. A glyph's quad reaches
+half a texel past its coverage, into the blank texels the atlas keeps
+between glyphs, so a pixel on a turned glyph's edge is blank either way. With four samples
 per pixel and without text, it checks that every pixel of each image also
 matches the other's, so an edge smoothed in one alone fails, allowing one
 sample's share of the colors around a pixel, since SwiftShader snaps
@@ -1899,8 +1907,9 @@ tour's frames back to the page, which must show the pointer cursor over
 the rail.
 
 **The tour in a worker.** `zig build` also writes
-`zig-out/web/zui-web-tour.wasm`, the sokol renderer's tour built for
-`wasm32-freestanding` with shared memory (about 49 MiB of memory once
+`zig-out/web/zui-web-tour.wasm`, the tour built for
+`wasm32-freestanding` with shared memory, declared for
+`zui_webgl.Drawing` (about 49 MiB of memory once
 `zuiTourInit` reserves it). `web/tour_worker.mjs` takes the page's clock
 and records each frame and posts back the frame's wire bytes. The tour's
 strip and frame inspector time each frame's beginFrame, declaration and

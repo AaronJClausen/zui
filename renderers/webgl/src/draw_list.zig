@@ -1,7 +1,6 @@
 const std = @import("std");
 const zui = @import("zui");
 const zui_glyphs = @import("zui_glyphs");
-const BitmapFonts = @import("bitmap_fonts.zig").BitmapFonts;
 const GlyphAtlas = @import("root.zig").GlyphAtlas;
 const backdrop_blur = @import("backdrop_blur.zig");
 const PixelRegion = backdrop_blur.PixelRegion;
@@ -16,10 +15,10 @@ const SplitWeight = backdrop_blur.SplitWeight;
 /// bounds, gradients in bands of OKLab color, shadows faded in rings, text
 /// as a textured quad per glyph, and transforms applied to every vertex.
 /// A backdrop blur runs before the batch that samples it, and a material
-/// is a batch of its own, drawn by its pattern. TrueType text is drawn
-/// where `zui_glyphs` lays it out, from `glyph_atlas`, and text in a font
-/// the text has no face for from `bitmap_fonts`. Images are not laid out
-/// yet. Memory is reserved by `init`.
+/// is a batch of its own, drawn by its pattern. Text is drawn where
+/// `zui_glyphs` lays it out, from `glyph_atlas`; text in a font the text
+/// has no face for is not drawn. Images are not laid out yet. Memory is
+/// reserved by `init`.
 ///
 /// ```zig
 /// var draw_list: DrawList = try .init(gpa);
@@ -49,8 +48,7 @@ pub const DrawList = struct {
         position: [2]f32,
         color: zui.Color,
         texture: Texture = .none,
-        /// For `.bitmap_glyphs`, this vertex's texture coordinates. For
-        /// `.glyph_atlas`, those at the window's origin, from which
+        /// For `.glyph_atlas`, the texture coordinates at the window's origin, from which
         /// `texture_per_unit` finds each pixel's, the same at every vertex
         /// of a glyph. For `.material`, the vertex's position from the
         /// element's top left, in its layout units, where the pattern is
@@ -75,8 +73,6 @@ pub const DrawList = struct {
         /// SwiftShader does to a sixteenth of a pixel, and a turned glyph
         /// would differ from the sokol renderer's by up to 31 levels.
         glyph_atlas,
-        /// `bitmap_fonts.texels`, sampled at the nearest texel.
-        bitmap_glyphs,
         /// The last backdrop blur run, at this pixel, replacing what was
         /// drawn there.
         backdrop_blur,
@@ -134,7 +130,6 @@ pub const DrawList = struct {
     blur_tap_storage: []BlurTap,
     material_storage: []Material,
     glyph_atlas: *GlyphAtlas,
-    bitmap_fonts: BitmapFonts,
     vertex_count: u32 = 0,
     batch_count: u32 = 0,
     backdrop_blur_count: u32 = 0,
@@ -175,12 +170,10 @@ pub const DrawList = struct {
             .blur_tap_storage = blur_tap_storage,
             .material_storage = material_storage,
             .glyph_atlas = glyph_atlas,
-            .bitmap_fonts = try .init(gpa),
         };
     }
 
     pub fn deinit(self: *DrawList, gpa: std.mem.Allocator) void {
-        self.bitmap_fonts.deinit(gpa);
         self.glyph_atlas.destroy(gpa);
         gpa.free(self.material_storage);
         gpa.free(self.blur_tap_storage);
@@ -241,8 +234,6 @@ pub const DrawList = struct {
                 .material => |material| builder.drawMaterial(bounds, material),
                 .text => |line| if (fonts.fontMetrics(line.style.font) != null) {
                     builder.drawTrueTypeText(fonts, self.glyph_atlas, line.content, bounds, line.style);
-                } else if (self.bitmap_fonts.loaded) {
-                    builder.drawBitmapText(line.content, bounds, line.style);
                 },
                 .clip_begin => |clip| {
                     clips.push(if (transforms.isActive()) transforms.current().boundsOf(clip).intersect(clips.current() orelse wholeViewport(params.viewport)) else clip);
@@ -456,14 +447,6 @@ const Builder = struct {
         }
     }
 
-    fn bitmapGlyph(self: *Builder, box: Box, texture_box: Box, color: zui.Color) void {
-        var corners: [4]DrawList.Vertex = undefined;
-        for (&corners, texture_box.corners()) |*corner, texture_corner| {
-            corner.* = .{ .position = undefined, .color = color, .texture = .bitmap_glyphs, .texture_coordinates = texture_corner };
-        }
-        self.quad(box.corners(), corners);
-    }
-
     /// Drawn a pixel wider on every side, since the page decides pixel by
     /// pixel which are in the glyph.
     fn atlasGlyph(self: *Builder, box: Box, texture_box: Box, color: zui.Color) void {
@@ -487,37 +470,6 @@ const Builder = struct {
         var quads = zui_glyphs.glyphQuads(fonts, atlas, content, bounds, style, self.pixels_per_unit) orelse return;
         const color = colorOf(style.color);
         while (quads.next()) |glyph| self.atlasGlyph(boxOf(glyph.position), boxOf(glyph.texture), color);
-    }
-
-    /// As the sokol renderer draws bitmap text into an image: square cells of the
-    /// glyph size from `bounds.x`, centered down `bounds`, and `?` for
-    /// what is not printable ASCII. A font id past the bitmap fonts with no
-    /// TrueType font draws in the last bitmap font.
-    fn drawBitmapText(self: *Builder, content: []const u8, bounds: zui.Rect, style: anytype) void {
-        const glyph_size = style.size * BitmapFonts.glyph_scale;
-        if (glyph_size <= 0) return;
-        const utf8 = std.unicode.Utf8View.init(content) catch return;
-        const glyph_side = BitmapFonts.glyph_side;
-        const font_index: u16 = @min(style.font, BitmapFonts.count - 1);
-        const font_row: f32 = @floatFromInt(font_index * glyph_side);
-        const top = bounds.y + (bounds.height - glyph_size) / 2;
-        const texture_top = font_row / BitmapFonts.texture_height;
-        const texture_bottom = (font_row + glyph_side) / BitmapFonts.texture_height;
-        const color = colorOf(style.color);
-        var glyph_index: f32 = 0;
-        var codepoints = utf8.iterator();
-        while (codepoints.nextCodepoint()) |codepoint| : (glyph_index += 1) {
-            const is_printable_ascii = codepoint >= 0x20 and codepoint < 0x7F;
-            const character: f32 = @floatFromInt(if (is_printable_ascii) codepoint else '?');
-            const left = bounds.x + glyph_index * (glyph_size + style.letter_spacing);
-            const texture_left = character * glyph_side / BitmapFonts.texture_width;
-            const texture_right = (character + 1) * glyph_side / BitmapFonts.texture_width;
-            self.bitmapGlyph(
-                .{ .left = left, .top = top, .right = left + glyph_size, .bottom = top + glyph_size },
-                .{ .left = texture_left, .top = texture_top, .right = texture_right, .bottom = texture_bottom },
-                color,
-            );
-        }
     }
 
     fn triangle(self: *Builder, points: [3][2]f32, color: zui.Color) void {

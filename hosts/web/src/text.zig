@@ -1,18 +1,15 @@
 const std = @import("std");
 const zui_glyphs = @import("zui_glyphs");
 const zui_truetype = @import("zui_truetype");
-const BitmapFonts = @import("zui_webgl").BitmapFonts;
 const FontId = zui_glyphs.FontId;
 const GlyphId = zui_glyphs.GlyphId;
 const FontMetrics = zui_glyphs.FontMetrics;
 const GlyphBox = zui_glyphs.GlyphBox;
 
-/// The fonts a stream's text is drawn in, numbered as the sokol renderer's
-/// `Text` numbers them: `FontId` 0 to 5 are the bitmap fonts, and the
-/// TrueType fonts the page hands over follow them, in the order the
-/// stream's host added them, since they are the application's, not the
-/// client's. Without them, text past the bitmap fonts is drawn in the last
-/// bitmap font. Memory is reserved by `init`.
+/// The fonts a stream's text is drawn in: the TrueType fonts the page hands
+/// over, `FontId` 0, 1, … in the order the stream's application added
+/// them, since they are the application's, not the client's. Text in a font
+/// not handed over is not drawn. Memory is reserved by `init`.
 ///
 /// ```zig
 /// var text: Text = try .init(gpa);
@@ -54,21 +51,17 @@ pub const Text = struct {
         const data = self.roomForFont(count) orelse return error.FontTooLarge;
         const font = try self.truetype.addFont(data);
         self.font_bytes_used += count;
-        return BitmapFonts.count + font;
+        return font;
     }
 
-    /// As the sokol renderer's `Text` with the same fonts fingerprints
-    /// itself, so a stream measured with other fonts is told apart.
+    /// As `zui_truetype.Text` with the same fonts fingerprints itself, so a
+    /// stream measured with other fonts is told apart.
     pub fn zuiFingerprint(self: *const Text) u64 {
-        var hasher = std.hash.Wyhash.init(BitmapFonts.count);
-        hasher.update(&std.mem.toBytes(std.mem.nativeToLittle(u64, self.truetype.addedFontsFingerprint())));
-        hasher.update(&std.mem.toBytes(std.mem.nativeToLittle(u32, @as(u32, @bitCast(@as(f32, BitmapFonts.glyph_scale))))));
-        return hasher.final();
+        return self.truetype.addedFontsFingerprint();
     }
 
     fn face(self: *const Text, font: FontId) ?*const zui_truetype.Face {
-        if (font < BitmapFonts.count) return null;
-        return self.truetype.addedFace(font - BitmapFonts.count);
+        return self.truetype.addedFace(font);
     }
 
     pub fn fontMetrics(self: *const Text, font: FontId) ?FontMetrics {
@@ -100,15 +93,18 @@ test "bytes that are not a TrueType font are refused, and the room is kept for t
     try std.testing.expectError(error.InvalidFont, text.addTrueTypeFont(not_a_font.len));
     try std.testing.expectEqual(0, text.font_bytes_used);
     try std.testing.expectEqual(null, text.roomForFont(Text.max_font_bytes + 1));
-    try std.testing.expectEqual(null, text.fontMetrics(BitmapFonts.count));
+    try std.testing.expectEqual(null, text.fontMetrics(0));
 }
 
-test "fonts the page hands over follow the bitmap fonts and conform" {
+test "fonts the page hands over are numbered from 0, fingerprint as zui_truetype's, and conform" {
     var text: Text = try .init(std.testing.allocator);
     defer text.deinit(std.testing.allocator);
     const regular = @import("zui_fonts").atkinson_hyperlegible_regular;
     @memcpy(text.roomForFont(regular.len).?, regular);
-    try std.testing.expectEqual(BitmapFonts.count, try text.addTrueTypeFont(regular.len));
-    try std.testing.expectEqual(null, text.fontMetrics(BitmapFonts.count - 1));
+    try std.testing.expectEqual(0, try text.addTrueTypeFont(regular.len));
+    try std.testing.expectEqual(null, text.fontMetrics(1));
+    var measured_with: zui_truetype.Text = .{};
+    _ = try measured_with.addFont(regular);
+    try std.testing.expectEqual(measured_with.zuiFingerprint(), text.zuiFingerprint());
     try zui_glyphs.expectFontsConform(&text.truetype, std.testing.allocator);
 }

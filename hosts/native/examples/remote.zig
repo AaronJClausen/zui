@@ -10,10 +10,16 @@ const zui_host = @import("zui_host");
 const zui_sokol = @import("zui_sokol");
 const zui_app = @import("zui_app");
 const zui_wire = @import("zui_wire");
-const tour = @import("zui_sokol_tour");
+const zui_truetype = @import("zui_truetype");
+const zui_tour = @import("zui_tour");
 const capture = @import("capture.zig");
 const zui = @import("zui");
-const Ui = tour.kit.Ui;
+const SokolRenderer = @import("sokol_renderer.zig").SokolRenderer;
+
+/// The tour as the viewer's renderer draws it, which the process that runs
+/// it declares for.
+const kit = zui_tour.Kit(.{ .Renderer = SokolRenderer, .FontSystem = zui_truetype.Text, .inspector = false, .renderer_name = "sokol, over zui_wire" });
+const Ui = kit.Ui;
 
 const Mode = union(enum) {
     /// Serves the tour in a child process of its own, and draws it.
@@ -48,15 +54,15 @@ pub fn main(init: std.process.Init) !void {
 /// The port `--serve` listens on, 0 for any; the one it got is printed.
 var serve_port: u16 = 0;
 
-/// zui-sokol's tour, unchanged, on zui_wire's host and renderer: its input
-/// comes from the viewer and its frames go back to it.
+/// The tour on zui_wire's host and renderer: its input comes from the
+/// viewer and its frames go back to it.
 const TourOverWire = struct {
     pub const Host = zui_wire.Host(Ui);
     pub const Renderer = zui_wire.Renderer(Ui);
-    pub const Text = zui_sokol.Text;
+    pub const Text = kit.Text;
 
-    tour: tour.App,
-    sources: *tour.kit.Sources,
+    tour: zui_tour.Tour(kit),
+    sources: *zui_tour.Sources,
 
     pub fn init(app: *TourOverWire, start: zui_app.Start(TourOverWire)) !void {
         var address: std.Io.net.IpAddress = .{ .ip4 = .loopback(serve_port) };
@@ -69,7 +75,7 @@ const TourOverWire = struct {
         try start.host.attach(start.gpa, try server.accept(start.io));
 
         app.* = .{ .tour = undefined, .sources = &app.tour.sources };
-        app.tour.init(start.io, start.host.now());
+        app.tour.init(start.io, start.host.now(), start.text.fonts);
         app.tour.host_waker = start.waker;
     }
 
@@ -86,14 +92,17 @@ const TourOverWire = struct {
         app.tour.declare(ui);
     }
 
+    pub fn zuiObserve(app: *TourOverWire, ui: *const Ui, frame: *const Ui.Frame) void {
+        app.tour.observe(ui, frame);
+    }
+
     pub fn zuiLoader(app: *TourOverWire, ui: *const Ui, _: std.Io) void {
-        // The tour's loaders only read `ui`; they take it as zui-sokol's own loop gives it.
-        app.tour.afterFrame(@constCast(ui));
+        app.tour.afterFrame(ui);
     }
 };
 
-/// Draws the tour served on `port` in a window of this host, with
-/// zui-sokol's renderer, until the window or the connection closes. With
+/// Draws the tour served on `port` in a window of this host, with the sokol
+/// renderer, in the fonts the tour added, in the same order, until the window or the connection closes. With
 /// `check_path`, the input is scripted and the run ends by itself.
 fn view(gpa: std.mem.Allocator, io: std.Io, port: u16, check_path: ?[]const u8) !void {
     const host = try gpa.create(zui_host.Host);
@@ -103,11 +112,12 @@ fn view(gpa: std.mem.Allocator, io: std.Io, port: u16, check_path: ?[]const u8) 
     host.system_material_unavailable = false;
     try host.init(io, .{ .title = "zui tour, drawn here, running elsewhere", .size = .{ 1440, 900 } });
     defer host.deinit();
-    var text: zui_sokol.Text = .{};
-    try tour.kit.addFonts(&text);
+    var text: kit.Text = undefined;
+    try text.init();
+    defer text.deinit();
     var renderer: zui_sokol.Renderer = try .initForSurface(&text, host.zuiSurface(.main));
     defer renderer.deinit();
-    renderer.clear_color = tour.kit.Palette.forEnvironment(&.{}).background;
+    renderer.clear_color = zui_tour.Palette.forEnvironment(&.{}).background;
 
     const address: std.Io.net.IpAddress = .{ .ip4 = .loopback(port) };
     const client = try gpa.create(zui_wire.Client(Ui));
@@ -149,7 +159,7 @@ const Script = struct {
     const patience_seconds = 20;
     const poll_interval_ns = 50 * std.time.ns_per_ms;
 
-    const Step = struct { screen: tour.kit.Screen, key: ?zui.Key };
+    const Step = struct { screen: zui_tour.Screen, key: ?zui.Key };
     const steps = [_]Step{
         .{ .screen = .welcome, .key = null },
         .{ .screen = .layout_lab, .key = .digit_2 },
@@ -167,7 +177,7 @@ const Script = struct {
     }
 
     fn saw(self: *Script, frame: anytype, now: zui.Instant) void {
-        if (self.done or !showsTagline(frame, steps[self.step].screen.info().tagline)) return;
+        if (self.done or !showsTagline(frame, kit.info(steps[self.step].screen).tagline)) return;
         std.debug.print("{t}: frame {d}, {d} commands, {d:.0} ms into the run\n", .{ steps[self.step].screen, frame.number, frame.commands().len, now.secondsSince(self.started_at) * 1000 });
         self.step += 1;
         self.pressed = false;

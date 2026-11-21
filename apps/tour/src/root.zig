@@ -3,7 +3,7 @@
 //! it:
 //!
 //! ```zig
-//! const App = zui_tour.App(.{ .Host = zui_raylib.Host, .Renderer = zui_raylib.Renderer, .Text = zui_truetype.Text });
+//! const App = zui_tour.App(.{ .Host = zui_raylib.Host, .Renderer = zui_raylib.Renderer, .Text = zui_truetype.Text, .renderer_name = "raylib" });
 //!
 //! pub fn main(init: std.process.Init) !void {
 //!     try zui_app.run(App, init, .{ .title = "zui tour (raylib)", .size = .{ 1440, 900 } });
@@ -18,6 +18,7 @@
 //! `light_and_depth` needs `.backdrop_blur`.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const zui = @import("zui");
 const zui_app = @import("zui_app");
 const zui_tracy = @import("zui_tracy");
@@ -46,9 +47,8 @@ pub const Config = struct {
     /// which passes each zone on to Tracy when zui is built with
     /// `-Dzui-tracy`. Off, neither is compiled in.
     inspector: bool = true,
-    /// The renderer as the tour names it on its screens: by default its
-    /// module's name, so "raylib" for `zui_raylib.Renderer`.
-    renderer_name: ?[]const u8 = null,
+    /// The renderer as the tour names it on its screens, such as "raylib".
+    renderer_name: []const u8,
 };
 
 /// How a run of the tour behaves: the start screen, a smoke test's cycle
@@ -60,9 +60,9 @@ pub const Config = struct {
 /// --frames <count>       quit after this many frames, printing whether every frame was ok
 /// --cycle <frames>       move to the next screen every this many frames, in live mode
 /// --zui-debug            open zui_debug's inspector, which F12 toggles
+/// --measure-idle         print the CPU time an idle tour uses over 10 s, then quit
 /// --hidden               for the target: keep the window hidden
 /// --screenshot <path>    for the target: save the window once the tour settles, then quit
-/// --measure-idle         for the target: measure the CPU an idle tour uses
 /// --measure-startup      for the target: measure the time to the first presented frame
 /// ```
 pub const Options = struct {
@@ -120,7 +120,8 @@ pub const Options = struct {
 /// strip, and reads the renderer's `layer_overflows` and
 /// `glyphOverflows()` when it counts them. Its `init` takes its `Options`
 /// from the process's arguments; a target that does more around the tour
-/// holds an `App` and calls `initWith` and each hook itself.
+/// holds an `App` and calls `initWith`, with `startOf` its own `Start`,
+/// and each hook itself.
 pub fn App(comptime config: Config) type {
     return struct {
         const Self = @This();
@@ -131,7 +132,7 @@ pub fn App(comptime config: Config) type {
             .Renderer = Renderer,
             .FontSystem = config.Text,
             .inspector = config.inspector,
-            .renderer_name = config.renderer_name orelse moduleName(Renderer),
+            .renderer_name = config.renderer_name,
         });
         pub const Text = kit.Text;
         pub const Ui = kit.Ui;
@@ -156,6 +157,7 @@ pub fn App(comptime config: Config) type {
         observed_at: zui.Instant = .zero,
         observed: Observed = .{},
         measure_calls_seen: u64 = 0,
+        idle_measurement: ?IdleMeasurement = null,
 
         const Observed = struct {
             elements: u32 = 0,
@@ -187,8 +189,17 @@ pub fn App(comptime config: Config) type {
             if (options.screen) |screen| app.tour.show(screen);
             app.tour.cycle_every = options.cycle_every;
             app.tour.zui_debug_open = options.zui_debug;
-            if (options.measure_idle) app.tour.heartbeat = false;
+            if (options.measure_idle) {
+                app.tour.heartbeat = false;
+                app.idle_measurement = .{ .launched_at = app.now() };
+            }
             if (options.screenshot_path != null) app.tour.live = true;
+        }
+
+        /// `start`, a `zui_app.Start` of a target's application around
+        /// this one, as this one's.
+        pub fn startOf(start: anytype) zui_app.Start(Self) {
+            return .{ .gpa = start.gpa, .io = start.io, .process = start.process, .host = start.host, .renderer = start.renderer, .text = start.text, .waker = start.waker, .windows = {} };
         }
 
         /// Stops the tour's producers, so the sources outlive them.
@@ -218,6 +229,15 @@ pub fn App(comptime config: Config) type {
         }
 
         pub fn zuiDeclare(app: *Self, ui: *Ui) void {
+            if (app.idle_measurement) |*measurement| {
+                if (measurement.reportAt(ui.now(), app.frames, app.tour.wakes.load(.monotonic))) |report| {
+                    std.debug.print("{f}\n", .{report});
+                    app.idle_measurement = null;
+                    app.closeHost();
+                } else {
+                    ui.requestFrameAt(measurement.nextCheckpoint());
+                }
+            }
             app.declare_started_at = app.now();
             app.tour.declare(ui);
             app.declared_at = app.now();
@@ -300,6 +320,86 @@ pub fn App(comptime config: Config) type {
     };
 }
 
+/// `--measure-idle`: the CPU time the tour uses while idle, read by the
+/// process itself at two frames it asks for with `requestFrameAt`, so the
+/// run ends on its own and needs no outside sampler.
+const IdleMeasurement = struct {
+    const warm_up_seconds = 5;
+    const measured_seconds = 10;
+
+    launched_at: zui.Instant,
+    start: ?Checkpoint = null,
+
+    const Checkpoint = struct { at: zui.Instant, cpu_nanoseconds: u64, frames: u64, wakes: u32 };
+
+    const Report = struct {
+        cpu_nanoseconds: u64,
+        seconds: f32,
+        frames: u64,
+        wakes: u32,
+
+        pub fn format(self: Report, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+            try writer.print("idle: {d:.1} ms of CPU over {d:.1} s ({d:.3}% of one core), {d} frames, {d} wakes", .{
+                @as(f64, @floatFromInt(self.cpu_nanoseconds)) / std.time.ns_per_ms,
+                self.seconds,
+                @as(f64, @floatFromInt(self.cpu_nanoseconds)) / (self.seconds * std.time.ns_per_s) * 100,
+                self.frames,
+                self.wakes,
+            });
+        }
+    };
+
+    fn nextCheckpoint(self: *const IdleMeasurement) zui.Instant {
+        if (self.start) |start| return start.at.addSeconds(measured_seconds);
+        return self.launched_at.addSeconds(warm_up_seconds);
+    }
+
+    /// Called in every frame; the frame at the end of the measurement
+    /// counts toward it.
+    fn reportAt(self: *IdleMeasurement, at: zui.Instant, frames: u64, wakes: u32) ?Report {
+        if (at.isBefore(self.nextCheckpoint())) return null;
+        const checkpoint: Checkpoint = .{ .at = at, .cpu_nanoseconds = processCpuNanoseconds(), .frames = frames, .wakes = wakes };
+        const start = self.start orelse {
+            self.start = checkpoint;
+            return null;
+        };
+        return .{
+            .cpu_nanoseconds = checkpoint.cpu_nanoseconds - start.cpu_nanoseconds,
+            .seconds = checkpoint.at.secondsSince(start.at),
+            .frames = checkpoint.frames - start.frames,
+            .wakes = checkpoint.wakes - start.wakes,
+        };
+    }
+};
+
+const windows = std.os.windows;
+extern "kernel32" fn GetProcessTimes(process: windows.HANDLE, creation: *windows.FILETIME, exit: *windows.FILETIME, kernel: *windows.FILETIME, user: *windows.FILETIME) callconv(.winapi) windows.BOOL;
+
+/// User and kernel time of every thread of this process; 0 where the
+/// system keeps no account of it.
+fn processCpuNanoseconds() u64 {
+    switch (builtin.os.tag) {
+        .windows => {
+            var times: [4]windows.FILETIME = undefined;
+            if (GetProcessTimes(windows.GetCurrentProcess(), &times[0], &times[1], &times[2], &times[3]) == .FALSE) return 0;
+            return (fileTimeTicks(times[2]) + fileTimeTicks(times[3])) * 100;
+        },
+        .freestanding, .wasi => return 0,
+        else => {
+            const usage = std.posix.getrusage(std.posix.rusage.SELF);
+            return timevalNanoseconds(usage.utime) + timevalNanoseconds(usage.stime);
+        },
+    }
+}
+
+fn fileTimeTicks(time: windows.FILETIME) u64 {
+    return @as(u64, time.dwHighDateTime) << 32 | time.dwLowDateTime;
+}
+
+fn timevalNanoseconds(time: anytype) u64 {
+    return @as(u64, @intCast(time.sec)) * std.time.ns_per_s + @as(u64, @intCast(time.usec)) * std.time.ns_per_us;
+}
+
 fn sourcesPending(sources: *const Sources) bool {
     inline for (@typeInfo(Sources).@"struct".fields) |field| {
         if (@field(sources, field.name).zuiPending()) return true;
@@ -309,11 +409,4 @@ fn sourcesPending(sources: *const Sources) bool {
 
 fn microsecondsBetween(earlier: zui.Instant, later: zui.Instant) f32 {
     return later.secondsSince(earlier) * std.time.us_per_s;
-}
-
-/// "raylib" for `zui_raylib.Renderer`: the type's module, less its `zui_`.
-fn moduleName(comptime Type: type) []const u8 {
-    const name = @typeName(Type);
-    const module = name[0 .. std.mem.indexOfScalar(u8, name, '.') orelse name.len];
-    return if (std.mem.startsWith(u8, module, "zui_")) module["zui_".len..] else module;
 }

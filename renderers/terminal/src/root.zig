@@ -59,13 +59,14 @@ pub const Renderer = struct {
     background: zui.Color = .black,
 
     /// Sizes the screen to `surface`, so frames at that size allocate
-    /// nothing, and paints in the cells `text` measures.
-    pub fn init(self: *Renderer, surface: zui.Surface, text: *const Text) !void {
+    /// nothing, and paints in the cells `text` measures: its `cell_size`,
+    /// or `default_cell_size`, the cells `glyph_placement` lays text out in.
+    pub fn init(self: *Renderer, surface: zui.Surface, text: anytype) !void {
         const terminal = switch (surface) {
             .terminal => |terminal| terminal,
             else => return error.UnsupportedSurface,
         };
-        self.cell_size = text.cell_size;
+        self.cell_size = if (@hasField(@TypeOf(text.*), "cell_size")) text.cell_size else default_cell_size;
         _ = try self.screen.begin(self.gpa, .{ terminal.columns, terminal.rows }, self.background);
     }
 

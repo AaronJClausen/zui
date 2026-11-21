@@ -3,7 +3,6 @@ const zui = @import("zui");
 const zui_wire = @import("zui_wire");
 const DemoUi = @import("demo_ui.zig").DemoUi;
 const DrawList = @import("zui_webgl").DrawList;
-const BitmapFonts = @import("zui_webgl").BitmapFonts;
 const Text = @import("text.zig").Text;
 const browser_input = @import("browser_input.zig");
 
@@ -16,7 +15,6 @@ pub var newest: ?*const DemoStream.Frame = null;
 pub var records: DemoRecords = undefined;
 var draw_list: DrawList = undefined;
 var text: Text = undefined;
-var bitmap_font_rows: [BitmapFonts.font_bytes]u8 = undefined;
 var last_error: ?anyerror = null;
 const key_name_bytes_most = 64;
 var key_names: [2 * key_name_bytes_most]u8 = undefined;
@@ -25,11 +23,11 @@ var taken_record: []const u8 = &.{};
 
 /// Reserves the client's memory. False when the browser has too little.
 /// The fonts the stream's text uses are handed over before its first
-/// frame, with `zuiWebLoadBitmapFonts` and `zuiWebAddTrueTypeFont`.
+/// frame, with `zuiWebAddTrueTypeFont`.
 ///
 /// ```js
 /// wasm.zuiWebInit();
-/// for (const font of [regularTtf, boldTtf]) {
+/// for (const font of [regularTtf, boldTtf, monoTtf]) {
 ///   new Uint8Array(wasm.memory.buffer, wasm.zuiWebRoomForFont(font.length), font.length).set(font);
 ///   wasm.zuiWebAddTrueTypeFont(font.length);
 /// }
@@ -68,25 +66,6 @@ export fn zuiWebInit() bool {
     return true;
 }
 
-/// Where to write sokol_debugtext's six fonts, `BitmapFonts.font_bytes`
-/// of them laid out as `BitmapFonts.font_bytes` says, before
-/// `zuiWebLoadBitmapFonts`.
-export fn zuiWebBitmapFontRows() usize {
-    return @intFromPtr(&bitmap_font_rows);
-}
-
-/// Unpacks the bitmap fonts written to `zuiWebBitmapFontRows` into
-/// `zuiWebBitmapGlyphTexels`. Until then, bitmap text is not drawn.
-export fn zuiWebLoadBitmapFonts() void {
-    draw_list.bitmap_fonts.load(&bitmap_font_rows);
-}
-
-/// `BitmapFonts.texture_width` × `BitmapFonts.texture_height` bytes, one
-/// a texel, for an R8 texture sampled at the nearest texel.
-export fn zuiWebBitmapGlyphTexels() usize {
-    return @intFromPtr(draw_list.bitmap_fonts.texels.ptr);
-}
-
 /// Where to write the next TrueType font's `count` bytes, or 0 when they
 /// do not fit.
 export fn zuiWebRoomForFont(count: usize) usize {
@@ -95,8 +74,8 @@ export fn zuiWebRoomForFont(count: usize) usize {
 }
 
 /// Adds the TrueType font written to `zuiWebRoomForFont`, returning its
-/// `FontId`, which follows the six bitmap fonts' and those added before
-/// it, or -1 when it cannot be read, as `zuiWebErrorName` says. From then
+/// `FontId`, which follows those added before it, or -1 when it cannot be
+/// read, as `zuiWebErrorName` says. From then
 /// on, a stream measured with other fonts is refused.
 export fn zuiWebAddTrueTypeFont(count: usize) i32 {
     const font = text.addTrueTypeFont(count) catch |err| {

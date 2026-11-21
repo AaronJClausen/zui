@@ -3,19 +3,15 @@ const zui = @import("zui");
 const sokol = @import("sokol");
 const sg = sokol.gfx;
 const sgl = sokol.gl;
-const sdtx = sokol.debugtext;
 const builtin = @import("builtin");
 const options = @import("zui_sokol_options");
-const zui_sokol_ui = @import("zui_sokol_ui");
 const zui_glyphs = @import("zui_glyphs");
-const Image = zui_sokol_ui.Image;
+const Image = @import("root.zig").Image;
 const GlyphAtlas = zui_glyphs.Atlas(.rgba8);
 const BackdropBlurs = @import("backdrop_blur.zig").BackdropBlurs;
 const materials = @import("materials.zig");
-const Material = zui_sokol_ui.Material;
+const Material = @import("material.zig").Material;
 const Materials = materials.Materials;
-const bitmap_glyphs = @import("bitmap_glyphs.zig");
-const BitmapGlyphs = bitmap_glyphs.BitmapGlyphs;
 const destination = @import("destination.zig");
 const Destination = destination.Destination;
 const OffscreenTarget = destination.OffscreenTarget;
@@ -46,28 +42,25 @@ else
     };
 
 /// The renderer contract, through sokol_gfx: draws zui frames with
-/// sokol_gl (shapes, images, and TrueType text where `zui_glyphs` lays it
-/// out) and sokol_debugtext (bitmap text) into sokol_app's swapchain, its
-/// `.library` surface, into an image of its own for an `.offscreen`
-/// surface, which may be `.scrgb_fp16`, or,
-/// into a native host's window: `.win32` on Windows, `.wayland` on Linux.
-/// Both record into numbered layers that are replayed in order, so shapes
-/// and text interleave in zui's paint order, and each layer is drawn under
-/// its own scissor rectangle. A frame with a backdrop blur is drawn offscreen and
+/// sokol_gl (shapes, images, and text where `zui_glyphs` lays it out, in
+/// the fonts of the text frames are measured with) into sokol_app's
+/// swapchain, its `.library` surface, into an image of its own for an
+/// `.offscreen` surface, which may be `.scrgb_fp16`, or, into a native
+/// host's window: `.win32` on Windows, `.wayland` on Linux. It records
+/// into numbered layers that are replayed in order, each drawn under its
+/// own scissor rectangle. A frame with a backdrop blur is drawn offscreen and
 /// copied to the surface, so that the blur can sample what is beneath it.
 /// A transform is sokol_gl's modelview matrix; a clip inside one is
 /// scissored to the box around it in the window, which is larger than a
 /// turned clip. A material is drawn by its own shader at the start of a
 /// layer, before the layer's shapes. In an `.scrgb_fp16` target every
-/// color is drawn in linear light, and bitmap text by sokol_gl, since
-/// sokol_debugtext would write its colors' sRGB encoding. A `.win32`
-/// surface in `.scrgb_fp16` is drawn so into an image, which is then
+/// color is drawn in linear light. A `.win32` surface in `.scrgb_fp16` is drawn so into an image, which is then
 /// copied into the window's half-float swapchain at the monitor's SDR
 /// white. Windows after the first are attached with `zuiAttachSurface`,
 /// each a swapchain on the first one's device, with targets of its own.
 pub const Renderer = struct {
     pub const zui_surfaces: zui.SurfaceKinds = if (native_surface) |kind| .initMany(&.{ .library, .offscreen, kind }) else .initMany(&.{ .library, .offscreen });
-    pub const zui_commands: zui.CommandSet = zui_sokol_ui.commands;
+    pub const zui_commands: zui.CommandSet = .initMany(&.{ .gradient, .shadow, .backdrop_blur, .transform, .material });
     pub const zui_extended_color = true;
     pub const zui_output_formats: zui.OutputFormats = if (presents_scrgb) .initMany(&.{ .sdr, .scrgb_fp16 }) else .initOne(.sdr);
     pub const ImageHandle = Image;
@@ -87,22 +80,14 @@ pub const Renderer = struct {
         backdrop_blurs: BackdropBlurs = .{},
     };
 
-    /// The fonts of the text its frames were measured with; a font id they
-    /// do not have is one of sokol_debugtext's bitmap fonts.
+    /// The fonts of the text its frames were measured with; text in a font
+    /// id they do not have is not drawn.
     fonts: zui_glyphs.Fonts = .none,
-    /// A bitmap glyph's height and advance as a fraction of the text size.
-    bitmap_glyph_scale: f32 = 0.75,
     /// What each frame's pass clears to before drawing.
     clear_color: zui.Color = .black,
     /// Triangles per rounded corner.
     corner_segments: u8 = 8,
     pipeline: sgl.Pipeline,
-    alpha_coverage_pipeline: sgl.Pipeline,
-    /// The surface keeps the alpha drawn, as a composed native window does.
-    composes_alpha: bool = false,
-    /// This frame draws every shape again into the alpha channel: in a
-    /// composed window, where sokol_debugtext draws the bitmap text.
-    covers_alpha: bool = false,
     /// Paint order breaks once a frame needs more layers than this; zui's
     /// commands then share the last layer.
     layer_overflows: u32 = 0,
@@ -123,9 +108,6 @@ pub const Renderer = struct {
     glyph_view: sg.View = .{},
     glyph_sampler: sg.Sampler = .{},
     backdrop_blurs: BackdropBlurs = .{},
-    /// For bitmap text inside a transform, which sokol_debugtext cannot
-    /// draw transformed.
-    bitmap_glyphs: BitmapGlyphs = .{},
     /// Times transforms nested deeper than the renderer keeps; the deeper
     /// ones were drawn as their parent is.
     transform_overflows: u32 = 0,
@@ -142,26 +124,14 @@ pub const Renderer = struct {
 
     /// Call after `sokol.gfx.setup`. `text` is the text contract frames
     /// are measured with, which must outlive the renderer: a
-    /// `zui_sokol.Text`, or any text whose fonts `zui_glyphs.Fonts.of`
+    /// `zui_truetype.Text`, or any text whose fonts `zui_glyphs.Fonts.of`
     /// erases.
     pub fn init(text: anytype) Renderer {
         sgl.setup(.{ .max_vertices = 1 << 19, .max_commands = 1 << 14, .logger = .{ .func = sokol.log.func } });
-        var debugtext_desc: sdtx.Desc = .{
-            .context = .{ .char_buf_size = 1 << 16, .max_commands = 1 << 14 },
-            .logger = .{ .func = sokol.log.func },
-        };
-        debugtext_desc.fonts[0..bitmap_glyphs.font_count].* = bitmap_glyphs.fonts();
-        sdtx.setup(debugtext_desc);
-
-        var coverage: [8]sg.ColorTargetState = @splat(.{});
-        coverage[0].write_mask = .A;
-        coverage[0].blend = .{ .enabled = true, .src_factor_alpha = .ONE, .dst_factor_alpha = .ONE, .op_alpha = .MAX };
         return .{
             .fonts = zui_glyphs.Fonts.of(text),
-            .bitmap_glyph_scale = if (@hasField(@typeInfo(@TypeOf(text)).pointer.child, "glyph_scale")) text.glyph_scale else 0.75,
             .glyphs = GlyphAtlas.create(std.heap.page_allocator) catch null,
             .pipeline = sgl.makePipeline(destination.blendingPipeline()),
-            .alpha_coverage_pipeline = sgl.makePipeline(.{ .colors = coverage }),
         };
     }
 
@@ -180,7 +150,6 @@ pub const Renderer = struct {
         var renderer: Renderer = .init(text);
         renderer.native = context;
         renderer.owns_gfx = true;
-        renderer.composes_alpha = draws_into_win32 and !options.opengl;
         if (comptime draws_into_many_windows) renderer.shared_device = context.retainDevice();
         return renderer;
     }
@@ -194,13 +163,10 @@ pub const Renderer = struct {
         self.materials.deinit();
         self.offscreen.deinit();
         self.scrgb_present.deinit();
-        self.bitmap_glyphs.deinit();
         self.destroyGlyphTexture();
         if (self.glyph_sampler.id != 0) sg.destroySampler(self.glyph_sampler);
         if (self.glyphs) |atlas| atlas.destroy(std.heap.page_allocator);
         sgl.destroyPipeline(self.pipeline);
-        sgl.destroyPipeline(self.alpha_coverage_pipeline);
-        sdtx.shutdown();
         sgl.shutdown();
         if (comptime native_surface != null) if (self.owns_gfx) {
             sg.shutdown();
@@ -295,7 +261,6 @@ pub const Renderer = struct {
             .offscreen, .scrgb_window => .{ self.offscreen.destination(), self.offscreen.size, self.offscreen.pipeline },
         };
         self.format = into.format;
-        self.covers_alpha = self.composes_alpha and into.is_swapchain;
         const clear_value = clearValue(self.clear_color, into.format);
         var action: sg.PassAction = .{};
         action.colors[0] = .{ .load_action = .CLEAR, .clear_value = clear_value };
@@ -373,25 +338,15 @@ pub const Renderer = struct {
             switch (command.payload) {
                 .rectangle => |rectangle| {
                     recorder.beginShapes();
-                    const color: VertexColor = .of(rectangle.color, format);
-                    fillRectangle(bounds, rectangle.corner_radius, color, self.corner_segments);
-                    if (self.covers_alpha) self.coverAlpha(recorder.layer, fillRectangle, .{ bounds, rectangle.corner_radius, color, self.corner_segments });
+                    fillRectangle(bounds, rectangle.corner_radius, .of(rectangle.color, format), self.corner_segments);
                 },
                 .border => |border| {
                     recorder.beginShapes();
-                    const color: VertexColor = .of(border.color, format);
-                    strokeBorder(bounds, border.widths, border.corner_radius, color, self.corner_segments);
-                    if (self.covers_alpha) self.coverAlpha(recorder.layer, strokeBorder, .{ bounds, border.widths, border.corner_radius, color, self.corner_segments });
+                    strokeBorder(bounds, border.widths, border.corner_radius, .of(border.color, format), self.corner_segments);
                 },
-                .text => |line| if (self.fonts.fontMetrics(line.style.font) != null) {
+                .text => |line| if (self.glyphs) |atlas| {
                     recorder.beginShapes();
-                    if (self.glyphs) |atlas| drawTrueTypeText(self.fonts, atlas, self.glyph_view, self.glyph_sampler, line.content, bounds, line.style, .of(line.style.color, format), pixels_per_unit);
-                } else if (transforms.isActive() or !into.is_swapchain) {
-                    recorder.beginShapes();
-                    self.bitmap_glyphs.draw(line.content, bounds, line.style.font, line.style.size * self.bitmap_glyph_scale, line.style.letter_spacing, .of(line.style.color, format));
-                } else {
-                    recorder.beginText();
-                    drawText(line.style.size * self.bitmap_glyph_scale, line.content, bounds, line.style, viewport);
+                    drawText(self.fonts, atlas, self.glyph_view, self.glyph_sampler, line.content, bounds, line.style, .of(line.style.color, format), pixels_per_unit);
                 },
                 .image => |image| {
                     recorder.beginShapes();
@@ -400,12 +355,10 @@ pub const Renderer = struct {
                 .gradient => |gradient| {
                     recorder.beginShapes();
                     fillGradient(bounds, gradient, format, self.corner_segments);
-                    if (self.covers_alpha) self.coverAlpha(recorder.layer, fillGradient, .{ bounds, gradient, format, self.corner_segments });
                 },
                 .shadow => |shadow| {
                     recorder.beginShapes();
                     drawShadow(bounds, shadow, format, self.corner_segments);
-                    if (self.covers_alpha) self.coverAlpha(recorder.layer, drawShadow, .{ bounds, shadow, format, self.corner_segments });
                 },
                 .backdrop_blur => |blur| {
                     if (self.backdrop_blurs.ready) if (recorder.beginBackdropBlur()) |layer| {
@@ -417,15 +370,11 @@ pub const Renderer = struct {
                         }
                     };
                     recorder.beginShapes();
-                    const tint: VertexColor = .of(blur.tint, format);
-                    fillRectangle(bounds, blur.corner_radius, tint, self.corner_segments);
-                    if (self.covers_alpha) self.coverAlpha(recorder.layer, fillRectangle, .{ bounds, blur.corner_radius, tint, self.corner_segments });
+                    fillRectangle(bounds, blur.corner_radius, .of(blur.tint, format), self.corner_segments);
                 },
                 .material => |material| if (!self.recordMaterial(&recorder, material, bounds, transforms.current(), viewport)) {
                     recorder.beginShapes();
-                    const fallback: VertexColor = .of(material.fallback, format);
-                    fillRectangle(bounds, material.corner_radius, fallback, self.corner_segments);
-                    if (self.covers_alpha) self.coverAlpha(recorder.layer, fillRectangle, .{ bounds, material.corner_radius, fallback, self.corner_segments });
+                    fillRectangle(bounds, material.corner_radius, .of(material.fallback, format), self.corner_segments);
                 },
                 .clip_begin => |clip| {
                     clips.push(if (transforms.isActive()) transforms.current().boundsOf(clip).intersect(clips.current() orelse wholeViewport(viewport)) else clip);
@@ -463,12 +412,7 @@ pub const Renderer = struct {
         };
         var outline: Outline = .{};
         outline.trace(bounds, material.corner_radius, .{}, self.corner_segments);
-        if (!self.materials.record(material.handle, outline.points[0..outline.count], bounds, to_window, viewport, layer, self.format)) return false;
-        if (self.covers_alpha) {
-            const coverage: VertexColor = .{ .rgba = .{ .r = 0, .g = 0, .b = 0, .a = material.handle.opacity() } };
-            self.coverAlpha(layer, fillRectangle, .{ bounds, material.corner_radius, coverage, self.corner_segments });
-        }
-        return true;
+        return self.materials.record(material.handle, outline.points[0..outline.count], bounds, to_window, viewport, layer, self.format);
     }
 
     /// Draws the recorded layers in the current pass, which is the scene's
@@ -486,35 +430,13 @@ pub const Renderer = struct {
             applyScissor(scissor, params);
             self.materials.replayBefore(layer);
             sgl.contextDrawLayer(into.context, @intCast(layer));
-            if (into.is_swapchain) sdtx.drawLayer(@intCast(layer));
         }
-        if (self.covers_alpha) for (scissors, 0..) |scissor, layer| {
-            applyScissor(scissor, params);
-            sgl.drawLayer(alphaCoverageLayer(layer));
-        };
     }
 
     fn applyScissor(scissor: ?zui.Rect, params: zui.FrameParams) void {
         const dpi_scale = params.scale * params.zoom;
         const rect = scissor orelse wholeViewport(params.viewport);
         sg.applyScissorRectf(rect.x * dpi_scale, rect.y * dpi_scale, rect.width * dpi_scale, rect.height * dpi_scale, true);
-    }
-
-    /// sokol_debugtext writes its font's alpha, 0 between the strokes of a
-    /// glyph, which would let a composed window's backdrop show through
-    /// each glyph's cell. So every shape is drawn again into the alpha
-    /// channel after all the text, keeping the greater alpha.
-    fn coverAlpha(self: *Renderer, layer: usize, comptime drawShape: anytype, arguments: anytype) void {
-        sgl.layer(alphaCoverageLayer(layer));
-        sgl.pushPipeline();
-        sgl.loadPipeline(self.alpha_coverage_pipeline);
-        @call(.auto, drawShape, arguments);
-        sgl.popPipeline();
-        sgl.layer(@intCast(layer));
-    }
-
-    fn alphaCoverageLayer(layer: usize) i32 {
-        return @intCast(max_layers + layer);
     }
 
     /// Times a frame needed more glyphs than the atlas holds, or a glyph
@@ -565,23 +487,14 @@ const LayerRecorder = struct {
     layer: usize = 0,
     has_materials: bool = false,
     has_shapes: bool = false,
-    has_text: bool = false,
 
     fn begin(self: *LayerRecorder) void {
         self.renderer.layer_scissors[0] = null;
         sgl.layer(0);
-        sdtx.layer(0);
     }
 
-    /// Within a layer, shapes replay before text, so a shape that follows
-    /// text must start a new layer to paint over it.
     fn beginShapes(self: *LayerRecorder) void {
-        if (self.has_text) self.beginLayer(self.renderer.layer_scissors[self.layer]);
         self.has_shapes = true;
-    }
-
-    fn beginText(self: *LayerRecorder) void {
-        self.has_text = true;
     }
 
     /// A backdrop blur samples everything painted before it, so it starts a
@@ -596,11 +509,11 @@ const LayerRecorder = struct {
         return self.layer;
     }
 
-    /// Materials replay before their layer's shapes and text, so one that
-    /// follows either starts a layer. Returns that layer, or null when no
-    /// layer is left.
+    /// Materials replay before their layer's shapes, so one that follows
+    /// them starts a layer. Returns that layer, or null when no layer is
+    /// left.
     fn beginMaterial(self: *LayerRecorder) ?usize {
-        if (self.has_shapes or self.has_text) {
+        if (self.has_shapes) {
             if (self.layer + 1 == Renderer.max_layers) return null;
             self.beginLayer(self.renderer.layer_scissors[self.layer]);
         }
@@ -609,7 +522,7 @@ const LayerRecorder = struct {
     }
 
     fn isUsed(self: *const LayerRecorder) bool {
-        return self.has_materials or self.has_shapes or self.has_text;
+        return self.has_materials or self.has_shapes;
     }
 
     fn beginLayer(self: *LayerRecorder, scissor: ?zui.Rect) void {
@@ -624,10 +537,8 @@ const LayerRecorder = struct {
         self.layer += 1;
         self.has_materials = false;
         self.has_shapes = false;
-        self.has_text = false;
         self.renderer.layer_scissors[self.layer] = scissor;
         sgl.layer(@intCast(self.layer));
-        sdtx.layer(@intCast(self.layer));
     }
 };
 
@@ -951,31 +862,7 @@ const Outline = struct {
     }
 };
 
-/// sokol_debugtext lays glyphs on a grid of 8×8 canvas pixels; sizing the
-/// canvas per command scales that grid to the glyph size. Glyph size is
-/// baked into vertices as they are emitted, so one context serves every
-/// text size in a frame. With letter spacing, each glyph is placed on its
-/// own, since the grid advances by whole glyphs.
-fn drawText(glyph_size: f32, content: []const u8, bounds: zui.Rect, style: anytype, viewport: [2]f32) void {
-    if (glyph_size <= 0) return;
-    const canvas_scale = 8 / glyph_size;
-    sdtx.canvas(viewport[0] * canvas_scale, viewport[1] * canvas_scale);
-    sdtx.font(@min(style.font, 5));
-    const color = VertexColor.of(style.color, .sdr).rgba;
-    sdtx.color4b(color.r, color.g, color.b, color.a);
-    const row = (bounds.y + (bounds.height - glyph_size) / 2) / glyph_size;
-    const glyph_pitch = (glyph_size + style.letter_spacing) / glyph_size;
-    sdtx.pos(bounds.x / glyph_size, row);
-    var glyph_index: f32 = 0;
-    var codepoints = (std.unicode.Utf8View.init(content) catch return).iterator();
-    while (codepoints.nextCodepoint()) |codepoint| : (glyph_index += 1) {
-        if (style.letter_spacing != 0) sdtx.pos(bounds.x / glyph_size + glyph_index * glyph_pitch, row);
-        const is_printable_ascii = codepoint >= 0x20 and codepoint < 0x7F;
-        sdtx.putc(if (is_printable_ascii) @intCast(codepoint) else '?');
-    }
-}
-
-fn drawTrueTypeText(fonts: zui_glyphs.Fonts, atlas: *const GlyphAtlas, view: sg.View, sampler: sg.Sampler, content: []const u8, bounds: zui.Rect, style: anytype, color: VertexColor, pixels_per_unit: f32) void {
+fn drawText(fonts: zui_glyphs.Fonts, atlas: *const GlyphAtlas, view: sg.View, sampler: sg.Sampler, content: []const u8, bounds: zui.Rect, style: anytype, color: VertexColor, pixels_per_unit: f32) void {
     var quads = zui_glyphs.glyphQuads(fonts, atlas, content, bounds, style, pixels_per_unit) orelse return;
     sgl.enableTexture();
     sgl.texture(view, sampler);

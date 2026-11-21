@@ -1,8 +1,9 @@
 //! ```sh
 //! draw-reference <stream path> <reference path> <samples per pixel> <with-text | without-text> <frame number>...
 //! ```
-//! Draws each frame named with zui-sokol's renderer, keeping only the
-//! commands the browser's client draws, and its text only `with-text`, and
+//! Draws each frame named with the sokol renderer, keeping only the
+//! commands the browser's client draws, and its text only `with-text`, in
+//! the fonts the tour added, and
 //! writes for each, little-endian,
 //! its number (u64), its width and height in pixels (u32 each), and its
 //! RGBA pixels, bottom row first, as OpenGL and WebGL read them back.
@@ -11,11 +12,16 @@ const std = @import("std");
 const zui = @import("zui");
 const zui_sokol = @import("zui_sokol");
 const zui_wire = @import("zui_wire");
-const tour = @import("zui_sokol_tour");
+const zui_truetype = @import("zui_truetype");
+const zui_tour = @import("zui_tour");
 const sokol = zui_sokol.sokol;
 const sapp = sokol.app;
 const sg = sokol.gfx;
-const Ui = tour.kit.Ui;
+
+/// The tour's frames as the sokol renderer takes them: the stream's, field
+/// for field, with the sokol renderer's images and materials.
+const kit = zui_tour.Kit(.{ .Renderer = zui_sokol.Renderer, .FontSystem = zui_truetype.Text, .inspector = false, .renderer_name = "the browser" });
+const Ui = kit.Ui;
 const Command = Ui.RenderCommand;
 
 extern fn glBindTexture(target: c_uint, texture: c_uint) callconv(.c) void;
@@ -51,7 +57,7 @@ const Harness = struct {
     frame_numbers: []const u64,
     samples_per_pixel: i32,
     draws_text: bool,
-    text: zui_sokol.Text = .{},
+    text: kit.Text = undefined,
     renderer: zui_sokol.Renderer = undefined,
     outcome: anyerror!void = error.FrameNeverDrawn,
 
@@ -161,7 +167,8 @@ pub fn main(init: std.process.Init) !void {
         .samples_per_pixel = samples_per_pixel,
         .draws_text = text_choice == .@"with-text",
     };
-    try tour.kit.addFonts(&harness.text);
+    try harness.text.init();
+    defer harness.text.deinit();
     sapp.run(.{
         .init_userdata_cb = onInit,
         .frame_userdata_cb = onFrame,

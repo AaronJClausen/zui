@@ -71,8 +71,9 @@ Stop and ask the user instead of guessing when:
 | the default font system, `zui_truetype.Text` on stb_truetype | `text/truetype/src/`, the `zui_truetype` module, reached through `zui.builder.dependency("zui_truetype", …)` and never re-exported, since it builds stb; it lays text out only through `zui_glyphs` and never imports a renderer. stb_truetype is compiled in from `text/truetype/src/stb_truetype.c` without a C library on every target |
 | a bundled typeface | `text/fonts/`, its file and licence beside `zui_fonts.zig`, which makes it a `pub const` of its `@embedFile` bytes and adds both to `.paths` in `text/fonts/build.zig.zon` |
 | a new face, shaper or rasterizer | a package of its own beside `text/truetype/`, depending on `zui_glyphs`, and in the root's `packages`, `.paths` and `.dependencies` |
-| the tour | `apps/tour/src/`, the `zui_tour` module, which the root re-exports: `zui_tour.App(.{ .Host, .Renderer, .Text })` is the application `zui_app` runs. A screen is `apps/tour/src/screens/<name>.zig`, generic over the tour's `Kit` through `Using(kit)`, a field of `Screens` in `apps/tour/src/tour.zig` and a case of `Screen` in `apps/tour/src/shared.zig`; one that needs an optional command is offered only by `Kit.offers`. The tour imports no renderer, host or font system, and compiles for `wasm32-freestanding`. Its headless test is `apps/tour/src/tests.zig`, its compile errors `apps/tour/tests/compile_errors/<case>.zig` with a row in `compile_error_cases` in `apps/tour/build.zig` |
-| the showcase | `apps/showcase/zui_showcase.zig`, the `zui_showcase` module, which the root re-exports and the tour's classic screen declares; it imports only `zui` and `zui_widgets` |
+| the tour | `apps/tour/src/`, the `zui_tour` module, which the root re-exports: `zui_tour.App(.{ .Host, .Renderer, .Text, .renderer_name })` is the application `zui_app` runs. A screen is `apps/tour/src/screens/<name>.zig`, generic over the tour's `Kit` through `Using(kit)`, a field of `Screens` in `apps/tour/src/tour.zig` and a case of `Screen` in `apps/tour/src/shared.zig`; one that needs an optional command is offered only by `Kit.offers`. The tour imports no renderer, host or font system, and compiles for `wasm32-freestanding`. Its headless test is `apps/tour/src/tests.zig`, its compile errors `apps/tour/tests/compile_errors/<case>.zig` with a row in `compile_error_cases` in `apps/tour/build.zig` |
+| the showcase | `apps/showcase/zui_showcase.zig`, the `zui_showcase` module, which the root re-exports and the tour's classic screen declares: `zui_showcase.App(.{ .Host, .Renderer, .Text, .title })` is the application `zui_app` runs. It imports only `zui`, `zui_widgets`, `zui_app` and `zui_glyphs` |
+| a target: a `main` that runs an app on a host, a renderer and a font system | `examples/<app>.zig` in the renderer's or host's package (`renderers/raylib/`, `renderers/terminal/`, `hosts/native/`; sokol's are `hosts/native/`'s), built as the step named after the app, `tour` or `showcase`. It names the app, the host, the renderer and the font system at one place, and adds only what its host or its flags need, such as screenshots or `--dump` |
 | a skin for an OS design language | `themes/src/<design language>.zig`, exported from `themes/src/root.zig` (the `zui_themes` module), with its tests beside it. A skin is data, applied through `zui_widgets`' skin contract: it imports only `zui` and `zui_widgets`, and holds no drawing or OS code |
 | the template project | `examples/template/`, a package of its own, so it can be copied out as a new app |
 | a sample | `examples/samples/<name>/`, built and tested from `examples/build.zig` and imported from the `test` block of `examples/samples/root.zig`. A sample uses only the public APIs of zui, its modules, and the renderers and hosts, as a user would |
@@ -80,7 +81,7 @@ Stop and ask the user instead of guessing when:
 | renderer changes | `renderers/<name>/`, which names `core/` by path, so it is tested in place from its directory: `renderers/raylib/`, `renderers/sokol/`, `renderers/terminal/`, `renderers/webgl/`. A renderer module imports `zui_glyphs`, never a font system: it takes the text it is given as `anytype`, erases it with `zui_glyphs.Fonts.of`, and draws where `zui_glyphs` lays the text out, declaring `glyph_placement` when it does not draw on the pixel grid |
 | native hosts | `hosts/native/<os>/`, in the package `zui_host`, which names `core/` and `renderers/sokol/` by path, so it is tested in place from `hosts/native/`; its examples are `hosts/native/examples/` |
 | the browser's drawing of a frame | `renderers/webgl/src/<topic>.zig`, reached from `renderers/webgl/src/root.zig` (the module `zui_webgl`); the page's WebGL 2 drawing of it, `renderers/webgl/web/frame_drawer.mjs`. It never imports anything of `hosts/web/` |
-| the web client and, later, the web host | `hosts/web/src/<topic>.zig`, reached from `hosts/web/src/root.zig`, in the package `zui_web`, which names `core/`, `renderers/webgl/` and `renderers/sokol/` by path, so it is tested in place from `hosts/web/` |
+| the web client and, later, the web host | `hosts/web/src/<topic>.zig`, reached from `hosts/web/src/root.zig`, in the package `zui_web`, which names `core/`, `renderers/webgl/`, `apps/tour/` and `text/` by path, and `renderers/sokol/`, lazily, for `test-draw`'s reference drawing alone, so it is tested in place from `hosts/web/`. The tour's worker declares its frames for `zui_webgl.Drawing`, what the browser's drawing draws |
 | what the browser runs | reached from `hosts/web/src/browser.zig`, the client's WebAssembly exports, or `hosts/web/src/tour_worker.zig`, the tour's in a worker, which `zig build check` compiles for `wasm32-freestanding` |
 | what only a check needs in the browser | `hosts/web/src/browser_wire_check.zig`, which adds exports to the client's for `zig build test-demo`; `hosts/web/web/check_*`, the pages and Node scripts the checks run |
 | native programs the web checks run, such as the tour's stream | `hosts/web/tools/` |
@@ -140,28 +141,33 @@ declares every screen headlessly on renderers that draw every optional
 command and none, in pixels and in cells, and checks its compile errors.
 In `renderers/terminal/`, run `zig build test`
 (which runs `conformance` too), `zig build check`, the same `check` with
-`-Dtarget=x86_64-windows` and `-Dtarget=aarch64-macos`, and
-`zig build demo -- --dump`, which prints the demo's glyphs and must
-contain "zui + terminal" (without `--dump` the demo is interactive).
-In `renderers/raylib/`, run `zig build test`, `zig build check`,
-`zig build conformance` and `zig build test-tour`; the tour's cycle,
-`zig build demo -- --hidden --frames 600 --cycle 50`, which must print
+`-Dtarget=x86_64-windows` and `-Dtarget=aarch64-macos`,
+`zig build showcase -- --dump`, which prints the showcase's glyphs and
+must contain "zui + terminal", and `zig build tour -- --dump --screen
+<name>` for every screen the terminal is offered, whose glyphs must show
+no text cut short. Without `--dump` the targets are interactive: never
+run them so outside a terminal of their own (`script` under `timeout`,
+with `--frames`).
+In `renderers/raylib/`, run `zig build test`, `zig build check` and
+`zig build conformance`; the tour's cycle,
+`zig build tour -- --hidden --frames 600 --cycle 50`, which must print
 `diagnostics ok: true`; a screenshot of each of `welcome`, `gallery`,
 `mission_control`, `typography` and `light_and_depth` with
-`zig build demo -- --screenshot <absolute path> --screen <name>`;
-`zig build demo -- --measure-idle`; and `check` with `-Dzui-tracy=true`
-and with `-Dtarget=x86_64-windows`. Conformance and the demo open hidden
+`zig build tour -- --screenshot <absolute path> --screen <name>`;
+`zig build tour -- --measure-idle`;
+`zig build showcase -- --hidden --frames 60`, which must print
+`diagnostics ok: true`; and `check` with `-Dzui-tracy=true`
+and with `-Dtarget=x86_64-windows`. Conformance and the targets open hidden
 windows, so they need a display (CI runs them under `xvfb-run`); never
-run `zig build demo` without `--hidden --frames`, `--screenshot` or
+run a target without `--hidden --frames`, `--screenshot` or
 `--measure-idle`, since its window stays open until closed. Its links on
 Linux print `warning(link): unexpected LLD stderr` and still succeed.
-In `renderers/sokol/`, run `zig build test`, `zig build check` (which
-also links the tour for `wasm32-freestanding`), the same `check` with
-`-Dtarget=wasm32-freestanding`, with `-Dtarget=x86_64-windows` and with
-`-Dgl=true -Dtarget=x86_64-windows`, `zig build test-tour`,
+In `renderers/sokol/`, run `zig build test`, `zig build check`, the same
+`check` with `-Dtarget=wasm32-freestanding`, with
+`-Dtarget=x86_64-windows` and with `-Dgl=true -Dtarget=x86_64-windows`,
 and `zig build conformance`, which opens a window and must print that
-`zui_sokol.Renderer` passes zui's renderer suite; the tour it draws is
-run by `hosts/native/`'s tour, below. After changing a shader's GLSL,
+`zui_sokol.Renderer` passes zui's renderer suite; its tour and showcase
+are `hosts/native/`'s, below. After changing a shader's GLSL,
 run `zig build shaders` and commit the regenerated `.glsl.zig`. Its links
 on Linux print `warning(link): unexpected LLD stderr` and a `failed
 command:` line and still succeed.
@@ -177,7 +183,9 @@ print that every service answered; `zig build theme -- --check`, which
 must print the frame it restyled in; the tour's cycle,
 `zig build tour -- --frames 300 --cycle 30`, which must print
 `0 layer overflows, 0 glyph atlas overflows, diagnostics ok: true`, also
-after any change to the sokol renderer or its tour; and `zig build tour -- --measure-idle`. They need
+after any change to the sokol renderer or the tour; `zig build tour -- --measure-idle`;
+and `zig build showcase -- --frames 60`, which must print
+`diagnostics ok: true`. They need
 a Wayland compositor (CI runs a headless Weston); never run an example
 without `--check`, `--frames` or `--measure-idle`, since its window
 stays open until closed. Its links on Linux print the same LLD noise.
@@ -190,10 +198,10 @@ and, each with `timeout` in front:
 `zig build test-demo` (and with `-Doptimize=ReleaseSafe`) after any
 change to the client, `hosts/web/src/demo_ui.zig`, the tour's worker
 (`hosts/web/src/tour_*.zig`, `hosts/web/src/stepped_io.zig`,
-`hosts/web/web/tour_*.mjs`), core, `text/` or the sokol renderer's tour; it needs
+`hosts/web/web/tour_*.mjs`), core, `text/` or `apps/tour/`; it needs
 Node. `zig build test-draw` after any change to how the client lays
-frames out or the page draws them (`renderers/webgl/`), or to `text/` or the sokol
-renderer; it needs Node, Chromium (`-Dbrowser=<path>` names another) and
+frames out or the page draws them (`renderers/webgl/`), or to `text/`,
+`apps/tour/` or the sokol renderer; it needs Node, Chromium (`-Dbrowser=<path>` names another) and
 a display, and `ZUI_WEB_DRAW_FAILURES=<dir>` keeps its failing frames.
 `zig build test-input` after any change to how the client writes records
 or the page reads input or applies host requests; it needs Node and

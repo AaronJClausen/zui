@@ -55,9 +55,6 @@ pub const GlyphBox = struct {
 pub const Fonts = struct {
     context: ?*const anyopaque,
     functions: *const Functions,
-    /// Font ids below this are not these fonts; from it on, they are these
-    /// fonts' ids from 0.
-    first_font: FontId = 0,
 
     pub const Functions = struct {
         fontMetrics: *const fn (?*const anyopaque, FontId) ?FontMetrics,
@@ -113,33 +110,24 @@ pub const Fonts = struct {
         return .{ .context = provider, .functions = &erased.functions };
     }
 
-    /// These fonts under ids that start at `first`, for a text that numbers
-    /// fonts of its own before them.
-    pub fn startingAt(self: Fonts, first: FontId) Fonts {
-        var moved = self;
-        moved.first_font += first;
-        return moved;
-    }
-
     pub fn fontMetrics(self: *const Fonts, font: FontId) ?FontMetrics {
-        if (font < self.first_font) return null;
-        return self.functions.fontMetrics(self.context, font - self.first_font);
+        return self.functions.fontMetrics(self.context, font);
     }
 
     pub fn advance(self: *const Fonts, font: FontId, codepoint: u21) f32 {
-        return self.functions.advance(self.context, font - self.first_font, codepoint);
+        return self.functions.advance(self.context, font, codepoint);
     }
 
     pub fn glyphIndex(self: *const Fonts, font: FontId, codepoint: u21) GlyphId {
-        return self.functions.glyphIndex(self.context, font - self.first_font, codepoint);
+        return self.functions.glyphIndex(self.context, font, codepoint);
     }
 
     pub fn glyphBox(self: *const Fonts, font: FontId, glyph: GlyphId, pixel_size: f32) GlyphBox {
-        return self.functions.glyphBox(self.context, font - self.first_font, glyph, pixel_size);
+        return self.functions.glyphBox(self.context, font, glyph, pixel_size);
     }
 
     pub fn rasterize(self: *const Fonts, font: FontId, glyph: GlyphId, pixel_size: f32, box: GlyphBox, coverage: []u8, stride: usize, scratch: []align(16) u8) bool {
-        return self.functions.rasterize(self.context, font - self.first_font, glyph, pixel_size, box, coverage, stride, scratch);
+        return self.functions.rasterize(self.context, font, glyph, pixel_size, box, coverage, stride, scratch);
     }
 };
 
@@ -165,13 +153,12 @@ fn noRaster(_: ?*const anyopaque, _: FontId, _: GlyphId, _: f32, _: GlyphBox, _:
 
 const BoxFonts = @import("box_fonts.zig").BoxFonts;
 
-test "erased fonts answer as the font system does, under the ids they start at" {
+test "erased fonts answer as the font system does" {
     const boxes: BoxFonts = .{};
-    const fonts = Fonts.of(&boxes).startingAt(6);
-    try std.testing.expectEqual(null, fonts.fontMetrics(0));
-    try std.testing.expectEqual(boxes.fontMetrics(0), fonts.fontMetrics(6));
-    try std.testing.expectEqual(boxes.advance(0, 'W'), fonts.advance(6, 'W'));
-    try std.testing.expectEqual(null, fonts.fontMetrics(6 + BoxFonts.font_count));
+    const fonts = Fonts.of(&boxes);
+    try std.testing.expectEqual(boxes.fontMetrics(0), fonts.fontMetrics(0));
+    try std.testing.expectEqual(boxes.advance(1, 'W'), fonts.advance(1, 'W'));
+    try std.testing.expectEqual(null, fonts.fontMetrics(BoxFonts.font_count));
     try std.testing.expectEqual(null, Fonts.none.fontMetrics(0));
     try std.testing.expectEqual(fonts, Fonts.of(&fonts));
 }

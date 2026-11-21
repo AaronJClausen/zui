@@ -92,9 +92,15 @@ jobs:
           version: ${{ env.ZIG_VERSION }}
       - run: zig build test
       - run: zig build check
-      - name: Render the demo offscreen
+      - name: Render the showcase offscreen
         shell: bash
-        run: zig build demo -- --dump | tee dump.txt && grep -q "zui + terminal" dump.txt
+        run: zig build showcase -- --dump | tee dump.txt && grep -q "zui + terminal" dump.txt
+      - name: Render every screen of the tour a terminal draws, offscreen
+        shell: bash
+        run: |
+          for screen in welcome layout_lab box_storm gallery mission_control window_manager robot_workshop pixel_pad typography light_and_depth classic; do
+            zig build tour -- --dump --screen $screen > /dev/null
+          done
 
   raylib-windows:
     name: "raylib: test and build (windows-latest)"
@@ -109,7 +115,6 @@ jobs:
         with:
           version: ${{ env.ZIG_VERSION }}
       - run: zig build test
-      - run: zig build test-tour
       - run: zig build check
 
   raylib-linux:
@@ -130,26 +135,30 @@ jobs:
       - run: zig build check
       - name: Run zui's renderer and host suites
         run: xvfb-run --auto-servernum zig build conformance
-      - run: zig build test-tour
       - name: Visit every screen of the tour
         run: |
           set -o pipefail
-          xvfb-run --auto-servernum zig build demo -- --hidden --frames 600 --cycle 50 2>&1 | tee cycle.log
+          xvfb-run --auto-servernum zig build tour -- --hidden --frames 600 --cycle 50 2>&1 | tee cycle.log
           grep "diagnostics ok: true" cycle.log
       - name: Render the tour offscreen
         run: |
           for screen in welcome gallery mission_control typography light_and_depth; do
-            xvfb-run --auto-servernum zig build demo -- --screenshot "$PWD/demo-$screen.png" --screen $screen
+            xvfb-run --auto-servernum zig build tour -- --screenshot "$PWD/tour-$screen.png" --screen $screen
           done
       - name: Report the CPU used while idle
         run: |
-          timeout 60 xvfb-run --auto-servernum zig build demo -- --measure-idle 2>&1 | grep "^idle" | tee idle.log
+          timeout 60 xvfb-run --auto-servernum zig build tour -- --measure-idle 2>&1 | grep "^idle" | tee idle.log
           echo "The tour's welcome screen, $(cat idle.log)" >> "$GITHUB_STEP_SUMMARY"
+      - name: Draw the showcase
+        run: |
+          set -o pipefail
+          xvfb-run --auto-servernum zig build showcase -- --hidden --frames 60 2>&1 | tee showcase.log
+          grep "diagnostics ok: true" showcase.log
       - name: Keep the renders
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: demo-screenshots
-          path: renderers/raylib/demo*.png
+          name: tour-screenshots
+          path: renderers/raylib/tour*.png
 
   raylib-macos:
     name: "raylib: build (macos-latest)"
@@ -205,7 +214,6 @@ jobs:
       - name: Compile the renderer for a native host's win32 window, with OpenGL
         if: runner.os == 'Windows'
         run: zig build check -Dgl=true
-      - run: zig build test-tour
 
   host-windows:
     name: "Native host: test and build (Windows)"
@@ -268,6 +276,13 @@ jobs:
           set -o pipefail
           timeout 300 zig build tour -- --frames 300 --cycle 30 2>&1 | tee cycle.log
           grep "0 layer overflows, 0 glyph atlas overflows, diagnostics ok: true" cycle.log
+      - name: Draw the showcase, by the sokol renderer
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: |
+          set -o pipefail
+          timeout 120 zig build showcase -- --frames 60 2>&1 | tee showcase.log
+          grep "diagnostics ok: true" showcase.log
 
   host-cross:
     name: "Native host: cross-compile for Windows (Linux)"
@@ -319,8 +334,6 @@ jobs:
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: ${{ env.ZIG_VERSION }}
-      - name: Install sokol's X11, OpenGL, PulseAudio, EGL and Wayland dependencies, which the tour links
-        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxi-dev libxcursor-dev libgl1-mesa-dev libpulse-dev libegl-dev libwayland-dev
       - run: node --version
       - run: zig build test-demo
       - run: zig build test-demo -Doptimize=ReleaseSafe
@@ -340,7 +353,7 @@ jobs:
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: ${{ env.ZIG_VERSION }}
-      - name: Install sokol's X11, OpenGL, PulseAudio, EGL and Wayland dependencies, which the tour links, and Xvfb
+      - name: Install sokol's X11, OpenGL, PulseAudio, EGL and Wayland dependencies, which the reference drawing links, and Xvfb
         run: sudo apt-get update && sudo apt-get install -y libx11-dev libxi-dev libxcursor-dev libgl1-mesa-dev libpulse-dev libegl-dev libwayland-dev xvfb
       - run: google-chrome --version
       - run: xvfb-run --auto-servernum zig build test-draw -Dbrowser=google-chrome

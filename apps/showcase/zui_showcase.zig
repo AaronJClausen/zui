@@ -1,6 +1,17 @@
 //! One small application every renderer draws, so the same frame can be
 //! compared across them: a toolbar, a scrolling list, widgets, a tooltip
-//! and a modal dialog, generic over the `Ui` that declares it.
+//! and a modal dialog, generic over the `Ui` that declares it. A target
+//! runs it through `zui_app`:
+//!
+//! ```zig
+//! const App = zui_showcase.App(.{ .Host = zui_raylib.Host, .Renderer = zui_raylib.Renderer, .Text = zui_truetype.Text, .title = "zui + raylib" });
+//!
+//! pub fn main(init: std.process.Init) !void {
+//!     try zui_app.run(App, init, .{ .title = "zui showcase (raylib)" });
+//! }
+//! ```
+//!
+//! or declares it on a loop of its own:
 //!
 //! ```zig
 //! const Showcase = zui_showcase.Showcase(Ui);
@@ -11,6 +22,8 @@
 const std = @import("std");
 const zui = @import("zui");
 const zui_widgets = @import("zui_widgets");
+const zui_app = @import("zui_app");
+const zui_glyphs = @import("zui_glyphs");
 
 /// The showcase's colors, dark by default.
 pub const Palette = struct {
@@ -190,6 +203,133 @@ pub fn Showcase(comptime Ui: type) type {
     };
 }
 
+/// Metrics that keep controls on whole cells of 8×16 layout units.
+pub const cell_metrics: Metrics = .{
+    .toolbar_height = 48,
+    .sidebar_width = 160,
+    .row_height = 16,
+    .padding = 16,
+    .gap = 16,
+    .dialog_width = 400,
+    .corner_radius = 1,
+};
+
+/// What a target names: the showcase's host, renderer and font system,
+/// and the title it shows.
+pub const Config = struct {
+    Host: type,
+    Renderer: type,
+    /// A font system, such as `zui_truetype.Text`, laid out for the
+    /// placement the renderer draws; `void` when the renderer measures.
+    Text: type = void,
+    title: []const u8,
+};
+
+/// How a run of the showcase behaves, as its flags say:
+///
+/// ```sh
+/// --frames <count>   quit after this many frames, printing whether every frame was ok
+/// --hidden           for the target: keep the window hidden
+/// ```
+pub const Options = struct {
+    frame_limit: ?u64 = null,
+    hidden: bool = false,
+
+    pub const usage = "--frames <count> or --hidden";
+
+    /// The options `arguments` give, the program's name first.
+    pub fn parse(arguments: []const [:0]const u8) error{ UnknownArgument, InvalidCharacter, Overflow }!Options {
+        var options: Options = .{};
+        var index: usize = 1;
+        while (index < arguments.len) : (index += 1) {
+            const argument = arguments[index];
+            if (std.mem.eql(u8, argument, "--frames") and index + 1 < arguments.len) {
+                index += 1;
+                options.frame_limit = try std.fmt.parseInt(u64, arguments[index], 10);
+            } else if (std.mem.eql(u8, argument, "--hidden")) {
+                options.hidden = true;
+            } else {
+                return error.UnknownArgument;
+            }
+        }
+        return options;
+    }
+};
+
+/// The showcase as `zui_app` runs an application on `config.Host`, drawn
+/// by `config.Renderer`. On a renderer that draws one glyph per cell it
+/// keeps its controls on whole cells. Its `init` takes its `Options` from
+/// the process's arguments.
+pub fn App(comptime config: Config) type {
+    return struct {
+        const Self = @This();
+
+        pub const Host = config.Host;
+        pub const Renderer = config.Renderer;
+        pub const Text = if (config.Text == void) Renderer else config.Text;
+        pub const Ui = zui.Context(zui_app.contextConfig(Renderer, .{ .Text = config.Text }));
+        pub const ShowcaseOnUi = Showcase(Ui);
+
+        const draws_in_cells = zui_glyphs.placementOf(Renderer) == .cells;
+
+        showcase: ShowcaseOnUi,
+        host: *Host,
+        options: Options,
+        frames: u64 = 0,
+        diagnostics_ok: bool = true,
+
+        pub fn init(app: *Self, start: zui_app.Start(Self)) !void {
+            const options: Options = if (start.process) |process| Options.parse(try process.minimal.args.toSlice(process.arena.allocator())) catch |err| {
+                std.log.err("{t}; the showcase takes {s}", .{ err, Options.usage });
+                return err;
+            } else .{};
+            if (config.Text != void and @hasField(config.Text, "placement")) start.text.placement = zui_glyphs.placementOf(Renderer);
+            app.* = .{ .showcase = newShowcase(), .host = start.host, .options = options };
+            if (@hasField(Renderer, "background")) start.renderer.background = app.showcase.palette.background;
+        }
+
+        pub fn deinit(app: *Self) void {
+            if (app.options.frame_limit != null) std.log.info("drew {d} frames, diagnostics ok: {}", .{ app.frames, app.diagnostics_ok });
+        }
+
+        /// The showcase as it starts, titled and sized for the renderer.
+        pub fn newShowcase() ShowcaseOnUi {
+            if (!draws_in_cells) return .{ .title = config.title, .widgets = .{} };
+            return .{
+                .title = config.title,
+                .metrics = cell_metrics,
+                .widgets = .{ .theme = .{
+                    .corner_radius = 0,
+                    .control_height = 16,
+                    .horizontal_padding = 8,
+                    .gap = 8,
+                    .checkbox_size = 16,
+                    .slider_thumb_size = .{ 8, 16 },
+                    .track_thickness = 16,
+                    .label_width = 112,
+                } },
+            };
+        }
+
+        pub fn zuiDeclare(app: *Self, ui: *Ui) void {
+            if (@hasField(Host, "clear_color")) app.host.clear_color = app.showcase.palette.background;
+            if (app.options.frame_limit != null) ui.requestFrame();
+            app.showcase.declare(ui);
+        }
+
+        pub fn zuiObserve(app: *Self, _: *const Ui, frame: *const Ui.Frame) void {
+            app.diagnostics_ok = app.diagnostics_ok and frame.diagnostics.ok();
+        }
+
+        /// Closes the host at the frame limit.
+        pub fn zuiLoader(app: *Self, _: *const Ui, _: std.Io) void {
+            app.frames += 1;
+            if (app.options.frame_limit != app.frames) return;
+            if (@hasDecl(Host, "close")) app.host.close() else std.log.err("zui_showcase: {s} cannot close its window, so the run goes on", .{@typeName(Host)});
+        }
+    };
+}
+
 /// Every glyph 8 by 16 units at size 16, so a frame lays out the same on
 /// every machine.
 const FixedWidthText = struct {
@@ -214,4 +354,76 @@ test "the showcase declares within its limits, with and without its dialog" {
         try std.testing.expect(frame.diagnostics.ok());
         try std.testing.expect(frame.rectOf(Showcase(Ui).ids.sidebar) != null);
     }
+}
+
+/// Opens a window of 1280×720 units that closes after three frames.
+const TestHost = struct {
+    pub const zui_surfaces: zui.SurfaceKinds = .initOne(.offscreen);
+
+    polls: u32 = 0,
+    clear_color: zui.Color = .black,
+
+    pub fn init(_: *TestHost, _: std.Io, _: zui.WindowOptions) !void {}
+
+    pub fn deinit(_: *TestHost) void {}
+
+    pub fn zuiPoll(self: *TestHost, _: zui.WindowId, record: *zui.RecordBuilder) bool {
+        if (self.polls == 3) return false;
+        self.polls += 1;
+        record.begin(.{ .now = .fromNanoseconds(self.polls * std.time.ns_per_s / 60), .viewport = .{ 1280, 720 } });
+        return true;
+    }
+
+    pub fn zuiWaker(self: *TestHost) zui.Waker {
+        return .{ .context = self, .wakeFn = ignoreWake };
+    }
+
+    pub fn zuiWait(_: *TestHost, _: zui.NextFrame) void {}
+
+    pub fn zuiSurface(_: *TestHost, _: zui.WindowId) zui.Surface {
+        return .{ .offscreen = .{ .size = .{ 1280, 720 }, .format = .sdr } };
+    }
+
+    pub fn zuiApply(_: *TestHost, _: zui.WindowId, _: zui.HostRequests) void {}
+
+    fn ignoreWake(_: *anyopaque) void {}
+};
+
+fn TestRenderer(comptime placement: zui_glyphs.Placement) type {
+    return struct {
+        pub const zui_surfaces: zui.SurfaceKinds = .initOne(.offscreen);
+        pub const glyph_placement = placement;
+
+        submitted: u32 = 0,
+        background: zui.Color = .black,
+
+        pub fn zuiSubmit(self: *@This(), _: zui.Surface, _: anytype) !void {
+            self.submitted += 1;
+        }
+    };
+}
+
+test "a target runs the showcase through zui_app, its controls on whole cells where the renderer draws cells" {
+    if (@import("builtin").os.tag == .freestanding) return error.SkipZigTest;
+    inline for (.{ zui_glyphs.Placement.pixel_grid, zui_glyphs.Placement{ .cells = .{ 8, 16 } } }) |placement| {
+        const ShowcaseApp = App(.{ .Host = TestHost, .Renderer = TestRenderer(placement), .Text = FixedWidthText, .title = "zui + test" });
+        var runner: zui_app.Runner(ShowcaseApp) = undefined;
+        try runner.start(.{ .gpa = std.testing.allocator, .io = std.testing.io }, .{ .notify = ignoreNotice });
+        defer runner.stop();
+        while (try runner.frame()) {}
+        try std.testing.expectEqual(3, runner.renderer.submitted);
+        try std.testing.expect(runner.app.diagnostics_ok);
+        try std.testing.expectEqual(runner.app.showcase.palette.background, runner.host.clear_color);
+        try std.testing.expectEqual(runner.app.showcase.palette.background, runner.renderer.background);
+        try std.testing.expectEqual(placement == .cells, runner.app.showcase.metrics.row_height == cell_metrics.row_height);
+    }
+}
+
+fn ignoreNotice(_: zui_app.Notice) void {}
+
+test "the showcase's options are its flags" {
+    const options = try Options.parse(&.{ "showcase", "--hidden", "--frames", "60" });
+    try std.testing.expectEqual(60, options.frame_limit);
+    try std.testing.expect(options.hidden);
+    try std.testing.expectError(error.UnknownArgument, Options.parse(&.{ "showcase", "--dump" }));
 }

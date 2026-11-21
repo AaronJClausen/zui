@@ -12,6 +12,8 @@ const sokol = zui_sokol.sokol;
 const sapp = sokol.app;
 const sg = sokol.gfx;
 const zui_testing = @import("zui_testing");
+const zui_app = @import("zui_app");
+const zui_truetype = @import("zui_truetype");
 
 extern fn glReadPixels(x: c_int, y: c_int, width: c_int, height: c_int, format: c_uint, pixel_type: c_uint, pixels: ?*anyopaque) callconv(.c) void;
 extern fn glBindTexture(target: c_uint, texture: c_uint) callconv(.c) void;
@@ -46,11 +48,11 @@ const targets = [_]Target{
 };
 
 const WindowHarness = struct {
-    pub const config = zui_sokol.config(.{});
+    pub const config = zui_app.contextConfig(zui_sokol.Renderer, .{ .Text = zui_truetype.Text });
 
     gpa: std.mem.Allocator,
     io: std.Io,
-    text_contract: zui_sokol.Text = .{},
+    text_contract: zui_truetype.Text = .{},
     drawn: zui_sokol.Renderer = undefined,
     target: Target = .swapchain,
     /// Bottom row first, as OpenGL reads them.
@@ -62,7 +64,7 @@ const WindowHarness = struct {
         return &self.drawn;
     }
 
-    pub fn text(self: *WindowHarness) *zui_sokol.Text {
+    pub fn text(self: *WindowHarness) *zui_truetype.Text {
         return &self.text_contract;
     }
 

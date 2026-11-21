@@ -1,4 +1,4 @@
-// The published page: zui-sokol's tour in a Web Worker, its frames drawn on
+// The published page: the tour in a Web Worker, its frames drawn on
 // the canvas and the canvas's input sent back to it as records. As a native
 // host does, it sleeps between the frames the tour needs, stepping it only
 // on input, a resize, or when the worker's answer said to wake. The page

@@ -1,18 +1,18 @@
 //! ```sh
 //! replay-input <records path> <stream path>
 //! ```
-//! Runs zui-sokol's tour on the records the browser's client wrote, as a
+//! Runs the tour on the records the browser's client wrote, as a
 //! `zui_wire.Host` reads them, checks each against the input the browser
 //! was given, and writes the frames the tour drew as the wire renderer
 //! sends them.
 
 const std = @import("std");
 const zui = @import("zui");
-const zui_sokol = @import("zui_sokol");
 const zui_wire = @import("zui_wire");
-const tour = @import("zui_sokol_tour");
-const Ui = tour.kit.Ui;
-const Screen = tour.kit.Screen;
+const tour_session = @import("tour_session");
+const kit = tour_session.kit;
+const Ui = tour_session.Ui;
+const Screen = kit.Screen;
 
 /// The rail's fifth entry, Mission Control, on a canvas 1280 by 800 CSS
 /// pixels.
@@ -77,13 +77,14 @@ pub fn main(init: std.process.Init) !void {
     const io = init.io;
     const gpa = init.gpa;
 
-    var text: zui_sokol.Text = .{};
-    try tour.kit.addFonts(&text);
+    var text: kit.Text = undefined;
+    try text.init();
+    defer text.deinit();
     var ui: Ui = try .init(gpa, io, &text);
     defer ui.deinit(gpa);
-    const app = try gpa.create(tour.App);
+    const app = try gpa.create(tour_session.Tour);
     defer gpa.destroy(app);
-    app.init(io, .zero);
+    app.init(io, .zero, text.fonts);
     defer app.deinit();
     app.heartbeat = false;
 
@@ -127,6 +128,7 @@ pub fn main(init: std.process.Init) !void {
         ui.beginFrame(&.{ .params = sent.params, .events = events[0..event_count] }, &app.sources);
         app.declare(&ui);
         const frame = ui.endFrame();
+        app.observe(&ui, frame);
         app.afterFrame(&ui);
         defer ui.release(frame);
 

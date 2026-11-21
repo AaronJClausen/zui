@@ -296,7 +296,7 @@ const ScriptedHost = struct {
 };
 
 test "zui_app runs the tour through every screen it is offered, and stops at the frame limit" {
-    const App = tour.App(.{ .Host = ScriptedHost, .Renderer = FakeRenderer(false, .pixel_grid), .Text = zui_truetype.Text });
+    const App = tour.App(.{ .Host = ScriptedHost, .Renderer = FakeRenderer(false, .pixel_grid), .Text = zui_truetype.Text, .renderer_name = "a fake renderer" });
     const cycle_every = 3;
     const frame_limit = cycle_every * App.kit.offered_screens.len + 2;
     const runner = try testing.allocator.create(zui_app.Runner(App));

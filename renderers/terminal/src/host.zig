@@ -7,15 +7,15 @@ const InputDecoder = @import("input.zig").InputDecoder;
 /// the alternate screen, input decoded from the bytes the terminal sends,
 /// waits until input, a resize, a wake or the instant `nextFrame` names.
 /// Its surface is `.terminal`: the window's size in cells and a writer on
-/// stdout, which `zui_terminal.Renderer` draws through. Ctrl+C and Ctrl+Q
-/// close it. The window's title, size and visibility are the terminal's
-/// own.
+/// stdout, which `zui_terminal.Renderer` draws through. Ctrl+C, Ctrl+Q and
+/// `close` close it. The window's title, size and visibility are the
+/// terminal's own.
 ///
 /// ```zig
 /// const App = struct {
 ///     pub const Host = zui_terminal.Host;
 ///     pub const Renderer = zui_terminal.Renderer;
-///     pub const Text = zui_terminal.Text;
+///     pub const Text = zui_truetype.Text;
 ///     // ...
 /// };
 /// ```
@@ -31,6 +31,7 @@ pub const Host = struct {
     output: std.Io.File.Writer,
     output_buffer: [64 * 1024]u8 = undefined,
     read_buffer: [4096]u8 = undefined,
+    closed: bool = false,
 
     pub fn init(self: *Host, io: std.Io, window: zui.WindowOptions) !void {
         _ = window;
@@ -41,6 +42,11 @@ pub const Host = struct {
     pub fn deinit(self: *Host) void {
         self.terminal.leave();
         self.* = undefined;
+    }
+
+    /// Ends the run after this frame.
+    pub fn close(self: *Host) void {
+        self.closed = true;
     }
 
     pub fn zuiPoll(self: *Host, window: zui.WindowId, record: *zui.RecordBuilder) bool {
@@ -71,7 +77,7 @@ pub const Host = struct {
     }
 
     fn recordDecoded(self: *Host, at: zui.Instant, size_in_cells: [2]u16, record: *zui.RecordBuilder) bool {
-        if (self.decoder.quit_requested) return false;
+        if (self.closed or self.decoder.quit_requested) return false;
         const cell_size = self.decoder.cell_size;
         record.begin(.{ .now = at, .viewport = .{
             @as(f32, @floatFromInt(size_in_cells[0])) * cell_size[0],
@@ -103,6 +109,16 @@ test "a poll records what was typed in a viewport of whole cells" {
     try std.testing.expectEqual(zui.Key.h, recorded[0].key_down.key);
     try std.testing.expectEqualStrings("hé", recorded[recorded.len - 1].text);
     try std.testing.expect(recorded[recorded.len - 1].text.ptr == builder.text_buffer.ptr);
+}
+
+test "close ends the run at the next poll" {
+    var host = testHost();
+    var events: [8]zui.Event = undefined;
+    var text: [8]u8 = undefined;
+    var builder: zui.RecordBuilder = .init(&events, &text);
+    try std.testing.expect(host.recordDecoded(.zero, .{ 10, 3 }, &builder));
+    host.close();
+    try std.testing.expect(!host.recordDecoded(.zero, .{ 10, 3 }, &builder));
 }
 
 test "Ctrl+Q closes the window" {

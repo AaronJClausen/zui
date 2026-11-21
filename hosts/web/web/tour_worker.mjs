@@ -1,4 +1,4 @@
-// zui-sokol's tour in a Web Worker, behind the page. The page sends
+// The tour in a Web Worker, behind the page. The page sends
 //
 //   { type: "start", wasm, steadyTimings }    the tour's module, as bytes, and
 //                                             whether to time its frames on a

@@ -8,7 +8,6 @@ pub const RecordStream = @import("record_stream.zig").RecordStream;
 pub const SteppedIo = @import("stepped_io.zig").SteppedIo;
 const browser_input = @import("browser_input.zig");
 const DrawList = @import("zui_webgl").DrawList;
-const BitmapFonts = @import("zui_webgl").BitmapFonts;
 const Text = @import("text.zig").Text;
 const zui_fonts = @import("zui_fonts");
 
@@ -465,38 +464,18 @@ test "a shape that does not fit is left out whole, and the frame after starts ag
     try testing.expectEqual(rounded_vertices, draw_list.vertices().len);
 }
 
-test "bitmap text is a quad per glyph in its font's row, drawn once the fonts are loaded" {
-    const line: DemoCommand = .{ .bounds = .{ .x = 10, .y = 0, .width = 24, .height = 20 }, .id = 1, .payload = .{ .text = .{ .content = "A\u{e9}", .style = .{ .size = 16, .color = .white, .font = 2 }, .line = 0 } } };
-    var laid_out = try layOutForTest(&.{line});
-    defer laid_out.deinit();
-    try testing.expectEqual(0, laid_out.draw_list.vertices().len);
-
-    var rows: [BitmapFonts.font_bytes]u8 = @splat(0);
-    laid_out.draw_list.bitmap_fonts.load(&rows);
-    laid_out.draw_list.layOut(&[_]DemoCommand{line}, demo_params, &laid_out.text);
-    const vertices = laid_out.draw_list.vertices();
-    try testing.expectEqual(2 * 6, vertices.len);
-    const glyph_size = 16 * BitmapFonts.glyph_scale;
-    try testing.expectEqualDeep([2]f32{ 10, (20 - glyph_size) / 2 }, vertices[0].position);
-    try testing.expectEqualDeep([2]f32{ 10 + glyph_size, (20 + glyph_size) / 2 }, vertices[2].position);
-    try testing.expectEqual(DrawList.Texture.bitmap_glyphs, vertices[0].texture);
-    try testing.expectEqualDeep([2]f32{ 'A' * 8.0 / 2048.0, 16.0 / 48.0 }, vertices[0].texture_coordinates);
-    try testing.expectEqualDeep([2]f32{ '?' * 8.0 / 2048.0, 16.0 / 48.0 }, vertices[6].texture_coordinates);
-    try testing.expectEqualDeep([2]f32{ 10 + glyph_size, (20 - glyph_size) / 2 }, vertices[6].position);
-}
-
-test "text in a font id past the bitmap fonts that no TrueType font was added for draws in the last bitmap font" {
-    const line: DemoCommand = .{ .bounds = .{ .width = 12, .height = 16 }, .id = 1, .payload = .{ .text = .{ .content = "x", .style = .{ .size = 16, .color = .white, .font = BitmapFonts.count }, .line = 0 } } };
+test "text in a font the page did not hand over is not drawn" {
+    const line: DemoCommand = .{ .bounds = .{ .width = 12, .height = 16 }, .id = 1, .payload = .{ .text = .{ .content = "x", .style = .{ .size = 16, .color = .white, .font = 1 }, .line = 0 } } };
     var laid_out = try layOutForTest(&.{});
     defer laid_out.deinit();
-    var rows: [BitmapFonts.font_bytes]u8 = @splat(0);
-    laid_out.draw_list.bitmap_fonts.load(&rows);
+    laid_out.text.deinit(testing.allocator);
+    laid_out.text = try textWith(&.{zui_fonts.atkinson_hyperlegible_regular});
     laid_out.draw_list.layOut(&[_]DemoCommand{line}, demo_params, &laid_out.text);
-    try testing.expectEqual(40.0 / 48.0, laid_out.draw_list.vertices()[0].texture_coordinates[1]);
+    try testing.expectEqual(0, laid_out.draw_list.vertices().len);
 }
 
 test "TrueType text is a quad per glyph where the layout puts it, from the atlas" {
-    const line: DemoCommand = .{ .bounds = .{ .x = 10, .y = 0, .width = 80, .height = 20 }, .id = 1, .payload = .{ .text = .{ .content = "Hi you", .style = .{ .size = 16, .color = .white, .font = BitmapFonts.count, .letter_spacing = 1 }, .line = 0 } } };
+    const line: DemoCommand = .{ .bounds = .{ .x = 10, .y = 0, .width = 80, .height = 20 }, .id = 1, .payload = .{ .text = .{ .content = "Hi you", .style = .{ .size = 16, .color = .white, .font = 0, .letter_spacing = 1 }, .line = 0 } } };
     var laid_out = try layOutForTest(&.{});
     defer laid_out.deinit();
     laid_out.text.deinit(testing.allocator);

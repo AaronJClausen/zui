@@ -13,6 +13,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const zui_host = @import("zui_host");
 const zui_sokol = @import("zui_sokol");
+const zui_truetype = @import("zui_truetype");
 const zui_app = @import("zui_app");
 const zui_async = @import("zui_async");
 const zui_widgets = @import("zui_widgets");
@@ -24,7 +25,7 @@ const ServiceReply = zui.ServiceReply(16 * 1024);
 const ServiceSources = struct {
     replies: zui_async.Stream(ServiceReply, .{ .capacity = 4 }) = .{},
 };
-const Ui = zui.Context(zui_sokol.config(.{ .Sources = ServiceSources }));
+const Ui = zui.Context(zui_app.contextConfig(zui_sokol.Renderer, .{ .Text = zui_truetype.Text, .Sources = ServiceSources }));
 const Widgets = zui_widgets.Widgets(Ui);
 const services = zui_app.ServicesOf(zui_host.Host);
 
@@ -169,7 +170,7 @@ pub fn main(init: std.process.Init) !void {
 const ServicesApp = struct {
     pub const Host = zui_host.Host;
     pub const Renderer = SokolRenderer;
-    pub const Text = zui_sokol.Text;
+    pub const Text = zui_truetype.Text;
 
     sources: ServiceSources = .{},
     host: *Host = undefined,
@@ -475,7 +476,7 @@ const SokolRenderer = struct {
     /// False submits nothing, for a window that is never shown.
     draws: bool = true,
 
-    pub fn init(self: *SokolRenderer, surface: zui.Surface, text: *const zui_sokol.Text) !void {
+    pub fn init(self: *SokolRenderer, surface: zui.Surface, text: anytype) !void {
         self.* = .{ .sokol = try .initForSurface(text, surface) };
     }
 

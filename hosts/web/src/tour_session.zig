@@ -1,15 +1,21 @@
 const std = @import("std");
-const zui_sokol_ui = @import("zui_sokol_ui");
+const zui = @import("zui");
 const zui_wire = @import("zui_wire");
-const tour = @import("zui_sokol_tour");
-const zui = tour.kit.zui;
-const FrameReason = tour.FrameReason;
+const zui_tour = @import("zui_tour");
+const zui_truetype = @import("zui_truetype");
+const zui_webgl = @import("zui_webgl");
+const FrameReason = zui_tour.FrameReason;
 
 pub const SteppedIo = @import("stepped_io.zig").SteppedIo;
 
-pub const Ui = tour.kit.Ui;
+/// The tour as the browser draws it: declared for `zui_webgl.Drawing`, in
+/// `zui_truetype`'s layout of the three fonts it adds, which the page hands
+/// the client in the same order.
+pub const kit = zui_tour.Kit(.{ .Renderer = zui_webgl.Drawing, .FontSystem = zui_truetype.Text, .inspector = false, .renderer_name = "the browser" });
+pub const Ui = kit.Ui;
+pub const Tour = zui_tour.Tour(kit);
 
-/// zui-sokol's tour, run by a loop that owns its clock: the page's, in a
+/// The tour, run by a loop that owns its clock: the page's, in a
 /// browser's worker. Each `frame` steps the tour's `Io` to the page's
 /// instant, takes the records the page sent since the last, declares a
 /// frame, times it on the session's `Stopwatch` for the tour's strip, and
@@ -34,9 +40,9 @@ pub const TourSession = struct {
 
     gpa: std.mem.Allocator,
     stepped: *SteppedIo,
-    text: zui_sokol_ui.Text,
+    text: kit.Text,
     ui: Ui,
-    app: *tour.App,
+    app: *Tour,
     decoder: zui_wire.Decoder(Ui),
     encoder: zui_wire.Encoder(Ui),
     builder: zui.RecordBuilder,
@@ -54,7 +60,6 @@ pub const TourSession = struct {
     key_frame_next: bool = false,
     stopwatch: Stopwatch,
     steady_stopwatch_reads: u64 = 0,
-    previous_frame_milliseconds: ?f64 = null,
     previous_params: ?zui.FrameParams = null,
 
     /// What the tour's frames are timed by: the page's `Io` cannot time
@@ -92,7 +97,7 @@ pub const TourSession = struct {
         self.* = .{
             .gpa = gpa,
             .stepped = stepped,
-            .text = .{},
+            .text = undefined,
             .ui = undefined,
             .app = undefined,
             .decoder = undefined,
@@ -102,13 +107,14 @@ pub const TourSession = struct {
             .frame_bytes = &.{},
             .stopwatch = options.stopwatch,
         };
-        try tour.kit.addFonts(&self.text);
+        try self.text.init();
+        errdefer self.text.deinit();
         const io = stepped.io();
         self.ui = try .init(gpa, io, &self.text);
         errdefer self.ui.deinit(gpa);
-        self.app = try gpa.create(tour.App);
+        self.app = try gpa.create(Tour);
         errdefer gpa.destroy(self.app);
-        self.app.init(io, .zero);
+        self.app.init(io, .zero, self.text.fonts);
         errdefer self.app.deinit();
         self.decoder = try .init(gpa, .of(Ui));
         errdefer self.decoder.deinit(gpa);
@@ -130,6 +136,7 @@ pub const TourSession = struct {
         self.app.deinit();
         gpa.destroy(self.app);
         self.ui.deinit(gpa);
+        self.text.deinit();
         gpa.free(self.frame_bytes);
         gpa.free(self.pending_records);
         gpa.free(self.builder.text_buffer);
@@ -198,6 +205,7 @@ pub const TourSession = struct {
         const declaration_ended = self.readStopwatch();
         const declared = self.ui.endFrame();
         const ended = self.readStopwatch();
+        app.observe(&self.ui, declared);
         app.afterFrame(&self.ui);
         defer self.ui.release(declared);
 
@@ -213,12 +221,9 @@ pub const TourSession = struct {
             .reason = reason,
         });
         const submit_microseconds: f32 = @floatCast(previous_draw_milliseconds * std.time.us_per_ms);
-        perf.submit_us = if (perf.display_frames == 0) submit_microseconds else perf.submit_us * 0.95 + submit_microseconds * 0.05;
-        if (self.previous_frame_milliseconds) |previous| {
-            if (now_milliseconds > previous) perf.display_fps = @floatCast(std.time.ms_per_s / (now_milliseconds - previous));
-        }
+        perf.submit_us = if (perf.zui_frames == 0) submit_microseconds else perf.submit_us * 0.95 + submit_microseconds * 0.05;
         perf.zui_frames += 1;
-        perf.display_frames += 1;
+        perf.countFrameAt(now.secondsSince(app.started_at));
         perf.measure_calls_total += measure_calls;
         perf.diagnostics = declared.diagnostics;
         perf.wakes = app.wakes.load(.monotonic);
@@ -227,7 +232,6 @@ pub const TourSession = struct {
             .at => |deadline| deadline.secondsSince(now),
             else => 0,
         };
-        self.previous_frame_milliseconds = now_milliseconds;
         self.previous_params = builder.params;
 
         var writer: std.Io.Writer = .fixed(self.frame_bytes);
@@ -259,7 +263,7 @@ pub const TourSession = struct {
         const previous = self.previous_params orelse return .first;
         if (event_count != 0) return .input;
         if (!std.meta.eql(params.viewport, previous.viewport) or params.scale != previous.scale or params.zoom != previous.zoom) return .resize;
-        inline for (@typeInfo(tour.kit.Sources).@"struct".fields) |field| {
+        inline for (@typeInfo(kit.Sources).@"struct".fields) |field| {
             if (@field(&self.app.sources, field.name).zuiPending()) return .source;
         }
         return switch (self.ui.nextFrame(&self.app.sources)) {

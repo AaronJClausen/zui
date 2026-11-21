@@ -246,14 +246,14 @@ test "a frame's glyphs are added before it is drawn, with nothing allocated afte
         },
     };
     const commands = [_]Command{
-        .{ .payload = .{ .text = .{ .content = "Hi", .style = .{ .font = 7, .size = 16 } } } },
+        .{ .payload = .{ .text = .{ .content = "Hi", .style = .{ .font = 1, .size = 16 } } } },
         .{ .payload = .rectangle },
-        .{ .payload = .{ .text = .{ .content = "skipped", .style = .{ .font = 0, .size = 16 } } } },
+        .{ .payload = .{ .text = .{ .content = "skipped", .style = .{ .font = BoxFonts.font_count, .size = 16 } } } },
     };
-    atlas.addFrameGlyphs(Fonts.of(&BoxFonts{}).startingAt(6), &commands, 2);
-    try std.testing.expect(atlas.find(.{ .font = 7, .pixel_size = 32, .codepoint = 'H' }) != null);
-    try std.testing.expect(atlas.find(.{ .font = 7, .pixel_size = 32, .codepoint = 'i' }) != null);
-    try std.testing.expectEqual(null, atlas.find(.{ .font = 0, .pixel_size = 32, .codepoint = 's' }));
+    atlas.addFrameGlyphs(Fonts.of(&BoxFonts{}), &commands, 2);
+    try std.testing.expect(atlas.find(.{ .font = 1, .pixel_size = 32, .codepoint = 'H' }) != null);
+    try std.testing.expect(atlas.find(.{ .font = 1, .pixel_size = 32, .codepoint = 'i' }) != null);
+    try std.testing.expectEqual(null, atlas.find(.{ .font = BoxFonts.font_count, .pixel_size = 32, .codepoint = 's' }));
     try std.testing.expectEqual(0, atlas.overflows);
     try std.testing.expectEqual(1, failing.allocations);
 }

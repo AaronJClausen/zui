@@ -13,12 +13,14 @@
 const std = @import("std");
 const zui_host = @import("zui_host");
 const zui_sokol = @import("zui_sokol");
+const zui_app = @import("zui_app");
+const zui_truetype = @import("zui_truetype");
 const capture = @import("capture.zig");
 const zui = @import("zui");
 const Host = zui_host.Host;
 const Renderer = zui_sokol.Renderer;
 
-const Ui = zui.Context(zui_sokol.config(.{}));
+const Ui = zui.Context(zui_app.contextConfig(zui_sokol.Renderer, .{ .Text = zui_truetype.Text }));
 
 const Palette = struct {
     background: zui.Color,
@@ -87,7 +89,7 @@ pub fn main(init: std.process.Init) !void {
     try host.init(io, .{ .title = "zui: the desktop through the window", .size = .{ 720, 360 }, .material = material });
     defer host.deinit();
 
-    var text: zui_sokol.Text = .{};
+    var text: zui_truetype.Text = .{};
     var renderer: Renderer = try .initForSurface(&text, host.zuiSurface(.main));
     defer renderer.deinit();
     renderer.clear_color = .{ .r = 0, .g = 0, .b = 0, .a = 0 };

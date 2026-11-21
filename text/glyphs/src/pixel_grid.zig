@@ -45,9 +45,15 @@ pub fn GlyphQuads(comptime FontSource: type, comptime AtlasType: type) type {
         units_per_raster_pixel: f32,
         pixels_per_unit: f32,
 
-        /// The next glyph that covers any pixel and is in the atlas.
+        /// The next glyph that covers any pixel and is in the atlas. Its
+        /// quad reaches half a texel past the glyph's coverage on every
+        /// side, into the blank texels the atlas keeps between glyphs: a
+        /// filtered sample at the quad's edge is blank, so a pixel whose
+        /// centre lies on a turned or scaled glyph's edge looks the same
+        /// whether a rasterizer counts it in or out.
         pub fn next(self: *Self) ?GlyphQuad {
             const texel: f32 = 1.0 / @as(f32, AtlasType.side);
+            const half_texel_units = 0.5 * self.units_per_raster_pixel;
             while (self.layout.next()) |placed| {
                 const glyph = self.atlas.find(.{ .font = placed.font, .pixel_size = self.pixel_size, .codepoint = placed.codepoint }) orelse continue;
                 if (glyph.width == 0) continue;
@@ -57,16 +63,16 @@ pub fn GlyphQuads(comptime FontSource: type, comptime AtlasType: type) type {
                 const texture_top = @as(f32, @floatFromInt(glyph.y)) * texel;
                 return .{
                     .position = .{
-                        .left = left,
-                        .top = top,
-                        .right = left + @as(f32, @floatFromInt(glyph.width)) * self.units_per_raster_pixel,
-                        .bottom = top + @as(f32, @floatFromInt(glyph.height)) * self.units_per_raster_pixel,
+                        .left = left - half_texel_units,
+                        .top = top - half_texel_units,
+                        .right = left + @as(f32, @floatFromInt(glyph.width)) * self.units_per_raster_pixel + half_texel_units,
+                        .bottom = top + @as(f32, @floatFromInt(glyph.height)) * self.units_per_raster_pixel + half_texel_units,
                     },
                     .texture = .{
-                        .left = texture_left,
-                        .top = texture_top,
-                        .right = texture_left + @as(f32, @floatFromInt(glyph.width)) * texel,
-                        .bottom = texture_top + @as(f32, @floatFromInt(glyph.height)) * texel,
+                        .left = texture_left - 0.5 * texel,
+                        .top = texture_top - 0.5 * texel,
+                        .right = texture_left + (@as(f32, @floatFromInt(glyph.width)) + 0.5) * texel,
+                        .bottom = texture_top + (@as(f32, @floatFromInt(glyph.height)) + 0.5) * texel,
                     },
                 };
             }
@@ -113,7 +119,7 @@ test "text is rasterized at its size in physical pixels, up to the largest size"
     try std.testing.expectEqual(10.5, snapToPixel(10.4, 2));
 }
 
-test "glyph quads start on whole pixels from the run's start, their baseline on a whole pixel" {
+test "glyph coverage starts on whole pixels from the run's start, its baseline on a whole pixel, and its quad half a texel wider" {
     const atlas = try Atlas(.rgba8).create(std.testing.allocator);
     defer atlas.destroy(std.testing.allocator);
     const fonts = Fonts.of(&BoxFonts{});
@@ -127,8 +133,10 @@ test "glyph quads start on whole pixels from the run's start, their baseline on 
     while (layout.next()) |placed| {
         if (placed.codepoint == ' ') continue;
         const quad = quads.next().?;
-        try std.testing.expectEqual(snapToPixel(bounds.x + placed.x, 2), quad.position.left);
-        try std.testing.expectEqual(@round(quad.position.bottom * 2), quad.position.bottom * 2);
+        const half_texel_units = 0.5 * quads.units_per_raster_pixel;
+        try std.testing.expectEqual(snapToPixel(bounds.x + placed.x, 2), quad.position.left + half_texel_units);
+        const coverage_bottom = quad.position.bottom - half_texel_units;
+        try std.testing.expectEqual(@round(coverage_bottom * 2), coverage_bottom * 2);
         drawn += 1;
     }
     try std.testing.expectEqual(null, quads.next());

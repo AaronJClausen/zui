@@ -1,7 +1,7 @@
 //! ```sh
 //! tour-frames <ticks path> <stream path>
 //! ```
-//! Runs zui-sokol's tour natively as the browser's worker runs it, on each
+//! Runs the tour natively as the browser's worker runs it, on each
 //! tick the page gave the worker: its instant on the page's clock and how
 //! long it took to draw the frame before (f64 milliseconds each), and the
 //! records it sent since the one before (a u32 count, then the bytes),

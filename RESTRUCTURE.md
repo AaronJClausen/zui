@@ -99,7 +99,7 @@ A target is the application, a host, a renderer and a font system, named
 at one place:
 
 ```zig
-const App = zui_tour.App(.{ .Host = zui_raylib.Host, .Renderer = zui_raylib.Renderer, .Text = zui_truetype.Text });
+const App = zui_tour.App(.{ .Host = zui_raylib.Host, .Renderer = zui_raylib.Renderer, .Text = zui_truetype.Text, .renderer_name = "raylib" });
 
 pub fn main(init: std.process.Init) !void {
     try zui_app.run(App, init, .{ .title = "zui tour (raylib)", .size = .{ 1440, 900 } });

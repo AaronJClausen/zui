@@ -12,9 +12,6 @@ pub const Destination = struct {
     context: sgl.Context,
     pixels: Pixels,
     format: zui.OutputFormat,
-    /// sokol_debugtext's context was made for the swapchain's pixels, so it
-    /// draws only there.
-    is_swapchain: bool,
 
     pub const Pixels = struct {
         color_format: sg.PixelFormat,
@@ -30,7 +27,6 @@ pub const Destination = struct {
             .context = sgl.defaultContext(),
             .pixels = .{ .color_format = defaults.color_format, .depth_format = defaults.depth_format, .sample_count = defaults.sample_count },
             .format = .sdr,
-            .is_swapchain = true,
         };
     }
 };
@@ -95,7 +91,6 @@ pub const OffscreenTarget = struct {
             .context = self.context,
             .pixels = .{ .color_format = colorFormat(self.format), .depth_format = .NONE, .sample_count = self.sample_count },
             .format = self.format,
-            .is_swapchain = false,
         };
     }
 

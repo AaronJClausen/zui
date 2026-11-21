@@ -13,12 +13,13 @@
 const std = @import("std");
 const zui_host = @import("zui_host");
 const zui_sokol = @import("zui_sokol");
+const zui_truetype = @import("zui_truetype");
 const zui_app = @import("zui_app");
 const zui_widgets = @import("zui_widgets");
 const zui = @import("zui");
 const win32 = zui_host.windows.win32;
 
-const Ui = zui.Context(zui_sokol.config(.{ .features = .{ .semantics = true, .chrome_regions = true } }));
+const Ui = zui.Context(zui_app.contextConfig(zui_sokol.Renderer, .{ .Text = zui_truetype.Text, .features = .{ .semantics = true, .chrome_regions = true } }));
 const Widgets = zui_widgets.Widgets(Ui);
 
 const ids = zui.ids(.{ "root", "title_bar", "title", "search", "minimize", "maximize", "close", "content" });
@@ -73,7 +74,7 @@ pub fn main(init: std.process.Init) !void {
 const TitleBarApp = struct {
     pub const Host = zui_host.Host;
     pub const Renderer = SokolRenderer;
-    pub const Text = zui_sokol.Text;
+    pub const Text = zui_truetype.Text;
 
     host: *Host = undefined,
     widgets: Widgets = .{},
@@ -222,7 +223,7 @@ const SokolRenderer = struct {
 
     sokol: zui_sokol.Renderer,
 
-    pub fn init(self: *SokolRenderer, surface: zui.Surface, text: *const zui_sokol.Text) !void {
+    pub fn init(self: *SokolRenderer, surface: zui.Surface, text: anytype) !void {
         self.sokol = try .initForSurface(text, surface);
     }
 

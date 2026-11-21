@@ -14,6 +14,8 @@ const builtin = @import("builtin");
 const zui_host = @import("zui_host");
 const zui_async = @import("zui_async");
 const zui_sokol = @import("zui_sokol");
+const zui_app = @import("zui_app");
+const zui_truetype = @import("zui_truetype");
 const zui = @import("zui");
 const Host = zui_host.Host;
 const Renderer = zui_sokol.Renderer;
@@ -32,7 +34,7 @@ const ThemeSources = struct {
     theme: zui_async.Latest(Theme) = .{},
 };
 
-const Ui = zui.Context(zui_sokol.config(.{ .Sources = ThemeSources }));
+const Ui = zui.Context(zui_app.contextConfig(zui_sokol.Renderer, .{ .Text = zui_truetype.Text, .Sources = ThemeSources }));
 const root_id: zui.Id = .of("root");
 
 const App = struct {
@@ -159,7 +161,7 @@ pub fn main(init: std.process.Init) !void {
     app.reload_requested = true;
     app.load(io, waker);
 
-    var text: zui_sokol.Text = .{};
+    var text: zui_truetype.Text = .{};
     var renderer: Renderer = try .initForSurface(&text, host.zuiSurface(.main));
     defer renderer.deinit();
 

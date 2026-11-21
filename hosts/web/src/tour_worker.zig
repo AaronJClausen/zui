@@ -1,4 +1,4 @@
-//! zui-sokol's tour for a browser's Web Worker, on memory shared with the
+//! zui's tour for a browser's Web Worker, on memory shared with the
 //! workers its tasks run on. `web/tour_worker.mjs` instantiates it, starts
 //! a worker per thread that calls `zuiTourRunThread` on a stack of its own,
 //! and then, once per frame, hands over the page's records, instant and

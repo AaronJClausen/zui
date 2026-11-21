@@ -5,6 +5,7 @@
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .zui_core = .{ .path = "../../core" },
+        .zui_glyphs = .{ .path = "../../text/glyphs" },
     },
     .paths = .{ "build.zig", "build.zig.zon", "zui_showcase.zig", "freestanding_test_runner.zig" },
 }

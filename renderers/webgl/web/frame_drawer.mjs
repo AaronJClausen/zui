@@ -5,7 +5,6 @@ const blurTapBytes = 8;
 const materialFloats = 16;
 const noMaterial = 0xffffffff;
 const glyphAtlasSide = 1024;
-const bitmapGlyphTextureSize = [2048, 48];
 
 const vertexShaderSource = `#version 300 es
 in vec2 position;
@@ -38,7 +37,6 @@ void main() {
 const fragmentShaderSource = `#version 300 es
 precision highp float;
 uniform highp sampler2D glyphAtlas;
-uniform highp sampler2D bitmapGlyphs;
 uniform highp sampler2D blurredBackdrop;
 uniform float pixelsPerUnit;
 uniform float targetHeight;
@@ -91,10 +89,8 @@ void main() {
     vec2 glyph = texture(glyphAtlas, coordinates).rg;
     texel = inGlyph ? vec4(glyph.rrr, glyph.g) : vec4(0.0);
   } else if (drawnTextureKind == 2u) {
-    texel = vec4(1.0, 1.0, 1.0, texture(bitmapGlyphs, interpolatedTextureCoordinates).r);
-  } else if (drawnTextureKind == 3u) {
     texel = vec4(texelFetch(blurredBackdrop, ivec2(gl_FragCoord.xy), 0).rgb, 1.0);
-  } else if (drawnTextureKind == 4u) {
+  } else if (drawnTextureKind == 3u) {
     texel = material(interpolatedTextureCoordinates);
   }
   fragmentColor = texel * drawnColor;
@@ -129,9 +125,8 @@ void main() {
 }`;
 
 const glyphAtlasUnit = 0;
-const bitmapGlyphsUnit = 1;
-const blurredBackdropUnit = 2;
-const blurSourceUnit = 3;
+const blurredBackdropUnit = 1;
+const blurSourceUnit = 2;
 
 function makeTexture(gl, unit, filter) {
   const texture = gl.createTexture();
@@ -271,12 +266,11 @@ class BlurTargets {
 export class FrameDrawer {
   /**
    * @param {HTMLCanvasElement} canvas sized to each frame as it is drawn
-   * @param {WebAssembly.Exports} wasm the client's exports, after `zuiWebInit`
-   *   and, if bitmap text is to be drawn, `zuiWebLoadBitmapFonts`. Without
-   *   float render targets, backdrop blurs are drawn as their tint alone,
-   *   and `blurAccumulationFormat` is null.
+   * @param {WebAssembly.Exports} wasm the client's exports, after
+   *   `zuiWebInit`. Without float render targets, backdrop blurs are drawn
+   *   as their tint alone, and `blurAccumulationFormat` is null.
    * @param {{ samplesPerPixel?: number }} options 4 by default, as
-   *   zui-sokol's demo window has, smoothing every edge; 1 draws as an
+   *   a window drawn with `sample_count = 4` has, smoothing every edge; 1 draws as an
    *   image with one sample per pixel does
    */
   constructor(canvas, wasm, { samplesPerPixel = 4 } = {}) {
@@ -333,10 +327,6 @@ export class FrameDrawer {
     this.glyphAtlas = makeTexture(gl, glyphAtlasUnit, gl.LINEAR);
     gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RG8, glyphAtlasSide, glyphAtlasSide);
     gl.uniform1i(gl.getUniformLocation(program, "glyphAtlas"), glyphAtlasUnit);
-    makeTexture(gl, bitmapGlyphsUnit, gl.NEAREST);
-    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.R8, bitmapGlyphTextureSize[0], bitmapGlyphTextureSize[1]);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, bitmapGlyphTextureSize[0], bitmapGlyphTextureSize[1], gl.RED, gl.UNSIGNED_BYTE, new Uint8Array(wasm.memory.buffer, wasm.zuiWebBitmapGlyphTexels() >>> 0, bitmapGlyphTextureSize[0] * bitmapGlyphTextureSize[1]));
-    gl.uniform1i(gl.getUniformLocation(program, "bitmapGlyphs"), bitmapGlyphsUnit);
 
     gl.enable(gl.BLEND);
     this.blendOver();

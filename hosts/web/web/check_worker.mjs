@@ -1,6 +1,6 @@
 // node check_worker.mjs <client wasm> <tour worker wasm> <tour-frames>
 //
-// Runs zui-sokol's tour in a worker, as the page will: on each tick, the
+// Runs the tour in a worker, as the page will: on each tick, the
 // page's clock, a made-up time for drawing the frame before, and the
 // records the client wrote of the mouse crossing each of the tour's
 // thirteen screens, with Ctrl+PageDown between them. Then `tour-frames`

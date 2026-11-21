@@ -9,12 +9,14 @@
 const std = @import("std");
 const zui_host = @import("zui_host");
 const zui_sokol = @import("zui_sokol");
+const zui_app = @import("zui_app");
+const zui_truetype = @import("zui_truetype");
 const scrgb_capture = @import("scrgb_capture.zig");
 const zui = @import("zui");
 const Host = zui_host.Host;
 const Renderer = zui_sokol.Renderer;
 
-const Ui = zui.Context(zui_sokol.config(.{ .Color = zui.ExtendedColor }));
+const Ui = zui.Context(zui_app.contextConfig(zui_sokol.Renderer, .{ .Text = zui_truetype.Text, .Color = zui.ExtendedColor }));
 
 const Swatch = struct {
     id: zui.Id,
@@ -75,7 +77,7 @@ pub fn main(init: std.process.Init) !void {
     try host.init(io, .{ .title = "zui: HDR white", .size = .{ 640, 320 }, .output_formats = zui.sharedOutputFormats(Host, Renderer) });
     defer host.deinit();
 
-    var text: zui_sokol.Text = .{};
+    var text: zui_truetype.Text = .{};
     var renderer: Renderer = try .initForSurface(&text, host.zuiSurface(.main));
     defer renderer.deinit();
 

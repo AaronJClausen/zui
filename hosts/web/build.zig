@@ -19,13 +19,13 @@ pub fn build(b: *std.Build) void {
     const browser_target = b.resolveTargetQuery(.{ .cpu_arch = .wasm32, .os_tag = .freestanding });
     const client = browserModule(b, "zui-web", "src/browser.zig", browser_target, optimize, core_options);
     b.getInstallStep().dependOn(&b.addInstallArtifact(client, .{ .dest_dir = .{ .override = .{ .custom = "web" } } }).step);
-    const check_step = b.step("check", "Compile the unit tests, and the client for the browser, without running them");
+    const check_step = b.step("check", "Compile the unit tests, the client and the tour's worker for the browser, and the native tools that run the tour, without running them");
     check_step.dependOn(&unit_tests.step);
     check_step.dependOn(&client.step);
 
-    const test_demo = b.step("test-demo", "Stream the sokol renderer's tour, headless, to the browser's client under Node, and check every frame decodes to what was drawn; run the tour in a worker under Node, and check every frame is the one it draws natively");
-    const test_draw = b.step("test-draw", "Draw frames of the sokol renderer's tour in headless Chromium, with one sample per pixel and with four, and check each against the sokol renderer drawing it alike; needs a display");
-    const test_input = b.step("test-input", "Give the client input in headless Chromium, run the sokol renderer's tour on the records it writes, and check the tour took them and the page shows its cursor");
+    const test_demo = b.step("test-demo", "Stream the tour, headless, to the browser's client under Node, and check every frame decodes to what was drawn; run the tour in a worker under Node, and check every frame is the one it draws natively");
+    const test_draw = b.step("test-draw", "Draw frames of the tour in headless Chromium, with one sample per pixel and with four, and check each against the sokol renderer drawing it alike; needs a display");
+    const test_input = b.step("test-input", "Give the client input in headless Chromium, run the tour on the records it writes, and check the tour took them and the page shows its cursor");
     const site_step = b.step("site", "Write the published page, the client, the tour's worker and the tour's fonts to zig-out/site");
     const test_site = b.step("test-site", "Serve the published page without isolation headers, open it in headless Chromium, and check its service worker isolates it, it draws the tour's frames, sleeps while idle, and its input wakes it and reaches the tour");
     const browser = b.option([]const u8, "browser", "The Chromium that `test-draw` runs headless (default: chromium)") orelse "chromium";
@@ -34,92 +34,90 @@ pub fn build(b: *std.Build) void {
         .os_tag = .freestanding,
         .cpu_features_add = std.Target.wasm.featureSet(&.{ .atomics, .bulk_memory }),
     });
-    const tour_worker = if (sokolDeclaring(b, core_options.on(worker_target, optimize), "zui_sokol_tour")) |worker_zui_sokol| tour_worker: {
-        const tour_worker = tourWorker(b, worker_zui_sokol, worker_target, optimize, core_options);
-        b.getInstallStep().dependOn(&b.addInstallArtifact(tour_worker, .{ .dest_dir = .{ .override = .{ .custom = "web" } } }).step);
-        check_step.dependOn(&tour_worker.step);
-        break :tour_worker tour_worker;
-    } else null;
-    if (sokolDeclaring(b, core_options.on(target, optimize), "zui_sokol")) |zui_sokol_dependency| {
-        const tour_imports: []const std.Build.Module.Import = &.{
-            .{ .name = "zui", .module = b.dependency("zui_core", core_options.on(target, optimize)).module("zui") },
-            .{ .name = "zui_sokol", .module = zui_sokol_dependency.module("zui_sokol") },
-            .{ .name = "zui_sokol_tour", .module = zui_sokol_dependency.module("zui_sokol_tour") },
-            .{ .name = "zui_wire", .module = b.dependency("zui_core", core_options.on(target, optimize)).module("zui_wire") },
-        };
-        const demo_stream = tourTool(b, "demo-stream", "tools/demo_stream.zig", tour_imports, target, optimize);
-        const write_stream = b.addRunArtifact(demo_stream);
-        const stream = write_stream.addOutputFileArg("tour.zuiw");
-        const expected = write_stream.addOutputFileArg("tour.expected");
+    const worker_truetype_dependency = truetypeDeclaring(b, core_options.on(worker_target, optimize)) orelse return;
+    const tour_worker = tourWorker(b, worker_truetype_dependency, worker_target, optimize, core_options);
+    b.getInstallStep().dependOn(&b.addInstallArtifact(tour_worker, .{ .dest_dir = .{ .override = .{ .custom = "web" } } }).step);
+    check_step.dependOn(&tour_worker.step);
 
-        const wire_check = browserModule(b, "zui-web-wire-check", "src/browser_wire_check.zig", browser_target, optimize, core_options);
-        const decode_in_client = b.addSystemCommand(&.{"node"});
-        decode_in_client.addFileArg(b.path("web/check_stream.mjs"));
-        decode_in_client.addArtifactArg(wire_check);
-        decode_in_client.addFileArg(stream);
-        decode_in_client.addFileArg(expected);
-        for (tour_truetype_fonts) |font| decode_in_client.addFileArg(fontsDependency(b).path(font));
-        decode_in_client.expectExitCode(0);
-        test_demo.dependOn(&decode_in_client.step);
+    const core_dependency = b.dependency("zui_core", core_options.on(target, optimize));
+    const tour_session = b.createModule(.{ .root_source_file = b.path("src/tour_session.zig"), .target = target, .optimize = optimize, .imports = tourSessionImports(b, truetypeDeclaring(b, core_options.on(target, optimize)).?, target, optimize, core_options) });
+    const tour_imports: []const std.Build.Module.Import = &.{
+        .{ .name = "zui", .module = core_dependency.module("zui") },
+        .{ .name = "zui_wire", .module = core_dependency.module("zui_wire") },
+        .{ .name = "tour_session", .module = tour_session },
+    };
+    const demo_stream = tourTool(b, "demo-stream", "tools/demo_stream.zig", tour_imports, target, optimize);
+    check_step.dependOn(&demo_stream.step);
+    const write_stream = b.addRunArtifact(demo_stream);
+    const stream = write_stream.addOutputFileArg("tour.zuiw");
+    const expected = write_stream.addOutputFileArg("tour.expected");
 
-        if (tour_worker) |worker| {
-            const tour_session = b.createModule(.{ .root_source_file = b.path("src/tour_session.zig"), .target = target, .optimize = optimize, .imports = tourSessionImports(b, zui_sokol_dependency, target, optimize, core_options) });
-            const tour_frames = tourTool(b, "tour-frames", "tools/tour_frames.zig", &.{.{ .name = "tour_session", .module = tour_session }}, target, optimize);
-            const run_in_worker = b.addSystemCommand(&.{"node"});
-            run_in_worker.addFileArg(b.path("web/check_worker.mjs"));
-            run_in_worker.addArtifactArg(client);
-            run_in_worker.addArtifactArg(worker);
-            run_in_worker.addArtifactArg(tour_frames);
-            for ([_][]const u8{ "web/tour_worker.mjs", "web/tour_thread.mjs", "web/worker_port.mjs" }) |worker_file| run_in_worker.addFileInput(b.path(worker_file));
-            run_in_worker.expectExitCode(0);
-            test_demo.dependOn(&run_in_worker.step);
-        }
+    const wire_check = browserModule(b, "zui-web-wire-check", "src/browser_wire_check.zig", browser_target, optimize, core_options);
+    const decode_in_client = b.addSystemCommand(&.{"node"});
+    decode_in_client.addFileArg(b.path("web/check_stream.mjs"));
+    decode_in_client.addArtifactArg(wire_check);
+    decode_in_client.addFileArg(stream);
+    decode_in_client.addFileArg(expected);
+    for (tour_fonts) |font| decode_in_client.addFileArg(fontsDependency(b).path(font));
+    decode_in_client.expectExitCode(0);
+    test_demo.dependOn(&decode_in_client.step);
 
-        const draw_reference = tourTool(b, "draw-reference", "tools/draw_reference.zig", tour_imports, target, optimize);
-        const one_sample_reference = drawReference(b, draw_reference, stream, "1", "with-text");
-        const four_sample_reference = drawReference(b, draw_reference, stream, "4", "without-text");
+    const tour_frames = tourTool(b, "tour-frames", "tools/tour_frames.zig", &.{.{ .name = "tour_session", .module = tour_session }}, target, optimize);
+    check_step.dependOn(&tour_frames.step);
+    const run_in_worker = b.addSystemCommand(&.{"node"});
+    run_in_worker.addFileArg(b.path("web/check_worker.mjs"));
+    run_in_worker.addArtifactArg(client);
+    run_in_worker.addArtifactArg(tour_worker);
+    run_in_worker.addArtifactArg(tour_frames);
+    for ([_][]const u8{ "web/tour_worker.mjs", "web/tour_thread.mjs", "web/worker_port.mjs" }) |worker_file| run_in_worker.addFileInput(b.path(worker_file));
+    run_in_worker.expectExitCode(0);
+    test_demo.dependOn(&run_in_worker.step);
 
-        const bitmap_fonts = tourTool(b, "bitmap-fonts", "tools/bitmap_fonts.zig", tour_imports, target, optimize);
-        const write_bitmap_fonts = b.addRunArtifact(bitmap_fonts);
-        const bitmap_font_rows = write_bitmap_fonts.addOutputFileArg("bitmap.fonts");
+    const replay_input = tourTool(b, "replay-input", "tools/replay_input.zig", tour_imports, target, optimize);
+    check_step.dependOn(&replay_input.step);
+    const input_in_browser = b.addSystemCommand(&.{"node"});
+    input_in_browser.addFileArg(b.path("web/check_input.mjs"));
+    input_in_browser.addArg(browser);
+    input_in_browser.addArtifactArg(client);
+    input_in_browser.addArtifactArg(replay_input);
+    for ([_][]const u8{ "web/check_input.html", "web/input_recorder.mjs", "web/headless_page.mjs" }) |page_file| input_in_browser.addFileInput(b.path(page_file));
+    input_in_browser.expectExitCode(0);
+    test_input.dependOn(&input_in_browser.step);
 
-        const draw_in_browser = b.addSystemCommand(&.{"node"});
-        draw_in_browser.addFileArg(b.path("web/check_draw.mjs"));
-        draw_in_browser.addArg(browser);
-        draw_in_browser.addArtifactArg(client);
-        draw_in_browser.addFileArg(webglDependency(b, target, optimize, core_options).path("web/frame_drawer.mjs"));
-        draw_in_browser.addFileArg(stream);
-        draw_in_browser.addFileArg(one_sample_reference);
-        draw_in_browser.addFileArg(four_sample_reference);
-        draw_in_browser.addFileArg(bitmap_font_rows);
-        for (tour_truetype_fonts) |font| draw_in_browser.addFileArg(fontsDependency(b).path(font));
-        for ([_][]const u8{ "web/check_draw.html", "web/client.mjs", "web/headless_page.mjs" }) |page_file| draw_in_browser.addFileInput(b.path(page_file));
-        draw_in_browser.expectExitCode(0);
-        test_draw.dependOn(&draw_in_browser.step);
+    const site = siteFiles(b, client, tour_worker, webglDependency(b, target, optimize, core_options));
+    site_step.dependOn(&b.addInstallDirectory(.{ .source_dir = site.getDirectory(), .install_dir = .prefix, .install_subdir = "site" }).step);
+    const open_site = b.addSystemCommand(&.{"node"});
+    open_site.addFileArg(b.path("web/check_site.mjs"));
+    open_site.addArg(browser);
+    open_site.addDirectoryArg(site.getDirectory());
+    open_site.addFileInput(b.path("web/headless_page.mjs"));
+    open_site.expectExitCode(0);
+    test_site.dependOn(&open_site.step);
 
-        const replay_input = tourTool(b, "replay-input", "tools/replay_input.zig", tour_imports, target, optimize);
-        const input_in_browser = b.addSystemCommand(&.{"node"});
-        input_in_browser.addFileArg(b.path("web/check_input.mjs"));
-        input_in_browser.addArg(browser);
-        input_in_browser.addArtifactArg(client);
-        input_in_browser.addArtifactArg(replay_input);
-        for ([_][]const u8{ "web/check_input.html", "web/input_recorder.mjs", "web/headless_page.mjs" }) |page_file| input_in_browser.addFileInput(b.path(page_file));
-        input_in_browser.expectExitCode(0);
-        test_input.dependOn(&input_in_browser.step);
+    // Only the reference `test-draw` compares with needs the sokol renderer.
+    const zui_sokol_dependency = sokolDeclaring(b, core_options.on(target, optimize), "zui_sokol") orelse return;
+    const draw_reference = tourTool(b, "draw-reference", "tools/draw_reference.zig", &.{
+        .{ .name = "zui", .module = core_dependency.module("zui") },
+        .{ .name = "zui_wire", .module = core_dependency.module("zui_wire") },
+        .{ .name = "zui_sokol", .module = zui_sokol_dependency.module("zui_sokol") },
+        .{ .name = "zui_truetype", .module = truetypeDeclaring(b, core_options.on(target, optimize)).?.module("zui_truetype") },
+        .{ .name = "zui_tour", .module = b.dependency("zui_tour", core_options.on(target, optimize)).module("zui_tour") },
+    }, target, optimize);
+    const one_sample_reference = drawReference(b, draw_reference, stream, "1", "with-text");
+    const four_sample_reference = drawReference(b, draw_reference, stream, "4", "without-text");
 
-        if (tour_worker) |worker| {
-            const site = siteFiles(b, client, worker, bitmap_font_rows, webglDependency(b, target, optimize, core_options));
-            site_step.dependOn(&b.addInstallDirectory(.{ .source_dir = site.getDirectory(), .install_dir = .prefix, .install_subdir = "site" }).step);
-
-            const open_site = b.addSystemCommand(&.{"node"});
-            open_site.addFileArg(b.path("web/check_site.mjs"));
-            open_site.addArg(browser);
-            open_site.addDirectoryArg(site.getDirectory());
-            open_site.addFileInput(b.path("web/headless_page.mjs"));
-            open_site.expectExitCode(0);
-            test_site.dependOn(&open_site.step);
-        }
-    }
+    const draw_in_browser = b.addSystemCommand(&.{"node"});
+    draw_in_browser.addFileArg(b.path("web/check_draw.mjs"));
+    draw_in_browser.addArg(browser);
+    draw_in_browser.addArtifactArg(client);
+    draw_in_browser.addFileArg(webglDependency(b, target, optimize, core_options).path("web/frame_drawer.mjs"));
+    draw_in_browser.addFileArg(stream);
+    draw_in_browser.addFileArg(one_sample_reference);
+    draw_in_browser.addFileArg(four_sample_reference);
+    for (tour_fonts) |font| draw_in_browser.addFileArg(fontsDependency(b).path(font));
+    for ([_][]const u8{ "web/check_draw.html", "web/client.mjs", "web/headless_page.mjs" }) |page_file| draw_in_browser.addFileInput(b.path(page_file));
+    draw_in_browser.expectExitCode(0);
+    test_draw.dependOn(&draw_in_browser.step);
 }
 
 fn webModule(b: *std.Build, root_source_file: []const u8, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, core_options: CoreOptions) *std.Build.Module {
@@ -174,13 +172,16 @@ const compared_frames = compared: {
     break :compared numbers;
 };
 
-/// The TrueType fonts of `zui_fonts` that the sokol renderer's tour adds,
-/// in the order `kit.addFonts` adds them, so each takes the `FontId` the
-/// tour's text names.
-const tour_truetype_fonts = [_][]const u8{
+/// The fonts of `zui_fonts` that the tour adds, in the order it adds them,
+/// so each takes the `FontId` the tour's text names.
+const tour_fonts = [_][]const u8{
     "AtkinsonHyperlegible-Regular.ttf",
     "AtkinsonHyperlegible-Bold.ttf",
+    "LiberationMono-Regular.ttf",
 };
+
+/// The licences of `tour_fonts`, published beside them.
+const tour_font_licences = [_][]const u8{ "OFL.txt", "LiberationMono-LICENSE.txt" };
 
 /// What the published page loads from `web/`, besides the client, the frame
 /// drawer, the tour's worker and the fonts.
@@ -197,45 +198,47 @@ const site_scripts = [_][]const u8{
 };
 
 /// The published site: the page, the client, the frame drawer, the tour's
-/// worker, and the tour's fonts with their license.
-fn siteFiles(b: *std.Build, client: *std.Build.Step.Compile, worker: *std.Build.Step.Compile, bitmap_font_rows: std.Build.LazyPath, webgl_dependency: *std.Build.Dependency) *std.Build.Step.WriteFile {
+/// worker, and the tour's fonts with their licences.
+fn siteFiles(b: *std.Build, client: *std.Build.Step.Compile, worker: *std.Build.Step.Compile, webgl_dependency: *std.Build.Dependency) *std.Build.Step.WriteFile {
     const site = b.addWriteFiles();
     for (site_scripts) |script| _ = site.addCopyFile(b.path(b.fmt("web/{s}", .{script})), script);
     _ = site.addCopyFile(webgl_dependency.path("web/frame_drawer.mjs"), "frame_drawer.mjs");
     _ = site.addCopyFile(client.getEmittedBin(), "zui-web.wasm");
     _ = site.addCopyFile(worker.getEmittedBin(), "zui-web-tour.wasm");
-    _ = site.addCopyFile(bitmap_font_rows, "bitmap.fonts");
     var font_urls: std.ArrayList(u8) = .empty;
     font_urls.append(b.allocator, '[') catch @panic("out of memory");
-    for (tour_truetype_fonts, 0..) |font, index| {
+    for (tour_fonts, 0..) |font, index| {
         const url = b.fmt("fonts/{s}", .{font});
         _ = site.addCopyFile(fontsDependency(b).path(font), url);
         font_urls.print(b.allocator, "{s}\"{s}\"", .{ if (index == 0) "" else ",", url }) catch @panic("out of memory");
     }
     font_urls.append(b.allocator, ']') catch @panic("out of memory");
     _ = site.add("truetype-fonts.json", font_urls.items);
-    _ = site.addCopyFile(fontsDependency(b).path("OFL.txt"), "fonts/OFL.txt");
+    for (tour_font_licences) |licence| _ = site.addCopyFile(fontsDependency(b).path(licence), b.fmt("fonts/{s}", .{licence}));
     return site;
 }
 
-fn tourSessionImports(b: *std.Build, zui_sokol_dependency: *std.Build.Dependency, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, core_options: CoreOptions) []const std.Build.Module.Import {
+fn tourSessionImports(b: *std.Build, truetype_dependency: *std.Build.Dependency, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, core_options: CoreOptions) []const std.Build.Module.Import {
+    const core_dependency = b.dependency("zui_core", core_options.on(target, optimize));
     return b.allocator.dupe(std.Build.Module.Import, &.{
-        .{ .name = "zui_sokol_ui", .module = zui_sokol_dependency.module("zui_sokol_ui") },
-        .{ .name = "zui_sokol_tour", .module = zui_sokol_dependency.module("zui_sokol_tour") },
-        .{ .name = "zui_wire", .module = b.dependency("zui_core", core_options.on(target, optimize)).module("zui_wire") },
+        .{ .name = "zui", .module = core_dependency.module("zui") },
+        .{ .name = "zui_wire", .module = core_dependency.module("zui_wire") },
+        .{ .name = "zui_tour", .module = b.dependency("zui_tour", core_options.on(target, optimize)).module("zui_tour") },
+        .{ .name = "zui_truetype", .module = truetype_dependency.module("zui_truetype") },
+        .{ .name = "zui_webgl", .module = webglDependency(b, target, optimize, core_options).module("zui_webgl") },
     }) catch @panic("out of memory");
 }
 
-/// The sokol renderer's tour for a Web Worker: WebAssembly on memory the
-/// page shares with the workers the tour's tasks run on, each of which sets
-/// its own stack pointer and thread-local storage.
-fn tourWorker(b: *std.Build, zui_sokol_dependency: *std.Build.Dependency, worker_target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, core_options: CoreOptions) *std.Build.Step.Compile {
+/// The tour for a Web Worker: WebAssembly on memory the page shares with
+/// the workers the tour's tasks run on, each of which sets its own stack
+/// pointer and thread-local storage.
+fn tourWorker(b: *std.Build, truetype_dependency: *std.Build.Dependency, worker_target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, core_options: CoreOptions) *std.Build.Step.Compile {
     const module = b.createModule(.{
         .root_source_file = b.path("src/tour_worker.zig"),
         .target = worker_target,
         .optimize = optimize,
         .single_threaded = false,
-        .imports = tourSessionImports(b, zui_sokol_dependency, worker_target, optimize, core_options),
+        .imports = tourSessionImports(b, truetype_dependency, worker_target, optimize, core_options),
     });
     module.export_symbol_names = &.{ "__stack_pointer", "__wasm_init_tls" };
     const worker = b.addExecutable(.{ .name = "zui-web-tour", .root_module = module });
@@ -248,7 +251,7 @@ fn tourWorker(b: *std.Build, zui_sokol_dependency: *std.Build.Dependency, worker
     return worker;
 }
 
-/// A native program that runs the sokol renderer's tour.
+/// A native program that runs the tour, or draws it.
 fn tourTool(b: *std.Build, name: []const u8, root_source_file: []const u8, imports: []const std.Build.Module.Import, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Step.Compile {
     const tool = b.addExecutable(.{
         .name = name,
@@ -266,7 +269,7 @@ fn browserModule(b: *std.Build, name: []const u8, root_source_file: []const u8, 
     return module;
 }
 
-/// As the sokol renderer links: Zig 0.16's ELF linker rejects the
+/// Zig 0.16's ELF linker rejects the
 /// R_X86_64_PC64 relocations that GCC 16's crt1.o carries, and LLD crashes
 /// the compiler unless the LLVM backend produced the objects.
 fn linkThroughLlvmOnLinux(compile: *std.Build.Step.Compile) void {

@@ -15,6 +15,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const zui_host = @import("zui_host");
 const zui_sokol = @import("zui_sokol");
+const zui_truetype = @import("zui_truetype");
 const zui_app = @import("zui_app");
 const zui_async = @import("zui_async");
 const zui_widgets = @import("zui_widgets");
@@ -22,7 +23,7 @@ const zui = @import("zui");
 const win32 = zui_host.windows.win32;
 
 const WindowSources = struct { shared_count: zui_async.Latest(u32) = .{} };
-const Ui = zui.Context(zui_sokol.config(.{ .Sources = WindowSources }));
+const Ui = zui.Context(zui_app.contextConfig(zui_sokol.Renderer, .{ .Text = zui_truetype.Text, .Sources = WindowSources }));
 const Widgets = zui_widgets.Widgets(Ui);
 const ids = zui.ids(.{ "root", "add_here", "add_everywhere", "open", "close" });
 
@@ -67,7 +68,7 @@ const Slot = struct {
 const ManyWindowsApp = struct {
     pub const Host = zui_host.Host;
     pub const Renderer = SokolRenderer;
-    pub const Text = zui_sokol.Text;
+    pub const Text = zui_truetype.Text;
 
     host: *Host = undefined,
     windows: zui_app.Windows(ManyWindowsApp) = undefined,
@@ -326,7 +327,7 @@ fn processCpuNanoseconds() u64 {
     return (kernel + user) * 100;
 }
 
-/// zui-sokol's renderer as `zui_app` opens one, with each window after the
+/// The sokol renderer as `zui_app` opens one, with each window after the
 /// first attached to it.
 const SokolRenderer = struct {
     pub const zui_surfaces: zui.SurfaceKinds = zui_host.Host.zui_surfaces;
@@ -334,7 +335,7 @@ const SokolRenderer = struct {
 
     sokol: zui_sokol.Renderer,
 
-    pub fn init(self: *SokolRenderer, surface: zui.Surface, text: *const zui_sokol.Text) !void {
+    pub fn init(self: *SokolRenderer, surface: zui.Surface, text: anytype) !void {
         self.sokol = try .initForSurface(text, surface);
     }
 

@@ -52,44 +52,38 @@ pub fn build(b: *std.Build) void {
     linkThroughLlvmOnLinux(conformance_tests);
     b.step("conformance", "Run zui's renderer and host suites against the renderer and the host, in hidden windows").dependOn(&b.addRunArtifact(conformance_tests).step);
 
-    const demo_imports: []const std.Build.Module.Import = &.{
+    const check_step = b.step("check", "Compile the backend, the targets and the renderer suite without producing output");
+    check_step.dependOn(&backend_tests.step);
+    check_step.dependOn(&conformance_tests.step);
+    const target_imports: []const std.Build.Module.Import = &.{
         .{ .name = "zui_raylib", .module = backend_module },
         .{ .name = "zui", .module = zui_module },
         .{ .name = "zui_app", .module = zui_app_module },
-        .{ .name = "zui_widgets", .module = core.module("zui_widgets") },
-        .{ .name = "zui_reflect", .module = core.module("zui_reflect") },
-        .{ .name = "zui_async", .module = core.module("zui_async") },
-        .{ .name = "zui_tracy", .module = core.module("zui_tracy") },
-        .{ .name = "zui_debug", .module = core.module("zui_debug") },
-        .{ .name = "zui_glyphs", .module = zui_glyphs_module },
         .{ .name = "zui_truetype", .module = zui_truetype_module },
-        .{ .name = "zui_fonts", .module = b.dependency("zui_fonts", .{ .target = target, .optimize = optimize }).module("zui_fonts") },
+        .{ .name = "zui_tour", .module = b.dependency("zui_tour", core_options.on(target, optimize)).module("zui_tour") },
         .{ .name = "zui_showcase", .module = b.dependency("zui_showcase", core_options.on(target, optimize)).module("zui_showcase") },
     };
-    const demo = b.addExecutable(.{
-        .name = "zui-demo",
-        .root_module = b.createModule(.{ .root_source_file = b.path("examples/demo.zig"), .target = target, .optimize = optimize, .imports = demo_imports }),
-    });
-    if (target.result.os.tag == .windows) demo.subsystem = .windows;
-    linkThroughLlvmOnLinux(demo);
-    b.installArtifact(demo);
-
-    const run_demo = b.addRunArtifact(demo);
-    if (b.args) |arguments| run_demo.addArgs(arguments);
-    b.step("demo", "Run the tour (`-- --frames 900 --cycle 40` visits every screen and quits)").dependOn(&run_demo.step);
-
-    const tour_tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path("examples/tour_test.zig"), .target = target, .optimize = optimize, .imports = demo_imports }) });
-    linkThroughLlvmOnLinux(tour_tests);
-    b.step("test-tour", "Declare every screen of the tour headlessly; fail if one exceeds its limits or does not fit the default window").dependOn(&b.addRunArtifact(tour_tests).step);
-
-    const check_step = b.step("check", "Compile the backend, the tour, its tests and the renderer suite without producing output");
-    check_step.dependOn(&demo.step);
-    check_step.dependOn(&tour_tests.step);
-    check_step.dependOn(&conformance_tests.step);
+    const apps = [_]struct { name: []const u8, description: []const u8 }{
+        .{ .name = "tour", .description = "Run zui's tour (`-- --hidden --frames 600 --cycle 50` visits every screen and quits)" },
+        .{ .name = "showcase", .description = "Run zui's showcase (`-- --hidden --frames 60` draws 60 frames and quits)" },
+    };
+    for (apps) |app| {
+        const executable = b.addExecutable(.{
+            .name = b.fmt("zui-raylib-{s}", .{app.name}),
+            .root_module = b.createModule(.{ .root_source_file = b.path(b.fmt("examples/{s}.zig", .{app.name})), .target = target, .optimize = optimize, .imports = target_imports }),
+        });
+        if (target.result.os.tag == .windows) executable.subsystem = .windows;
+        linkThroughLlvmOnLinux(executable);
+        b.installArtifact(executable);
+        check_step.dependOn(&executable.step);
+        const run = b.addRunArtifact(executable);
+        if (b.args) |arguments| run.addArgs(arguments);
+        b.step(app.name, app.description).dependOn(&run.step);
+    }
 }
 
-/// The font system the tour and the renderer suite measure with, once it
-/// has declared its module: until stb is fetched it returns from `build()`
+/// The font system the targets and the renderer suite measure with, once
+/// it has declared its module: until stb is fetched it returns from `build()`
 /// before declaring it.
 fn truetypeDeclaring(b: *std.Build, args: anytype) ?*std.Build.Dependency {
     const dependency = b.dependency("zui_truetype", args);

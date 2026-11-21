@@ -4,7 +4,7 @@ const sokol = @import("sokol");
 const sg = sokol.gfx;
 const shader = @import("material.glsl.zig");
 const Destination = @import("destination.zig").Destination;
-const Material = @import("zui_sokol_ui").Material;
+const Material = @import("material.zig").Material;
 
 /// The shader and pipeline are made the first time a frame has a material,
 /// so applications without one never pay for them. During recording each
