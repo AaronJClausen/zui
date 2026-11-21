@@ -207,7 +207,40 @@ ms of CPU over 10 s, 9 to 11 frames, no wakes, as without the change.
 The Linux check draws nothing: `zui_sokol` drawing a surface the
 compositor never shows waits in `eglSwapBuffers` for a frame callback
 that never comes, which slice 7's hidden many-windows check will meet.
-Slice 5 is next.
+
+Slice 5 is done in `hosts/native/` alone (`hosts/native/linux/text_input.zig`,
+`hosts/native/linux/wayland.zig`): `zwp_text_input_v3` at version 1, its
+interfaces written in Zig, one per seat. While the seat's text-input
+focus is on the window and a frame's `HostRequests.text_input` names a
+caret, the host enables it and sets its cursor rectangle at the caret in
+surface coordinates (layout units times the last poll's
+`surface_coordinates_per_unit`, so at 1.5 with a zoom of 1.25 a caret at
+10, 20 is at 12, 25, not the buffer's 15, 30), floored and ceiled to
+cover it; a frame without one disables it. Requests go only when the
+caret, or whether one is asked for, changes, so an unchanged or absent
+request sends nothing; `enter` resends what the last frame asked for, and
+`leave` forgets it. `commit_string` is typed on `done` through the same
+inbox as keys, ending a wait, whatever `done`'s serial, as the protocol
+says a client must apply text; a `done` that commits nothing ends no
+wait. `preedit_string` is kept (`TextInput.preeditText`) and not
+reported, which is left for `11-polish:06-text-editing`; no surrounding
+text or content type is sent, and `delete_surrounding_text` is ignored.
+Keys are untouched: an input method that consumes a key keeps it from
+the window, and one it forwards arrives as `wl_keyboard.key`, typed
+through xkb as before. Hyprland offers the manager; the host binds it,
+and `enter` and `leave` follow keyboard focus. Nine tests drive the
+handlers (the caret at scale 1 and at a fractional scale and zoom,
+nothing sent for an unchanged frame, disabling, committed text as one
+`text` event, a lagging serial, composing text alone ending no wait,
+leave and enter, another surface's focus), running under a compositor
+without the manager too, and two unit tests cover the rectangle's
+rounding and a string past the capacity; 68 of 69 tests pass in Debug and ReleaseSafe,
+the opt-in one skipped. Tour idle: 24.4 to 31.4 ms of CPU over 10 s, 10
+to 12 frames, no wakes, against 25.3 to 26.6 ms and 10 or 11 frames for
+the commit before it measured in the same hour on a busier machine than
+slice 4's runs. Not run: typing through fcitx5 into a text field, since
+nothing here can focus one without a pointer; Tab presses from `wtype`
+reached the tour as keys, but did not focus a field. Slice 6 is next.
 
 Decided here:
 - **libwayland-client, linked,** as sokol-zig links it, since the surface
@@ -247,6 +280,11 @@ Decided here:
   process the first did not.
 - **Repeats keep their own instants,** and a frame late by more than four
   gets four, not a burst.
+- **Text input at version 1,** since version 2 adds only actions,
+  languages, panel requests and preedit hints, which nothing in the
+  record carries. Its cursor rectangle is the caret's covering in surface
+  coordinates, and the state follows the harness's events without the
+  manager, so the tests run under compositors that lack it.
 
 ## 10-reach:02-web-host — Web
 

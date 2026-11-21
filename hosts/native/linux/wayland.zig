@@ -275,6 +275,52 @@ pub const fractional_scale_interface: Interface = .{
 /// `wp_fractional_scale_v1.preferred_scale` is in 120ths.
 pub const fractional_scale_denominator = 120;
 
+pub const text_input_manager_destroy = 0;
+pub const text_input_manager_get_text_input = 1;
+pub const text_input_manager_interface: Interface = .{
+    .name = "zwp_text_input_manager_v3",
+    .version = 1,
+    .method_count = 2,
+    .methods = &[_]Message{
+        message("destroy", "", &untyped),
+        message("get_text_input", "no", &.{ &text_input_interface, &wl_seat_interface }),
+    },
+    .event_count = 0,
+    .events = null,
+};
+
+pub const text_input_destroy = 0;
+pub const text_input_enable = 1;
+pub const text_input_disable = 2;
+pub const text_input_set_cursor_rectangle = 6;
+pub const text_input_commit = 7;
+/// Version 1, without version 2's actions, languages, panel requests and
+/// preedit hints.
+pub const text_input_interface: Interface = .{
+    .name = "zwp_text_input_v3",
+    .version = 1,
+    .method_count = 8,
+    .methods = &[_]Message{
+        message("destroy", "", &untyped),
+        message("enable", "", &untyped),
+        message("disable", "", &untyped),
+        message("set_surrounding_text", "sii", &untyped),
+        message("set_text_change_cause", "u", &untyped),
+        message("set_content_type", "uu", &untyped),
+        message("set_cursor_rectangle", "iiii", &untyped),
+        message("commit", "", &untyped),
+    },
+    .event_count = 6,
+    .events = &[_]Message{
+        message("enter", "o", &.{&wl_surface_interface}),
+        message("leave", "o", &.{&wl_surface_interface}),
+        message("preedit_string", "?sii", &untyped),
+        message("commit_string", "?s", &untyped),
+        message("delete_surrounding_text", "uu", &untyped),
+        message("done", "u", &untyped),
+    },
+};
+
 pub const RegistryListener = extern struct {
     global: *const fn (?*anyopaque, ?*Proxy, u32, [*:0]const u8, u32) callconv(.c) void,
     global_remove: *const fn (?*anyopaque, ?*Proxy, u32) callconv(.c) void,
@@ -358,6 +404,16 @@ pub const DataSourceListener = extern struct {
     dnd_drop_performed: *const fn (?*anyopaque, ?*Proxy) callconv(.c) void,
     dnd_finished: *const fn (?*anyopaque, ?*Proxy) callconv(.c) void,
     action: *const fn (?*anyopaque, ?*Proxy, u32) callconv(.c) void,
+};
+
+/// Version 1.
+pub const TextInputListener = extern struct {
+    enter: *const fn (?*anyopaque, ?*Proxy, ?*Proxy) callconv(.c) void,
+    leave: *const fn (?*anyopaque, ?*Proxy, ?*Proxy) callconv(.c) void,
+    preedit_string: *const fn (?*anyopaque, ?*Proxy, ?[*:0]const u8, i32, i32) callconv(.c) void,
+    commit_string: *const fn (?*anyopaque, ?*Proxy, ?[*:0]const u8) callconv(.c) void,
+    delete_surrounding_text: *const fn (?*anyopaque, ?*Proxy, u32, u32) callconv(.c) void,
+    done: *const fn (?*anyopaque, ?*Proxy, u32) callconv(.c) void,
 };
 
 pub fn addListener(proxy: *Proxy, listener: anytype, data: *anyopaque) void {

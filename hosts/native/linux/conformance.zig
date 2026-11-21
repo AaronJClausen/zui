@@ -819,3 +819,192 @@ test "without a session bus, each service is unavailable at once" {
     try testing.expectError(error.Unavailable, Host.zuiFileDialogs.show(window_host, .main, .of("open"), .{}, .of(&replies)));
     try testing.expectError(error.Unavailable, Host.zuiOpenUrl.open(window_host, "https://ziglang.org/"));
 }
+
+const TextInput = zui_host.linux.text_input.TextInput;
+
+fn askingForTextInputAt(caret: zui.Rect) zui.HostRequests {
+    return .{ .text_input = .{ .caret = caret } };
+}
+
+test "a frame asking for text input enables the input method once the window has its focus, the caret in surface coordinates" {
+    var window: UnshownWindow = .{};
+    try window.open(1);
+    defer window.close();
+    const window_host = window.host();
+    var polled: zui_testing.PolledRecord = .{};
+    polled.init();
+    _ = polled.poll(window_host);
+    const caret: zui.Rect = .{ .x = 10, .y = 20, .width = 2, .height = 16 };
+
+    window_host.zuiApply(.main, askingForTextInputAt(caret));
+    try testing.expectEqual(@as(u32, 0), window_host.text_input.requests_sent);
+
+    window_host.onTextInputEnter(window_host.surface);
+    try testing.expectEqual(@as(u32, 1), window_host.text_input.commits);
+    try testing.expectEqual(TextInput.CursorRectangle{ .x = 10, .y = 20, .width = 2, .height = 16 }, window_host.text_input.committed_caret.?);
+}
+
+test "at a fractional scale and a zoom, the caret's rectangle is in surface coordinates, not the buffer's pixels" {
+    var window: UnshownWindow = .{};
+    try window.open(null);
+    defer window.close();
+    const window_host = window.host();
+    var polled: zui_testing.PolledRecord = .{};
+    polled.init();
+    window_host.onPreferredFractionalScale(180);
+    polled.builder.params.zoom = 1.25;
+    _ = polled.poll(window_host);
+    try testing.expectEqual(@as(f32, 1.5), polled.builder.params.scale);
+
+    window_host.onTextInputEnter(window_host.surface);
+    window_host.zuiApply(.main, askingForTextInputAt(.{ .x = 10, .y = 20, .width = 2, .height = 16 }));
+    try testing.expectEqual(TextInput.CursorRectangle{ .x = 12, .y = 25, .width = 3, .height = 20 }, window_host.text_input.committed_caret.?);
+}
+
+test "a frame whose text-input request is unchanged, or absent while none was enabled, sends the compositor nothing" {
+    var window: UnshownWindow = .{};
+    try window.open(1);
+    defer window.close();
+    const window_host = window.host();
+    window_host.onTextInputEnter(window_host.surface);
+
+    window_host.zuiApply(.main, .{});
+    window_host.zuiApply(.main, .{ .cursor = .pointer });
+    try testing.expectEqual(@as(u32, 0), window_host.text_input.requests_sent);
+
+    const caret: zui.Rect = .{ .x = 4, .y = 4, .width = 1, .height = 12 };
+    window_host.zuiApply(.main, askingForTextInputAt(caret));
+    const sent = window_host.text_input.requests_sent;
+    try testing.expectEqual(@as(u32, 3), sent);
+    window_host.zuiApply(.main, askingForTextInputAt(caret));
+    window_host.zuiApply(.main, askingForTextInputAt(caret));
+    try testing.expectEqual(sent, window_host.text_input.requests_sent);
+
+    window_host.zuiApply(.main, askingForTextInputAt(.{ .x = 5, .y = 4, .width = 1, .height = 12 }));
+    try testing.expectEqual(sent + 2, window_host.text_input.requests_sent);
+    try testing.expectEqual(@as(u32, 2), window_host.text_input.commits);
+}
+
+test "an editable losing focus disables the input method" {
+    var window: UnshownWindow = .{};
+    try window.open(1);
+    defer window.close();
+    const window_host = window.host();
+    window_host.onTextInputEnter(window_host.surface);
+    window_host.zuiApply(.main, askingForTextInputAt(.{ .x = 4, .y = 4, .width = 1, .height = 12 }));
+    const sent = window_host.text_input.requests_sent;
+
+    window_host.zuiApply(.main, .{});
+    try testing.expectEqual(@as(?TextInput.CursorRectangle, null), window_host.text_input.committed_caret);
+    try testing.expectEqual(sent + 2, window_host.text_input.requests_sent);
+    try testing.expectEqual(@as(u32, 2), window_host.text_input.commits);
+    window_host.zuiApply(.main, .{});
+    try testing.expectEqual(sent + 2, window_host.text_input.requests_sent);
+}
+
+test "text the input method commits arrives on done as one text event beside typed keys, and ends a wait" {
+    var window: UnshownWindow = .{};
+    try window.open(1);
+    defer window.close();
+    const window_host = window.host();
+    var polled: zui_testing.PolledRecord = .{};
+    polled.init();
+    _ = polled.poll(window_host);
+    window_host.onTextInputEnter(window_host.surface);
+    window_host.zuiApply(.main, askingForTextInputAt(.{ .x = 4, .y = 4, .width = 1, .height = 12 }));
+
+    window_host.onKey(evdevCodeOf(window_host, .a).?, true);
+    window_host.onKey(evdevCodeOf(window_host, .a).?, false);
+    window_host.onCommitString("\u{65e5}\u{672c}");
+    _ = polled.poll(window_host);
+    var buffer: [32]u8 = undefined;
+    try testing.expectEqualStrings("a", typedText(&polled, &buffer));
+
+    window_host.onTextInputDone(window_host.text_input.commits);
+    const waited_from = window_host.now();
+    window_host.zuiWait(.{ .at = waited_from.addSeconds(2) });
+    try testing.expect(window_host.now().secondsSince(waited_from) < 1);
+    _ = polled.poll(window_host);
+    try testing.expectEqualStrings("\u{65e5}\u{672c}", typedText(&polled, &buffer));
+    var text_events: usize = 0;
+    for (polled.builder.events()) |event| text_events += @intFromBool(event == .text);
+    try testing.expectEqual(@as(usize, 1), text_events);
+}
+
+test "a done whose serial lags the commits still applies its text, as the protocol says a client must" {
+    var window: UnshownWindow = .{};
+    try window.open(1);
+    defer window.close();
+    const window_host = window.host();
+    var polled: zui_testing.PolledRecord = .{};
+    polled.init();
+    _ = polled.poll(window_host);
+    window_host.onTextInputEnter(window_host.surface);
+    window_host.zuiApply(.main, askingForTextInputAt(.{ .x = 4, .y = 4, .width = 1, .height = 12 }));
+    window_host.zuiApply(.main, askingForTextInputAt(.{ .x = 5, .y = 4, .width = 1, .height = 12 }));
+
+    window_host.onCommitString("late");
+    window_host.onTextInputDone(window_host.text_input.commits - 1);
+    _ = polled.poll(window_host);
+    var buffer: [32]u8 = undefined;
+    try testing.expectEqualStrings("late", typedText(&polled, &buffer));
+}
+
+test "composing text alone is kept, reports nothing and does not end a wait" {
+    var window: UnshownWindow = .{};
+    try window.open(1);
+    defer window.close();
+    const window_host = window.host();
+    var polled: zui_testing.PolledRecord = .{};
+    polled.init();
+    _ = polled.poll(window_host);
+    window_host.onTextInputEnter(window_host.surface);
+    window_host.zuiApply(.main, askingForTextInputAt(.{ .x = 4, .y = 4, .width = 1, .height = 12 }));
+
+    window_host.onPreeditString("ni", 2, 2);
+    window_host.onTextInputDone(window_host.text_input.commits);
+    try testing.expectEqualStrings("ni", window_host.text_input.preeditText());
+    const waited_from = window_host.now();
+    window_host.zuiWait(.{ .at = waited_from.addSeconds(0.05) });
+    try testing.expect(window_host.now().secondsSince(waited_from) >= 0.05);
+    _ = polled.poll(window_host);
+    var buffer: [32]u8 = undefined;
+    try testing.expectEqualStrings("", typedText(&polled, &buffer));
+
+    window_host.onCommitString("\u{4f60}");
+    window_host.onTextInputDone(window_host.text_input.commits);
+    try testing.expectEqualStrings("", window_host.text_input.preeditText());
+}
+
+test "leaving and entering the window again enables the input method again, the caret resent" {
+    var window: UnshownWindow = .{};
+    try window.open(1);
+    defer window.close();
+    const window_host = window.host();
+    const caret: zui.Rect = .{ .x = 4, .y = 4, .width = 1, .height = 12 };
+    window_host.onTextInputEnter(window_host.surface);
+    window_host.zuiApply(.main, askingForTextInputAt(caret));
+    window_host.onPreeditString("ni", 2, 2);
+    window_host.onTextInputDone(window_host.text_input.commits);
+
+    window_host.onTextInputLeave(window_host.surface);
+    try testing.expectEqual(@as(?TextInput.CursorRectangle, null), window_host.text_input.committed_caret);
+    try testing.expectEqualStrings("", window_host.text_input.preeditText());
+    const sent = window_host.text_input.requests_sent;
+    window_host.zuiApply(.main, askingForTextInputAt(caret));
+    try testing.expectEqual(sent, window_host.text_input.requests_sent);
+
+    window_host.onTextInputEnter(window_host.surface);
+    try testing.expectEqual(sent + 3, window_host.text_input.requests_sent);
+    try testing.expectEqual(TextInput.CursorRectangle{ .x = 4, .y = 4, .width = 1, .height = 12 }, window_host.text_input.committed_caret.?);
+}
+
+test "text-input focus on another surface leaves the input method alone" {
+    var window: UnshownWindow = .{};
+    try window.open(1);
+    defer window.close();
+    const window_host = window.host();
+    window_host.zuiApply(.main, askingForTextInputAt(.{ .x = 4, .y = 4, .width = 1, .height = 12 }));
+    window_host.onTextInputEnter(null);
+    try testing.expectEqual(@as(u32, 0), window_host.text_input.requests_sent);
+}

@@ -7,6 +7,7 @@ pub const keys = @import("keys.zig");
 pub const dbus = @import("dbus.zig");
 pub const desktop_bus = @import("desktop_bus.zig");
 pub const data_device = @import("data_device.zig");
+pub const text_input = @import("text_input.zig");
 pub const file_watch = @import("file_watch.zig");
 pub const services = @import("services.zig");
 
@@ -24,9 +25,11 @@ const Proxy = wayland.Proxy;
 /// environment the desktop reports over D-Bus (theme, contrast, reduced
 /// motion, power); and SIGINT, SIGTERM and SIGHUP as terminate requests
 /// and the system sleeping and waking as lifecycle events. It sets the
-/// cursor where the compositor offers cursor shapes, reads and writes the
-/// clipboard, watches directories, offers notifications, file dialogs and
-/// opening URLs over the session bus, and waits for `nextFrame` on the
+/// cursor where the compositor offers cursor shapes, enables an input
+/// method's text at the caret of a frame's text-input request where it
+/// offers text input, reads and writes the clipboard, watches
+/// directories, offers notifications, file dialogs and opening URLs over
+/// the session bus, and waits for `nextFrame` on the
 /// display, the desktop's buses, its transfers and watches, a wake and a
 /// deadline.
 ///
@@ -179,6 +182,7 @@ pub const Host = struct {
     key_repeat: KeyRepeat,
 
     data_device: data_device.DataDevice,
+    text_input: text_input.TextInput,
     file_watches: file_watch.Watches,
     desktop: desktop_bus.DesktopBus,
     desktop_settings: DesktopSettings,
@@ -244,6 +248,7 @@ pub const Host = struct {
         data_device_manager: ?*Proxy = null,
         viewporter: ?*Proxy = null,
         fractional_scale_manager: ?*Proxy = null,
+        text_input_manager: ?*Proxy = null,
     };
 
     const Inbox = struct {
@@ -347,6 +352,7 @@ pub const Host = struct {
             .applied_cursor = null,
             .key_repeat = .{},
             .data_device = .{ .io = io },
+            .text_input = .{},
             .file_watches = .{},
             .desktop = .{},
             .desktop_settings = .{},
@@ -377,6 +383,7 @@ pub const Host = struct {
         wayland.addListener(self.surface, &surface_listener, self);
         self.useFractionalScale();
         self.openDataDevice();
+        self.openTextInput();
         if (options.visible) {
             try self.giveToplevelRole(wm_base, options);
         } else {
@@ -437,6 +444,13 @@ pub const Host = struct {
         wayland.addListener(device, &data_device_listener, self);
     }
 
+    fn openTextInput(self: *Host) void {
+        const manager = self.globals.text_input_manager orelse return;
+        const seat = self.globals.seat orelse return;
+        const proxy = self.text_input.open(manager, seat) orelse return;
+        wayland.addListener(proxy, &text_input_listener, self);
+    }
+
     /// Call after the renderer's `deinit`, whose EGL objects live on this
     /// display.
     pub fn deinit(self: *Host) void {
@@ -446,6 +460,8 @@ pub const Host = struct {
         self.file_watches.stopAll();
         self.data_device.deinit();
         if (self.globals.data_device_manager) |manager| wayland.wl_proxy_destroy(manager);
+        self.text_input.deinit();
+        if (self.globals.text_input_manager) |manager| wayland.destroy(manager, wayland.text_input_manager_destroy);
         if (self.fractional_scale) |fractional_scale| wayland.destroy(fractional_scale, wayland.fractional_scale_destroy);
         if (self.viewport) |viewport| wayland.destroy(viewport, wayland.viewport_destroy);
         if (self.globals.fractional_scale_manager) |manager| wayland.destroy(manager, wayland.fractional_scale_manager_destroy);
@@ -665,6 +681,7 @@ pub const Host = struct {
         std.debug.assert(window == .main);
         self.requests = requests;
         self.applyCursor();
+        self.applyTextInput();
         _ = wayland.wl_display_flush(self.display);
     }
 
@@ -730,6 +747,41 @@ pub const Host = struct {
         self.buffer_scale = 1;
         self.preferred_fractional_scale = scale_120ths;
         self.input_arrived = true;
+    }
+
+    /// The seat's text-input focus came to `surface`; on the window's, the
+    /// input method is enabled again if the last frame asked for it.
+    pub fn onTextInputEnter(self: *Host, surface: ?*Proxy) void {
+        if (surface != self.surface) return;
+        self.text_input.onEnter();
+        self.applyTextInput();
+    }
+
+    pub fn onTextInputLeave(self: *Host, surface: ?*Proxy) void {
+        if (surface != self.surface) return;
+        self.text_input.onLeave();
+    }
+
+    /// Kept, not reported, from the next `done` on.
+    pub fn onPreeditString(self: *Host, utf8: ?[]const u8, cursor_begin: i32, cursor_end: i32) void {
+        self.text_input.onPreeditString(utf8, cursor_begin, cursor_end);
+    }
+
+    /// Typed at the next `done`.
+    pub fn onCommitString(self: *Host, utf8: ?[]const u8) void {
+        self.text_input.onCommitString(utf8);
+    }
+
+    /// Text committed since the last `done` is typed, and ends a wait;
+    /// a `done` that commits none does not. The serial is not compared
+    /// with the commits: text is applied whatever it is, and the host
+    /// answers no `done` with requests whose state a stale one would
+    /// change.
+    pub fn onTextInputDone(self: *Host, serial: u32) void {
+        _ = serial;
+        const applied = self.text_input.onDone();
+        self.inbox.dropped_bytes +|= applied.left_out_bytes;
+        if (applied.committed_text.len > 0) self.deliverText(applied.committed_text);
     }
 
     /// A drag entered the window, at `position` in surface coordinates;
@@ -1029,6 +1081,11 @@ pub const Host = struct {
         if (self.termination_signalled.swap(false, .acq_rel)) self.deliver(.{ .lifecycle = .terminate_requested });
     }
 
+    fn applyTextInput(self: *Host) void {
+        const area = self.requests.text_input orelse return self.text_input.apply(null);
+        self.text_input.apply(.covering(area.caret, self.surface_coordinates_per_unit));
+    }
+
     fn applyCursor(self: *Host) void {
         const serial = self.pointer_enter_serial orelse return;
         const device = self.cursor_shape_device orelse return;
@@ -1117,6 +1174,7 @@ pub const Host = struct {
             .{ .interface = &wayland.wl_data_device_manager_interface, .slot = &self.globals.data_device_manager, .highest_version = 3 },
             .{ .interface = &wayland.viewporter_interface, .slot = &self.globals.viewporter, .highest_version = 1 },
             .{ .interface = &wayland.fractional_scale_manager_interface, .slot = &self.globals.fractional_scale_manager, .highest_version = 1 },
+            .{ .interface = &wayland.text_input_manager_interface, .slot = &self.globals.text_input_manager, .highest_version = 1 },
         };
         for (wanted) |global| {
             if (global.slot.* != null or !std.mem.eql(u8, interface_name, std.mem.span(global.interface.name))) continue;
@@ -1222,6 +1280,37 @@ pub const Host = struct {
                 hostFrom(data).data_device.onSelection(offer);
             }
         }.selection,
+    };
+
+    const text_input_listener: wayland.TextInputListener = .{
+        .enter = struct {
+            fn enter(data: ?*anyopaque, _: ?*Proxy, surface: ?*Proxy) callconv(.c) void {
+                hostFrom(data).onTextInputEnter(surface);
+            }
+        }.enter,
+        .leave = struct {
+            fn leave(data: ?*anyopaque, _: ?*Proxy, surface: ?*Proxy) callconv(.c) void {
+                hostFrom(data).onTextInputLeave(surface);
+            }
+        }.leave,
+        .preedit_string = struct {
+            fn preeditString(data: ?*anyopaque, _: ?*Proxy, utf8: ?[*:0]const u8, cursor_begin: i32, cursor_end: i32) callconv(.c) void {
+                hostFrom(data).onPreeditString(if (utf8) |text| std.mem.span(text) else null, cursor_begin, cursor_end);
+            }
+        }.preeditString,
+        .commit_string = struct {
+            fn commitString(data: ?*anyopaque, _: ?*Proxy, utf8: ?[*:0]const u8) callconv(.c) void {
+                hostFrom(data).onCommitString(if (utf8) |text| std.mem.span(text) else null);
+            }
+        }.commitString,
+        .delete_surrounding_text = struct {
+            fn ignoredSinceNoSurroundingTextIsSent(_: ?*anyopaque, _: ?*Proxy, _: u32, _: u32) callconv(.c) void {}
+        }.ignoredSinceNoSurroundingTextIsSent,
+        .done = struct {
+            fn done(data: ?*anyopaque, _: ?*Proxy, serial: u32) callconv(.c) void {
+                hostFrom(data).onTextInputDone(serial);
+            }
+        }.done,
     };
 
     const seat_listener: wayland.SeatListener = .{
@@ -1330,6 +1419,7 @@ test {
     _ = dbus;
     _ = desktop_bus;
     _ = data_device;
+    _ = text_input;
     _ = file_watch;
     _ = services;
 }

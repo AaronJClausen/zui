@@ -196,6 +196,15 @@ So far it:
 - closes when its close button or the compositor asks;
 - sets the cursor a frame asks for, where the compositor offers
   `wp_cursor_shape_v1`;
+- enables the input method where the compositor offers
+  `zwp_text_input_v3`, while the window has the seat's text-input focus
+  and a frame's text-input request names a caret, with its cursor
+  rectangle around the caret in surface coordinates, and disables it
+  while no editable asks; it sends nothing for a frame that asks for
+  what the last one did. Text the input method commits is typed as
+  `text` when it is done, beside text typed from keys. Composing text
+  (the preedit) is kept but not reported yet, and no surrounding text or
+  content type is sent;
 - offers zui's host services over the session bus, the Windows host's
   shapes: `Host.zuiNotifications.show(host, request, notification,
   sink)`, a notification from the desktop's notification daemon
@@ -242,8 +251,8 @@ the desktop's current settings, so the first frame has them. A window
 opened with `visible = false` is a surface with no role, which the
 compositor never shows. The services have a connection to the session
 bus of their own, which reads nothing while no call waits for an
-answer. Low memory, reduced transparency, the IME, a system material and
-X11 are still to come.
+answer. Low memory, reduced transparency, the input method's composing
+text, a system material and X11 are still to come.
 
 It passes zui's host suite (`zui_testing.expectHostConforms`) against a
 window the compositor never shows, whose harness delivers what a
