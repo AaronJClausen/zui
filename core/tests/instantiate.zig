@@ -12,6 +12,7 @@ const zui_tracy = @import("zui_tracy");
 const zui_app = @import("zui_app");
 const zui_wire = @import("zui_wire");
 const zui_debug = @import("zui_debug");
+const zui_motion = @import("zui_motion");
 
 /// A freestanding target has no default log output, so an application there
 /// brings its own, as this one does.
@@ -100,6 +101,7 @@ export fn zuiCheckFrame(width: f32, height: f32, pointer_x: f32, pointer_y: f32)
     _ = ui.dropped(list, [2]f32) orelse ui.draggedOver(list, [2]f32);
     _ = ui.doubleTapped(save) or ui.contextRequested(save) or ui.dismissed(list) or ui.adjusted(save) != null or ui.navigated(save) == .up;
     declareWidgets(&ui);
+    declareMotion(&ui, pointer_x);
     inspector.declare(&ui);
     const frame = ui.endFrame();
     defer ui.release(frame);
@@ -115,6 +117,14 @@ export fn zuiCheckFrame(width: f32, height: f32, pointer_x: f32, pointer_y: f32)
     const inspected = frame.inspect(frame.elementCount() - 1);
     const inspected_content = @intFromEnum(inspected.content) + @intFromBool(inspected.effects != null and inspected.floating != null);
     return frame.commands().len + @intFromBool(ui.nextFrame() == .immediately) + violation_count + failed_check + broken_invariant + frame.elementCount() + host_requests + frame.semantics().len + frame.chromeRegions().len + inspected_content + inspector.rows().len;
+}
+
+const MotionCard = struct { offset: [2]f32, background: zui.Color, glow: zui.ExtendedColor, opacity: f32 };
+
+fn declareMotion(ui: *Ui, target: f32) void {
+    const card = zui_motion.tween(ui, .of("motion card"), MotionCard, .{ .offset = .{ target, 0 }, .background = .white, .glow = .rgb(0x3366ff), .opacity = 1 }, .{ .duration = 0.3, .easing = .ease_in_out, .delay = 0.1 });
+    const thumb = zui_motion.spring(ui, .of("motion thumb"), [2]f32, .{ target, target }, .{ .angular_frequency = 30 });
+    ui.box(.{ .layout = .{ .sizing = .{ .width = .fixed(thumb[0] + card.offset[0]), .height = .fixed(card.opacity) } }, .decoration = .{ .background = card.background } });
 }
 
 const Settings = struct {

@@ -116,7 +116,6 @@ is in the file its group names.
 | `10-reach:01-linux-host` | `hosts/native/`, `renderers/sokol/` | | in progress; slice 6, the custom title bar, is next |
 | `10-reach:02-web-host` | `hosts/web/`, `renderers/webgl/` | | |
 | `10-reach:04-window-decorations` | `core/src/chrome.zig`, `core/src/context.zig`, `core/zui_app/`, `hosts/native/` | | waiting on a person: the checklist under its *Status*, on `zig build title-bar` in `hosts/native/` |
-| `11-polish:01-zui-motion` | `core/zui_motion/` | | |
 | `11-polish:02-exit-animations` | `core/src/`, `core/zui_motion/` | `11-polish:01-zui-motion` | |
 | `11-polish:03-zui-color` | `core/zui_color/` | | |
 | `11-polish:04-skin-contract` | `core/zui_widgets/` | | |

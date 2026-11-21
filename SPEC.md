@@ -2758,11 +2758,13 @@ comptime; icon names to codepoints in an icon font, drawn as text.
 
 ### 19.9 `zui_motion`
 
-Tweens over `state(id, T)` and `dt()`, which request frames by deadline
-while they move and finish instantly under `reduced_motion`. Exit
-animations use the core's ghost buffer: an element with `exit_seconds`
-keeps emitting its last commands, taking no space and receiving no hits,
-from `limits.exit_ghost_commands` (0 compiles it out).
+Tweens and springs over `state(id, T)` and `dt()`, which ask for the
+next frame while they move, for a frame at the instant a delayed one
+starts, and for none at rest, and finish instantly under
+`reduced_motion`. Exit animations use the core's ghost buffer: an
+element with `exit_seconds` keeps emitting its last commands, taking no
+space and receiving no hits, from `limits.exit_ghost_commands` (0
+compiles it out).
 
 ### 19.10 `zui_tracy`
 

@@ -32,7 +32,7 @@ const generated_sources = [_][]const u8{
     "renderers/sokol/src/present_scrgb.glsl.zig",
 };
 
-const core_modules = [_][]const u8{ "zui", "zui_testing", "zui_widgets", "zui_async", "zui_tracy", "zui_reflect", "zui_app", "zui_wire", "zui_debug" };
+const core_modules = [_][]const u8{ "zui", "zui_testing", "zui_widgets", "zui_async", "zui_tracy", "zui_reflect", "zui_app", "zui_wire", "zui_debug", "zui_motion" };
 
 /// Packages with no third-party library, whose module of the same name the
 /// aggregator re-exports. One that links a C library is reached through

@@ -24,5 +24,6 @@
         "zui_app",
         "zui_wire",
         "zui_debug",
+        "zui_motion",
     },
 }

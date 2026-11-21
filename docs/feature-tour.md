@@ -1115,6 +1115,35 @@ fn blinkCaret(ui: *Ui, app: *App) bool {
 }
 ```
 
+<a id="zui-motion"></a>
+
+### `zui_motion`: tweens and springs · *shipped*
+
+`zui_motion.tween(ui, id, T, target, options)` eases a value toward `target` over `duration` seconds with an `Easing` (`linear`, or cubic `ease_in`, `ease_out` and `ease_in_out`) and returns this frame's value. `zui_motion.spring` follows `target` with a critically damped spring instead, keeping its velocity when the target moves, which suits a value chasing a drag. The value is an `f32`, a `[N]f32`, a `zui.Color` (mixed per sRGB channel, as `Color.mix` and CSS transitions do), a `zui.ExtendedColor`, or a struct of them; anything else is a compile error. Each keeps its state in `ui.state`, so the first target it sees is where it starts, and a target that changes mid-flight starts again from the current value. While it moves it asks for the next frame, a `delay` asks for the instant it starts, and at rest it asks for nothing, so the app still idles. Under the environment's `reduced_motion` it lands on the target in the frame the target changes. When the state table is full it reports `.state_slots` and returns the target.
+
+`src/ui/import_progress.zig`
+
+```zig
+const zui_motion = @import("zui_motion");
+
+fn importToast(app: *App, ui: *Ui) void {
+    // Every tween is called each frame, even while hidden, so none forgets where it was.
+    const opacity = zui_motion.tween(ui, .of("import_toast"), f32, if (app.importing) 1 else 0, .{ .duration = 0.25 });
+    const slide = zui_motion.spring(ui, .of("import_toast slide"), f32, if (app.importing) 0 else 24, .{});
+    const background = zui_motion.tween(ui, .of("import_toast color"), zui.Color, if (app.import_failed) .rgb(0x8a2030) else .rgb(0x262634), .{});
+    if (opacity == 0) return;
+
+    const alpha: u8 = @intFromFloat(opacity * 255);
+    ui.open(.{
+        .floating = .{ .attach_to = .root, .anchor = .bottom_right, .attach_point = .bottom_right, .offset = .{ -16, -16 + slide }, .z = 80 },
+        .layout = .{ .padding = .all(10) },
+        .decoration = .{ .background = background, .corner_radius = .all(6) },
+    });
+    ui.text("Importing…", .{ .size = 13, .color = .{ .r = 255, .g = 255, .b = 255, .a = alpha } });
+    ui.close();
+}
+```
+
 <a id="diagnostics"></a>
 
 ### Limits that fail softly: diagnostics · *shipped*
@@ -2266,7 +2295,7 @@ Build with `-Dzui-tracy=true` to link Tracy's client, then connect profiler 0.14
 These names compile, but they don't do anything yet. This list is from `ARCHITECTURE.md` §7 and the roadmap.
 
 - **A host that runs its own loop**: `zuiRun` and the `zui.Driver` it is handed, with `suspendSurfaces` and `resumeSurfaces` for a surface the platform takes away, compile and pass `zui_app`'s tests against a scripted host, but no shipped host declares `zuiRun` yet; macOS, iOS and Android's are to come.
-- **Still to come**: Motion, multi-line text editing, skins, the inspector over the wire, and more hosts (Linux and web; macOS later).
+- **Still to come**: Exit animations, multi-line text editing, skins, the inspector over the wire, and more hosts (Linux and web; macOS later).
 
 <a id="dx"></a>
 

@@ -1352,6 +1352,31 @@ fn blinkCaret(ui: *Ui, app: *App) bool {
 </script>
       </article>
 
+      <article class="feature" id="zui-motion" data-title="zui_motion">
+        <div class="feature-head"><h3><code>zui_motion</code>: tweens and springs</h3><span class="pill shipped">Shipped</span></div>
+        <p><code class="z">zui_motion.tween(ui, id, T, target, options)</code> eases a value toward <code class="z">target</code> over <code class="z">duration</code> seconds with an <code class="z">Easing</code> (<code class="z">linear</code>, or cubic <code class="z">ease_in</code>, <code class="z">ease_out</code> and <code class="z">ease_in_out</code>) and returns this frame's value. <code class="z">zui_motion.spring</code> follows <code class="z">target</code> with a critically damped spring instead, keeping its velocity when the target moves, which suits a value chasing a drag. The value is an <code class="z">f32</code>, a <code class="z">[N]f32</code>, a <code class="z">zui.Color</code> (mixed per sRGB channel, as <code class="z">Color.mix</code> and CSS transitions do), a <code class="z">zui.ExtendedColor</code>, or a struct of them; anything else is a compile error. Each keeps its state in <code class="z">ui.state</code>, so the first target it sees is where it starts, and a target that changes mid-flight starts again from the current value. While it moves it asks for the next frame, a <code class="z">delay</code> asks for the instant it starts, and at rest it asks for nothing, so the app still idles. Under the environment's <code class="z">reduced_motion</code> it lands on the target in the frame the target changes. When the state table is full it reports <code class="z">.state_slots</code> and returns the target.</p>
+<script type="text/x-zig" data-file="src/ui/import_progress.zig">
+const zui_motion = @import("zui_motion");
+
+fn importToast(app: *App, ui: *Ui) void {
+    // Every tween is called each frame, even while hidden, so none forgets where it was.
+    const opacity = zui_motion.tween(ui, .of("import_toast"), f32, if (app.importing) 1 else 0, .{ .duration = 0.25 });
+    const slide = zui_motion.spring(ui, .of("import_toast slide"), f32, if (app.importing) 0 else 24, .{});
+    const background = zui_motion.tween(ui, .of("import_toast color"), zui.Color, if (app.import_failed) .rgb(0x8a2030) else .rgb(0x262634), .{});
+    if (opacity == 0) return;
+
+    const alpha: u8 = @intFromFloat(opacity * 255);
+    ui.open(.{
+        .floating = .{ .attach_to = .root, .anchor = .bottom_right, .attach_point = .bottom_right, .offset = .{ -16, -16 + slide }, .z = 80 },
+        .layout = .{ .padding = .all(10) },
+        .decoration = .{ .background = background, .corner_radius = .all(6) },
+    });
+    ui.text("Importing…", .{ .size = 13, .color = .{ .r = 255, .g = 255, .b = 255, .a = alpha } });
+    ui.close();
+}
+</script>
+      </article>
+
       <article class="feature" id="diagnostics" data-title="Diagnostics">
         <div class="feature-head"><h3>Limits that fail softly: diagnostics</h3><span class="pill shipped">Shipped</span></div>
         <p>Every limit fails the same way. zui keeps and draws what fits, and records in <code class="z">frame.diagnostics</code> which limit was exceeded, how much the frame needed, and the first element dropped. Duplicate ids, unbalanced trees and publishes refused by full sources are reported here too. Apps that would rather stop call <code class="z">check()</code>.</p>
@@ -2362,7 +2387,7 @@ fn present(renderer: *Renderer, surface: zui.Surface, frame: *const Ui.Frame) !v
       <p class="group-intro">These names compile, but they don't do anything yet. This list is from <code>ARCHITECTURE.md</code> §7 and the roadmap.</p>
       <ul class="gap-list">
         <li><b>A host that runs its own loop</b><span><code class="z">zuiRun</code> and the <code class="z">zui.Driver</code> it is handed, with <code class="z">suspendSurfaces</code> and <code class="z">resumeSurfaces</code> for a surface the platform takes away, compile and pass <code class="z">zui_app</code>'s tests against a scripted host, but no shipped host declares <code class="z">zuiRun</code> yet; macOS, iOS and Android's are to come.</span></li>
-        <li><b>Still to come</b><span>Motion, multi-line text editing, skins, the inspector over the wire, and more hosts (Linux and web; macOS later).</span></li>
+        <li><b>Still to come</b><span>Exit animations, multi-line text editing, skins, the inspector over the wire, and more hosts (Linux and web; macOS later).</span></li>
       </ul>
     </section>
 

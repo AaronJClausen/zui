@@ -191,7 +191,7 @@ The stage is the one in SPEC.md §21 that builds it.
 | who owns the loop: one turn that never blocks, pulled, pushed or stepped, and surfaces a platform takes away | `zui_app.Session.step`; the host contract's loop half, `zuiWait` or `zuiRun` and `zui.Driver`, in the core; `zui_testing`'s suite for each loop half | 10 |
 | window decorations: a custom title bar the OS still moves, resizes and snaps | chrome regions in the core, beside the frame, behind `features.chrome_regions`; `zui_app` hands them to the host's `zuiChromeRegions`; each host answers its window manager | 10 |
 | host services: the clipboard, notifications, file dialogs, opening URLs, menus | the core's vocabulary and checks (`core/src/services.zig`); `zui_app.ServicesOf`'s guards; each host implements them, answering into a source the application chooses | 10 |
-| motion and exit animations | `zui_motion`; ghost buffer in the core | 11 |
+| motion and exit animations | `zui_motion`'s tweens and springs, over `state` and `dt`; ghost buffer in the core, for exit animations | 11 |
 | text editing and IME | `zui_widgets`; composition events and the IME area from the core | 11 |
 | color spaces, palettes, icons | `zui_color`, `zui_icons` | 11 |
 | themes and skins | `zui_widgets`' default skin; `zui_themes`, in `themes/` | 11 |
@@ -319,7 +319,7 @@ zui is one repository of packages, each with its own `build.zig` and
 | Directory | Package | Holds |
 |---|---|---|
 | the root | `zui` | the package users fetch, which re-exports core's modules, `zui_glyphs`, `zui_fonts`, `zui_tour` and `zui_showcase`, forwards core's steps, and runs every package's steps in `test-all` and `check-all` |
-| `core/` | `zui_core` | the core, the contracts, and the modules: `zui_app`, `zui_async`, `zui_debug`, `zui_reflect`, `zui_testing`, `zui_tracy`, `zui_widgets` and `zui_wire`, and later `zui_motion`, `zui_color` and `zui_icons`; Tracy, fetched lazily |
+| `core/` | `zui_core` | the core, the contracts, and the modules: `zui_app`, `zui_async`, `zui_debug`, `zui_motion`, `zui_reflect`, `zui_testing`, `zui_tracy`, `zui_widgets` and `zui_wire`, and later `zui_color` and `zui_icons`; Tracy, fetched lazily |
 | `text/glyphs/` | `zui_glyphs` | what font systems and renderers share: the codepoints of a run, the type-erased `Fonts` a renderer draws through, the `Placement` a renderer declares, the one `layOut` that places a run's glyphs for measuring and for drawing, the pixel grid's glyph quads, the `Atlas` that rasterized glyphs are drawn from, and the font systems' conformance suite; no third-party library, so the root re-exports it |
 | `text/truetype/` | `zui_truetype` | `Text`, the text contract on stb_truetype, its fonts added from embedded bytes or memory reserved for fonts that arrive at run time, Atkinson Hyperlegible Regular as font 0 when none is added, and `zuiFingerprint` over its fonts and placement; stb, fetched lazily, so users reach it through `zui.builder.dependency("zui_truetype", .{})` |
 | `text/fonts/` | `zui_fonts` | Atkinson Hyperlegible Regular and Bold and Liberation Mono, each a `pub const` of its bytes, with their licences; no third-party library, so the root re-exports it |
