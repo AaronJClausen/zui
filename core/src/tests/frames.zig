@@ -93,10 +93,13 @@ test "tryBeginFrame refuses instead of waiting" {
     defer ui.deinit(testing.allocator);
 
     const record: zui.FrameRecord = .{ .params = .{ .now = .zero, .viewport = .{ 10, 10 } } };
+    try testing.expect(ui.hasFreeFrame());
     try ui.tryBeginFrame(&record);
     const held = ui.endFrame();
+    try testing.expect(!ui.hasFreeFrame());
     try testing.expectError(error.NoFreeFrame, ui.tryBeginFrame(&record));
     ui.release(held);
+    try testing.expect(ui.hasFreeFrame());
     try ui.tryBeginFrame(&record);
     ui.release(ui.endFrame());
 }

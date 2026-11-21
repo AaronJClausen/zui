@@ -32,6 +32,8 @@ fn FakeRenderer(comptime draws_every_command: bool, comptime placement: zui_glyp
         pub const MaterialHandle = if (draws_every_command) PatternMaterial else void;
         pub const glyph_placement = placement;
 
+        clear_color: zui.Color = .black,
+
         pub fn zuiSubmit(_: *@This(), _: zui.Surface, _: anytype) !void {}
     };
 }
@@ -261,7 +263,6 @@ const ScriptedHost = struct {
 
     polls: u64 = 0,
     closed: bool = false,
-    clear_color: zui.Color = .black,
 
     pub fn init(self: *ScriptedHost, _: std.Io, _: zui.WindowOptions) !void {
         self.* = .{};
@@ -312,7 +313,7 @@ test "zui_app runs the tour through every screen it is offered, and stops at the
     try testing.expectEqual(App.kit.offered_screens.len, screens_shown.count());
     try testing.expect(runner.app.tour.perf.diagnostics.ok());
     try testing.expectEqual(@as(u64, frame_limit), runner.app.tour.perf.zui_frames);
-    try testing.expectEqual(tour.Palette.dark.background, runner.host.clear_color);
+    try testing.expectEqual(tour.Palette.dark.background, runner.renderer.clear_color);
 }
 
 fn ignoreNotice(_: zui_app.Notice) void {}

@@ -374,7 +374,7 @@ pub fn run(comptime App: type, init: std.process.Init, options: Options) !void {
     defer init.gpa.destroy(runner);
     try runner.start(.{ .gpa = init.gpa, .io = init.io, .process = init }, options);
     defer runner.stop();
-    while (try runner.frame()) {}
+    while (try runner.step()) |next| runner.wait(next);
 }
 
 /// `run`, one frame at a time, for tests and for applications that drive
@@ -396,6 +396,10 @@ pub fn Runner(comptime App: type) type {
         const EventBuffer = [Ui.limits.max_events_per_frame]zui.Event;
         const TextBuffer = [Ui.limits.max_text_input_bytes + Ui.limits.max_dropped_path_bytes]u8;
 
+        /// What a window's last frame was declared with, against which the
+        /// next turn judges whether it is due.
+        const Drawn = struct { params: zui.FrameParams, format: zui.OutputFormat };
+
         /// One open window of an application with many: its context and
         /// what the loop keeps for it between turns.
         const Window = struct {
@@ -404,13 +408,10 @@ pub fn Runner(comptime App: type) type {
             event_buffer: EventBuffer,
             text_buffer: TextBuffer,
             builder: zui.RecordBuilder,
-            has_drawn: bool = false,
-            drawn_params: zui.FrameParams = undefined,
-            drawn_format: zui.OutputFormat = .sdr,
+            drawn: ?Drawn = null,
             closing: bool = false,
         };
 
-        const OneWindowPending = struct { frame: *const Ui.Frame, surface: zui.Surface };
         /// What the UI thread asks of the render thread for a window, which
         /// it waits for, so the renderer is used by one thread at a time.
         const SurfaceChange = struct {
@@ -418,15 +419,14 @@ pub fn Runner(comptime App: type) type {
             done: std.Io.Event = .unset,
             error_code: u16 = 0,
         };
-        const WindowedPending = union(enum) {
+        const Pending = union(enum) {
             frame: struct { frame: *const Ui.Frame, surface: zui.Surface, ui: *Ui },
             attach: *SurfaceChange,
             /// Comes after the window's last frame, so when it is done every
             /// frame of the window has been released.
             detach: *SurfaceChange,
         };
-        const Pending = if (windowed) WindowedPending else OneWindowPending;
-        const pending_capacity = if (windowed) Ui.frames_in_flight * max_windows + 1 else Ui.frames_in_flight;
+        const pending_capacity = Ui.frames_in_flight * (if (windowed) max_windows else 1) + 1;
 
         app: App,
         host: Host,
@@ -440,6 +440,10 @@ pub fn Runner(comptime App: type) type {
         event_buffer: if (windowed) void else EventBuffer,
         text_buffer: if (windowed) void else TextBuffer,
         builder: if (windowed) void else zui.RecordBuilder,
+        drawn: if (windowed) void else ?Drawn,
+        /// Set by `wait`, so the next turn of an application with one
+        /// window is due.
+        host_waited: bool,
         windows: if (windowed) [max_windows]?*Window else void,
         /// Set while `zuiDeclare` runs, when opening a window panics.
         declaring: bool,
@@ -470,6 +474,7 @@ pub fn Runner(comptime App: type) type {
             self.render_task = .init;
             self.render_thread_started = false;
             self.declaring = false;
+            self.host_waited = false;
             self.pending = .init(&self.pending_buffer);
 
             if (options.title_bar == .custom and !Ui.features.chrome_regions) return error.CustomTitleBarWithoutChromeRegions;
@@ -501,6 +506,7 @@ pub fn Runner(comptime App: type) type {
                 self.windows[0] = try self.makeWindow(.main, options.zoom);
             } else {
                 self.ui = try self.initUi();
+                self.drawn = null;
                 self.builder = .init(&self.event_buffer, &self.text_buffer);
                 self.builder.params.zoom = options.zoom;
             }
@@ -595,21 +601,51 @@ pub fn Runner(comptime App: type) type {
             return .render_thread;
         }
 
-        /// One turn of the loop: false once every window has closed.
-        pub fn frame(self: *Self) !bool {
+        /// One turn, which never blocks: polls each window, runs
+        /// `zuiRecord`, and declares, ends and submits each window that is
+        /// due. Returns when the next turn is wanted, or null once every
+        /// window has closed. A window is due with an event, a new
+        /// viewport, scale, zoom or output format, a `nextFrame` that has
+        /// come, or no frame yet, and every window is due on every turn
+        /// when a source lacks `zuiPending`. An application with one
+        /// window is also due on the turn after `wait`.
+        pub fn step(self: *Self) !?zui.NextFrame {
             const render_error = self.render_error.load(.acquire);
             if (render_error != 0) return @errorFromInt(render_error);
-            if (windowed) return self.frameEveryDueWindow();
+            if (windowed) return self.stepEveryWindow();
 
-            if (!self.host.zuiPoll(.main, &self.builder)) return false;
+            const waited = self.host_waited;
+            self.host_waited = false;
+            if (!self.host.zuiPoll(.main, &self.builder)) return null;
             if (@hasDecl(App, "zuiRecord")) self.app.zuiRecord(&self.builder);
             self.noticeDroppedInput(&self.builder);
-            try self.frameWindow(&self.ui, &self.builder, .main);
-            self.host.zuiWait(self.nextFrameOf(&self.ui, .main));
+            const format = self.host.zuiSurface(.main).outputFormat();
+            if (waited or self.isDue(&self.ui, .main, &self.builder, self.drawn, format)) {
+                self.drawn = .{ .params = self.builder.params, .format = format };
+                try self.frameWindow(&self.ui, &self.builder, .main);
+            }
+            return self.nextFrameOf(&self.ui, .main);
+        }
+
+        /// Blocks in the host's `zuiWait` until `next`. The turn after it
+        /// declares an application with one window whatever its record
+        /// holds, since a wait may end for a repaint the record does not
+        /// show; each of many windows is still judged, since one wait does
+        /// not say which window it was for.
+        pub fn wait(self: *Self, next: zui.NextFrame) void {
+            self.host.zuiWait(next);
+            if (!windowed) self.host_waited = true;
+        }
+
+        /// `step`, then `wait` for the frame it names: false once every
+        /// window has closed.
+        pub fn frame(self: *Self) !bool {
+            const next = try self.step() orelse return false;
+            self.wait(next);
             return true;
         }
 
-        fn frameEveryDueWindow(self: *Self) !bool {
+        fn stepEveryWindow(self: *Self) !?zui.NextFrame {
             for (&self.windows) |*slot| {
                 const window = slot.* orelse continue;
                 if (window.closing) continue;
@@ -620,26 +656,22 @@ pub fn Runner(comptime App: type) type {
                 if (@hasDecl(App, "zuiRecord")) self.app.zuiRecord(window.id, &window.builder);
                 self.noticeDroppedInput(&window.builder);
                 const format = self.host.zuiSurface(window.id).outputFormat();
-                if (!self.isDue(window, format)) continue;
-                window.has_drawn = true;
-                window.drawn_params = window.builder.params;
-                window.drawn_format = format;
+                if (!self.isDue(&window.ui, window.id, &window.builder, window.drawn, format)) continue;
+                window.drawn = .{ .params = window.builder.params, .format = format };
                 try self.frameWindow(&window.ui, &window.builder, window.id);
             }
             while (self.closeOneClosingWindow()) {}
-            const next = self.earliestNextFrame() orelse return false;
-            self.host.zuiWait(next);
-            return true;
+            return self.earliestNextFrame();
         }
 
-        fn isDue(self: *Self, window: *Window, format: zui.OutputFormat) bool {
-            if (!sources_report_pending or !window.has_drawn) return true;
-            const params = window.builder.params;
-            const drawn = window.drawn_params;
-            if (window.builder.events().len != 0) return true;
-            if (!std.meta.eql(params.viewport, drawn.viewport) or params.scale != drawn.scale or params.zoom != drawn.zoom) return true;
-            if (format != window.drawn_format) return true;
-            return switch (self.nextFrameOf(&window.ui, window.id)) {
+        fn isDue(self: *Self, ui: *const Ui, window: zui.WindowId, builder: *const zui.RecordBuilder, drawn: ?Drawn, format: zui.OutputFormat) bool {
+            if (!sources_report_pending) return true;
+            const last = drawn orelse return true;
+            const params = builder.params;
+            if (builder.events().len != 0) return true;
+            if (!std.meta.eql(params.viewport, last.params.viewport) or params.scale != last.params.scale or params.zoom != last.params.zoom) return true;
+            if (format != last.format) return true;
+            return switch (self.nextFrameOf(ui, window)) {
                 .immediately => true,
                 .at => |instant| !params.now.isBefore(instant),
                 .on_event => false,
@@ -651,15 +683,8 @@ pub fn Runner(comptime App: type) type {
             var earliest: ?zui.NextFrame = null;
             for (self.windows) |slot| {
                 const window = slot orelse continue;
-                const next = if (window.has_drawn) self.nextFrameOf(&window.ui, window.id) else .immediately;
-                earliest = switch (next) {
-                    .immediately => return .immediately,
-                    .at => |instant| if (earliest) |sooner| switch (sooner) {
-                        .at => |other| .{ .at = if (other.isBefore(instant)) other else instant },
-                        else => next,
-                    } else next,
-                    .on_event => earliest orelse next,
-                };
+                const next: zui.NextFrame = if (window.drawn != null) self.nextFrameOf(&window.ui, window.id) else .immediately;
+                earliest = if (earliest) |so_far| so_far.sooner(next) else next;
             }
             return earliest;
         }
@@ -690,8 +715,7 @@ pub fn Runner(comptime App: type) type {
             const surface = self.host.zuiSurface(window);
             if (self.render_thread_started) {
                 self.host.zuiApply(window, drawn.requests());
-                const pending: Pending = if (windowed) .{ .frame = .{ .frame = drawn, .surface = surface, .ui = ui } } else .{ .frame = drawn, .surface = surface };
-                self.pending.putOneUncancelable(self.io, pending) catch unreachable;
+                self.pending.putOneUncancelable(self.io, .{ .frame = .{ .frame = drawn, .surface = surface, .ui = ui } }) catch unreachable;
             } else {
                 self.renderer.zuiSubmit(surface, drawn) catch |err| {
                     ui.release(drawn);
@@ -796,9 +820,7 @@ pub fn Runner(comptime App: type) type {
 
         fn submitPending(self: *Self) void {
             while (self.pending.getOneUncancelable(self.io)) |pending| {
-                if (!windowed) {
-                    self.submitOnRenderThread(pending.surface, pending.frame, &self.ui);
-                } else switch (pending) {
+                switch (pending) {
                     .frame => |queued| self.submitOnRenderThread(queued.surface, queued.frame, queued.ui),
                     .attach => |change| {
                         if (renderer_keeps_surfaces) self.renderer.zuiAttachSurface(change.surface) catch |err| {

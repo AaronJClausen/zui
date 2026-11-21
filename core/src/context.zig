@@ -924,6 +924,17 @@ pub fn Context(comptime config: Config) type {
         /// `beginFrame` for hosts that cannot block.
         pub const tryBeginFrame = if (has_sources) tryBeginFrameWithSources else tryBeginFrameWithoutSources;
 
+        /// Whether `beginFrame` would find a frame without waiting, for a
+        /// loop that cannot block to ask before it polls, so input it could
+        /// not declare stays with the host. Only the thread that begins
+        /// frames takes one, so the answer holds until it begins one.
+        pub fn hasFreeFrame(self: *const Self) bool {
+            for (&self.memory.frames) |*slot| {
+                if (!slot.frame.held.load(.acquire)) return true;
+            }
+            return false;
+        }
+
         fn beginFrameWithSources(self: *Self, record: *const FrameRecord, sources: *Sources) void {
             self.beginWaiting(record, sources);
         }

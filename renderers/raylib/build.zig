@@ -10,7 +10,9 @@ pub fn build(b: *std.Build) void {
     b.step("fmt-check", "Fail if any Zig source is not formatted").dependOn(&b.addFmt(.{ .paths = formatted_paths, .check = true }).step);
 
     const core = b.dependency("zui_core", core_options.on(target, optimize));
-    const raylib_dependency = b.lazyDependency("raylib", .{ .target = target, .optimize = optimize }) orelse return;
+    // The renderer presents and the host polls input, so raylib's
+    // `EndDrawing` must do neither.
+    const raylib_dependency = b.lazyDependency("raylib", .{ .target = target, .optimize = optimize, .config = "-DSUPPORT_CUSTOM_FRAME_CONTROL=1" }) orelse return;
     const truetype_dependency = truetypeDeclaring(b, core_options.on(target, optimize)) orelse return;
     const zui_module = core.module("zui");
     const zui_app_module = core.module("zui_app");

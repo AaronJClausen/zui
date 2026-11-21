@@ -286,6 +286,7 @@ pub fn App(comptime config: Config) type {
             if (config.Text != void and @hasField(config.Text, "placement")) start.text.placement = zui_glyphs.placementOf(Renderer);
             app.* = .{ .showcase = newShowcase(), .host = start.host, .options = options };
             if (@hasField(Renderer, "background")) start.renderer.background = app.showcase.palette.background;
+            if (@hasField(Renderer, "clear_color")) start.renderer.clear_color = app.showcase.palette.background;
         }
 
         pub fn deinit(app: *Self) void {
@@ -312,7 +313,6 @@ pub fn App(comptime config: Config) type {
         }
 
         pub fn zuiDeclare(app: *Self, ui: *Ui) void {
-            if (@hasField(Host, "clear_color")) app.host.clear_color = app.showcase.palette.background;
             if (app.options.frame_limit != null) ui.requestFrame();
             app.showcase.declare(ui);
         }
@@ -361,7 +361,6 @@ const TestHost = struct {
     pub const zui_surfaces: zui.SurfaceKinds = .initOne(.offscreen);
 
     polls: u32 = 0,
-    clear_color: zui.Color = .black,
 
     pub fn init(_: *TestHost, _: std.Io, _: zui.WindowOptions) !void {}
 
@@ -396,6 +395,7 @@ fn TestRenderer(comptime placement: zui_glyphs.Placement) type {
 
         submitted: u32 = 0,
         background: zui.Color = .black,
+        clear_color: zui.Color = .black,
 
         pub fn zuiSubmit(self: *@This(), _: zui.Surface, _: anytype) !void {
             self.submitted += 1;
@@ -413,7 +413,7 @@ test "a target runs the showcase through zui_app, its controls on whole cells wh
         while (try runner.frame()) {}
         try std.testing.expectEqual(3, runner.renderer.submitted);
         try std.testing.expect(runner.app.diagnostics_ok);
-        try std.testing.expectEqual(runner.app.showcase.palette.background, runner.host.clear_color);
+        try std.testing.expectEqual(runner.app.showcase.palette.background, runner.renderer.clear_color);
         try std.testing.expectEqual(runner.app.showcase.palette.background, runner.renderer.background);
         try std.testing.expectEqual(placement == .cells, runner.app.showcase.metrics.row_height == cell_metrics.row_height);
     }

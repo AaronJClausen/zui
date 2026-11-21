@@ -69,7 +69,7 @@ green, and its **Status** line below says which slice is next.
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
 | H4. Linux | 10 | `hosts/native/`, `renderers/sokol/` | | in progress; slice 5, the IME, is next |
-| H10. Hosts whose platform owns the loop | 10 | `core/zui_app/`, `core/src/contracts.zig`, `hosts/web/` | | waiting on a decision: open decision 2 |
+| H10. Hosts whose platform owns the loop | 10 | `core/zui_app/`, `core/src/contracts.zig`, `renderers/raylib/`, `hosts/web/`, `core/zui_testing/` | | in progress; slice 2, the split contract, is next |
 | H5. Web | 10 | `hosts/web/`, `renderers/webgl/` | H10 | |
 | H7. Window decorations | 10 | `core/src/chrome.zig`, `core/src/context.zig`, `core/zui_app/`, `hosts/native/` | | waiting on a person: the checklist under H7's *Status*, on `zig build title-bar` in `hosts/native/` |
 | M1. `zui_motion` | 11 | `core/zui_motion/` | | |
@@ -4671,96 +4671,85 @@ Once checked, H7 moves to *Done*.
 ### H10. Hosts whose platform owns the loop
 
 **Grounding.**
-- `zui_app.run` owns the loop: `while (try runner.frame()) {}`
-  (`core/zui_app/zui_app.zig:377`). Each turn of `Runner.frame`
-  (`:599-610`) polls the host (`zuiPoll`), hands the record to the
-  application's `zuiRecord`, declares and submits the window
-  (`frameWindow`), and waits in the host until the frame's `nextFrame`
-  (`zuiWait`). With many windows, `frameEveryDueWindow` (`:612-633`)
-  polls each, frames those that are due, and waits once for the earliest
-  `nextFrame`.
-- The host contract requires `zuiPoll`, `zuiWaker`, `zuiWait`,
-  `zuiSurface` and `zuiApply` (`core/src/contracts.zig:121`), whose
-  signatures are checked at `:142-146`, and every host declaration is
-  listed in `host_declarations` (`:24`), so a `zuiRun` would be an
-  unknown declaration today.
-- That is a pull loop: it works wherever the application may block in a
-  loop of its own, which covers the Windows and Linux hosts, raylib's
-  GLFW, the terminal and the test hosts. It does not work where the
-  platform owns the loop: the browser's main thread
-  (`requestAnimationFrame` and event callbacks; blocking freezes the
-  tab), macOS (`[NSApp run]`, which never returns), iOS
-  (`UIApplicationMain`) and Android (the activity's looper, which
-  destroys the surface on pause and makes another on resume). macOS and
-  iOS allow UI only on the main thread, so a second thread does not help.
-- The web host's worker is already driven from outside: the page calls
-  `zuiTourFrame` (`hosts/web/src/tour_worker.zig:93`) on its own clock,
-  and `TourSession.frame` (`hosts/web/src/tour_session.zig:182`) begins
-  and ends the tour's frames itself (`:202`, `:206`) on the stepped `Io`,
-  without `zui_app`.
-- The application side is already callbacks: an `App` is `zuiDeclare`,
-  `zuiRecord`, `zuiObserve`, `init` and `deinit`, and never writes a
-  loop. Nothing lets a renderer drop its surface and take one again while
-  the contexts live on; `zuiDetachSurface` is for a window that closes
-  (H9).
+- `zui_app.run` owned the loop: `while (try runner.frame()) {}`, each
+  turn polling the host, declaring and submitting, then blocking in the
+  host's `zuiWait`, so nothing could turn it without blocking. The host
+  contract required `zuiWait` (`core/src/contracts.zig:144`).
+- The web host's worker forked the frame logic to get a turn that does
+  not block: `TourSession.frame` (`hosts/web/src/tour_session.zig:182`)
+  begins and ends the tour's frames itself, `frameReason` (`:262`)
+  repeats `zui_app`'s judgement of whether a frame is due, and `nextWake`
+  (`:249`) folds the stepped `Io`'s next wake into `nextFrame`.
+- `zui_raylib.Host` began raylib's drawing in `zuiPoll` and presented it
+  in `zuiWait`, so it could not be polled without being waited on.
+- The browser's main thread, macOS, iOS and Android own their loops and
+  call the application back; Android and a lost GPU device also take the
+  surface away and give it back. `zuiAttachSurface` and
+  `zuiDetachSurface` (`core/src/contracts.zig:23`) already let a renderer
+  drop and take a window's surface while its context lives on (H9).
 
-**Plan.** One step is the unit of `zui_app`'s frame logic, and a host
-whose platform owns the loop drives it from its callbacks:
-- `Runner.frame` splits into `step`, which polls, frames every due window
-  and returns the `NextFrame` it wants next, or null once every window
-  has closed, and the wait around it.
-- `zui_app.Driver`, which a host that owns the loop is handed through
-  `zuiRun(self, io, window, driver)`: `start(surface)` once the window's
-  surface is ready (making the text, the renderer and the contexts),
-  `step()`, `suspendSurface()` and `stop()`.
-- **Scheduling from `NextFrame`:** `.immediately` asks for the next
-  display callback (`requestAnimationFrame`, `CADisplayLink`,
-  Choreographer), an instant sets a timer, and waiting for input pauses
-  the display callback until an event arrives, so idle stays idle and no
-  frame is drawn that is not due.
-- **Wakers:** `zuiWaker` stays, and the host turns a wake into a step
-  scheduled on its loop (`postMessage`, `CFRunLoopWakeUp`,
-  `ALooper_wake`).
-- **A run that never returns:** on macOS and iOS `zuiRun` does not
-  return; `driver.stop()` runs from `applicationWillTerminate` and the
-  process exits, so `run`'s caller relies on nothing after it.
-- **Losing the surface:** the platform takes the surface away (Android's
-  pause, a lost GPU device anywhere), and `suspendSurface` and a fresh
-  `start(surface)` let the renderer drop and remake its GPU resources
-  while the contexts and the application's state live on.
-- **The render thread and many windows** stay as they are: `step` hands
-  a frame to the render thread as `frame` does, and covers every due
-  window, so a host with many calls it once per display callback.
-- **The loop's shape** is open decision 2: every host on `zuiRun`, the
-  pull hosts through a shared helper (option 2), or `run` calling
-  `zuiRun` where a host declares it and keeping today's pull loop
-  otherwise (option 3).
-- **The first host that owns its loop is the browser's:** the web host's
-  worker becomes a `zuiRun` host and runs the tour through `zui_app` in
-  place of `TourSession`'s own frames. macOS, iOS and Android follow when
-  their hosts are built (H3 and later).
-- `zuiRun` joins `host_declarations` with its signature checked, and
-  SPEC.md §6.1, §16.3 and §19.5 and README.md's hosts say how a host
-  chooses its loop.
+**Plan.** One non-blocking step is the unit of `zui_app`'s frame logic,
+and three loops turn it (open decision 2, settled: the owner's choice of
+option D). A host is two halves: the window half every host gives
+(`zui_surfaces`, `zuiPoll` as a drain that never blocks or presents,
+`zuiWaker`, `zuiSurface`, `zuiApply`), and at most one call of the loop
+half:
+- `zuiWait`: zui pulls the loop, `run` stepping and waiting in turn;
+- `zuiRun(self, io, window, driver)`: the platform pushes it, and the
+  host calls a `zui.Driver` from its callbacks (`start(io)`, `step`,
+  `suspendSurfaces`, `resumeSurfaces`, `stop`), scheduling each turn as
+  the `NextFrame` the step returns says; `run` returns as `zuiRun` does,
+  `noreturn` included;
+- neither: only the application's own loop steps a `zui_app.Session`.
+
+In slices, each a commit with every check green:
+1. **The step.** `Runner.frame` splits into `step`, which never blocks and
+   judges which windows are due on the one-window path as on the many,
+   and `wait`. `NextFrame.sooner` folds two schedules; `Context.hasFreeFrame`
+   says whether `beginFrame` would wait. raylib's renderer presents in
+   `zuiSubmit`, and its host's `zuiPoll` only drains.
+2. **The split contract.** `zuiWait` becomes the optional loop half beside
+   `zuiRun` and `zui.Driver`; `Runner` becomes `Session`, with `Loop`,
+   `runWith` and a compile error for each mistake; SPEC.md, README.md,
+   ARCHITECTURE.md and the feature tour describe it.
+3. **Surface loss.** `Session.suspendSurfaces` and `resumeSurfaces`
+   detach and re-attach every window's surface through the renderer.
+4. **The browser's worker on `Session`.** A stepped host over the page's
+   records, `zui_wire`'s renderer and the tour's own `App`, in place of
+   `TourSession`'s frames; the owner of the stepped `Io` folds its next
+   wake with `sooner`.
+5. **Conformance.** `zui_testing` suites for a host that runs its loop
+   and one that is stepped, beside the pull suite.
 
 **Done when:**
-- `zui_app`'s tests drive a fake host that owns its loop from a scripted
-  list of callbacks: input reaches its window, a step frames only the
-  windows that are due, the `NextFrame` a step returns is what the pull
-  loop would wait for, a wake schedules a step and an idle window
-  schedules none, a suspended surface resumed keeps every context's
-  state and the application's, and a render thread and many windows run
-  as they do on a pull host;
-- each new rule is a compile error with its message pinned by a
-  compile-error test (`zuiRun`'s signature, and the rule the decision
-  sets for `zuiWait`);
-- the web host's worker runs the tour through `zui_app.run` on its
-  `zuiRun` host: `test-demo` writes the same stream byte for byte, and
-  `test-site` passes, the idle page sleeping and its input waking it;
+- `zui_app`'s tests drive a fake host that runs its loop from a scripted
+  list of callbacks, on a UI-thread and a render-thread renderer: input
+  reaches its window, a step declares only what is due, a lost surface
+  is let go and given back with every context and the application's
+  state kept, and `run`'s type is `noreturn` for a `zuiRun` that is;
+- an application's own loop steps a `Session` on a host with no loop
+  half, and declares only the frames that are due;
+- every new rule is a compile error with its message pinned;
+- the web host's worker runs the tour through `Session`: `test-demo`,
+  `test-draw`, `test-input` and `test-site` pass, the worker and the
+  native `tour-frames` writing the same bytes;
 - every native host's and renderer's tour cycle still prints
   `diagnostics ok: true`, and R1 counts are unchanged.
 
-**Spec.** §6.1, §16.2, §16.3, §19.5.
+**Spec.** §6.1, §6.3, §16.2, §16.3, §19.4, §19.5.
+
+**Status.** Slice 1 is done: `Runner.step` and `wait`, one judgement of
+whether a frame is due for one window and many, `NextFrame.sooner`,
+`Context.hasFreeFrame`, and raylib presenting from its renderer (raylib
+built with `SUPPORT_CUSTOM_FRAME_CONTROL`, its host polling input once a
+turn in `zuiWait`). The turn after `zuiWait` stays due for an
+application with one window, measured: without that rule an idle tour
+declared 10 frames in 10 s on the Wayland host against 11 (24.8 against
+27.9 ms of CPU, within noise), and 10 against 10 on raylib; the busy
+cycles were unchanged; nine of `zui_app`'s tests and the showcase's,
+whose fake hosts return from every wait with an empty record, declared
+fewer frames. Too little to gain for a frame a host's wait may ask for
+without a record that shows it. Slice 2, the split contract, is next.
 
 ---
 
@@ -4910,7 +4899,9 @@ Deliberate, and each a reason to choose zui:
 | Decision | Outcome |
 |---|---|
 | The frame boundary | the cornerstone: a record in at `beginFrame`, a frame out of `endFrame` |
-| A surface the platform takes away (H10) | part of H10's design, settled by the owner: `suspendSurface`, then a fresh `start(surface)`, so the renderer drops and remakes its GPU resources while the contexts live on; not left for the Android host |
+| A surface the platform takes away (H10) | part of H10's design, settled by the owner: `suspendSurfaces` and `resumeSurfaces` detach and re-attach every window's surface through the renderer's `zuiDetachSurface` and `zuiAttachSurface`, so the renderer lets go of what it keeps for each while it, the contexts and the application live on; not left for the Android host. It replaced an earlier choice, `suspendSurface` then a fresh `start(surface)`, which would have remade the renderer and the text, when the calls H9 built already drop and take a surface |
+| Who owns the loop (H10) | settled by the owner, after two prototypes: one non-blocking `step` and three loops over it. A host declares at most one loop call: `zuiWait`, and `run` pulls the loop; `zuiRun(io, window, driver)`, and the platform pushes it through a `zui.Driver`; or neither, and the application's own loop steps a `zui_app.Session`. It took option 3 (one step, `zuiWait` kept where a host may block) and added the stepped host, so a game engine or an editor that owns its loop and window has a contract too; option 2, push only, would have changed every host and still left that case out. The other prototype made `std.Io` the loop: `zui_app` waits on a futex through its `Io`, and a platform that calls back steps an `Io` that suspends the loop on a stack of its own, a fiber or, in a browser, JS Promise Integration. Not taken: on such an `Io` a loop asked for a frame `.immediately` never returns control to the platform; the application's tasks have nowhere to run on it; zui would own stack-switching assembly; and its test runs on neither Windows nor ThreadSanitizer. What it found stands: under JSPI, `zui_app`'s own loop ran on a page's main thread, in Node 26, with every callback returning; `Io.Dispatch` resumes a fiber off the main thread, so it cannot hold AppKit's loop; and `std.Io` has no wait on a descriptor, so a host that polls one (Wayland, X11) keeps `zuiWait`. Zig 0.17.1 changes none of this |
+| The turn after `zuiWait` (H10) | stays due for an application with one window, since a host's wait may end for a repaint its record does not show; measured before deciding: judging that turn too saved one idle frame in ten seconds on the Wayland host and none on raylib, with no change while busy |
 | Outside data | sources swapped at `beginFrame`, demand out, a loader between frames; zui starts and cancels nothing (A1) |
 | `TaskPool` and feeds | deleted and retired; sources replace both (A5, F1) |
 | `Platform` | split: the text contract in `Config`, `Waker` from the host, scale in the record (C5, S1) |
@@ -5048,18 +5039,6 @@ Each is planned with its first option. SPEC.md §22 has those that change
 the spec.
 
 1. **Physical keys.** Planned: logical keys plus the opaque scancode.
-2. **Who owns the loop (H10).** Option 2, push only, as winit does:
-   every host owns its loop through `zuiRun(self, io, window, driver)`,
-   the pull hosts through a shared `zui_app` helper that waits between
-   steps, and `zuiWait` leaves the core host contract; one shape for every
-   host, but every existing host changes (the raylib, terminal and native
-   hosts, and the test hosts). Option 3, one step and two ways to drive
-   it, as SDL3 does: `zui_app.run` calls a host's `zuiRun` when it
-   declares one and keeps today's pull loop over `zuiPoll` and `zuiWait`
-   otherwise, `zuiWait` is required only of a host without `zuiRun`, no
-   existing host changes, and a later move to push only is mechanical.
-   The design recommends option 3. Not planned with either: H10 waits
-   for the owner's choice.
 
 ---
 

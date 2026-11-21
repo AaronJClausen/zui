@@ -122,8 +122,8 @@ const os_event = struct {
 /// zui's host contract on raylib's window, with one window and no system
 /// material. Input goes through `zui.InputSampler`, since raylib reports
 /// state; waits go through GLFW, so an idle window sleeps until input, a
-/// wake or the instant `nextFrame` names. Its surface is `.library`:
-/// `zuiPoll` begins raylib's drawing and `zuiWait` presents it.
+/// wake or the instant `nextFrame` names. Its surface is `.library`, which
+/// `Renderer` draws and presents.
 ///
 /// ```zig
 /// const App = struct {
@@ -139,8 +139,6 @@ pub const Host = struct {
     io: std.Io,
     window: ?*glfw.Window,
     input: InputOptions = .{},
-    /// What each frame is cleared to before the renderer draws.
-    clear_color: zui.Color = .black,
     /// `.immediately` waits until this long after the last frame began:
     /// the monitor's refresh interval.
     frame_interval_ns: u64,
@@ -149,15 +147,12 @@ pub const Host = struct {
     scripted_first: usize = 0,
     scripted_count: usize = 0,
     woken: std.atomic.Value(bool) = .init(false),
-    drawing: bool = false,
     closed: bool = false,
-    offscreen: ?c.RenderTexture2D = null,
     applied_cursor: ?zui.Cursor = null,
     frame_began: zui.Instant = .zero,
-    /// When `init` had opened the window, and when the first frame was
-    /// presented: what an application's cold start is made of.
+    /// When `init` had opened the window, which with
+    /// `Renderer.first_present_seconds` is what a cold start is made of.
     opened_at: zui.Instant = .zero,
-    first_present: ?zui.Instant = null,
 
     const scripted_capacity = 16;
 
@@ -182,26 +177,8 @@ pub const Host = struct {
     }
 
     pub fn deinit(self: *Host) void {
-        if (self.offscreen) |texture| c.UnloadRenderTexture(texture);
         c.CloseWindow();
         self.* = undefined;
-    }
-
-    /// Draws every frame into a texture of the window's size instead of
-    /// the window, for `saveScreenshot`.
-    pub fn drawOffscreen(self: *Host) void {
-        if (self.offscreen == null) self.offscreen = c.LoadRenderTexture(c.GetScreenWidth(), c.GetScreenHeight());
-    }
-
-    /// Saves the frame drawn offscreen as an image file, such as a PNG.
-    /// Call it once the frame was submitted, as from the loader.
-    pub fn saveScreenshot(self: *Host, path: [:0]const u8) !void {
-        const texture = self.offscreen orelse return error.NotDrawingOffscreen;
-        self.endDrawing();
-        var image = c.LoadImageFromTexture(texture.texture);
-        defer c.UnloadImage(image);
-        c.ImageFlipVertical(&image);
-        if (!c.ExportImage(image, path.ptr)) return error.ScreenshotFailed;
     }
 
     /// Input for a later poll instead of raylib's, one sample a poll, as a
@@ -238,10 +215,6 @@ pub const Host = struct {
             else => record.append(event),
         };
         os_event.arrived = false;
-
-        if (self.offscreen) |texture| c.BeginTextureMode(texture) else c.BeginDrawing();
-        c.ClearBackground(toRaylibColor(self.clear_color));
-        self.drawing = true;
         return true;
     }
 
@@ -249,11 +222,13 @@ pub const Host = struct {
         return .{ .context = self, .wakeFn = wake };
     }
 
-    /// Presents the frame, then sleeps until input arrives, the host is
-    /// woken, or the instant `next` names. The wake flag is cleared after
-    /// the wait, never before, so a wake that came first ends it at once.
+    /// Sleeps until input arrives, the host is woken, or the instant `next`
+    /// names. raylib empties its queues of pressed keys and characters as
+    /// it polls, so it polls here, once a turn, after `zuiPoll` has read
+    /// them. The wake flag is cleared after the wait, never before, so a
+    /// wake that came first ends it at once.
     pub fn zuiWait(self: *Host, next: zui.NextFrame) void {
-        if (self.drawing) self.endDrawing() else c.PollInputEvents();
+        c.PollInputEvents();
         const deadline: ?zui.Instant = switch (next) {
             .immediately => self.frame_began.addNanoseconds(self.frame_interval_ns),
             .at => |instant| instant,
@@ -287,20 +262,6 @@ pub const Host = struct {
 
     pub fn now(self: *const Host) zui.Instant {
         return .fromTimestamp(std.Io.Timestamp.now(self.io, .awake));
-    }
-
-    /// raylib polls input in `EndDrawing`, and an offscreen frame polls it
-    /// the same way.
-    fn endDrawing(self: *Host) void {
-        if (!self.drawing) return;
-        self.drawing = false;
-        if (self.offscreen != null) {
-            c.EndTextureMode();
-            c.PollInputEvents();
-        } else {
-            c.EndDrawing();
-            if (self.first_present == null) self.first_present = self.now();
-        }
     }
 
     fn nextScripted(self: *Host) ?zui.InputSampler.Sample {
@@ -491,10 +452,11 @@ fn encodeCodepoint(codepoint: u21, destination: []u8) usize {
 /// texture.
 pub const GlyphAtlas = zui_glyphs.Atlas(.rgba8);
 
-/// zui's renderer contract through raylib. It draws into raylib's current
-/// target: the window between `BeginDrawing` and `EndDrawing`, or a render
-/// texture between `BeginTextureMode` and `EndTextureMode`. raylib owns
-/// that window, so its surface is `.library`. Text is drawn in the fonts
+/// zui's renderer contract through raylib. Each submit clears raylib's
+/// window, or the texture `drawOffscreen` made, to `clear_color`, draws the
+/// frame and presents it; with `.draws_into_current_target` it only draws,
+/// into whatever target its caller began. raylib owns that window, so its
+/// surface is `.library`. Text is drawn in the fonts
 /// of the text contract `init` is given, from a `zui_glyphs` atlas, where
 /// `zui_glyphs` laid it out; text in a font id that text has no face for
 /// is not drawn.
@@ -521,6 +483,20 @@ pub const Renderer = struct {
     corner_segments: c_int = 0,
     glyphs: ?*GlyphAtlas = null,
     glyph_texture: Texture = .{},
+    clear_color: zui.Color = .black,
+    presentation: Presentation = .presents_each_frame,
+    offscreen: ?c.RenderTexture2D = null,
+    /// When the first frame was presented, on raylib's clock: seconds
+    /// since the window opened.
+    first_present_seconds: ?f64 = null,
+
+    pub const Presentation = enum {
+        /// Begins its target, clears it, draws and presents.
+        presents_each_frame,
+        /// Draws into the target its caller began, as a test harness that
+        /// reads the frame back does.
+        draws_into_current_target,
+    };
 
     /// `text` is the text contract frames are measured with, which must
     /// outlive the renderer: any text whose fonts `zui_glyphs.Fonts.of`
@@ -533,6 +509,7 @@ pub const Renderer = struct {
     }
 
     pub fn deinit(self: *Renderer) void {
+        if (self.offscreen) |texture| c.UnloadRenderTexture(texture);
         if (self.glyph_texture.id != 0) c.UnloadTexture(self.glyph_texture);
         if (self.glyphs) |atlas| atlas.destroy(std.heap.page_allocator);
         self.* = .{};
@@ -545,10 +522,37 @@ pub const Renderer = struct {
         return atlas.overflows + atlas.raster_refusals;
     }
 
+    /// Draws every frame into a texture of the window's size instead of
+    /// the window, for `saveScreenshot`.
+    pub fn drawOffscreen(self: *Renderer) void {
+        if (self.offscreen == null) self.offscreen = c.LoadRenderTexture(c.GetScreenWidth(), c.GetScreenHeight());
+    }
+
+    /// Saves the last frame drawn offscreen as an image file, such as a
+    /// PNG.
+    pub fn saveScreenshot(self: *Renderer, path: [:0]const u8) !void {
+        const texture = self.offscreen orelse return error.NotDrawingOffscreen;
+        var image = c.LoadImageFromTexture(texture.texture);
+        defer c.UnloadImage(image);
+        c.ImageFlipVertical(&image);
+        if (!c.ExportImage(image, path.ptr)) return error.ScreenshotFailed;
+    }
+
     /// Draws in layout units, scaled by the frame's zoom; raylib maps its
     /// screen to physical pixels itself.
     pub fn zuiSubmit(self: *Renderer, surface: zui.Surface, frame: anytype) error{UnsupportedSurface}!void {
         if (surface != .library) return error.UnsupportedSurface;
+        if (self.presentation == .draws_into_current_target) return self.draw(frame);
+        if (self.offscreen) |texture| c.BeginTextureMode(texture) else c.BeginDrawing();
+        c.ClearBackground(toRaylibColor(self.clear_color));
+        self.draw(frame);
+        if (self.offscreen != null) return c.EndTextureMode();
+        c.EndDrawing();
+        c.SwapScreenBuffer();
+        if (self.first_present_seconds == null) self.first_present_seconds = c.GetTime();
+    }
+
+    fn draw(self: *Renderer, frame: anytype) void {
         const zoom = frame.params.zoom;
         const pixels_per_unit = frame.params.scale * zoom;
         if (self.glyphs) |atlas| {

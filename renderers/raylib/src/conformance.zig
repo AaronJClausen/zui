@@ -11,7 +11,7 @@ const zui_truetype = @import("zui_truetype");
 const RenderTextureHarness = struct {
     pub const config = zui_app.contextConfig(zui_raylib.Renderer, .{ .Text = zui_truetype.Text });
 
-    drawn: zui_raylib.Renderer = .{},
+    drawn: zui_raylib.Renderer = .{ .presentation = .draws_into_current_target },
     text_contract: zui_truetype.Text = .{},
     target: c.RenderTexture2D,
     pictures: [4]c.Texture2D = undefined,

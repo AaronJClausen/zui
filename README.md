@@ -853,8 +853,14 @@ pub fn main(init: std.process.Init) !void {
 ```
 
 `zui_raylib.Renderer` implements zui's renderer contract. Its surface is
-`.library`: raylib's own window between `BeginDrawing` and `EndDrawing`,
-or a render texture between `BeginTextureMode` and `EndTextureMode`. It
+`.library`, raylib's own window: each `zuiSubmit` begins raylib's
+drawing, clears to `clear_color`, draws the frame and presents it, or
+with `drawOffscreen()` draws into a render texture that
+`saveScreenshot(path)` saves, as the tour's `--screenshot` does; with
+`.presentation = .draws_into_current_target` it only draws, into the
+target its caller began, as its conformance harness does. raylib is
+built with `SUPPORT_CUSTOM_FRAME_CONTROL`, so `EndDrawing` neither
+presents nor polls input. It
 draws each frame scaled by the record's zoom, and the host divides the
 viewport and the pointer by it. `zui_app` hands its `init` the
 application's `Text`, whose glyphs it rasterizes on first use into a
@@ -869,20 +875,17 @@ the thread that opened the window, so it does not declare
 `zui_render_thread`, and `zui_app` submits on the UI thread.
 
 `zui_raylib.Host` implements zui's host contract with one window and no
-system material. `zuiPoll` samples raylib's input and begins drawing;
-`zuiWait` presents, then sleeps in GLFW (compiled into raylib's default
+system material. `zuiPoll` samples raylib's input and draws nothing;
+`zuiWait` polls raylib's input once a turn, then sleeps in GLFW (compiled into raylib's default
 desktop platform) until input arrives, the host is woken, or the instant
 `nextFrame` names, and `.immediately` waits out the monitor's refresh
 interval. Its `zuiWaker` sets a flag and posts an empty GLFW event, which
 any thread may do; the flag is cleared only after a wait, so a wake
 between `nextFrame` and the wait is not lost. Escape does not close the
 window, since the application may want it. Beyond the contract:
-- `drawOffscreen()` and `saveScreenshot(path)` draw into a texture and
-  save it, as the tour's `--screenshot` does;
 - `script(sample)` replaces raylib's input for one poll, as the host
   suite and the tour's screenshots do;
-- `close()` closes the window as its close button would;
-- `clear_color` is what each frame is cleared to.
+- `close()` closes the window as its close button would.
 
 | zui | raylib |
 |---|---|

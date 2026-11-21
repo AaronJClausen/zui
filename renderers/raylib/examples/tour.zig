@@ -51,7 +51,7 @@ const TourOnRaylib = struct {
     pub fn init(app: *TourOnRaylib, start: zui_app.Start(TourOnRaylib)) !void {
         app.sources = &app.tour.tour.sources;
         try app.tour.init(Tour.startOf(start));
-        if (app.tour.options.screenshot_path != null) start.host.drawOffscreen();
+        if (app.tour.options.screenshot_path != null) start.renderer.drawOffscreen();
     }
 
     pub fn deinit(app: *TourOnRaylib) void {
@@ -65,7 +65,7 @@ const TourOnRaylib = struct {
     pub fn zuiDeclare(app: *TourOnRaylib, ui: *Tour.Ui) void {
         if (app.tour.options.measure_startup) {
             if (app.tour.frames == 1) {
-                reportStartup(app.tour.host);
+                reportStartup(app.tour.host, app.tour.renderer);
                 app.tour.closeHost();
             }
             ui.requestFrame();
@@ -86,7 +86,7 @@ const TourOnRaylib = struct {
         app.tour.zuiLoader(ui, io);
         const path = app.tour.options.screenshot_path orelse return;
         if (app.tour.frames != screenshot_after_frames) return;
-        app.tour.host.saveScreenshot(path) catch |err| {
+        app.tour.renderer.saveScreenshot(path) catch |err| {
             std.debug.print("could not save {s}: {t}\n", .{ path, err });
             std.process.exit(1);
         };
@@ -101,8 +101,9 @@ extern "kernel32" fn GetSystemTimePreciseAsFileTime(time: *windows.FILETIME) cal
 
 /// `--measure-startup`: from the moment the OS created the process to the
 /// moment the first frame was presented, read in the second frame.
-fn reportStartup(host: *const zui_raylib.Host) void {
-    const presented = host.first_present orelse return std.debug.print("startup: no frame was presented\n", .{});
+fn reportStartup(host: *const zui_raylib.Host, renderer: *const zui_raylib.Renderer) void {
+    const presented_seconds = renderer.first_present_seconds orelse return std.debug.print("startup: no frame was presented\n", .{});
+    const presented = host.opened_at.addSeconds(presented_seconds);
     if (builtin.os.tag != .windows) return std.debug.print("startup: not measured on this system\n", .{});
     var times: [4]windows.FILETIME = undefined;
     if (GetProcessTimes(windows.GetCurrentProcess(), &times[0], &times[1], &times[2], &times[3]) == .FALSE) return std.debug.print("startup: the process's times are unavailable\n", .{});

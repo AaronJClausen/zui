@@ -259,7 +259,38 @@ pub const NextFrame = union(enum) {
     at: Instant,
     /// Sleep until input arrives or something wakes the host.
     on_event,
+
+    /// The one that comes first, for a loop that waits on more than one:
+    /// a host that owns the `Io` folds in when its tasks next wake.
+    ///
+    /// ```zig
+    /// const next = (try driver.step()) orelse return;
+    /// schedule(if (stepped.nextWake()) |instant| next.sooner(.{ .at = instant }) else next);
+    /// ```
+    pub fn sooner(self: NextFrame, other: NextFrame) NextFrame {
+        return switch (self) {
+            .immediately => self,
+            .on_event => other,
+            .at => |instant| switch (other) {
+                .immediately => other,
+                .on_event => self,
+                .at => |other_instant| .{ .at = if (other_instant.isBefore(instant)) other_instant else instant },
+            },
+        };
+    }
 };
+
+test "the sooner of two next frames is the one that comes first" {
+    const early: NextFrame = .{ .at = .fromNanoseconds(10) };
+    const late: NextFrame = .{ .at = .fromNanoseconds(20) };
+    const idle: NextFrame = .on_event;
+    try std.testing.expectEqual(early, early.sooner(late));
+    try std.testing.expectEqual(early, late.sooner(early));
+    try std.testing.expectEqual(early, idle.sooner(early));
+    try std.testing.expectEqual(early, early.sooner(idle));
+    try std.testing.expectEqual(NextFrame.immediately, early.sooner(.immediately));
+    try std.testing.expectEqual(idle, idle.sooner(idle));
+}
 
 test "instants measure the seconds between them" {
     const start: Instant = .fromNanoseconds(1_000_000_000);

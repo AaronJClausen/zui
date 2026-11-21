@@ -242,7 +242,6 @@ pub fn App(comptime config: Config) type {
             app.tour.declare(ui);
             app.declared_at = app.now();
             const background = Palette.forEnvironment(ui.environment()).background;
-            if (@hasField(Host, "clear_color")) app.host.clear_color = background;
             if (@hasField(Renderer, "clear_color")) app.renderer.clear_color = background;
         }
 
