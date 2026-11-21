@@ -3,9 +3,15 @@ name: CI
 on:
   push:
     branches: [main]
+    # Nothing here is read by a build, a test or a check. `.gitattributes`
+    # stays out of this list: it decides the line endings `fmt-check` sees.
     paths-ignore: &ci_irrelevant_paths
-      - "assets/**"
       - "**.md"
+      - "assets/**"
+      - "docs/**"
+      - "LICENSE"
+      - ".editorconfig"
+      - ".github/dependabot.yml"
   pull_request:
     paths-ignore: *ci_irrelevant_paths
   workflow_dispatch:

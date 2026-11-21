@@ -44,8 +44,10 @@ Run these from the root:
 
 ## CI
 
-CI runs one job for each package, from its directory, on every push,
-each job and each of its legs within 10 minutes:
+CI runs one job for each package, from its directory, on every push
+that changes something a build reads (a push of only Markdown, `docs/`,
+`assets/`, `LICENSE`, `.editorconfig` or Dependabot's settings runs
+nothing), each job and each of its legs within 10 minutes:
 - the format check, the documentation and every package's `check`, from
   the root;
 - core, from the root, which forwards its steps: the tests in three
@@ -87,8 +89,10 @@ each job and each of its legs within 10 minutes:
   Linux, Windows and macOS; and on Linux, `test-demo` in Debug and
   ReleaseSafe, `test-input` and `test-site` in headless Google Chrome, and
   `test-draw` under `xvfb-run`, keeping the frames that do not match as
-  the run's artifacts. On every push to `main`, the Pages workflow builds
-  the site in ReleaseSmall, runs `test-site` on it, and publishes it.
+  the run's artifacts. On every push to `main` that changes the code of
+  `hosts/web/` or a package it builds the site from (`core/`, `text/`,
+  `apps/`, `renderers/webgl/`), the Pages workflow builds the site in
+  ReleaseSmall, runs `test-site` on it, and publishes it.
 
 Those targets exist to catch assumptions about the host machine early:
 the first 32-bit build found two places that used a 64-bit hash as an

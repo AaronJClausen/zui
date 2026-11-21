@@ -3,6 +3,16 @@ name: Pages
 on:
   push:
     branches: [main]
+    # The packages `hosts/web` builds the site from, by `.path`; sokol is
+    # left out, since only `test-draw` fetches it.
+    paths:
+      - ".github/workflows/pages.yml"
+      - "core/**"
+      - "text/**"
+      - "apps/**"
+      - "renderers/webgl/**"
+      - "hosts/web/**"
+      - "!**.md"
   workflow_dispatch:
 
 permissions:
