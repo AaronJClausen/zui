@@ -89,7 +89,7 @@ Implemented so far:
   passing zui's host suite; and the system's material (Mica) behind the
   window where nothing is drawn, reported as
   `Environment.system_material`, so the same code draws its own
-  background where there is none. The sokol renderer's tour runs on it unchanged,
+  background where there is none. The tour runs on it unchanged,
   through `zui_app.run`, drawn by the sokol renderer into the native
   window, and idles at 0% CPU. `zui_app` makes an application's own text
   contract when the renderer does not measure (`pub const Text`), and
@@ -107,7 +107,7 @@ Implemented so far:
   refuses it. `zui_wire.Host` and `zui_wire.Renderer` run an application
   whose window is elsewhere, and `zui_wire.Client` joins any host and
   renderer to it over a socket, sending input and drawing the frames
-  that come back: `zui_host`'s `zig build remote` runs the sokol renderer's tour in
+  that come back: `zui_host`'s `zig build remote` runs the tour in
   one process and draws it in another, keys going one way and frames the
   other. In tests, `zui_testing.Recording` keeps a session's records
   and `driver.replay` runs them again, with no loader: a recorded session
@@ -258,8 +258,7 @@ Implemented so far:
   balanced clips) and names the first one broken; with
   `features.safety_sweeps`, on by default in safe builds, `endFrame`
   panics on it.
-  The tour runs in a browser, at
-  <https://aaronjclausen.github.io/zui-web/>: the web host builds it for
+  The tour runs in a browser, on the published page: the web host builds it for
   `wasm32-freestanding` and runs it in a Web Worker, and its page draws
   the tour's frames over `zui_wire` through WebGL 2, with four samples
   per pixel as a native window with `sample_count = 4` has, and sends
@@ -405,12 +404,14 @@ modules and runs core's steps under the same names. Beside core:
   skin contract (K4, after the skin contract, K5); a skeleton today.
 - `examples/`: a template project (D1) and samples (D2); a skeleton today.
 - `renderers/raylib/`, the package `zui_raylib`: the raylib renderer and
-  adapter host, and the tour (see *The raylib renderer* below).
-- `renderers/sokol/`, the package `zui_sokol`: the sokol renderer, and
-  the tour it draws, which `hosts/native/` runs (see *The sokol renderer*
-  below).
+  adapter host, and the `tour` and `showcase` targets on them (see *The
+  raylib renderer* below).
+- `renderers/sokol/`, the package `zui_sokol`: the sokol renderer, whose
+  `tour` and `showcase` targets are `hosts/native/`'s (see *The sokol
+  renderer* below).
 - `renderers/terminal/`, the package `zui_terminal`: the terminal
-  renderer and host (see *The terminal renderer* below).
+  renderer and host, and the `tour` and `showcase` targets on them (see
+  *The terminal renderer* below).
 - `renderers/webgl/`, the package `zui_webgl`: the browser's drawing of
   a frame through WebGL 2 (see *The WebGL renderer* below).
 - `hosts/native/`, the package `zui_host`: the native hosts, for Windows
@@ -686,8 +687,8 @@ the macOS fork of poop reads them; `--counters` does not read them yet.
 
 ### Conformance suites
 
-A renderer or host proves its contract by running zui's suite in its own
-CI. Each suite takes a harness: a value that gives the suite what only
+A renderer or host proves its contract by running zui's suite in its
+package's CI job. Each suite takes a harness: a value that gives the suite what only
 the implementation knows how to do, such as making a drawing target and
 reading its pixels back, or making the OS report an event.
 
@@ -1857,7 +1858,7 @@ under a second: the first frame arrives about 3 ms after connecting.
 `zui_web`, in [hosts/web/](hosts/web/), is zui in the browser: today a
 thin client that draws an application streamed over `zui_wire` (V4), the
 tour in a Web Worker, and the page that puts them
-together, published at <https://aaronjclausen.github.io/zui-web/>; later
+together, published to GitHub Pages by the Pages workflow; later
 a web host with a canvas surface (H5). It exports no module yet: its
 steps run from `hosts/web/` (see *Development*). Everything under its
 `src/` that the browser runs compiles for `wasm32-freestanding`.

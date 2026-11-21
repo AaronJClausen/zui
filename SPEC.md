@@ -78,7 +78,7 @@ packages.
 | Not in zui | Why | Where it goes instead |
 |---|---|---|
 | rasterization, GPU, windows, OS services | platform-specific; owning them ties zui to one stack | renderers and hosts, behind contracts (§16) |
-| font loading, shaping, glyph rasterization | large, and every platform already has them | the text contract (§9.4) |
+| font loading, shaping, glyph rasterization | large, and every platform already has them | font systems behind the text contract (§9.4), in the `text/` packages: `zui_truetype` today, a shaper or another rasterizer beside it |
 | a retained widget tree | immediate mode is the model | the keyed state table (§12) |
 | a style cascade | it costs time per element and hides where values come from | themes and skins as plain structs (§18) |
 | a task runner or scheduler | work belongs to the application and its `Io` | sources and demand (§14) |
@@ -113,8 +113,9 @@ packages.
 | Layer | Holds | Bound |
 |---|---|---|
 | **Core** (`zui`) | layout, interaction, state, the frame boundary, sources and demand, the shared vocabulary, every contract and its checks | no OS calls, no drawing, no threads of its own beyond `Io` it is given; identical behavior on every target |
-| **Modules** (`zui_*`, this repo) | defaults built on the public API: async sources, widgets, reflection, testing, tracing, the app runner, wire, debug, motion, color, icons | the public API only, enforced by the module boundary (§3.3) |
-| **Renderers** | drawing, fonts, text measurement, images, materials | implement the renderer and text contracts; never import a host |
+| **Modules** (`zui_*`, in `core/`) | defaults built on the public API: async sources, widgets, reflection, testing, tracing, the app runner, wire, debug, motion, color, icons | the public API only, enforced by the module boundary (§3.3) |
+| **Text** | font systems, typefaces, and the layout of a run that font systems and renderers share | implement the text contract; never import a renderer |
+| **Renderers** | drawing, images, materials, and text where its layout places it | implement the renderer contract, and may implement the text contract; never import a host |
 | **Hosts** | windows, the event loop, OS events and services, frame pacing | implement the host contract; never import a renderer |
 | **Theme packs** | design languages as skins | data only |
 
@@ -150,8 +151,10 @@ zui is one repository, `zui`, of packages:
 
 | Directory | Holds |
 |---|---|
-| the root | the package `zui`, which re-exports core's modules |
+| the root | the package `zui`, which re-exports core's modules and those of `zui_glyphs`, `zui_fonts`, `zui_tour` and `zui_showcase` |
 | `core/` | the core, the contracts, and the modules, as the package `zui_core` |
+| `text/` | text, one package each: `glyphs/` (`zui_glyphs`, what font systems and renderers share), `truetype/` (`zui_truetype`, the default font system) and `fonts/` (`zui_fonts`, the bundled typefaces) |
+| `apps/` | the tour (`zui_tour`) and the showcase (`zui_showcase`), which every renderer and host runs |
 | `themes/` | skins for OS design languages (`zui_themes`) |
 | `examples/` | samples and the template project |
 | `renderers/` | renderers, one package each: `raylib/` (`zui_raylib`, which also holds an adapter host), `sokol/` (`zui_sokol`), `terminal/` (`zui_terminal`) and `webgl/` (`zui_webgl`, the browser's drawing) |
@@ -2392,7 +2395,7 @@ edit (the message quotes the `.hidden = true` line that fixes it).
   only, defaults omitted, identical in debug and release.
 - **`checkCommands`**: finite bounds, nondecreasing layers, balanced
   clips and transforms, each ending inside what it began inside.
-- **Conformance suites**, which every implementation runs in its own CI.
+- **Conformance suites**, which every implementation runs in CI.
   Each takes a harness that does what only the implementation can: make
   a drawing target and read it back, make the OS report an event, or
   publish into a source.

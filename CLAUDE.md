@@ -47,8 +47,6 @@ Stop and ask the user instead of guessing when:
 - the *Done when* can only be met by CI or another machine. Commit what
   can be verified here, mark the row `waiting on CI` with what to check,
   and say so;
-- the item is in a repository other than this one and the user has not
-  said to work there in this session.
 - the item's counts or budgets fail because of code it did not write.
   Profile where the cost lands and propose an item to fix that code
   first, rather than building on it: this is how the data-oriented

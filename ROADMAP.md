@@ -31,7 +31,7 @@ Each item says:
 | stage 7 | gestures (I5): arbitration by motion component, zoom, long press, double tap, momentum, the intents and custom recognizers; drag and drop between elements (I1) | done: a carousel in a list, a pinch starting on a list inside a map, a lasso module against a map's pan, and `zui_testing.Driver.drag` moving an item between two lists, out of one that scrolls by dragging |
 | after stage 7: the foundation | G1's first slice ran 5.5% to 7.7% more instructions in scenes that draw no effect, so the work turned to what lay under it: benchmarks that can be trusted (R3 to R9) and the data-oriented design audit's findings (P6 to P10) | done; a commit compared with itself over three code layouts calls nothing, its intervals 0.52% wide on average, and a change that only moves code is not called; a tooltip declared before a 3,000-cell grid lays out in 79 µs, not 671 µs (P6); warm text −43% (P9); `init` from 138 µs to 92 µs (P7, P10); the budgets judged in benchmarking mode |
 | stage 8 | gradients, shadows and glow (G1); backdrop blur (G2); effects in the corners of a decoration that draws nothing (G7); transforms with hit inversion (G3); materials (G5); HDR and wide gamut (G6) | done: the sokol renderer draws gradients, shadows, backdrop blurs, transforms and materials through a shader of its own and passes the renderer suite, its effects rounded by a decoration that draws nothing, a pointer hits a turned button where it is drawn, and a frame without effects runs no more instructions than before; `zui.ExtendedColor` is clamped for a renderer that draws only `Color`, and on a monitor in HDR the Windows host opens the window in scRGB and reports its headroom, and the sokol renderer shows twice SDR white at 2.00× and four times it at 4.00×, measured off the desktop |
-| stage 9 | `zui_debug` (V1); semantics and accessibility actions (V2); safety sweeps (V3); the demo in a browser (V4) | done. V2: every `zui_widgets` control lists its semantics, and the Windows host bridges them to UI Automation with each control's pattern, its state and changes, and every action, so a client out of process toggles, sets, expands, selects, scrolls and invokes the native hosts' accessibility example; V4: the sokol renderer's tour runs in a browser at the display's frame rate, from <https://aaronjclausen.github.io/zui-web/>, in a Web Worker behind a page that draws its frames over `zui_wire` and sleeps between the frames the tour needs; V1 done: `Frame.inspect` and the inspector's diagnostics, fallbacks, zone times from its `ZoneTimer` tracer, element tree and hovered element's configs, and its theme reloaded from a watched file; the raylib renderer's tour opens it with F12 through `zui_app`'s `zuiObserve`, and draws every screen with it open within its limits |
+| stage 9 | `zui_debug` (V1); semantics and accessibility actions (V2); safety sweeps (V3); the demo in a browser (V4) | done. V2: every `zui_widgets` control lists its semantics, and the Windows host bridges them to UI Automation with each control's pattern, its state and changes, and every action, so a client out of process toggles, sets, expands, selects, scrolls and invokes the native hosts' accessibility example; V4: the sokol renderer's tour runs in a browser at the display's frame rate, from the published page, in a Web Worker behind a page that draws its frames over `zui_wire` and sleeps between the frames the tour needs; V1 done: `Frame.inspect` and the inspector's diagnostics, fallbacks, zone times from its `ZoneTimer` tracer, element tree and hovered element's configs, and its theme reloaded from a watched file; the raylib renderer's tour opens it with F12 through `zui_app`'s `zuiObserve`, and draws every screen with it open within its limits |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
@@ -69,7 +69,8 @@ green, and its **Status** line below says which slice is next.
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
 | H4. Linux | 10 | `hosts/native/`, `renderers/sokol/` | | in progress; slice 5, the IME, is next |
-| H5. Web | 10 | `hosts/web/`, `renderers/webgl/` | | |
+| H10. Hosts whose platform owns the loop | 10 | `core/zui_app/`, `core/src/contracts.zig`, `hosts/web/` | | waiting on a decision: open decision 2 |
+| H5. Web | 10 | `hosts/web/`, `renderers/webgl/` | H10 | |
 | H7. Window decorations | 10 | `core/src/chrome.zig`, `core/src/context.zig`, `core/zui_app/`, `hosts/native/` | | waiting on a person: the checklist under H7's *Status*, on `zig build title-bar` in `hosts/native/` |
 | M1. `zui_motion` | 11 | `core/zui_motion/` | | |
 | M2. Exit animations | 11 | `core/src/`, `core/zui_motion/` | M1 | |
@@ -86,6 +87,9 @@ green, and its **Status** line below says which slice is next.
 
 After stage 10's rows come stage 11's, which has joined the queue in dependency order. Stage 10's items are listed under *Stage 10: reach* and stage 11's under *Stage 11: polish*; each is given its Grounding, Plan and Done when as it is taken.
 
+The font system is planned under *The font system*, after stage 11. It
+has no rows yet; its items join the queue when the owner orders them.
+
 macOS is not in the queue. Its work is set aside under *macOS, for
 later* at the end of this file, and none of it is built until the owner
 chooses to take up macOS. Until then, a progress report leaves it out.
@@ -94,8 +98,8 @@ Statuses: `next` (the first open row), `in progress` (a slice has
 landed), `waiting on <what>` (blocked by something the next session cannot
 do: a decision, CI, a push), or empty (not started). A finished item's
 row is removed, and the item moves to *Done*. An item whose remaining
-work is waiting on CI or another repository counts as done for the rows
-that wait for it, as long as what they need from it has landed.
+work is waiting on CI or a person counts as done for the rows that wait
+for it, as long as what they need from it has landed.
 
 Things to know:
 - **Judge each item against its parent commit,** in benchmarking mode:
@@ -122,7 +126,7 @@ Things to know:
   with the change; the raylib renderer's tour, run from
   `renderers/raylib/`, checks the idle budget with `--measure-idle` and
   the trace with `-Dzui-tracy=true`, and the web host's checks, run from
-  `hosts/web/`, draw and run the sokol renderer's tour in a browser.
+  `hosts/web/`, draw and run the tour in a browser.
 - **`bench --check-targets` checks §20.2's budgets,** including
   declaration for the box tree, judged in benchmarking mode (Turbo Boost
   off, the `performance` governor), the mode `bench-compare` measures in.
@@ -153,7 +157,7 @@ Things to know:
   `Context`, the frame record, input and outside data together, and
   stage 3 adds the contracts on top, before any native host or wire
   format can freeze the old shapes. Every backend, `zui_testing` and
-  `bench/` are updated in the same week, and the notes say what to
+  `core/bench/` are updated in the same week, and the notes say what to
   change.
 - **Prove each contract twice.** An adapter proves it in stage 3; a
   native host proves it again in stage 4, because a contract with one
@@ -174,42 +178,42 @@ Things to know:
 
 ### H9. Many windows
 
-**Grounding.** Where the code stood when H9 was taken (zui `daba4a7`,
-zui-host `3435b8a`, zui-sokol `8f6811d`):
-- *The core.* A window is a `zui.WindowId` (`src/host.zig:5-8`), and a host
+**Grounding.** Where the code stood when H9 was taken (`daba4a7`, with
+`hosts/native/` at `dbbef70` and `renderers/sokol/` at `d66de6c`):
+- *The core.* A window is a `zui.WindowId` (`core/src/host.zig:5-8`), and a host
   says how many it opens in `HostCapabilities.windows`, default `.one`
   (`:14-24`). `zuiPoll`, `zuiSurface` and `zuiApply` already take a
   `WindowId`; `zuiWaker` and `zuiWait` take none, so one wake and one wait
-  serve the whole host (`src/contracts.zig:117-121`). No host call opened
+  serve the whole host (`core/src/contracts.zig:117-121`). No host call opened
   or closed a window, and nothing told a renderer that a surface went
   away.
 - *Contexts and sources.* SPEC.md §15.4 already settled the shape:
   contexts share nothing, each has its own sources, and data shared
   between windows is published into each. A source has one reader
   (§14.8). `nextFrame(sources)` is `.immediately` when a source with
-  `zuiPending` holds something (`src/context.zig`'s `nextFrameWithSources`),
+  `zuiPending` holds something (`core/src/context.zig`'s `nextFrameWithSources`),
   and every `zui_async` source declares `zuiPending`.
 - *`zui_app`.* `Runner` hard-coded `const window: zui.WindowId = .main`
-  (`zui_app/zui_app.zig:324`) and owned one `Ui`, one `RecordBuilder` and
+  (`core/zui_app/zui_app.zig:324`) and owned one `Ui`, one `RecordBuilder` and
   one render-thread queue (`:327-345`). `frame` polled, declared, handed
   the frame to the host and the renderer, and waited on that one
   context's `nextFrame` (`:442-477`). `checkApp` accepted only
   `zuiDeclare(app, ui)` (`:592-600`).
-- *The Windows host* is `.one` (`zui-host/windows/host.zig:43`). It holds
+- *The Windows host* is `.one` (`hosts/native/windows/host.zig:43`). It holds
   one `hwnd`, one `Inbox`, one `requests`, one `WindowThreadState`, one
   chrome snapshot, one accessibility bridge and one set of service state
   (`:191-220`), and asserts `.main` in every call that takes a window
   (`:122`, `:144`, `:157`, `:395`, `:489-518`). Its waits are already
   host-wide. The window procedure finds the host through `GWLP_USERDATA`
   (`:619`, `:671`), and `WM_DESTROY` ends the window thread (`:695`).
-- *zui-sokol* draws a `.win32` surface through one `native.Context`
-  (`zui-sokol/src/renderer.zig:92`), made in `initForSurface`, which also
+- *The sokol renderer* draws a `.win32` surface through one `native.Context`
+  (`renderers/sokol/src/renderer.zig:92`), made in `initForSurface`, which also
   runs `sg.setup` on its device (`:139-146`). sokol_gfx is process-wide, so
   a second window needs a second swapchain on the same device, not a
   second renderer. `zuiSubmit` uses the one context for any `.win32`
   surface (`:184`, `:221`). The scRGB and backdrop-blur targets are made
-  again whenever the size changes (`src/destination.zig`'s `prepare`,
-  `src/backdrop_blur.zig`'s `prepare`).
+  again whenever the size changes (`renderers/sokol/src/destination.zig`'s
+  `prepare`, `renderers/sokol/src/backdrop_blur.zig`'s `prepare`).
 
 **Plan.** An application opens a window through `zui_app`, between
 frames, never in declaration. `zui_app` gives each window a context of
@@ -221,12 +225,12 @@ the earliest of the contexts' `nextFrame`, and after it only the windows
 that are due run a frame. The renderer stays one, with per-surface state
 it attaches when a window opens and detaches before it closes. The
 one-window form is untouched. In three slices:
-1. **The contract and `zui_app`** (zui only): `zui.OpenWindowError`;
+1. **The contract and `zui_app`** (core only): `zui.OpenWindowError`;
    `zuiOpenWindow` and `zuiCloseWindow`, required with `.many` and refused
    with `.one`; `zuiAttachSurface` and `zuiDetachSurface`, declared
    together; `zui_app`'s windowed form, `Windows(App)`, `max_windows`;
    the host suite's many-windows steps; the compile-error cases.
-2. **The Windows host opens many windows** (zui-host): a slot per window,
+2. **The Windows host opens many windows** (`hosts/native/`): a slot per window,
    `max_windows = 4`, each with its id, `hwnd`, inbox, requests, window
    thread state, chrome snapshot, accessibility bridge and per-window
    service state (the menu bar); a message-only window that anchors the
@@ -234,10 +238,11 @@ one-window form is untouched. In three slices:
    other; ids never reused; the console's terminate and low memory to
    every window; hosts in the conformance tests off the stack; the
    harness's `postTo`.
-3. **Two windows drawn by zui-sokol** (zui-sokol, then zui-host): one
+3. **Two windows drawn by the sokol renderer** (`renderers/sokol/`, then
+   `hosts/native/`): one
    D3D11 device shared by a composition swapchain per window, found by
    `hwnd`, each with its own scRGB and backdrop-blur targets;
-   `zuiAttachSurface` and `zuiDetachSurface`; zui-host's
+   `zuiAttachSurface` and `zuiDetachSurface`; the native hosts'
    `examples/many_windows.zig`, with `--check` and `--measure-idle`.
 
 **When a window is due.** After the wait, each open window is polled and
@@ -257,7 +262,7 @@ be told apart, so every window is due on every turn.
 - The host suite's many-windows steps pass on a host that keeps windows
   apart, and fail on one that reports every event in the first or reuses
   a closed window's id.
-- zui-host's `zig build test`: the suite passes on the Windows host, now
+- `hosts/native/`'s `zig build test`: the suite passes on the Windows host, now
   `.many`, against hidden windows; `WM_CLOSE` closes one window; a DPI
   change moves one window's scale; Ctrl+C reaches every window; a fifth
   window is refused; the clipboard works after `.main` closes.
@@ -267,7 +272,7 @@ be told apart, so every window is due on every turn.
   alone and the shared one in both; closing one leaves the other running;
   two windows idle at 0% CPU; two animating windows both hold the
   display's rate.
-- Unchanged: zui-host's tour, zui-raylib's `zig build check`, and R1.
+- Unchanged: the native hosts' tour, the raylib renderer's `zig build check`, and R1.
 
 **Spec.** §6.1, §6.8, §15.4, §16.2, §16.3, §16.6, §19.4, §19.5.
 
@@ -294,11 +299,11 @@ be told apart, so every window is due on every turn.
   to each through the harness's `postTo`, closes it, and opens a third.
 - R1, measured by CI's counts job on `ea5ab47`: every scenario's count is
   identical to `6b6ce6f`'s run, its code parent (`daba4a7` changed only
-  documents). `src/` gains an error set and comptime checks only, and the
+  documents). `core/src/` gains an error set and comptime checks only, and the
   `zui-counts` executable's `.text` (1,171,081 bytes) and `.rodata`
   (145,243 bytes) are byte-identical to `daba4a7`'s.
 
-Slice 2, the Windows host (zui-host `75d8b93`), is done:
+Slice 2, the Windows host (`bf64f7c`), is done:
 - The host is `.many`, with `Host.max_windows = 4` slots. Each slot holds
   the window's `HWND`, inbox, requests, scale, terminate and low-memory
   state, window-thread state, chrome snapshot, accessibility bridge and
@@ -325,8 +330,8 @@ Slice 2, the Windows host (zui-host `75d8b93`), is done:
   `title-bar -- --check` pass, and the tour idles at 0.0 ms of CPU over
   10 s.
 
-Slice 3, zui-sokol drawing many windows (zui-sokol `f03fb36`) and the
-example (zui-host `63e96de`), is done:
+Slice 3, the sokol renderer drawing many windows (`9ad703d`) and the
+example (`c19a504`), is done:
 - `zuiAttachSurface` makes a composition swapchain for each `.win32`
   window after the first, on the first one's Direct3D 11 device, and
   `zuiDetachSurface` frees it. `composition.c` takes the device to share
@@ -356,10 +361,10 @@ example (zui-host `63e96de`), is done:
 Measured across the item:
 - R1: unchanged. CI's counts on `ea5ab47` are identical to `6b6ce6f`'s
   scenario by scenario, and slices 2 and 3 do not touch zui.
-- Idle: 0.0 ms of CPU over 10 s for two windows, and for zui-sokol's
-  tour, which runs on the host unchanged.
+- Idle: 0.0 ms of CPU over 10 s for two windows, and for the sokol
+  renderer's tour, which runs on the host unchanged.
 - Animation: 144 Hz for one window, and 143 Hz for each of two.
-- zui-host's 77 tests pass in Debug and ReleaseSafe. `zig build
+- The native hosts' 77 tests pass in Debug and ReleaseSafe. `zig build
   conformance` passed 12 runs of 12 with fresh seeds.
 - `services`, `title-bar`, `theme`, `remote` and `many-windows` pass
   `--check`.
@@ -372,7 +377,7 @@ What remains, and where it went:
   scale. Close the first window and see the others run on, then close
   the last and see the process end.
 - **H4, and H3 once macOS is taken up:** Linux and macOS implement the
-  same contract, and their hosts stay `.one` until then. zui-sokol's EGL
+  same contract, and their hosts stay `.one` until then. The sokol renderer's EGL
   path would attach a `wl_egl_window` and `EGLSurface` per window on one
   `EGLContext`.
 - **`zui_wire`:** a connection carries one window. Many windows over the
@@ -381,21 +386,21 @@ What remains, and where it went:
 
 ### H6. Services
 
-**Grounding** (at zui `62d0813` and zui-host `16a9235`, before the first
-slice). The host contract listed six optional services by name
-(`src/contracts.zig:23`), and `checkHost` only checked that each was a type
+**Grounding** (at `62d0813`, with `hosts/native/` at `0dd3be1`, before the
+first slice). The host contract listed six optional services by name
+(`core/src/contracts.zig:23`), and `checkHost` only checked that each was a type
 (`:100-102`). Only `zuiFileWatch` had a checked shape (`checkFileWatch`,
 `:143`), pinned by `host_file_watch_wrong_signature`. The pattern it set
 (F6) is a sink: `zui.FileChangeSink`, a pointer and a function, made by
 `.of(&source)` from any source whose `publish` returns `Wake` or
-`error{Full}!Wake` (`src/host.zig`). SPEC.md showed the other five only as
+`error{Full}!Wake` (`core/src/host.zig`). SPEC.md showed the other five only as
 `struct { ... }` (§16.3) and said they are reached through `zui_app` with
 `has_*` guards (§16.6), but nothing declared a guard. `zui_app` named the
-services (`zui_app/zui_app.zig:177`) only to report the missing ones
+services (`core/zui_app/zui_app.zig:177`) only to report the missing ones
 (`:375`); an application reaches its host only through `Start(App).host`
 (`:198`), and `zuiLoader` gets the context and the `Io`, not the host
 (`:552`). `zui_app`'s test host declared `zuiClipboard = struct {}`
-(`zui_app/tests.zig:15`).
+(`core/zui_app/tests.zig:15`).
 
 The frame boundary had no channel for a service: `HostRequests` holds the
 cursor and the IME area, diffed as state by `zuiApply`, and a new kind of
@@ -405,7 +410,7 @@ counts. `zui_wire`'s host declares no services. A `zui_async.Stream` with
 one producer panics in safe builds when two publish at once.
 
 On Windows only the clipboard existed, unchecked
-(`zui-host/windows/host.zig:40`): `read(host, buffer) ?[]u8` copied
+(`hosts/native/windows/host.zig:40`): `read(host, buffer) ?[]u8` copied
 `CF_UNICODETEXT` on the caller's thread (`:860`), and `write(host, text)`
 returned `error{InvalidUtf8, ClipboardUnavailable, OutOfMemory}` (`:873`),
 where `OutOfMemory` was `GlobalAlloc` failing (`:875`): the OS's memory,
@@ -418,28 +423,28 @@ dispatches everything through `handleMessage` (`:467`), and takes work
 from the UI thread as `WM_APP` messages (`:93`). A modal loop on it, such
 as a move or resize, keeps dispatching the window's messages. Test-only
 settings are fields set before `init` (`:62`), and the harness sends what
-the OS would (`windows/conformance.zig:43`).
+the OS would (`hosts/native/windows/conformance.zig:43`).
 
 **Plan.** Five slices; the first fixes every shape at once, so H3 and H4
 build on one reviewed contract.
 
-1. **The shapes, checked; the clipboard and URLs on Windows.** zui: the
-   vocabulary in `src/services.zig`; `checkHost` checks every service's
+1. **The shapes, checked; the clipboard and URLs on Windows.** Core: the
+   vocabulary in `core/src/services.zig`; `checkHost` checks every service's
    functions, with a compile-error case for each function, one for a
    service that is not a struct and one for `ServiceSink.of`;
    `zui_app.ServicesOf(Host)`, its `has_*` guards and the unguarded-call
-   error; `tests/instantiate.zig` declares a host with all five;
+   error; `core/tests/instantiate.zig` declares a host with all five;
    `zui_testing`'s host suite checks the services a host declares.
-   zui-host: the clipboard moves to the new shape and `zuiOpenUrl` is
+   `hosts/native/`: the clipboard moves to the new shape and `zuiOpenUrl` is
    added, both answered from the window thread (`windows/services.zig`).
-2. **Notifications** (zui-host): `Shell_NotifyIconW` with `NIF_INFO` and
+2. **Notifications** (`hosts/native/`): `Shell_NotifyIconW` with `NIF_INFO` and
    `NOTIFYICON_VERSION_4`, the icon added on the first `show` and removed
    when the balloon ends or at `deinit`; `NIN_BALLOONUSERCLICK` answers
    `.notification_activated`, `NIN_BALLOONTIMEOUT` and `NIN_BALLOONHIDE`
    `.notification_dismissed`, as does a notification replaced by the next.
    The fake records `NIM_ADD` and `NIM_MODIFY`, and the tests send the
    callback messages Windows would.
-3. **File dialogs** (zui-host): `IFileOpenDialog` and `IFileSaveDialog`
+3. **File dialogs** (`hosts/native/`): `IFileOpenDialog` and `IFileSaveDialog`
    created and shown on the window thread, owned by the window; `show`
    copies the dialog's strings into a fixed buffer, posts it and returns;
    the dialog's modal loop keeps dispatching the window's messages, and
@@ -447,7 +452,7 @@ build on one reviewed contract.
    dialog or menu at a time. The vtables go in `windows/file_dialog.zig`;
    the fake builds and configures the real dialog and reads `GetOptions`
    back without `Show`.
-4. **Menus** (zui-host): `popup` builds a menu with `CreatePopupMenu` and
+4. **Menus** (`hosts/native/`): `popup` builds a menu with `CreatePopupMenu` and
    `AppendMenuW` on the window thread, converts the position to screen
    pixels, and shows it with `TrackPopupMenuEx(TPM_RETURNCMD)`; `setBar`
    builds one with `CreateMenu` and answers each `WM_COMMAND`. Items are
@@ -455,32 +460,32 @@ build on one reviewed contract.
    A menu bar's `HMENU` lives in one struct of per-window service state,
    for H9 to move into its window slots; with H7's custom title bar,
    `setBar` may answer `error.Unavailable`.
-5. **The example, and closing H6** (zui-host and zui):
+5. **The example, and closing H6** (`hosts/native/` and core):
    `examples/services.zig` and `zig build services` on `zui_app`, with a
    menu bar, a context menu, and buttons to copy, paste, notify, open,
    save, choose a folder and open a URL, each answer shown; one
    `Stream(zui.ServiceReply(16 * 1024))`, every call from `zuiLoader`
    through `ServicesOf`; `-- --check` scripts what shows nothing.
 
-**Done when.** Automated: zui's tests in Debug, ReleaseFast and
+**Done when.** Automated: core's tests in Debug, ReleaseFast and
 ReleaseSafe and its `wasm32-freestanding`, `powerpc-linux` and `x86-linux`
-checks; each compile-error case fails with its message; zui-host's tests
+checks; each compile-error case fails with its message; the native hosts' tests
 in Debug and ReleaseSafe, `check` and `fmt-check`, with the host suite
 passing every service the host has built, faked through
 `Host.service_fake`; the host's own tests of `error.Busy`,
 `error.TooLarge`, the menu built (read back from the `HMENU`), the
 popup's position in screen pixels, a menu bar's `WM_COMMAND`, the dialog's
 configuration, the notification's callbacks, and `ShellExecuteW` never
-reached with a refused URL; zui-sokol's tour runs unchanged; R1 counts
-unchanged. By a person, in slice 5: `zig build services` in zui-host,
+reached with a refused URL; the sokol renderer's tour runs unchanged; R1 counts
+unchanged. By a person, in slice 5: `zig build services` in `hosts/native/`,
 choosing a file, saving, choosing a folder, a notification clicked, a
 context menu and the menu bar, a URL opened in the browser, copy and
 paste, each in a screenshot.
 
 **Spec.** §14.1, §16.3, §16.6, §19.5, §19.6.
 
-Done in five slices. Slice 1, in zui `578b8c1` and zui-host `c5d01f3`: zui gained
-`src/services.zig`: `zui.ServiceRequest` (`.of(name)`), `ServiceAnswer`
+Done in five slices. Slice 1, in `578b8c1` and `22a8cd5`: core gained
+`core/src/services.zig`: `zui.ServiceRequest` (`.of(name)`), `ServiceAnswer`
 (the outcome, borrowed, and the bytes the host could not hold),
 `ServiceReply(n)` (the plain-data copy, text cut at a character and paths
 kept whole, the rest counted), `ServiceSink` (`.of(&source)` for any source
@@ -505,7 +510,7 @@ out) or calls `ShellExecuteW`, so every answer comes from one thread;
 suite passes against a hidden window with the URL opener faked. Measured:
 the zui-counts executable's .text and .rodata are byte-identical to
 `62d0813`'s (sha256 6ac82a44... and d05b536a...), so R1 counts are
-unchanged; zui-sokol's tour on the host, in ReleaseSafe with
+unchanged; the sokol renderer's tour on the host, in ReleaseSafe with
 `--measure-idle`, idled at 0.0 ms of CPU over 10 s, and `zui_app` now
 reports only notifications, file dialogs and menus missing. Decided in
 the slice, beyond the plan: `Busy` also refuses a clipboard read or a URL
@@ -513,7 +518,7 @@ still waiting for the window thread; `ServiceAnswer.left_out_bytes`
 carries what the host itself could not hold; `zui.isOpenableUrl` is core,
 so every host refuses the same URLs.
 
-Slice 2, in zui-host alone (`2e06e20`): `zuiNotifications.show`
+Slice 2, in `hosts/native/` alone (`c6fc2d8`): `zuiNotifications.show`
 checks the text is UTF-8, copies the title and body into fixed buffers cut
 at a character to what `NOTIFYICONDATAW` holds (63 and 255 UTF-16 units),
 and posts to the window thread, which adds the window's notification-area
@@ -532,14 +537,14 @@ as the harness's `scriptServices` says by posting the callback message
 Windows would, so the host suite now checks a notification through the
 real callback path; the host's own tests check the calls made, the title
 cut at a character, a click, a replacement, a time-out removing the icon,
-and a callback with nothing showing answering nothing. zui-sokol's tour on
+and a callback with nothing showing answering nothing. The sokol renderer's tour on
 the host idles as before (15.6 ms of CPU over 10 s and 10 frames on the
 Welcome screen in ReleaseSafe) and `zui_app` now reports only file dialogs
 and menus missing. Not detected: notifications the user turned off, or Do
 Not Disturb, neither of which a balloon reports, so the Windows host never
 answers `.failed = .denied`.
 
-Slice 3, in zui-host alone (`2da9ccd`):
+Slice 3, in `hosts/native/` alone (`eb0150b`):
 `zuiFileDialogs.show(host, window, request, dialog, sink)` copies the
 dialog's strings into one fixed buffer of 8,192 UTF-16 units: the title,
 the directory made absolute (`GetFullPathNameW`, since the shell takes only
@@ -589,12 +594,12 @@ published their answer before releasing their slot, so a call made as
 soon as the answer arrived could be `error.Busy`. Two of about 20 runs of the ReleaseSafe suite failed
 this way. Each now releases first. The bytes it answers with stay put,
 since only the window thread writes them. Twenty runs each in Debug and
-ReleaseSafe then passed. zui-sokol's tour on the host, in ReleaseSafe with
+ReleaseSafe then passed. The sokol renderer's tour on the host, in ReleaseSafe with
 `--measure-idle`, idled at 31.3 ms of CPU over 10 s and 10 frames on the
 Welcome screen, two of Windows' 15.6 ms ticks, against one in slice 2.
 `zui_app` now reports only menus missing.
 
-Slice 4, in zui-host (`621c6e0`), with one sentence added to SPEC.md
+Slice 4, in `hosts/native/` (`02282d5`), with one sentence added to SPEC.md
 §16.3 (`fcdef0e`): `zuiMenus.popup(host, window, request, items, position,
 sink)` and `setBar(host, window, request, items, sink)` copy the items
 into a fixed menu of up to 256 entries and 8,192 UTF-16 units, at most
@@ -636,13 +641,13 @@ and dialogs both ways, and a closed menu answering `.canceled`;
 open at close answered with nothing; and a menu bar read back from the
 window's own `GetMenu`, answering two choices sent as `WM_COMMAND`,
 waiting while its menus are open, answering a late choice from the bar it
-replaced, and removed. zui-host's tests (63) passed six times each in
-Debug and ReleaseSafe. zui-sokol's tour on the host, in ReleaseSafe
+replaced, and removed. The native hosts' tests (63) passed six times each in
+Debug and ReleaseSafe. The sokol renderer's tour on the host, in ReleaseSafe
 with `--measure-idle`, idled at 0.0 to 31.3 ms of CPU over 10 s with 9 to
 14 frames in three runs on the Welcome screen; a fourth drew 96 frames for
 the pointer over the window. `zui_app` now reports no service missing.
 
-Slice 5, in zui-host alone, after `621c6e0`: `zig build services`
+Slice 5, in `hosts/native/` alone, after `02282d5`: `zig build services`
 (`examples/services.zig`), a window on `zui_app` with a button for each
 service: pick a file, save a file, show a notification, open a popup
 menu, set or clear the menu bar, copy, paste, and open
@@ -664,8 +669,8 @@ after every change) and answered `.failed = .unavailable`, as the
 contract says: four of the first five runs failed this way. The check now
 presses Paste again, as a user would, and says how often. It then passed
 in seven of seven runs, six in Debug and one in ReleaseSafe, each
-pressing Paste once or twice more. zui-host's 63 tests pass in Debug and ReleaseSafe, with
-`check` and `fmt-check`. zui-sokol's tour on the host, in ReleaseSafe
+pressing Paste once or twice more. The native hosts' 63 tests pass in Debug and ReleaseSafe, with
+`check` and `fmt-check`. The sokol renderer's tour on the host, in ReleaseSafe
 with `--measure-idle`, idled at 0.0 ms of CPU over 10 s, with 12 frames
 and no wakes.
 
@@ -704,21 +709,21 @@ What remains, and where it went:
 ### V2. Semantics and accessibility actions
 
 **Grounding.** `Frame.semantics()` lists each node in tree order
-(`src/context.zig:552-558`), in a slot beside its frame (`:739-749`)
+(`core/src/context.zig:552-558`), in a slot beside its frame (`:739-749`)
 that is emptied when the frame is released (`:731`). A node has a `u64`
 id, the index of the node around it, a role, a label, a value,
 untransformed bounds in layout units, a state and its actions
-(`src/semantics.zig:120-134`). Parents always come earlier in the list
+(`core/src/semantics.zig:120-134`). Parents always come earlier in the list
 (`context.zig:1505-1516`), so any prefix of it is a whole tree. An
-`action` event (`src/input.zig:240-242`) is answered by `applyAction`
+`action` event (`core/src/input.zig:240-242`) is answered by `applyAction`
 (`context.zig:1822-1837`); a disabled element takes none. `zui_app`
 hands the list to a host that declares `zuiSemantics`, on the UI thread,
-after `zuiObserve` and before submission (`zui_app/zui_app.zig:408`),
+after `zuiObserve` and before submission (`core/zui_app/zui_app.zig:408`),
 and opens the window with room sized from `Config.limits`
 (`:371-373`). `checkHost` checks the call's signature from a table that
-H7's chrome regions can join (`src/contracts.zig:22`, `:124`). zui-host's
+H7's chrome regions can join (`core/src/contracts.zig:22`, `:124`). The
 Windows host keeps one `accessibility.Bridge` per window
-(`windows/host.zig:87`); `zuiSemantics` publishes into it (`:336`), the
+(`hosts/native/windows/host.zig:87`); `zuiSemantics` publishes into it (`:336`), the
 window thread answers `WM_GETOBJECT` (`:580`), raises events
 (`:576`) and disconnects at `WM_DESTROY` (`:482`), and runs in a
 single-threaded apartment (`:389`). The bridge's snapshots, elements and
@@ -740,7 +745,7 @@ took room for in `init`, sized by `WindowOptions.semantics`, and swaps
 them under a lock; UI Automation reads the front through providers
 written as hand-made COM vtables, and a request comes back as an
 `action` event through the host's inbox. In slices:
-1. **The contract, the tree and `invoke`** (zui and zui-host): the
+1. **The contract, the tree and `invoke`** (core and `hosts/native/`): the
    contract and its compile error, `zui_app`'s call, notice and report,
    the host suite's `invoke` step, and on Windows the fragment root, an
    element per node with its name, control type, AutomationId (the id in
@@ -749,7 +754,7 @@ written as hand-made COM vtables, and a request comes back as an
    `GetFocus`, `Invoke` and `SetFocus` as actions, and focus-changed and
    structure-changed events raised on the window thread only while a
    client listens; `examples/accessible.zig` for Narrator.
-2. **The control patterns and property events** (zui-host):
+2. **The control patterns and property events** (`hosts/native/`):
    `IToggleProvider` for checkboxes and toggles through `invoke`;
    `IExpandCollapseProvider` for a node whose `state.expanded` is set,
    through `invoke` when the state differs; `IRangeValueProvider` for
@@ -761,7 +766,7 @@ written as hand-made COM vtables, and a request comes back as an
    name, value, toggle, expand, selection, range and enabled, compared
    against a summary the window thread keeps. Tested through the client
    against `zui_widgets` controls.
-3. **Scroll, the menu and dismissal** (zui, zui-host, zui-sokol):
+3. **Scroll, the menu and dismissal** (core, `hosts/native/`, the tour):
    `scroll: ?SemanticScroll` on `SemanticNode` (offset, content and
    viewport per axis, filled from `ScrollState`, paid for only with the
    feature on) and `IScrollProvider`;
@@ -820,13 +825,13 @@ closes on `dismiss`, and `zui_reflect` names each control after its field.
 the instruction; with it on and nothing declared, declaration moves
 −1.28% to +0.52% and `endFrame` adds 2 to 7 instructions.
 
-Slice 1 is done, in zui and in zui-host (not pushed; zui-host's pin
-moves once zui is). zui gains `zuiSemantics`, `SemanticsCapacity`,
+Slice 1 is done, in core and in `hosts/native/`. Core gains
+`zuiSemantics`, `SemanticsCapacity`,
 `SemanticsDropped` and `WindowOptions.semantics`, the compile error
 `host_semantics_wrong_signature`, `zui_app`'s call with
 `Notice.semantics_dropped` and `Report.accessibility`, and the host
 suite's `invoke` step, which `QueueHost` passes and
-`QueueHost(.drops_actions)` fails. zui-host's Windows host passes the
+`QueueHost(.drops_actions)` fails. The Windows host passes the
 suite with the step answered through UI Automation's client in-process
 against a window that is never shown (UI Automation exposes it), and
 four tests of its own: the tree reads back with names, control types,
@@ -840,7 +845,7 @@ checkbox, slider and text field with their roles and bounds, invoked
 Save (the label then read "Saved 1 times") and moved focus to the
 checkbox.
 
-Slice 2 is done, in zui-host alone. Each element offers the pattern that
+Slice 2 is done, in `hosts/native/` alone. Each element offers the pattern that
 stands for what it does: Toggle for a node that says whether it is
 checked (not a radio or option), ExpandCollapse for one that says
 whether it is expanded, RangeValue for a range, Value for text,
@@ -868,7 +873,7 @@ Selection naming the chosen option; and a property-changed handler,
 added from the test's thread, hearing the checkbox turn off. With no
 pattern code in zui, R1 counts cannot move.
 
-Slice 3 is done, in zui, zui-sokol and zui-host. zui's `SemanticNode`
+Slice 3 is done, in core, the tour and `hosts/native/`. Core's `SemanticNode`
 gains `scroll: ?SemanticScroll` (offset, content and viewport sizes and
 the axes it scrolls on, filled after layout from the element's scroll
 state, so it is the clamped offset the frame drew) and `level`, which
@@ -882,8 +887,8 @@ dialog as `dismiss`, and the heading level as `HeadingLevel1` to
 `HeadingLevel9`; scroll percentages join the property-changed events. A
 slider, a text field and a progress bar no longer offer Invoke beside
 their own pattern. A dropdown's open list closes by its combo box's
-Collapse, which slice 2 already made an `invoke`. zui-sokol's tour turns
-`features.semantics` on (`examples/kit.zig`). Two more conformance tests
+Collapse, which slice 2 already made an `invoke`. The tour turns
+`features.semantics` on (`apps/tour/src/kit.zig`). Two more conformance tests
 drive a real scroll container through UI Automation (a notch, then 100%,
 and a refused horizontal step), and a dialog's Close, a button's
 ShowContextMenu and a heading's level. Out of process, Windows
@@ -937,9 +942,9 @@ it as `toColor` does (a test renderer that skips the encoding fails);
 `zui_wire.Renderer(Ui)` declares `zui_extended_color` when `Ui`'s
 commands carry `ExtendedColor`, and its commands round-trip in either
 color. `toColor(fromColor(c))` is `c` for every 8-bit channel, so
-zui-terminal still passes at a tolerance of 0, and zui-raylib and
-zui-sokol pass unchanged against this checkout.
-The third slice, in zui-sokol (`64737d9`, pinned to `b6d3086`):
+the terminal renderer still passes at a tolerance of 0, and the raylib
+and sokol renderers pass unchanged.
+The third slice, in the sokol renderer (`06a28fa`):
 its renderer declares `zui_extended_color`, so `zui_sokol.config`
 sets `extended_color`, and it encodes each command's color at the
 point it is drawn, as `toColor` does, from either color the
@@ -955,7 +960,7 @@ reports them; each native `Surface` carries the format the host chose,
 `.sdr` by default, so the backends compile unchanged, and
 `surface.outputFormat()` reads it. The host suite fails a surface in a
 format the host does not declare. The core's hot paths are untouched;
-zui-raylib, zui-sokol and zui-terminal pass against this checkout.
+the raylib, sokol and terminal renderers pass unchanged.
 The fifth slice reads an `.scrgb_fp16` target back: a harness whose
 `beginDraw` returns a surface in that format is read through its
 optional `extendedPixel`, HDR white must read back as `hdr_white`
@@ -964,7 +969,7 @@ translucent color is expected to blend, and a blur to average, in
 linear light there. The suite's own test renderer draws into either
 target and passes in both; one that clamps HDR into its FP16 target
 fails, reading back SDR white. Nothing outside `zui_testing` changed.
-The sixth slice, in zui-sokol (`af617f2`, pinned to `24e3706`): its
+The sixth slice, in the sokol renderer (`e06389e`): its
 renderer takes an `.offscreen` surface and draws into an image of its
 own in the surface's format, RGBA16F for `.scrgb_fp16`, in linear
 light, through a shader with sokol_gl's layout that decodes each 8-bit
@@ -976,7 +981,7 @@ offscreen images, and fails the FP16 run when HDR is clamped. It does
 not declare `zui_output_formats` yet, since its `.win32` swapchain is
 still 8-bit.
 
-The seventh slice, in zui-host (`113a5af`): the Windows host declares
+The seventh slice, in `hosts/native/` (`da286d5`): the Windows host declares
 `zui_output_formats` with `.scrgb_fp16`. It reads the monitor the window
 is on through DXGI (whether Windows runs it in HDR, and its peak) and the
 display configuration (the SDR white level the SDR content brightness
@@ -986,7 +991,7 @@ was opened with it and in `.sdr` otherwise, and reports
 reads them again when the window moves to another monitor, the displays
 change, or a setting does. `forced_display_color` keeps its tests off the
 monitor.
-The eighth slice, in zui-sokol (`df9a490`): the renderer declares
+The eighth slice, in the sokol renderer (`f81fd03`): the renderer declares
 `zui_output_formats` with `.scrgb_fp16` when it draws through
 DirectComposition (not with `-Dgl=true`). A `.win32` surface in
 `.scrgb_fp16` resizes the composition swapchain to RGBA16F in linear
@@ -996,20 +1001,20 @@ multiplies each color by the monitor's SDR white over 80 nits, since
 zui's scRGB puts SDR white at 1.0 and the swapchain's puts 80 nits there.
 The level is read at most twice a second, since the slider tells no
 window when it moves.
-The ninth, in zui-host (`acc379f`): `zig build hdr` shows boxes of SDR
+The ninth, in `hosts/native/` (`cc3033b`): `zig build hdr` shows boxes of SDR
 white and two and four times it, and `-- --measure` reads them back off
 the desktop in scRGB through DXGI's desktop duplication, which sees past
 SDR white where GDI clips at it. On the reference machine's monitor in
 HDR (a 1,068-nit peak, SDR white at 280 nits): `scrgb_fp16`, headroom
 3.81; SDR white 3.500 in scRGB, twice it 7.000, four times it 14.000,
-2.00× and 4.00× SDR white. zui-host's tour, zui-sokol's demo, its
-conformance run and every test pass in `.sdr` as before.
+2.00× and 4.00× SDR white. The native hosts' tour, the sokol renderer's
+demo, its conformance run and every test pass in `.sdr` as before.
 
 Left for later: the SDR content brightness slider is read again only
 when the window moves, the displays change or a setting does, and by
-zui-sokol twice a second, so a headroom reported after the slider moves
-waits for one of those; the Linux host (H4) and macOS (H3) report no
-headroom. zui-host pins zui-sokol `df9a490`.
+the sokol renderer twice a second, so a headroom reported after the
+slider moves waits for one of those; the Linux host (H4) and macOS (H3)
+report no headroom.
 
 **Spec.** §13.1, §13.3, §16.4, §18.
 
@@ -1056,9 +1061,9 @@ macOS's counters through kperf are not written.
 
 ### P12. Text commands that point at their style
 
-**Grounding.** `RenderCommand.Text` (`src/commands.zig:85`) holds a copy
+**Grounding.** `RenderCommand.Text` (`core/src/commands.zig:85`) holds a copy
 of its `TextStyle`, 20 bytes of its 40, and `emitText`
-(`src/emission.zig:330`) copies the record's style into every line. A
+(`core/src/emission.zig:330`) copies the record's style into every line. A
 command is 80 bytes.
 
 **Plan.** `style: *const TextStyle`, pointing at the text record's style,
@@ -1078,9 +1083,9 @@ a text payload 32. By `counts`, the text scenes run 0.06% to 0.24% fewer
 instructions and their simulated D1 misses change by under 0.1%, while
 `4096 interactive boxes`, which draws no text, runs 1.17% more. No
 scene reads the commands as a renderer does, which is where the audit
-put the saving. `1000 labels, rendered` (`bench/scenes.zig`) now does:
+put the saving. `1000 labels, rendered` (`core/bench/scenes.zig`) now does:
 1,000 single-line labels in 8 bordered columns, all inside the viewport,
-whose commands are read after each frame as zui-sokol's and zui-raylib's
+whose commands are read after each frame as the sokol and raylib
 renderers read them, each command's bounds and payload and, for a text,
 its style and every byte of its content, a pen advanced glyph by glyph.
 `bench` times the read as a phase of its own (`, read`), and `counts`
@@ -1089,12 +1094,12 @@ about 1,000 text commands and 16 for the columns.
 
 Carried onto `main` after `a021c1d` and finished, then judged and not
 shipped: parked on `p12-text-style-pointer-on-main` (`7e27942`), which
-supersedes `p12-text-style-pointer`, with zui-terminal's two tests on
-its own `p12-text-style-pointer` (`c9e48e0`). A context that clamps
+supersedes `p12-text-style-pointer`, with the terminal renderer's two
+tests changed beside it. A context that clamps
 `ExtendedColor` points its commands at a clamped copy per text record,
 `Frame.clamped_text_styles`, which exists only there; `zui_wire` copies
 the style beside the text in its histories and the remote's slots.
-zui-raylib and zui-sokol pass against it unchanged; zui-web's tests,
+The raylib and sokol renderers pass against it unchanged; the web host's tests,
 which build three text commands by value, were not updated. Every check
 passes. `bench-compare -- a021c1d --require-quiet` (100 rounds over 3
 layouts, turbo off, pinned): the read +0.4% (+0.1% to +0.9%), within
@@ -1114,8 +1119,8 @@ order.
 
 ### P11. Flat child lists
 
-**Grounding.** `Frame.Children.next` (`src/context.zig:487`) and
-`FlowChildren` (`src/layout.zig:76`) step to each sibling through
+**Grounding.** `Frame.Children.next` (`core/src/context.zig:487`) and
+`FlowChildren` (`core/src/layout.zig:76`) step to each sibling through
 `subtree_end`, one dependent load at a time.
 
 **Plan.** Only after `perf` attributes cycles of `4000 children of one
@@ -1147,13 +1152,13 @@ save at most that 0.9%, and would build two more passes every frame.
 published from CI. **Done when:** the demo runs at its native frame rate
 in a browser.
 
-The owner opened <https://aaronjclausen.github.io/zui-web/> in a desktop
+The owner opened the published page in a desktop
 browser: the tour keeps the display's frame rate, the mouse, the wheel
 and its shortcuts drive it, and its gradients, shadows, blurs and
 materials look right. They found two defects, fixed before V4 closed:
 - **Timings read 0 µs.** The tour's strip and frame inspector read 0 µs
-  for every timing, their bars at 0: zui-web's `TourSession` never
-  recorded the tour's `Perf` samples, which zui-sokol's host takes
+  for every timing, their bars at 0: the web host's `TourSession` never
+  recorded the tour's `Perf` samples, which the native host takes
   around `beginFrame`, the declaration and `endFrame`, and had it, the
   worker's `SteppedIo` reads the page's one instant for the whole frame.
   The session now times each frame on a stopwatch of its own, the
@@ -1167,15 +1172,15 @@ materials look right. They found two defects, fixed before V4 closed:
   failed before the fix (no frame above 0 µs within 10 s), and after it
   the newest frame was declared in 745 µs, at 37 frames a second in
   headless Chromium.
-- **Only text was smoothed.** zui-sokol's renderer has no coverage of
+- **Only text was smoothed.** The sokol renderer has no coverage of
   its own for shapes; its demo window smooths every edge with
   `sample_count = 4`, and the page drew with one sample per pixel.
   `test-draw` could not tell: its reference was drawn into an offscreen
   image of one sample per pixel, and an unsmoothed pixel matches a
   neighbor across the edge within the check's reach. The page now draws
   into a renderbuffer of four samples per pixel and resolves it into the
-  texture that backdrop blurs sample and the canvas shows. zui-sokol
-  (`73f3612`) draws an `.offscreen` surface with
+  texture that backdrop blurs sample and the canvas shows. The sokol
+  renderer (`58c114a`) draws an `.offscreen` surface with
   `renderer.offscreen_sample_count` samples per pixel, and passes the
   renderer suite with four. `test-draw` draws each frame twice: with one
   sample per pixel and every command, compared as before, and with four
@@ -1189,20 +1194,19 @@ materials look right. They found two defects, fixed before V4 closed:
   With four samples, the unsmoothed page failed every frame, 338 to 2,374
   pixels a frame matching nothing; the smoothed one passes every frame,
   at most 2 pixels a frame matching nothing. Its run in CI, its reference
-  drawn by llvmpipe, is to be confirmed once zui-sokol and then zui-web
-  are pushed.
+  drawn by llvmpipe, is to be confirmed.
 
 After V4 closed, the owner found the page never slept: it stepped the
 tour and drew a frame at every `requestAnimationFrame`, and the worker
-asked `ui.nextFrame()` only to label those frames "requested". zui-web
-(`a533fd0`) now sleeps as native hosts do. Each answer from the worker
+asked `ui.nextFrame()` only to label those frames "requested". The page
+(`22c4330`) now sleeps as native hosts do. Each answer from the worker
 carries when to step the tour again: its `nextFrame`, or sooner when one
 of its tasks' sleeps ends, since under `SteppedIo` tasks run only while a
 frame waits for them, and while a Gallery tile loads or a Mission Control
 producer sleeps, `nextFrame` says `.on_event`. The page asks for an
 animation frame at once, sets a timer for a deadline, or waits for the
 canvas's input, a resize or a change of `devicePixelRatio`. A step
-declares a frame only when one is due, for the reasons zui-sokol's demo
+declares a frame only when one is due, for the reasons the native tour
 declares one, and `test-demo`'s byte-for-byte run still declares one
 every tick. `test-site` now checks that the idle page draws only the
 tour's heartbeat while the display runs on, that input wakes it and is
@@ -1212,11 +1216,11 @@ Welcome in headless Chromium, the page drew 19 frames a second before,
 every animation frame it had (drawing each held SwiftShader there), and
 1 after, the tour's heartbeat, while the display ran at 60. Box Storm,
 Typography, Light and Depth, Transforms and Materials animate and still
-ask for every frame, as natively, where zui-sokol's demo declares all
+ask for every frame, as natively, where the native tour declares all
 300 of 300 display frames on each, against 4 on Welcome.
 
-It landed in five slices, in zui-web unless one says otherwise:
-1. **The client's decoder in WebAssembly.** zui-web's
+It landed in five slices, in `hosts/web/` unless one says otherwise:
+1. **The client's decoder in WebAssembly.** The web host's
    `FrameStream(Ui)` holds what has arrived of a stream and decodes each
    frame once it is whole, and `src/browser.zig` exports it for the page
    as `zui-web.wasm` (19 KB in ReleaseSmall, 12 MiB of memory reserved by
@@ -1229,10 +1233,10 @@ It landed in five slices, in zui-web unless one says otherwise:
    client built for `wasm32-freestanding` in pieces of 1 to 16,384 bytes,
    and checks that each of the 312 frames, written whole again in the
    browser, hashes as the frame drawn did; a flipped bit in the stream or
-   in the expected hashes fails it. CI runs it on Linux. In zui, a test
+   in the expected hashes fails it. CI runs it on Linux. In core, a test
    pins the decoder reading again a message cut short at any byte.
 2. **Drawing,** in parts. The client lays each frame's commands out as
-   triangles in zui-sokol's renderer's geometry (`DrawList`: rounded
+   triangles in the sokol renderer's geometry (`DrawList`: rounded
    corners in eight segments, borders inside their bounds, gradients in
    bands of OKLab color, shadows faded in six rings, transforms applied to
    each vertex, a batch per clip scissored as sokol_gfx truncates it), and
@@ -1241,7 +1245,7 @@ It landed in five slices, in zui-web unless one says otherwise:
    37 KB in ReleaseSmall and reserves 20 MiB, 8 of them for the
    vertices. `zig build test-draw`
    draws the middle frame of each of the tour's thirteen screens with
-   zui-sokol's renderer into an `.sdr` offscreen image, through OpenGL in
+   the sokol renderer into an `.sdr` offscreen image, through OpenGL in
    a sokol_app window, and with the client in headless Chromium on
    SwiftShader, keeping in both only the commands the client draws, and
    compares them pixel by pixel. A pixel matches when its colors are within
@@ -1254,14 +1258,14 @@ It landed in five slices, in zui-web unless one says otherwise:
      triangle and matching a neighbor. The reference reads back the same
      bytes on every run. Drawing the shadows with five rings instead of
      six fails it. CI runs it on Linux under Xvfb with Google Chrome; its
-     first run there is to be confirmed once zui-web is pushed.
+     first run there is to be confirmed.
    - **Text.** The
      page hands the client the stream's fonts: the TrueType ones, which
-     follow the six bitmap fonts' ids in the order the host added them,
-     and sokol_debugtext's six. stb_truetype, at zui-sokol's commit, is
-     compiled into the client without a C library, allocating from a
-     scratch reserved at init, and rasterizes into a 1024² RG8 atlas
-     packed as zui-sokol packs its RGBA one, so a glyph sampled at its
+     follow the ids of sokol's six built-in bitmap fonts in the order the
+     host added them, and those six. stb_truetype, at the sokol renderer's
+     commit, is compiled into the client without a C library, allocating
+     from a scratch reserved at init, and rasterizes into a 1024² RG8 atlas
+     packed as the sokol renderer packs its RGBA one, so a glyph sampled at its
      edge blends with the same neighbors; bitmap glyphs are an R8 texture
      sampled at the nearest texel. A vertex grows from 12 bytes to 56: an
      atlas glyph carries the map from a pixel's position to its texture
@@ -1272,7 +1276,7 @@ It landed in five slices, in zui-web unless one says otherwise:
      The client is 63 KB in ReleaseSmall and reserves 35 MiB, 14 of them
      for 2^18 vertices (6.7 times the busiest compared frame's 38,790).
      `test-draw` compares the text too, its reference drawn with the
-     tour's fonts and failing if zui-sokol's glyph atlas overflowed, and
+     tour's fonts and failing if the sokol renderer's glyph atlas overflowed, and
      a frame passes with at most one pixel matching nothing within 1
      (`maxUnmatchedPixelsPerFrame`; Decisions, Made: a pixel on a glyph's
      edge). In Debug and ReleaseSafe alike, 1 to 12,717 of each frame's
@@ -1280,28 +1284,28 @@ It landed in five slices, in zui-web unless one says otherwise:
      231), and every frame has no unmatched pixel but frame 252, on the
      Transforms screen, which has one: its centre 0.0002 texels inside a
      glyph's right edge, drawn by the client (75, 75, 85) and left as the
-     button's background (35, 35, 50) by zui-sokol's OpenGL capture.
+     button's background (35, 35, 50) by the sokol renderer's OpenGL capture.
      Handing the client the Bold and Regular fonts swapped fails all 13
      frames (13,480 to 61,256 unmatched pixels), and moving every
      TrueType glyph a pixel right fails frames 204 and 252 (7 and 2,327);
      the neighbor rule absorbs the shift elsewhere. CI's first `test-draw`
      with text, its reference drawn by Mesa under Xvfb rather than this
-     machine's NVIDIA driver, is to be confirmed once zui-web is pushed.
+     machine's NVIDIA driver, is to be confirmed.
    - **Backdrop blurs and materials.** A blur starts a batch, and
      before it the page copies the canvas into a texture and runs
-     zui-sokol's two passes: each Gaussian tap, split into the coarse and
-     fine weights zui-sokol's 8-bit vertex colors add, is an instance of a
+     the sokol renderer's two passes: each Gaussian tap, split into the coarse and
+     fine weights its 8-bit vertex colors add, is an instance of a
      quad over the blur's whole pixels, adding its linearly filtered
      sample into a float target along x, then from that into another
      along y, the sample clamped per pixel to the region's edge pixels,
-     which is what zui-sokol's three quads per tap draw. The batch's fan
+     which is what the sokol renderer's three quads per tap draw. The batch's fan
      then takes the blurred texel at each pixel, under the tint. A
-     material is a batch of its own, its uniforms zui-sokol's, its
-     pattern found at each vertex's place in the element by zui-sokol's
+     material is a batch of its own, its uniforms the sokol renderer's, its
+     pattern found at each vertex's place in the element by the sokol renderer's
      material shader ported to GLSL ES. The targets are RGBA32F where
      WebGL can render, blend and filter it, else RGBA16F; without
      `EXT_color_buffer_float` a blur is its tint alone; past 16 blurs or 256 materials a frame
-     draws the tint or the fallback, counted, as zui-sokol does. The client
+     draws the tint or the fallback, counted, as the sokol renderer does. The client
      is 66 KB in ReleaseSmall and still reserves 35 MiB. `test-draw` now
      keeps every command but `image`, which the tour never draws. In
      Debug and ReleaseSafe alike, 1 to 16,682 of each frame's 1,296,000
@@ -1316,7 +1320,7 @@ It landed in five slices, in zui-web unless one says otherwise:
      CI's first `test-draw` with blurs failed frame 228 (17,654 unmatched
      pixels): Mesa's llvmpipe, drawing the reference under Xvfb, rounds
      each tap's addition to an RGBA16F target differently and summed the
-     pane 2 to 6 color steps darker than NVIDIA. zui-sokol (`0d7eedb`)
+     pane 2 to 6 color steps darker than NVIDIA. The sokol renderer (`05724a9`)
      now sums blurs in RGBA32F where the GPU can, and RGBA16F otherwise,
      and so does the client; `test-draw` fails if either side cannot sum
      in RGBA32F, and reports each failing frame's numbers and uploads its
@@ -1324,11 +1328,10 @@ It landed in five slices, in zui-web unless one says otherwise:
      alike, no pixel inside the pane differs by more than 1, and every
      frame but 252 (its one pixel) has none unmatched; 1 to 13,740 of each
      frame's pixels differ at all on NVIDIA, 5,516 to 22,905 on llvmpipe.
-     Its run in CI is to be confirmed once zui-sokol and then zui-web are
-     pushed.
+     Its run in CI is to be confirmed.
 3. **Input.** `web/input_recorder.mjs` turns a canvas's pointer,
    wheel, key and text events, its size and `devicePixelRatio` into calls
-   the client makes records of: zui-web's `RecordStream(Ui)` fills a
+   the client makes records of: the web host's `RecordStream(Ui)` fills a
    `RecordBuilder` and writes, through `zui_wire`'s `Encoder`, the
    stream's header and then a record only when it holds events or the
    viewport or scale changed, as F5's client sends. Its message buffer is
@@ -1353,37 +1356,34 @@ It landed in five slices, in zui-web unless one says otherwise:
    modifiers fails record 3, positions in device pixels fail record 1,
    and not setting the cursor fails frame 0. The client is 75 KB in
    ReleaseSmall and still reserves 35 MiB. The IME's text input area, and
-   composed text, wait for E1; CI's first `test-input` is to be confirmed
-   once zui-web is pushed.
+   composed text, wait for E1; CI's first `test-input` is to be confirmed.
 4. **The demo behind the page, in a Web Worker** (Decisions, Made): the
    tour built for `wasm32-freestanding`, its frames posted to the page as
    wire bytes and the page's records posted back. In parts:
-   - **The tour without sokol** (in zui-sokol). `zui_sokol_ui`, a
-     module that does not import sokol, holds `Text`, `truetype`,
-     `Material`, `Image`, the commands the renderer draws and `config`;
-     `zui_sokol` re-exports them, and its `config` checks the renderer.
-     `Image` is now the ids of a sokol_gfx view and sampler, field for
-     field what zui-web's `DemoUi` decodes, and `zui_sokol.imageOf` makes
-     one from sokol's handles. The tour declares its `Ui` through
-     `zui_sokol_ui`, so `zui_sokol_tour` imports no sokol, and given a
-     freestanding target zui-sokol's build makes only those two modules.
-     Without a C library stb_truetype allocates nothing: it measures, and
-     would rasterize no glyph. zui-sokol's `zig build check` compiles and
-     links `examples/tour_freestanding.zig`, the tour declaring a frame
-     for `wasm32-freestanding` on `std.Io.failing` (7.5 MB in Debug,
+   - **The tour without sokol** (in the sokol renderer, `ef05a67`). A
+     module of the sokol renderer's that does not import sokol holds
+     `Text`, `truetype`, `Material`, `Image`, the commands the renderer
+     draws and `config`; `zui_sokol` re-exports them, and its `config`
+     checks the renderer. `Image` is now the ids of a sokol_gfx view and
+     sampler, field for field what the web host's `DemoUi` decodes, and
+     `zui_sokol.imageOf` makes one from sokol's handles. The tour declares
+     its `Ui` through that module, so the tour imports no sokol, and given
+     a freestanding target the sokol renderer's build makes only those two
+     modules. Without a C library stb_truetype allocates nothing: it
+     measures, and would rasterize no glyph. The sokol renderer's
+     `zig build check` compiles and links the tour declaring a frame for
+     `wasm32-freestanding` on `std.Io.failing` (7.5 MB in Debug,
      importing nothing from the page); run once by hand under Node, it
-     declared the frame. The tour's frames are unchanged: with
-     `--fork=../zui-sokol`, zui-web's `test-demo` writes the same stream
-     byte for byte, its reference for `test-draw` is the same, and
-     `test-input` passes. zui-web's zui-sokol pin moved to that commit
-     (`3931162`) with the worker.
-   - **The worker** (pinned to zui-sokol `cac68e4`).
+     declared the frame. The tour's frames are unchanged: the web host's
+     `test-demo` writes the same stream byte for byte, its reference for
+     `test-draw` is the same, and `test-input` passes.
+   - **The worker** (on the tour at `5242889`).
      `zig build`
-     writes `zui-web-tour.wasm`, `zui_sokol_tour` built for
+     writes `zui-web-tour.wasm`, the tour built for
      `wasm32-freestanding` with atomics and bulk memory, on memory it
      imports shared: 793 KB in ReleaseSmall, 8.0 MB in Debug, and about
      49 MiB once `zuiTourInit` reserves it (the tour, 16 thread stacks of
-     256 KiB and 4 MiB for a frame's bytes). zui-web's `TourSession`
+     256 KiB and 4 MiB for a frame's bytes). The web host's `TourSession`
      runs the tour as a loop that owns its clock: each frame it steps the
      tour's `Io` to the page's instant, takes the records that arrived
      whole, declares the frame and writes it through `zui_wire`'s
@@ -1407,7 +1407,7 @@ It landed in five slices, in zui-web unless one says otherwise:
      starting the threads included; three runs of each agree. A worker
      refusing every task, as `std.Io.failing` does, fails it (no task
      finished), and so does a worker on 4 threads (frame 76 differs), and
-     at zui-sokol `3931162`, where the Gallery's tiles depended on the
+     at the tour of `ef05a67`, where the Gallery's tiles depended on the
      pointer width, frame 88 differs. By hand, in headless Chromium
      serving the page cross-origin isolated, the worker drew 312 frames
      in 115 ms in ReleaseSmall, after 28 ms starting its threads, and ran
@@ -1427,9 +1427,9 @@ It landed in five slices, in zui-web unless one says otherwise:
    `Cross-Origin-Embedder-Policy: require-corp`, and the page registers it
    and reloads once, and says so rather than reload again if it is still
    not isolated. `zig build site` writes the page, the client, the tour's
-   worker, sokol_debugtext's fonts and the tour's TrueType fonts with
+   worker, sokol's built-in bitmap fonts and the tour's TrueType fonts with
    their license to `zig-out/site`, 1.0 MB in ReleaseSmall (the client
-   77 KB, the tour 793 KB); zui-web's Pages workflow builds it in
+   77 KB, the tour 793 KB); the Pages workflow builds it in
    ReleaseSmall on each push to `main`, runs `test-site` on it and
    publishes it. `zig build test-site` serves the site as GitHub Pages
    does, without the isolation headers, opens it in headless Chromium and
@@ -1466,15 +1466,13 @@ renderer of the every-command context and that `zui.Context` of
 `contextConfig` of it is that context again; it fails to compile
 without the change with the message above.
 
-zui-host's `remote` example, `zui.checkRenderer` of
-`zui_wire.Renderer(tour.kit.Ui)`, fails the same way once zui-host
-builds against zui-sokol `cac68e4`, whose tour has a Materials screen;
-with this commit it compiles (`zig build check -Dtarget=x86_64-windows`
-with zui and zui-sokol as path dependencies), and needs no change of its
-own, only its pins moved. Nothing on a hot path changed. The pins have
-moved: zui-sokol `3b5e242` pins this commit, zui-host `fe9d90b` pins
-both and its check for x86_64 and aarch64 Windows compiles the `remote`
-example, and zui-web, zui-raylib and zui-terminal pin the same zui.
+The native hosts' `remote` example, `zui.checkRenderer` of
+`zui_wire.Renderer(tour.kit.Ui)`, failed the same way against the tour
+of `5242889`, which has a Materials screen; with this commit it compiles
+(`zig build check -Dtarget=x86_64-windows`), and needs no change of its
+own. Nothing on a hot path changed. The sokol renderer (`374702f`) and
+the native hosts (`b10af14`) build on this commit, and the hosts' check
+for x86_64 and aarch64 Windows compiles the `remote` example.
 
 ### V3. Safety sweeps
 
@@ -1483,7 +1481,7 @@ example, and zui-web, zui-raylib and zui-terminal pin the same zui.
 when:** the randomized tests run through it, a debug demo runs with it
 on, and with the feature off, R1 counts are unchanged.
 
-`Frame.sweep()`, in `src/sweeps.zig`, returns the first invariant a
+`Frame.sweep()`, in `core/src/sweeps.zig`, returns the first invariant a
 frame breaks as a `zui.SweepFailure`, naming a `zui.Invariant` and the
 element or command: sizes and positions finite and not negative; child
 lists that agree with the parent links, declaration order and counts;
@@ -1505,11 +1503,10 @@ now says they start inside the content box on an axis that does not
 scroll, since an overflowing child that cannot shrink passes the clip by
 design and a scrolled axis is offset by state the frame does not keep.
 
-zui-raylib's demo needs no change: its Debug build has the feature on by
-default, and `zig build demo --fork=../zui -- --hidden --frames 900
---cycle 40` drew 900 frames across every screen, every limit held, with
-no failure. zui-raylib's, zui-sokol's and zui-terminal's tests pass
-against this checkout.
+The raylib renderer's tour needs no change: its Debug build has the
+feature on by default, and its run with `--hidden --frames 900 --cycle 40`
+drew 900 frames across every screen, every limit held, with no failure.
+The raylib, sokol and terminal renderers' tests pass.
 
 Measured against `4f9d316` with `zig build counts`: with the feature
 off (its ReleaseFast default) every scenario is identical to the
@@ -1544,19 +1541,19 @@ theme among the context's sources, so a replay restyles without reading
 a file (`389e497`). `zui_app`'s optional `zuiObserve(app, ui, frame)`
 hook hands the application each frame on the UI thread before it is
 submitted, and `zui_testing`'s driver runs the inspector over the
-Documents view of `bench/scenes.zig`: a row per element, and the sixth
+Documents view of `core/bench/scenes.zig`: a row per element, and the sixth
 document under the pointer with its rectangle, flags and hovered
 background (`676799c`).
 
-zui-raylib (`d3afdb1`, pinned to `676799c`) toggles the panel with F12,
+The raylib renderer's tour (`6a12de7`) toggles the panel with F12,
 or opens it with `--zui-debug`, observing frames only while it is open;
 its tracer is `ZoneTimer(zui_tracy.Tracer)`, and its fallbacks list the
 `Report` `zui_app` started with. Its theme does not reload there, since
-raylib's host has no file watch. `test-tour` opens the panel with F12
-over the Classic screen and checks it lists the frame's elements with
-every limit held.
+raylib's host has no file watch. The tour's headless test opened the
+panel with F12 over the Classic screen and checked it lists the frame's
+elements with every limit held.
 
-Measured: `src/` gained only `Frame.inspect`, which no frame calls, so
+Measured: `core/src/` gained only `Frame.inspect`, which no frame calls, so
 no hot path or instruction count moved. The hidden demo drew 480 frames
 across every screen with the panel open, every limit held; the panel
 lists a row per element, so a Box Storm raised to 14,000 boxes would
@@ -1580,13 +1577,13 @@ without a background, and emission draws the `material` command over
 the shadow and backdrop blur and under the gradient, its fallback the
 background or transparent; for a renderer without `.material` it draws
 the background and lists `.material` in `Diagnostics.lowered`.
-`src/tests/materials.zig` tests both ways, a static style's material and
+`core/src/tests/materials.zig` tests both ways, a static style's material and
 the order; snapshots write a material. The renderer suite's reference
 scene declares a material when the harness gives one
 (`harness.material(color)`), and its pixel renderer passes drawing it
 and with it lowered, and fails drawing the fallback in its place.
 
-zui-sokol (`69c6617`, pinned to `7af04c6`) declares it with
+The sokol renderer (`5903f48`) declares it with
 `zui_sokol.Material`, a pattern between two colors (`solid`, `sheen`,
 `aurora`) moved by a phase the application turns, and passes the suite
 on Linux with `Material.solid` drawn through its shader, in a frame that
@@ -1603,13 +1600,13 @@ Measured: `counts` against `613760e` moved one scene, the documents
 view's declaration, by 40 instructions (30,527 to 30,567, +0.13%), every
 other scene and phase unchanged; `materialOf` is `inline`, since out of
 line its `null` for a `void` handle was not folded and declaration grew
-up to 6.3%. zui-sokol's Materials screen held 144 fps at 144 Hz on
+up to 6.3%. The sokol renderer's Materials screen held 144 fps at 144 Hz on
 Linux, its "sokol submit" reading 2.3 ms in one sample; the GPU's cost
 is not timed.
 
-Not done: zui-sokol has been drawn only with OpenGL; its HLSL and Metal
-are sokol-shdc's and compile only when the tour runs on Windows or macOS.
-zui-raylib and zui-terminal draw the fallback.
+Not done: the sokol renderer's material has been drawn only with OpenGL;
+its HLSL and Metal are sokol-shdc's and compile only when the tour runs
+on Windows or macOS. The raylib and terminal renderers draw the fallback.
 
 **Spec.** §10.1, §13.1, §13.3.
 
@@ -1629,41 +1626,41 @@ the element's units, and lowered to the element as laid out, listed in
 `Diagnostics.lowered` (`592e305`). Each transformed element enters a
 space in the hit results, and every hit test goes through
 `Results.hits`, which maps the pointer into the region's space and
-checks the clip around each transform. `src/tests/transforms.zig` clicks
+checks the clip around each transform. `core/src/tests/transforms.zig` clicks
 a rotated button where it is drawn and not where it was laid out, and
 through nested transforms up to the clip around them. `checkCommands`
 checks transforms and clips nest; snapshots write a transform's fields.
 The renderer suite's reference scene turns a box of two halves a
 quarter, and its pixel renderer passes drawing it and with it lowered,
-and fails turning it the wrong way; zui-raylib and zui-terminal pass it
-lowered.
+and fails turning it the wrong way; the raylib and terminal renderers
+pass it lowered.
 
-zui-sokol (`a00c6c4`, pinned to `592e305`) declares it and passes the
+The sokol renderer (`f153f57`) declares it and passes the
 suite on Linux, read back by `glReadPixels`. Each `transform_begin`
 composes its affine with those around it and loads the result as
 sokol_gl's modelview matrix, which sokol_gl bakes into each draw, so it
-holds across the layers paint order needs. sokol_debugtext has no
-matrix, so bitmap text inside a transform is drawn as sokol_gl quads
+holds across the layers paint order needs. sokol's built-in bitmap text
+has no matrix, so bitmap text inside a transform is drawn as sokol_gl quads
 from a texture of its own font bits. A clip inside a transform is
 scissored to the box around it in the window, and a backdrop blur inside
 one blurs that box and samples each vertex where it is drawn. Its tour
 gains a Transforms screen: a card turned, moved and scaled from sliders
 and pressed where it is drawn, turned tiles, clock hands turned about
-their foot, and the six bitmap fonts turned.
+their foot, and sokol's six built-in bitmap fonts turned.
 
 Measured: against `cceecfa`, `counts` moved no declaration and every
 `endFrame` by −0.04% to −0.39%; `bench-compare`, turbo off, called no
 frame scene slower and `init` 2.9% slower (+1.0% to +6.6%), `Effects`
-having grown 32 bytes for each of its 256 copies a frame. zui-sokol's
+having grown 32 bytes for each of its 256 copies a frame. The sokol renderer's
 Transforms screen held 144 fps at 144 Hz on Linux, its "sokol submit"
 reading 2.8 ms in one sample; the GPU's cost is not timed.
 
 Not done: a pan or wheel over a transformed scroll container moves it
 along the window's axes, and `Drag` and the pointer events report window
 units; SPEC.md does not yet say which units they take inside a
-transform. zui-sokol cuts a clip inside a turned transform to the box
+transform. The sokol renderer cuts a clip inside a turned transform to the box
 around it, since a scissor is upright; a stencil would cut it exactly.
-zui-raylib and zui-terminal draw the element as laid out.
+The raylib and terminal renderers draw the element as laid out.
 
 **Spec.** §13.1, §13.3, §16.4.
 
@@ -1674,17 +1671,17 @@ when it draws nothing itself, declared or through a static style, and
 every other decoration as before.
 **Done when:** a test finds the radius on each effect's command and its
 lowered form, both ways; `counts` moves no scene by more than the noise;
-zui-sokol's tour, pinned to the fix, shows the card and the pane rounded.
+the sokol renderer's tour, on the fix, shows the card and the pane rounded.
 
 Declaration stored a decoration only when it had a background or a
 border, so an element with a corner radius and effects alone drew them
-square; G2 found it on zui-sokol's tour. It now keeps the decoration
+square; G2 found it on the sokol renderer's tour. It now keeps the decoration
 whenever the element declares effects (`keepsDecoration`, `62a21d2`),
 and emission draws nothing for it but the effects' corners. Two tests in
-`src/tests/effects.zig` find the radius on the `shadow`,
+`core/src/tests/effects.zig` find the radius on the `shadow`,
 `backdrop_blur` and `gradient` commands and on the lowered rectangles,
-declared and static, and fail without the fix. zui-sokol (`b7c885d`,
-pinned to `62a21d2`) draws the Light & Depth card's gradient and shadow
+declared and static, and fail without the fix. The sokol renderer
+(`6dbf06d`) draws the Light & Depth card's gradient and shadow
 and the frosted pane rounded.
 
 Measured: `counts` against the parent moved one scene, which declares no
@@ -1709,13 +1706,13 @@ lowered to a rectangle in its tint, listed in `Diagnostics.lowered`
 row: a blur floating over eight stripes, which a declared blur averages
 under its tint and a lowered one tints stripe by stripe; its pixel
 renderer passes both ways, box-averaging, and fails tinting without
-blurring. zui-raylib and zui-terminal pass it lowered.
+blurring. The raylib and terminal renderers pass it lowered.
 
-zui-sokol (`0526510`, pinned to `43e3d8f`) declares it and passes the
+The sokol renderer (`d738cdc`) declares it and passes the
 suite on Windows, read back by `glReadPixels`, and fails it drawing only
 the tint. A frame with a blur is drawn into an offscreen target made
-like the swapchain, so sokol_gl's and sokol_debugtext's pipelines draw
-into it unchanged, and copied to the swapchain at the end; at each blur
+like the swapchain, so sokol_gl's pipelines and those of sokol's built-in
+bitmap text draw into it unchanged, and copied to the swapchain at the end; at each blur
 the scene's pass ends, a Gaussian runs along x then y into two RGBA16F
 targets, its neighbouring pixels paired into one filtered sample and the
 element's edge pixels repeated, and the pass resumes with the result
@@ -1732,17 +1729,17 @@ Measured: the core's `counts` were unchanged in every scene, and
 1.3% slower in the same instructions and simulated misses, `Effects`
 having grown 12 bytes; moving the effects' storage last instead made
 declaration 1% to 5% slower in most scenes, so it stays where G1 put it.
-In zui-sokol, one D3D11 sample of the Light & Depth screen at 144 Hz
+In the sokol renderer, one D3D11 sample of the Light & Depth screen at 144 Hz
 reads "sokol submit" 5.7 ms against 3.9 ms before, both holding 141 to
 144 fps; the GPU's cost is not timed.
 
 Found on the way: an element whose decoration has a corner radius but
-no background or border keeps no decoration (`src/context.zig:1223`,
+no background or border keeps no decoration (`core/src/context.zig:1223`,
 `drawnDecoration`), so its effects are drawn square. Both the tour's
 gradient card (G1) and its frosted pane show it; it is in ARCHITECTURE.md
 §7, and G7 fixes it.
 
-Not done: zui-raylib and zui-terminal draw the tint alone. zui-sokol
+Not done: the raylib and terminal renderers draw the tint alone. The sokol renderer
 stops a blur's standard deviation at about 42 physical pixels (129 taps
 per axis) and a frame at 16 blurs, drawing the rest as their tint and
 counting them in `Renderer.backdrop_blurs.lowered`; downsampling would
@@ -1767,7 +1764,7 @@ nothing, listing both in `Diagnostics.lowered`. `limits.max_effects`
 both; its pixel renderer passes it drawing them and with them lowered,
 and fails it interpolating in sRGB.
 
-zui-sokol (`e4ed7c5`, pinned to `b4bf610`) declares both and passes the
+The sokol renderer (`c5b5de4`) declares both and passes the
 suite on Linux, read back by `glReadPixels`: a gradient in bands at most
 4 units long, each vertex its OKLab `colorAt`, so sokol_gl's sRGB blend
 between vertices stays within a step of it; a shadow as its box at the
@@ -1790,7 +1787,7 @@ instantiation of the walk stopped `emitText`, `floatingLayer` and
 `sortLayers` being inlined, 4%; storage for every element made `init`
 21% slower.
 
-Not done: zui-raylib and zui-terminal still draw the lowered forms.
+Not done: the raylib and terminal renderers still draw the lowered forms.
 
 **Spec.** §13.1, §13.3, §16.4.
 
@@ -2079,7 +2076,7 @@ measured per machine, rounds until the interval is narrow enough.
 **Done when:** a commit compared with itself gives intervals that all
 contain zero, and R2's store-forwarding stall is still called faster.
 
-`bench/statistics.zig` holds the bootstrap (a fixed seed, 10,000
+`core/bench/statistics.zig` holds the bootstrap (a fixed seed, 10,000
 resamples, two-stage for R7's layouts) and a test for two clusters of
 frames, which `bench` warns about, beside each phase's p95.
 `bench-compare --calibrate` compares a commit with itself and saves each
@@ -2104,7 +2101,7 @@ then pins itself, records the state before every run, and warns when it
 changes. **Done when:** a commit compared with itself, pinned and with
 turbo off, is narrower than unpinned.
 
-`bench/machine.zig` reads the power plan, `PROCTHROTTLEMAX`,
+`core/bench/machine.zig` reads the power plan, `PROCTHROTTLEMAX`,
 `PERFBOOSTMODE` and the clock on Windows, and the governor, turbo, the
 core's siblings and `randomize_va_space` on Linux. `--require-quiet`
 refuses to run with turbo on or another governor. README's *Quieting the
@@ -2119,7 +2116,7 @@ reports the base clock as the current one, so it cannot show boosting.
 ### I1. Drag and drop between elements
 
 **Grounding.** I5 arbitrates every pointer by motion component past the
-touch slop (`src/context.zig`, `pan` and `panOwner`), and `Gestures` had
+touch slop (`core/src/context.zig`, `pan` and `panOwner`), and `Gestures` had
 two spare bits; SPEC.md §11.5 named `dragging`, `dropped` and `startDrag`
 and the payload's place in the state table, but no element could declare
 `drag`.
@@ -2183,7 +2180,7 @@ Linux container.
 
 **Grounding.**
 - The slider drags with `pressed` and `pointerLocal`
-  (`zui_widgets/zui_widgets.zig:290`); drag-to-scroll and drag and drop
+  (`core/zui_widgets/zui_widgets.zig:290`); drag-to-scroll and drag and drop
   want the same pointer, and nothing decides between them.
 - Routing by gesture kind fails: a vertical drag on a horizontal carousel
   inside a vertical list goes to the carousel, and a pinch that starts on
@@ -2359,17 +2356,16 @@ not work added.
 ### C10. The backends draw images' tint and corner radius
 
 **Grounding.** Since L3 the `image` command carries `tint` and
-`corner_radius`, but zui-raylib draws an image with its handle and bounds
-alone (`src/root.zig:541`, `drawTexture(image.handle, bounds)`), and so
-does zui-sokol (`src/renderer.zig:185`); zui-terminal has no images. The
+`corner_radius`, but the raylib renderer draws an image with its handle and bounds
+alone (`renderers/raylib/src/root.zig:541`, `drawTexture(image.handle, bounds)`), and so
+does the sokol renderer (`renderers/sokol/src/renderer.zig:185`); the terminal renderer has no images. The
 renderer suite's reference scene declares an untinted, square image.
 
 **Plan.** Each backend multiplies the tint into the image and rounds its
 corners; the renderer suite's reference scene declares a tinted image
 with a corner radius and checks a pixel inside it and one in a corner.
-Then each backend's pin moves past L3.
 
-**Done when:** zui-raylib and zui-sokol pass the extended renderer suite
+**Done when:** the raylib and sokol renderers pass the extended renderer suite
 in CI.
 
 **Spec.** §10.1, §13.1, §16.2.
@@ -2386,25 +2382,23 @@ corners, and a flawed copy of it that draws images untinted and square
 fails with
 `drew #00ffff at (32, 112) in the reference scene, where a tinted image of one color should be #00ff80`.
 
-zui-sokol sets the tint as the vertex color, which sokol_gl multiplies
+The sokol renderer sets the tint as the vertex color, which sokol_gl multiplies
 into each texel, and draws a rounded image as a fan of textured triangles
 from its center over the outline its rounded rectangles already trace,
 each corner with its own radius. raylib multiplies a texture by a tint
-too, but cannot round one, so zui-raylib draws a rounded image the same
+too, but cannot round one, so the raylib renderer draws a rounded image the same
 way through rlgl, wound counter-clockwise on screen as raylib's culling
 wants, with each corner's own radius, though its rectangles round all
 four corners by the largest. A square image is drawn as before, one
 quad, with the tint.
 
-Both backends' pins move to this commit, from `cd3ddd6` (zui-raylib) and
-`ad90c3a` (zui-sokol), with no change to their code beyond drawing
-images; zui-terminal, which has no images, moves from `0268dbd`, and
-zui-host to this commit and the new zui-sokol. Run against the zui
-worktree with `--fork`, zui-raylib's renderer and host suites and
-zui-sokol's renderer suite pass on Windows, and zui-raylib's old drawing
-fails the extended suite with the message above; their CI runs the suites
-on Linux under `xvfb-run`. zui core is unchanged, so its instruction
-counts and times are too.
+Neither renderer's code changes beyond drawing images, and the terminal
+renderer, which has no images, does not change. The raylib renderer's
+renderer and host suites and the sokol renderer's renderer suite pass
+on Windows, and the raylib renderer's old drawing fails the extended
+suite with the message above; CI runs the suites on Linux under
+`xvfb-run`. The core is unchanged, so its instruction counts and times
+are too.
 
 ### L7. Wrap
 
@@ -2621,7 +2615,7 @@ alone. SPEC.md §10.1 now shows `Decoration` and `Border` and says so.
 `image` command carries both, with the same defaults so that renderers
 and tests that build one with a handle alone still compile.
 `zui_testing.snapshot` writes them when they are not the defaults.
-zui-raylib and zui-sokol draw images without them until C10.
+The raylib and sokol renderers draw images without them until C10.
 
 Tests: dividers across a row with a border, sitting in the gaps inside
 the border's widths, after the children and before the border; down a
@@ -3001,8 +2995,7 @@ host's watch publishes into a source and wakes once; a too-long path is a
 refusal; a delivery of changes round-trips through `zui_wire`; `zig build
 check` watches on every target. Nothing on a hot path changed.
 
-zui-host (`39e3971`, pinning zui at `ad90c3a` and zui-sokol at
-`68b29d1`, which moved only its zui pin) watches up to four directories
+The Windows host (`0e9690f`) watches up to four directories
 with their subdirectories: a thread per directory issues each overlapped
 `ReadDirectoryChangesW` and publishes each change, waking the window for
 the first since the last frame; `watch` returns once the first read is
@@ -3011,7 +3004,7 @@ see files added, written, renamed, added in a new subdirectory and
 removed, each within 2 s, and a missing directory and a fifth watch
 fail.
 
-The demo is zui-host's `zig build theme`: a window in the colors of a
+The demo is the native hosts' `zig build theme`: a window in the colors of a
 ZON theme, whose application declares a `Stream(zui.FileChange)` and a
 `Latest(Theme)` among its sources; declaration sees the theme's file
 among the changes, and the loader reads and parses it into the `Latest`,
@@ -3033,8 +3026,8 @@ Decided here:
   files changed.
 
 Since then, `zui_debug` (V1) reloads its theme this way (`389e497`).
-The demo is a zui-host example rather than zui-sokol's tour, whose
-working tree another session is changing.
+The demo is an example of the native hosts' rather than the sokol
+renderer's tour, which was changing under another item at the time.
 
 ### F5. Rendering somewhere else
 
@@ -3067,10 +3060,10 @@ pass in the three modes on Windows, and on Linux and x86-linux in
 Docker. `zig build check` instantiates the three for every target with a
 network.
 
-The demo: zui-host's `zig build remote -- --check tour.bmp` starts
-zui-sokol's tour, unchanged, in a second process on the wire host and
+The demo: the native hosts' `zig build remote -- --check tour.bmp` starts
+the tour, unchanged, in a second process on the wire host and
 renderer, listening on a loopback port it prints, and draws it in a
-window of the Windows host with zui-sokol's renderer through a client.
+window of the Windows host with the sokol renderer through a client.
 It presses Ctrl+2, Ctrl+4 and Ctrl+9 and waits for frames showing each
 screen's tagline, saves the window, and closes it, after which the tour's
 process exits with 0. In five runs in a row on the reference machine,
@@ -3121,7 +3114,7 @@ gallery session, a grid of tiles loaded by key with loads that finish a
 frame later, a battery level and a log, replays to the same commands
 with no load started.
 
-The demo: in zui-sokol's tour at `ed00845`, declared headlessly with
+The demo: in the sokol renderer's tour at `9b616d5`, declared headlessly with
 real fonts and its real loaders (tiles loaded on threads, telemetry), 30
 frames on each of its ten screens recorded with `Recording`, then
 replayed into a fresh context and a fresh application whose loaders
@@ -3164,7 +3157,7 @@ by element id and kind within 32 commands. `zui_async`'s `Stream` and
 contract's `zuiFingerprint` is checked for its signature
 (`fn (*const Text) u64`).
 
-`zui_wire/tests.zig` round-trips every `Event` and `EnvironmentChange`
+`core/zui_wire/tests.zig` round-trips every `Event` and `EnvironmentChange`
 kind, every delivery of `zui_async` and one holding a pointer that sends
 a number instead, and every command kind whole and as changes; checks
 that a key frame lets a reader join, that a message beyond the decoder's
@@ -3175,8 +3168,8 @@ pin a delivery and an `ImageHandle` holding a pointer, `zuiSerialize`
 without `zuiDeserialize`, and a wrong `zuiFingerprint`; `zig build check`
 encodes and decodes a record and a frame on every target.
 
-Measured on zui-sokol's tour at `ed00845`, declared headlessly as its
-`test-tour` does, with real fonts: 120 frames on each of its ten screens
+Measured on the sokol renderer's tour at `9b616d5`, declared headlessly as its
+tour test does, with real fonts: 120 frames on each of its ten screens
 at 1440×900, the mouse crossing each screen, every frame written whole
 by one encoder and as changes by another, and each decoded frame
 checked equal to the one drawn:
@@ -3233,7 +3226,7 @@ frame fills from each source's `zuiDelivery` into `relayed_deliveries`
 in the context's reservation, and a replayed one passes through.
 `relayTo(null)` detaches it.
 
-`src/tests/relay.zig` relays a four-frame session (a click with typed
+`core/src/tests/relay.zig` relays a four-frame session (a click with typed
 text, a published value, six events where four are kept) into a
 recorder, checks each record against what was applied, then feeds the
 recorded records with their deliveries to a fresh context and gets the
@@ -3264,16 +3257,16 @@ each host" needs one loop for every application.
 
 **Grounding.** `zui_app.checkApp` made any `Text` but the renderer a
 compile error (C4), and `contextConfig` replaced an override's `Text`
-with a renderer that measures. zui-sokol's tour measures with
+with a renderer that measures. The sokol renderer's tour measures with
 `zui_sokol.Text`, a separate type its renderer holds a pointer to, so
-H2 ran it on zui-host under a hand-written loop.
+H2 ran it on the Windows host under a hand-written loop.
 
 **Plan.** Let the application name its text contract, keeping "the
 renderer measures" as the default, with exact, pinned compile errors.
 
-**Done when:** zui-host's `tour` step runs zui-sokol's tour through
-`zui_app.run`, `zui_app`'s tests cover both cases, and zui-raylib's demo
-builds unchanged.
+**Done when:** the native hosts' `tour` step runs the sokol renderer's
+tour through `zui_app.run`, `zui_app`'s tests cover both cases, and the
+raylib renderer's demo builds unchanged.
 
 What landed:
 - **`App.Text`.** An application whose `Config` names `.Text = Fonts`
@@ -3292,24 +3285,23 @@ What landed:
   `sources` as a field holding the `Sources` or pointing to them, so a
   wrapper uses the sources of the application it wraps; and each field
   of the host, the renderer and the text that has a default holding it
-  when their `init` is called. zui-host's `Host.init` reads
+  when their `init` is called. The Windows host's `Host.init` reads
   `forced_scale` and `system_material_unavailable` from itself, which
   under `zui_app` had been undefined.
 
-zui-host (`34ce8cb`, pinning zui at `b2b3574` and zui-sokol at
-`ed00845`, which moved only its zui pin so the two agree) runs the tour
+The native hosts (`d6fe429`) run the tour
 with `examples/tour.zig` now `zui_app.run(TourOnHost, ...)`:
 `TourOnHost` names the host, the renderer and `zui_sokol.Text`, and
 passes each step to the tour's own `App`; a small `SokolRenderer`
-opens zui-sokol's renderer with `initForSurface` and times each submit
-for the tour's strip, since zui-sokol's `Renderer.init` predates
-`zui_app` and its working tree is being changed by another session. The
+opens the sokol renderer with `initForSurface` and times each submit
+for the tour's strip, since the sokol renderer's `Renderer.init` predates
+`zui_app` and was changing under another item at the time. The
 tour visits every screen (`--frames 300 --cycle 30`, diagnostics ok), its
 screenshot shows the dark theme `zuiRecord` applied, and in ReleaseSafe
 on the reference machine Layout Lab idles at 0.0, 31.3, 15.6 and 0.0 ms
 of CPU over 10 s with 0 frames and 0 wakes; Welcome at 0.0 ms with its
-11 heartbeat frames. zui-raylib's demo, tests and suites build and pass
-against this commit unchanged. Nothing in the core changed, so there is
+11 heartbeat frames. The raylib renderer's demo, tests and suites build
+and pass unchanged. Nothing in the core changed, so there is
 nothing to count.
 
 Decided here:
@@ -3319,17 +3311,17 @@ Decided here:
   host's poll: the zoom is the application's (SPEC.md §16.3), and the
   host converted this poll's events at the zoom then on screen.
 
-What remains: zui-sokol's `Renderer` could take `zui_app`'s
-`init(self, surface, text)` itself, which would retire zui-host's
-`SokolRenderer`; that waits for zui-sokol's working tree to settle.
+What remains: the sokol renderer's `Renderer` could take `zui_app`'s
+`init(self, surface, text)` itself, which would retire the native hosts'
+`SokolRenderer` (`hosts/native/examples/sokol_renderer.zig`).
 
 ### H8. The desktop showing through the window
 
 `zui.SystemMaterial` (`none`, `window`, `transient`) in
 `WindowOptions.material`, passed by `zui_app.Options.material`, and
 `Environment.system_material`, the host's answer on this machine, an
-environment change like every other (`50430d8`). zui-host's Windows host
-(`5c33514`) declares `system_material`: it asks DWM for the backdrop
+environment change like every other (`50430d8`). The Windows host
+(`a958595`) declares `system_material`: it asks DWM for the backdrop
 (`DWMWA_SYSTEMBACKDROP_TYPE`, Mica or Acrylic), extends the frame over the
 client area and paints it black, which is transparent there, and reports
 `system_material` (the backdrop taken and transparency effects on) and
@@ -3340,16 +3332,16 @@ refuses the attribute.
 The renderer clears to transparent and must keep its alpha. Windows
 ignores the alpha of an OpenGL window and of a Direct3D swapchain made for
 a window: over Acrylic's #545454, an opaque #2d2d2d card showed #818181,
-the backdrop added under every pixel. So zui-sokol's renderer (`b138784`)
+the backdrop added under every pixel. So the sokol renderer (`6d49d41`)
 now draws into a `win32` window with D3D11, its default backend, through a
 swapchain DirectComposition composes into the window with premultiplied
 alpha, and its sokol_gl pipeline writes alpha, which sokol_gl does not by
-default. sokol_debugtext writes 0 between a glyph's strokes, which let the
+default. sokol's built-in bitmap text writes 0 between a glyph's strokes, which let the
 backdrop through each glyph's cell over a card, so when the surface
 composes alpha every rectangle and border is drawn again into the alpha
 channel after the text, with MAX blending.
 
-`zig build material` in zui-host declares a root without a background
+`zig build material` in `hosts/native/` declares a root without a background
 while `system_material` is true and with the theme's otherwise. Read back
 from the screen on the reference machine (Windows 11): Mica shows #202020
 where nothing is drawn (black without it), Acrylic #545454, and a #2d2d2d
@@ -3363,7 +3355,7 @@ Decided here:
   status a host call returns, so it is in the record, replays, and the
   application reads it where it reads the theme.
 - **A native window's renderer composes with alpha** through
-  DirectComposition on Windows; zui-sokol's OpenGL path stays for
+  DirectComposition on Windows; the sokol renderer's OpenGL path stays for
   `-Dgl=true` and its renderer suite, and does not show the material.
 
 What remains, and where it went:
@@ -3375,8 +3367,7 @@ What remains, and where it went:
 
 ### H2. The Windows host
 
-[zui-host](https://github.com/AaronJClausen/zui-host) (`dc57eae`,
-pinning zui at `d9d279e` and zui-sokol at `78ba9ad`), created here, one
+`zui_host`, in `hosts/native/` (`0731195`), created here, one
 directory per OS; `zui_host.Host` is `windows/host.zig` on Windows and a
 compile error naming the OS elsewhere. The Windows host:
 - runs its window's message loop on a thread of its own, so the window
@@ -3398,7 +3389,7 @@ compile error naming the OS elsewhere. The Windows host:
   at the caret, turning the IME off while no editable asks for text;
 - offers the clipboard as text through `zuiClipboard`.
 
-zui gained what such a host reports and the record could not carry
+The core gained what such a host reports and the record could not carry
 (`d9d279e`): `Event.files_dropped` (`zui.FilesDropped`, paths copied
 whole into the new `limits.max_dropped_path_bytes`, `ui.filesDropped()`,
 `RecordBuilder.appendFilesDropped`) and `Event.lifecycle`
@@ -3406,7 +3397,7 @@ whole into the new `limits.max_dropped_path_bytes`, `ui.filesDropped()`,
 in a local Docker container: declaration +1 instruction in every
 scenario, `endFrame` unchanged.
 
-zui-sokol's renderer (`88d400d`, `78ba9ad`) draws into a `win32` surface
+The sokol renderer (`05485b5`, `2d11a00`) draws into a `win32` surface
 when built with OpenGL (`-Dgl=true`): `Renderer.initForSurface` makes the
 window's OpenGL 4.3 core context through WGL and sets sokol_gfx up on it
 without sokol_app, and `zuiSubmit` presents with vsync. A D3D11 build does
@@ -3415,26 +3406,27 @@ not declare the surface, so pairing it with the host fails to compile.
 It passes C3: `expectHostConforms` against a hidden window, with a
 harness that sends the messages Windows would, and ten more tests (DPI
 changes, text, the wheel, dropped files, the session ending, Ctrl+C, the
-clipboard, requests). The demo is zui-sokol's tour, whose application
-zui-sokol exports as `zui_sokol_tour` and zui-host runs unchanged under
-its own six-line loop; under sokol_app it runs as before (`test-tour`
-passes). Measured on the reference machine in ReleaseSafe with
+clipboard, requests). The demo is the sokol renderer's tour, whose
+application the sokol renderer exports as a module of its own and the
+native hosts run unchanged under their own six-line loop; under
+sokol_app it runs as before (its tour test passes). Measured on the
+reference machine in ReleaseSafe with
 `--measure-idle` on the Layout Lab screen (heartbeat off): 15.6, 15.6,
 31.3 and 62.5 ms of CPU over 10 s, 0 or 1 frames and 0 wakes; the Welcome
 screen, which animates once a second, 15.6 ms and 10 frames. A screenshot
-through the compositor (`--screenshot`) shows the tour drawn. zui-host's
-CI checks the format, runs the tests and the host suite on GitHub's
+through the compositor (`--screenshot`) shows the tour drawn. The native
+hosts' CI checks the format, runs the tests and the host suite on GitHub's
 Windows runner in Debug and ReleaseSafe, and cross-compiles from Linux for
 x86-64 and ARM64 Windows, which found a function-pointer alignment that
-only ARM64 enforces in zui-sokol's WGL code (`78ba9ad`).
+only ARM64 enforces in the sokol renderer's WGL code (`2d11a00`).
 
 Decided here:
-- **The demo for a native host is zui-sokol's tour,** not zui-raylib's
+- **The demo for a native host is the sokol renderer's tour,** not the raylib renderer's
   demo: raylib owns its window and cannot draw into another, so the
   application that runs unchanged across hosts is the one whose renderer
   can. The tour runs under a loop written by hand, not `zui_app`, because
   `zui_app` gives the context the renderer as its text contract and
-  zui-sokol's text contract is a separate `Text`.
+  the sokol renderer's text contract is a separate `Text`.
 - **The window's loop runs on its own thread,** so Windows' modal move
   and resize loops never stop frames; the contract does not change, as
   the host owns its threads.
@@ -3460,7 +3452,7 @@ What remains, and where it went:
 
 ### H1. The raylib adapter host
 
-zui-raylib (`2fe41eb`, pinning zui at `cd3ddd6`) has `zui_raylib.Host`,
+The raylib renderer (`80981d0`) has `zui_raylib.Host`,
 zui's host contract on raylib's window, with one window and no system
 material:
 - `zuiPoll` samples raylib's state through `zui.InputSampler` and begins
@@ -3480,7 +3472,7 @@ material:
 
 The renderer is now also the text contract, so
 `zui_app.contextConfig(Renderer, ...)` replaced `zui_raylib.config`.
-`src/conformance.zig` runs `expectHostConforms` beside the renderer
+`renderers/raylib/src/conformance.zig` runs `expectHostConforms` beside the renderer
 suite; its harness's `post` scripts the state `InputSampler` reads. Both
 pass on Windows here and on Linux CI under Xvfb, where the demo's
 screenshots, its abandoned loads and its idle measurement (23.7 ms over
@@ -3585,16 +3577,16 @@ instant; and a closed window polls false. Every wait is bounded: past
 `lost_wake_ns` the suite keeps waking the host, so a lost wake fails it
 rather than hanging it. A test host in `zui_testing` passes; one that
 clears its wake before waiting fails with `WakeNotSticky`. The three wait
-tests of `src/tests/hosts.zig` moved into the suite. `zig build check`
+tests of `core/src/tests/hosts.zig` moved into the suite. `zig build check`
 instantiates both suites on every target.
 
 Each backend has `src/conformance.zig` and a `conformance` step, which
 its CI runs (README.md's *Conformance suites* is the recipe):
-- **zui-terminal** reads each pixel as the cell covering it, and passes
+- **the terminal renderer** reads each pixel as the cell covering it, and passes
   with no tolerance; its `test` step runs the suite too;
-- **zui-raylib** draws into a render texture of a hidden window and reads
+- **the raylib renderer** draws into a render texture of a hidden window and reads
   it back with `LoadImageFromTexture`; on Linux CI under Xvfb;
-- **zui-sokol** runs the suite in a sokol_app window's first frame,
+- **the sokol renderer** runs the suite in a sokol_app window's first frame,
   reading each frame back with `glReadPixels` before it is presented, so
   its suite always renders with OpenGL; on Linux CI under Xvfb.
 
@@ -3629,7 +3621,7 @@ and each drop is counted on the builder; `record()` and
 `recordWith(Ui.Deliveries)` make the record for a context without and
 with sources.
 
-A test host in `src/tests/hosts.zig` runs the loop of SPEC.md §6.1 with a
+A test host in `core/src/tests/hosts.zig` runs the loop of SPEC.md §6.1 with a
 `Context` and a renderer on its offscreen surface: a click and typed text
 queued as the OS's events arrive through the builder, the frame's cursor
 request is applied, and the loop ends when the window closes. Its wake is
@@ -3666,7 +3658,7 @@ carries its record's parameters (`Frame.params`), which a renderer needs
 to draw. `zig build check` instantiates a renderer that declares every
 optional command and payload type on every target.
 
-zui-raylib, zui-sokol and zui-terminal are renderers: each has a
+The raylib, sokol and terminal renderers are renderers: each has a
 `Renderer` whose `config()` builds the `Config` from its declarations and
 whose `zuiSubmit` switches exhaustively over the commands. raylib and
 sokol draw into their library's own window (`.library`); the terminal
@@ -3762,13 +3754,13 @@ comparison has it). Against `bf807b9`:
 
 ### C8. The backends on the stage-2 API
 
-zui-raylib (`67d1cc1`), zui-sokol (`cb9d03e`) and zui-terminal
-(`039b7fe`) pin zui at `2df48f7` and build without `--fork`; each
+The raylib renderer (`66c3d77`), the sokol renderer (`e8ce40f`) and the
+terminal renderer (`d7930bb`) move to the API of `2df48f7`, and each
 one's CI passes on Linux, Windows and macOS. In each:
 - `Platform` is `Text`, the text contract, set by the backend's
   `config()`: `zuiMeasure` with a `MeasureKey`, counting the letter
   spacing after every glyph, and text commands drawn with their spacing
-  (per glyph in sokol_debugtext, to the nearest cell in a terminal);
+  (per glyph in sokol's built-in bitmap text, to the nearest cell in a terminal);
 - the loop builds a `FrameRecord`, takes `endFrame()`'s frame, and waits
   as `nextFrame` says;
 - the frame's cursor request is applied where the library has cursors
@@ -3778,14 +3770,14 @@ The demo's thumbnails are a `zui_async.KeyedLoads` source: declaration
 asks for the keys of the rows near the visible area, the loader starts
 each load as its own task on the application's `Io` after `endFrame`, and
 keys unread for 30 frames are abandoned (34 of 98 in a scripted fast
-scroll). Measured in zui-raylib:
+scroll). Measured in the raylib renderer's demo:
 - **0% CPU idle.** `--measure-idle` has the demo read its own CPU time
   at two frames it requests 10 s apart. On Windows (i9-10900K,
   ReleaseSafe): 0.0 ms in the thumbnail grid and the settings view,
   31–47 ms in the documents view, with 1 frame (the measurement's own)
   and 0 wakes in each window; Windows counts CPU in 15.6 ms ticks. On
   CI's Linux runner, under Xvfb: 24.0 ms for the grid, 1 frame, 0 wakes.
-- **One wake for 100 loads.** A test in `examples/thumbnails.zig` asks
+- **One wake for 100 loads.** A test of the demo's thumbnails asks
   for 100 thumbnails in one frame, finishes them on 100 tasks before the
   next, and counts 1 wake; the next frame shows all 100 and `nextFrame`
   is `.on_event` again.
@@ -3812,7 +3804,7 @@ Decided here:
 `Features.Tracer`: a zone per layout pass, per emission step and per
 `beginFrame` step, through `zuiBegin` and `zuiEnd`, and nothing analyzed
 when it is `void`; `zui.TraceZone` and five compile-error tests; a
-recording tracer in `src/tests/support.zig`, and a test that one frame
+recording tracer in `core/src/tests/support.zig`, and a test that one frame
 produces every zone, each nested in `begin_frame` or `end_frame`;
 `zui_tracy`, with Tracy as a lazy dependency linked by
 `-Dzui-tracy=true`, tested with Tracy's client on all three systems (in a
@@ -3823,7 +3815,7 @@ code 9 after Tracy shuts down); the profiling guide, in README.md's
 `zig build counts` without a tracer was identical to the instruction in
 every scenario, against `994a631`, in a local Docker container.
 
-The trace of the demo was captured headlessly: zui-raylib's demo built
+The trace of the demo was captured headlessly: the raylib renderer's demo built
 with `-Dzui-tracy=true` and run with `TRACY_NO_EXIT=1`, Tracy 0.14.1's
 `tracy-capture` saving the trace and `tracy-csvexport` listing its
 zones. In the thumbnail grid's 36 frames, each of the 14 zones other than
@@ -3900,7 +3892,7 @@ slots only once a key could have gone unread long enough; before that
 change the scenario's `endFrame` took 25,955.
 
 The demo's thumbnail grid on `KeyedLoads`, idling at 0% CPU, and its 100
-loads causing one wake, were done in zui-raylib by C8.
+loads causing one wake, were done in the raylib renderer by C8.
 
 ### A3. Sources in the core
 
@@ -3986,7 +3978,7 @@ the spacing belongs to the renderers, which C8 did.
 
 ### R1. Instruction counts in CI
 
-`zig build counts` runs each single-threaded scenario of `bench/` in a
+`zig build counts` runs each single-threaded scenario of `core/bench/` in a
 fresh process under Callgrind, collecting only `beginFrame` with
 declaration, or only `endFrame`, over 10 frames after 4 of warm-up. The
 executable is always built for x86-64-v3 Linux without libc, so every
@@ -4034,7 +4026,7 @@ change; the alternation of each commit's own benchmarks remains.
 | first frame, Documents view | 30.3 µs (steady: 9.9 µs) |
 | first frame, 1,000 texts | 230.0 µs |
 
-The demo's cold start moved to C4, because the demo lives in zui-raylib.
+The demo's cold start moved to C4, because the demo is the raylib renderer's.
 
 ### A1. The async and parallel audit
 
@@ -4080,14 +4072,14 @@ first.
 **Done when:** every test, widget and benchmark builds on `Context(config)`;
 compile-error tests pin each contract message.
 
-**Status.** Done in this repository.
+**Status.** Done in the core.
 
 **Spec.** §4, §5, §9.4, §16.1.
 
 ### S1. The frame record's parameters: time, scale and zoom
 
 **Grounding.** `Platform.scale` only snaps command bounds
-(`src/emission.zig:32`). Nothing lets an application zoom its UI. Time
+(`core/src/emission.zig:32`). Nothing lets an application zoom its UI. Time
 arrives as `dt_seconds`, so deadlines and velocities cannot be expressed
 in the host's clock.
 
@@ -4105,13 +4097,13 @@ reproduces the frame exactly with any scale.
 ### I4. Input as an ordered event log
 
 **Grounding.**
-- `Input.buttons` is the state at poll time (`src/context.zig:902`), so a
+- `Input.buttons` is the state at poll time (`core/src/context.zig:902`), so a
   press and release between two polls is never a click. zui sleeps until
   input arrives, which makes that likely, and a touch tap usually
   vanishes.
 - There is one pointer: one `press_target` and one `hover_chain`
-  (`src/interaction.zig:181`).
-- `Key` has no letters (`src/interaction.zig:8`), so Ctrl+S cannot be
+  (`core/src/interaction.zig:181`).
+- `Key` has no letters (`core/src/interaction.zig:8`), so Ctrl+S cannot be
   expressed, and modifiers are sampled once per frame rather than per key.
 
 I3, which was to settle this format before the host contract, is merged
@@ -4177,7 +4169,7 @@ over every limit still draws what fit.
 **Plan.** Remove `src/tasks.zig`, its tests and every reference; the
 demo's loads move to A4's sources.
 
-**Done when:** nothing in this repository or the backends names a task
+**Done when:** nothing in the core or the renderers names a task
 pool.
 
 **Status.** Done; the backends and the demo's loads moved off it in C8.
@@ -4266,13 +4258,17 @@ Done: V1, V2, V3 and V4 are in *Done*.
 ## Stage 10: reach
 
 - **H4. Linux** (Wayland, then X11; KDE blur where offered).
-- **H5. Web** (a canvas surface; `tryBeginFrame`, since it cannot block).
+- **H5. Web** (a canvas surface, on the loop H10 gives a host that cannot
+  block).
 - **H6. Services:** clipboard, notifications, file dialogs, opening URLs,
   native menus, each an optional host declaration.
 - **H7. Window decorations:** native by default; a custom title bar uses
   chrome regions so the OS still moves, resizes and snaps the window.
 - **H9. Many windows:** one `Context` per window, with sources published
   into each.
+- **H10. Hosts whose platform owns the loop:** the browser's main
+  thread, macOS, iOS and Android, driving `zui_app` from their own
+  callbacks, and a surface the platform takes away and gives back.
 
 **Done when (each):** the host passes C3, and the demo runs on it
 unchanged.
@@ -4352,26 +4348,25 @@ Slices 4, 6 and 7 were added when the Windows host's H6, H7 and H9 had
 landed, so that the Linux host makes every report the Windows host makes.
 
 **Done when:** the host passes C3 on Wayland and on X11, in CI under a
-headless compositor and Xvfb; the sokol renderer's tour runs on it unchanged and
+headless compositor and Xvfb; the tour runs on it unchanged and
 idles at 0% CPU; and the theme example restyles on a file change.
 
 **Spec.** §7, §16.3, §16.4, §21 (stage 10).
 
-**Status.** Slice 1 is done: zui-host `e9607a3` (`hosts/native/linux/host.zig`,
-`hosts/native/linux/wayland.zig`, `hosts/native/linux/xkb.zig`, `hosts/native/linux/keys.zig`) and zui-sokol
-`301765b` (`src/egl.zig`), neither pushed; zui-host's pin moves to
-zui-sokol `301765b` once it is. On Hyprland with an NVIDIA RTX 2060
+**Status.** Slice 1 is done: `aab0e37` (`hosts/native/linux/host.zig`,
+`hosts/native/linux/wayland.zig`, `hosts/native/linux/xkb.zig`, `hosts/native/linux/keys.zig`) and
+`77e9448` (`renderers/sokol/src/egl.zig`). On Hyprland with an NVIDIA RTX 2060
 SUPER, the host suite and six tests of the host's own pass in Debug,
 ReleaseFast and ReleaseSafe against a window the compositor never shows,
 and skip with a message without a compositor; the tour drew 1,500 frames
 across every screen in a tiled window, seen in a screenshot, with no
 layer overflow; and Layout Lab idled at 1.2 to 4.4 ms of CPU over 10 s,
 with 0 or 1 frames and no wakes, in five ReleaseSafe runs of six (the
-sixth drew 96 frames for the pointer over the window). zui-host's CI
-gains a Linux job under a headless Weston, which passes (`a141d78`).
+sixth drew 96 frames for the pointer over the window). The native hosts'
+CI gains a Linux job under a headless Weston, which passes (`d703a34`).
 
-Slice 2 is done in zui-host alone, `96d3720` (`hosts/native/linux/host.zig`,
-`hosts/native/linux/dbus.zig`, `hosts/native/linux/desktop_bus.zig`), not pushed, reporting what the Windows host reports
+Slice 2 is done in `hosts/native/` alone, `3bd5c13` (`hosts/native/linux/host.zig`,
+`hosts/native/linux/dbus.zig`, `hosts/native/linux/desktop_bus.zig`), reporting what the Windows host reports
 (`hosts/native/windows/host.zig:504`, `:534-544`, `:672-706`, `:768-777`) where Linux
 has it. A held key repeats at `repeat_info`'s rate and delay, each repeat
 a `key_down` with `repeat` set that types again, and a wait ends at the
@@ -4394,15 +4389,15 @@ and an impostor's signal does not (CI starts such a daemon). The tour
 drew 300 frames across every screen with no layer overflow, and Layout
 Lab idled at 9.7 to 15.2 ms of CPU over 10 s with 9 to 11 frames and no
 wakes in three runs of four (the fourth drew 58 frames for the pointer),
-as `a141d78` did the same day (10.6 and 12.8 ms, 9 and 10 frames): a run
+as `d703a34` did the same day (10.6 and 12.8 ms, 9 and 10 frames): a run
 counted no reads of either bus while idle, and the frames come from the
 compositor's events. Not reported yet: `.low_memory` (the Windows host's
 memory notification has no unprivileged counterpart but pressure
 triggers), reduced transparency and text scale, which the portal does not
 carry.
 
-Slice 3 is done in zui-host alone, `09ccf9d` (`hosts/native/linux/data_device.zig`,
-`hosts/native/linux/file_watch.zig`), pushed. With `wp_fractional_scale_v1` and
+Slice 3 is done in `hosts/native/` alone, `3f3d57a` (`hosts/native/linux/data_device.zig`,
+`hosts/native/linux/file_watch.zig`). With `wp_fractional_scale_v1` and
 `wp_viewporter` both offered, the record's scale is `preferred_scale /
 120` and the buffer `round(size × scale)` with a buffer scale of 1; one
 function, `pixelsPerSurfaceCoordinate`, converts surface coordinates, and
@@ -4426,8 +4421,8 @@ over 10 s, 9 and 10 frames, no wakes. Not run: a drag from another
 application, and a fractional scale on a monitor (the tests convert at
 1.25 and 1.5 through the listeners).
 
-Slice 4 is done in zui-host alone, `e2b15ad` (`hosts/native/linux/services.zig`,
-`hosts/native/linux/dbus.zig`), pushed: H6's shapes on a second session-bus
+Slice 4 is done in `hosts/native/` alone, `342302e` (`hosts/native/linux/services.zig`,
+`hosts/native/linux/dbus.zig`): H6's shapes on a second session-bus
 connection of the host's own, its socket in the same `ppoll`. A call
 only writes, at most 100 ms, and answers are published from `zuiPoll`
 and `zuiWait`. `zuiNotifications` calls `org.freedesktop.Notifications`'
@@ -4528,7 +4523,7 @@ application marks its parts with `Element.chrome`, behind
 `zuiChromeRegions`, as it hands semantics to `zuiSemantics`. The Windows
 host keeps a snapshot, answers `WM_NCHITTEST` from it, and works the
 caption buttons itself.
-1. **The core, `zui_app` and `zui_testing`** (zui only):
+1. **The core, `zui_app` and `zui_testing`** (core only):
    - `ChromeKind`, `ChromeRegion` (`core/src/chrome.zig`).
    - `TitleBar`, `WindowOptions.title_bar` and
      `HostCapabilities.custom_title_bar` (`core/src/host.zig`).
@@ -4629,7 +4624,7 @@ caption buttons itself.
   identical to the instruction (4096 boxes declare 436,605 and
   `endFrame` 1,264,648; 1000 warm texts' `endFrame` 654,147).
 
-Slice 2, the Windows host (zui-host `38d2be5`), is done:
+Slice 2, the Windows host (`0e3e704`), is done:
 - A window opened with `title_bar = .custom` drops its caption in
   `WM_NCCALCSIZE` and keeps the system's frame on the other three sides,
   so DWM draws its border, rounded corners and shadow. Maximized, its
@@ -4673,6 +4668,100 @@ without `--no-system-material`, in light and dark mode:
   they are drawn.
 Once checked, H7 moves to *Done*.
 
+### H10. Hosts whose platform owns the loop
+
+**Grounding.**
+- `zui_app.run` owns the loop: `while (try runner.frame()) {}`
+  (`core/zui_app/zui_app.zig:377`). Each turn of `Runner.frame`
+  (`:599-610`) polls the host (`zuiPoll`), hands the record to the
+  application's `zuiRecord`, declares and submits the window
+  (`frameWindow`), and waits in the host until the frame's `nextFrame`
+  (`zuiWait`). With many windows, `frameEveryDueWindow` (`:612-633`)
+  polls each, frames those that are due, and waits once for the earliest
+  `nextFrame`.
+- The host contract requires `zuiPoll`, `zuiWaker`, `zuiWait`,
+  `zuiSurface` and `zuiApply` (`core/src/contracts.zig:121`), whose
+  signatures are checked at `:142-146`, and every host declaration is
+  listed in `host_declarations` (`:24`), so a `zuiRun` would be an
+  unknown declaration today.
+- That is a pull loop: it works wherever the application may block in a
+  loop of its own, which covers the Windows and Linux hosts, raylib's
+  GLFW, the terminal and the test hosts. It does not work where the
+  platform owns the loop: the browser's main thread
+  (`requestAnimationFrame` and event callbacks; blocking freezes the
+  tab), macOS (`[NSApp run]`, which never returns), iOS
+  (`UIApplicationMain`) and Android (the activity's looper, which
+  destroys the surface on pause and makes another on resume). macOS and
+  iOS allow UI only on the main thread, so a second thread does not help.
+- The web host's worker is already driven from outside: the page calls
+  `zuiTourFrame` (`hosts/web/src/tour_worker.zig:93`) on its own clock,
+  and `TourSession.frame` (`hosts/web/src/tour_session.zig:182`) begins
+  and ends the tour's frames itself (`:202`, `:206`) on the stepped `Io`,
+  without `zui_app`.
+- The application side is already callbacks: an `App` is `zuiDeclare`,
+  `zuiRecord`, `zuiObserve`, `init` and `deinit`, and never writes a
+  loop. Nothing lets a renderer drop its surface and take one again while
+  the contexts live on; `zuiDetachSurface` is for a window that closes
+  (H9).
+
+**Plan.** One step is the unit of `zui_app`'s frame logic, and a host
+whose platform owns the loop drives it from its callbacks:
+- `Runner.frame` splits into `step`, which polls, frames every due window
+  and returns the `NextFrame` it wants next, or null once every window
+  has closed, and the wait around it.
+- `zui_app.Driver`, which a host that owns the loop is handed through
+  `zuiRun(self, io, window, driver)`: `start(surface)` once the window's
+  surface is ready (making the text, the renderer and the contexts),
+  `step()`, `suspendSurface()` and `stop()`.
+- **Scheduling from `NextFrame`:** `.immediately` asks for the next
+  display callback (`requestAnimationFrame`, `CADisplayLink`,
+  Choreographer), an instant sets a timer, and waiting for input pauses
+  the display callback until an event arrives, so idle stays idle and no
+  frame is drawn that is not due.
+- **Wakers:** `zuiWaker` stays, and the host turns a wake into a step
+  scheduled on its loop (`postMessage`, `CFRunLoopWakeUp`,
+  `ALooper_wake`).
+- **A run that never returns:** on macOS and iOS `zuiRun` does not
+  return; `driver.stop()` runs from `applicationWillTerminate` and the
+  process exits, so `run`'s caller relies on nothing after it.
+- **Losing the surface:** the platform takes the surface away (Android's
+  pause, a lost GPU device anywhere), and `suspendSurface` and a fresh
+  `start(surface)` let the renderer drop and remake its GPU resources
+  while the contexts and the application's state live on.
+- **The render thread and many windows** stay as they are: `step` hands
+  a frame to the render thread as `frame` does, and covers every due
+  window, so a host with many calls it once per display callback.
+- **The loop's shape** is open decision 2: every host on `zuiRun`, the
+  pull hosts through a shared helper (option 2), or `run` calling
+  `zuiRun` where a host declares it and keeping today's pull loop
+  otherwise (option 3).
+- **The first host that owns its loop is the browser's:** the web host's
+  worker becomes a `zuiRun` host and runs the tour through `zui_app` in
+  place of `TourSession`'s own frames. macOS, iOS and Android follow when
+  their hosts are built (H3 and later).
+- `zuiRun` joins `host_declarations` with its signature checked, and
+  SPEC.md §6.1, §16.3 and §19.5 and README.md's hosts say how a host
+  chooses its loop.
+
+**Done when:**
+- `zui_app`'s tests drive a fake host that owns its loop from a scripted
+  list of callbacks: input reaches its window, a step frames only the
+  windows that are due, the `NextFrame` a step returns is what the pull
+  loop would wait for, a wake schedules a step and an idle window
+  schedules none, a suspended surface resumed keeps every context's
+  state and the application's, and a render thread and many windows run
+  as they do on a pull host;
+- each new rule is a compile error with its message pinned by a
+  compile-error test (`zuiRun`'s signature, and the rule the decision
+  sets for `zuiWait`);
+- the web host's worker runs the tour through `zui_app.run` on its
+  `zuiRun` host: `test-demo` writes the same stream byte for byte, and
+  `test-site` passes, the idle page sleeping and its input waking it;
+- every native host's and renderer's tour cycle still prints
+  `diagnostics ok: true`, and R1 counts are unchanged.
+
+**Spec.** §6.1, §16.2, §16.3, §19.5.
+
 ---
 
 ## Stage 11: polish
@@ -4702,6 +4791,89 @@ Once checked, H7 moves to *Done*.
 **Done when (each):** `zui_testing` coverage; IME works on Windows.
 
 **Spec.** §19.2, §19.8, §19.9.
+
+---
+
+## The font system
+
+A contract with default implementations, through which an application
+brings any typeface and any compatible font library, and zui makes it
+work on every renderer. The packages already have room for it: what font
+systems and renderers share is `zui_glyphs` (`text/glyphs/`), the
+default font system is `zui_truetype` (`text/truetype/`), and the
+bundled typefaces are `zui_fonts` (`text/fonts/`), so the font system
+moves nothing. Measuring and drawing already take their glyphs from one
+layout, so it inherits no two loops that must agree. Its items are given
+their Grounding, Plan and Done when as they join the queue.
+
+**The layers.** Every mature text stack splits text into the same parts:
+Skia (typeface, font, shaper, text blob), cosmic-text (fontdb for
+discovery, rustybuzz for shaping, swash for rasterization, its own layout
+and glyph cache), egui (fonts laid out into a galley of positioned glyphs,
+rasterized on demand into one atlas, drawn as textured triangles), and
+Dear ImGui 1.92 (a font loader interface with stb_truetype and FreeType
+behind it, glyphs loaded on demand into an atlas that grows, which the
+renderer backend uploads):
+
+| Layer | Turns | into | Implementations, now or later |
+|---|---|---|---|
+| source | a name, a file, embedded bytes, a system font | font bytes | `zui_fonts`; a host's system fonts (DirectWrite, fontconfig, CoreText), as a host service |
+| face | font bytes | metrics, glyph ids, outlines or bitmaps | `zui_truetype` (stb); FreeType; DirectWrite and CoreText faces; bitmap faces |
+| layout | a run and a `MeasureKey` | positioned glyphs and their extent | one per-glyph pen in `zui_glyphs`, additive as SPEC.md §9.4 requires; a shaper (HarfBuzz) and font fallback later |
+| raster | a glyph at a size | coverage, SDF, color, or nothing | stb, FreeType, platform rasterizers; nothing for a renderer that draws cells or outlines |
+| atlas | rasters | texels in a cache with dirty rectangles | `zui_glyphs`, in the texel layout each renderer asks for |
+| draw | positioned glyphs and an atlas | pixels or cells | each renderer |
+
+**The rules it keeps:**
+- **One layout, two readers.** A text's `zuiMeasure` and its drawing take
+  their glyph positions from the same function, in `zui_glyphs`. A
+  renderer places what the layout gives it and advances no pen of its
+  own. Commands carry the text and its style, not glyphs, so frames and
+  the wire stay as they are; a remote renderer runs the same layout,
+  which the text contract's `zuiFingerprint` guards.
+- **The renderer declares what it draws, the font system provides it.**
+  As a renderer declares `zui_commands` and `zui_output_formats`, it
+  declares the glyph placement it can draw (`glyph_placement`): on a
+  pixel grid, or one glyph per cell, as the terminal does. The font
+  system lays text out for it, so a typeface brought by the application
+  works on the terminal, with every glyph one cell wide and measured as
+  such, and on a GPU, with its own advances. This is how the terminal
+  runs the tour.
+- **Core stays out of fonts.** The text contract in `zui_core` (SPEC.md
+  §9.4: `zuiMeasure`, `zuiSegment`, `zuiFingerprint`, `FontId`,
+  `MeasureKey`) does not import `zui_glyphs`. What font systems and
+  renderers agree on lives in `zui_glyphs`, as does its conformance
+  suite, since `zui_testing` is part of core.
+- **Text looks its best with no setup.** Out of the box, text is drawn in
+  `zui_fonts`' typefaces through `zui_truetype`: an application that
+  names no fonts gets Atkinson Hyperlegible as font 0. A renderer's or
+  library's built-in fonts (sokol's 8×8 bitmap fonts, raylib's default
+  font) are never a default and are not part of zui.
+- **`text/` is a family,** as `renderers/` and `hosts/` are. A new face,
+  shaper or rasterizer is a new package beside `truetype/` (`freetype/`,
+  `harfbuzz/`), and a platform's system fonts are its host's. None is
+  created ahead of the font system's own items.
+
+**What `zui_glyphs` holds today** is what today's renderers need, and
+the font system's items design the contract properly and may change all
+of it:
+- `Codepoints`, a run's codepoints;
+- `Fonts`, the type-erased fonts a renderer draws through, with
+  `FontMetrics` and `GlyphBox`, made from any text contract that
+  provides `fontMetrics`, `advance`, `glyphIndex`, `glyphBox` and
+  `rasterize`;
+- `Placement` and `placementOf(Renderer)`, the pixel grid or cells;
+- `layOut` and `measure`: the pen that lays a run out from each glyph's
+  advance and the letter spacing, without kerning, so measurement stays
+  additive, into `PositionedGlyph`s (font, glyph id, position), every
+  glyph one cell in cell placement;
+- `glyphQuads`, the pixel grid's quads, each half a texel wider than its
+  glyph's coverage;
+- `Atlas`, which takes coverage from any face on first use into memory
+  reserved at `init`, packs it in rows, and lays it out in the
+  `TexelLayout` the renderer asks for (sokol's and raylib's RGBA, the
+  browser's RG8);
+- `expectFontsConform`, the font systems' conformance suite.
 
 ---
 
@@ -4738,6 +4910,7 @@ Deliberate, and each a reason to choose zui:
 | Decision | Outcome |
 |---|---|
 | The frame boundary | the cornerstone: a record in at `beginFrame`, a frame out of `endFrame` |
+| A surface the platform takes away (H10) | part of H10's design, settled by the owner: `suspendSurface`, then a fresh `start(surface)`, so the renderer drops and remakes its GPU resources while the contexts live on; not left for the Android host |
 | Outside data | sources swapped at `beginFrame`, demand out, a loader between frames; zui starts and cancels nothing (A1) |
 | `TaskPool` and feeds | deleted and retired; sources replace both (A5, F1) |
 | `Platform` | split: the text contract in `Config`, `Waker` from the host, scale in the record (C5, S1) |
@@ -4875,6 +5048,18 @@ Each is planned with its first option. SPEC.md §22 has those that change
 the spec.
 
 1. **Physical keys.** Planned: logical keys plus the opaque scancode.
+2. **Who owns the loop (H10).** Option 2, push only, as winit does:
+   every host owns its loop through `zuiRun(self, io, window, driver)`,
+   the pull hosts through a shared `zui_app` helper that waits between
+   steps, and `zuiWait` leaves the core host contract; one shape for every
+   host, but every existing host changes (the raylib, terminal and native
+   hosts, and the test hosts). Option 3, one step and two ways to drive
+   it, as SDL3 does: `zui_app.run` calls a host's `zuiRun` when it
+   declares one and keeps today's pull loop over `zuiPoll` and `zuiWait`
+   otherwise, `zuiWait` is required only of a host without `zuiRun`, no
+   existing host changes, and a later move to push only is mechanical.
+   The design recommends option 3. Not planned with either: H10 waits
+   for the owner's choice.
 
 ---
 
@@ -4903,7 +5088,8 @@ that the core and its modules build and pass there.
 
 The items:
 - **H3. macOS** (stage 10, `hosts/native/`): a Cocoa host passing C3, its
-  surface `.cocoa`, its event loop on the main thread as AppKit requires;
+  surface `.cocoa`, its event loop on the main thread as AppKit requires,
+  driving `zui_app` through H10's `zuiRun`;
   vibrancy through `NSVisualEffectView` as the system material (H8);
   many windows, a context each, as H9 built on Windows; the EDR headroom
   that G6 left unreported; a custom title bar's chrome regions (H7); and
