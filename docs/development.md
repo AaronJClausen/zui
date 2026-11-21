@@ -95,12 +95,13 @@ Each job, from its package's directory, fits within 10 minutes:
 - `hosts/native/`: its tests in Debug and ReleaseSafe and its `check`, on
   Windows, and on Linux under a headless Weston with a D-Bus daemon of
   its own (`.github/actions/wayland-session`); `check` for ARM64 Windows
-  from Linux; and in a job of its own under Weston, the `services` and
-  `theme` examples' `--check`, the `tour` target's visit of every screen,
+  from Linux; and in a job of its own under Weston, the `theme` example's
+  `--check`, the `tour` target's visit of every screen,
   which must report no layer or glyph atlas overflow and clean
   diagnostics, its CPU while idle, shown in the job summary, and the
-  `showcase` target's frames. The Windows examples are compiled there and
-  run on a desktop;
+  `showcase` target's frames. A headless Weston has no seat, so no
+  clipboard, and the `services` example's `--check` runs on a desktop, as
+  the Windows examples do;
 - `hosts/web/`: on Linux, each optimize mode's tests, `check` there and
   for x86-64 Windows and ARM64 macOS, `test-demo` in Debug and in
   ReleaseSafe, and `test-input`, each in a job of its own; `test-site` in

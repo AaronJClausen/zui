@@ -441,7 +441,8 @@ jobs:
       - run: zig build check
 
   # The headless Weston draws in software, so Mesa's EGL hands it
-  # shared-memory buffers.
+  # shared-memory buffers. It has no input devices, so it offers no seat and
+  # no clipboard, and the services example's `--check` runs on a desktop.
   native-linux-targets:
     name: "hosts/native: examples and targets (ubuntu-latest, Weston)"
     needs: changes
@@ -459,11 +460,6 @@ jobs:
         with:
           version: ${{ env.ZIG_VERSION }}
       - uses: ./.github/actions/wayland-session
-      - name: Answer every host service through the host's fake
-        run: |
-          set -o pipefail
-          timeout 120 zig build services -- --check 2>&1 | tee services.log
-          grep "every service answered" services.log
       - name: Restyle a window when its theme file is rewritten
         run: |
           set -o pipefail
