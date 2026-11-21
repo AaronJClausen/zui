@@ -644,7 +644,7 @@ pub fn main(init: std.process.Init) !void {
     const setup = try machine.read(io, arena, tool.pinned_core);
     if (options.require_quiet) {
         if (setup.noisyReason()) |reason| {
-            std.debug.print("--require-quiet: {s}. README.md, \"Quieting the machine\", says how to set it up.\n", .{reason});
+            std.debug.print("--require-quiet: {s}. docs/benchmarking.md, \"Quieting the machine\", says how to set it up.\n", .{reason});
             return error.NoisyMachine;
         }
     }

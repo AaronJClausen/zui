@@ -145,7 +145,7 @@ tests of `core/src/tests/hosts.zig` moved into the suite. `zig build check`
 instantiates both suites on every target.
 
 Each backend has `src/conformance.zig` and a `conformance` step, which
-its CI runs (README.md's *Conformance suites* is the recipe):
+its CI runs (`docs/development.md`'s *Conformance suites* is the recipe):
 - **the terminal renderer** reads each pixel as the cell covering it, and passes
   with no tolerance; its `test` step runs the suite too;
 - **the raylib renderer** draws into a render texture of a hidden window and reads

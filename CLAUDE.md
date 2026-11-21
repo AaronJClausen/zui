@@ -8,7 +8,7 @@ and each has one job:
 | `SPEC.md` | the contract: what zui is, every API, every budget | the implementation proves it wrong, or an open question (§22) is settled |
 | `ROADMAP.md` and `roadmap/` | **the queue** of work and where it stands (`ROADMAP.md`); each item's plan, test and status, in its group's file (`roadmap/<group>.md`); the decisions (`roadmap/decisions.md`) | every item, every slice of an item |
 | `ARCHITECTURE.md` | the map: which layer and package holds each part, and how today's code still differs from the spec (§7) | a difference closes or opens, or a feature moves layer or stage |
-| `README.md` | what a user sees: status, today's API, the build commands | a stage or a user-visible API ships, or a build step changes |
+| `README.md`, each package's `README.md`, and `docs/development.md` and `docs/benchmarking.md` | what a user sees: in `README.md`, the status in one line per stage, the core API, the packages and the common build commands; in a package's `README.md` (`renderers/<name>/`, `hosts/native/`, `hosts/web/`, `apps/tour/`, `text/`), its API, what it draws or reports, its limits and its build steps; in `docs/development.md`, every root step, CI and the conformance recipe; in `docs/benchmarking.md`, profiling and measuring | a stage or a user-visible API ships, or a build step changes |
 
 The code and these documents move together. A commit that changes one and
 leaves another stale is not done.
@@ -116,9 +116,11 @@ In every item's commit:
       spec in the same commit and give the reason in the commit message.
       When an open question in §22 is settled, remove it there and record
       the outcome under *Made* in `roadmap/decisions.md`.
-- [ ] **README.md:** the status list when a stage or user-visible feature
+- [ ] **README.md:** the status list's line for the stage when a stage
       ships; the API example whenever the API it shows changes; the
-      *Development* table when a build step changes.
+      *Packages* table when a package is added. A package's feature, API,
+      limit or build step goes in that package's `README.md`; a root step
+      or a CI job, in `docs/development.md`.
 - [ ] **docs/feature-tour.html and docs/feature-tour.md:** when a
       user-visible feature ships or its API changes, add or update its
       entry in both, with an example in a consumer's own code; move a
