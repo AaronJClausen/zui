@@ -88,15 +88,20 @@ host.zuiPoll ──► FrameRecord ──► ui.beginFrame(record, &sources)
            ┌────────────────────────┤              ├──► renderer.zuiSubmit (any thread) ──► ui.release
            │                        │              └──► host.zuiApply(frame.requests())
            ▼                        ▼
-   app loader: demand → work   ui.nextFrame() ──► host.zuiWait
-   (starts, abandons, releases      ▲
-    on the app's own Io)            │
+   app loader: demand → work   ui.nextFrame() ──► host.zuiWait, or the
+   (starts, abandons, releases      ▲              platform's next callback,
+    on the app's own Io)            │              or the application's loop
            │                        │
            └── producers publish ───┴── Waker.wake (sticky)
 ```
 
 The loader runs after `endFrame`, so it sees the demand of the frame just
 declared, and before the wait, so work it starts can end that wait.
+Everything above the wait is one turn, `zui_app.Session.step()`, which
+never blocks. Who waits is the host's loop half: `run` waits in
+`zuiWait`; a host that declares `zuiRun` schedules the next turn on the
+platform's loop and calls it through a `zui.Driver`; on a host with
+neither, the application's own loop steps the `Session`.
 
 ## 4. The contracts at a glance
 
@@ -111,9 +116,9 @@ only plain names are types the application uses directly: a source's
 | Text | a font system, such as `zui_truetype.Text` | `zuiMeasure` | `zuiSegment`, `zui_thread_safe`, `zuiFingerprint` | §9.4 |
 | Source | `zui_async` or the application | `Delivery`, `View`, `zuiSwap`, `zuiView`, `zuiDelivery`, `zuiInject` | `zuiPending`, `zuiEndFrame`, `zuiRefusedCount` | §14.2 |
 | Renderer | a renderer | `zuiSubmit`, `zui_surfaces` | `zui_commands`, `zui_extended_color`, `zui_render_thread`, payload types, `zuiAttachSurface` with `zuiDetachSurface` | §16.2 |
-| Host | a host | `zuiPoll`, `zuiWaker`, `zuiWait`, `zuiSurface`, `zuiApply`, `zui_surfaces` | `zui_capabilities`, `zuiOpenWindow` and `zuiCloseWindow` (exactly when `.many`), `zuiSemantics`, `zuiChromeRegions`, services (`zuiClipboard`, `zuiNotifications`, `zuiFileDialogs`, `zuiOpenUrl`, `zuiMenus`, `zuiFileWatch`), each a struct of functions whose types are checked | §16.3 |
+| Host | a host | the window half: `zuiPoll`, which never blocks or presents, `zuiWaker`, `zuiSurface`, `zuiApply`, `zui_surfaces` | at most one call of the loop half, `zuiWait` (pulled) or `zuiRun` (pushed, handed a `zui.Driver`), neither for a host the application steps; `zui_capabilities`, `zuiOpenWindow` and `zuiCloseWindow` (exactly when `.many`), `zuiSemantics`, `zuiChromeRegions`, services (`zuiClipboard`, `zuiNotifications`, `zuiFileDialogs`, `zuiOpenUrl`, `zuiMenus`, `zuiFileWatch`), each a struct of functions whose types are checked | §16.3 |
 | Tracer | a profiler binding | `zuiBegin`, `zuiEnd` | | §16.5 |
-| Application | the application, run by `zui_app` | `Host`, `Renderer`, `zuiDeclare` | `Text`, `zuiRecord`, `zuiObserve`, `zuiLoader`, `init`, `deinit`; with many windows, `zuiDeclare` and each hook take the window, and `zuiSources`, `zuiWindowClosed` | §19.5 |
+| Application | the application, run by `zui_app.run` or stepped as a `zui_app.Session` | `Host`, `Renderer`, `zuiDeclare` | `Text`, `zuiRecord`, `zuiObserve`, `zuiLoader`, `init`, `deinit`; with many windows, `zuiDeclare` and each hook take the window, and `zuiSources`, `zuiWindowClosed` | §19.5 |
 | Skin | a theme pack or the application | `zuiStyle` | | §19.2 |
 | Wire payload | an application type with pointers | `zuiSerialize`, `zuiDeserialize` | | §19.6 |
 
@@ -139,7 +144,7 @@ fallback in effect.
 
 | Thread | Runs | Waits for |
 |---|---|---|
-| the host's main thread | the event loop, and declaration by default (macOS requires the loop there) | `zuiWait(nextFrame)`; a free arena in `beginFrame` |
+| the host's main thread | the event loop, and declaration by default (macOS requires the loop there) | `zuiWait(nextFrame)` on a pulled host, the platform's loop on a pushed one; a free arena in `beginFrame`, which a step on a host that is not waited on never waits for |
 | a render thread, optional | `zuiSubmit`, then `release` | nothing of zui's |
 | producers, on the application's `Io` | the application's work; they publish into sources and wake | nothing of zui's; a full source refuses |
 | zui's measuring tasks | cold text, with `zui_thread_safe` text | nothing |
@@ -295,6 +300,9 @@ roadmap item named:
 | `Widgets(Ui)` with a `Theme` struct | `Widgets(Ui, Skin)` | `core/zui_widgets/` | K5 |
 | `zui_debug`'s inspector runs in the application's process; a frame on the wire carries no elements for it | over the wire, the inspector runs in another process (SPEC.md §19.7) | `core/zui_debug/`, `core/zui_wire/` | not yet queued |
 | a frame on the wire carries no chrome regions, and the wire host declares no `zuiChromeRegions`, so a remote window keeps the system's title bar | chrome over the wire | `core/zui_wire/` | not yet queued |
+| the web host's worker declares the tour's frames itself in `TourSession`, judging which are due and folding its `Io`'s wakes by hand | the worker steps a `zui_app.Session` on a stepped host over the page's records, and folds the `Io`'s next wake with `NextFrame.sooner` | `hosts/web/src/tour_session.zig` | H10 |
+| `zui_testing` has the pulled host's suite only | suites for a pushed host, `expectPushedHostConforms`, and a stepped one, `expectSteppedHostConforms` (SPEC.md §19.4) | `core/zui_testing/` | H10 |
+| the sokol renderer attaches and detaches only `.win32` windows, so a lost `.wayland` or `.library` surface cannot be given back: `zuiAttachSurface` returns `UnsupportedSurface`, and `resumeSurfaces` with it | a renderer that a platform may take surfaces from keeps each surface's resources in `zuiAttachSurface` and `zuiDetachSurface` | `renderers/sokol/` | the first host that loses a surface (Android) |
 | `zui_host`'s Linux host speaks Wayland only, opens one window, reports no low memory, IME or semantics, and keeps the compositor's title bar; its environment comes from the desktop portal and UPower over D-Bus, and stays at the defaults without them; its services have no menus, which Wayland lacks | a Linux host on Wayland and X11 with every report the Windows host makes, and a system material where the compositor offers one | `hosts/native/` | H4 |
 
 Unchanged in shape: element storage in pre-order structure-of-arrays, the

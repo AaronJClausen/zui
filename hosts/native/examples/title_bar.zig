@@ -56,19 +56,19 @@ pub fn main(init: std.process.Init) !void {
         }
     }
 
-    const runner = try init.gpa.create(zui_app.Runner(TitleBarApp));
-    defer init.gpa.destroy(runner);
-    try runner.start(.{ .gpa = init.gpa, .io = init.io, .process = init }, .{
+    const session = try init.gpa.create(zui_app.Session(TitleBarApp));
+    defer init.gpa.destroy(session);
+    try session.start(.{ .gpa = init.gpa, .io = init.io, .process = init }, .{
         .title = "zui: a custom title bar",
         .size = .{ 720, 480 },
         .visible = !checking,
         .material = material,
         .title_bar = .custom,
     });
-    defer runner.stop();
-    if (checking) runner.app.check = .{};
-    while (try runner.frame()) {}
-    if (runner.app.check) |check| return check.result();
+    defer session.stop();
+    if (checking) session.app.check = .{};
+    while (try session.frame()) {}
+    if (session.app.check) |check| return check.result();
 }
 
 const TitleBarApp = struct {

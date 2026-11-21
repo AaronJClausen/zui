@@ -371,6 +371,21 @@ declared, and before the wait, so work it starts can wake the next one.
 With many windows, each window is a context of its own, and the loop
 polls each and waits once for all (§19.5).
 
+**Who turns the loop.** The steps from the poll to the loader are one
+turn, which never blocks; only the wait does. A host says who waits by
+its loop half (§16.3): zui waits on a host that declares `zuiWait`, the
+platform runs the loop of a host that declares `zuiRun` and calls zui
+from its callbacks, and the application's own loop turns a host that
+declares neither. `zui_app` gives each the same turn,
+`zui_app.Session(App).step()`, which returns when it next wants to run:
+
+```zig
+while (try session.step()) |next| session.wait(next);            // zui owns the loop: what run does
+const next = try driver.step() orelse return driver.stop();      // the platform owns it: in rAF, CADisplayLink, SDL_AppIterate
+schedule(next);
+if (try session.step()) |next| editor.redrawAt(next);            // the application owns it: in its own frame
+```
+
 ### 6.2 The frame record
 
 ```zig
@@ -413,7 +428,11 @@ chosen at comptime.
 In order:
 1. **Take a frame arena.** `beginFrame` waits for one if a renderer holds
    all of them (§15.2), which is zui's only wait. `tryBeginFrame` returns
-   `error.NoFreeFrame` instead, for hosts that cannot block.
+   `error.NoFreeFrame` instead, for hosts that cannot block, and
+   `hasFreeFrame()` says beforehand whether one would, so a loop that
+   cannot block leaves input it could not declare with its host. Only
+   the thread that begins frames takes one, so the answer holds until it
+   begins one.
 2. **Advance the state table's generation** and evict slots past their
    TTL (§12).
 3. **Apply events in arrival order** (§7): environment changes, then
@@ -1862,7 +1881,10 @@ to its thread's graphics context, as raylib's is, leaves it out.
 `zuiAttachSurface(self, surface) !void` and `zuiDetachSurface(self,
 surface) void` (optional, declared together) give a renderer each window
 after the first that `zui_app` opens, and take back each window before it
-closes, the first included, on the thread that submits. A renderer that
+closes, the first included, on the thread that submits. Around a surface
+loss (§19.5) they are called for every window, the first included: each
+surface is detached when the platform takes it away and attached again,
+as the host then names it, when it returns. A renderer that
 keeps a swapchain per window makes and frees it there. Without them a
 renderer draws any surface it is given as it is. One without the other is
 a compile error:
@@ -1883,7 +1905,7 @@ const Win32Host = struct {
 
     pub fn zuiPoll(self: *Win32Host, window: zui.WindowId, record: *zui.RecordBuilder) bool { ... } // false: the window closed
     pub fn zuiWaker(self: *Win32Host) zui.Waker { ... }
-    pub fn zuiWait(self: *Win32Host, next: zui.NextFrame) void { ... }
+    pub fn zuiWait(self: *Win32Host, next: zui.NextFrame) void { ... }   // the loop half: this, or zuiRun, or neither
     pub fn zuiSurface(self: *Win32Host, window: zui.WindowId) zui.Surface { ... }
     pub fn zuiApply(self: *Win32Host, window: zui.WindowId, requests: zui.HostRequests) void { ... } // cursor, IME window
     pub fn zuiOpenWindow(self: *Win32Host, options: zui.WindowOptions) zui.OpenWindowError!zui.WindowId { ... } // with .many
@@ -1999,13 +2021,54 @@ pub fn checkHost(comptime Host: type) void
 pub fn checkHostAndRenderer(comptime Host: type, comptime Renderer: type) void   // also: a surface kind both share
 ```
 
+- **Two halves.** The *window half* is what every host gives:
+  `zui_surfaces`, `zuiPoll`, `zuiWaker`, `zuiSurface`, `zuiApply`, and the
+  optional declarations below. The *loop half* says who turns the loop
+  (§6.1), and a host declares at most one of its calls: `zuiWait`, and
+  zui waits on it (*pulled*); `zuiRun`, and the platform runs the loop
+  (*pushed*); neither, and only the application's own loop steps it
+  (*stepped*). Both is a compile error:
+  ``"zui: Win32Host declares both `zuiWait` and `zuiRun`; zui pulls a host's loop or the platform pushes it, never both"``.
 - **`zuiPoll`** starts the record with `begin`, appends what the OS
   reported since the last poll in arrival order, and returns false when
-  the window has closed.
+  the window has closed. It is a drain: it never blocks, never presents
+  and never begins drawing, so a turn may poll without declaring, and a
+  loop that is not zui's may poll whenever it turns.
 - **`zuiWait`** returns at once for `.immediately`, at the instant for
   `.at`, and on input or a wake for `.on_event`. Its wake is sticky: it
   clears the wake after the wait returns, never before, so a wake between
   `nextFrame` and the wait ends the wait.
+- **`zuiRun(self, io, window, driver) !void`**, or `noreturn` on a
+  platform whose loop never returns (`[NSApp run]`), is the whole life of
+  a pushed host: it opens the window when the platform allows, calls
+  `driver.start(io)` once `zuiSurface(.main)` names its surface, calls
+  `driver.step()` from the platform's callbacks and schedules the next
+  as the `NextFrame` it returns says, and calls `driver.stop()` before
+  the window closes. A pushed host declares no `init` or `deinit`, a
+  compile error naming `zuiRun`. Any other type is a compile error:
+  ``"zui: Win32Host.zuiRun must be fn (*Win32Host, std.Io, zui.WindowOptions, zui.Driver) !void, or noreturn, found fn (*Win32Host, host.Driver) void"``.
+  The `io` it passes to `start` is the one the application's tasks run
+  on, which may be its own; such a host steps that `Io` before each turn
+  and folds the `Io`'s next wake into what it schedules with
+  `NextFrame.sooner`.
+
+  ```zig
+  /// What zui_app hands a pushed host, as a host hands out its Waker: a pointer and five calls, made on the thread that polls.
+  pub const Driver = struct {
+      context: *anyopaque,
+      calls: *const Calls,   // start, step, suspendSurfaces, resumeSurfaces, stop
+      pub fn start(self: Driver, io: std.Io) anyerror!void      // the window is open: makes the text, renderer, contexts, application
+      pub fn step(self: Driver) anyerror!?NextFrame             // one turn; null once every window has closed
+      pub fn suspendSurfaces(self: Driver) void                 // the platform took the surfaces away
+      pub fn resumeSurfaces(self: Driver) anyerror!void         // zuiSurface names each again
+      pub fn stop(self: Driver) void                            // frees what start made; again, or before start, nothing
+  };
+  pub fn sooner(self: NextFrame, other: NextFrame) NextFrame    // on NextFrame: the one that comes first
+  ```
+- **A stepped host** declares `init` and `deinit` and neither loop call:
+  it is a window the application already owns (an editor's panel, a
+  game's overlay, a page's canvas behind a host package's exports), and
+  its waker is the application's to forward to that loop.
 - **`zuiApply`** takes the frame's `HostRequests`, setting the cursor and
   placing the IME window.
 - **Many windows.** A host whose `zui_capabilities.windows` is `.many`
@@ -2042,7 +2105,9 @@ pub fn checkHostAndRenderer(comptime Host: type, comptime Renderer: type) void  
 - **The composition root checks the pair.** `checkHostAndRenderer` is
   called by the application or `zui_app`, the one place naming both:
   ``"zui: RaylibHost and TerminalRenderer share no surface kind: the host gives .library, the renderer draws into .terminal"``.
-- **Native hosts** own the window and loop, one per OS.
+- **Native hosts** own the window, one per OS, and pull the loop where
+  the OS lets a thread block (Windows, Wayland), or push it where the OS
+  owns it (macOS and iOS, whose `zuiRun` is `noreturn`).
 - **Adapter hosts** wrap a library that insists on owning its window
   (raylib), with fewer capabilities, through `InputSampler`.
 - **System materials.** A host with `system_material` asks the OS for the
@@ -2426,7 +2491,14 @@ edit (the message quotes the `.hidden = true` line that fixes it).
     that it has its own id, viewport and surface, that an event posted to
     either window is reported by that window alone, that closing it
     leaves the first polling, and that a window opened after it has a new
-    id; that harness declares `postTo(window, event)`.
+    id; that harness declares `postTo(window, event)`. It is the pulled
+    host's suite. A pushed host's, `expectPushedHostConforms`, runs
+    `zuiRun` with a harness that scripts the platform's callbacks, a
+    surface loss and its return among them, and checks that each turn's
+    `NextFrame` is scheduled, that a turn with nothing new declares
+    nothing, and that the application is freed once; a stepped host's,
+    `expectSteppedHostConforms`, steps a `Session` from the harness's
+    own loop and checks that a poll never blocks.
   - `expectSourceConforms(Source, harness, .{ .io })` stresses publish,
     swap, inject and refusal under many producers, on any `Io`, with a
     harness that publishes, since publishing is not part of the contract.
@@ -2434,11 +2506,24 @@ edit (the message quotes the `.hidden = true` line that fixes it).
 ### 19.5 `zui_app`
 
 The composition root as a library: `contextConfig(Renderer, overrides)`,
-and `run(App, init, options)`, which owns the loop of §6.1, calls the
+and `run(App, init, options)`, which runs the loop of §6.1 as the host's
+loop half says, calls the
 application's `zuiDeclare` and optional `zuiObserve` and `zuiLoader`, moves submission to
 a render thread when the renderer allows, applies host requests, paces
 to `nextFrame`, and reports capabilities and fallbacks. An application
-that wants its own loop writes the six lines of §6.1 instead.
+that owns its loop steps a `Session(App)` from it; one that wants
+nothing of `zui_app` writes the lines of §6.1 instead.
+
+```zig
+try zui_app.run(App, init, options);                 // zui or the platform owns the loop
+
+var session: zui_app.Session(App) = undefined;       // the application owns it
+try session.start(.{ .gpa = gpa, .io = io }, options);
+defer session.stop();
+while (editor.running()) {
+    if (try session.step()) |next| editor.redrawAt(next) else break;
+}
+```
 
 ```zig
 const App = struct {
@@ -2467,11 +2552,12 @@ const App = struct {
   and `deinit` if it declares them) and gives the context and the
   renderer a pointer to it. A `Ui` whose `Text` is neither the renderer
   nor `App.Text` is a compile error.
-- **What it opens.** The host declares `init(self, io, window:
+- **What it opens.** A pulled or stepped host declares `init(self, io, window:
   zui.WindowOptions) !void` (title, size, visible, resizable, material,
   title bar; `Options.title_bar = .custom` without
-  `features.chrome_regions` makes `start` return
-  `error.CustomTitleBarWithoutChromeRegions`) and `deinit`; the renderer may declare `init(self, surface) !void`, or
+  `features.chrome_regions` makes `start`, or `run`, return
+  `error.CustomTitleBarWithoutChromeRegions`) and `deinit`; a pushed
+  host is given the same options by `zuiRun`. The renderer may declare `init(self, surface) !void`, or
   `init(self, surface, text: *const Text) !void` beside `App.Text`, and
   `deinit`. Each field with a default holds it when `init` is called, so
   a setting made on the type survives. `Start(App)` gives the application
@@ -2491,7 +2577,7 @@ const App = struct {
   in flight, frames go through a queue of `frames_in_flight` entries to a
   task on the application's `Io` that submits and releases them; the UI
   thread applies host requests before handing a frame over. An error
-  there is returned by a later `frame()`.
+  there is returned by a later `step()`.
 - **What it reports,** once each, through `Options.notify` (by default
   `std.log`): at start, the host, its capabilities, where frames are
   submitted and why, the optional commands lowered and the services the
@@ -2527,9 +2613,46 @@ const App = struct {
   the user closes is closed; `run` returns once none is open. Frames,
   attaches and detaches share the render thread's queue, so a closed
   window's frames are released before its context is freed.
-- **`Runner(App)`** is `run` one frame at a time, for tests and hosts
-  that drive the loop. Each mistake in `App` is a compile error naming
-  it: ``"zui_app: demo.App declares unknown `zuiLoder`"``.
+- **Who turns the loop** follows the host's loop half (§16.3),
+  `zui_app.loopOf(Host)`: `.pulled`, `.pushed` or `.stepped`. `run` on a
+  pulled host starts a `Session`, then `while (try session.step())
+  |next| session.wait(next)`, then stops it. On a pushed host it hands
+  `zuiRun` a `zui.Driver` over a `Session` and returns as `zuiRun` does:
+  when `zuiRun` is `noreturn`, `run`'s type is
+  `zui_app.PushedStartError!noreturn`, and nothing after it runs, not
+  even a `defer`; Zig does not reject code there, so the caller keeps
+  none, and teardown is the application's `deinit`, which
+  `driver.stop()` runs. After `zuiRun` returns, `run` stops the driver
+  if the host did not. On a stepped host `run` is a compile error:
+  ``"zui_app: demo.Host declares neither `zuiWait` nor `zuiRun`, so only the application's own loop can turn it: step a zui_app.Session(demo.App) from that loop"``.
+  `runWith(App, setup, options)` is `run` without a process.
+- **`Session(App)`** is one run's state, turned by any loop. It must not
+  move after `start`. `start(setup, options)` opens the host's window
+  and makes the text, the renderer, the contexts and the application;
+  on a pushed host it is a compile error naming `run`. `step()` is one
+  turn, and never blocks: it polls each window, runs `zuiRecord`, and
+  declares, ends and submits each window that is due, by the rule of
+  *Many windows* below, for one window as for many; it returns when the
+  next turn is wanted, or null once every window has closed. An
+  application with one window is also due on the turn after `wait`,
+  since a wait may end for a repaint its record does not show. Unless the host is waited on, a window whose frames the render
+  thread holds every one of is not polled, so its input stays with the
+  host, and the turn returns `.immediately`. `wait(next)` blocks in the
+  host's `zuiWait`, and `frame()` is `step` then `wait`; on a host
+  without `zuiWait` both are compile errors:
+  ``"zui_app: demo.Host declares no `zuiWait`, so zui_app cannot wait on it; the loop that calls step waits as the zui.NextFrame it returns says"``.
+  `stop()` frees what `start` made, the application first, and closes
+  the window. Each mistake in `App` is a compile error naming it:
+  ``"zui_app: demo.App declares unknown `zuiLoder`"``.
+- **Surface loss.** `suspendSurfaces()` (`Driver.suspendSurfaces`) is
+  called when the platform takes the windows' surfaces away, as Android
+  does on pause or a GPU on a lost device: each window's surface is
+  detached from the renderer after the frames the render thread holds
+  for it, and turns declare nothing and return `.on_event` until
+  `resumeSurfaces()`, which attaches each surface as `zuiSurface` now
+  names it and makes every window due. On an error the surfaces stay
+  suspended, and those attached are detached again. The contexts, their
+  state, the application and its sources live on.
 
 ### 19.6 `zui_wire`
 

@@ -1943,6 +1943,26 @@ pub const App = struct {
 </script>
         <p>On the native Windows host, up to four windows open at once, and the sokol renderer draws each through its own swapchain on one device: two windows animating at once each hold a 144 Hz display's rate, and two idle windows use no CPU.</p>
       </article>
+      <article class="feature" id="own-loop" data-title="Your own loop">
+        <div class="feature-head"><h3>Your own loop: stepping a <code class="z">Session</code></h3><span class="pill shipped">Shipped</span></div>
+        <p>When an editor, a game engine or an existing app already owns the loop and the window, step a <code class="z">zui_app.Session(App)</code> from its frame instead of calling <code class="z">run</code>. Each <code class="z">step</code> polls the host, declares and submits only the windows that are due, and returns when it next wants to run, or null once the window has closed. It never blocks, so you get <code class="z">zui_app</code>'s render thread, host requests and notices without handing it your loop. The host is a small one over the window you already have: it declares the window half (<code class="z">zuiPoll</code>, <code class="z">zuiWaker</code>, <code class="z">zuiSurface</code>, <code class="z">zuiApply</code>) and neither <code class="z">zuiWait</code> nor <code class="z">zuiRun</code>. Calling <code class="z">run</code> with it, or <code class="z">wait</code>, is a compile error that tells you to step a <code class="z">Session</code>.</p>
+<script type="text/x-zig" data-file="src/panel.zig">
+const zui_app = @import("zui_app");
+
+pub fn runPanel(editor: *Editor, gpa: std.mem.Allocator, io: std.Io) !void {
+    var session: zui_app.Session(PanelApp) = undefined;
+    try session.start(.{ .gpa = gpa, .io = io }, .{ .title = "Outline" });
+    defer session.stop();
+
+    while (editor.running()) {
+        editor.beginFrame();
+        if (try session.step()) |next| editor.redrawAt(next) else break;
+        editor.endFrame();
+    }
+}
+</script>
+        <p>A host whose platform owns the loop, as AppKit's or a browser page's does, declares <code class="z">zuiRun</code> instead, and <code class="z">run</code> hands it a <code class="z">zui.Driver</code> to call from the platform's callbacks.</p>
+      </article>
     </section>
 
     <section class="group" id="contracts" data-title="Backend contracts">
@@ -1995,7 +2015,7 @@ pub fn config(overrides: zui.Config) zui.Config {
 
       <article class="feature" id="host" data-title="Writing a host">
         <div class="feature-head"><h3>Writing a host</h3><span class="pill shipped">Shipped</span></div>
-        <p>A host polls the OS into a <code class="z">RecordBuilder</code>, gives a waker that producers call from any thread, waits as <code class="z">NextFrame</code> says, hands out a surface, and applies a frame's requests. A library that reports input as state rather than events, as raylib does, uses <code class="z">InputSampler</code> to turn snapshots into the event log. <code class="z">checkHostAndRenderer</code> fails to compile when a host and renderer share no surface kind.</p>
+        <p>A host polls the OS into a <code class="z">RecordBuilder</code> without blocking, gives a waker that producers call from any thread, hands out a surface, and applies a frame's requests. Then it says who turns the loop: <code class="z">zuiWait</code>, to sleep as <code class="z">NextFrame</code> says while <code class="z">zui_app.run</code> loops; <code class="z">zuiRun</code>, when the platform owns the loop and the host calls the <code class="z">zui.Driver</code> it is handed from its callbacks; or neither, for a window whose application steps a <code class="z">Session</code> itself. A library that reports input as state rather than events, as raylib does, uses <code class="z">InputSampler</code> to turn snapshots into the event log. <code class="z">checkHostAndRenderer</code> fails to compile when a host and renderer share no surface kind.</p>
 <script type="text/x-zig" data-file="zui-glfw/src/host.zig">
 pub const Host = struct {
     pub const zui_surfaces: zui.SurfaceKinds = .initOne(.library);
@@ -2341,6 +2361,7 @@ fn present(renderer: *Renderer, surface: zui.Surface, frame: *const Ui.Frame) !v
       <div class="group-head"><span class="group-index">08</span><h2>Declared but not working yet</h2></div>
       <p class="group-intro">These names compile, but they don't do anything yet. This list is from <code>ARCHITECTURE.md</code> §7 and the roadmap.</p>
       <ul class="gap-list">
+        <li><b>A host that runs its own loop</b><span><code class="z">zuiRun</code> and the <code class="z">zui.Driver</code> it is handed, with <code class="z">suspendSurfaces</code> and <code class="z">resumeSurfaces</code> for a surface the platform takes away, compile and pass <code class="z">zui_app</code>'s tests against a scripted host, but no shipped host declares <code class="z">zuiRun</code> yet; macOS, iOS and Android's are to come.</span></li>
         <li><b>Still to come</b><span>Motion, multi-line text editing, skins, the inspector over the wire, and more hosts (Linux and web; macOS later).</span></li>
       </ul>
     </section>

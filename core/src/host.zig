@@ -1,4 +1,6 @@
+const std = @import("std");
 const Wake = @import("sources.zig").Wake;
+const NextFrame = @import("record.zig").NextFrame;
 const OutputFormats = @import("surface.zig").OutputFormats;
 const SemanticsCapacity = @import("semantics.zig").SemanticsCapacity;
 
@@ -168,4 +170,68 @@ pub const FileWatchError = error{
     TooManyWatches,
     /// The directory does not exist or cannot be opened.
     DirectoryUnavailable,
+};
+
+/// What a host that runs its own loop is handed by `zui_app`, through
+/// `zuiRun`, to call from the platform's callbacks: one per run, as a host
+/// hands out its `Waker`. Every call is made on the thread that polls.
+///
+/// ```zig
+/// pub fn zuiRun(self: *Host, io: std.Io, window: zui.WindowOptions, driver: zui.Driver) !void {
+///     try self.openCanvas(window);
+///     try driver.start(io);
+///     defer driver.stop();
+///     while (self.nextAnimationFrame()) {
+///         const next = try driver.step() orelse return;
+///         self.schedule(next);
+///     }
+/// }
+/// ```
+pub const Driver = struct {
+    context: *anyopaque,
+    calls: *const Calls,
+
+    pub const Calls = struct {
+        start: *const fn (*anyopaque, std.Io) anyerror!void,
+        step: *const fn (*anyopaque) anyerror!?NextFrame,
+        suspendSurfaces: *const fn (*anyopaque) void,
+        resumeSurfaces: *const fn (*anyopaque) anyerror!void,
+        stop: *const fn (*anyopaque) void,
+    };
+
+    /// Once the main window is open and `zuiSurface(.main)` names its
+    /// surface: makes the text, the renderer, the contexts and the
+    /// application, whose tasks run on `io`, which may be the host's own.
+    pub fn start(self: Driver, io: std.Io) anyerror!void {
+        return self.calls.start(self.context, io);
+    }
+
+    /// One turn, which never blocks: polls every window and declares,
+    /// ends and submits those that are due. Returns when the next turn is
+    /// wanted, for the host to schedule, or null once every window has
+    /// closed, when the host calls `stop`.
+    pub fn step(self: Driver) anyerror!?NextFrame {
+        return self.calls.step(self.context);
+    }
+
+    /// The platform took the windows' surfaces away, as Android does on
+    /// pause or a GPU does when its device is lost: the renderer lets go
+    /// of what it keeps for each, and turns until `resumeSurfaces`
+    /// declare nothing.
+    pub fn suspendSurfaces(self: Driver) void {
+        self.calls.suspendSurfaces(self.context);
+    }
+
+    /// Each window has a surface again, as `zuiSurface` now names it: the
+    /// renderer is handed each one, and every window is due.
+    pub fn resumeSurfaces(self: Driver) anyerror!void {
+        return self.calls.resumeSurfaces(self.context);
+    }
+
+    /// Frees what `start` made, the application first. Call it before
+    /// the window closes; a second call, or one without `start`, does
+    /// nothing.
+    pub fn stop(self: Driver) void {
+        self.calls.stop(self.context);
+    }
 };

@@ -300,20 +300,20 @@ test "zui_app runs the tour through every screen it is offered, and stops at the
     const App = tour.App(.{ .Host = ScriptedHost, .Renderer = FakeRenderer(false, .pixel_grid), .Text = zui_truetype.Text, .renderer_name = "a fake renderer" });
     const cycle_every = 3;
     const frame_limit = cycle_every * App.kit.offered_screens.len + 2;
-    const runner = try testing.allocator.create(zui_app.Runner(App));
-    defer testing.allocator.destroy(runner);
-    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = ignoreNotice });
-    defer runner.stop();
-    runner.app.options.frame_limit = frame_limit;
-    runner.app.tour.cycle_every = cycle_every;
+    const session = try testing.allocator.create(zui_app.Session(App));
+    defer testing.allocator.destroy(session);
+    try session.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = ignoreNotice });
+    defer session.stop();
+    session.app.options.frame_limit = frame_limit;
+    session.app.tour.cycle_every = cycle_every;
 
     var screens_shown: std.EnumSet(tour.Screen) = .initEmpty();
-    while (try runner.frame()) screens_shown.insert(runner.app.tour.current);
-    try testing.expectEqual(@as(u64, frame_limit), runner.app.frames);
+    while (try session.frame()) screens_shown.insert(session.app.tour.current);
+    try testing.expectEqual(@as(u64, frame_limit), session.app.frames);
     try testing.expectEqual(App.kit.offered_screens.len, screens_shown.count());
-    try testing.expect(runner.app.tour.perf.diagnostics.ok());
-    try testing.expectEqual(@as(u64, frame_limit), runner.app.tour.perf.zui_frames);
-    try testing.expectEqual(tour.Palette.dark.background, runner.renderer.clear_color);
+    try testing.expect(session.app.tour.perf.diagnostics.ok());
+    try testing.expectEqual(@as(u64, frame_limit), session.app.tour.perf.zui_frames);
+    try testing.expectEqual(tour.Palette.dark.background, session.renderer.clear_color);
 }
 
 fn ignoreNotice(_: zui_app.Notice) void {}

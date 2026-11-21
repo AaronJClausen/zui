@@ -240,7 +240,8 @@ pub fn Start(comptime App: type) type {
     return struct {
         gpa: std.mem.Allocator,
         io: std.Io,
-        /// Null when a test starts the `Runner` itself.
+        /// Null when a test or the application's own loop starts the
+        /// `Session`.
         process: ?std.process.Init,
         host: *App.Host,
         /// For the renderer's own settings. While frames are submitted on a
@@ -283,7 +284,7 @@ pub fn Windows(comptime App: type) type {
         /// The host opens more than one window; guard `open` with it.
         pub const has_many_windows = hostOpensManyWindows(App.Host);
 
-        runner: *anyopaque,
+        session: *anyopaque,
         openFn: *const fn (*anyopaque, zui.WindowOptions) anyerror!zui.WindowId,
         closeFn: *const fn (*anyopaque, zui.WindowId) void,
 
@@ -295,23 +296,42 @@ pub fn Windows(comptime App: type) type {
             if (comptime !has_many_windows) {
                 @compileError("zui_app: " ++ @typeName(App.Host) ++ " opens one window (its zui_capabilities.windows is .one), so " ++ @typeName(App) ++ " cannot open another");
             }
-            return self.openFn(self.runner, options);
+            return self.openFn(self.session, options);
         }
 
         /// Closes `window` once this turn's frames are done; then
         /// `zuiWindowClosed` runs. A window that is not open is ignored.
         pub fn close(self: Self, window: zui.WindowId) void {
-            self.closeFn(self.runner, window);
+            self.closeFn(self.session, window);
         }
     };
 }
 
-/// What `Runner.start` takes; `run` fills it from the process.
+/// What `Session.start` takes; `run` fills it from the process.
 pub const Setup = struct {
     gpa: std.mem.Allocator,
     io: std.Io,
     process: ?std.process.Init = null,
 };
+
+/// Who turns a host's loop, by the loop half it declares.
+pub const Loop = enum {
+    /// It declares `zuiWait`: `run` steps a `Session` and waits on the
+    /// host for the frame each step names.
+    pulled,
+    /// It declares `zuiRun`: `run` hands the host a `zui.Driver`, which the
+    /// host steps from the platform's callbacks.
+    pushed,
+    /// It declares neither: only the application's own loop steps a
+    /// `Session` on it, and `run` is a compile error.
+    stepped,
+};
+
+pub fn loopOf(comptime Host: type) Loop {
+    if (@hasDecl(Host, "zuiWait")) return .pulled;
+    if (@hasDecl(Host, "zuiRun")) return .pushed;
+    return .stepped;
+}
 
 /// Opens `App.Host`'s window and runs the loop of SPEC.md §6.1 until it
 /// closes. `App` declares:
@@ -354,8 +374,18 @@ pub const Setup = struct {
 /// once for the earliest `nextFrame` of all. A window the user closes is
 /// closed, and `run` returns once none is open.
 ///
-/// The host declares `pub fn init(self: *Host, io: std.Io, window:
-/// zui.WindowOptions) !void` and `pub fn deinit(self: *Host) void`. With
+/// Who turns the loop follows the host's loop half (`Loop`). A host that
+/// declares `zuiWait` is stepped and waited on until its windows close. A
+/// host that declares `zuiRun` is handed a `zui.Driver` and runs the
+/// loop itself, opening and closing its window there, and `run` returns
+/// as `zuiRun` does: when `zuiRun` is `noreturn`, so is `run`, and
+/// nothing after the call runs, not even a `defer`. Zig does not reject
+/// code after a `noreturn` call, so the caller keeps none there. A host
+/// that declares neither is a compile error naming `Session`.
+///
+/// A host that waits, or declares neither, declares `pub fn init(self:
+/// *Host, io: std.Io, window: zui.WindowOptions) !void` and `pub fn
+/// deinit(self: *Host) void`; one that runs declares neither. With
 /// `features.semantics`, a host that declares `zuiSemantics` opens the
 /// window with room for `Config.limits`' elements and text, and is handed
 /// each frame's list on the UI thread, after `zuiObserve` and before the
@@ -369,17 +399,124 @@ pub const Setup = struct {
 /// *Text) !void` and `pub fn deinit(self: *Text) void`. Without `init`,
 /// every field needs a default; with it, the fields that have a default
 /// hold it when `init` is called.
-pub fn run(comptime App: type, init: std.process.Init, options: Options) !void {
-    const runner = try init.gpa.create(Runner(App));
-    defer init.gpa.destroy(runner);
-    try runner.start(.{ .gpa = init.gpa, .io = init.io, .process = init }, options);
-    defer runner.stop();
-    while (try runner.step()) |next| runner.wait(next);
+pub fn run(comptime App: type, init: std.process.Init, options: Options) RunResult(App) {
+    return runWith(App, .{ .gpa = init.gpa, .io = init.io, .process = init }, options);
 }
 
-/// `run`, one frame at a time, for tests and for applications that drive
-/// the loop themselves. It must not move after `start`.
-pub fn Runner(comptime App: type) type {
+/// `run`, given the allocator and `Io` it would take from the process:
+/// for tests, and for a process that keeps its own.
+pub fn runWith(comptime App: type, setup: Setup, options: Options) RunResult(App) {
+    switch (comptime loopOf(App.Host)) {
+        .pulled => {
+            const session = try setup.gpa.create(Session(App));
+            defer setup.gpa.destroy(session);
+            try session.start(setup, options);
+            defer session.stop();
+            while (try session.step()) |next| session.wait(next);
+        },
+        .pushed => return runPushed(App, setup, options),
+        .stepped => @compileError("zui_app: " ++ @typeName(App.Host) ++ " declares neither `zuiWait` nor `zuiRun`, so only the application's own loop can turn it: step a zui_app.Session(" ++ @typeName(App) ++ ") from that loop"),
+    }
+}
+
+/// What `run` can fail with before a host that runs takes the loop.
+pub const PushedStartError = error{ OutOfMemory, CustomTitleBarWithoutChromeRegions };
+
+/// `run`'s return type: `zuiRun`'s, when it is `noreturn`.
+fn RunResult(comptime App: type) type {
+    comptime checkApp(App);
+    if (loopOf(App.Host) == .pushed and @typeInfo(@TypeOf(App.Host.zuiRun)).@"fn".return_type.? == noreturn) return PushedStartError!noreturn;
+    return anyerror!void;
+}
+
+fn runPushed(comptime App: type, setup: Setup, options: Options) RunResult(App) {
+    if (options.title_bar == .custom and !UiOf(App).features.chrome_regions) return error.CustomTitleBarWithoutChromeRegions;
+    const pushed = try setup.gpa.create(Pushed(App));
+    defer setup.gpa.destroy(pushed);
+    pushed.* = .{ .session = undefined, .setup = setup, .options = options };
+    setFieldDefaults(App.Host, &pushed.session.host);
+    const driver = pushed.driver();
+    defer driver.stop();
+    return pushed.session.host.zuiRun(setup.io, Session(App).windowOptions(options), driver);
+}
+
+/// A `Session` behind the `zui.Driver` a host that runs is handed, with
+/// what its `start` waits for the host to give.
+fn Pushed(comptime App: type) type {
+    return struct {
+        const Self = @This();
+
+        session: Session(App),
+        setup: Setup,
+        options: Options,
+        started: bool = false,
+
+        const calls: zui.Driver.Calls = .{
+            .start = start,
+            .step = step,
+            .suspendSurfaces = suspendSurfaces,
+            .resumeSurfaces = resumeSurfaces,
+            .stop = stop,
+        };
+
+        fn driver(self: *Self) zui.Driver {
+            return .{ .context = self, .calls = &calls };
+        }
+
+        fn of(context: *anyopaque) *Self {
+            return @ptrCast(@alignCast(context));
+        }
+
+        fn start(context: *anyopaque, io: std.Io) anyerror!void {
+            const self = of(context);
+            if (self.started) @panic("zui_app: a host called Driver.start twice; a lost surface is Driver.suspendSurfaces and resumeSurfaces");
+            var setup = self.setup;
+            setup.io = io;
+            try self.session.startOnOpenHost(setup, self.options);
+            self.started = true;
+        }
+
+        fn step(context: *anyopaque) anyerror!?zui.NextFrame {
+            const self = of(context);
+            if (!self.started) @panic("zui_app: a host called Driver.step before Driver.start");
+            return self.session.step();
+        }
+
+        fn suspendSurfaces(context: *anyopaque) void {
+            const self = of(context);
+            if (self.started) self.session.suspendSurfaces();
+        }
+
+        fn resumeSurfaces(context: *anyopaque) anyerror!void {
+            const self = of(context);
+            if (self.started) try self.session.resumeSurfaces();
+        }
+
+        fn stop(context: *anyopaque) void {
+            const self = of(context);
+            if (!self.started) return;
+            self.started = false;
+            self.session.stopKeepingHost();
+        }
+    };
+}
+
+/// One run's state, turned one step at a time by whichever loop owns it:
+/// `run`'s, waiting on the host between steps; a host's that runs, through
+/// its `zui.Driver`; or the application's own, on a host that declares
+/// neither loop call. It must not move after `start`.
+///
+/// ```zig
+/// var session: zui_app.Session(App) = undefined;
+/// try session.start(.{ .gpa = gpa, .io = io }, .{ .title = "panel" });
+/// defer session.stop();
+/// while (editor.running()) {
+///     editor.beginFrame();
+///     if (try session.step()) |next| editor.redrawAt(next) else break;
+///     editor.endFrame();
+/// }
+/// ```
+pub fn Session(comptime App: type) type {
     comptime checkApp(App);
     return struct {
         const Self = @This();
@@ -390,6 +527,7 @@ pub fn Runner(comptime App: type) type {
         /// measures, or nothing does.
         pub const Text = SeparateText(App);
 
+        pub const loop = loopOf(Host);
         const windowed = declaresWindows(App);
         const host_opens_many_windows = hostOpensManyWindows(Host);
         const renderer_keeps_surfaces = @hasDecl(Renderer, "zuiAttachSurface");
@@ -444,6 +582,7 @@ pub fn Runner(comptime App: type) type {
         /// Set by `wait`, so the next turn of an application with one
         /// window is due.
         host_waited: bool,
+        surfaces_suspended: bool,
         windows: if (windowed) [max_windows]?*Window else void,
         /// Set while `zuiDeclare` runs, when opening a window panics.
         declaring: bool,
@@ -465,7 +604,24 @@ pub fn Runner(comptime App: type) type {
             semantics_dropped: bool = false,
         };
 
+        /// Opens the host's window, then makes the text, the renderer, the
+        /// contexts and the application.
         pub fn start(self: *Self, setup: Setup, options: Options) !void {
+            if (comptime loop == .pushed) {
+                @compileError("zui_app: " ++ @typeName(Host) ++ " declares `zuiRun`, so it opens its own window and runs its own loop: start it with zui_app.run(" ++ @typeName(App) ++ ", ...)");
+            }
+            if (options.title_bar == .custom and !Ui.features.chrome_regions) return error.CustomTitleBarWithoutChromeRegions;
+            setFieldDefaults(Host, &self.host);
+            try self.host.init(setup.io, windowOptions(options));
+            errdefer self.host.deinit();
+            try self.startOnOpenHost(setup, options);
+        }
+
+        fn windowOptions(options: Options) zui.WindowOptions {
+            return .{ .title = options.title, .size = options.size, .visible = options.visible, .resizable = options.resizable, .material = options.material, .output_formats = output_formats, .semantics = window_semantics, .title_bar = options.title_bar };
+        }
+
+        fn startOnOpenHost(self: *Self, setup: Setup, options: Options) !void {
             self.gpa = setup.gpa;
             self.io = setup.io;
             self.notify = options.notify;
@@ -475,12 +631,9 @@ pub fn Runner(comptime App: type) type {
             self.render_thread_started = false;
             self.declaring = false;
             self.host_waited = false;
+            self.surfaces_suspended = false;
             self.pending = .init(&self.pending_buffer);
 
-            if (options.title_bar == .custom and !Ui.features.chrome_regions) return error.CustomTitleBarWithoutChromeRegions;
-            setFieldDefaults(Host, &self.host);
-            try self.host.init(setup.io, .{ .title = options.title, .size = options.size, .visible = options.visible, .resizable = options.resizable, .material = options.material, .output_formats = output_formats, .semantics = window_semantics, .title_bar = options.title_bar });
-            errdefer self.host.deinit();
             if (Text != void) {
                 if (@hasDecl(Text, "init")) {
                     setFieldDefaults(Text, &self.text);
@@ -520,7 +673,7 @@ pub fn Runner(comptime App: type) type {
                     .renderer = &self.renderer,
                     .text = if (Text != void) &self.text else {},
                     .waker = self.host.zuiWaker(),
-                    .windows = if (windowed) .{ .runner = self, .openFn = openWindow, .closeFn = closeWindow } else {},
+                    .windows = if (windowed) .{ .session = self, .openFn = openWindow, .closeFn = closeWindow } else {},
                 });
             } else {
                 self.app = .{};
@@ -608,12 +761,18 @@ pub fn Runner(comptime App: type) type {
         /// viewport, scale, zoom or output format, a `nextFrame` that has
         /// come, or no frame yet, and every window is due on every turn
         /// when a source lacks `zuiPending`. An application with one
-        /// window is also due on the turn after `wait`.
+        /// window is also due on the turn after `wait`. While the surfaces
+        /// are suspended a turn polls nothing and returns `.on_event`.
+        /// Unless the host is waited on, a window whose frames the render
+        /// thread holds every one of is not polled this turn, so its input
+        /// stays with the host, and the turn returns `.immediately`.
         pub fn step(self: *Self) !?zui.NextFrame {
             const render_error = self.render_error.load(.acquire);
             if (render_error != 0) return @errorFromInt(render_error);
+            if (self.surfaces_suspended) return .on_event;
             if (windowed) return self.stepEveryWindow();
 
+            if (!canBeginWithoutWaiting(&self.ui)) return .immediately;
             const waited = self.host_waited;
             self.host_waited = false;
             if (!self.host.zuiPoll(.main, &self.builder)) return null;
@@ -633,6 +792,9 @@ pub fn Runner(comptime App: type) type {
         /// show; each of many windows is still judged, since one wait does
         /// not say which window it was for.
         pub fn wait(self: *Self, next: zui.NextFrame) void {
+            if (comptime loop != .pulled) {
+                @compileError("zui_app: " ++ @typeName(Host) ++ " declares no `zuiWait`, so zui_app cannot wait on it; the loop that calls step waits as the zui.NextFrame it returns says");
+            }
             self.host.zuiWait(next);
             if (!windowed) self.host_waited = true;
         }
@@ -645,10 +807,20 @@ pub fn Runner(comptime App: type) type {
             return true;
         }
 
+        /// A loop that is waited on may wait in `beginFrame` too.
+        fn canBeginWithoutWaiting(ui: *const Ui) bool {
+            return loop == .pulled or ui.hasFreeFrame();
+        }
+
         fn stepEveryWindow(self: *Self) !?zui.NextFrame {
+            var held_back = false;
             for (&self.windows) |*slot| {
                 const window = slot.* orelse continue;
                 if (window.closing) continue;
+                if (!canBeginWithoutWaiting(&window.ui)) {
+                    held_back = true;
+                    continue;
+                }
                 if (!self.host.zuiPoll(window.id, &window.builder)) {
                     window.closing = true;
                     continue;
@@ -661,7 +833,8 @@ pub fn Runner(comptime App: type) type {
                 try self.frameWindow(&window.ui, &window.builder, window.id);
             }
             while (self.closeOneClosingWindow()) {}
-            return self.earliestNextFrame();
+            const next = self.earliestNextFrame() orelse return null;
+            return if (held_back) .immediately else next;
         }
 
         fn isDue(self: *Self, ui: *const Ui, window: zui.WindowId, builder: *const zui.RecordBuilder, drawn: ?Drawn, format: zui.OutputFormat) bool {
@@ -687,6 +860,36 @@ pub fn Runner(comptime App: type) type {
                 earliest = if (earliest) |so_far| so_far.sooner(next) else next;
             }
             return earliest;
+        }
+
+        /// The platform took every window's surface away: the renderer
+        /// detaches each, after the frames it holds for it, and turns
+        /// declare nothing until `resumeSurfaces`.
+        pub fn suspendSurfaces(self: *Self) void {
+            if (self.surfaces_suspended) return;
+            self.surfaces_suspended = true;
+            if (!windowed) return self.detachSurface(self.host.zuiSurface(.main));
+            for (self.windows) |slot| if (slot) |window| self.detachSurface(self.host.zuiSurface(window.id));
+        }
+
+        /// Attaches each window's surface as the host now names it, and
+        /// makes every window due. On an error the surfaces stay
+        /// suspended, and those attached are detached again.
+        pub fn resumeSurfaces(self: *Self) !void {
+            if (!self.surfaces_suspended) return;
+            if (!windowed) {
+                try self.attachSurface(self.host.zuiSurface(.main));
+                self.drawn = null;
+            } else {
+                for (self.windows, 0..) |slot, index| if (slot) |window| {
+                    self.attachSurface(self.host.zuiSurface(window.id)) catch |err| {
+                        for (self.windows[0..index]) |attached_slot| if (attached_slot) |attached| self.detachSurface(self.host.zuiSurface(attached.id));
+                        return err;
+                    };
+                    window.drawn = null;
+                };
+            }
+            self.surfaces_suspended = false;
         }
 
         /// Begins, declares and ends one frame of `ui`, hands it to the host
@@ -805,8 +1008,13 @@ pub fn Runner(comptime App: type) type {
 
         /// Submits what is left on the render thread, then frees everything
         /// `start` made, the application first, so it can join its work
-        /// before its sources go.
+        /// before its sources go, and closes the host's window.
         pub fn stop(self: *Self) void {
+            self.stopKeepingHost();
+            if (loop != .pushed) self.host.deinit();
+        }
+
+        fn stopKeepingHost(self: *Self) void {
             if (self.render_thread_started) {
                 self.pending.close(self.io);
                 self.render_task.await(self.io) catch {};
@@ -815,7 +1023,6 @@ pub fn Runner(comptime App: type) type {
             self.freeWindows();
             if (@hasDecl(Renderer, "deinit")) self.renderer.deinit();
             if (Text != void and @hasDecl(Text, "deinit")) self.text.deinit();
-            self.host.deinit();
         }
 
         fn submitPending(self: *Self) void {
@@ -921,7 +1128,7 @@ fn setFieldDefaults(comptime T: type, value: *T) void {
     }
 }
 
-/// `zui_app`'s part of the composition root: what `Runner(App)` needs of
+/// `zui_app`'s part of the composition root: what `Session(App)` needs of
 /// `App`, its host and its renderer, each mistake a compile error.
 pub fn checkApp(comptime App: type) void {
     const name = @typeName(App);
@@ -1009,10 +1216,16 @@ pub fn checkApp(comptime App: type) void {
     if (@hasDecl(App, "deinit")) expectFunction(App, "deinit", fn (*App) void, "fn (*" ++ name ++ ") void");
 
     const host_name = @typeName(App.Host);
-    if (!@hasDecl(App.Host, "init")) @compileError("zui_app: " ++ host_name ++ " must declare `pub fn init(self: *" ++ host_name ++ ", io: std.Io, window: zui.WindowOptions) !void`, which opens its window");
-    expectFunction(App.Host, "init", fn (*App.Host, std.Io, zui.WindowOptions) anyerror!void, "fn (*" ++ host_name ++ ", std.Io, zui.WindowOptions) !void");
-    if (!@hasDecl(App.Host, "deinit")) @compileError("zui_app: " ++ host_name ++ " must declare `pub fn deinit(self: *" ++ host_name ++ ") void`, which closes its window");
-    expectFunction(App.Host, "deinit", fn (*App.Host) void, "fn (*" ++ host_name ++ ") void");
+    if (loopOf(App.Host) == .pushed) {
+        for ([_][]const u8{ "init", "deinit" }) |declaration| {
+            if (@hasDecl(App.Host, declaration)) @compileError("zui_app: " ++ host_name ++ " declares `zuiRun`, which opens and closes its window, so it declares no `" ++ declaration ++ "`");
+        }
+    } else {
+        if (!@hasDecl(App.Host, "init")) @compileError("zui_app: " ++ host_name ++ " must declare `pub fn init(self: *" ++ host_name ++ ", io: std.Io, window: zui.WindowOptions) !void`, which opens its window");
+        expectFunction(App.Host, "init", fn (*App.Host, std.Io, zui.WindowOptions) anyerror!void, "fn (*" ++ host_name ++ ", std.Io, zui.WindowOptions) !void");
+        if (!@hasDecl(App.Host, "deinit")) @compileError("zui_app: " ++ host_name ++ " must declare `pub fn deinit(self: *" ++ host_name ++ ") void`, which closes its window");
+        expectFunction(App.Host, "deinit", fn (*App.Host) void, "fn (*" ++ host_name ++ ") void");
+    }
 
     const renderer_name = @typeName(App.Renderer);
     if (rendererInitTakesText(App)) {

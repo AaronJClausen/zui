@@ -342,6 +342,23 @@ while (host.zuiPoll(.main, &builder)) { // the host sets the time, viewport and 
 }
 ```
 
+Between the two, an application that owns its loop keeps `zui_app`'s
+turn: which windows are due, the render thread, host requests and
+notices. It steps a `zui_app.Session(App)` from its own frame, on a host
+that declares neither `zuiWait` nor `zuiRun` (a window it already has).
+A host whose platform owns the loop declares `zuiRun`, and `zui_app.run`
+hands it a `zui.Driver` to call from the platform's callbacks
+(SPEC.md §16.3, §19.5); no shipped host declares it yet:
+
+```zig
+var session: zui_app.Session(App) = undefined;
+try session.start(.{ .gpa = gpa, .io = io }, .{ .title = "panel" });
+defer session.stop();
+while (editor.running()) {
+    if (try session.step()) |next| editor.redrawAt(next) else break; // never blocks
+}
+```
+
 With `.Sources = AppSources` in the `Config`, a struct whose fields are
 sources (SPEC.md §14), `beginFrame` and `nextFrame` also take
 `&app.sources`, the record is `builder.recordWith(Ui.Deliveries)`, and declaration reads them with `ui.source(.quotes)`:

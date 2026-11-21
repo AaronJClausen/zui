@@ -69,7 +69,7 @@ green, and its **Status** line below says which slice is next.
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
 | H4. Linux | 10 | `hosts/native/`, `renderers/sokol/` | | in progress; slice 5, the IME, is next |
-| H10. Hosts whose platform owns the loop | 10 | `core/zui_app/`, `core/src/contracts.zig`, `renderers/raylib/`, `hosts/web/`, `core/zui_testing/` | | in progress; slice 2, the split contract, is next |
+| H10. Hosts whose platform owns the loop | 10 | `core/zui_app/`, `core/src/contracts.zig`, `renderers/raylib/`, `hosts/web/`, `core/zui_testing/` | | in progress; slice 4, the browser's worker on `Session`, is next |
 | H5. Web | 10 | `hosts/web/`, `renderers/webgl/` | H10 | |
 | H7. Window decorations | 10 | `core/src/chrome.zig`, `core/src/context.zig`, `core/zui_app/`, `hosts/native/` | | waiting on a person: the checklist under H7's *Status*, on `zig build title-bar` in `hosts/native/` |
 | M1. `zui_motion` | 11 | `core/zui_motion/` | | |
@@ -4749,7 +4749,21 @@ declared 10 frames in 10 s on the Wayland host against 11 (24.8 against
 cycles were unchanged; nine of `zui_app`'s tests and the showcase's,
 whose fake hosts return from every wait with an empty record, declared
 fewer frames. Too little to gain for a frame a host's wait may ask for
-without a record that shows it. Slice 2, the split contract, is next.
+without a record that shows it. Slices 2 and 3 landed together, since
+`zui.Driver` carries the surface calls: `zuiWait` is the optional loop
+half beside `zuiRun`, `checkHost` rejecting both and any other `zuiRun`;
+`zui.Driver`; `Session(App)` in place of `Runner`, every caller renamed,
+with `Loop`, `loopOf`, `runWith`, a `run` whose type is `noreturn` when
+`zuiRun`'s is, and a step that leaves input with the host while the
+render thread holds every frame (on a host that is not waited on); and
+`suspendSurfaces` and `resumeSurfaces` over the renderer's attach and
+detach. Six compile errors are pinned. A fake pushed host drives an
+application from a scripted list of callbacks through a lost surface and
+its return, on a UI-thread and a render-thread renderer and on an `Io`
+of its own, and an application's own loop steps a `Session` on a stepped
+host. The sokol renderer attaches only `.win32` windows, so a lost
+surface of another kind cannot come back to it yet (ARCHITECTURE.md §7).
+Slice 4, the browser's worker on `Session`, is next.
 
 ---
 

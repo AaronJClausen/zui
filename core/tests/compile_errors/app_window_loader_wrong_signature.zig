@@ -45,5 +45,5 @@ const Host_ = Host;
 const Renderer_ = Renderer;
 
 comptime {
-    _ = zui_app.Runner(App);
+    _ = zui_app.Session(App);
 }

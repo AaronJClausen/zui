@@ -209,8 +209,8 @@ const ViewerRenderer = struct {
     }
 };
 
-fn runUntilClosed(runner: *zui_app.Runner(CounterApp)) void {
-    while (runner.frame() catch false) {}
+fn runUntilClosed(session: *zui_app.Session(CounterApp)) void {
+    while (session.frame() catch false) {}
 }
 
 /// Runs the client's turns until the renderer shows `label`, failing after
@@ -227,10 +227,10 @@ test "an application runs in one place and draws in another, with input going ba
     const io = testing.io;
     const pair = try connect(io);
 
-    var runner: zui_app.Runner(CounterApp) = undefined;
-    try runner.start(.{ .gpa = testing.allocator, .io = io }, .{});
+    var session: zui_app.Session(CounterApp) = undefined;
+    try session.start(.{ .gpa = testing.allocator, .io = io }, .{});
     var app_stopped = false;
-    defer if (!app_stopped) runner.stop();
+    defer if (!app_stopped) session.stop();
 
     var viewer_host: ViewerHost = .{ .io = io };
     var viewer_renderer: ViewerRenderer = .{};
@@ -241,9 +241,9 @@ test "an application runs in one place and draws in another, with input going ba
     try testing.expect(client.poll(&viewer_host));
     client.send();
 
-    try runner.host.attach(testing.allocator, pair.application);
+    try session.host.attach(testing.allocator, pair.application);
     var application: Io.Group = .init;
-    try application.concurrent(io, runUntilClosed, .{&runner});
+    try application.concurrent(io, runUntilClosed, .{&session});
     defer application.cancel(io);
 
     try presentUntil(&client, &viewer_host, &viewer_renderer, "clicks: 0");
@@ -267,10 +267,10 @@ test "an application runs in one place and draws in another, with input going ba
     client.deinit();
     client_open = false;
     try application.await(io);
-    try testing.expectEqual(@as(u32, 2), runner.app.clicks);
-    try testing.expect(!runner.host.connected());
-    try testing.expectEqual(null, runner.host.failure());
-    runner.stop();
+    try testing.expectEqual(@as(u32, 2), session.app.clicks);
+    try testing.expect(!session.host.connected());
+    try testing.expectEqual(null, session.host.failure());
+    session.stop();
     app_stopped = true;
 }
 

@@ -356,7 +356,7 @@ pub fn Inspector(comptime Ui: type) type {
         /// that `; ` separates gets a line, and what does not fit is cut.
         ///
         /// ```zig
-        /// app.inspector.reportRun(runner.report); // zui_app's Report
+        /// app.inspector.reportRun(session.report); // zui_app's Report
         /// ```
         pub fn reportRun(self: *Self, report: anytype) void {
             var writer: std.Io.Writer = .fixed(&self.run_report_storage);

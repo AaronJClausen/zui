@@ -374,7 +374,7 @@ const CheckApp = struct {
     }
 };
 
-var app_runner: zui_app.Runner(CheckApp) = undefined;
+var app_runner: zui_app.Session(CheckApp) = undefined;
 var app_memory: [CheckApp.AppUi.required_bytes + 4096]u8 = undefined;
 
 export fn zuiCheckApp(io: *const std.Io) usize {
@@ -391,6 +391,68 @@ export fn zuiCheckRun(init: *const std.process.Init) usize {
 }
 
 fn ignoreNotice(_: zui_app.Notice) void {}
+
+var stepped_app_session: zui_app.Session(CheckApp) = undefined;
+var stepped_app_memory: [CheckApp.AppUi.required_bytes + 4096]u8 = undefined;
+
+export fn zuiCheckSessionSteps(io: *const std.Io) usize {
+    var fixed: std.heap.FixedBufferAllocator = .init(&stepped_app_memory);
+    stepped_app_session.start(.{ .gpa = fixed.allocator(), .io = io.* }, .{ .notify = ignoreNotice }) catch return 0;
+    defer stepped_app_session.stop();
+    var turns: usize = 0;
+    while (stepped_app_session.step() catch return 0) |next| : (turns += 1) {
+        if (next == .immediately) stepped_app_session.suspendSurfaces();
+        stepped_app_session.resumeSurfaces() catch return 0;
+    }
+    return turns + stepped_app_session.app.frames;
+}
+
+/// Runs its own loop, as a page's animation frames would.
+const PushCheckHost = struct {
+    pub const zui_surfaces: zui.SurfaceKinds = .initOne(.offscreen);
+
+    turns: u32 = 0,
+
+    pub fn zuiRun(self: *PushCheckHost, io: std.Io, _: zui.WindowOptions, driver: zui.Driver) !void {
+        try driver.start(io);
+        defer driver.stop();
+        while (try driver.step()) |next| {
+            if (next == .on_event) driver.suspendSurfaces();
+            try driver.resumeSurfaces();
+            self.turns += 1;
+        }
+    }
+
+    pub fn zuiPoll(self: *PushCheckHost, _: zui.WindowId, record: *zui.RecordBuilder) bool {
+        record.begin(.{ .now = .fromNanoseconds(self.turns), .viewport = .{ 100, 100 } });
+        return self.turns < 2;
+    }
+
+    pub fn zuiWaker(self: *PushCheckHost) zui.Waker {
+        return .{ .context = self, .wakeFn = wakeNothing };
+    }
+
+    pub fn zuiSurface(_: *PushCheckHost, _: zui.WindowId) zui.Surface {
+        return .{ .offscreen = .{ .size = .{ 100, 100 } } };
+    }
+
+    pub fn zuiApply(_: *PushCheckHost, _: zui.WindowId, _: zui.HostRequests) void {}
+};
+
+const PushCheckApp = struct {
+    pub const Host = PushCheckHost;
+    pub const Renderer = SurfaceKeepingRenderer;
+    const AppUi = zui.Context(zui_app.contextConfig(SurfaceKeepingRenderer, .{ .limits = .{ .max_elements = 16 }, .frames_in_flight = 2 }));
+
+    pub fn zuiDeclare(_: *PushCheckApp, ui: *AppUi) void {
+        ui.box(.{ .decoration = .{ .background = .black } });
+    }
+};
+
+export fn zuiCheckPushedRun(setup: *const zui_app.Setup) usize {
+    zui_app.runWith(PushCheckApp, setup.*, .{ .notify = ignoreNotice }) catch return 0;
+    return 1;
+}
 
 const TextDrawingRenderer = struct {
     pub const zui_surfaces: zui.SurfaceKinds = .initOne(.offscreen);
@@ -424,7 +486,7 @@ const CheckTextApp = struct {
     }
 };
 
-var text_app_runner: zui_app.Runner(CheckTextApp) = undefined;
+var text_app_runner: zui_app.Session(CheckTextApp) = undefined;
 var text_app_memory: [CheckTextApp.AppUi.required_bytes + 4096]u8 = undefined;
 
 export fn zuiCheckAppWithText(io: *const std.Io) usize {
@@ -489,7 +551,7 @@ const WindowsCheckApp = struct {
     }
 };
 
-var windows_app_runner: zui_app.Runner(WindowsCheckApp) = undefined;
+var windows_app_runner: zui_app.Session(WindowsCheckApp) = undefined;
 var windows_app_memory: [3 * WindowsCheckApp.AppUi.required_bytes + 64 * 1024]u8 = undefined;
 
 export fn zuiCheckAppWithWindows(io: *const std.Io) usize {

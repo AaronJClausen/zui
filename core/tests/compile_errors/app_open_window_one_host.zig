@@ -41,6 +41,6 @@ const App = struct {
 const Host_ = Host;
 const Renderer_ = Renderer;
 
-export fn startRunner(runner: *zui_app.Runner(App), setup: *const zui_app.Setup) void {
-    runner.start(setup.*, .{}) catch {};
+export fn startSession(session: *zui_app.Session(App), setup: *const zui_app.Setup) void {
+    session.start(setup.*, .{}) catch {};
 }

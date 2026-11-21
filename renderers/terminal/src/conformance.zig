@@ -66,5 +66,5 @@ test "the host, its renderer and its text make a zui_app application" {
         pub fn zuiDeclare(_: *@This(), _: *Ui) void {}
     };
     comptime zui_app.checkApp(App);
-    _ = zui_app.Runner(App);
+    _ = zui_app.Session(App);
 }

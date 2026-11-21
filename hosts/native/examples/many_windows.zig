@@ -37,17 +37,17 @@ pub fn main(init: std.process.Init) !void {
         };
     }
 
-    const runner = try init.gpa.create(zui_app.Runner(ManyWindowsApp));
-    defer init.gpa.destroy(runner);
-    try runner.start(.{ .gpa = init.gpa, .io = init.io, .process = init }, .{
+    const session = try init.gpa.create(zui_app.Session(ManyWindowsApp));
+    defer init.gpa.destroy(session);
+    try session.start(.{ .gpa = init.gpa, .io = init.io, .process = init }, .{
         .title = "zui: window 0",
         .size = .{ 480, 320 },
         .visible = mode != .@"--check",
     });
-    defer runner.stop();
-    try runner.app.begin(mode);
-    while (try runner.frame()) {}
-    if (runner.app.failure) |failure| {
+    defer session.stop();
+    try session.app.begin(mode);
+    while (try session.frame()) {}
+    if (session.app.failure) |failure| {
         std.debug.print("many-windows check: {s}\n", .{failure});
         return error.CheckFailed;
     }

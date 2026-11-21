@@ -39,5 +39,5 @@ const App = struct {
 };
 
 comptime {
-    _ = zui_app.Runner(App);
+    _ = zui_app.Session(App);
 }

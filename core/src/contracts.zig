@@ -21,7 +21,11 @@ const source_declarations = [_][]const u8{ "zuiSwap", "zuiView", "zuiDelivery", 
 const renderer_declarations = [_][]const u8{ "zuiSubmit", "zui_surfaces", "zui_commands", "zui_extended_color", "zui_render_thread", "zui_output_formats" } ++ renderer_surface_calls;
 /// Called as each window after the first opens, and as each window closes.
 const renderer_surface_calls = [_][]const u8{ "zuiAttachSurface", "zuiDetachSurface" };
-const host_declarations = [_][]const u8{ "zuiPoll", "zuiWaker", "zuiWait", "zuiSurface", "zuiApply", "zui_capabilities", "zui_output_formats" } ++ host_window_calls ++ host_frame_calls ++ host_services;
+const host_declarations = [_][]const u8{ "zuiPoll", "zuiWaker", "zuiSurface", "zuiApply", "zui_capabilities", "zui_output_formats" } ++ host_loop_calls ++ host_window_calls ++ host_frame_calls ++ host_services;
+/// At most one: zui pulls the loop of a host that waits, the platform
+/// pushes the loop of a host that runs, and the application's own loop
+/// steps a host with neither.
+const host_loop_calls = [_][]const u8{ "zuiWait", "zuiRun" };
 /// Declared exactly when `zui_capabilities.windows` is `.many`.
 const host_window_calls = [_][]const u8{ "zuiOpenWindow", "zuiCloseWindow" };
 /// What `zui_app` hands the host from each frame, besides its requests.
@@ -111,14 +115,15 @@ fn checkSurfaceCalls(comptime Renderer: type) void {
     if (Detach != fn (*Renderer, surface.Surface) void) @compileError("zui: " ++ name ++ ".zuiDetachSurface must be fn (*" ++ name ++ ", zui.Surface) void, found " ++ @typeName(Detach));
 }
 
-/// The host contract: the five calls of the loop and `zui_surfaces`, and
-/// optionally `zui_capabilities`, the frame calls and the services, each a
-/// struct of functions whose types are checked.
+/// The host contract: the window half, four calls and `zui_surfaces`; at
+/// most one call of the loop half; and optionally `zui_capabilities`, the
+/// frame calls and the services, each a struct of functions whose types
+/// are checked.
 pub fn checkHost(comptime Host: type) void {
     if (@typeInfo(Host) != .@"struct") @compileError("zui: a host must be a struct type, got " ++ @typeName(Host));
     const name = @typeName(Host);
     checkKnownDeclarations(Host);
-    for ([_][]const u8{ "zuiPoll", "zuiWaker", "zuiWait", "zuiSurface", "zuiApply", "zui_surfaces" }) |required| {
+    for ([_][]const u8{ "zuiPoll", "zuiWaker", "zuiSurface", "zuiApply", "zui_surfaces" }) |required| {
         if (!@hasDecl(Host, required)) @compileError("zui: " ++ name ++ " does not implement zui.Host: missing `" ++ required ++ "`");
     }
     expectDeclarationType(Host, "zui_surfaces", surface.SurfaceKinds, "zui.SurfaceKinds");
@@ -141,7 +146,7 @@ pub fn checkHost(comptime Host: type) void {
     const host_pointer = "*" ++ name;
     expectHostCall(Host, "zuiPoll", fn (*Host, host.WindowId, *record.RecordBuilder) bool, "fn (" ++ host_pointer ++ ", zui.WindowId, *zui.RecordBuilder) bool");
     expectHostCall(Host, "zuiWaker", fn (*Host) sources.Waker, "fn (" ++ host_pointer ++ ") zui.Waker");
-    expectHostCall(Host, "zuiWait", fn (*Host, record.NextFrame) void, "fn (" ++ host_pointer ++ ", zui.NextFrame) void");
+    checkLoopCalls(Host);
     expectHostCall(Host, "zuiSurface", fn (*Host, host.WindowId) surface.Surface, "fn (" ++ host_pointer ++ ", zui.WindowId) zui.Surface");
     expectHostCall(Host, "zuiApply", fn (*Host, host.WindowId, record.HostRequests) void, "fn (" ++ host_pointer ++ ", zui.WindowId, zui.HostRequests) void");
     checkWindowCalls(Host);
@@ -224,6 +229,24 @@ fn serviceFunctions(comptime Host: type) []const ServiceFunction {
             .expected_name = "fn (" ++ host_pointer ++ ", []const u8, zui.FileChangeSink) zui.FileWatchError!void",
         },
     };
+}
+
+fn checkLoopCalls(comptime Host: type) void {
+    const name = @typeName(Host);
+    const host_pointer = "*" ++ name;
+    const waits = @hasDecl(Host, "zuiWait");
+    const runs = @hasDecl(Host, "zuiRun");
+    if (waits and runs) @compileError("zui: " ++ name ++ " declares both `zuiWait` and `zuiRun`; zui pulls a host's loop or the platform pushes it, never both");
+    if (waits) expectHostCall(Host, "zuiWait", fn (*Host, record.NextFrame) void, "fn (" ++ host_pointer ++ ", zui.NextFrame) void");
+    if (!runs) return;
+    const Run = @TypeOf(Host.zuiRun);
+    const runs_a_loop = switch (@typeInfo(Run)) {
+        .@"fn" => |function| function.params.len == 4 and function.params[0].type == *Host and function.params[1].type == std.Io and
+            function.params[2].type == host.WindowOptions and function.params[3].type == host.Driver and
+            if (function.return_type) |Returned| Returned == noreturn or (@typeInfo(Returned) == .error_union and @typeInfo(Returned).error_union.payload == void) else false,
+        else => false,
+    };
+    if (!runs_a_loop) @compileError("zui: " ++ name ++ ".zuiRun must be fn (" ++ host_pointer ++ ", std.Io, zui.WindowOptions, zui.Driver) !void, or noreturn, found " ++ @typeName(Run));
 }
 
 fn checkWindowCalls(comptime Host: type) void {

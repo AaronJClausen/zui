@@ -64,6 +64,7 @@ pub const checkRenderer = contracts.checkRenderer;
 pub const WindowId = host.WindowId;
 pub const HostCapabilities = host.HostCapabilities;
 pub const WindowOptions = host.WindowOptions;
+pub const Driver = host.Driver;
 pub const OpenWindowError = host.OpenWindowError;
 pub const SystemMaterial = host.SystemMaterial;
 pub const TitleBar = host.TitleBar;
@@ -84,8 +85,11 @@ pub const MenuItem = services.MenuItem;
 pub const isOpenableUrl = services.isOpenableUrl;
 
 /// Fails to compile, with a message naming the declaration, unless `Host`
-/// implements the host contract: `zuiPoll`, `zuiWaker`, `zuiWait`,
-/// `zuiSurface`, `zuiApply` and `zui_surfaces`, and optionally
+/// implements the host contract: its window half, `zuiPoll`, `zuiWaker`,
+/// `zuiSurface`, `zuiApply` and `zui_surfaces`; at most one loop half,
+/// `zuiWait` for a loop zui pulls or `zuiRun` for one the platform
+/// pushes, neither for a host only the application's own loop steps; and
+/// optionally
 /// `zui_capabilities` (with `custom_title_bar` only beside
 /// `zuiChromeRegions`), `zui_output_formats` (with `.sdr`), the frame calls
 /// `zuiSemantics` and `zuiChromeRegions`, and the services

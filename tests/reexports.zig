@@ -50,6 +50,6 @@ const HalfWidthFonts = struct {
 
 comptime {
     const Tour = zui_tour.App(.{ .Host = OffscreenHost, .Renderer = OffscreenRenderer, .Text = HalfWidthFonts, .renderer_name = "an offscreen renderer" });
-    _ = zui_app.Runner(Tour);
+    _ = zui_app.Session(Tour);
     _ = zui_showcase.Showcase(Tour.Ui);
 }

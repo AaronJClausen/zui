@@ -1795,6 +1795,32 @@ pub const App = struct {
 
 On the native Windows host, up to four windows open at once, and the sokol renderer draws each through its own swapchain on one device: two windows animating at once each hold a 144 Hz display's rate, and two idle windows use no CPU.
 
+<a id="own-loop"></a>
+
+### Your own loop: stepping a `Session` · *shipped*
+
+When an editor, a game engine or an existing app already owns the loop and the window, step a `zui_app.Session(App)` from its frame instead of calling `run`. Each `step` polls the host, declares and submits only the windows that are due, and returns when it next wants to run, or null once the window has closed. It never blocks, so you get `zui_app`'s render thread, host requests and notices without handing it your loop. The host is a small one over the window you already have: it declares the window half (`zuiPoll`, `zuiWaker`, `zuiSurface`, `zuiApply`) and neither `zuiWait` nor `zuiRun`. Calling `run` with it, or `wait`, is a compile error that tells you to step a `Session`.
+
+`src/panel.zig`
+
+```zig
+const zui_app = @import("zui_app");
+
+pub fn runPanel(editor: *Editor, gpa: std.mem.Allocator, io: std.Io) !void {
+    var session: zui_app.Session(PanelApp) = undefined;
+    try session.start(.{ .gpa = gpa, .io = io }, .{ .title = "Outline" });
+    defer session.stop();
+
+    while (editor.running()) {
+        editor.beginFrame();
+        if (try session.step()) |next| editor.redrawAt(next) else break;
+        editor.endFrame();
+    }
+}
+```
+
+A host whose platform owns the loop, as AppKit's or a browser page's does, declares `zuiRun` instead, and `run` hands it a `zui.Driver` to call from the platform's callbacks.
+
 <a id="contracts"></a>
 
 ## 06. The backend contracts
@@ -1854,7 +1880,7 @@ Declaring `pub const zui_commands: zui.CommandSet = .initMany(&.{ .gradient, .sh
 
 ### Writing a host · *shipped*
 
-A host polls the OS into a `RecordBuilder`, gives a waker that producers call from any thread, waits as `NextFrame` says, hands out a surface, and applies a frame's requests. A library that reports input as state rather than events, as raylib does, uses `InputSampler` to turn snapshots into the event log. `checkHostAndRenderer` fails to compile when a host and renderer share no surface kind.
+A host polls the OS into a `RecordBuilder` without blocking, gives a waker that producers call from any thread, hands out a surface, and applies a frame's requests. Then it says who turns the loop: `zuiWait`, to sleep as `NextFrame` says while `zui_app.run` loops; `zuiRun`, when the platform owns the loop and the host calls the `zui.Driver` it is handed from its callbacks; or neither, for a window whose application steps a `Session` itself. A library that reports input as state rather than events, as raylib does, uses `InputSampler` to turn snapshots into the event log. `checkHostAndRenderer` fails to compile when a host and renderer share no surface kind.
 
 `zui-glfw/src/host.zig`
 
@@ -2239,6 +2265,7 @@ Build with `-Dzui-tracy=true` to link Tracy's client, then connect profiler 0.14
 
 These names compile, but they don't do anything yet. This list is from `ARCHITECTURE.md` §7 and the roadmap.
 
+- **A host that runs its own loop**: `zuiRun` and the `zui.Driver` it is handed, with `suspendSurfaces` and `resumeSurfaces` for a surface the platform takes away, compile and pass `zui_app`'s tests against a scripted host, but no shipped host declares `zuiRun` yet; macOS, iOS and Android's are to come.
 - **Still to come**: Motion, multi-line text editing, skins, the inspector over the wire, and more hosts (Linux and web; macOS later).
 
 <a id="dx"></a>

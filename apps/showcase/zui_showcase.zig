@@ -407,15 +407,15 @@ test "a target runs the showcase through zui_app, its controls on whole cells wh
     if (@import("builtin").os.tag == .freestanding) return error.SkipZigTest;
     inline for (.{ zui_glyphs.Placement.pixel_grid, zui_glyphs.Placement{ .cells = .{ 8, 16 } } }) |placement| {
         const ShowcaseApp = App(.{ .Host = TestHost, .Renderer = TestRenderer(placement), .Text = FixedWidthText, .title = "zui + test" });
-        var runner: zui_app.Runner(ShowcaseApp) = undefined;
-        try runner.start(.{ .gpa = std.testing.allocator, .io = std.testing.io }, .{ .notify = ignoreNotice });
-        defer runner.stop();
-        while (try runner.frame()) {}
-        try std.testing.expectEqual(3, runner.renderer.submitted);
-        try std.testing.expect(runner.app.diagnostics_ok);
-        try std.testing.expectEqual(runner.app.showcase.palette.background, runner.renderer.clear_color);
-        try std.testing.expectEqual(runner.app.showcase.palette.background, runner.renderer.background);
-        try std.testing.expectEqual(placement == .cells, runner.app.showcase.metrics.row_height == cell_metrics.row_height);
+        var session: zui_app.Session(ShowcaseApp) = undefined;
+        try session.start(.{ .gpa = std.testing.allocator, .io = std.testing.io }, .{ .notify = ignoreNotice });
+        defer session.stop();
+        while (try session.frame()) {}
+        try std.testing.expectEqual(3, session.renderer.submitted);
+        try std.testing.expect(session.app.diagnostics_ok);
+        try std.testing.expectEqual(session.app.showcase.palette.background, session.renderer.clear_color);
+        try std.testing.expectEqual(session.app.showcase.palette.background, session.renderer.background);
+        try std.testing.expectEqual(placement == .cells, session.app.showcase.metrics.row_height == cell_metrics.row_height);
     }
 }
 

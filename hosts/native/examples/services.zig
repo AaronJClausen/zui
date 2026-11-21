@@ -152,19 +152,19 @@ pub fn main(init: std.process.Init) !void {
         }
     }
 
-    const runner = try init.gpa.create(zui_app.Runner(ServicesApp));
-    defer init.gpa.destroy(runner);
-    try runner.start(.{ .gpa = init.gpa, .io = init.io, .process = init }, .{ .title = "zui: host services", .size = .{ 760, 560 }, .visible = !checking });
-    defer runner.stop();
+    const session = try init.gpa.create(zui_app.Session(ServicesApp));
+    defer init.gpa.destroy(session);
+    try session.start(.{ .gpa = init.gpa, .io = init.io, .process = init }, .{ .title = "zui: host services", .size = .{ 760, 560 }, .visible = !checking });
+    defer session.stop();
     if (checking) {
         // A Wayland surface the compositor never shows gets no frame
         // callbacks, and a swap waits for the last frame's.
-        if (builtin.os.tag == .linux) runner.renderer.draws = false;
-        runner.host.fakeServices(&runner.app.service_fake);
-        runner.app.check = .{ .deadline = runner.host.now().addNanoseconds(Check.deadline_ns) };
+        if (builtin.os.tag == .linux) session.renderer.draws = false;
+        session.host.fakeServices(&session.app.service_fake);
+        session.app.check = .{ .deadline = session.host.now().addNanoseconds(Check.deadline_ns) };
     }
-    while (try runner.frame()) {}
-    if (runner.app.check) |check| return check.result();
+    while (try session.frame()) {}
+    if (session.app.check) |check| return check.result();
 }
 
 const ServicesApp = struct {

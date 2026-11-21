@@ -143,9 +143,9 @@ const Notices = struct {
     }
 };
 
-fn runToClose(runner: anytype) !u32 {
+fn runToClose(session: anytype) !u32 {
     var frames: u32 = 0;
-    while (try runner.frame()) frames += 1;
+    while (try session.frame()) frames += 1;
     return frames;
 }
 
@@ -191,21 +191,21 @@ const ClickApp = struct {
     }
 };
 
-test "the runner opens the window, runs the loop until it closes, and applies its requests" {
-    var runner: zui_app.Runner(ClickApp) = undefined;
-    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .title = "clicks", .zoom = 1.5, .notify = Notices.record });
-    try testing.expectEqual(@as(u32, 3), try runToClose(&runner));
+test "a session opens the window, runs the loop until it closes, and applies its requests" {
+    var session: zui_app.Session(ClickApp) = undefined;
+    try session.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .title = "clicks", .zoom = 1.5, .notify = Notices.record });
+    try testing.expectEqual(@as(u32, 3), try runToClose(&session));
 
-    try testing.expectEqualStrings("clicks", runner.app.title);
-    try testing.expectEqual(@as(u32, 1), runner.app.clicks);
-    try testing.expectEqualStrings("ok", runner.app.typed[0..runner.app.typed_len]);
-    try testing.expectEqual(@as(u32, 3), runner.app.loads_after_declaration);
-    try testing.expectEqual(zui.Cursor.pointer, runner.host.applied.cursor);
-    try testing.expectEqual(@as(usize, 3), runner.renderer.submitted);
-    try testing.expectEqual(@as(f32, 1.5), runner.renderer.zoom);
-    for (runner.renderer.threads[0..3]) |thread| try testing.expectEqual(std.Thread.getCurrentId(), thread);
-    runner.stop();
-    try testing.expect(runner.host.closed);
+    try testing.expectEqualStrings("clicks", session.app.title);
+    try testing.expectEqual(@as(u32, 1), session.app.clicks);
+    try testing.expectEqualStrings("ok", session.app.typed[0..session.app.typed_len]);
+    try testing.expectEqual(@as(u32, 3), session.app.loads_after_declaration);
+    try testing.expectEqual(zui.Cursor.pointer, session.host.applied.cursor);
+    try testing.expectEqual(@as(usize, 3), session.renderer.submitted);
+    try testing.expectEqual(@as(f32, 1.5), session.renderer.zoom);
+    for (session.renderer.threads[0..3]) |thread| try testing.expectEqual(std.Thread.getCurrentId(), thread);
+    session.stop();
+    try testing.expect(session.host.closed);
 }
 
 fn FramesApp(comptime Renderer_: type, comptime frames_in_flight: u8, comptime frames: u32) type {
@@ -262,34 +262,34 @@ fn ObservingApp(comptime Renderer_: type) type {
 test "zuiObserve reads each frame on the UI thread, before it is submitted" {
     inline for (.{ TestRenderer(false), TestRenderer(true) }) |Renderer| {
         const App = ObservingApp(Renderer);
-        var runner: zui_app.Runner(App) = undefined;
-        try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
-        try testing.expectEqual(@as(u32, App.frame_count), try runToClose(&runner));
-        runner.stop();
+        var session: zui_app.Session(App) = undefined;
+        try session.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+        try testing.expectEqual(@as(u32, App.frame_count), try runToClose(&session));
+        session.stop();
 
-        try testing.expectEqual(@as(usize, App.frame_count), runner.app.observed);
-        try testing.expectEqual(std.Thread.getCurrentId(), runner.app.thread_observed_on.?);
-        for (runner.app.observed_numbers, runner.app.elements_observed, 0..) |number, elements, index| {
+        try testing.expectEqual(@as(usize, App.frame_count), session.app.observed);
+        try testing.expectEqual(std.Thread.getCurrentId(), session.app.thread_observed_on.?);
+        for (session.app.observed_numbers, session.app.elements_observed, 0..) |number, elements, index| {
             try testing.expectEqual(@as(u64, index), number);
             try testing.expectEqual(@as(u32, 2), elements);
         }
         if (!Renderer.zui_render_thread) {
-            for (runner.app.submitted_when_observed, 0..) |submitted, index| try testing.expectEqual(index, submitted);
+            for (session.app.submitted_when_observed, 0..) |submitted, index| try testing.expectEqual(index, submitted);
         }
     }
 }
 
 test "a renderer that declares zui_render_thread draws every frame, in order, on a thread of its own" {
     const App = FramesApp(TestRenderer(true), 2, 12);
-    var runner: zui_app.Runner(App) = undefined;
-    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
-    try testing.expectEqual(zui_app.Submission.render_thread, runner.report.submission);
-    try testing.expectEqual(@as(u32, 12), try runToClose(&runner));
-    runner.stop();
+    var session: zui_app.Session(App) = undefined;
+    try session.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+    try testing.expectEqual(zui_app.Submission.render_thread, session.report.submission);
+    try testing.expectEqual(@as(u32, 12), try runToClose(&session));
+    session.stop();
 
-    try testing.expectEqual(@as(usize, 12), runner.renderer.submitted);
-    for (runner.renderer.frame_numbers[0..12], 0..) |number, expected| try testing.expectEqual(@as(u64, expected), number);
-    for (runner.renderer.threads[0..12]) |thread| try testing.expect(thread != std.Thread.getCurrentId());
+    try testing.expectEqual(@as(usize, 12), session.renderer.submitted);
+    for (session.renderer.frame_numbers[0..12], 0..) |number, expected| try testing.expectEqual(@as(u64, expected), number);
+    for (session.renderer.threads[0..12]) |thread| try testing.expect(thread != std.Thread.getCurrentId());
 }
 
 test "frames are submitted on the UI thread, with the reason reported, when a render thread cannot be used" {
@@ -300,12 +300,12 @@ test "frames are submitted on the UI thread, with the reason reported, when a re
         .{ FramesApp(TestRenderer(true), 2, 2), true, singleThreadedIo(), zui_app.Submission.Reason.io_cannot_run_concurrently },
     };
     inline for (cases) |case| {
-        var runner: zui_app.Runner(case[0]) = undefined;
-        try runner.start(.{ .gpa = testing.allocator, .io = case[2] }, .{ .render_thread = case[1], .notify = Notices.record });
-        defer runner.stop();
-        try testing.expectEqual(zui_app.Submission{ .ui_thread = case[3] }, runner.report.submission);
-        try testing.expectEqual(@as(u32, 2), try runToClose(&runner));
-        for (runner.renderer.threads[0..2]) |thread| try testing.expectEqual(std.Thread.getCurrentId(), thread);
+        var session: zui_app.Session(case[0]) = undefined;
+        try session.start(.{ .gpa = testing.allocator, .io = case[2] }, .{ .render_thread = case[1], .notify = Notices.record });
+        defer session.stop();
+        try testing.expectEqual(zui_app.Submission{ .ui_thread = case[3] }, session.report.submission);
+        try testing.expectEqual(@as(u32, 2), try runToClose(&session));
+        for (session.renderer.threads[0..2]) |thread| try testing.expectEqual(std.Thread.getCurrentId(), thread);
     }
 }
 
@@ -318,20 +318,20 @@ fn singleThreadedIo() std.Io {
 
 test "an error drawing on the render thread is returned by a later frame" {
     const App = FramesApp(TestRenderer(true), 2, 20);
-    var runner: zui_app.Runner(App) = undefined;
-    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
-    defer runner.stop();
-    runner.renderer.fails_at_frame = 3;
-    try testing.expectError(error.DeviceLost, runToClose(&runner));
-    try testing.expect(runner.host.polls <= 6);
+    var session: zui_app.Session(App) = undefined;
+    try session.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+    defer session.stop();
+    session.renderer.fails_at_frame = 3;
+    try testing.expectError(error.DeviceLost, runToClose(&session));
+    try testing.expect(session.host.polls <= 6);
 }
 
 test "the start reports the host's capabilities, where frames are drawn, and every fallback" {
     Notices.clear();
     const App = FramesApp(TestRenderer(false), 2, 1);
-    var runner: zui_app.Runner(App) = undefined;
-    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
-    defer runner.stop();
+    var session: zui_app.Session(App) = undefined;
+    try session.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+    defer session.stop();
 
     try testing.expectEqual(@as(usize, 1), Notices.count);
     const report = Notices.first(.started).started;
@@ -340,7 +340,7 @@ test "the start reports the host's capabilities, where frames are drawn, and eve
     try testing.expectEqual(zui.SurfaceKinds.initOne(.offscreen), report.surfaces);
     try testing.expectEqual(zui.HostCapabilities{}, report.capabilities);
     try testing.expectEqual(zui.OutputFormats.initOne(.sdr), report.output_formats);
-    try testing.expectEqual(zui.OutputFormats.initOne(.sdr), runner.host.window.output_formats);
+    try testing.expectEqual(zui.OutputFormats.initOne(.sdr), session.host.window.output_formats);
 
     const described = try std.fmt.allocPrint(testing.allocator, "{f}", .{Notices.first(.started)});
     defer testing.allocator.free(described);
@@ -362,15 +362,15 @@ const HdrRenderer = struct {
 
 test "a host and a renderer that both draw HDR open the window in it" {
     const App = FramesApp(HdrRenderer, 1, 2);
-    var runner: zui_app.Runner(App) = undefined;
-    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
-    defer runner.stop();
+    var session: zui_app.Session(App) = undefined;
+    try session.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+    defer session.stop();
 
     const both: zui.OutputFormats = .initMany(&.{ .sdr, .scrgb_fp16 });
-    try testing.expectEqual(both, runner.host.window.output_formats);
-    try testing.expectEqual(both, runner.report.output_formats);
-    _ = try runToClose(&runner);
-    try testing.expectEqual(@as(?zui.OutputFormat, .scrgb_fp16), runner.renderer.drawn_in);
+    try testing.expectEqual(both, session.host.window.output_formats);
+    try testing.expectEqual(both, session.report.output_formats);
+    _ = try runToClose(&session);
+    try testing.expectEqual(@as(?zui.OutputFormat, .scrgb_fp16), session.renderer.drawn_in);
 }
 
 const FloodApp = struct {
@@ -390,10 +390,10 @@ const FloodApp = struct {
 
 test "dropped input and an exceeded limit are each reported once, naming what to raise" {
     Notices.clear();
-    var runner: zui_app.Runner(FloodApp) = undefined;
-    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
-    defer runner.stop();
-    try testing.expectEqual(@as(u32, 3), try runToClose(&runner));
+    var session: zui_app.Session(FloodApp) = undefined;
+    try session.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+    defer session.stop();
+    try testing.expectEqual(@as(u32, 3), try runToClose(&session));
 
     try testing.expectEqual(@as(usize, 3), Notices.count);
     try testing.expectEqual(@as(u32, 6), Notices.first(.input_dropped).input_dropped.events);
@@ -465,17 +465,17 @@ const PacedApp = struct {
 };
 
 test "the host waits as nextFrame says, after the loader, with the application's sources" {
-    var runner: zui_app.Runner(PacedApp) = undefined;
-    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
-    defer runner.stop();
-    try testing.expectEqual(@as(u32, 4), try runToClose(&runner));
+    var session: zui_app.Session(PacedApp) = undefined;
+    try session.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+    defer session.stop();
+    try testing.expectEqual(@as(u32, 4), try runToClose(&session));
 
-    const waits = runner.host.waits[0..runner.host.wait_count];
+    const waits = session.host.waits[0..session.host.wait_count];
     try testing.expectEqual(@as(usize, 4), waits.len);
     try testing.expectEqual(zui.NextFrame{ .at = .fromNanoseconds(1_000 * frame_interval_ns) }, waits[0]);
     try testing.expectEqual(zui.NextFrame.immediately, waits[1]);
     try testing.expectEqual(zui.NextFrame.on_event, waits[2]);
-    try testing.expectEqual(@as(?u32, 7), runner.app.seen);
+    try testing.expectEqual(@as(?u32, 7), session.app.seen);
 }
 
 test "contextConfig takes the renderer's commands, payload types and text contract" {
@@ -588,21 +588,21 @@ const FontsApp = struct {
 };
 
 test "an application whose text contract is not the renderer has zui_app make it, for the context and the renderer" {
-    var runner: zui_app.Runner(FontsApp) = undefined;
-    runner.host.scale = 3;
-    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
-    try testing.expect(FontsApp.Ui.Text == Fonts and zui_app.Runner(FontsApp).Text == Fonts);
-    try testing.expect(runner.text.initialized);
-    try testing.expectEqual(@as(*const Fonts, &runner.text), runner.renderer.fonts);
-    try testing.expectEqual(&runner.renderer, runner.app.renderer);
-    try testing.expectEqual(zui.Color.white, runner.renderer.clear_color);
-    try testing.expectEqual(@as(f32, 2), runner.host.scale);
+    var session: zui_app.Session(FontsApp) = undefined;
+    session.host.scale = 3;
+    try session.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+    try testing.expect(FontsApp.Ui.Text == Fonts and zui_app.Session(FontsApp).Text == Fonts);
+    try testing.expect(session.text.initialized);
+    try testing.expectEqual(@as(*const Fonts, &session.text), session.renderer.fonts);
+    try testing.expectEqual(&session.renderer, session.app.renderer);
+    try testing.expectEqual(zui.Color.white, session.renderer.clear_color);
+    try testing.expectEqual(@as(f32, 2), session.host.scale);
 
-    try testing.expectEqual(@as(u32, 3), try runToClose(&runner));
-    try testing.expect(runner.text.measured > 0);
-    try testing.expectEqual(@as(u32, 3), runner.renderer.submitted);
+    try testing.expectEqual(@as(u32, 3), try runToClose(&session));
+    try testing.expect(session.text.measured > 0);
+    try testing.expectEqual(@as(u32, 3), session.renderer.submitted);
     const deinitializations_before = Fonts.deinitializations;
-    runner.stop();
+    session.stop();
     try testing.expectEqual(deinitializations_before + 1, Fonts.deinitializations);
 }
 
@@ -635,10 +635,10 @@ const AnyTextApp = struct {
 };
 
 test "a renderer may take the text it is given as anytype" {
-    var runner: zui_app.Runner(AnyTextApp) = undefined;
-    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
-    defer runner.stop();
-    try testing.expectEqual(@as(?*const anyopaque, &runner.text), runner.renderer.text);
+    var session: zui_app.Session(AnyTextApp) = undefined;
+    try session.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+    defer session.stop();
+    try testing.expectEqual(@as(?*const anyopaque, &session.text), session.renderer.text);
 }
 
 /// Keeps the text `init` was given, to add its fonts there.
@@ -661,22 +661,22 @@ const TextKeepingApp = struct {
 };
 
 test "init is given the text the context measures with" {
-    var runner: zui_app.Runner(TextKeepingApp) = undefined;
-    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
-    defer runner.stop();
-    try testing.expectEqual(&runner.text, runner.app.text.?);
-    try testing.expectEqual(&runner.text, runner.ui.text_contract);
+    var session: zui_app.Session(TextKeepingApp) = undefined;
+    try session.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+    defer session.stop();
+    try testing.expectEqual(&session.text, session.app.text.?);
+    try testing.expectEqual(&session.text, session.ui.text_contract);
     try testing.expect(@FieldType(zui_app.Start(ClickApp), "text") == void);
 }
 
 test "zuiRecord adds the application's zoom and events to the record, after the host's" {
-    var runner: zui_app.Runner(FontsApp) = undefined;
-    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .zoom = 1, .notify = Notices.record });
-    defer runner.stop();
-    try testing.expectEqual(@as(u32, 3), try runToClose(&runner));
+    var session: zui_app.Session(FontsApp) = undefined;
+    try session.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .zoom = 1, .notify = Notices.record });
+    defer session.stop();
+    try testing.expectEqual(@as(u32, 3), try runToClose(&session));
 
-    try testing.expectEqualSlices(zui.Environment.Theme, &.{ .light, .dark, .dark }, &runner.app.themes_seen);
-    try testing.expectEqual(@as(f32, 5), runner.renderer.zoom);
+    try testing.expectEqualSlices(zui.Environment.Theme, &.{ .light, .dark, .dark }, &session.app.themes_seen);
+    try testing.expectEqual(@as(f32, 5), session.renderer.zoom);
 }
 
 test "contextConfig keeps a text contract the overrides name, even from a renderer that measures" {
@@ -765,42 +765,42 @@ fn AccessibleApp(comptime Host_: type, comptime Renderer_: type, comptime semant
 test "a host that bridges semantics is handed each frame's list on the UI thread, before the frame is submitted" {
     inline for (.{ TestRenderer(false), TestRenderer(true) }) |Renderer| {
         const App = AccessibleApp(SemanticsHost, Renderer, true);
-        var runner: zui_app.Runner(App) = undefined;
-        try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
-        try testing.expectEqual(zui.SemanticsCapacity{ .nodes = 16, .text_bytes = App.Ui.limits.max_text_bytes }, runner.host.base.window.semantics);
-        try testing.expectEqual(zui_app.Accessibility.bridged, runner.report.accessibility);
-        try testing.expectEqual(@as(u32, App.frame_count), try runToClose(&runner));
-        runner.stop();
+        var session: zui_app.Session(App) = undefined;
+        try session.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+        try testing.expectEqual(zui.SemanticsCapacity{ .nodes = 16, .text_bytes = App.Ui.limits.max_text_bytes }, session.host.base.window.semantics);
+        try testing.expectEqual(zui_app.Accessibility.bridged, session.report.accessibility);
+        try testing.expectEqual(@as(u32, App.frame_count), try runToClose(&session));
+        session.stop();
 
-        try testing.expectEqual(@as(u32, App.frame_count), runner.host.lists_received);
-        try testing.expectEqual(@as(usize, 1), runner.host.last_node_count);
-        try testing.expectEqualStrings("Save", runner.host.last_label[0..runner.host.last_label_len]);
-        try testing.expectEqual(std.Thread.getCurrentId(), runner.host.thread_received_on.?);
+        try testing.expectEqual(@as(u32, App.frame_count), session.host.lists_received);
+        try testing.expectEqual(@as(usize, 1), session.host.last_node_count);
+        try testing.expectEqualStrings("Save", session.host.last_label[0..session.host.last_label_len]);
+        try testing.expectEqual(std.Thread.getCurrentId(), session.host.thread_received_on.?);
         if (!Renderer.zui_render_thread) {
-            for (runner.host.submitted_when_received[0..App.frame_count], 0..) |submitted, index| try testing.expectEqual(index, submitted);
+            for (session.host.submitted_when_received[0..App.frame_count], 0..) |submitted, index| try testing.expectEqual(index, submitted);
         }
     }
 }
 
 test "without semantics a bridging host is never handed a list, and opens its window without room for one" {
     const App = AccessibleApp(SemanticsHost, TestRenderer(false), false);
-    var runner: zui_app.Runner(App) = undefined;
-    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
-    defer runner.stop();
-    try testing.expectEqual(zui.SemanticsCapacity{}, runner.host.base.window.semantics);
-    try testing.expectEqual(zui_app.Accessibility.off, runner.report.accessibility);
-    _ = try runToClose(&runner);
-    try testing.expectEqual(@as(u32, 0), runner.host.lists_received);
+    var session: zui_app.Session(App) = undefined;
+    try session.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+    defer session.stop();
+    try testing.expectEqual(zui.SemanticsCapacity{}, session.host.base.window.semantics);
+    try testing.expectEqual(zui_app.Accessibility.off, session.report.accessibility);
+    _ = try runToClose(&session);
+    try testing.expectEqual(@as(u32, 0), session.host.lists_received);
 }
 
 test "semantics on a host without a bridge are reported as a fallback" {
     Notices.clear();
     const App = AccessibleApp(TestHost, TestRenderer(false), true);
-    var runner: zui_app.Runner(App) = undefined;
-    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
-    defer runner.stop();
-    try testing.expectEqual(zui.SemanticsCapacity{}, runner.host.window.semantics);
-    try testing.expectEqual(zui_app.Accessibility.not_bridged, runner.report.accessibility);
+    var session: zui_app.Session(App) = undefined;
+    try session.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+    defer session.stop();
+    try testing.expectEqual(zui.SemanticsCapacity{}, session.host.window.semantics);
+    try testing.expectEqual(zui_app.Accessibility.not_bridged, session.report.accessibility);
     const described = try std.fmt.allocPrint(testing.allocator, "{f}", .{Notices.first(.started)});
     defer testing.allocator.free(described);
     try testing.expect(std.mem.endsWith(u8, described, "; semantics on, but the host bridges none to an accessibility API"));
@@ -809,11 +809,11 @@ test "semantics on a host without a bridge are reported as a fallback" {
 test "a bridge without room for the list is reported once" {
     Notices.clear();
     const App = AccessibleApp(SemanticsHost, TestRenderer(false), true);
-    var runner: zui_app.Runner(App) = undefined;
-    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
-    defer runner.stop();
-    runner.host.reports_dropped = .{ .nodes = 2, .text_bytes = 5 };
-    _ = try runToClose(&runner);
+    var session: zui_app.Session(App) = undefined;
+    try session.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+    defer session.stop();
+    session.host.reports_dropped = .{ .nodes = 2, .text_bytes = 5 };
+    _ = try runToClose(&session);
 
     try testing.expectEqual(@as(usize, 1), Notices.countOf(.semantics_dropped));
     const described = try std.fmt.allocPrint(testing.allocator, "{f}", .{Notices.first(.semantics_dropped)});
@@ -894,29 +894,29 @@ fn TitleBarApp(comptime Host_: type, comptime chrome_regions: bool) type {
 
 test "a custom title bar opens the window with it, and the host is handed each frame's chrome on the UI thread" {
     const App = TitleBarApp(TitleBarHost, true);
-    var runner: zui_app.Runner(App) = undefined;
-    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .title_bar = .custom, .notify = Notices.record });
-    try testing.expectEqual(zui.TitleBar.custom, runner.host.base.window.title_bar);
-    try testing.expect(runner.report.capabilities.custom_title_bar);
-    try testing.expectEqual(@as(u32, App.frame_count), try runToClose(&runner));
-    runner.stop();
+    var session: zui_app.Session(App) = undefined;
+    try session.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .title_bar = .custom, .notify = Notices.record });
+    try testing.expectEqual(zui.TitleBar.custom, session.host.base.window.title_bar);
+    try testing.expect(session.report.capabilities.custom_title_bar);
+    try testing.expectEqual(@as(u32, App.frame_count), try runToClose(&session));
+    session.stop();
 
-    try testing.expectEqual(@as(u32, App.frame_count), runner.host.lists_received);
-    try testing.expectEqualSlices(zui.ChromeKind, &.{ .title_bar, .client, .close_button }, runner.host.last_kinds[0..runner.host.last_count]);
-    try testing.expectEqual(std.Thread.getCurrentId(), runner.host.thread_received_on.?);
+    try testing.expectEqual(@as(u32, App.frame_count), session.host.lists_received);
+    try testing.expectEqualSlices(zui.ChromeKind, &.{ .title_bar, .client, .close_button }, session.host.last_kinds[0..session.host.last_count]);
+    try testing.expectEqual(std.Thread.getCurrentId(), session.host.thread_received_on.?);
 }
 
 test "without chrome regions a custom title bar does not start, and a native one hands the host nothing" {
-    var refused: zui_app.Runner(TitleBarApp(TitleBarHost, false)) = undefined;
+    var refused: zui_app.Session(TitleBarApp(TitleBarHost, false)) = undefined;
     try testing.expectError(error.CustomTitleBarWithoutChromeRegions, refused.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .title_bar = .custom, .notify = Notices.record }));
 
     const App = TitleBarApp(TitleBarHost, false);
-    var runner: zui_app.Runner(App) = undefined;
-    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
-    defer runner.stop();
-    try testing.expectEqual(zui.TitleBar.native, runner.host.base.window.title_bar);
-    _ = try runToClose(&runner);
-    try testing.expectEqual(@as(u32, 0), runner.host.lists_received);
+    var session: zui_app.Session(App) = undefined;
+    try session.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+    defer session.stop();
+    try testing.expectEqual(zui.TitleBar.native, session.host.base.window.title_bar);
+    _ = try runToClose(&session);
+    try testing.expectEqual(@as(u32, 0), session.host.lists_received);
 }
 
 const LastReply = struct {
@@ -1129,45 +1129,45 @@ fn TwoWindowsApp(comptime Renderer_: type) type {
     };
 }
 
-fn expectTwoWindowsRan(runner: anytype) !void {
+fn expectTwoWindowsRan(session: anytype) !void {
     const second: zui.WindowId = @enumFromInt(1);
-    try testing.expectEqual(second, runner.app.second);
-    try testing.expectEqual([2]u32{ 0, 1 }, runner.app.clicks);
+    try testing.expectEqual(second, session.app.second);
+    try testing.expectEqual([2]u32{ 0, 1 }, session.app.clicks);
     // Each window draws its first frame, and then only when it has input.
-    try testing.expectEqual([2]u32{ 1, 2 }, runner.app.declarations);
-    try testing.expectEqual(runner.app.declarations, runner.app.loads);
-    try testing.expectEqual(zui.Cursor.pointer, runner.host.windows[1].applied.cursor);
-    try testing.expectEqual(zui.Cursor.default, runner.host.windows[0].applied.cursor);
-    try testing.expectEqualSlices(zui.WindowId, &.{ second, .main }, runner.app.closed[0..runner.app.closed_count]);
-    try testing.expectEqualSlices(zui.WindowId, &.{ second, .main }, runner.host.closed[0..runner.host.closed_count]);
-    try testing.expectEqual(@as(usize, 1), runner.renderer.drawnFor(0));
-    try testing.expectEqual(@as(usize, 2), runner.renderer.drawnFor(1));
-    try testing.expectEqualSlices(u32, &.{1}, runner.renderer.attached[0..runner.renderer.attached_count]);
-    try testing.expectEqualSlices(u32, &.{ 1, 0 }, runner.renderer.detached[0..runner.renderer.detached_count]);
+    try testing.expectEqual([2]u32{ 1, 2 }, session.app.declarations);
+    try testing.expectEqual(session.app.declarations, session.app.loads);
+    try testing.expectEqual(zui.Cursor.pointer, session.host.windows[1].applied.cursor);
+    try testing.expectEqual(zui.Cursor.default, session.host.windows[0].applied.cursor);
+    try testing.expectEqualSlices(zui.WindowId, &.{ second, .main }, session.app.closed[0..session.app.closed_count]);
+    try testing.expectEqualSlices(zui.WindowId, &.{ second, .main }, session.host.closed[0..session.host.closed_count]);
+    try testing.expectEqual(@as(usize, 1), session.renderer.drawnFor(0));
+    try testing.expectEqual(@as(usize, 2), session.renderer.drawnFor(1));
+    try testing.expectEqualSlices(u32, &.{1}, session.renderer.attached[0..session.renderer.attached_count]);
+    try testing.expectEqualSlices(u32, &.{ 1, 0 }, session.renderer.detached[0..session.renderer.detached_count]);
 }
 
 test "an application with many windows declares each in a context of its own, and input reaches only its window" {
     const App = TwoWindowsApp(WindowsRenderer(false));
-    var runner: zui_app.Runner(App) = undefined;
-    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
-    try testing.expectEqual(@as(u32, 4), try runToClose(&runner));
-    runner.stop();
-    try expectTwoWindowsRan(&runner);
-    try testing.expect(runner.host.deinitialized);
-    for (runner.renderer.threads[0..runner.renderer.thread_count]) |thread| try testing.expectEqual(std.Thread.getCurrentId(), thread);
+    var session: zui_app.Session(App) = undefined;
+    try session.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+    try testing.expectEqual(@as(u32, 4), try runToClose(&session));
+    session.stop();
+    try expectTwoWindowsRan(&session);
+    try testing.expect(session.host.deinitialized);
+    for (session.renderer.threads[0..session.renderer.thread_count]) |thread| try testing.expectEqual(std.Thread.getCurrentId(), thread);
 }
 
 test "with a render thread, every window's frames and surfaces go through it, and a window closes after its frames" {
     const App = TwoWindowsApp(WindowsRenderer(true));
-    var runner: zui_app.Runner(App) = undefined;
-    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
-    try testing.expectEqual(zui_app.Submission.render_thread, runner.report.submission);
-    try testing.expectEqual(@as(u32, 4), try runToClose(&runner));
-    runner.stop();
-    try expectTwoWindowsRan(&runner);
+    var session: zui_app.Session(App) = undefined;
+    try session.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+    try testing.expectEqual(zui_app.Submission.render_thread, session.report.submission);
+    try testing.expectEqual(@as(u32, 4), try runToClose(&session));
+    session.stop();
+    try expectTwoWindowsRan(&session);
     // The second window was attached in `init`, before the render thread started.
-    try testing.expectEqual(std.Thread.getCurrentId(), runner.renderer.threads[0]);
-    for (runner.renderer.threads[1..runner.renderer.thread_count]) |thread| try testing.expect(thread != std.Thread.getCurrentId());
+    try testing.expectEqual(std.Thread.getCurrentId(), session.renderer.threads[0]);
+    for (session.renderer.threads[1..session.renderer.thread_count]) |thread| try testing.expect(thread != std.Thread.getCurrentId());
 }
 
 const PacedWindowsApp = struct {
@@ -1207,15 +1207,15 @@ const PacedWindowsApp = struct {
 };
 
 test "the host waits for the earliest nextFrame of every window, and a publish makes only its own window due" {
-    var runner: zui_app.Runner(PacedWindowsApp) = undefined;
-    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
-    defer runner.stop();
-    try testing.expectEqual(@as(u32, 4), try runToClose(&runner));
+    var session: zui_app.Session(PacedWindowsApp) = undefined;
+    try session.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+    defer session.stop();
+    try testing.expectEqual(@as(u32, 4), try runToClose(&session));
 
     const at_main_deadline: zui.NextFrame = .{ .at = PacedWindowsApp.main_deadline };
-    try testing.expectEqualSlices(zui.NextFrame, &.{ .immediately, .immediately, at_main_deadline, at_main_deadline }, runner.host.waitsSoFar());
-    try testing.expectEqual([2]u32{ 1, 3 }, runner.app.declarations);
-    try testing.expectEqual([2]?u32{ null, 7 }, runner.app.seen);
+    try testing.expectEqualSlices(zui.NextFrame, &.{ .immediately, .immediately, at_main_deadline, at_main_deadline }, session.host.waitsSoFar());
+    try testing.expectEqual([2]u32{ 1, 3 }, session.app.declarations);
+    try testing.expectEqual([2]?u32{ null, 7 }, session.app.seen);
 }
 
 fn ManyWindowsApp(comptime host_holds: u32) type {
@@ -1242,11 +1242,11 @@ fn ManyWindowsApp(comptime host_holds: u32) type {
 
 test "past the windows the host or zui_app holds, opening one more is refused" {
     inline for (.{ .{ 4, 3 }, .{ WindowsHost.capacity, zui_app.max_windows - 1 } }) |case| {
-        var runner: zui_app.Runner(ManyWindowsApp(case[0])) = undefined;
-        try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
-        defer runner.stop();
-        try testing.expectEqual(@as(u32, case[1]), runner.app.opened);
-        try testing.expectEqual(@as(?anyerror, error.TooManyWindows), runner.app.refused);
+        var session: zui_app.Session(ManyWindowsApp(case[0])) = undefined;
+        try session.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+        defer session.stop();
+        try testing.expectEqual(@as(u32, case[1]), session.app.opened);
+        try testing.expectEqual(@as(?anyerror, error.TooManyWindows), session.app.refused);
     }
 }
 
@@ -1275,12 +1275,12 @@ const ClosingWindowApp = struct {
 };
 
 test "a window the application closes runs no frame after that turn, and the run ends with the last" {
-    var runner: zui_app.Runner(ClosingWindowApp) = undefined;
-    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
-    defer runner.stop();
-    try testing.expectEqual(@as(u32, 0), try runToClose(&runner));
-    try testing.expectEqual(@as(u32, 2), runner.app.declarations);
-    try testing.expectEqual(@as(usize, 2), runner.host.closed_count);
+    var session: zui_app.Session(ClosingWindowApp) = undefined;
+    try session.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+    defer session.stop();
+    try testing.expectEqual(@as(u32, 0), try runToClose(&session));
+    try testing.expectEqual(@as(u32, 2), session.app.declarations);
+    try testing.expectEqual(@as(usize, 2), session.host.closed_count);
 }
 
 const OneWindowOnManyApp = struct {
@@ -1302,12 +1302,12 @@ const OneWindowOnManyApp = struct {
 };
 
 test "an application with one window runs a frame every turn on a host with many, and ends when it closes" {
-    var runner: zui_app.Runner(OneWindowOnManyApp) = undefined;
-    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
-    defer runner.stop();
-    try testing.expectEqual(@as(u32, 3), try runToClose(&runner));
-    try testing.expectEqual(@as(u32, 3), runner.app.declarations);
-    try testing.expectEqual(@as(usize, 0), runner.host.closed_count);
+    var session: zui_app.Session(OneWindowOnManyApp) = undefined;
+    try session.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+    defer session.stop();
+    try testing.expectEqual(@as(u32, 3), try runToClose(&session));
+    try testing.expectEqual(@as(u32, 3), session.app.declarations);
+    try testing.expectEqual(@as(usize, 0), session.host.closed_count);
 }
 
 const WindowedAppOnOneWindow = struct {
@@ -1335,11 +1335,298 @@ const WindowedAppOnOneWindow = struct {
 };
 
 test "an application that declares windows runs on a host with one, in its main window" {
-    var runner: zui_app.Runner(WindowedAppOnOneWindow) = undefined;
-    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
-    defer runner.stop();
-    try testing.expectEqual(@as(u32, 2), try runToClose(&runner));
-    try testing.expectEqual(@as(?zui.WindowId, .main), runner.app.declared_in);
-    try testing.expectEqual(@as(?zui.WindowId, .main), runner.app.closed);
-    try testing.expectEqual(@as(usize, 1), runner.renderer.submitted);
+    var session: zui_app.Session(WindowedAppOnOneWindow) = undefined;
+    try session.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+    defer session.stop();
+    try testing.expectEqual(@as(u32, 2), try runToClose(&session));
+    try testing.expectEqual(@as(?zui.WindowId, .main), session.app.declared_in);
+    try testing.expectEqual(@as(?zui.WindowId, .main), session.app.closed);
+    try testing.expectEqual(@as(usize, 1), session.renderer.submitted);
+}
+
+/// What the platform calls a host that runs its own loop with, as a page's
+/// `requestAnimationFrame` or Android's window commands do.
+const Callback = enum { window_opened, display_frame, clicked, surface_lost, surface_regained, close_requested };
+
+/// What a run on `PushHost` left behind, since the host, the renderer and
+/// the application are freed before `run` returns.
+const PushRun = struct {
+    var nexts: [16]zui.NextFrame = undefined;
+    var next_count: usize = 0;
+    var ended_by_step: bool = false;
+    var declarations: u32 = 0;
+    var clicks: u32 = 0;
+    var drawn_for: [8]u32 = undefined;
+    var submitted: usize = 0;
+    var attached: [4]u32 = undefined;
+    var attached_count: usize = 0;
+    var detached: [4]u32 = undefined;
+    var detached_count: usize = 0;
+    var deinitializations: u32 = 0;
+
+    fn clear() void {
+        next_count = 0;
+        ended_by_step = false;
+        declarations = 0;
+        clicks = 0;
+        submitted = 0;
+        attached_count = 0;
+        detached_count = 0;
+        deinitializations = 0;
+    }
+
+    fn nextsSoFar() []const zui.NextFrame {
+        return nexts[0..next_count];
+    }
+};
+
+/// A host that runs its own loop through `zuiRun`, calling the driver from
+/// a scripted list of the platform's callbacks. Each display frame moves
+/// its clock on a frame. Its surface is 100 units wide for each time it
+/// has been given, so a renderer can tell a regained surface from the
+/// lost one. With `owns_io`, the application's tasks run on an `Io` of
+/// the host's own.
+fn PushHost(comptime callbacks: []const Callback, comptime owns_io: bool) type {
+    return struct {
+        const Self = @This();
+        pub const zui_surfaces: zui.SurfaceKinds = .initOne(.offscreen);
+
+        window: zui.WindowOptions = .{},
+        surfaces_given: u32 = 1,
+        display_frames: u32 = 0,
+        closing: bool = false,
+        pending_events: []const zui.Event = &.{},
+
+        pub fn zuiRun(self: *Self, io: std.Io, window: zui.WindowOptions, driver: zui.Driver) !void {
+            self.window = window;
+            defer driver.stop();
+            for (callbacks) |callback| switch (callback) {
+                .window_opened => try driver.start(if (owns_io) singleThreadedIo() else io),
+                .surface_lost => driver.suspendSurfaces(),
+                .surface_regained => {
+                    self.surfaces_given += 1;
+                    try driver.resumeSurfaces();
+                },
+                .display_frame, .clicked, .close_requested => {
+                    if (callback == .clicked) self.pending_events = &click_at_save;
+                    if (callback == .close_requested) self.closing = true;
+                    self.display_frames += 1;
+                    const next = try driver.step() orelse {
+                        PushRun.ended_by_step = true;
+                        return;
+                    };
+                    PushRun.nexts[PushRun.next_count] = next;
+                    PushRun.next_count += 1;
+                },
+            };
+        }
+
+        pub fn zuiPoll(self: *Self, _: zui.WindowId, record: *zui.RecordBuilder) bool {
+            if (self.closing) return false;
+            record.begin(.{ .now = .fromNanoseconds(@as(u64, self.display_frames) * frame_interval_ns), .viewport = .{ 400, 300 }, .scale = 1 });
+            for (self.pending_events) |event| record.append(event);
+            self.pending_events = &.{};
+            return true;
+        }
+
+        pub fn zuiWaker(self: *Self) zui.Waker {
+            return .{ .context = self, .wakeFn = ignoreWake };
+        }
+
+        pub fn zuiSurface(self: *Self, _: zui.WindowId) zui.Surface {
+            return .{ .offscreen = .{ .size = .{ 100 * self.surfaces_given, 100 } } };
+        }
+
+        pub fn zuiApply(_: *Self, _: zui.WindowId, _: zui.HostRequests) void {}
+
+        fn ignoreWake(_: *anyopaque) void {}
+    };
+}
+
+fn PushedApp(comptime Host_: type, comptime Renderer_: type) type {
+    return struct {
+        const Self = @This();
+        pub const Host = Host_;
+        pub const Renderer = Renderer_;
+        pub const Ui = zui.Context(zui_app.contextConfig(Renderer, .{ .limits = .{ .max_elements = 16 }, .frames_in_flight = 2 }));
+
+        renderer: *Renderer = undefined,
+        declarations: u32 = 0,
+        clicks: u32 = 0,
+
+        pub fn init(app: *Self, start: zui_app.Start(Self)) !void {
+            app.* = .{ .renderer = start.renderer };
+        }
+
+        pub fn zuiDeclare(app: *Self, ui: *Ui) void {
+            app.declarations += 1;
+            if (ui.clicked(save)) app.clicks += 1;
+            ui.box(.{ .id = save, .interactive = true, .layout = .{ .sizing = .{ .width = .fixed(100), .height = .fixed(40) } } });
+        }
+
+        /// After the render thread has submitted its last frame, and before
+        /// the renderer is freed.
+        pub fn deinit(app: *Self) void {
+            const renderer = app.renderer;
+            PushRun.deinitializations += 1;
+            PushRun.declarations = app.declarations;
+            PushRun.clicks = app.clicks;
+            PushRun.submitted = renderer.submitted;
+            @memcpy(PushRun.drawn_for[0..renderer.submitted], renderer.drawn_for[0..renderer.submitted]);
+            PushRun.attached_count = renderer.attached_count;
+            @memcpy(PushRun.attached[0..renderer.attached_count], renderer.attached[0..renderer.attached_count]);
+            PushRun.detached_count = renderer.detached_count;
+            @memcpy(PushRun.detached[0..renderer.detached_count], renderer.detached[0..renderer.detached_count]);
+        }
+    };
+}
+
+const lose_and_regain_the_surface = [_]Callback{ .window_opened, .display_frame, .display_frame, .clicked, .surface_lost, .display_frame, .surface_regained, .display_frame, .close_requested };
+
+test "a host that runs its own loop drives the application through its driver, and a lost surface is let go and given back" {
+    inline for (.{ WindowsRenderer(false), WindowsRenderer(true) }) |Renderer| {
+        PushRun.clear();
+        Notices.clear();
+        const App = PushedApp(PushHost(&lose_and_regain_the_surface, false), Renderer);
+        try testing.expect(zui_app.Session(App).loop == .pushed);
+        try zui_app.runWith(App, .{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+
+        const expected_submission: zui_app.Submission = if (Renderer.zui_render_thread) .render_thread else .{ .ui_thread = .renderer_needs_its_thread };
+        try testing.expectEqual(expected_submission, Notices.first(.started).started.submission);
+        try testing.expect(PushRun.ended_by_step);
+        try testing.expectEqual(@as(u32, 1), PushRun.deinitializations);
+        // The first frame, the click, and the first frame on the regained
+        // surface; a display frame with nothing new declares nothing.
+        try testing.expectEqual(@as(u32, 3), PushRun.declarations);
+        try testing.expectEqual(@as(u32, 1), PushRun.clicks);
+        try testing.expectEqualSlices(u32, &.{ 0, 0, 1 }, PushRun.drawn_for[0..PushRun.submitted]);
+        try testing.expectEqualSlices(u32, &.{0}, PushRun.detached[0..PushRun.detached_count]);
+        try testing.expectEqualSlices(u32, &.{1}, PushRun.attached[0..PushRun.attached_count]);
+        try testing.expectEqualSlices(zui.NextFrame, &.{ .on_event, .on_event, .on_event, .on_event, .on_event }, PushRun.nextsSoFar());
+    }
+}
+
+test "a host that runs its own loop may run the application's tasks on an Io of its own" {
+    Notices.clear();
+    PushRun.clear();
+    const App = PushedApp(PushHost(&.{ .window_opened, .display_frame, .close_requested }, true), WindowsRenderer(true));
+    try zui_app.runWith(App, .{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+    try testing.expectEqual(zui_app.Submission{ .ui_thread = .io_cannot_run_concurrently }, Notices.first(.started).started.submission);
+    try testing.expectEqual(@as(u32, 1), PushRun.declarations);
+}
+
+test "a driver stopped by the host is not stopped again, and one never started frees nothing" {
+    PushRun.clear();
+    const NeverOpened = PushedApp(PushHost(&.{}, false), WindowsRenderer(false));
+    try zui_app.runWith(NeverOpened, .{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+    try testing.expectEqual(@as(u32, 0), PushRun.deinitializations);
+
+    const OpenedAndLeft = PushedApp(PushHost(&.{ .window_opened, .display_frame }, false), WindowsRenderer(false));
+    try zui_app.runWith(OpenedAndLeft, .{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+    try testing.expectEqual(@as(u32, 1), PushRun.deinitializations);
+    try testing.expect(!PushRun.ended_by_step);
+}
+
+/// A host that runs a loop that never returns, as `[NSApp run]` does.
+const NeverReturningHost = struct {
+    pub const zui_surfaces: zui.SurfaceKinds = .initOne(.offscreen);
+
+    pub fn zuiRun(_: *NeverReturningHost, _: std.Io, _: zui.WindowOptions, _: zui.Driver) noreturn {
+        std.process.exit(0);
+    }
+
+    pub fn zuiPoll(_: *NeverReturningHost, _: zui.WindowId, _: *zui.RecordBuilder) bool {
+        return false;
+    }
+
+    pub fn zuiWaker(self: *NeverReturningHost) zui.Waker {
+        return .{ .context = self, .wakeFn = ignoreWake };
+    }
+
+    pub fn zuiSurface(_: *NeverReturningHost, _: zui.WindowId) zui.Surface {
+        return .{ .offscreen = .{ .size = .{ 1, 1 } } };
+    }
+
+    pub fn zuiApply(_: *NeverReturningHost, _: zui.WindowId, _: zui.HostRequests) void {}
+
+    fn ignoreWake(_: *anyopaque) void {}
+};
+
+test "run returns as the host's zuiRun does, and never when it never returns" {
+    const App = PushedApp(NeverReturningHost, WindowsRenderer(false));
+    try testing.expect(@TypeOf(zui_app.runWith(App, undefined, .{})) == zui_app.PushedStartError!noreturn);
+    try testing.expect(@TypeOf(zui_app.runWith(PushedApp(PushHost(&.{}, false), WindowsRenderer(false)), undefined, .{})) == anyerror!void);
+    try testing.expect(@TypeOf(zui_app.runWith(ClickApp, undefined, .{})) == anyerror!void);
+}
+
+/// `TestHost` without `zuiWait`: a window the application's own loop owns
+/// and waits for, as an editor's panel or a game's overlay is.
+const SteppedHost = struct {
+    pub const zui_surfaces = TestHost.zui_surfaces;
+
+    base: TestHost,
+
+    pub fn init(self: *SteppedHost, io: std.Io, window: zui.WindowOptions) !void {
+        self.* = .{ .base = undefined };
+        try self.base.init(io, window);
+    }
+
+    pub fn deinit(self: *SteppedHost) void {
+        self.base.deinit();
+    }
+
+    pub fn zuiPoll(self: *SteppedHost, window: zui.WindowId, record: *zui.RecordBuilder) bool {
+        return self.base.zuiPoll(window, record);
+    }
+
+    pub fn zuiWaker(self: *SteppedHost) zui.Waker {
+        return self.base.zuiWaker();
+    }
+
+    pub fn zuiSurface(self: *SteppedHost, window: zui.WindowId) zui.Surface {
+        return self.base.zuiSurface(window);
+    }
+
+    pub fn zuiApply(self: *SteppedHost, window: zui.WindowId, requests: zui.HostRequests) void {
+        self.base.zuiApply(window, requests);
+    }
+};
+
+const SteppedApp = struct {
+    pub const Host = SteppedHost;
+    pub const Renderer = TestRenderer(false);
+    pub const Ui = zui.Context(zui_app.contextConfig(Renderer, .{ .limits = .{ .max_elements = 16 } }));
+
+    declarations: u32 = 0,
+    clicks: u32 = 0,
+
+    pub fn init(app: *SteppedApp, start: zui_app.Start(SteppedApp)) !void {
+        app.* = .{};
+        start.host.base.closes_after_polls = 4;
+        start.host.base.script = &.{ &.{}, &.{}, &click_at_save, &.{} };
+    }
+
+    pub fn zuiDeclare(app: *SteppedApp, ui: *Ui) void {
+        app.declarations += 1;
+        if (ui.clicked(save)) app.clicks += 1;
+        ui.box(.{ .id = save, .interactive = true, .layout = .{ .sizing = .{ .width = .fixed(100), .height = .fixed(40) } } });
+    }
+};
+
+test "an application's own loop steps a Session on a host without a loop, which declares only the frames that are due" {
+    var session: zui_app.Session(SteppedApp) = undefined;
+    try session.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+    defer session.stop();
+    try testing.expect(zui_app.Session(SteppedApp).loop == .stepped);
+
+    var nexts: [8]zui.NextFrame = undefined;
+    var turns: usize = 0;
+    while (try session.step()) |next| : (turns += 1) nexts[turns] = next;
+
+    try testing.expectEqual(@as(usize, 4), turns);
+    try testing.expectEqual(@as(u32, 2), session.app.declarations);
+    try testing.expectEqual(@as(u32, 1), session.app.clicks);
+    try testing.expectEqual(@as(usize, 2), session.renderer.submitted);
+    try testing.expectEqual(@as(usize, 0), session.host.base.wait_count);
+    try testing.expectEqualSlices(zui.NextFrame, &.{ .on_event, .on_event, .on_event, .on_event }, nexts[0..turns]);
 }
