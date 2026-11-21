@@ -215,11 +215,59 @@ fn drawText(buffer: *CellBuffer, area: CellRect, clip: CellRect, cell_size: [2]f
     }
 }
 
+/// How many of `frame`'s text lines lose a glyph past the left or right
+/// edge of their clip, on a row that clip shows. Text scrolled out of view
+/// is not cut short: a line past its clip's top or bottom, or inside an
+/// element that scrolls sideways, is not counted.
+pub fn countTextLinesCutShort(whole_buffer: CellRect, cell_size: [2]f32, frame: anytype) usize {
+    var clips: ClipStack = .{ .whole_buffer = whole_buffer };
+    var depths_scrolling_sideways: std.StaticBitSet(ClipStack.capacity) = .initEmpty();
+    var lines_cut_short: usize = 0;
+    for (frame.commands()) |command| {
+        switch (command.payload) {
+            .text => |text| {
+                const inside_sideways_scroll = clips.depth > 0 and depths_scrolling_sideways.findFirstSet() != null;
+                if (inside_sideways_scroll) continue;
+                const clip = clips.current();
+                const area = CellRect.fromLayout(command.bounds, cell_size);
+                if (area.top < clip.top or area.top >= clip.bottom) continue;
+                var glyphs = zui_glyphs.layOut({}, text.content, text.style, .{ .cells = cell_size }).?;
+                while (glyphs.next()) |glyph| {
+                    const column = area.left + roundToCell(glyph.x / cell_size[0]);
+                    if (column < clip.left or column >= clip.right) {
+                        lines_cut_short += 1;
+                        break;
+                    }
+                }
+            },
+            .clip_begin => |clip| {
+                const fits = clips.depth < ClipStack.capacity;
+                clips.push(CellRect.fromLayout(clip, cell_size));
+                if (fits) depths_scrolling_sideways.setValue(clips.depth - 1, scrollsSideways(frame, command.id));
+            },
+            .clip_end => {
+                const pops_a_clip = clips.overflow == 0 and clips.depth > 0;
+                clips.pop();
+                if (pops_a_clip) depths_scrolling_sideways.unset(clips.depth);
+            },
+            else => {},
+        }
+    }
+    return lines_cut_short;
+}
+
+fn scrollsSideways(frame: anytype, element_id: u64) bool {
+    const index = frame.lookup(element_id) orelse return false;
+    return frame.inspect(index).flags.scrolls(.x);
+}
+
 /// zui's clip rectangles are already intersected with every enclosing clip,
 /// so `clip_end` only has to restore the enclosing one.
 const ClipStack = struct {
+    const capacity = 64;
+
     whole_buffer: CellRect,
-    rects: [64]CellRect = undefined,
+    rects: [capacity]CellRect = undefined,
     depth: usize = 0,
     overflow: usize = 0,
 
@@ -283,6 +331,22 @@ test "text is clipped and borders do not overwrite it" {
     try testing.expectEqualStrings("┌────────┐", rowText(&buffer, 0, &output));
     try testing.expectEqualStrings("│clipp   │", rowText(&buffer, 1, &output));
     try testing.expectEqualStrings("└────────┘", rowText(&buffer, 2, &output));
+}
+
+test "a line past its clip's side is cut short, and one scrolled out of view is not" {
+    var text: @import("zui_testing").FixedMetricsText(u16) = .{};
+    var ui: TestUi = try .init(testing.allocator, testing.io, &text);
+    defer ui.deinit(testing.allocator);
+    ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 80, 48 } } });
+    ui.open(.{ .id = .of("narrow"), .layout = .{ .sizing = .{ .width = .fixed(40), .height = .fixed(16) } }, .clip = .both });
+    ui.text("cut short here", .{ .wrap = .none });
+    ui.close();
+    ui.open(.{ .id = .of("marquee"), .layout = .{ .sizing = .{ .width = .fixed(40), .height = .fixed(16) } }, .scroll = .{ .horizontal = true, .vertical = false } });
+    ui.text("scrolled sideways", .{ .wrap = .none });
+    ui.close();
+    const frame = ui.endFrame();
+    defer ui.release(frame);
+    try testing.expectEqual(@as(usize, 1), countTextLinesCutShort(.{ .right = 10, .bottom = 3 }, .{ 8, 16 }, frame));
 }
 
 test "a one-row border becomes brackets" {

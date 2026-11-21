@@ -114,7 +114,8 @@ does not draw (Transforms and Materials), which `zui_tour` leaves out as
 it does on any renderer, and `zig build showcase` the showcase, its
 controls on whole cells. `--dump` draws either into cells without a
 terminal and prints the glyphs: the tour's a screen at 180×56 cells
-(`--screen <name>`), the showcase's three frames at 100×30 with the
+(`--screen <name>`), or every screen it is offered (`--every-screen`),
+failing when one cuts text short, the showcase's three frames at 100×30 with the
 pointer on "Hover me". `--frames <count>` ends a run after that many
 frames, through `Host.close`.
 
@@ -130,6 +131,7 @@ Run from `renderers/terminal/`; the targets fetch stb for
 | `zig build check` | compile the renderer and the targets without producing output |
 | `zig build tour` | run the tour in this terminal, every screen whose commands a terminal draws; Ctrl+C or Ctrl+Q quits, and `-- --frames <count>` quits after that many frames |
 | `zig build tour -- --dump --screen typography` | render a screen offscreen at 180×56 and print its glyphs |
+| `zig build tour -- --dump --every-screen` | print every screen a terminal is offered the same way, failing when one cuts a line of text short at the side of its clip (a line in an element that scrolls sideways is scrolled, not cut short) |
 | `zig build showcase` | run the showcase in this terminal |
 | `zig build showcase -- --dump` | render the showcase offscreen at 100×30 and print its glyphs |
 

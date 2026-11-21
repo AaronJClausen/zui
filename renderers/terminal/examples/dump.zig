@@ -9,12 +9,17 @@ const zui_terminal = @import("zui_terminal");
 
 /// The arguments without `--dump`, when `--dump` is among them.
 pub fn dumpArguments(arena: std.mem.Allocator, arguments: []const [:0]const u8) !?[]const [:0]const u8 {
+    return withoutFlag(arena, arguments, "--dump");
+}
+
+/// The arguments without `flag`, when `flag` is among them.
+pub fn withoutFlag(arena: std.mem.Allocator, arguments: []const [:0]const u8, flag: []const u8) !?[]const [:0]const u8 {
     var others: std.ArrayList([:0]const u8) = .empty;
-    var dumps = false;
+    var found = false;
     for (arguments) |argument| {
-        if (std.mem.eql(u8, argument, "--dump")) dumps = true else try others.append(arena, argument);
+        if (std.mem.eql(u8, argument, flag)) found = true else try others.append(arena, argument);
     }
-    return if (dumps) others.items else null;
+    return if (found) others.items else null;
 }
 
 /// The terminal is the screen: a line logged on it would stay among the
@@ -48,6 +53,10 @@ pub const Cells = struct {
     pub fn draw(self: *Cells, background: zui.Color, commands: anytype) void {
         self.buffer.fill(.{ .foreground = background, .background = background });
         zui_terminal.render(&self.buffer, self.cell_size, commands);
+    }
+
+    pub fn countTextLinesCutShort(self: *const Cells, frame: anytype) usize {
+        return zui_terminal.countTextLinesCutShort(self.buffer.bounds(), self.cell_size, frame);
     }
 
     pub fn print(self: *const Cells, io: std.Io) !void {

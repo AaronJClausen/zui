@@ -7,6 +7,7 @@ pub const Cell = cells.Cell;
 pub const CellBuffer = cells.CellBuffer;
 pub const CellRect = cells.CellRect;
 pub const render = cells.render;
+pub const countTextLinesCutShort = cells.countTextLinesCutShort;
 
 pub const Screen = @import("screen.zig").Screen;
 pub const InputDecoder = @import("input.zig").InputDecoder;
