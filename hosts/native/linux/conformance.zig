@@ -115,39 +115,20 @@ test "the host passes zui's host suite" {
     try zui_testing.expectHostConforms(Host, &harness, .{ .io = testing.io });
 }
 
-const Polled = struct {
-    events: [64]zui.Event = undefined,
-    text: [8192]u8 = undefined,
-    builder: zui.RecordBuilder = undefined,
-
-    fn init(self: *Polled) void {
-        self.builder = .init(&self.events, &self.text);
-    }
-
-    fn poll(self: *Polled, window_host: *Host) bool {
-        return window_host.zuiPoll(.main, &self.builder);
-    }
-
-    fn find(self: *const Polled, comptime tag: std.meta.Tag(zui.Event)) ?@FieldType(zui.Event, @tagName(tag)) {
-        for (self.builder.events()) |event| if (event == tag) return @field(event, @tagName(tag));
-        return null;
-    }
-
-    fn typed(self: *const Polled, buffer: []u8) []const u8 {
-        var len: usize = 0;
-        for (self.builder.events()) |event| if (event == .text) {
-            @memcpy(buffer[len..][0..event.text.len], event.text);
-            len += event.text.len;
-        };
-        return buffer[0..len];
-    }
-};
+fn typedText(polled: *const zui_testing.PolledRecord, buffer: []u8) []const u8 {
+    var len: usize = 0;
+    for (polled.builder.events()) |event| if (event == .text) {
+        @memcpy(buffer[len..][0..event.text.len], event.text);
+        len += event.text.len;
+    };
+    return buffer[0..len];
+}
 
 test "the first poll reports focus, and a viewport in layout units" {
     var window: UnshownWindow = .{};
     try window.open(2);
     defer window.close();
-    var polled: Polled = .{};
+    var polled: zui_testing.PolledRecord = .{};
     polled.init();
     polled.builder.params.zoom = 1.25;
     try testing.expect(polled.poll(window.host()));
@@ -160,7 +141,7 @@ test "a new buffer scale moves the scale, and the window keeps its size in layou
     var window: UnshownWindow = .{};
     try window.open(null);
     defer window.close();
-    var polled: Polled = .{};
+    var polled: zui_testing.PolledRecord = .{};
     polled.init();
     _ = polled.poll(window.host());
     const viewport = polled.builder.params.viewport;
@@ -175,7 +156,7 @@ test "a configured size is the window's size once the configure is done" {
     var window: UnshownWindow = .{};
     try window.open(1);
     defer window.close();
-    var polled: Polled = .{};
+    var polled: zui_testing.PolledRecord = .{};
     polled.init();
     window.host().onToplevelConfigure(500, 400);
     _ = polled.poll(window.host());
@@ -189,7 +170,7 @@ test "a wheel's notch scrolls a step toward the end, and a touchpad its distance
     var window: UnshownWindow = .{};
     try window.open(1);
     defer window.close();
-    var polled: Polled = .{};
+    var polled: zui_testing.PolledRecord = .{};
     polled.init();
     _ = polled.poll(window.host());
 
@@ -208,7 +189,7 @@ test "keys type their text, but not with Control held, and Enter types nothing" 
     try window.open(1);
     defer window.close();
     const window_host = window.host();
-    var polled: Polled = .{};
+    var polled: zui_testing.PolledRecord = .{};
     polled.init();
     _ = polled.poll(window_host);
 
@@ -218,7 +199,7 @@ test "keys type their text, but not with Control held, and Enter types nothing" 
     }
     _ = polled.poll(window_host);
     var buffer: [32]u8 = undefined;
-    try testing.expectEqualStrings("hi", polled.typed(&buffer));
+    try testing.expectEqualStrings("hi", typedText(&polled, &buffer));
     const pressed = polled.find(.key_down).?;
     try testing.expectEqual(zui.Key.h, pressed.key);
     try testing.expectEqual(evdevCodeOf(window_host, .h).?, pressed.scancode);
@@ -226,7 +207,7 @@ test "keys type their text, but not with Control held, and Enter types nothing" 
     window_host.modifiers.control = true;
     window_host.onKey(evdevCodeOf(window_host, .s).?, true);
     _ = polled.poll(window_host);
-    try testing.expectEqualStrings("", polled.typed(&buffer));
+    try testing.expectEqualStrings("", typedText(&polled, &buffer));
     try testing.expect(polled.find(.key_down).?.modifiers.control);
 }
 
@@ -234,14 +215,14 @@ test "the close button closes the window at the next poll" {
     var window: UnshownWindow = .{};
     try window.open(1);
     defer window.close();
-    var polled: Polled = .{};
+    var polled: zui_testing.PolledRecord = .{};
     polled.init();
     try testing.expect(polled.poll(window.host()));
     window.host().onClose();
     try testing.expect(!polled.poll(window.host()));
 }
 
-fn environmentOf(polled: *const Polled) struct { environment: zui.Environment, changes: usize } {
+fn environmentOf(polled: *const zui_testing.PolledRecord) struct { environment: zui.Environment, changes: usize } {
     var environment: zui.Environment = .{};
     var changes: usize = 0;
     for (polled.builder.events()) |event| if (event == .environment and event.environment != .window_focused) {
@@ -255,7 +236,7 @@ test "without a bus to read, the first poll reports the environment at zui's def
     var window: UnshownWindow = .{};
     try window.openReading(1, .{ .session = "unix:path=/nonexistent/zui-host-session-bus", .system = "unix:path=/nonexistent/zui-host-system-bus" });
     defer window.close();
-    var polled: Polled = .{};
+    var polled: zui_testing.PolledRecord = .{};
     polled.init();
     _ = polled.poll(window.host());
     const reported = environmentOf(&polled);
@@ -271,7 +252,7 @@ test "the desktop's own buses, where they run, report the whole environment with
     defer window.close();
     const init_ns = started.durationTo(std.Io.Timestamp.now(testing.io, .awake)).nanoseconds;
     try testing.expect(init_ns < std.time.ns_per_s);
-    var polled: Polled = .{};
+    var polled: zui_testing.PolledRecord = .{};
     polled.init();
     _ = polled.poll(window.host());
     try testing.expectEqual(@as(usize, 4), environmentOf(&polled).changes);
@@ -282,7 +263,7 @@ test "a setting the desktop changes is reported, and only what changed" {
     try window.open(1);
     defer window.close();
     const window_host = window.host();
-    var polled: Polled = .{};
+    var polled: zui_testing.PolledRecord = .{};
     polled.init();
     _ = polled.poll(window_host);
 
@@ -309,7 +290,7 @@ test "the system preparing to sleep is a suspend, and waking a resume" {
     var window: UnshownWindow = .{};
     try window.open(1);
     defer window.close();
-    var polled: Polled = .{};
+    var polled: zui_testing.PolledRecord = .{};
     polled.init();
     window.host().onDesktopReport(.{ .preparing_for_sleep = true });
     window.host().onDesktopReport(.{ .preparing_for_sleep = false });
@@ -333,7 +314,7 @@ test "SIGINT, SIGTERM and SIGHUP each wake the wait as a terminate request, afte
             std.debug.print("skipped: SIG{t} already has a handler in this process\n", .{signal});
             return error.SkipZigTest;
         }
-        var polled: Polled = .{};
+        var polled: zui_testing.PolledRecord = .{};
         polled.init();
         _ = polled.poll(window_host);
         try std.posix.raise(signal);
@@ -344,7 +325,7 @@ test "SIGINT, SIGTERM and SIGHUP each wake the wait as a terminate request, afte
     }
 }
 
-fn findRepeat(polled: *const Polled) ?zui.KeyEvent {
+fn findRepeat(polled: *const zui_testing.PolledRecord) ?zui.KeyEvent {
     for (polled.builder.events()) |event| if (event == .key_down and event.key_down.repeat) return event.key_down;
     return null;
 }
@@ -354,7 +335,7 @@ test "a held key repeats after the delay at the compositor's rate, typing each t
     try window.open(1);
     defer window.close();
     const window_host = window.host();
-    var polled: Polled = .{};
+    var polled: zui_testing.PolledRecord = .{};
     polled.init();
     _ = polled.poll(window_host);
     const a = evdevCodeOf(window_host, .a).?;
@@ -373,7 +354,7 @@ test "a held key repeats after the delay at the compositor's rate, typing each t
     try testing.expectEqual(zui.Key.a, repeat.key);
     try testing.expect(repeat.at.secondsSince(pressed_at) >= 0.03);
     var buffer: [32]u8 = undefined;
-    try testing.expect(std.mem.startsWith(u8, polled.typed(&buffer), "a"));
+    try testing.expect(std.mem.startsWith(u8, typedText(&polled, &buffer), "a"));
 
     window_host.onKey(a, false);
     try testing.expectEqual(@as(?zui.Instant, null), window_host.nextRepeatAt());
@@ -407,7 +388,7 @@ test "a fractional scale of 1.25 or 1.5 is the record's scale, and the viewport 
         try window.open(null);
         defer window.close();
         const window_host = window.host();
-        var polled: Polled = .{};
+        var polled: zui_testing.PolledRecord = .{};
         polled.init();
         _ = polled.poll(window_host);
 
@@ -433,7 +414,7 @@ test "a forced scale still wins over a fractional one, and the buffer still take
     var window: UnshownWindow = .{};
     try window.open(1);
     defer window.close();
-    var polled: Polled = .{};
+    var polled: zui_testing.PolledRecord = .{};
     polled.init();
     window.host().onPreferredFractionalScale(150);
     _ = polled.poll(window.host());
@@ -459,7 +440,7 @@ const transfer_bound_ns = 2 * std.time.ns_per_s;
 /// Waits, as the loop would, until `done`, first taking what is already
 /// pending, which would end every wait at once.
 fn waitUntil(window_host: *Host, comptime done: fn (*Host, *const anyopaque) bool, context: *const anyopaque) !void {
-    var pending: Polled = .{};
+    var pending: zui_testing.PolledRecord = .{};
     pending.init();
     _ = pending.poll(window_host);
     const deadline = window_host.now().addNanoseconds(transfer_bound_ns);
@@ -576,7 +557,7 @@ test "a drop's URI list, read from the wait, arrives as files_dropped at the dra
     try window.open(2);
     defer window.close();
     const window_host = window.host();
-    var polled: Polled = .{};
+    var polled: zui_testing.PolledRecord = .{};
     polled.init();
     _ = polled.poll(window_host);
 
@@ -752,7 +733,7 @@ test "with ZUI_HOST_TEST_SHOWN_WINDOW set, text written to the clipboard comes b
     defer plain.release();
     try plain.attach(&window_host);
 
-    var polled: Polled = .{};
+    var polled: zui_testing.PolledRecord = .{};
     polled.init();
     const deadline = window_host.now().addNanoseconds(transfer_bound_ns);
     while (true) {
@@ -797,7 +778,7 @@ test "a service is answered by the wait after the call, which it ends, and never
     try window.open(1);
     defer window.close();
     const window_host = window.host();
-    var polled: Polled = .{};
+    var polled: zui_testing.PolledRecord = .{};
     polled.init();
     _ = polled.poll(window_host);
 

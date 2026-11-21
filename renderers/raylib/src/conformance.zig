@@ -16,7 +16,7 @@ const RenderTextureHarness = struct {
     target: c.RenderTexture2D,
     pictures: [4]c.Texture2D = undefined,
     picture_count: usize = 0,
-    read_back: ?c.Image = null,
+    read_back: zui_testing.ReadBack(.sdr) = .{ .rows = .bottom_up },
 
     fn init(self: *RenderTextureHarness) !void {
         c.SetTraceLogLevel(c.LOG_WARNING);
@@ -28,7 +28,6 @@ const RenderTextureHarness = struct {
 
     fn deinit(self: *RenderTextureHarness) void {
         self.drawn.deinit();
-        if (self.read_back) |frame_pixels| c.UnloadImage(frame_pixels);
         for (self.pictures[0..self.picture_count]) |picture| c.UnloadTexture(picture);
         c.UnloadRenderTexture(self.target);
         c.CloseWindow();
@@ -51,15 +50,15 @@ const RenderTextureHarness = struct {
 
     pub fn endDraw(self: *RenderTextureHarness) void {
         c.EndTextureMode();
-        if (self.read_back) |frame_pixels| c.UnloadImage(frame_pixels);
-        self.read_back = c.LoadImageFromTexture(self.target.texture);
+        const frame_pixels = c.LoadImageFromTexture(self.target.texture);
+        defer c.UnloadImage(frame_pixels);
+        std.debug.assert(frame_pixels.format == c.PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
+        const read_back = self.read_back.bytes();
+        @memcpy(read_back, @as([*]const u8, @ptrCast(frame_pixels.data))[0..read_back.len]);
     }
 
-    /// A render texture's rows are stored bottom up.
     pub fn pixel(self: *RenderTextureHarness, x: u32, y: u32) zui.Color {
-        const frame_pixels = self.read_back.?;
-        const color = c.GetImageColor(frame_pixels, @intCast(x), frame_pixels.height - 1 - @as(c_int, @intCast(y)));
-        return .{ .r = color.r, .g = color.g, .b = color.b, .a = color.a };
+        return self.read_back.pixel(x, y);
     }
 
     pub fn image(self: *RenderTextureHarness, color: zui.Color) zui_raylib.Texture {
@@ -73,10 +72,11 @@ const RenderTextureHarness = struct {
 };
 
 test "the renderer passes zui's renderer suite" {
-    var harness: RenderTextureHarness = undefined;
+    const harness = try std.testing.allocator.create(RenderTextureHarness);
+    defer std.testing.allocator.destroy(harness);
     try harness.init();
     defer harness.deinit();
-    try zui_testing.expectRendererConforms(zui_raylib.Renderer, &harness, .{ .gpa = std.testing.allocator, .io = std.testing.io });
+    try zui_testing.expectRendererConforms(zui_raylib.Renderer, harness, .{ .gpa = std.testing.allocator, .io = std.testing.io });
 }
 
 /// raylib reports state, not events, so each posted event becomes the

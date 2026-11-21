@@ -120,7 +120,12 @@ only plain names are types the application uses directly: a source's
 **Proving a contract takes two implementations.** Each has a conformance
 suite in `zui_testing` that every implementation runs in its own CI, and
 each is proven by an adapter before a native implementation (the raylib
-adapter, then the Windows host).
+adapter, then the Windows host). An implementation's harness keeps only
+what is its own: its window, its renderer or host, and how it reads a
+frame back or makes the OS report an event. What harnesses share is
+`zui_testing`'s: `ReadBack`, a frame read back in either row order, which
+answers the suite's `pixel` and `extendedPixel`, and `PolledRecord`, the
+record a host's own tests poll into.
 
 **What happens when something is missing** follows one table
 (SPEC.md §16.6): what zui needs is a compile error; what zui uses quietly
@@ -335,9 +340,14 @@ renderer advances a pen of its own. A renderer has no fonts of its own:
 text in a font id the fonts do not have is not drawn. `zui_truetype` compiles
 stb_truetype in from `src/stb_truetype.c` without a C library on every
 target, allocating only from the scratch the atlas reserves.
-Every package has its build and CI jobs, and names core by path, so a change to core is built and
+Every package has its build and a CI job of its own, and names core by path, so a change to core is built and
 tested against each of them in place; each runs its own steps from its
 own directory, and the root's `test-all` and `check-all` run them all.
+CI runs every package's job on every push, with a leg for each OS the
+package runs on, and core's job from the root, which forwards core's
+steps, with a leg for each optimize mode, Tracy, ThreadSanitizer, 32-bit
+x86 and each cross-compiled target; its benchmarks and instruction counts
+run only when a push changes something under `core/`.
 
 A target is a `main` in a renderer's or host's package that names an
 app, a host, a renderer and a font system at one place, as

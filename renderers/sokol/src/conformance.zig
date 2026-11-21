@@ -55,9 +55,8 @@ const WindowHarness = struct {
     text_contract: zui_truetype.Text = .{},
     drawn: zui_sokol.Renderer = undefined,
     target: Target = .swapchain,
-    /// Bottom row first, as OpenGL reads them.
-    read_back: [width * height][4]u8 = undefined,
-    extended_read_back: [width * height][4]f32 = undefined,
+    read_back: zui_testing.ReadBack(.sdr) = .{ .rows = .bottom_up },
+    extended_read_back: zui_testing.ReadBack(.scrgb_fp16) = .{ .rows = .bottom_up },
     outcome: anyerror!?zui_testing.RendererViolation = null,
 
     pub fn renderer(self: *WindowHarness) *zui_sokol.Renderer {
@@ -85,13 +84,13 @@ const WindowHarness = struct {
     /// when the frame callback returns, so it is still in the back buffer.
     pub fn endDraw(self: *WindowHarness) void {
         switch (self.target) {
-            .swapchain => glReadPixels(0, 0, width, height, gl_rgba, gl_unsigned_byte, &self.read_back),
+            .swapchain => glReadPixels(0, 0, width, height, gl_rgba, gl_unsigned_byte, self.read_back.bytes().ptr),
             .offscreen => |offscreen| {
                 const texture = sg.glQueryImageInfo(self.drawn.offscreenImage());
                 glBindTexture(texture.tex_target, texture.tex[@intCast(texture.active_slot)]);
                 switch (offscreen.format) {
-                    .sdr => glGetTexImage(texture.tex_target, 0, gl_rgba, gl_unsigned_byte, &self.read_back),
-                    .scrgb_fp16 => glGetTexImage(texture.tex_target, 0, gl_rgba, gl_float, &self.extended_read_back),
+                    .sdr => glGetTexImage(texture.tex_target, 0, gl_rgba, gl_unsigned_byte, self.read_back.bytes().ptr),
+                    .scrgb_fp16 => glGetTexImage(texture.tex_target, 0, gl_rgba, gl_float, self.extended_read_back.bytes().ptr),
                 }
                 glBindTexture(texture.tex_target, 0);
                 // The texture binding was changed behind sokol_gfx's back.
@@ -101,13 +100,11 @@ const WindowHarness = struct {
     }
 
     pub fn pixel(self: *WindowHarness, x: u32, y: u32) zui.Color {
-        const rgba = self.read_back[(height - 1 - y) * width + x];
-        return .{ .r = rgba[0], .g = rgba[1], .b = rgba[2], .a = rgba[3] };
+        return self.read_back.pixel(x, y);
     }
 
     pub fn extendedPixel(self: *WindowHarness, x: u32, y: u32) zui.ExtendedColor {
-        const rgba = self.extended_read_back[(height - 1 - y) * width + x];
-        return .linear(rgba[0], rgba[1], rgba[2], rgba[3]);
+        return self.extended_read_back.pixel(x, y);
     }
 
     pub fn image(_: *WindowHarness, color: zui.Color) zui_sokol.Image {

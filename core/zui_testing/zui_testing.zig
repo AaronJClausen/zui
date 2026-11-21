@@ -35,6 +35,11 @@ pub const ServiceScript = host_conformance.ServiceScript;
 pub const expectHostConforms = host_conformance.expectHostConforms;
 pub const findHostViolation = host_conformance.findHostViolation;
 
+const harness_parts = @import("harness.zig");
+pub const RowOrder = harness_parts.RowOrder;
+pub const ReadBack = harness_parts.ReadBack;
+pub const PolledRecord = harness_parts.PolledRecord;
+
 /// A text contract whose metrics don't depend on fonts: each byte is
 /// `size / 2` wide plus the letter spacing after it, and `size` tall, so
 /// at the default size of 16 an unspaced character is 8×16.
@@ -1392,4 +1397,8 @@ test "a recording drops a record that does not fit, whole" {
 test {
     _ = renderer_conformance;
     _ = host_conformance;
+}
+
+test {
+    _ = @import("tests.zig");
 }

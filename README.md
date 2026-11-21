@@ -546,47 +546,47 @@ Run these from the root:
 | `zig build fmt` | format every Zig source file |
 | `zig build fmt-check` | fail if any file is not formatted, as CI does |
 
-CI runs:
-- the format check;
-- the tests in three optimize modes on Linux, Windows and macOS, plus as
-  a 32-bit x86 Linux program;
-- `check` for six targets: 32- and 64-bit, big-endian, freestanding and
-  WebAssembly;
-- the benchmarks, failing on any allocation after `init`. Times and the
-  SPEC.md §20.2 budgets are reported in the job summary but not compared:
-  runners vary too much. Check for slowdowns on your own machine with
-  `zig build bench-compare`;
-- instruction counts of this commit and its parent, failing on more than
-  2% growth, with simulated cache and branch misses reported beside them;
-- the tests under ThreadSanitizer, which stress every `zui_async` source
-  with producers on other threads;
-- `zui_tracy` with Tracy's client, on Linux, Windows and macOS;
+CI runs one job for each package, from its directory, on every push,
+each job and each of its legs within 10 minutes:
+- the format check, the documentation and every package's `check`, from
+  the root;
+- core, from the root, which forwards its steps: the tests in three
+  optimize modes on Linux, Windows and macOS, plus as a 32-bit x86 Linux
+  program, under ThreadSanitizer, which stresses every `zui_async`
+  source with producers on other threads, and with Tracy's client on
+  Linux, Windows and macOS; and `check` for six targets: 32- and 64-bit,
+  big-endian, freestanding and WebAssembly;
+- when a push changes something under `core/`, the benchmarks, failing
+  on any allocation after `init` (times and the SPEC.md §20.2 budgets are
+  reported in the job summary but not compared: runners vary too much,
+  so check for slowdowns on your own machine with `zig build
+  bench-compare`), and instruction counts of this commit and its parent,
+  failing on more than 2% growth, with simulated cache and branch misses
+  reported beside them;
 - the tests of `text/glyphs/`, `text/fonts/`, `text/truetype/`,
-  `apps/showcase/`, `apps/tour/`, `themes/` and `examples/` in three
-  optimize modes, and their `check`, on Linux, Windows and macOS, each run
-  from its directory;
-- the raylib renderer's tests and `check` on Windows, `check` on macOS,
-  and on Linux, under `xvfb-run`, its conformance, the `tour` target's
-  visit of every screen, five screenshots, kept as the run's artifacts,
-  and the CPU the tour uses while idle, in the job summary, and the
-  `showcase` target's frames, from `renderers/raylib/`;
-- the sokol renderer's tests and `check` on Linux, Windows and macOS, its
-  `check -Dgl=true` on Windows, and its conformance on Linux under
-  `xvfb-run`, from `renderers/sokol/`;
-- the terminal renderer's tests, its conformance, its `check`, the
+  `apps/showcase/`, `apps/tour/`, `themes/`, `examples/` and
+  `renderers/webgl/` in three optimize modes, and their `check`, on
+  Linux, Windows and macOS;
+- `renderers/raylib/`: its tests and `check` on Windows, `check` on
+  macOS, and on Linux, under `xvfb-run`, its conformance, the `tour`
+  target's visit of every screen, five screenshots, kept as the run's
+  artifacts, the CPU the tour uses while idle, in the job summary, and the
+  `showcase` target's frames;
+- `renderers/sokol/`: its tests and `check` on Linux, Windows and macOS,
+  its `check -Dgl=true` on Windows, and its conformance on Linux under
+  `xvfb-run`;
+- `renderers/terminal/`: its tests, its conformance, its `check`, the
   `showcase` target's `--dump` and the `tour` target's `--dump` of every
-  screen it is offered, on Linux, Windows and macOS, from
-  `renderers/terminal/`;
-- the native hosts' tests in Debug and ReleaseSafe and their `check`, on
+  screen it is offered, on Linux, Windows and macOS;
+- `hosts/native/`: its tests in Debug and ReleaseSafe and its `check`, on
   Windows, and on Linux under a headless Weston with a D-Bus daemon of
   its own, where the `tour` target also visits every screen and must
   report no layer or glyph atlas overflow and clean diagnostics, and the
-  `showcase` target draws its frames, and `check` for
-  x86-64 and ARM64 Windows from Linux, from `hosts/native/`. The other
-  examples are compiled there and run on a desktop;
-- the WebGL renderer's and the web host's tests in three optimize modes
-  and their `check`, on Linux, Windows and macOS, each from its
-  directory; and on Linux, from `hosts/web/`, `test-demo` in Debug and
+  `showcase` target draws its frames; and `check` for x86-64 and ARM64
+  Windows from Linux. The other examples are compiled there and run on a
+  desktop;
+- `hosts/web/`: its tests in three optimize modes and its `check`, on
+  Linux, Windows and macOS; and on Linux, `test-demo` in Debug and
   ReleaseSafe, `test-input` and `test-site` in headless Google Chrome, and
   `test-draw` under `xvfb-run`, keeping the frames that do not match as
   the run's artifacts. On every push to `main`, the Pages workflow builds
@@ -703,7 +703,12 @@ test "the renderer passes zui's renderer suite" {
 
 The recipe the backends follow:
 - `src/conformance.zig` holds the harness and the test, built by a
-  `conformance` step in `build.zig`;
+  `conformance` step in `build.zig`. The harness keeps only what is the
+  backend's own: its window, its renderer and how it reads a frame back.
+  What harnesses share is `zui_testing`'s: `ReadBack(.sdr)` and
+  `ReadBack(.scrgb_fp16)` hold a frame read back in either row order and
+  answer `pixel` and `extendedPixel`, and `PolledRecord` is the record a
+  host's own tests poll into;
 - CI runs `zig build conformance`, under `xvfb-run --auto-servernum` on
   Linux when the backend needs a window for its graphics context;
 - a backend whose test step needs no display adds `conformance` to

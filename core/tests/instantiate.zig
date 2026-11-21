@@ -552,6 +552,18 @@ export fn zuiCheckConformanceSuites(io: *const std.Io) usize {
     return @intFromBool(renderer_violation == null) + @intFromBool(host_violation == null);
 }
 
+var sdr_read_back: zui_testing.ReadBack(.sdr) = .{ .rows = .bottom_up };
+var extended_read_back: zui_testing.ReadBack(.scrgb_fp16) = .{ .rows = .top_down };
+
+export fn zuiCheckHarnessParts() usize {
+    var polled_host: OffscreenHost = .{};
+    var polled: zui_testing.PolledRecord = .{};
+    polled.init();
+    const polled_both = polled.poll(&polled_host) and polled.pollWindow(&polled_host, .main) and polled.find(.key_down) == null;
+    const read_pixels = @intFromBool(sdr_read_back.pixel(0, 0).r > 0) + @intFromBool(extended_read_back.pixel(1, 1).r > 1);
+    return @intFromBool(polled_both) + read_pixels + sdr_read_back.bytes().len + extended_read_back.bytes().len;
+}
+
 const TestingUi = zui.Context(.{ .limits = .{ .max_elements = 32 }, .Text = zui_testing.FixedMetricsText(u16) });
 
 var testing_text: zui_testing.FixedMetricsText(u16) = .{};

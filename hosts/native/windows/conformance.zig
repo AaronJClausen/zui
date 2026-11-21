@@ -141,30 +141,11 @@ test "the host passes zui's host suite" {
     try zui_testing.expectHostConforms(Host, &harness, .{ .io = testing.io });
 }
 
-const Polled = struct {
-    events: [64]zui.Event = undefined,
-    text: [8192]u8 = undefined,
-    builder: zui.RecordBuilder = undefined,
-
-    fn init(self: *Polled) void {
-        self.builder = .init(&self.events, &self.text);
-    }
-
-    fn poll(self: *Polled, host: *Host) bool {
-        return host.zuiPoll(.main, &self.builder);
-    }
-
-    fn find(self: *const Polled, comptime tag: std.meta.Tag(zui.Event)) ?@FieldType(zui.Event, @tagName(tag)) {
-        for (self.builder.events()) |event| if (event == tag) return @field(event, @tagName(tag));
-        return null;
-    }
-};
-
 test "the first poll reports the environment, and a viewport in layout units" {
     var window: HiddenWindow = .{};
     try window.open(2);
     defer window.close();
-    var polled: Polled = .{};
+    var polled: zui_testing.PolledRecord = .{};
     polled.init();
     polled.builder.params.zoom = 1.25;
     try testing.expect(polled.poll(&window.window_host));
@@ -179,7 +160,7 @@ test "a DPI change moves the scale, and the window keeps its size in layout unit
     var window: HiddenWindow = .{};
     try window.open(null);
     defer window.close();
-    var polled: Polled = .{};
+    var polled: zui_testing.PolledRecord = .{};
     polled.init();
     _ = polled.poll(&window.window_host);
     const viewport = polled.builder.params.viewport;
@@ -203,7 +184,7 @@ test "typed text arrives as UTF-8, with surrogate pairs joined and control chara
     var window: HiddenWindow = .{};
     try window.open(1);
     defer window.close();
-    var polled: Polled = .{};
+    var polled: zui_testing.PolledRecord = .{};
     polled.init();
     _ = polled.poll(&window.window_host);
 
@@ -222,7 +203,7 @@ test "the wheel scrolls toward the end when turned toward the user" {
     var window: HiddenWindow = .{};
     try window.open(1);
     defer window.close();
-    var polled: Polled = .{};
+    var polled: zui_testing.PolledRecord = .{};
     polled.init();
     _ = polled.poll(&window.window_host);
 
@@ -236,7 +217,7 @@ test "dropped files arrive with their paths and where they were dropped" {
     var window: HiddenWindow = .{};
     try window.open(1);
     defer window.close();
-    var polled: Polled = .{};
+    var polled: zui_testing.PolledRecord = .{};
     polled.init();
     _ = polled.poll(&window.window_host);
 
@@ -265,7 +246,7 @@ test "the session ending is a terminate request, after which the window reports 
     var window: HiddenWindow = .{};
     try window.open(1);
     defer window.close();
-    var polled: Polled = .{};
+    var polled: zui_testing.PolledRecord = .{};
     polled.init();
     _ = polled.poll(&window.window_host);
 
@@ -558,7 +539,7 @@ test "a popup menu is built as asked, read back from Windows' menu, shown in scr
     try window.open(2);
     defer window.close();
     const host = &window.window_host;
-    var polled: Polled = .{};
+    var polled: zui_testing.PolledRecord = .{};
     polled.init();
     _ = polled.poll(host);
 
@@ -718,7 +699,7 @@ test "requests reach the window: the cursor it shows, and an IME only while text
     try window.open(1);
     defer window.close();
     const host = &window.window_host;
-    var polled: Polled = .{};
+    var polled: zui_testing.PolledRecord = .{};
     polled.init();
     _ = polled.poll(host);
 
@@ -743,7 +724,7 @@ test "Ctrl+C is a terminate request, as the console's handler reports it" {
     var window: HiddenWindow = .{};
     try window.open(1);
     defer window.close();
-    var polled: Polled = .{};
+    var polled: zui_testing.PolledRecord = .{};
     polled.init();
     _ = polled.poll(&window.window_host);
 
@@ -763,7 +744,7 @@ test "the system material is reported only where the window asked for it and the
         window.window_host.forced_scale = 1;
         try window.window_host.init(testing.io, .{ .title = "zui host suite", .size = .{ 320, 240 }, .visible = false, .material = case.material });
         defer window.close();
-        var polled: Polled = .{};
+        var polled: zui_testing.PolledRecord = .{};
         polled.init();
         _ = polled.poll(&window.window_host);
         var environment: zui.Environment = .{ .system_material = true };
@@ -780,7 +761,7 @@ fn openOnDisplay(window: *HiddenWindow, color: zui_host.windows.display.DisplayC
     try window.window_host.init(testing.io, .{ .title = "zui host suite", .size = .{ 320, 240 }, .visible = false, .output_formats = output_formats });
 }
 
-fn reportedHeadroom(polled: *const Polled) ?f32 {
+fn reportedHeadroom(polled: *const zui_testing.PolledRecord) ?f32 {
     var headroom: ?f32 = null;
     for (polled.builder.events()) |event| if (event == .environment and event.environment == .hdr_headroom) {
         headroom = event.environment.hdr_headroom;
@@ -792,7 +773,7 @@ test "on an HDR display a window opened with scRGB gets an scRGB surface and the
     var window: HiddenWindow = .{};
     try openOnDisplay(&window, hdr_display, Host.zui_output_formats);
     defer window.close();
-    var polled: Polled = .{};
+    var polled: zui_testing.PolledRecord = .{};
     polled.init();
     _ = polled.poll(&window.window_host);
     try testing.expectEqual(zui.OutputFormat.scrgb_fp16, window.window_host.zuiSurface(.main).outputFormat());
@@ -803,7 +784,7 @@ test "a window opened only in SDR stays SDR on an HDR display, with no headroom"
     var window: HiddenWindow = .{};
     try openOnDisplay(&window, hdr_display, .initOne(.sdr));
     defer window.close();
-    var polled: Polled = .{};
+    var polled: zui_testing.PolledRecord = .{};
     polled.init();
     _ = polled.poll(&window.window_host);
     try testing.expectEqual(zui.OutputFormat.sdr, window.window_host.zuiSurface(.main).outputFormat());
@@ -814,7 +795,7 @@ test "turning HDR off returns the surface to SDR and the headroom to 1" {
     var window: HiddenWindow = .{};
     try openOnDisplay(&window, hdr_display, Host.zui_output_formats);
     defer window.close();
-    var polled: Polled = .{};
+    var polled: zui_testing.PolledRecord = .{};
     polled.init();
     _ = polled.poll(&window.window_host);
 
@@ -907,7 +888,7 @@ fn toolbar(open_state: zui.SemanticState, open_actions: zui.Actions) [3]zui.Sema
     };
 }
 
-fn openToolbarWindow(window: *HiddenWindow, polled: *Polled, open_state: zui.SemanticState, open_actions: zui.Actions) !void {
+fn openToolbarWindow(window: *HiddenWindow, polled: *zui_testing.PolledRecord, open_state: zui.SemanticState, open_actions: zui.Actions) !void {
     try window.openWithSemantics(2, .{ .nodes = 8, .text_bytes = 64 });
     polled.init();
     _ = polled.poll(&window.window_host);
@@ -915,7 +896,7 @@ fn openToolbarWindow(window: *HiddenWindow, polled: *Polled, open_state: zui.Sem
     try testing.expectEqual(zui.SemanticsDropped{}, window.window_host.zuiSemantics(.main, &nodes));
 }
 
-fn expectAction(host: *Host, polled: *Polled, expected: zui.ActionEvent) !void {
+fn expectAction(host: *Host, polled: *zui_testing.PolledRecord, expected: zui.ActionEvent) !void {
     for (0..200) |_| {
         _ = polled.poll(host);
         for (polled.builder.events()) |event| if (event == .action and std.meta.eql(event.action, expected)) return;
@@ -926,7 +907,7 @@ fn expectAction(host: *Host, polled: *Polled, expected: zui.ActionEvent) !void {
 
 test "the semantics read back through UI Automation: names, roles, ids, the tree and bounds in screen pixels" {
     var window: HiddenWindow = .{};
-    var polled: Polled = .{};
+    var polled: zui_testing.PolledRecord = .{};
     try openToolbarWindow(&window, &polled, .{}, .initOne(.invoke));
     defer window.close();
 
@@ -965,7 +946,7 @@ test "the semantics read back through UI Automation: names, roles, ids, the tree
 
 test "an assistive technology's focus arrives as a focus action, and a disabled element offers no invoke" {
     var window: HiddenWindow = .{};
-    var polled: Polled = .{};
+    var polled: zui_testing.PolledRecord = .{};
     try openToolbarWindow(&window, &polled, .{ .disabled = true }, .initEmpty());
     defer window.close();
 
@@ -1268,7 +1249,7 @@ test "through UI Automation a dialog closes, an element shows its menu, and a he
     var window: HiddenWindow = .{};
     try window.openWithSemantics(1, .{ .nodes = 8, .text_bytes = 64 });
     defer window.close();
-    var polled: Polled = .{};
+    var polled: zui_testing.PolledRecord = .{};
     polled.init();
     _ = polled.poll(&window.window_host);
     const dialog_id = 0x0102_0304_0506_0708;
@@ -1301,7 +1282,7 @@ test "through UI Automation a dialog closes, an element shows its menu, and a he
     try testing.expect(!try reset.closeWindow());
 }
 
-fn reportedEnvironment(polled: *const Polled) zui.Environment {
+fn reportedEnvironment(polled: *const zui_testing.PolledRecord) zui.Environment {
     var environment: zui.Environment = .{};
     for (polled.builder.events()) |event| if (event == .environment) environment.apply(event.environment);
     return environment;
@@ -1331,7 +1312,7 @@ test "a custom title bar leaves out the caption, keeps the client size asked for
     try testing.expectEqual(@as(i32, @intCast(320 * dpi / win32.USER_DEFAULT_SCREEN_DPI)), client.right);
     try testing.expectEqual(@as(i32, @intCast(240 * dpi / win32.USER_DEFAULT_SCREEN_DPI)), client.bottom);
 
-    var polled: Polled = .{};
+    var polled: zui_testing.PolledRecord = .{};
     polled.init();
     _ = polled.poll(&window.window_host);
     const environment = reportedEnvironment(&polled);
@@ -1343,7 +1324,7 @@ test "a native title bar is reported as the system's, keeps no chrome, and its h
     var window: HiddenWindow = .{};
     try window.open(1);
     defer window.close();
-    var polled: Polled = .{};
+    var polled: zui_testing.PolledRecord = .{};
     polled.init();
     _ = polled.poll(&window.window_host);
     try testing.expect(!reportedEnvironment(&polled).custom_title_bar);
@@ -1382,7 +1363,7 @@ fn insideInPixels(region: zui.ChromeRegion, scale: f32) [2]i32 {
 /// `titleBarRegions` for its viewport.
 const TitleBarWindow = struct {
     window: HiddenWindow = .{},
-    polled: Polled = .{},
+    polled: zui_testing.PolledRecord = .{},
     regions: [6]zui.ChromeRegion = undefined,
 
     fn open(self: *TitleBarWindow, scale: f32) !void {
@@ -1499,22 +1480,18 @@ test "under a custom title bar a native menu bar is unavailable, since the drawn
 
 const second_window_options: zui.WindowOptions = .{ .title = "zui host suite, second window", .size = .{ 320, 240 }, .visible = false };
 
-fn pollWindow(polled: *Polled, host: *Host, id: zui.WindowId) bool {
-    return host.zuiPoll(id, &polled.builder);
-}
-
 test "closing one window by its close button closes it alone" {
     var window: HiddenWindow = .{};
     try window.open(1);
     defer window.close();
     const host = &window.window_host;
     const second = try host.zuiOpenWindow(second_window_options);
-    var polled: Polled = .{};
+    var polled: zui_testing.PolledRecord = .{};
     polled.init();
-    try testing.expect(pollWindow(&polled, host, second));
+    try testing.expect(polled.pollWindow(host, second));
 
     _ = win32.SendMessageW(host.windowById(second).?.hwnd, win32.WM_CLOSE, 0, 0);
-    try testing.expect(!pollWindow(&polled, host, second));
+    try testing.expect(!polled.pollWindow(host, second));
     try testing.expect(polled.poll(host));
     host.zuiCloseWindow(second);
     try testing.expectEqual(null, host.windowById(second));
@@ -1527,11 +1504,11 @@ test "a DPI change in one window moves that window's scale alone" {
     defer window.close();
     const host = &window.window_host;
     const second = try host.zuiOpenWindow(second_window_options);
-    var polled: Polled = .{};
+    var polled: zui_testing.PolledRecord = .{};
     polled.init();
     _ = polled.poll(host);
     const main_scale = polled.builder.params.scale;
-    _ = pollWindow(&polled, host, second);
+    _ = polled.pollWindow(host, second);
 
     const hwnd = host.windowById(second).?.hwnd;
     var frame: win32.RECT = .{};
@@ -1539,7 +1516,7 @@ test "a DPI change in one window moves that window's scale alone" {
     const doubled_dpi = 2 * win32.GetDpiForWindow(hwnd);
     _ = win32.SendMessageW(hwnd, win32.WM_DPICHANGED, doubled_dpi * 0x10001, @bitCast(@intFromPtr(&frame)));
 
-    try testing.expect(pollWindow(&polled, host, second));
+    try testing.expect(polled.pollWindow(host, second));
     try testing.expectEqual(@as(f32, @floatFromInt(doubled_dpi)) / win32.USER_DEFAULT_SCREEN_DPI, polled.builder.params.scale);
     try testing.expect(polled.poll(host));
     try testing.expectEqual(main_scale, polled.builder.params.scale);
@@ -1551,16 +1528,16 @@ test "Ctrl+C reaches every window, and each then reports itself closed" {
     defer window.close();
     const host = &window.window_host;
     const second = try host.zuiOpenWindow(second_window_options);
-    var polled: Polled = .{};
+    var polled: zui_testing.PolledRecord = .{};
     polled.init();
     _ = polled.poll(host);
-    _ = pollWindow(&polled, host, second);
+    _ = polled.pollWindow(host, second);
 
     try testing.expectEqual(@as(win32.BOOL, 1), zui_host.windows.onConsoleControl(win32.CTRL_C_EVENT));
     for ([_]zui.WindowId{ .main, second }) |id| {
-        try testing.expect(pollWindow(&polled, host, id));
+        try testing.expect(polled.pollWindow(host, id));
         try testing.expectEqual(zui.Lifecycle.terminate_requested, polled.find(.lifecycle).?);
-        try testing.expect(!pollWindow(&polled, host, id));
+        try testing.expect(!polled.pollWindow(host, id));
     }
 }
 
