@@ -2493,12 +2493,20 @@ edit (the message quotes the `.hidden = true` line that fixes it).
     leaves the first polling, and that a window opened after it has a new
     id; that harness declares `postTo(window, event)`. It is the pulled
     host's suite. A pushed host's, `expectPushedHostConforms`, runs
-    `zuiRun` with a harness that scripts the platform's callbacks, a
-    surface loss and its return among them, and checks that each turn's
-    `NextFrame` is scheduled, that a turn with nothing new declares
-    nothing, and that the application is freed once; a stepped host's,
-    `expectSteppedHostConforms`, steps a `Session` from the harness's
-    own loop and checks that a poll never blocks.
+    `zuiRun` with a `zui.Driver` of the suite's own, whose steps ask for
+    the next turn `.immediately`, `.at` an instant and `.on_event`, with
+    a wake from another thread, and checks that the host starts the
+    driver once and before any step, schedules each step as the one
+    before asked, never blocks in a poll, calls `suspendSurfaces` and
+    `resumeSurfaces` when its harness's platform takes the surface away
+    and gives it back, stops the driver, and steps no more once a step
+    has ended the run; that harness declares `takeSurfaceAway`,
+    `giveSurfaceBack` and `quit`, which the suite calls from another
+    thread for a platform that stopped stepping. A stepped host's,
+    `expectSteppedHostConforms`, checks that a poll never blocks, with
+    nothing to report or after a wake from another thread, that the
+    surface is one the host declares, and that posted events arrive in
+    order. Each is a compile error for a host of another loop half.
   - `expectSourceConforms(Source, harness, .{ .io })` stresses publish,
     swap, inject and refusal under many producers, on any `Io`, with a
     harness that publishes, since publishing is not part of the contract.

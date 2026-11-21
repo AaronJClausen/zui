@@ -1953,7 +1953,7 @@ pub const Host = struct {
 
 ### Conformance suites · *shipped*
 
-A backend proves its contract by running zui's suite in its package's CI job, through a harness that does what only the backend knows how to do. The renderer suite draws a reference scene, deep clips and out-of-bounds commands, then reads the pixels back. The host suite checks event order, sticky and cross-thread wakes, and waits. All three renderers pass. `findRendererViolation` and `findHostViolation` return the first violation instead of failing.
+A backend proves its contract by running zui's suite in its package's CI job, through a harness that does what only the backend knows how to do. The renderer suite draws a reference scene, deep clips and out-of-bounds commands, then reads the pixels back. The host suite checks event order, sticky and cross-thread wakes, and waits. A host whose platform owns the loop runs the pushed suite, which hands its `zuiRun` a scripted `zui.Driver` and checks that each step is scheduled as the one before asked and that a lost surface is reported and given back; a host its application steps runs the stepped suite, which checks that a poll never blocks. All three renderers pass. `findRendererViolation` and `findHostViolation` return the first violation instead of failing.
 
 `zui-d3d11/src/conformance.zig`
 

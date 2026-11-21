@@ -300,6 +300,14 @@ Implemented so far:
   swapchain on one device. In `zui_host`'s `zig build many-windows`, two
   windows animating at once each hold the display's rate, and two idle
   windows use no CPU.
+  Who owns the loop: `zui_app`'s turn is `Session.step()`, which never
+  blocks, and a host says who turns it. `run` waits in a host's
+  `zuiWait`; a host whose platform owns the loop declares `zuiRun` and
+  calls the `zui.Driver` it is handed from the platform's callbacks,
+  telling it when the platform takes the surface away and gives it back;
+  and an application that owns its loop and window steps a `Session` on
+  a host that declares neither. The browser's tour is such a `Session`,
+  stepped by the page. `zui_testing` checks hosts of each kind.
 
 The reference backend, its adapter host and its `tour` and `showcase`
 targets live in [renderers/raylib/](renderers/raylib/); the other backends are

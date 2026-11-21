@@ -2084,7 +2084,7 @@ pub const Host = struct {
 
       <article class="feature" id="conformance" data-title="Conformance suites">
         <div class="feature-head"><h3>Conformance suites</h3><span class="pill shipped">Shipped</span></div>
-        <p>A backend proves its contract by running zui's suite in its package's CI job, through a harness that does what only the backend knows how to do. The renderer suite draws a reference scene, deep clips and out-of-bounds commands, then reads the pixels back. The host suite checks event order, sticky and cross-thread wakes, and waits. All three renderers pass. <code class="z">findRendererViolation</code> and <code class="z">findHostViolation</code> return the first violation instead of failing.</p>
+        <p>A backend proves its contract by running zui's suite in its package's CI job, through a harness that does what only the backend knows how to do. The renderer suite draws a reference scene, deep clips and out-of-bounds commands, then reads the pixels back. The host suite checks event order, sticky and cross-thread wakes, and waits. A host whose platform owns the loop runs the pushed suite, which hands its <code class="z">zuiRun</code> a scripted <code class="z">zui.Driver</code> and checks that each step is scheduled as the one before asked and that a lost surface is reported and given back; a host its application steps runs the stepped suite, which checks that a poll never blocks. All three renderers pass. <code class="z">findRendererViolation</code> and <code class="z">findHostViolation</code> return the first violation instead of failing.</p>
 <script type="text/x-zig" data-file="zui-d3d11/src/conformance.zig">
 const std = @import("std");
 const zui = @import("zui");

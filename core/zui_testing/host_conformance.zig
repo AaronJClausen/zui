@@ -42,6 +42,16 @@ pub const HostError = error{
     EventReachedWrongWindow,
     WindowIdReused,
     ClosingOneClosedAnother,
+    PollBlocked,
+    StartedTwice,
+    SteppedBeforeStart,
+    ImmediateNotStepped,
+    SteppedBeforeInstant,
+    SteppedPastInstant,
+    SurfaceLossNotReported,
+    SurfaceNotGivenBack,
+    NotStopped,
+    SteppedAfterTheEnd,
 };
 
 /// What the user does when the suite calls a service the harness fakes.
@@ -210,17 +220,17 @@ pub fn findHostViolation(comptime Host: type, harness: anytype, conformance: Hos
     return null;
 }
 
-fn now(io: std.Io) zui.Instant {
+pub fn now(io: std.Io) zui.Instant {
     return .fromTimestamp(std.Io.Timestamp.now(io, .awake));
 }
 
-fn milliseconds(nanoseconds: u64) u64 {
+pub fn milliseconds(nanoseconds: u64) u64 {
     return nanoseconds / std.time.ns_per_ms;
 }
 
 /// Posts a click, a key, typed text and a move, then polls until each
 /// event the harness could post has arrived after the one before it.
-fn expectPostedEvents(host: anytype, harness: anytype, builder: *zui.RecordBuilder, conformance: HostConformance) !?HostViolation {
+pub fn expectPostedEvents(host: anytype, harness: anytype, builder: *zui.RecordBuilder, conformance: HostConformance) !?HostViolation {
     const at = builder.params.now;
     const press: zui.Pointer = .{ .id = .mouse, .kind = .mouse, .position = .{ 10, 10 }, .at = at };
     const moved: zui.Pointer = .{ .id = .mouse, .kind = .mouse, .position = .{ 20, 30 }, .at = at };
@@ -244,7 +254,7 @@ fn expectPostedEvents(host: anytype, harness: anytype, builder: *zui.RecordBuild
     var arrived: usize = 0;
     const started = now(conformance.io);
     while (arrived < posted_count) {
-        host.zuiWait(.immediately);
+        if (@hasDecl(@TypeOf(host.*), "zuiWait")) host.zuiWait(.immediately);
         if (!host.zuiPoll(conformance.window, builder)) return .init(error.WindowClosed, "closed its window while the suite polled for events", .{});
         for (builder.events()) |event| {
             if (arrived < posted_count and sameEvent(event, posted[arrived])) arrived += 1;

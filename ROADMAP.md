@@ -69,8 +69,7 @@ green, and its **Status** line below says which slice is next.
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
 | H4. Linux | 10 | `hosts/native/`, `renderers/sokol/` | | in progress; slice 5, the IME, is next |
-| H10. Hosts whose platform owns the loop | 10 | `core/zui_app/`, `core/src/contracts.zig`, `renderers/raylib/`, `hosts/web/`, `core/zui_testing/` | | in progress; slice 5, the pushed and stepped conformance suites, is next |
-| H5. Web | 10 | `hosts/web/`, `renderers/webgl/` | H10 | |
+| H5. Web | 10 | `hosts/web/`, `renderers/webgl/` | | |
 | H7. Window decorations | 10 | `core/src/chrome.zig`, `core/src/context.zig`, `core/zui_app/`, `hosts/native/` | | waiting on a person: the checklist under H7's *Status*, on `zig build title-bar` in `hosts/native/` |
 | M1. `zui_motion` | 11 | `core/zui_motion/` | | |
 | M2. Exit animations | 11 | `core/src/`, `core/zui_motion/` | M1 | |
@@ -175,6 +174,126 @@ Things to know:
 ---
 
 ## Done
+
+### H10. Hosts whose platform owns the loop
+
+**Grounding.**
+- `zui_app.run` owned the loop: `while (try runner.frame()) {}`, each
+  turn polling the host, declaring and submitting, then blocking in the
+  host's `zuiWait`, so nothing could turn it without blocking. The host
+  contract required `zuiWait` (`core/src/contracts.zig:144`).
+- The web host's worker forked the frame logic to get a turn that does
+  not block: `TourSession.frame` (`hosts/web/src/tour_session.zig:182`)
+  begins and ends the tour's frames itself, `frameReason` (`:262`)
+  repeats `zui_app`'s judgement of whether a frame is due, and `nextWake`
+  (`:249`) folds the stepped `Io`'s next wake into `nextFrame`.
+- `zui_raylib.Host` began raylib's drawing in `zuiPoll` and presented it
+  in `zuiWait`, so it could not be polled without being waited on.
+- The browser's main thread, macOS, iOS and Android own their loops and
+  call the application back; Android and a lost GPU device also take the
+  surface away and give it back. `zuiAttachSurface` and
+  `zuiDetachSurface` (`core/src/contracts.zig:23`) already let a renderer
+  drop and take a window's surface while its context lives on (H9).
+
+**Plan.** One non-blocking step is the unit of `zui_app`'s frame logic,
+and three loops turn it (open decision 2, settled: the owner's choice of
+option D). A host is two halves: the window half every host gives
+(`zui_surfaces`, `zuiPoll` as a drain that never blocks or presents,
+`zuiWaker`, `zuiSurface`, `zuiApply`), and at most one call of the loop
+half:
+- `zuiWait`: zui pulls the loop, `run` stepping and waiting in turn;
+- `zuiRun(self, io, window, driver)`: the platform pushes it, and the
+  host calls a `zui.Driver` from its callbacks (`start(io)`, `step`,
+  `suspendSurfaces`, `resumeSurfaces`, `stop`), scheduling each turn as
+  the `NextFrame` the step returns says; `run` returns as `zuiRun` does,
+  `noreturn` included;
+- neither: only the application's own loop steps a `zui_app.Session`.
+
+In slices, each a commit with every check green:
+1. **The step.** `Runner.frame` splits into `step`, which never blocks and
+   judges which windows are due on the one-window path as on the many,
+   and `wait`. `NextFrame.sooner` folds two schedules; `Context.hasFreeFrame`
+   says whether `beginFrame` would wait. raylib's renderer presents in
+   `zuiSubmit`, and its host's `zuiPoll` only drains.
+2. **The split contract.** `zuiWait` becomes the optional loop half beside
+   `zuiRun` and `zui.Driver`; `Runner` becomes `Session`, with `Loop`,
+   `runWith` and a compile error for each mistake; SPEC.md, README.md,
+   ARCHITECTURE.md and the feature tour describe it.
+3. **Surface loss.** `Session.suspendSurfaces` and `resumeSurfaces`
+   detach and re-attach every window's surface through the renderer.
+4. **The browser's worker on `Session`.** A stepped host over the page's
+   records, `zui_wire`'s renderer and the tour's own `App`, in place of
+   `TourSession`'s frames; the owner of the stepped `Io` folds its next
+   wake with `sooner`.
+5. **Conformance.** `zui_testing` suites for a host that runs its loop
+   and one that is stepped, beside the pull suite.
+
+**Done when:**
+- `zui_app`'s tests drive a fake host that runs its loop from a scripted
+  list of callbacks, on a UI-thread and a render-thread renderer: input
+  reaches its window, a step declares only what is due, a lost surface
+  is let go and given back with every context and the application's
+  state kept, and `run`'s type is `noreturn` for a `zuiRun` that is;
+- an application's own loop steps a `Session` on a host with no loop
+  half, and declares only the frames that are due;
+- every new rule is a compile error with its message pinned;
+- the web host's worker runs the tour through `Session`: `test-demo`,
+  `test-draw`, `test-input` and `test-site` pass, the worker and the
+  native `tour-frames` writing the same bytes;
+- every native host's and renderer's tour cycle still prints
+  `diagnostics ok: true`, and R1 counts are unchanged.
+
+**Spec.** §6.1, §6.3, §16.2, §16.3, §19.4, §19.5.
+
+**Status.** Slice 1 is done: `Runner.step` and `wait`, one judgement of
+whether a frame is due for one window and many, `NextFrame.sooner`,
+`Context.hasFreeFrame`, and raylib presenting from its renderer (raylib
+built with `SUPPORT_CUSTOM_FRAME_CONTROL`, its host polling input once a
+turn in `zuiWait`). The turn after `zuiWait` stays due for an
+application with one window, measured: without that rule an idle tour
+declared 10 frames in 10 s on the Wayland host against 11 (24.8 against
+27.9 ms of CPU, within noise), and 10 against 10 on raylib; the busy
+cycles were unchanged; nine of `zui_app`'s tests and the showcase's,
+whose fake hosts return from every wait with an empty record, declared
+fewer frames. Too little to gain for a frame a host's wait may ask for
+without a record that shows it. Slices 2 and 3 landed together, since
+`zui.Driver` carries the surface calls: `zuiWait` is the optional loop
+half beside `zuiRun`, `checkHost` rejecting both and any other `zuiRun`;
+`zui.Driver`; `Session(App)` in place of `Runner`, every caller renamed,
+with `Loop`, `loopOf`, `runWith`, a `run` whose type is `noreturn` when
+`zuiRun`'s is, and a step that leaves input with the host while the
+render thread holds every frame (on a host that is not waited on); and
+`suspendSurfaces` and `resumeSurfaces` over the renderer's attach and
+detach. Six compile errors are pinned. A fake pushed host drives an
+application from a scripted list of callbacks through a lost surface and
+its return, on a UI-thread and a render-thread renderer and on an `Io`
+of its own, and an application's own loop steps a `Session` on a stepped
+host. The sokol renderer attaches only `.win32` windows, so a lost
+surface of another kind cannot come back to it yet (ARCHITECTURE.md §7).
+Slice 4 is done: the worker steps a `Session` of `zui_tour.App`, on a
+stepped host over the page's records (`PageHost`) and a renderer that
+declares what `zui_webgl.Drawing` declares and writes each frame as wire
+bytes (`PageRenderer`), so `TourSession` keeps only the page's side:
+records in, bytes out, and the `Io`'s next wake folded in with `sooner`.
+Its own judgement of which frames are due, its `.every_call` mode and
+the page's `onlyWhenDue` are gone; every step judges. The tour times its
+frames on a `zui_tour.Stopwatch` (the `Io`, a page's clock or a steady
+one), and takes its submit time from a renderer that reports one
+(`submitMicroseconds`), as the page's draw time is. `test-demo` in Debug
+and ReleaseSafe, `test-draw`, `test-input` and `test-site` (also in
+ReleaseSmall) pass; the worker and the native `tour-frames` still write
+the same bytes, a stream that changed once: the tour now records each
+frame's timings where `zui_app` takes them. Slice 5 is done:
+`zui_testing.expectPushedHostConforms` hands a host's `zuiRun` a
+scripted `zui.Driver` and checks that it starts it once before any step,
+schedules each step as the one before asked (`.immediately`, `.at` and
+`.on_event` with a wake from another thread), never blocks in a poll,
+reports a surface its platform takes away and gives back, stops the
+driver and steps no more after the end, quitting a platform that stopped
+stepping; `expectSteppedHostConforms` checks that a stepped host's poll
+never blocks and that posted events arrive in order. Each passes a fake
+host that keeps its rules and fails one that breaks each, ThreadSanitizer
+included. H10 is done; counts were unchanged by every slice.
 
 ### H9. Many windows
 
@@ -4667,117 +4786,6 @@ without `--no-system-material`, in light and dark mode:
 - Moving the window to a monitor at another scale keeps the parts where
   they are drawn.
 Once checked, H7 moves to *Done*.
-
-### H10. Hosts whose platform owns the loop
-
-**Grounding.**
-- `zui_app.run` owned the loop: `while (try runner.frame()) {}`, each
-  turn polling the host, declaring and submitting, then blocking in the
-  host's `zuiWait`, so nothing could turn it without blocking. The host
-  contract required `zuiWait` (`core/src/contracts.zig:144`).
-- The web host's worker forked the frame logic to get a turn that does
-  not block: `TourSession.frame` (`hosts/web/src/tour_session.zig:182`)
-  begins and ends the tour's frames itself, `frameReason` (`:262`)
-  repeats `zui_app`'s judgement of whether a frame is due, and `nextWake`
-  (`:249`) folds the stepped `Io`'s next wake into `nextFrame`.
-- `zui_raylib.Host` began raylib's drawing in `zuiPoll` and presented it
-  in `zuiWait`, so it could not be polled without being waited on.
-- The browser's main thread, macOS, iOS and Android own their loops and
-  call the application back; Android and a lost GPU device also take the
-  surface away and give it back. `zuiAttachSurface` and
-  `zuiDetachSurface` (`core/src/contracts.zig:23`) already let a renderer
-  drop and take a window's surface while its context lives on (H9).
-
-**Plan.** One non-blocking step is the unit of `zui_app`'s frame logic,
-and three loops turn it (open decision 2, settled: the owner's choice of
-option D). A host is two halves: the window half every host gives
-(`zui_surfaces`, `zuiPoll` as a drain that never blocks or presents,
-`zuiWaker`, `zuiSurface`, `zuiApply`), and at most one call of the loop
-half:
-- `zuiWait`: zui pulls the loop, `run` stepping and waiting in turn;
-- `zuiRun(self, io, window, driver)`: the platform pushes it, and the
-  host calls a `zui.Driver` from its callbacks (`start(io)`, `step`,
-  `suspendSurfaces`, `resumeSurfaces`, `stop`), scheduling each turn as
-  the `NextFrame` the step returns says; `run` returns as `zuiRun` does,
-  `noreturn` included;
-- neither: only the application's own loop steps a `zui_app.Session`.
-
-In slices, each a commit with every check green:
-1. **The step.** `Runner.frame` splits into `step`, which never blocks and
-   judges which windows are due on the one-window path as on the many,
-   and `wait`. `NextFrame.sooner` folds two schedules; `Context.hasFreeFrame`
-   says whether `beginFrame` would wait. raylib's renderer presents in
-   `zuiSubmit`, and its host's `zuiPoll` only drains.
-2. **The split contract.** `zuiWait` becomes the optional loop half beside
-   `zuiRun` and `zui.Driver`; `Runner` becomes `Session`, with `Loop`,
-   `runWith` and a compile error for each mistake; SPEC.md, README.md,
-   ARCHITECTURE.md and the feature tour describe it.
-3. **Surface loss.** `Session.suspendSurfaces` and `resumeSurfaces`
-   detach and re-attach every window's surface through the renderer.
-4. **The browser's worker on `Session`.** A stepped host over the page's
-   records, `zui_wire`'s renderer and the tour's own `App`, in place of
-   `TourSession`'s frames; the owner of the stepped `Io` folds its next
-   wake with `sooner`.
-5. **Conformance.** `zui_testing` suites for a host that runs its loop
-   and one that is stepped, beside the pull suite.
-
-**Done when:**
-- `zui_app`'s tests drive a fake host that runs its loop from a scripted
-  list of callbacks, on a UI-thread and a render-thread renderer: input
-  reaches its window, a step declares only what is due, a lost surface
-  is let go and given back with every context and the application's
-  state kept, and `run`'s type is `noreturn` for a `zuiRun` that is;
-- an application's own loop steps a `Session` on a host with no loop
-  half, and declares only the frames that are due;
-- every new rule is a compile error with its message pinned;
-- the web host's worker runs the tour through `Session`: `test-demo`,
-  `test-draw`, `test-input` and `test-site` pass, the worker and the
-  native `tour-frames` writing the same bytes;
-- every native host's and renderer's tour cycle still prints
-  `diagnostics ok: true`, and R1 counts are unchanged.
-
-**Spec.** §6.1, §6.3, §16.2, §16.3, §19.4, §19.5.
-
-**Status.** Slice 1 is done: `Runner.step` and `wait`, one judgement of
-whether a frame is due for one window and many, `NextFrame.sooner`,
-`Context.hasFreeFrame`, and raylib presenting from its renderer (raylib
-built with `SUPPORT_CUSTOM_FRAME_CONTROL`, its host polling input once a
-turn in `zuiWait`). The turn after `zuiWait` stays due for an
-application with one window, measured: without that rule an idle tour
-declared 10 frames in 10 s on the Wayland host against 11 (24.8 against
-27.9 ms of CPU, within noise), and 10 against 10 on raylib; the busy
-cycles were unchanged; nine of `zui_app`'s tests and the showcase's,
-whose fake hosts return from every wait with an empty record, declared
-fewer frames. Too little to gain for a frame a host's wait may ask for
-without a record that shows it. Slices 2 and 3 landed together, since
-`zui.Driver` carries the surface calls: `zuiWait` is the optional loop
-half beside `zuiRun`, `checkHost` rejecting both and any other `zuiRun`;
-`zui.Driver`; `Session(App)` in place of `Runner`, every caller renamed,
-with `Loop`, `loopOf`, `runWith`, a `run` whose type is `noreturn` when
-`zuiRun`'s is, and a step that leaves input with the host while the
-render thread holds every frame (on a host that is not waited on); and
-`suspendSurfaces` and `resumeSurfaces` over the renderer's attach and
-detach. Six compile errors are pinned. A fake pushed host drives an
-application from a scripted list of callbacks through a lost surface and
-its return, on a UI-thread and a render-thread renderer and on an `Io`
-of its own, and an application's own loop steps a `Session` on a stepped
-host. The sokol renderer attaches only `.win32` windows, so a lost
-surface of another kind cannot come back to it yet (ARCHITECTURE.md §7).
-Slice 4 is done: the worker steps a `Session` of `zui_tour.App`, on a
-stepped host over the page's records (`PageHost`) and a renderer that
-declares what `zui_webgl.Drawing` declares and writes each frame as wire
-bytes (`PageRenderer`), so `TourSession` keeps only the page's side:
-records in, bytes out, and the `Io`'s next wake folded in with `sooner`.
-Its own judgement of which frames are due, its `.every_call` mode and
-the page's `onlyWhenDue` are gone; every step judges. The tour times its
-frames on a `zui_tour.Stopwatch` (the `Io`, a page's clock or a steady
-one), and takes its submit time from a renderer that reports one
-(`submitMicroseconds`), as the page's draw time is. `test-demo` in Debug
-and ReleaseSafe, `test-draw`, `test-input` and `test-site` (also in
-ReleaseSmall) pass; the worker and the native `tour-frames` still write
-the same bytes, a stream that changed once: the tour now records each
-frame's timings where `zui_app` takes them. Slice 5, the pushed and
-stepped conformance suites, is next.
 
 ---
 

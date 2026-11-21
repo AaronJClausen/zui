@@ -131,7 +131,10 @@ what is its own: its window, its renderer or host, and how it reads a
 frame back or makes the OS report an event. What harnesses share is
 `zui_testing`'s: `ReadBack`, a frame read back in either row order, which
 answers the suite's `pixel` and `extendedPixel`, and `PolledRecord`, the
-record a host's own tests poll into.
+record a host's own tests poll into. A host runs the suite of its loop
+half: `expectHostConforms` for one zui waits on, `expectPushedHostConforms`
+for one whose platform runs the loop, and `expectSteppedHostConforms` for
+one its application steps.
 
 **What happens when something is missing** follows one table
 (SPEC.md §16.6): what zui needs is a compile error; what zui uses quietly
@@ -185,6 +188,7 @@ The stage is the one in SPEC.md §21 that builds it.
 | the demo in a browser | `zui_web` in `hosts/web/`: the application in a Web Worker, its frames drawn by a thin client over `zui_wire` through `zui_webgl` in `renderers/webgl/` | 9 |
 | Linux and web hosts; many windows | `zui_host` in `hosts/native/`, and `zui_web` in `hosts/web/`; one `Context` per window, each made and declared through `zui_app`, and one renderer with a surface per window | 10 |
 | the macOS host | `zui_host`, as the others; only its contract shapes exist (the `cocoa` surface, vibrancy as the system material), as stubs | set aside |
+| who owns the loop: one turn that never blocks, pulled, pushed or stepped, and surfaces a platform takes away | `zui_app.Session.step`; the host contract's loop half, `zuiWait` or `zuiRun` and `zui.Driver`, in the core; `zui_testing`'s suite for each loop half | 10 |
 | window decorations: a custom title bar the OS still moves, resizes and snaps | chrome regions in the core, beside the frame, behind `features.chrome_regions`; `zui_app` hands them to the host's `zuiChromeRegions`; each host answers its window manager | 10 |
 | host services: the clipboard, notifications, file dialogs, opening URLs, menus | the core's vocabulary and checks (`core/src/services.zig`); `zui_app.ServicesOf`'s guards; each host implements them, answering into a source the application chooses | 10 |
 | motion and exit animations | `zui_motion`; ghost buffer in the core | 11 |
@@ -300,7 +304,6 @@ roadmap item named:
 | `Widgets(Ui)` with a `Theme` struct | `Widgets(Ui, Skin)` | `core/zui_widgets/` | K5 |
 | `zui_debug`'s inspector runs in the application's process; a frame on the wire carries no elements for it | over the wire, the inspector runs in another process (SPEC.md §19.7) | `core/zui_debug/`, `core/zui_wire/` | not yet queued |
 | a frame on the wire carries no chrome regions, and the wire host declares no `zuiChromeRegions`, so a remote window keeps the system's title bar | chrome over the wire | `core/zui_wire/` | not yet queued |
-| `zui_testing` has the pulled host's suite only | suites for a pushed host, `expectPushedHostConforms`, and a stepped one, `expectSteppedHostConforms` (SPEC.md §19.4) | `core/zui_testing/` | H10 |
 | the sokol renderer attaches and detaches only `.win32` windows, so a lost `.wayland` or `.library` surface cannot be given back: `zuiAttachSurface` returns `UnsupportedSurface`, and `resumeSurfaces` with it | a renderer that a platform may take surfaces from keeps each surface's resources in `zuiAttachSurface` and `zuiDetachSurface` | `renderers/sokol/` | the first host that loses a surface (Android) |
 | `zui_host`'s Linux host speaks Wayland only, opens one window, reports no low memory, IME or semantics, and keeps the compositor's title bar; its environment comes from the desktop portal and UPower over D-Bus, and stays at the defaults without them; its services have no menus, which Wayland lacks | a Linux host on Wayland and X11 with every report the Windows host makes, and a system material where the compositor offers one | `hosts/native/` | H4 |
 

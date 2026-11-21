@@ -34,6 +34,11 @@ pub const HostViolation = host_conformance.HostViolation;
 pub const ServiceScript = host_conformance.ServiceScript;
 pub const expectHostConforms = host_conformance.expectHostConforms;
 pub const findHostViolation = host_conformance.findHostViolation;
+const loop_conformance = @import("loop_conformance.zig");
+pub const expectPushedHostConforms = loop_conformance.expectPushedHostConforms;
+pub const findPushedHostViolation = loop_conformance.findPushedHostViolation;
+pub const expectSteppedHostConforms = loop_conformance.expectSteppedHostConforms;
+pub const findSteppedHostViolation = loop_conformance.findSteppedHostViolation;
 
 const harness_parts = @import("harness.zig");
 pub const RowOrder = harness_parts.RowOrder;
@@ -1397,6 +1402,7 @@ test "a recording drops a record that does not fit, whole" {
 test {
     _ = renderer_conformance;
     _ = host_conformance;
+    _ = loop_conformance;
 }
 
 test {
