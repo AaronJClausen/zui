@@ -15,6 +15,7 @@ ROADMAP.md says when each part is built.
 | **Renderers** | drawing, images, materials, and text where `zui_glyphs` lays it out | implement the renderer contract; never import a host or a font system |
 | **Hosts** | windows, the event loop, OS events and services, frame pacing | implement the host contract; never import a renderer |
 | **Theme packs** | OS design languages | skins: data only |
+| **Apps** (`apps/`) | the tour (`zui_tour`) and the showcase (`zui_showcase`), which every renderer's and host's demo runs | zui, its modules, `zui_glyphs` and `zui_fonts` only; never a renderer, host or font system, which a target names |
 
 ```
                           application
@@ -182,6 +183,7 @@ The stage is the one in SPEC.md §21 that builds it.
 | one layout for measuring and drawing, the placement a renderer declares, the glyph atlas | `zui_glyphs` in `text/glyphs/` | — |
 | fonts, shaping, bidirectional text | behind the text contract: `zui_truetype` in `text/truetype/` on stb_truetype, `zui_fonts`' typefaces in `text/fonts/`; shaping and fallback later, beside them | — |
 | number, date and plural formatting | out of scope: a localization library | — |
+| the tour and the showcase, on any host, renderer and font system; the screens a renderer is offered by the commands it draws | `zui_tour` in `apps/tour/`, `zui_showcase` in `apps/showcase/` | — |
 
 ## 7. From today's code to the spec
 
@@ -301,6 +303,8 @@ parallel measurement and the module boundary.
 | `zui`, in `text/glyphs/` | the package `zui_glyphs`: what font systems and renderers share: the codepoints of a run, the type-erased `Fonts` a renderer draws through, the `Placement` a renderer declares, the one `layOut` that places a run's glyphs for measuring and for drawing, the pixel grid's glyph quads, the `Atlas` that rasterized glyphs are drawn from, and the font systems' conformance suite; no third-party library, so the root re-exports it |
 | `zui`, in `text/truetype/` | the package `zui_truetype`: `Text`, the text contract on stb_truetype, its fonts added from embedded bytes or memory reserved for fonts that arrive at run time, Atkinson Hyperlegible Regular as font 0 when none is added, and `zuiFingerprint` over its fonts and placement; stb, fetched lazily, so users reach it through `zui.builder.dependency("zui_truetype", .{})` |
 | `zui`, in `text/fonts/` | the package `zui_fonts`: Atkinson Hyperlegible Regular and Bold and Liberation Mono, each a `pub const` of its bytes, with their licences; no third-party library, so the root re-exports it |
+| `zui`, in `apps/tour/` | the package `zui_tour`: the tour, `App(.{ .Host, .Renderer, .Text })` for `zui_app` to run, which gives the font system the three `zui_fonts` typefaces, lays text out for the placement the renderer declares, and offers a screen only when the renderer draws its commands; `Kit` and `Tour`, for a driver that begins and ends the frames itself; its headless test on renderers that draw every optional command and none, in pixels and in cells, which alone fetches stb, for `zui_truetype`; no third-party library in the module, so the root re-exports it |
+| `zui`, in `apps/showcase/` | the package `zui_showcase`: the small application every renderer draws, the tour's Classic screen; no third-party library, so the root re-exports it |
 | `zui`, in `renderers/raylib/` | the package `zui_raylib`: the raylib renderer and the raylib adapter host, their conformance harness, and the tour; raylib, fetched lazily |
 | `zui`, in `renderers/sokol/` | the package `zui_sokol`: the sokol renderer, on sokol_gfx through sokol-zig, its conformance harness, its shaders, and the tour; `zui_sokol_ui`, the tour's context types without sokol, and `zui_sokol_tour`, the tour's application; sokol, fetched lazily |
 | `zui`, in `renderers/terminal/` | the package `zui_terminal`: the terminal renderer, the terminal host, its input decoder and raw-mode terminal, its conformance harness and its demo; no third-party library |
@@ -375,7 +379,7 @@ zui's host contract, handing the `Renderer` its stdout writer in each
 `.terminal` surface. Its conformance harness reads each pixel back as
 the cell covering it, so it passes the renderer suite at a tolerance of
 0, and its `test` step runs the suite too. It builds `examples/demo.zig`,
-which draws `examples/showcase.zig`, the same UI as the tour's Classic screen.
+which draws `zui_showcase` from `apps/showcase/`, the same UI as the tour's Classic screen.
 
 The raylib renderer, `zui_raylib`, names raylib as a lazy dependency, so
 raylib is fetched only when the package's own `build()` runs, as the

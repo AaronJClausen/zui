@@ -641,6 +641,34 @@ test "a renderer may take the text it is given as anytype" {
     try testing.expectEqual(@as(?*const anyopaque, &runner.text), runner.renderer.text);
 }
 
+/// Keeps the text `init` was given, to add its fonts there.
+const TextKeepingApp = struct {
+    pub const Host = TestHost;
+    pub const Renderer = AnyTextRenderer;
+    pub const Text = Fonts;
+    pub const Ui = zui.Context(zui_app.contextConfig(Renderer, .{ .limits = .{ .max_elements = 8 }, .Text = Fonts }));
+
+    text: ?*Fonts = null,
+
+    pub fn init(app: *TextKeepingApp, start: zui_app.Start(TextKeepingApp)) !void {
+        start.host.closes_after_polls = 1;
+        app.* = .{ .text = start.text };
+    }
+
+    pub fn zuiDeclare(_: *TextKeepingApp, ui: *Ui) void {
+        ui.text("fonts", .{});
+    }
+};
+
+test "init is given the text the context measures with" {
+    var runner: zui_app.Runner(TextKeepingApp) = undefined;
+    try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .notify = Notices.record });
+    defer runner.stop();
+    try testing.expectEqual(&runner.text, runner.app.text.?);
+    try testing.expectEqual(&runner.text, runner.ui.text_contract);
+    try testing.expect(@FieldType(zui_app.Start(ClickApp), "text") == void);
+}
+
 test "zuiRecord adds the application's zoom and events to the record, after the host's" {
     var runner: zui_app.Runner(FontsApp) = undefined;
     try runner.start(.{ .gpa = testing.allocator, .io = testing.io }, .{ .zoom = 1, .notify = Notices.record });

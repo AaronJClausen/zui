@@ -1,0 +1,10 @@
+.{
+    .name = .zui_showcase,
+    .version = "0.1.0",
+    .fingerprint = 0xcb5ea3ef4dc9bbe5, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        .zui_core = .{ .path = "../../core" },
+    },
+    .paths = .{ "build.zig", "build.zig.zon", "zui_showcase.zig", "freestanding_test_runner.zig" },
+}

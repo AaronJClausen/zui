@@ -387,6 +387,19 @@ modules and runs core's steps under the same names. Beside core:
 - `text/fonts/`, the package `zui_fonts`: Atkinson Hyperlegible Regular
   and Bold and Liberation Mono, each a `pub const` of its bytes, with
   their licences. The root re-exports it.
+- `apps/tour/`, the package `zui_tour`: the tour, every feature of zui on
+  a screen of its own, for any host, renderer and font system:
+  `zui_tour.App(.{ .Host = …, .Renderer = …, .Text = zui_truetype.Text })`
+  is an application `zui_app.run` runs. It sets its text in the three
+  `zui_fonts` typefaces, laid out for the placement the renderer draws,
+  and offers a screen only when the renderer draws what it needs
+  (`transforms` needs `.transform`, `materials` `.material`, and Light &
+  Depth's frost `.backdrop_blur`). Its `test` declares every screen
+  headlessly on renderers that draw every optional command and none, in
+  pixels and in cells. The root re-exports it.
+- `apps/showcase/`, the package `zui_showcase`: one small application
+  every renderer draws, so their frames can be compared; the tour's
+  Classic screen. The root re-exports it.
 - `themes/`, the package `zui_themes`: skins in the design languages of
   Windows, macOS, GNOME and KDE, as data applied through `zui_widgets`'
   skin contract (K4, after the skin contract, K5); a skeleton today.
@@ -408,8 +421,9 @@ modules and runs core's steps under the same names. Beside core:
 
 Each has its own `test` and `check`, run from its directory, and
 `test-all` and `check-all` run them. The text packages' `check` also
-compiles their tests for `wasm32-freestanding`; `zui_truetype`'s first
-build fetches stb. The raylib renderer has these too,
+compiles their tests for `wasm32-freestanding`, as the showcase's does,
+and the tour's compiles the tour for it; `zui_truetype`'s first build
+fetches stb, and so does the tour's, whose tests measure with it. The raylib renderer has these too,
 run from `renderers/raylib/`; the first build fetches raylib and compiles
 it:
 
@@ -541,8 +555,10 @@ CI runs:
 - the tests under ThreadSanitizer, which stress every `zui_async` source
   with producers on other threads;
 - `zui_tracy` with Tracy's client, on Linux, Windows and macOS;
-- the tests of `themes/` and `examples/` in three optimize modes, and
-  their `check`, on Linux, Windows and macOS, each run from its directory;
+- the tests of `text/glyphs/`, `text/fonts/`, `text/truetype/`,
+  `apps/showcase/`, `apps/tour/`, `themes/` and `examples/` in three
+  optimize modes, and their `check`, on Linux, Windows and macOS, each run
+  from its directory;
 - the raylib renderer's tests, `test-tour` and `check` on Windows, `check`
   on macOS, and on Linux, under `xvfb-run`, its conformance, a visit of
   every screen of the tour, five screenshots, kept as the run's
@@ -716,6 +732,9 @@ exe.root_module.addImport("zui_tracy", zui.module("zui_tracy"));
 // Text: what font systems and renderers share, and the bundled typefaces.
 exe.root_module.addImport("zui_glyphs", zui.module("zui_glyphs"));
 exe.root_module.addImport("zui_fonts", zui.module("zui_fonts"));
+// The tour and the showcase, for a renderer's or a host's demo.
+exe.root_module.addImport("zui_tour", zui.module("zui_tour"));
+exe.root_module.addImport("zui_showcase", zui.module("zui_showcase"));
 // The default font system, which builds stb_truetype, so it is a package of its own.
 const zui_truetype = zui.builder.dependency("zui_truetype", .{ .target = target, .optimize = optimize });
 exe.root_module.addImport("zui_truetype", zui_truetype.module("zui_truetype"));
@@ -923,7 +942,7 @@ watch.
 | Pixel Pad | painting through `pointerLocal` on one element, tools on keys, undo with chords, and a live view of `keyEvents` and `typedText` |
 | Typography | three TrueType fonts and raylib's built-in one, size, letter spacing, line height, wrap and alignment, a column to drag-resize, and a marquee looped with `measureText` and `setScrollOffset` |
 | Light & Depth | `zui.Effects` on sliders with their declaration printed as Zig. This renderer does not draw `gradient` or `shadow`, so zui lowers them: a gradient to its middle color, a shadow to nothing |
-| Classic | `examples/showcase.zig`, the UI every zui backend's demo shares, so the renderers can be compared |
+| Classic | `zui_showcase`, in `apps/showcase/`, the UI every zui renderer's demo shares, so the renderers can be compared |
 
 Ctrl+1 to Ctrl+0 jump to the first ten screens, Ctrl+PgDn and Ctrl+PgUp
 to the next and previous, Ctrl+= and Ctrl+- zoom (through

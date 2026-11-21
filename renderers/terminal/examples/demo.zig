@@ -2,7 +2,7 @@ const std = @import("std");
 const zui_terminal = @import("zui_terminal");
 const zui = @import("zui");
 const zui_app = @import("zui_app");
-const showcase_module = @import("showcase.zig");
+const showcase_module = @import("zui_showcase");
 
 const Ui = zui.Context(zui_terminal.config(.{}));
 const Showcase = showcase_module.Showcase(Ui);

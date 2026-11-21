@@ -3,6 +3,7 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const core_options: CoreOptions = .declare(b);
 
     const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "tools" };
     b.step("fmt", "Format all Zig sources").dependOn(&b.addFmt(.{ .paths = formatted_paths }).step);
@@ -10,13 +11,13 @@ pub fn build(b: *std.Build) void {
 
     // Until stb is fetched, the font system declares no module, and every
     // step here needs it.
-    if (truetypeDeclaring(b, .{ .target = target, .optimize = optimize }) == null) return;
-    const web_module = webModule(b, "src/root.zig", target, optimize);
+    if (truetypeDeclaring(b, core_options.on(target, optimize)) == null) return;
+    const web_module = webModule(b, "src/root.zig", target, optimize, core_options);
     const unit_tests = b.addTest(.{ .root_module = web_module });
     b.step("test", "Run the unit tests").dependOn(&b.addRunArtifact(unit_tests).step);
 
     const browser_target = b.resolveTargetQuery(.{ .cpu_arch = .wasm32, .os_tag = .freestanding });
-    const client = browserModule(b, "zui-web", "src/browser.zig", browser_target, optimize);
+    const client = browserModule(b, "zui-web", "src/browser.zig", browser_target, optimize, core_options);
     b.getInstallStep().dependOn(&b.addInstallArtifact(client, .{ .dest_dir = .{ .override = .{ .custom = "web" } } }).step);
     const check_step = b.step("check", "Compile the unit tests, and the client for the browser, without running them");
     check_step.dependOn(&unit_tests.step);
@@ -33,25 +34,25 @@ pub fn build(b: *std.Build) void {
         .os_tag = .freestanding,
         .cpu_features_add = std.Target.wasm.featureSet(&.{ .atomics, .bulk_memory }),
     });
-    const tour_worker = if (sokolDeclaring(b, .{ .target = worker_target, .optimize = optimize }, "zui_sokol_tour")) |worker_zui_sokol| tour_worker: {
-        const tour_worker = tourWorker(b, worker_zui_sokol, worker_target, optimize);
+    const tour_worker = if (sokolDeclaring(b, core_options.on(worker_target, optimize), "zui_sokol_tour")) |worker_zui_sokol| tour_worker: {
+        const tour_worker = tourWorker(b, worker_zui_sokol, worker_target, optimize, core_options);
         b.getInstallStep().dependOn(&b.addInstallArtifact(tour_worker, .{ .dest_dir = .{ .override = .{ .custom = "web" } } }).step);
         check_step.dependOn(&tour_worker.step);
         break :tour_worker tour_worker;
     } else null;
-    if (sokolDeclaring(b, .{ .target = target, .optimize = optimize }, "zui_sokol")) |zui_sokol_dependency| {
+    if (sokolDeclaring(b, core_options.on(target, optimize), "zui_sokol")) |zui_sokol_dependency| {
         const tour_imports: []const std.Build.Module.Import = &.{
-            .{ .name = "zui", .module = b.dependency("zui_core", .{ .target = target, .optimize = optimize }).module("zui") },
+            .{ .name = "zui", .module = b.dependency("zui_core", core_options.on(target, optimize)).module("zui") },
             .{ .name = "zui_sokol", .module = zui_sokol_dependency.module("zui_sokol") },
             .{ .name = "zui_sokol_tour", .module = zui_sokol_dependency.module("zui_sokol_tour") },
-            .{ .name = "zui_wire", .module = b.dependency("zui_core", .{ .target = target, .optimize = optimize }).module("zui_wire") },
+            .{ .name = "zui_wire", .module = b.dependency("zui_core", core_options.on(target, optimize)).module("zui_wire") },
         };
         const demo_stream = tourTool(b, "demo-stream", "tools/demo_stream.zig", tour_imports, target, optimize);
         const write_stream = b.addRunArtifact(demo_stream);
         const stream = write_stream.addOutputFileArg("tour.zuiw");
         const expected = write_stream.addOutputFileArg("tour.expected");
 
-        const wire_check = browserModule(b, "zui-web-wire-check", "src/browser_wire_check.zig", browser_target, optimize);
+        const wire_check = browserModule(b, "zui-web-wire-check", "src/browser_wire_check.zig", browser_target, optimize, core_options);
         const decode_in_client = b.addSystemCommand(&.{"node"});
         decode_in_client.addFileArg(b.path("web/check_stream.mjs"));
         decode_in_client.addArtifactArg(wire_check);
@@ -62,7 +63,7 @@ pub fn build(b: *std.Build) void {
         test_demo.dependOn(&decode_in_client.step);
 
         if (tour_worker) |worker| {
-            const tour_session = b.createModule(.{ .root_source_file = b.path("src/tour_session.zig"), .target = target, .optimize = optimize, .imports = tourSessionImports(b, zui_sokol_dependency, target, optimize) });
+            const tour_session = b.createModule(.{ .root_source_file = b.path("src/tour_session.zig"), .target = target, .optimize = optimize, .imports = tourSessionImports(b, zui_sokol_dependency, target, optimize, core_options) });
             const tour_frames = tourTool(b, "tour-frames", "tools/tour_frames.zig", &.{.{ .name = "tour_session", .module = tour_session }}, target, optimize);
             const run_in_worker = b.addSystemCommand(&.{"node"});
             run_in_worker.addFileArg(b.path("web/check_worker.mjs"));
@@ -86,7 +87,7 @@ pub fn build(b: *std.Build) void {
         draw_in_browser.addFileArg(b.path("web/check_draw.mjs"));
         draw_in_browser.addArg(browser);
         draw_in_browser.addArtifactArg(client);
-        draw_in_browser.addFileArg(webglDependency(b, target, optimize).path("web/frame_drawer.mjs"));
+        draw_in_browser.addFileArg(webglDependency(b, target, optimize, core_options).path("web/frame_drawer.mjs"));
         draw_in_browser.addFileArg(stream);
         draw_in_browser.addFileArg(one_sample_reference);
         draw_in_browser.addFileArg(four_sample_reference);
@@ -107,7 +108,7 @@ pub fn build(b: *std.Build) void {
         test_input.dependOn(&input_in_browser.step);
 
         if (tour_worker) |worker| {
-            const site = siteFiles(b, client, worker, bitmap_font_rows, webglDependency(b, target, optimize));
+            const site = siteFiles(b, client, worker, bitmap_font_rows, webglDependency(b, target, optimize, core_options));
             site_step.dependOn(&b.addInstallDirectory(.{ .source_dir = site.getDirectory(), .install_dir = .prefix, .install_subdir = "site" }).step);
 
             const open_site = b.addSystemCommand(&.{"node"});
@@ -121,8 +122,8 @@ pub fn build(b: *std.Build) void {
     }
 }
 
-fn webModule(b: *std.Build, root_source_file: []const u8, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Module {
-    const core_dependency = b.dependency("zui_core", .{ .target = target, .optimize = optimize });
+fn webModule(b: *std.Build, root_source_file: []const u8, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, core_options: CoreOptions) *std.Build.Module {
+    const core_dependency = b.dependency("zui_core", core_options.on(target, optimize));
     return b.createModule(.{
         .root_source_file = b.path(root_source_file),
         .target = target,
@@ -130,9 +131,9 @@ fn webModule(b: *std.Build, root_source_file: []const u8, target: std.Build.Reso
         .imports = b.allocator.dupe(std.Build.Module.Import, &.{
             .{ .name = "zui", .module = core_dependency.module("zui") },
             .{ .name = "zui_wire", .module = core_dependency.module("zui_wire") },
-            .{ .name = "zui_webgl", .module = webglDependency(b, target, optimize).module("zui_webgl") },
+            .{ .name = "zui_webgl", .module = webglDependency(b, target, optimize, core_options).module("zui_webgl") },
             .{ .name = "zui_glyphs", .module = b.dependency("zui_glyphs", .{ .target = target, .optimize = optimize }).module("zui_glyphs") },
-            .{ .name = "zui_truetype", .module = truetypeDeclaring(b, .{ .target = target, .optimize = optimize }).?.module("zui_truetype") },
+            .{ .name = "zui_truetype", .module = truetypeDeclaring(b, core_options.on(target, optimize)).?.module("zui_truetype") },
             .{ .name = "zui_fonts", .module = b.dependency("zui_fonts", .{ .target = target, .optimize = optimize }).module("zui_fonts") },
         }) catch @panic("out of memory"),
     });
@@ -150,8 +151,8 @@ fn truetypeDeclaring(b: *std.Build, args: anytype) ?*std.Build.Dependency {
     return if (dependency.builder.modules.contains("zui_truetype")) dependency else null;
 }
 
-fn webglDependency(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Dependency {
-    return b.dependency("zui_webgl", .{ .target = target, .optimize = optimize });
+fn webglDependency(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, core_options: CoreOptions) *std.Build.Dependency {
+    return b.dependency("zui_webgl", core_options.on(target, optimize));
 }
 
 /// The sokol renderer drawing `compared_frames` of `stream` with
@@ -217,24 +218,24 @@ fn siteFiles(b: *std.Build, client: *std.Build.Step.Compile, worker: *std.Build.
     return site;
 }
 
-fn tourSessionImports(b: *std.Build, zui_sokol_dependency: *std.Build.Dependency, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) []const std.Build.Module.Import {
+fn tourSessionImports(b: *std.Build, zui_sokol_dependency: *std.Build.Dependency, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, core_options: CoreOptions) []const std.Build.Module.Import {
     return b.allocator.dupe(std.Build.Module.Import, &.{
         .{ .name = "zui_sokol_ui", .module = zui_sokol_dependency.module("zui_sokol_ui") },
         .{ .name = "zui_sokol_tour", .module = zui_sokol_dependency.module("zui_sokol_tour") },
-        .{ .name = "zui_wire", .module = b.dependency("zui_core", .{ .target = target, .optimize = optimize }).module("zui_wire") },
+        .{ .name = "zui_wire", .module = b.dependency("zui_core", core_options.on(target, optimize)).module("zui_wire") },
     }) catch @panic("out of memory");
 }
 
 /// The sokol renderer's tour for a Web Worker: WebAssembly on memory the
 /// page shares with the workers the tour's tasks run on, each of which sets
 /// its own stack pointer and thread-local storage.
-fn tourWorker(b: *std.Build, zui_sokol_dependency: *std.Build.Dependency, worker_target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Step.Compile {
+fn tourWorker(b: *std.Build, zui_sokol_dependency: *std.Build.Dependency, worker_target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, core_options: CoreOptions) *std.Build.Step.Compile {
     const module = b.createModule(.{
         .root_source_file = b.path("src/tour_worker.zig"),
         .target = worker_target,
         .optimize = optimize,
         .single_threaded = false,
-        .imports = tourSessionImports(b, zui_sokol_dependency, worker_target, optimize),
+        .imports = tourSessionImports(b, zui_sokol_dependency, worker_target, optimize, core_options),
     });
     module.export_symbol_names = &.{ "__stack_pointer", "__wasm_init_tls" };
     const worker = b.addExecutable(.{ .name = "zui-web-tour", .root_module = module });
@@ -258,8 +259,8 @@ fn tourTool(b: *std.Build, name: []const u8, root_source_file: []const u8, impor
 }
 
 /// A WebAssembly module with no entry point, whose exports the page calls.
-fn browserModule(b: *std.Build, name: []const u8, root_source_file: []const u8, browser_target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Step.Compile {
-    const module = b.addExecutable(.{ .name = name, .root_module = webModule(b, root_source_file, browser_target, optimize) });
+fn browserModule(b: *std.Build, name: []const u8, root_source_file: []const u8, browser_target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, core_options: CoreOptions) *std.Build.Step.Compile {
+    const module = b.addExecutable(.{ .name = name, .root_module = webModule(b, root_source_file, browser_target, optimize, core_options) });
     module.entry = .disabled;
     module.rdynamic = true;
     return module;
@@ -282,3 +283,33 @@ fn sokolDeclaring(b: *std.Build, args: anytype, module_name: []const u8) ?*std.B
     const dependency = b.lazyDependency("zui_sokol", args) orelse return null;
     return if (dependency.builder.modules.contains(module_name)) dependency else null;
 }
+
+/// Core's options as the package depending on this one gave them, each
+/// passed on only when given: core instantiated with other options is a
+/// second `zui` module, whose types match no one else's.
+const CoreOptions = struct {
+    debug: ?bool,
+    sanitize_thread: ?bool,
+    tracy: ?bool,
+
+    fn declare(b: *std.Build) CoreOptions {
+        return .{
+            .debug = b.option(bool, "zui-debug", "Keep id names for diagnostics, as core does"),
+            .sanitize_thread = b.option(bool, "zui-sanitize-thread", "Build zui and its modules with ThreadSanitizer, through LLVM (Linux)"),
+            .tracy = b.option(bool, "zui-tracy", "Link Tracy's client into zui, so zui_tracy.Tracer traces into the Tracy profiler"),
+        };
+    }
+
+    /// `b.dependency`'s arguments for a package on core.
+    fn on(options: CoreOptions, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) DependencyArguments {
+        return .{ .target = target, .optimize = optimize, .@"zui-debug" = options.debug, .@"zui-sanitize-thread" = options.sanitize_thread, .@"zui-tracy" = options.tracy };
+    }
+
+    const DependencyArguments = struct {
+        target: std.Build.ResolvedTarget,
+        optimize: std.builtin.OptimizeMode,
+        @"zui-debug": ?bool,
+        @"zui-sanitize-thread": ?bool,
+        @"zui-tracy": ?bool,
+    };
+};

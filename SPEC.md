@@ -2472,8 +2472,9 @@ const App = struct {
   `init(self, surface, text: *const Text) !void` beside `App.Text`, and
   `deinit`. Each field with a default holds it when `init` is called, so
   a setting made on the type survives. `Start(App)` gives the application
-  the allocator, the `Io`, the process, its host, its renderer and the
-  host's `Waker`.
+  the allocator, the `Io`, the process, its host, its renderer, the
+  `App.Text` it made (`void` without one), for the fonts the application
+  adds and the ids they are given, and the host's `Waker`.
 - **The application's part of the record.** `zuiRecord` runs after the
   host's poll and before `beginFrame`: the application sets its zoom
   there and appends events it makes itself, after the host's. Its

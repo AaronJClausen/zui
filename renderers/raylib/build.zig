@@ -3,16 +3,15 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    // Passed on only when given: core instantiated with different options is a second `zui` module, whose types match no one else's.
-    const tracy = b.option(bool, "zui-tracy", "Link Tracy's client, so the demo traces zui's zones into the Tracy profiler");
+    const core_options: CoreOptions = .declare(b);
 
     const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "examples" };
     b.step("fmt", "Format all Zig sources").dependOn(&b.addFmt(.{ .paths = formatted_paths }).step);
     b.step("fmt-check", "Fail if any Zig source is not formatted").dependOn(&b.addFmt(.{ .paths = formatted_paths, .check = true }).step);
 
-    const core = b.dependency("zui_core", .{ .target = target, .optimize = optimize, .@"zui-tracy" = tracy });
+    const core = b.dependency("zui_core", core_options.on(target, optimize));
     const raylib_dependency = b.lazyDependency("raylib", .{ .target = target, .optimize = optimize }) orelse return;
-    const truetype_dependency = truetypeDeclaring(b, .{ .target = target, .optimize = optimize, .@"zui-tracy" = tracy }) orelse return;
+    const truetype_dependency = truetypeDeclaring(b, core_options.on(target, optimize)) orelse return;
     const zui_module = core.module("zui");
     const zui_app_module = core.module("zui_app");
     const zui_glyphs_module = b.dependency("zui_glyphs", .{ .target = target, .optimize = optimize }).module("zui_glyphs");
@@ -65,6 +64,7 @@ pub fn build(b: *std.Build) void {
         .{ .name = "zui_glyphs", .module = zui_glyphs_module },
         .{ .name = "zui_truetype", .module = zui_truetype_module },
         .{ .name = "zui_fonts", .module = b.dependency("zui_fonts", .{ .target = target, .optimize = optimize }).module("zui_fonts") },
+        .{ .name = "zui_showcase", .module = b.dependency("zui_showcase", core_options.on(target, optimize)).module("zui_showcase") },
     };
     const demo = b.addExecutable(.{
         .name = "zui-demo",
@@ -123,3 +123,33 @@ fn moveSystemLibrariesOntoModule(library: *std.Build.Step.Compile, module: *std.
         }
     }
 }
+
+/// Core's options as the package depending on this one gave them, each
+/// passed on only when given: core instantiated with other options is a
+/// second `zui` module, whose types match no one else's.
+const CoreOptions = struct {
+    debug: ?bool,
+    sanitize_thread: ?bool,
+    tracy: ?bool,
+
+    fn declare(b: *std.Build) CoreOptions {
+        return .{
+            .debug = b.option(bool, "zui-debug", "Keep id names for diagnostics, as core does"),
+            .sanitize_thread = b.option(bool, "zui-sanitize-thread", "Build zui and its modules with ThreadSanitizer, through LLVM (Linux)"),
+            .tracy = b.option(bool, "zui-tracy", "Link Tracy's client into zui, so zui_tracy.Tracer traces into the Tracy profiler"),
+        };
+    }
+
+    /// `b.dependency`'s arguments for a package on core.
+    fn on(options: CoreOptions, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) DependencyArguments {
+        return .{ .target = target, .optimize = optimize, .@"zui-debug" = options.debug, .@"zui-sanitize-thread" = options.sanitize_thread, .@"zui-tracy" = options.tracy };
+    }
+
+    const DependencyArguments = struct {
+        target: std.Build.ResolvedTarget,
+        optimize: std.builtin.OptimizeMode,
+        @"zui-debug": ?bool,
+        @"zui-sanitize-thread": ?bool,
+        @"zui-tracy": ?bool,
+    };
+};

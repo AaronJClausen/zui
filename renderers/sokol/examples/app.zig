@@ -8,7 +8,7 @@ const Ui = kit.Ui;
 const Shell = kit.Shell;
 const Screen = kit.Screen;
 const Perf = kit.Perf;
-const showcase = @import("showcase.zig");
+const showcase = @import("zui_showcase");
 
 const rail_width = 236;
 

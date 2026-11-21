@@ -71,6 +71,8 @@ Stop and ask the user instead of guessing when:
 | the default font system, `zui_truetype.Text` on stb_truetype | `text/truetype/src/`, the `zui_truetype` module, reached through `zui.builder.dependency("zui_truetype", …)` and never re-exported, since it builds stb; it lays text out only through `zui_glyphs` and never imports a renderer. stb_truetype is compiled in from `text/truetype/src/stb_truetype.c` without a C library on every target |
 | a bundled typeface | `text/fonts/`, its file and licence beside `zui_fonts.zig`, which makes it a `pub const` of its `@embedFile` bytes and adds both to `.paths` in `text/fonts/build.zig.zon` |
 | a new face, shaper or rasterizer | a package of its own beside `text/truetype/`, depending on `zui_glyphs`, and in the root's `packages`, `.paths` and `.dependencies` |
+| the tour | `apps/tour/src/`, the `zui_tour` module, which the root re-exports: `zui_tour.App(.{ .Host, .Renderer, .Text })` is the application `zui_app` runs. A screen is `apps/tour/src/screens/<name>.zig`, generic over the tour's `Kit` through `Using(kit)`, a field of `Screens` in `apps/tour/src/tour.zig` and a case of `Screen` in `apps/tour/src/shared.zig`; one that needs an optional command is offered only by `Kit.offers`. The tour imports no renderer, host or font system, and compiles for `wasm32-freestanding`. Its headless test is `apps/tour/src/tests.zig`, its compile errors `apps/tour/tests/compile_errors/<case>.zig` with a row in `compile_error_cases` in `apps/tour/build.zig` |
+| the showcase | `apps/showcase/zui_showcase.zig`, the `zui_showcase` module, which the root re-exports and the tour's classic screen declares; it imports only `zui` and `zui_widgets` |
 | a skin for an OS design language | `themes/src/<design language>.zig`, exported from `themes/src/root.zig` (the `zui_themes` module), with its tests beside it. A skin is data, applied through `zui_widgets`' skin contract: it imports only `zui` and `zui_widgets`, and holds no drawing or OS code |
 | the template project | `examples/template/`, a package of its own, so it can be copied out as a new app |
 | a sample | `examples/samples/<name>/`, built and tested from `examples/build.zig` and imported from the `test` block of `examples/samples/root.zig`. A sample uses only the public APIs of zui, its modules, and the renderers and hosts, as a user would |
@@ -130,7 +132,13 @@ same names; another package's own steps run from its directory. In
 `text/truetype/`, run `zig build test` in all three optimize modes and
 `zig build check` (which, for the text packages, also compiles their
 tests for `wasm32-freestanding`) before committing; `test-all` and
-`check-all` run them from the root. In `renderers/terminal/`, run `zig build test`
+`check-all` run them from the root. In `apps/tour/` and `apps/showcase/`,
+run `zig build test` in all three optimize modes, `zig build check`, which
+also compiles the tour or the showcase's tests for `wasm32-freestanding`,
+and the same `check` with `-Dtarget=x86_64-windows`; the tour's `test`
+declares every screen headlessly on renderers that draw every optional
+command and none, in pixels and in cells, and checks its compile errors.
+In `renderers/terminal/`, run `zig build test`
 (which runs `conformance` too), `zig build check`, the same `check` with
 `-Dtarget=x86_64-windows` and `-Dtarget=aarch64-macos`, and
 `zig build demo -- --dump`, which prints the demo's glyphs and must
@@ -260,7 +268,12 @@ Zig 0.16's package manager behaves in ways that are easy to get wrong:
   option to `b.dependency("zui_core", …)` only when the user gave it,
   leaving it `null` otherwise, never an explicit default such as
   `.@"zui-tracy" = false`. Two option sets instantiate core twice, and
-  the build fails with "file exists in modules 'zui' and 'zui0'".
+  the build fails with "file exists in modules 'zui' and 'zui0'". So
+  every package on core declares `zui-debug`, `zui-sanitize-thread` and
+  `zui-tracy` (its build's `CoreOptions`) and passes all three to each
+  package on core it depends on, and the root passes them to the
+  packages it re-exports; the root's `check` compiles
+  `tests/reexports.zig`, which imports `zui` and the apps together.
 - **A renderer's or host's entry in the root `build.zig.zon` is not
   lazy.** With `.lazy = true`, `zui.builder.dependency(…)` panics ("must
   use the lazyDependency function"); a `.path` dependency fetches nothing

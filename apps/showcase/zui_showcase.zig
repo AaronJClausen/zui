@@ -1,11 +1,18 @@
-//! A renderer-agnostic UI shared by the backends' demos, so the same frame
-//! can be compared across renderers. Keep this file identical in every
-//! backend repository until it moves into a shared package.
+//! One small application every renderer draws, so the same frame can be
+//! compared across them: a toolbar, a scrolling list, widgets, a tooltip
+//! and a modal dialog, generic over the `Ui` that declares it.
+//!
+//! ```zig
+//! const Showcase = zui_showcase.Showcase(Ui);
+//! var showcase: Showcase = .{ .title = "zui + raylib", .widgets = .{} };
+//! showcase.declare(&ui);
+//! ```
 
 const std = @import("std");
 const zui = @import("zui");
 const zui_widgets = @import("zui_widgets");
 
+/// The showcase's colors, dark by default.
 pub const Palette = struct {
     background: zui.Color = .rgb(0x16161c),
     panel: zui.Color = .rgb(0x20202a),
@@ -33,10 +40,13 @@ pub const Metrics = struct {
     corner_radius: f32 = 6,
 };
 
+/// The showcase declared through `Ui`, a `zui.Context`; `declare` it
+/// once a frame.
 pub fn Showcase(comptime Ui: type) type {
     return struct {
         const Self = @This();
 
+        /// The ids of the showcase's controls, for tests and scripted input.
         pub const ids = zui.ids(.{ "toolbar", "new", "open", "save", "about", "sidebar", "content", "tooltips", "volume", "hover_me", "dialog_close" });
 
         title: []const u8,
@@ -178,4 +188,30 @@ pub fn Showcase(comptime Ui: type) type {
             if (self.widgets.button(ui, ids.dialog_close, "Close", .{})) self.about_open = false;
         }
     };
+}
+
+/// Every glyph 8 by 16 units at size 16, so a frame lays out the same on
+/// every machine.
+const FixedWidthText = struct {
+    pub fn zuiMeasure(_: *FixedWidthText, run: []const u8, key: zui.MeasureKey(u16)) [2]f32 {
+        return .{ @as(f32, @floatFromInt(run.len)) * key.size / 2, key.size };
+    }
+};
+
+test "the showcase declares within its limits, with and without its dialog" {
+    const Ui = zui.Context(.{ .Text = FixedWidthText });
+    var text: FixedWidthText = .{};
+    const io = if (@import("builtin").os.tag == .freestanding) std.Io.failing else std.testing.io;
+    var ui: Ui = try .init(std.testing.allocator, io, &text);
+    defer ui.deinit(std.testing.allocator);
+    var showcase: Showcase(Ui) = .{ .title = "zui + test", .widgets = .{} };
+    for ([_]bool{ false, true }) |about_open| {
+        showcase.about_open = about_open;
+        ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 1280, 720 } } });
+        showcase.declare(&ui);
+        const frame = ui.endFrame();
+        defer ui.release(frame);
+        try std.testing.expect(frame.diagnostics.ok());
+        try std.testing.expect(frame.rectOf(Showcase(Ui).ids.sidebar) != null);
+    }
 }

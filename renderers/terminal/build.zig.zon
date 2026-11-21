@@ -6,6 +6,7 @@
     .dependencies = .{
         .zui_core = .{ .path = "../../core" },
         .zui_glyphs = .{ .path = "../../text/glyphs" },
+        .zui_showcase = .{ .path = "../../apps/showcase" },
     },
     .paths = .{ "build.zig", "build.zig.zon", "src", "examples" },
 }

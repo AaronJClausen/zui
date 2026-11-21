@@ -3,11 +3,12 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const core_options: CoreOptions = .declare(b);
     const windows = target.result.os.tag == .windows;
     const linux = target.result.os.tag == .linux;
     const has_host = windows or linux;
 
-    const core = b.dependency("zui_core", .{ .target = target, .optimize = optimize });
+    const core = b.dependency("zui_core", core_options.on(target, optimize));
     const zui_module = core.module("zui");
 
     const host_module = b.addModule("zui_host", .{
@@ -50,10 +51,10 @@ pub fn build(b: *std.Build) void {
     check_step.dependOn(&unit_tests.step);
     if (has_host) check_step.dependOn(&conformance_tests.step);
 
-    if (has_host) addTour(b, target, optimize, host_module, core, check_step);
-    if (has_host) addTheme(b, target, optimize, host_module, core, check_step);
-    if (has_host) addServicesExample(b, target, optimize, host_module, core, check_step);
-    if (windows) addWindowsExamples(b, target, optimize, host_module, core, check_step);
+    if (has_host) addTour(b, target, optimize, host_module, core, check_step, core_options);
+    if (has_host) addTheme(b, target, optimize, host_module, core, check_step, core_options);
+    if (has_host) addServicesExample(b, target, optimize, host_module, core, check_step, core_options);
+    if (windows) addWindowsExamples(b, target, optimize, host_module, core, check_step, core_options);
 
     const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "zui_host.zig", "windows", "linux", "examples" };
     b.step("fmt", "Format all Zig sources").dependOn(&b.addFmt(.{ .paths = formatted_paths }).step);
@@ -73,8 +74,8 @@ fn linkThroughLlvmOnLinux(compile: *std.Build.Step.Compile) void {
 /// The sokol renderer's tour on this host, drawn by that renderer: on
 /// Windows through a Direct3D 11 swapchain that DirectComposition composes
 /// over the window's backdrop, on Linux with OpenGL through EGL.
-fn addTour(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, host_module: *std.Build.Module, core: *std.Build.Dependency, check_step: *std.Build.Step) void {
-    const zui_sokol_dependency = sokolDeclaring(b, .{ .target = target, .optimize = optimize }, "zui_sokol") orelse return;
+fn addTour(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, host_module: *std.Build.Module, core: *std.Build.Dependency, check_step: *std.Build.Step, core_options: CoreOptions) void {
+    const zui_sokol_dependency = sokolDeclaring(b, core_options.on(target, optimize), "zui_sokol") orelse return;
     const tour = b.addExecutable(.{
         .name = "zui-host-tour",
         .root_module = b.createModule(.{
@@ -100,8 +101,8 @@ fn addTour(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builti
 
 /// A window styled by a ZON file that the host's file watch reloads, on
 /// either host.
-fn addTheme(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, host_module: *std.Build.Module, core: *std.Build.Dependency, check_step: *std.Build.Step) void {
-    const zui_sokol_dependency = sokolDeclaring(b, .{ .target = target, .optimize = optimize }, "zui_sokol") orelse return;
+fn addTheme(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, host_module: *std.Build.Module, core: *std.Build.Dependency, check_step: *std.Build.Step, core_options: CoreOptions) void {
+    const zui_sokol_dependency = sokolDeclaring(b, core_options.on(target, optimize), "zui_sokol") orelse return;
     const theme = b.addExecutable(.{
         .name = "zui-host-theme",
         .root_module = b.createModule(.{
@@ -125,8 +126,8 @@ fn addTheme(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.built
 }
 
 /// Every host service from buttons, on Windows and on Linux.
-fn addServicesExample(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, host_module: *std.Build.Module, core: *std.Build.Dependency, check_step: *std.Build.Step) void {
-    const zui_sokol_dependency = sokolDeclaring(b, .{ .target = target, .optimize = optimize }, "zui_sokol") orelse return;
+fn addServicesExample(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, host_module: *std.Build.Module, core: *std.Build.Dependency, check_step: *std.Build.Step, core_options: CoreOptions) void {
+    const zui_sokol_dependency = sokolDeclaring(b, core_options.on(target, optimize), "zui_sokol") orelse return;
     const services = b.addExecutable(.{
         .name = "zui-host-services",
         .root_module = b.createModule(.{
@@ -153,9 +154,9 @@ fn addServicesExample(b: *std.Build, target: std.Build.ResolvedTarget, optimize:
 
 /// The remote, material, HDR, accessibility, title bar and many-windows examples, which run
 /// only on the Windows host so far.
-fn addWindowsExamples(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, host_module: *std.Build.Module, core: *std.Build.Dependency, check_step: *std.Build.Step) void {
+fn addWindowsExamples(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, host_module: *std.Build.Module, core: *std.Build.Dependency, check_step: *std.Build.Step, core_options: CoreOptions) void {
     const app_module = core.module("zui_app");
-    const zui_sokol_dependency = sokolDeclaring(b, .{ .target = target, .optimize = optimize }, "zui_sokol") orelse return;
+    const zui_sokol_dependency = sokolDeclaring(b, core_options.on(target, optimize), "zui_sokol") orelse return;
 
     const remote = b.addExecutable(.{
         .name = "zui-host-remote",
@@ -289,3 +290,33 @@ fn sokolDeclaring(b: *std.Build, args: anytype, module_name: []const u8) ?*std.B
     const dependency = b.lazyDependency("zui_sokol", args) orelse return null;
     return if (dependency.builder.modules.contains(module_name)) dependency else null;
 }
+
+/// Core's options as the package depending on this one gave them, each
+/// passed on only when given: core instantiated with other options is a
+/// second `zui` module, whose types match no one else's.
+const CoreOptions = struct {
+    debug: ?bool,
+    sanitize_thread: ?bool,
+    tracy: ?bool,
+
+    fn declare(b: *std.Build) CoreOptions {
+        return .{
+            .debug = b.option(bool, "zui-debug", "Keep id names for diagnostics, as core does"),
+            .sanitize_thread = b.option(bool, "zui-sanitize-thread", "Build zui and its modules with ThreadSanitizer, through LLVM (Linux)"),
+            .tracy = b.option(bool, "zui-tracy", "Link Tracy's client into zui, so zui_tracy.Tracer traces into the Tracy profiler"),
+        };
+    }
+
+    /// `b.dependency`'s arguments for a package on core.
+    fn on(options: CoreOptions, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) DependencyArguments {
+        return .{ .target = target, .optimize = optimize, .@"zui-debug" = options.debug, .@"zui-sanitize-thread" = options.sanitize_thread, .@"zui-tracy" = options.tracy };
+    }
+
+    const DependencyArguments = struct {
+        target: std.Build.ResolvedTarget,
+        optimize: std.builtin.OptimizeMode,
+        @"zui-debug": ?bool,
+        @"zui-sanitize-thread": ?bool,
+        @"zui-tracy": ?bool,
+    };
+};

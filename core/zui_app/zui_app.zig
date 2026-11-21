@@ -246,6 +246,11 @@ pub fn Start(comptime App: type) type {
         /// For the renderer's own settings. While frames are submitted on a
         /// render thread, that thread uses it too.
         renderer: *App.Renderer,
+        /// The `App.Text` `zui_app` made, which the context measures with
+        /// and the renderer draws: for fonts the application adds and the
+        /// ids they are given. `void` when the application declares no
+        /// `Text`, or names the renderer as it.
+        text: if (SeparateText(App) != void) *SeparateText(App) else void,
         /// For the application's producers, as a source's publish asks.
         waker: zui.Waker,
         /// Opens and closes windows, for an application whose `zuiDeclare`
@@ -507,6 +512,7 @@ pub fn Runner(comptime App: type) type {
                     .process = setup.process,
                     .host = &self.host,
                     .renderer = &self.renderer,
+                    .text = if (Text != void) &self.text else {},
                     .waker = self.host.zuiWaker(),
                     .windows = if (windowed) .{ .runner = self, .openFn = openWindow, .closeFn = closeWindow } else {},
                 });

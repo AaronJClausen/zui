@@ -3,6 +3,7 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const core_options: CoreOptions = .declare(b);
     const force_opengl = b.option(bool, "gl", "Render with OpenGL instead of D3D11 or Metal") orelse false;
 
     const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "examples" };
@@ -10,11 +11,11 @@ pub fn build(b: *std.Build) void {
     b.step("fmt-check", "Fail if any Zig source is not formatted").dependOn(&b.addFmt(.{ .paths = formatted_paths, .exclude_paths = &generated_paths, .check = true }).step);
 
     const check = b.step("check", "Compile the backend and its tests, and link the tour for wasm32-freestanding, without running them");
-    const truetype_dependency = truetypeDeclaring(b, .{ .target = target, .optimize = optimize }) orelse return;
-    const tour_modules = addTourModules(b, truetype_dependency, target, optimize, .exported);
+    const truetype_dependency = truetypeDeclaring(b, core_options.on(target, optimize)) orelse return;
+    const tour_modules = addTourModules(b, truetype_dependency, target, optimize, .exported, core_options);
     if (target.result.os.tag == .freestanding) return;
 
-    const core = b.dependency("zui_core", .{ .target = target, .optimize = optimize });
+    const core = b.dependency("zui_core", core_options.on(target, optimize));
     const sokol_dependency = b.lazyDependency("sokol", .{ .target = target, .optimize = optimize, .gl = force_opengl }) orelse return;
     const zui_module = core.module("zui");
     const glyphs_module = b.dependency("zui_glyphs", .{ .target = target, .optimize = optimize }).module("zui_glyphs");
@@ -51,8 +52,8 @@ pub fn build(b: *std.Build) void {
     check.dependOn(&unit_tests.step);
     check.dependOn(&tour_tests.step);
     const freestanding_target = b.resolveTargetQuery(.{ .cpu_arch = .wasm32, .os_tag = .freestanding });
-    const freestanding_truetype_dependency = truetypeDeclaring(b, .{ .target = freestanding_target, .optimize = optimize }) orelse return;
-    const freestanding_tour_modules = addTourModules(b, freestanding_truetype_dependency, freestanding_target, optimize, .private);
+    const freestanding_truetype_dependency = truetypeDeclaring(b, core_options.on(freestanding_target, optimize)) orelse return;
+    const freestanding_tour_modules = addTourModules(b, freestanding_truetype_dependency, freestanding_target, optimize, .private, core_options);
     const freestanding_tour = b.addExecutable(.{
         .name = "zui-sokol-tour-freestanding",
         .root_module = b.createModule(.{
@@ -170,8 +171,8 @@ const TourModules = struct {
 
 /// `.exported` adds the modules for dependents to import; `.private`
 /// makes them for this build alone, as for a second target.
-fn addTourModules(b: *std.Build, truetype_dependency: *std.Build.Dependency, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, visibility: enum { exported, private }) TourModules {
-    const core = b.dependency("zui_core", .{ .target = target, .optimize = optimize });
+fn addTourModules(b: *std.Build, truetype_dependency: *std.Build.Dependency, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, visibility: enum { exported, private }, core_options: CoreOptions) TourModules {
+    const core = b.dependency("zui_core", core_options.on(target, optimize));
     const fonts_module = b.dependency("zui_fonts", .{ .target = target, .optimize = optimize }).module("zui_fonts");
     const ui_options: std.Build.Module.CreateOptions = .{
         .root_source_file = b.path("src/ui/root.zig"),
@@ -192,6 +193,7 @@ fn addTourModules(b: *std.Build, truetype_dependency: *std.Build.Dependency, tar
         .{ .name = "zui_reflect", .module = core.module("zui_reflect") },
         .{ .name = "zui_async", .module = core.module("zui_async") },
         .{ .name = "zui_fonts", .module = fonts_module },
+        .{ .name = "zui_showcase", .module = b.dependency("zui_showcase", core_options.on(target, optimize)).module("zui_showcase") },
     }) catch @panic("out of memory");
     const tour_options: std.Build.Module.CreateOptions = .{ .root_source_file = b.path("examples/tour_app.zig"), .target = target, .optimize = optimize, .imports = imports };
     const tour = if (visibility == .exported) b.addModule("zui_sokol_tour", tour_options) else b.createModule(tour_options);
@@ -205,3 +207,33 @@ fn truetypeDeclaring(b: *std.Build, args: anytype) ?*std.Build.Dependency {
     const dependency = b.dependency("zui_truetype", args);
     return if (dependency.builder.modules.contains("zui_truetype")) dependency else null;
 }
+
+/// Core's options as the package depending on this one gave them, each
+/// passed on only when given: core instantiated with other options is a
+/// second `zui` module, whose types match no one else's.
+const CoreOptions = struct {
+    debug: ?bool,
+    sanitize_thread: ?bool,
+    tracy: ?bool,
+
+    fn declare(b: *std.Build) CoreOptions {
+        return .{
+            .debug = b.option(bool, "zui-debug", "Keep id names for diagnostics, as core does"),
+            .sanitize_thread = b.option(bool, "zui-sanitize-thread", "Build zui and its modules with ThreadSanitizer, through LLVM (Linux)"),
+            .tracy = b.option(bool, "zui-tracy", "Link Tracy's client into zui, so zui_tracy.Tracer traces into the Tracy profiler"),
+        };
+    }
+
+    /// `b.dependency`'s arguments for a package on core.
+    fn on(options: CoreOptions, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) DependencyArguments {
+        return .{ .target = target, .optimize = optimize, .@"zui-debug" = options.debug, .@"zui-sanitize-thread" = options.sanitize_thread, .@"zui-tracy" = options.tracy };
+    }
+
+    const DependencyArguments = struct {
+        target: std.Build.ResolvedTarget,
+        optimize: std.builtin.OptimizeMode,
+        @"zui-debug": ?bool,
+        @"zui-sanitize-thread": ?bool,
+        @"zui-tracy": ?bool,
+    };
+};

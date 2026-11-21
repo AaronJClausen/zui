@@ -7,6 +7,8 @@ const packages = [_][]const u8{
     "text/glyphs",
     "text/fonts",
     "text/truetype",
+    "apps/showcase",
+    "apps/tour",
     "themes",
     "examples",
     "renderers/terminal",
@@ -16,6 +18,12 @@ const packages = [_][]const u8{
     "hosts/native",
     "hosts/web",
 };
+
+/// Packages that do not build on core, and so take none of its options.
+const packages_without_core = [_][]const u8{ "text/glyphs", "text/fonts" };
+
+/// Core's options that every package on core declares and passes on.
+const core_options = [_][]const u8{ "zui-debug", "zui-sanitize-thread", "zui-tracy" };
 
 /// Checked in as sokol-shdc writes them, so formatting leaves them alone.
 const generated_sources = [_][]const u8{
@@ -31,6 +39,10 @@ const core_modules = [_][]const u8{ "zui", "zui_testing", "zui_widgets", "zui_as
 /// `zui.builder.dependency`, so a user fetches only the libraries they use.
 const pure_zig_packages = [_][]const u8{ "zui_glyphs", "zui_fonts" };
 
+/// Pure-Zig packages built on core, re-exported with the options core is
+/// given, so that their `zui` is the one the aggregator re-exports.
+const pure_zig_packages_on_core = [_][]const u8{ "zui_showcase", "zui_tour" };
+
 /// A dependency's build does not see the arguments after `--`, and installs
 /// into a prefix of its own in the cache, so the aggregator runs and installs
 /// core's executables itself.
@@ -44,20 +56,28 @@ const core_steps_taking_arguments = [_]struct { step: []const u8, executable: []
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    // Passed on only when given: core instantiated with different options is a second `zui` module, whose types match no one else's.
+    const sanitize_thread = b.option(bool, "zui-sanitize-thread", "Build zui and its modules with ThreadSanitizer, through LLVM (Linux)");
+    const debug = b.option(bool, "zui-debug", "Keep id names for diagnostics");
+    const tracy = b.option(bool, "zui-tracy", "Link Tracy's client, so zui_tracy.Tracer traces into the Tracy profiler");
     const core = b.dependency("zui_core", .{
         .target = target,
         .optimize = optimize,
-        .@"zui-sanitize-thread" = b.option(bool, "zui-sanitize-thread", "Build zui and its modules with ThreadSanitizer, through LLVM (Linux)"),
-        .@"zui-debug" = b.option(bool, "zui-debug", "Keep id names for diagnostics"),
-        .@"zui-tracy" = b.option(bool, "zui-tracy", "Link Tracy's client, so zui_tracy.Tracer traces into the Tracy profiler"),
+        .@"zui-sanitize-thread" = sanitize_thread,
+        .@"zui-debug" = debug,
+        .@"zui-tracy" = tracy,
         .@"bench-layout-seed" = b.option(u64, "bench-layout-seed", "Move every function of the benchmark by a seed-chosen offset, as bench-compare's layouts do"),
     });
     for (core_modules) |name| b.modules.put(b.graph.arena, name, core.module(name)) catch @panic("OOM");
     for (pure_zig_packages) |name| {
         b.modules.put(b.graph.arena, name, b.dependency(name, .{ .target = target, .optimize = optimize }).module(name)) catch @panic("OOM");
     }
+    for (pure_zig_packages_on_core) |name| {
+        b.modules.put(b.graph.arena, name, b.dependency(name, .{ .target = target, .optimize = optimize, .@"zui-sanitize-thread" = sanitize_thread, .@"zui-debug" = debug, .@"zui-tracy" = tracy }).module(name)) catch @panic("OOM");
+    }
 
     for ([_][]const u8{ "test", "check" }) |name| forwardStep(b, core, name).dependOn(&core.builder.top_level_steps.get(name).?.step);
+    b.top_level_steps.get("check").?.step.dependOn(&reexportsCheck(b, target, optimize).step);
     forwardStep(b, core, "docs").dependOn(&b.addInstallDirectory(.{
         .source_dir = core.namedLazyPath("docs"),
         .install_dir = .prefix,
@@ -78,7 +98,7 @@ pub fn build(b: *std.Build) void {
     addStepInEveryPackage(b, "test-all", "test", "Run every package's tests, each in its own directory");
     addStepInEveryPackage(b, "check-all", "check", "Type-check every package for the selected target, each in its own directory");
 
-    const formatted_paths = [_][]const u8{ "build.zig", "build.zig.zon" } ++ packages;
+    const formatted_paths = [_][]const u8{ "build.zig", "build.zig.zon", "tests" } ++ packages;
     var excluded_paths: [2 * packages.len + generated_sources.len][]const u8 = undefined;
     for (packages, 0..) |package, index| {
         excluded_paths[2 * index] = b.pathJoin(&.{ package, "zig-out" });
@@ -87,6 +107,14 @@ pub fn build(b: *std.Build) void {
     @memcpy(excluded_paths[2 * packages.len ..], &generated_sources);
     b.step("fmt", "Format all Zig sources").dependOn(&b.addFmt(.{ .paths = &formatted_paths, .exclude_paths = &excluded_paths }).step);
     b.step("fmt-check", "Fail if any Zig source is not formatted").dependOn(&b.addFmt(.{ .paths = &formatted_paths, .exclude_paths = &excluded_paths, .check = true }).step);
+}
+
+/// Compiles one module that imports core's `zui` and the apps through the
+/// aggregator, so `check` fails when an app is built on a second `zui`.
+fn reexportsCheck(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Step.Compile {
+    const module = b.createModule(.{ .root_source_file = b.path("tests/reexports.zig"), .target = target, .optimize = optimize });
+    for ([_][]const u8{ "zui", "zui_app" } ++ pure_zig_packages_on_core) |name| module.addImport(name, b.modules.get(name).?);
+    return b.addObject(.{ .name = "zui-reexports", .root_module = module });
 }
 
 fn forwardStep(b: *std.Build, core: *std.Build.Dependency, name: []const u8) *std.Build.Step {
@@ -99,7 +127,11 @@ fn addStepInEveryPackage(b: *std.Build, name: []const u8, package_step: []const 
     const step = b.step(name, description);
     for (packages) |package| {
         const run = b.addSystemCommand(&.{ b.graph.zig_exe, "build", package_step });
-        for ([_][]const u8{ "target", "cpu", "optimize" }) |option| {
+        const builds_on_core = for (packages_without_core) |without| {
+            if (std.mem.eql(u8, package, without)) break false;
+        } else true;
+        for ([_][]const u8{ "target", "cpu", "optimize" } ++ core_options) |option| {
+            if (!builds_on_core and std.mem.startsWith(u8, option, "zui-")) continue;
             const given = b.user_input_options.get(option) orelse continue;
             if (given.value == .scalar) run.addArg(b.fmt("-D{s}={s}", .{ option, given.value.scalar }));
         }

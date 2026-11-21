@@ -59,7 +59,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package: [text/glyphs, text/fonts, text/truetype, themes, examples]
+        package: [text/glyphs, text/fonts, text/truetype, apps/showcase, apps/tour, themes, examples]
         os: [ubuntu-latest, windows-latest, macos-latest]
     defaults:
       run:
