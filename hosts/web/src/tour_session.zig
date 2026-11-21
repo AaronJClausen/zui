@@ -1,12 +1,13 @@
 const std = @import("std");
 const zui = @import("zui");
+const zui_app = @import("zui_app");
 const zui_wire = @import("zui_wire");
 const zui_tour = @import("zui_tour");
 const zui_truetype = @import("zui_truetype");
 const zui_webgl = @import("zui_webgl");
-const FrameReason = zui_tour.FrameReason;
 
 pub const SteppedIo = @import("stepped_io.zig").SteppedIo;
+pub const Stopwatch = zui_tour.Stopwatch;
 
 /// The tour as the browser draws it: declared for `zui_webgl.Drawing`, in
 /// `zui_truetype`'s layout of the three fonts it adds, which the page hands
@@ -15,21 +16,25 @@ pub const kit = zui_tour.Kit(.{ .Renderer = zui_webgl.Drawing, .FontSystem = zui
 pub const Ui = kit.Ui;
 pub const Tour = zui_tour.Tour(kit);
 
-/// The tour, run by a loop that owns its clock: the page's, in a
-/// browser's worker. Each `frame` steps the tour's `Io` to the page's
-/// instant, takes the records the page sent since the last, declares a
-/// frame, times it on the session's `Stopwatch` for the tour's strip, and
-/// writes it as the wire renderer sends it, the stream's header before the
-/// first. Given the same instants, records and draw times, and a `.steady`
-/// stopwatch, it writes the same bytes in a worker as natively. A page that
-/// sleeps between frames, as a native host does, declares one only
-/// `.when_due` and wakes when `nextWake` says. Memory is reserved by `init`.
+/// The tour's application, stepped by the page: `zui_tour.App` on a host
+/// over the records the page sends, drawn by a renderer that writes each
+/// frame as wire bytes for the page to draw.
+pub const App = zui_tour.App(.{ .Host = PageHost, .Renderer = PageRenderer, .Text = zui_truetype.Text, .inspector = false, .renderer_name = "the browser" });
+
+/// The tour, run by a loop that owns its clock: the page's, in a browser's
+/// worker. Each `frame` steps the tour's `Io` to the page's instant, takes
+/// the records the page sent since the last, and steps a
+/// `zui_app.Session` of the tour, which declares a frame when one is due
+/// and writes it as wire bytes, the stream's header before the first. Given
+/// the same instants, records and draw times, and a `.steady` stopwatch,
+/// it writes the same bytes in a worker as natively. Memory is reserved by
+/// `init`.
 ///
 /// ```zig
 /// try session.init(gpa, &stepped, .{ .stopwatch = .{ .clock = performanceNow } });
 /// @memcpy(try session.roomForRecords(bytes.len), bytes);
 /// session.receivedRecords(bytes.len);
-/// if (try session.frame(.when_due, page_milliseconds, last_draw_milliseconds)) |wire_bytes| post(wire_bytes);
+/// if (try session.frame(page_milliseconds, last_draw_milliseconds)) |wire_bytes| post(wire_bytes);
 /// sleepUntil(session.nextWake());
 /// ```
 pub const TourSession = struct {
@@ -40,12 +45,12 @@ pub const TourSession = struct {
 
     gpa: std.mem.Allocator,
     stepped: *SteppedIo,
-    text: kit.Text,
-    ui: Ui,
-    app: *Tour,
-    decoder: zui_wire.Decoder(Ui),
-    encoder: zui_wire.Encoder(Ui),
-    builder: zui.RecordBuilder,
+    session: *zui_app.Session(App),
+    decoder: zui_wire.Decoder(App.Ui),
+    encoder: zui_wire.Encoder(App.Ui),
+    /// What arrived from the page since the last step, which the host's
+    /// poll hands the session.
+    received: zui.RecordBuilder,
     pending_records: []u8,
     pending_end: usize = 0,
     read_start: usize = 0,
@@ -54,24 +59,14 @@ pub const TourSession = struct {
     /// before the first record.
     measured: ?struct { viewport: [2]f32, scale: f32 } = null,
     frame_bytes: []u8,
+    /// What the renderer wrote this step, if it declared a frame.
+    written: ?[]const u8 = null,
+    fingerprint: ?u64 = null,
     header_written: bool = false,
     /// Set when a frame did not fit `frame_bytes`, so the next is written
     /// whole rather than as changes from one the page never received.
     key_frame_next: bool = false,
-    stopwatch: Stopwatch,
-    steady_stopwatch_reads: u64 = 0,
-    previous_params: ?zui.FrameParams = null,
-
-    /// What the tour's frames are timed by: the page's `Io` cannot time
-    /// them, since it holds one instant for all of a frame.
-    pub const Stopwatch = union(enum) {
-        /// Milliseconds since a fixed instant, such as the page's
-        /// `performance.now()`.
-        clock: *const fn () callconv(.c) f64,
-        /// Moves on `step_nanoseconds` each time it is read, so every run
-        /// times its frames alike and draws the same timings.
-        steady: struct { step_nanoseconds: u64 = std.time.ns_per_us },
-    };
+    next: zui.NextFrame = .on_event,
 
     pub const Options = struct {
         /// The most bytes held of records that have not arrived whole.
@@ -97,52 +92,51 @@ pub const TourSession = struct {
         self.* = .{
             .gpa = gpa,
             .stepped = stepped,
-            .text = undefined,
-            .ui = undefined,
-            .app = undefined,
+            .session = undefined,
             .decoder = undefined,
             .encoder = undefined,
-            .builder = undefined,
+            .received = undefined,
             .pending_records = &.{},
             .frame_bytes = &.{},
-            .stopwatch = options.stopwatch,
         };
-        try self.text.init();
-        errdefer self.text.deinit();
-        const io = stepped.io();
-        self.ui = try .init(gpa, io, &self.text);
-        errdefer self.ui.deinit(gpa);
-        self.app = try gpa.create(Tour);
-        errdefer gpa.destroy(self.app);
-        self.app.init(io, .zero, self.text.fonts);
-        errdefer self.app.deinit();
-        self.decoder = try .init(gpa, .of(Ui));
+        self.decoder = try .init(gpa, .of(App.Ui));
         errdefer self.decoder.deinit(gpa);
         self.encoder = try .init(gpa);
         errdefer self.encoder.deinit(gpa);
-        const event_buffer = try gpa.alloc(zui.Event, Ui.limits.max_events_per_frame);
+        const event_buffer = try gpa.alloc(zui.Event, App.Ui.limits.max_events_per_frame);
         errdefer gpa.free(event_buffer);
-        const text_buffer = try gpa.alloc(u8, @as(usize, Ui.limits.max_text_input_bytes) + Ui.limits.max_dropped_path_bytes);
+        const text_buffer = try gpa.alloc(u8, @as(usize, App.Ui.limits.max_text_input_bytes) + App.Ui.limits.max_dropped_path_bytes);
         errdefer gpa.free(text_buffer);
-        self.builder = .init(event_buffer, text_buffer);
+        self.received = .init(event_buffer, text_buffer);
         self.pending_records = try gpa.alloc(u8, options.max_pending_record_bytes);
         errdefer gpa.free(self.pending_records);
         self.frame_bytes = try gpa.alloc(u8, options.max_frame_bytes);
+        errdefer gpa.free(self.frame_bytes);
+
+        self.session = try gpa.create(zui_app.Session(App));
+        errdefer gpa.destroy(self.session);
+        self.session.host.page = self;
+        try self.session.start(.{ .gpa = gpa, .io = stepped.io() }, .{ .notify = ignoreNotice });
+        self.session.app.stopwatch = options.stopwatch;
     }
 
     /// Cancels the tour's tasks, which the `Io` runs to their end.
     pub fn deinit(self: *TourSession) void {
         const gpa = self.gpa;
-        self.app.deinit();
-        gpa.destroy(self.app);
-        self.ui.deinit(gpa);
-        self.text.deinit();
+        self.session.stop();
+        gpa.destroy(self.session);
         gpa.free(self.frame_bytes);
         gpa.free(self.pending_records);
-        gpa.free(self.builder.text_buffer);
-        gpa.free(self.builder.event_buffer);
+        gpa.free(self.received.text_buffer);
+        gpa.free(self.received.event_buffer);
         self.encoder.deinit(gpa);
         self.decoder.deinit(gpa);
+    }
+
+    /// What the tour measured of its frames, for what a page shows beside
+    /// them.
+    pub fn perf(self: *const TourSession) *const zui_tour.Perf {
+        return &self.session.app.tour.perf;
     }
 
     /// Memory for the next `count` bytes of the page's records, which the
@@ -163,128 +157,59 @@ pub const TourSession = struct {
         self.pending_end += count;
     }
 
-    pub const Declaring = enum {
-        /// A frame at every call, whether one is due or not.
-        every_call,
-        /// Only when a host that sleeps between frames would declare one:
-        /// on input, a resize, a source that delivered, a requested frame
-        /// or a deadline that came due.
-        when_due,
-    };
-
     /// Steps the tour's tasks to `now_milliseconds` on the page's clock,
-    /// declares a frame with the events of every record that has arrived
-    /// whole, and returns it as wire bytes, valid until the next call; null
-    /// until the first record has measured the canvas, or `.when_due` while
-    /// none is. The tour's strip shows `previous_draw_milliseconds`, how
-    /// long the page took to draw the frame before, as its renderer's
-    /// submit time.
-    pub fn frame(self: *TourSession, declaring: Declaring, now_milliseconds: f64, previous_draw_milliseconds: f64) FrameError!?[]const u8 {
+    /// takes every record that has arrived whole, and steps the session,
+    /// which declares a frame if one is due. Returns that frame as wire
+    /// bytes, valid until the next call; null until the first record has
+    /// measured the canvas, or while no frame is due. The tour's strip shows
+    /// how long the page took to draw the frames before as its renderer's
+    /// submit time, `previous_draw_milliseconds` being the newest.
+    pub fn frame(self: *TourSession, now_milliseconds: f64, previous_draw_milliseconds: f64) anyerror!?[]const u8 {
         const now: zui.Instant = .fromNanoseconds(@intFromFloat(@max(0, now_milliseconds) * std.time.ns_per_ms));
         self.stepped.step(now.nanoseconds);
-
-        const app = self.app;
-        const builder = &self.builder;
-        builder.begin(.{ .now = now, .viewport = .{ 0, 0 } });
-        for (app.environment_changes.drain()) |change| builder.append(.{ .environment = change });
+        self.received.begin(.{ .now = now, .viewport = .{ 0, 0 } });
         try self.takeRecords();
-        const measured = self.measured orelse return null;
-        builder.params.viewport = measured.viewport;
-        builder.params.scale = measured.scale;
+        if (self.measured == null) return null;
 
-        const due_reason = self.frameReason(builder.params, builder.events().len);
-        const reason = switch (declaring) {
-            .every_call => due_reason orelse .requested,
-            .when_due => due_reason orelse return null,
+        self.session.renderer.drew(previous_draw_milliseconds);
+        self.written = null;
+        self.next = (try self.session.step()) orelse .on_event;
+        return self.written;
+    }
+
+    /// When the page should next call `frame`, on its clock: the tour's
+    /// `nextFrame`, or sooner, when one of its tasks wakes. Tasks run only
+    /// inside a frame, so where a native host sleeps until a task's thread
+    /// wakes it, the page wakes the task instead.
+    pub fn nextWake(self: *const TourSession) zui.NextFrame {
+        const task_nanoseconds = self.stepped.nextWakeNanoseconds() orelse return self.next;
+        return self.next.sooner(.{ .at = .fromNanoseconds(@intCast(@max(0, task_nanoseconds))) });
+    }
+
+    fn pollInto(self: *TourSession, record: *zui.RecordBuilder) void {
+        const measured = self.measured.?;
+        const zoom = record.params.zoom;
+        record.begin(.{ .now = self.received.params.now, .viewport = .{ measured.viewport[0] / zoom, measured.viewport[1] / zoom }, .scale = measured.scale });
+        for (self.received.events()) |event| switch (event) {
+            .text => |text| record.appendText(text),
+            .files_dropped => |drop| record.appendFilesDropped(drop),
+            else => record.append(event),
         };
-        const measure_calls_before = self.ui.measureCalls();
-        const started = self.readStopwatch();
-        self.ui.beginFrame(&.{ .params = builder.params, .events = builder.events() }, &app.sources);
-        const began = self.readStopwatch();
-        app.declare(&self.ui);
-        const declaration_ended = self.readStopwatch();
-        const declared = self.ui.endFrame();
-        const ended = self.readStopwatch();
-        app.observe(&self.ui, declared);
-        app.afterFrame(&self.ui);
-        defer self.ui.release(declared);
+        record.dropped_events +|= self.received.dropped_events;
+        record.dropped_text_bytes +|= self.received.dropped_text_bytes;
+    }
 
-        const measure_calls = self.ui.measureCalls() - measure_calls_before;
-        const perf = &app.perf;
-        perf.record(.{
-            .begin_frame_us = microsecondsBetween(started, began),
-            .declare_us = microsecondsBetween(began, declaration_ended),
-            .end_frame_us = microsecondsBetween(declaration_ended, ended),
-            .elements = declared.elementCount(),
-            .commands = @intCast(declared.commands().len),
-            .measure_calls = @intCast(measure_calls),
-            .reason = reason,
-        });
-        const submit_microseconds: f32 = @floatCast(previous_draw_milliseconds * std.time.us_per_ms);
-        perf.submit_us = if (perf.zui_frames == 0) submit_microseconds else perf.submit_us * 0.95 + submit_microseconds * 0.05;
-        perf.zui_frames += 1;
-        perf.countFrameAt(now.secondsSince(app.started_at));
-        perf.measure_calls_total += measure_calls;
-        perf.diagnostics = declared.diagnostics;
-        perf.wakes = app.wakes.load(.monotonic);
-        perf.next_frame = self.ui.nextFrame(&app.sources);
-        perf.next_frame_seconds = switch (perf.next_frame) {
-            .at => |deadline| deadline.secondsSince(now),
-            else => 0,
-        };
-        self.previous_params = builder.params;
-
+    fn writeFrame(self: *TourSession, declared: *const App.Ui.Frame) error{FrameTooLarge}!void {
         var writer: std.Io.Writer = .fixed(self.frame_bytes);
-        self.writeFrame(&writer, declared) catch {
+        self.writeFrameTo(&writer, declared) catch {
             self.key_frame_next = true;
             return error.FrameTooLarge;
         };
-        return writer.buffered();
+        self.written = writer.buffered();
     }
 
-    /// When the page should next call `frame(.when_due, ...)`, on its
-    /// clock: the tour's `nextFrame`, or sooner, when one of its tasks
-    /// wakes. Tasks run only inside a frame, so where a native host sleeps
-    /// until a task's thread wakes it, the page wakes the task instead.
-    pub fn nextWake(self: *const TourSession) zui.NextFrame {
-        const tour_next = self.ui.nextFrame(&self.app.sources);
-        const task_nanoseconds = self.stepped.nextWakeNanoseconds() orelse return tour_next;
-        const task_wake: zui.Instant = .fromNanoseconds(@intCast(@max(0, task_nanoseconds)));
-        return switch (tour_next) {
-            .immediately => .immediately,
-            .at => |deadline| .{ .at = if (task_wake.isBefore(deadline)) task_wake else deadline },
-            .on_event => .{ .at = task_wake },
-        };
-    }
-
-    /// Why the tour declares this frame, as a host that declares only the
-    /// frames zui needs would tell it, or null if it would not declare one.
-    fn frameReason(self: *const TourSession, params: zui.FrameParams, event_count: usize) ?FrameReason {
-        const previous = self.previous_params orelse return .first;
-        if (event_count != 0) return .input;
-        if (!std.meta.eql(params.viewport, previous.viewport) or params.scale != previous.scale or params.zoom != previous.zoom) return .resize;
-        inline for (@typeInfo(kit.Sources).@"struct".fields) |field| {
-            if (@field(&self.app.sources, field.name).zuiPending()) return .source;
-        }
-        return switch (self.ui.nextFrame(&self.app.sources)) {
-            .immediately => .requested,
-            .at => |deadline| if (params.now.isBefore(deadline)) null else .timer,
-            .on_event => null,
-        };
-    }
-
-    fn readStopwatch(self: *TourSession) zui.Instant {
-        switch (self.stopwatch) {
-            .clock => |milliseconds| return .fromNanoseconds(@intFromFloat(@max(0, milliseconds()) * std.time.ns_per_ms)),
-            .steady => |steady| {
-                self.steady_stopwatch_reads += 1;
-                return .fromNanoseconds(self.steady_stopwatch_reads * steady.step_nanoseconds);
-            },
-        }
-    }
-
-    fn writeFrame(self: *TourSession, writer: *std.Io.Writer, declared: *const Ui.Frame) zui_wire.WriteError!void {
-        if (!self.header_written) try zui_wire.writeHeader(writer, zui_wire.fingerprintOf(&self.text));
+    fn writeFrameTo(self: *TourSession, writer: *std.Io.Writer, declared: *const App.Ui.Frame) zui_wire.WriteError!void {
+        if (!self.header_written) try zui_wire.writeHeader(writer, self.fingerprint);
         if (self.key_frame_next) try self.encoder.writeKeyFrame(writer, declared) else try self.encoder.writeFrame(writer, declared);
         self.header_written = true;
         self.key_frame_next = false;
@@ -307,15 +232,11 @@ pub const TourSession = struct {
             };
             self.measured = .{ .viewport = record.params.viewport, .scale = record.params.scale };
             for (record.events) |event| switch (event) {
-                .text => |text| self.builder.appendText(text),
-                .files_dropped => |drop| self.builder.appendFilesDropped(drop),
-                else => self.builder.append(event),
+                .text => |text| self.received.appendText(text),
+                .files_dropped => |drop| self.received.appendFilesDropped(drop),
+                else => self.received.append(event),
             };
         }
-    }
-
-    fn microsecondsBetween(earlier: zui.Instant, later: zui.Instant) f32 {
-        return later.secondsSince(earlier) * std.time.us_per_s;
     }
 
     /// A record cut short is read again once the rest has arrived.
@@ -323,5 +244,84 @@ pub const TourSession = struct {
         if (err != error.EndOfStream) return err;
         const record_fills_every_byte_held = self.pending_end - self.read_start == self.pending_records.len;
         if (record_fills_every_byte_held) return error.RecordsExceedCapacity;
+    }
+
+    fn ignoreNotice(_: zui_app.Notice) void {}
+};
+
+/// The page as the tour's host: its window is the canvas the page
+/// measures, its input the records the page sends, and its loop the
+/// page's, which steps the session, so it declares neither `zuiWait` nor
+/// `zuiRun`. Its surface is the page link the renderer writes frames to.
+pub const PageHost = struct {
+    pub const zui_surfaces: zui.SurfaceKinds = .initOne(.wire);
+
+    page: *TourSession,
+
+    pub fn init(_: *PageHost, _: std.Io, _: zui.WindowOptions) !void {}
+
+    pub fn deinit(_: *PageHost) void {}
+
+    pub fn zuiPoll(self: *PageHost, _: zui.WindowId, record: *zui.RecordBuilder) bool {
+        self.page.pollInto(record);
+        return true;
+    }
+
+    /// The tour's tasks run only while the page steps it, and the page asks
+    /// `nextWake` after each step, so a wake has nothing to end.
+    pub fn zuiWaker(self: *PageHost) zui.Waker {
+        return .{ .context = self, .wakeFn = ignoreWake };
+    }
+
+    pub fn zuiSurface(self: *PageHost, _: zui.WindowId) zui.Surface {
+        return .{ .wire = .{ .connection = self.page } };
+    }
+
+    /// A frame's requests reach the page inside its wire bytes.
+    pub fn zuiApply(_: *PageHost, _: zui.WindowId, _: zui.HostRequests) void {}
+
+    fn ignoreWake(_: *anyopaque) void {}
+};
+
+/// What the page draws, declared as `zui_webgl.Drawing` declares it, so the
+/// tour's frames carry exactly the commands and payloads the page's WebGL
+/// drawing draws. It draws nothing itself: each frame is written as wire
+/// bytes for the page, which draws it after the step returns and reports
+/// how long that took.
+pub const PageRenderer = struct {
+    pub const zui_surfaces: zui.SurfaceKinds = .initOne(.wire);
+    pub const zui_commands = zui_webgl.Drawing.zui_commands;
+    pub const zui_extended_color = zui_webgl.Drawing.zui_extended_color;
+    pub const ImageHandle = zui_webgl.Drawing.ImageHandle;
+    pub const MaterialHandle = zui_webgl.Drawing.MaterialHandle;
+
+    /// The page's draw times, smoothed; null before the first.
+    smoothed_draw_microseconds: ?f32 = null,
+
+    /// Puts the fingerprint of the fonts frames are measured with in the
+    /// stream's header, so a client with other fonts refuses the stream.
+    pub fn init(_: *PageRenderer, surface: zui.Surface, text: anytype) error{UnsupportedSurface}!void {
+        (try pageOf(surface)).fingerprint = zui_wire.fingerprintOf(text);
+    }
+
+    pub fn zuiSubmit(_: *PageRenderer, surface: zui.Surface, frame: anytype) error{ UnsupportedSurface, FrameTooLarge }!void {
+        try (try pageOf(surface)).writeFrame(frame);
+    }
+
+    /// The page took `milliseconds` to draw the frame before.
+    pub fn drew(self: *PageRenderer, milliseconds: f64) void {
+        const microseconds: f32 = @floatCast(milliseconds * std.time.us_per_ms);
+        self.smoothed_draw_microseconds = if (self.smoothed_draw_microseconds) |smoothed| smoothed * 0.95 + microseconds * 0.05 else microseconds;
+    }
+
+    pub fn submitMicroseconds(self: *const PageRenderer) f32 {
+        return self.smoothed_draw_microseconds orelse 0;
+    }
+
+    fn pageOf(surface: zui.Surface) error{UnsupportedSurface}!*TourSession {
+        return switch (surface) {
+            .wire => |link| @ptrCast(@alignCast(link.connection)),
+            else => error.UnsupportedSurface,
+        };
     }
 };

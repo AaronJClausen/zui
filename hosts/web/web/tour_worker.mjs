@@ -4,11 +4,11 @@
 //                                             whether to time its frames on a
 //                                             steady stopwatch, as natively
 //   { type: "frame", now, previousDraw,       its clock and how long it took to
-//     records, onlyWhenDue }                  draw the frame before, in
-//                                             milliseconds, the records
-//                                             written since the last, and
-//                                             whether to declare a frame only
-//                                             if one is due
+//     records }                               draw the frame before, in
+//                                             milliseconds, and the records
+//                                             written since the last; the
+//                                             tour declares a frame only if
+//                                             one is due
 //
 // and the worker answers `{ type: "ready" }` once its threads have started,
 // then `{ type: "frame", bytes, tasks, frameMicroseconds, wakeAt }` for
@@ -94,14 +94,14 @@ async function start(wasm, steadyTimings) {
   await Promise.all(started);
 }
 
-function frame(now, previousDraw, records, onlyWhenDue) {
+function frame(now, previousDraw, records) {
   if (records.length > 0) {
     const room = tour.zuiTourRoomForRecords(records.length) >>> 0;
     if (room === 0) throw new Error(`no room for ${records.length} bytes of records: ${errorName()}`);
     new Uint8Array(memory.buffer, room, records.length).set(records);
     tour.zuiTourReceivedRecords(records.length);
   }
-  const count = tour.zuiTourFrame(now, previousDraw, onlyWhenDue);
+  const count = tour.zuiTourFrame(now, previousDraw);
   if (count < 0) throw new Error(`the tour could not write its frame: ${errorName()}`);
   const bytes = new Uint8Array(memory.buffer, tour.zuiTourFrameBytes() >>> 0, count).slice();
   const tasks = { started: tour.zuiTourTasksStarted(), finished: tour.zuiTourTasksFinished(), refused: tour.zuiTourTasksRefused() };
@@ -114,7 +114,7 @@ parent.listen(async (message) => {
       await start(message.wasm, message.steadyTimings ?? false);
       parent.post({ type: "ready" });
     } else if (message.type === "frame") {
-      const answer = frame(message.now, message.previousDraw, message.records, message.onlyWhenDue ?? false);
+      const answer = frame(message.now, message.previousDraw, message.records);
       parent.post({ type: "frame", ...answer }, [answer.bytes.buffer]);
     }
   } catch (error) {

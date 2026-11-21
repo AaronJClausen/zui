@@ -89,7 +89,7 @@ export async function runTour(canvas, stopped) {
   async function stepAndDrawIfDue() {
     const now = performance.now();
     const records = recorder.takeRecord(now) ?? new Uint8Array(0);
-    worker.post({ type: "frame", now, previousDraw, records, onlyWhenDue: true }, [records.buffer]);
+    worker.post({ type: "frame", now, previousDraw, records }, [records.buffer]);
     const { bytes, tasks, frameMicroseconds, wakeAt } = await inbox.expect("frame");
     tour.wakes += 1;
     tour.tasks = tasks;

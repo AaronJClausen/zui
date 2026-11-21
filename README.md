@@ -1936,8 +1936,13 @@ the rail.
 `zig-out/web/zui-web-tour.wasm`, the tour built for
 `wasm32-freestanding` with shared memory, declared for
 `zui_webgl.Drawing` (about 49 MiB of memory once
-`zuiTourInit` reserves it). `web/tour_worker.mjs` takes the page's clock
-and records each frame and posts back the frame's wire bytes. The tour's
+`zuiTourInit` reserves it). It is the tour's `zui_tour.App` stepped as a
+`zui_app.Session`, as any application whose loop is another's: its host
+hands the session the page's records and declares no loop of its own, and
+its renderer writes each frame as wire bytes. `web/tour_worker.mjs` takes
+the page's clock and records each frame, steps the session, which
+declares a frame only when one is due, and posts back the frame's wire
+bytes, or none, and when to step it next. The tour's
 strip and frame inspector time each frame's beginFrame, declaration and
 layout on the worker's `performance.now()`, and show the page's time to
 draw the frame before as its submit time. The tour's loaders, the

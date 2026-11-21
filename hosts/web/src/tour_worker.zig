@@ -9,7 +9,13 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const SteppedIo = @import("stepped_io.zig").SteppedIo;
-const TourSession = @import("tour_session.zig").TourSession;
+const tour_session = @import("tour_session.zig");
+const TourSession = tour_session.TourSession;
+
+/// A worker has no stderr; what the tour and `zui_app` log is dropped.
+pub const std_options: std.Options = .{ .logFn = dropLog };
+
+fn dropLog(comptime _: std.log.Level, comptime _: @EnumLiteral(), comptime _: []const u8, _: anytype) void {}
 
 comptime {
     std.debug.assert(!builtin.single_threaded);
@@ -38,7 +44,7 @@ export fn zuiTourInit(steady_timings: bool) bool {
     return true;
 }
 
-fn initialize(stopwatch: TourSession.Stopwatch) !void {
+fn initialize(stopwatch: tour_session.Stopwatch) !void {
     if (threadLocalBytes() > thread_local_bytes_most) return error.ThreadLocalStorageTooLarge;
     thread_memory = try growing_allocator.alignedAlloc(u8, .@"16", thread_count * (thread_stack_bytes + thread_local_bytes_most));
     stepped = try .init(growing_allocator, futex_io, .{ .thread_count = thread_count });
@@ -87,12 +93,11 @@ var frame_bytes: []const u8 = &.{};
 
 /// Steps the tour to `now_milliseconds` on the page's clock, after the page
 /// took `previous_draw_milliseconds` to draw the frame before, and declares
-/// a frame, or with `only_when_due` only if one is due: the count of wire
-/// bytes at `zuiTourFrameBytes`, 0 before the first record or when no
-/// frame was declared, or -1 with `zuiTourErrorName` saying why.
-export fn zuiTourFrame(now_milliseconds: f64, previous_draw_milliseconds: f64, only_when_due: bool) i32 {
-    const declaring: TourSession.Declaring = if (only_when_due) .when_due else .every_call;
-    frame_bytes = (session.frame(declaring, now_milliseconds, previous_draw_milliseconds) catch |err| {
+/// a frame if one is due: the count of wire bytes at `zuiTourFrameBytes`, 0
+/// before the first record or when no frame was due, or -1 with
+/// `zuiTourErrorName` saying why.
+export fn zuiTourFrame(now_milliseconds: f64, previous_draw_milliseconds: f64) i32 {
+    frame_bytes = (session.frame(now_milliseconds, previous_draw_milliseconds) catch |err| {
         error_name = @errorName(err);
         return -1;
     }) orelse &.{};
@@ -120,7 +125,7 @@ export fn zuiTourErrorName() [*:0]const u8 {
 /// What the tour's strip shows for its newest frame: the microseconds of
 /// its beginFrame, declaration and layout together.
 export fn zuiTourNewestFrameMicroseconds() f64 {
-    return session.app.perf.latest().totalMicroseconds();
+    return session.perf().latest().totalMicroseconds();
 }
 
 export fn zuiTourTasksStarted() f64 {

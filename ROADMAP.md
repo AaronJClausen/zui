@@ -69,7 +69,7 @@ green, and its **Status** line below says which slice is next.
 | Item | Stage | Where | Waits for | Status |
 |---|---|---|---|---|
 | H4. Linux | 10 | `hosts/native/`, `renderers/sokol/` | | in progress; slice 5, the IME, is next |
-| H10. Hosts whose platform owns the loop | 10 | `core/zui_app/`, `core/src/contracts.zig`, `renderers/raylib/`, `hosts/web/`, `core/zui_testing/` | | in progress; slice 4, the browser's worker on `Session`, is next |
+| H10. Hosts whose platform owns the loop | 10 | `core/zui_app/`, `core/src/contracts.zig`, `renderers/raylib/`, `hosts/web/`, `core/zui_testing/` | | in progress; slice 5, the pushed and stepped conformance suites, is next |
 | H5. Web | 10 | `hosts/web/`, `renderers/webgl/` | H10 | |
 | H7. Window decorations | 10 | `core/src/chrome.zig`, `core/src/context.zig`, `core/zui_app/`, `hosts/native/` | | waiting on a person: the checklist under H7's *Status*, on `zig build title-bar` in `hosts/native/` |
 | M1. `zui_motion` | 11 | `core/zui_motion/` | | |
@@ -4763,7 +4763,21 @@ its return, on a UI-thread and a render-thread renderer and on an `Io`
 of its own, and an application's own loop steps a `Session` on a stepped
 host. The sokol renderer attaches only `.win32` windows, so a lost
 surface of another kind cannot come back to it yet (ARCHITECTURE.md §7).
-Slice 4, the browser's worker on `Session`, is next.
+Slice 4 is done: the worker steps a `Session` of `zui_tour.App`, on a
+stepped host over the page's records (`PageHost`) and a renderer that
+declares what `zui_webgl.Drawing` declares and writes each frame as wire
+bytes (`PageRenderer`), so `TourSession` keeps only the page's side:
+records in, bytes out, and the `Io`'s next wake folded in with `sooner`.
+Its own judgement of which frames are due, its `.every_call` mode and
+the page's `onlyWhenDue` are gone; every step judges. The tour times its
+frames on a `zui_tour.Stopwatch` (the `Io`, a page's clock or a steady
+one), and takes its submit time from a renderer that reports one
+(`submitMicroseconds`), as the page's draw time is. `test-demo` in Debug
+and ReleaseSafe, `test-draw`, `test-input` and `test-site` (also in
+ReleaseSmall) pass; the worker and the native `tour-frames` still write
+the same bytes, a stream that changed once: the tour now records each
+frame's timings where `zui_app` takes them. Slice 5, the pushed and
+stepped conformance suites, is next.
 
 ---
 

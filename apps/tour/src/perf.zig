@@ -22,6 +22,30 @@ pub const FrameReason = enum {
     }
 };
 
+/// What the tour's frames are timed by for the strip.
+pub const Stopwatch = union(enum) {
+    /// The `Io`'s awake clock.
+    io,
+    /// Milliseconds since a fixed instant, such as a page's
+    /// `performance.now()`, for an `Io` that holds one instant for all of a
+    /// frame, as one a page steps does.
+    clock: *const fn () callconv(.c) f64,
+    /// Moves on `step_nanoseconds` each time it is read, so every run times
+    /// its frames alike and draws the same timings.
+    steady: struct { step_nanoseconds: u64 = std.time.ns_per_us, reads: u64 = 0 },
+
+    pub fn read(self: *Stopwatch, io: std.Io) zui.Instant {
+        return switch (self.*) {
+            .io => .fromTimestamp(std.Io.Timestamp.now(io, .awake)),
+            .clock => |milliseconds| .fromNanoseconds(@intFromFloat(@max(0, milliseconds()) * std.time.ns_per_ms)),
+            .steady => |*steady| {
+                steady.reads += 1;
+                return .fromNanoseconds(steady.reads * steady.step_nanoseconds);
+            },
+        };
+    }
+};
+
 /// What the tour measured of each zui frame, kept for the strip. The strip
 /// shows the frame before the one being declared, since a frame cannot
 /// time its own declaration.

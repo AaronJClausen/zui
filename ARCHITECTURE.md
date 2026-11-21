@@ -300,7 +300,6 @@ roadmap item named:
 | `Widgets(Ui)` with a `Theme` struct | `Widgets(Ui, Skin)` | `core/zui_widgets/` | K5 |
 | `zui_debug`'s inspector runs in the application's process; a frame on the wire carries no elements for it | over the wire, the inspector runs in another process (SPEC.md §19.7) | `core/zui_debug/`, `core/zui_wire/` | not yet queued |
 | a frame on the wire carries no chrome regions, and the wire host declares no `zuiChromeRegions`, so a remote window keeps the system's title bar | chrome over the wire | `core/zui_wire/` | not yet queued |
-| the web host's worker declares the tour's frames itself in `TourSession`, judging which are due and folding its `Io`'s wakes by hand | the worker steps a `zui_app.Session` on a stepped host over the page's records, and folds the `Io`'s next wake with `NextFrame.sooner` | `hosts/web/src/tour_session.zig` | H10 |
 | `zui_testing` has the pulled host's suite only | suites for a pushed host, `expectPushedHostConforms`, and a stepped one, `expectSteppedHostConforms` (SPEC.md §19.4) | `core/zui_testing/` | H10 |
 | the sokol renderer attaches and detaches only `.win32` windows, so a lost `.wayland` or `.library` surface cannot be given back: `zuiAttachSurface` returns `UnsupportedSurface`, and `resumeSurfaces` with it | a renderer that a platform may take surfaces from keeps each surface's resources in `zuiAttachSurface` and `zuiDetachSurface` | `renderers/sokol/` | the first host that loses a surface (Android) |
 | `zui_host`'s Linux host speaks Wayland only, opens one window, reports no low memory, IME or semantics, and keeps the compositor's title bar; its environment comes from the desktop portal and UPower over D-Bus, and stays at the defaults without them; its services have no menus, which Wayland lacks | a Linux host on Wayland and X11 with every report the Windows host makes, and a system material where the compositor offers one | `hosts/native/` | H4 |
@@ -494,8 +493,12 @@ fingerprint, and a stream measured with other fonts is refused.
 with `src/frame_stream.zig` and writing input records with
 `src/record_stream.zig` and `src/browser_input.zig`, for a context of the
 tour's shape (`src/demo_ui.zig`); `src/tour_worker.zig` runs the tour in
-a Web Worker through `src/tour_session.zig`, which declares it for
-`zui_webgl.Drawing`, on `src/stepped_io.zig`'s `Io`. `web/` holds the page, its service worker, the worker glue and the
+a Web Worker through `src/tour_session.zig`, which steps a
+`zui_app.Session` of `zui_tour.App` on `src/stepped_io.zig`'s `Io`, on a
+stepped host over the page's records and a renderer that declares what
+`zui_webgl.Drawing` declares and writes each frame as wire bytes for the
+page, folding the `Io`'s next wake into the session's with
+`NextFrame.sooner`. `web/` holds the page, its service worker, the worker glue and the
 Node scripts the checks run, and `tools/` the native programs they run:
 the tour's stream (`demo_stream.zig`), its frames in a worker's ticks
 (`tour_frames.zig`), the sokol renderer's drawing of them

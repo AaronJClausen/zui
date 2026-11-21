@@ -222,6 +222,7 @@ fn tourSessionImports(b: *std.Build, truetype_dependency: *std.Build.Dependency,
     const core_dependency = b.dependency("zui_core", core_options.on(target, optimize));
     return b.allocator.dupe(std.Build.Module.Import, &.{
         .{ .name = "zui", .module = core_dependency.module("zui") },
+        .{ .name = "zui_app", .module = core_dependency.module("zui_app") },
         .{ .name = "zui_wire", .module = core_dependency.module("zui_wire") },
         .{ .name = "zui_tour", .module = b.dependency("zui_tour", core_options.on(target, optimize)).module("zui_tour") },
         .{ .name = "zui_truetype", .module = truetype_dependency.module("zui_truetype") },

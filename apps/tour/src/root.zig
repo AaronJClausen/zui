@@ -31,6 +31,7 @@ pub const Sources = shared.Sources;
 pub const Palette = shared.Palette;
 pub const FrameReason = perf.FrameReason;
 pub const Perf = perf.Perf;
+pub const Stopwatch = perf.Stopwatch;
 pub const Kit = @import("kit.zig").Kit;
 pub const Tour = @import("tour.zig").Tour;
 pub const stage_id = @import("tour.zig").stage_id;
@@ -117,8 +118,10 @@ pub const Options = struct {
 
 /// The tour as `zui_app` runs an application on `config.Host`, drawn by
 /// `config.Renderer` in `config.Text`'s fonts. It times each frame for the
-/// strip, and reads the renderer's `layer_overflows` and
-/// `glyphOverflows()` when it counts them. Its `init` takes its `Options`
+/// strip on its `stopwatch`, and reads the renderer's `layer_overflows`
+/// and `glyphOverflows()` when it counts them, and `submitMicroseconds()`
+/// when the renderer reports how long drawing took, as one whose frames a
+/// page draws after `zuiSubmit` has returned does. Its `init` takes its `Options`
 /// from the process's arguments; a target that does more around the tour
 /// holds an `App` and calls `initWith`, with `startOf` its own `Start`,
 /// and each hook itself.
@@ -139,6 +142,7 @@ pub fn App(comptime config: Config) type {
 
         const counts_layer_overflows = @hasField(Renderer, "layer_overflows");
         const counts_glyph_overflows = @hasDecl(Renderer, "glyphOverflows");
+        const reports_submit_time = @hasDecl(Renderer, "submitMicroseconds");
 
         tour: Tour(kit),
         sources: *Sources,
@@ -146,6 +150,7 @@ pub fn App(comptime config: Config) type {
         renderer: *Renderer,
         io: std.Io,
         options: Options,
+        stopwatch: Stopwatch = .io,
         /// Frames drawn so far.
         frames: u64 = 0,
         next: zui.NextFrame = .immediately,
@@ -166,6 +171,7 @@ pub fn App(comptime config: Config) type {
         };
 
         pub fn init(app: *Self, start: zui_app.Start(Self)) !void {
+            if (builtin.os.tag == .freestanding) return app.initWith(start, .{});
             const process = start.process orelse return app.initWith(start, .{});
             const options = Options.parse(try process.minimal.args.toSlice(process.arena.allocator())) catch |err| {
                 std.log.err("{t}; the tour takes {s}", .{ err, Options.usage });
@@ -231,7 +237,9 @@ pub fn App(comptime config: Config) type {
         pub fn zuiDeclare(app: *Self, ui: *Ui) void {
             if (app.idle_measurement) |*measurement| {
                 if (measurement.reportAt(ui.now(), app.frames, app.tour.wakes.load(.monotonic))) |report| {
-                    std.debug.print("{f}\n", .{report});
+                    // Measuring idle is a native target's flag, and a
+                    // freestanding build has no stderr to print to.
+                    if (builtin.os.tag != .freestanding) std.debug.print("{f}\n", .{report});
                     app.idle_measurement = null;
                     app.closeHost();
                 } else {
@@ -274,8 +282,8 @@ pub fn App(comptime config: Config) type {
             if (@hasDecl(Host, "close")) app.host.close() else std.log.err("zui_tour: {s} cannot close its window, so the run goes on", .{@typeName(Host)});
         }
 
-        fn now(app: *const Self) zui.Instant {
-            return .fromTimestamp(std.Io.Timestamp.now(app.io, .awake));
+        fn now(app: *Self) zui.Instant {
+            return app.stopwatch.read(app.io);
         }
 
         /// What ended the host's wait for this frame.
@@ -310,7 +318,7 @@ pub fn App(comptime config: Config) type {
             tour_perf.zui_frames += 1;
             tour_perf.countFrameAt(ui.now().secondsSince(app.tour.started_at));
             tour_perf.measure_calls_total += measure_calls;
-            tour_perf.submit_us = microsecondsBetween(app.observed_at, loaded_at);
+            tour_perf.submit_us = if (reports_submit_time) app.renderer.submitMicroseconds() else microsecondsBetween(app.observed_at, loaded_at);
             tour_perf.diagnostics = app.observed.diagnostics;
             tour_perf.wakes = app.tour.wakes.load(.monotonic);
             if (counts_layer_overflows) tour_perf.layer_overflows = app.renderer.layer_overflows;
