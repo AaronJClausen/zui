@@ -496,7 +496,7 @@ fn settingsList(app: *App, ui: *Ui) void {
 
       <article class="feature" id="sizing" data-title="Sizing rules">
         <div class="feature-head"><h3>Sizing rules</h3><span class="pill shipped">Shipped</span></div>
-        <p>Each axis takes one <code class="z">Sizing</code> rule, with optional <code class="z">min</code> and <code class="z">max</code>. The grow basis landed in L1: <code class="z">grow</code> starts from the content and adds a share of the free space, and <code class="z">grow_equal</code> shares the whole width, so columns come out equal whatever they hold.</p>
+        <p>Each axis takes one <code class="z">Sizing</code> rule, with optional <code class="z">min</code> and <code class="z">max</code>. The grow basis landed in <code class="z">06-text-and-layout:07-grow-basis</code>: <code class="z">grow</code> starts from the content and adds a share of the free space, and <code class="z">grow_equal</code> shares the whole width, so columns come out equal whatever they hold.</p>
         <div class="table-wrap"><table class="ref">
           <thead><tr><th>Rule</th><th>Behaves like</th><th>Use it for</th></tr></thead>
           <tbody>
@@ -1727,7 +1727,7 @@ const light: Widgets.Theme = .{
 
 pub const widgets: Widgets = .{ .theme = light, .dark_theme = .{} };
 </script>
-        <p>Skins (<code class="z">Widgets(Ui, Skin)</code>) are planned to replace this struct (item K5).</p>
+        <p>Skins (<code class="z">Widgets(Ui, Skin)</code>) are planned to replace this struct (item <code class="z">11-polish:04-skin-contract</code>).</p>
       </article>
 
       <article class="feature" id="reflect" data-title="zui_reflect">

@@ -136,7 +136,7 @@ Elements without an `id` get an internal one. Give an element an id when you wan
 
 ### Sizing rules · *shipped*
 
-Each axis takes one `Sizing` rule, with optional `min` and `max`. The grow basis landed in L1: `grow` starts from the content and adds a share of the free space, and `grow_equal` shares the whole width, so columns come out equal whatever they hold.
+Each axis takes one `Sizing` rule, with optional `min` and `max`. The grow basis landed in `06-text-and-layout:07-grow-basis`: `grow` starts from the content and adds a share of the free space, and `grow_equal` shares the whole width, so columns come out equal whatever they hold.
 
 | Rule | Behaves like | Use it for |
 |---|---|---|
@@ -1554,7 +1554,7 @@ const light: Widgets.Theme = .{
 pub const widgets: Widgets = .{ .theme = light, .dark_theme = .{} };
 ```
 
-Skins (`Widgets(Ui, Skin)`) are planned to replace this struct (item K5).
+Skins (`Widgets(Ui, Skin)`) are planned to replace this struct (item `11-polish:04-skin-contract`).
 
 <a id="reflect"></a>
 

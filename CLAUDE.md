@@ -6,7 +6,7 @@ and each has one job:
 | Document | Its job | Changes when |
 |---|---|---|
 | `SPEC.md` | the contract: what zui is, every API, every budget | the implementation proves it wrong, or an open question (§22) is settled |
-| `ROADMAP.md` | **the queue** of work, each item's plan and test, and what is done | every item, every slice of an item |
+| `ROADMAP.md` and `roadmap/` | **the queue** of work and where it stands (`ROADMAP.md`); each item's plan, test and status, in its group's file (`roadmap/<group>.md`); the decisions (`roadmap/decisions.md`) | every item, every slice of an item |
 | `ARCHITECTURE.md` | the map: which layer and package holds each part, and how today's code still differs from the spec (§7) | a difference closes or opens, or a feature moves layer or stage |
 | `README.md` | what a user sees: status, today's API, the build commands | a stage or a user-visible API ships, or a build step changes |
 
@@ -21,9 +21,10 @@ leaves another stale is not done.
    Work set aside is parked on a branch that the item's **Status**
    names; read it before starting, and build on `main` unless the Status
    says to rebase.
-2. **Read it.** Read the item's entry in `ROADMAP.md` (Grounding, Plan,
-   Done when), every SPEC.md section it names, and the files in its
-   *Where* column. Check the *Waits for* column; if a prerequisite is not
+2. **Read it.** Read the item's entry in its group's file, the part of
+   its label before the colon (`10-reach:01-linux-host` is in
+   `roadmap/10-reach.md`): its Grounding, Plan and Done when, then every
+   SPEC.md section it names, and the files in its *Where* column. Check the *Waits for* column; if a prerequisite is not
    done, mark the row `waiting on <item>` and take the next row.
 3. **Check the ground.** The Grounding cites `file:line`; confirm it still
    holds before building on it. If it does not, fix the Grounding in the
@@ -40,7 +41,7 @@ leaves another stale is not done.
    was done, what was measured, and which row is next.
 
 Stop and ask the user instead of guessing when:
-- the item needs a decision listed under *Decisions → Open* in `ROADMAP.md`
+- the item needs a decision listed under *Open* in `roadmap/decisions.md`
   that has not been made;
 - the work would change a budget in SPEC.md §20.2, retire an item, or
   reorder the queue beyond moving a blocked row down;
@@ -99,10 +100,14 @@ If an item puts something in a different layer, change §6 too.
 In every item's commit:
 - [ ] **ROADMAP.md, the queue:** the row's status. When the item is done,
       remove its row. When five or fewer open rows remain, add the next
-      items from the next stage of SPEC.md §21, in dependency order.
-- [ ] **ROADMAP.md, the item:** a **Status** line saying what is done and
-      what remains. When it is done, move the item to *Done* with what it
-      measured, as R2 and P1 are written.
+      items from the next stage of SPEC.md §21, in dependency order, each
+      labelled and entered in its group's file.
+- [ ] **roadmap/<group>.md, the item:** a **Status** line saying what is
+      done and what remains, and its row in the group's *Items* table.
+      When it is done, the Status says so with what it measured, as
+      `01-measure:01-bench-compare` and
+      `01-measure:02-startup-benchmarks` are written, and the item stays
+      where it is.
 - [ ] **ROADMAP.md, *Where we are*:** when a stage finishes, or a budget
       measurement changes.
 - [ ] **ARCHITECTURE.md §7:** remove a row the item closed; add one for any
@@ -110,7 +115,7 @@ In every item's commit:
 - [ ] **SPEC.md:** if the implementation shows the spec is wrong, fix the
       spec in the same commit and give the reason in the commit message.
       When an open question in §22 is settled, remove it there and record
-      the outcome under *Decisions → Made* in ROADMAP.md.
+      the outcome under *Made* in `roadmap/decisions.md`.
 - [ ] **README.md:** the status list when a stage or user-visible feature
       ships; the API example whenever the API it shows changes; the
       *Development* table when a build step changes.
@@ -121,8 +126,8 @@ In every item's commit:
       files carry the same content and change together.
 - [ ] **Doc comments** on every new or changed `pub` declaration.
 
-New items take the next number in their series, and numbers are never
-reused (`ROADMAP.md` explains the letters).
+A new item takes the next number in its group, and numbers are never
+reused; *Labels* in `ROADMAP.md` explains how an item is named.
 
 ## Verifying
 

@@ -1,19 +1,19 @@
 # Plan: benchmarks that can be trusted
 
 Why zui's benchmarks were rebuilt after stage 7, and the research behind
-it. The plan's steps, B1 to B8, are now items in `ROADMAP.md`, where
+it. The plan's steps, B1 to B8, are now items in `roadmap/01-measure.md`, where
 their measurements are recorded:
 
 | Step | Item | What it became |
 |---|---|---|
-| B1 | R3 | pinned runs, with the machine's state recorded |
-| B2 | R4 | bootstrap confidence intervals and a calibrated noise band |
-| B3 | R5 | each scenario on its own, in a shuffled order |
-| B4 | R6 | hardware counters per phase |
-| B5 | R7 | code and memory layout as a random factor |
-| B6 | R8 | simulated cache and branch misses in `counts` |
-| B7 | R9 | results comparable across operating systems and hardware |
-| B8 | R10 | a dedicated benchmark machine, under *Later* |
+| B1 | `01-measure:05-pinned-runs` | pinned runs, with the machine's state recorded |
+| B2 | `01-measure:06-confidence-intervals` | bootstrap confidence intervals and a calibrated noise band |
+| B3 | `01-measure:07-shuffled-scenarios` | each scenario on its own, in a shuffled order |
+| B4 | `01-measure:08-hardware-counters` | hardware counters per phase |
+| B5 | `01-measure:09-layout-as-random-factor` | code and memory layout as a random factor |
+| B6 | `01-measure:10-simulated-misses` | simulated cache and branch misses in `counts` |
+| B7 | `01-measure:11-across-systems-and-hardware` | results comparable across operating systems and hardware |
+| B8 | `13-later:02-dedicated-benchmark-machine` | a dedicated benchmark machine |
 
 ## Where things stood at `db4ea4d`
 
@@ -34,10 +34,10 @@ What it already got right:
 Where error still got in:
 1. **The machine is not controlled.** Nothing sets affinity, priority,
    the power plan or turbo. The reference i9-10900K boosts based on its
-   temperature. `ROADMAP.md` already records the symptoms: warm text
+   temperature. The roadmap already records the symptoms: warm text
    drifting to 101.7 µs on the same instructions, a slow first run after
    each build, and a machine slower than when `a6d8e34` was measured.
-2. **Layout bias is seen but not handled.** In T4, warm text ran the very
+2. **Layout bias is seen but not handled.** In `06-text-and-layout:06-line-break-segmentation`, warm text ran the very
    same instructions as `c5b0401`, with the same simulated cache and
    branch behaviour, and still measured +7.8%. Aligning one function
    moved another scenario by 2.8%. This is the effect Mytkowicz et al.
@@ -60,7 +60,7 @@ Where error still got in:
    - The Windows clock has 0.1 µs resolution, which is 0.7% of a 15 µs
      declaration.
 5. **Results do not say where they came from.** A number in a commit
-   message or `ROADMAP.md` does not record the OS, CPU, clock speed or
+   message or the roadmap does not record the OS, CPU, clock speed or
    power settings it was taken under. That makes measurements from
    different machines impossible to compare or learn from.
 

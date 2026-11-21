@@ -322,7 +322,8 @@ open it in a browser, or read [docs/feature-tour.md](docs/feature-tour.md).
 Next, in the order of SPEC.md §21: the rest of the effects and of the
 inspector, more hosts, motion and
 text editing.
-[ROADMAP.md](ROADMAP.md) keeps the queue of work in order, and
+[ROADMAP.md](ROADMAP.md) keeps the queue of work in order, with each
+item's plan in [`roadmap/`](roadmap/), and
 [ARCHITECTURE.md](ARCHITECTURE.md) shows how the pieces connect.
 
 The loop by hand, which `zui_app.run` runs for
@@ -426,8 +427,8 @@ modules and runs core's steps under the same names. Beside core:
   Classic screen. The root re-exports it.
 - `themes/`, the package `zui_themes`: skins in the design languages of
   Windows, macOS, GNOME and KDE, as data applied through `zui_widgets`'
-  skin contract (K4, after the skin contract, K5); a skeleton today.
-- `examples/`: a template project (D1) and samples (D2); a skeleton today.
+  skin contract (`11-polish:08-zui-themes`, after the skin contract, `11-polish:04-skin-contract`); a skeleton today.
+- `examples/`: a template project (`11-polish:09-template-project`) and samples (`11-polish:10-samples`); a skeleton today.
 - `renderers/raylib/`, the package `zui_raylib`: the raylib renderer and
   adapter host, and the `tour` and `showcase` targets on them (see *The
   raylib renderer* below).
@@ -1884,10 +1885,10 @@ under a second: the first frame arrives about 3 ms after connecting.
 ### The web host
 
 `zui_web`, in [hosts/web/](hosts/web/), is zui in the browser: today a
-thin client that draws an application streamed over `zui_wire` (V4), the
+thin client that draws an application streamed over `zui_wire` (`09-seeing-the-ui:04-demo-in-browser`), the
 tour in a Web Worker, and the page that puts them
 together, published to GitHub Pages by the Pages workflow; later
-a web host with a canvas surface (H5). It exports no module yet: its
+a web host with a canvas surface (`10-reach:02-web-host`). It exports no module yet: its
 steps run from `hosts/web/` (see *Development*). Everything under its
 `src/` that the browser runs compiles for `wasm32-freestanding`.
 
