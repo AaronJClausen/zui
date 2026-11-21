@@ -23,7 +23,7 @@ is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:08-zui-themes` `zui_themes` | not started |
 | `11-polish:09-template-project` The template project | not started |
 | `11-polish:10-samples` Samples | not started |
-| `11-polish:11-profiling-guide` A profiling guide | not started |
+| `11-polish:11-profiling-guide` A profiling guide | done |
 | `11-polish:12-developer-experience-audit` A developer-experience audit | not started |
 
 ---
@@ -74,6 +74,38 @@ tool, a remote session.
 ## 11-polish:11-profiling-guide — A profiling guide
 
 Over `01-measure:04-tracer-contract`'s tracer.
+
+**Grounding.** `docs/benchmarking.md`'s `## Profiling` section was one
+paragraph on Tracy and a list of ways to keep noise out. The tracer
+contract is `core/src/trace.zig:3` (`TraceZone`) and
+`core/src/contracts.zig:380` (`checkTracer`); `zui_tracy` is
+`core/zui_tracy/zui_tracy.zig`, with Tracy 0.14.1 pinned in
+`core/build.zig.zon:8`; `ZoneTimer` is `core/zui_debug/zui_debug.zig:32`;
+the tour's `--measure-idle` is `apps/tour/src/root.zig:330`.
+
+**Plan.** Grow `docs/benchmarking.md`'s `## Profiling` into a guide for
+an application's author, with the consumer's own `build.zig` lines and
+Zig for: Tracy through `zui_tracy`, and the zones zui emits; the
+application's own zones; a tracer of one's own; `zui_debug`'s inspector
+and `ZoneTimer`; reading `Diagnostics` and `NextFrame`; and measuring a
+change. Compile every snippet in a consumer project of its own.
+
+**Done when:** the guide covers those six parts, each snippet matches the
+current API and compiles in a consumer project, the Tracy version and
+the zone list are read from the code, and no API is described that does
+not exist.
+
+**Spec.** §16.5, §19.7, §19.10.
+
+**Status.** Done: `docs/benchmarking.md`'s `## Profiling` is a guide in
+six parts. Every Zig snippet was compiled and run in a consumer project
+naming the repository by path, without Tracy and with `-Dzui-tracy=true
+-Dtarget=x86_64-linux-gnu`, except the `zui_raylib` dependency line,
+which copies `renderers/raylib/README.md`. `zui_tracy` has no API for an
+application's own zones, so the guide declares Tracy's C API, gated on
+`zui_tracy.enabled`; a public zone API in `zui_tracy` would spare that.
+`tracy-capture`'s and `tracy-csvexport`'s flags are from Tracy's
+documentation, not run here, since neither is installed.
 
 ## 11-polish:12-developer-experience-audit — A developer-experience audit
 
