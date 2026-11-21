@@ -210,11 +210,15 @@ pub fn build(b: *std.Build) void {
         .imports = &.{.{ .name = "zui", .module = zui_module }},
     });
 
-    const test_step = b.step("test", "Run the unit tests and the compile-error tests");
+    const test_step = b.step("test", "Run the unit tests and the compile-error tests, and compile the benchmark tools");
+    const unit_test_step = b.step("test-unit", "Run the unit tests, in the selected optimize mode");
+    const compile_error_test_step = b.step("test-compile-errors", "Check every compile error's message, which no optimize mode changes");
+    const bench_tools_step = b.step("check-bench-tools", "Compile counts, bench-compare and bench-report, each in its own fixed optimize mode");
+    for ([_]*std.Build.Step{ unit_test_step, compile_error_test_step, bench_tools_step }) |part| test_step.dependOn(part);
     const tested_modules = [_]*std.Build.Module{ zui_module, testing_module, async_module, widgets_module, reflect_module, tracy_module, app_module, wire_module, debug_module };
     for (tested_modules) |tested_module| {
         const module_tests = b.addTest(.{ .root_module = tested_module, .use_llvm = if (sanitize_thread) true else null });
-        test_step.dependOn(&b.addRunArtifact(module_tests).step);
+        unit_test_step.dependOn(&b.addRunArtifact(module_tests).step);
     }
     for ([_]*std.Build.Module{ async_module, widgets_module, reflect_module, tracy_module, wire_module, debug_module }) |module_with_driven_tests| {
         module_with_driven_tests.addImport("zui_testing", testing_module);
@@ -249,7 +253,7 @@ pub fn build(b: *std.Build) void {
             }),
         });
         failing_object.expect_errors = .{ .contains = case.expected_error };
-        test_step.dependOn(&failing_object.step);
+        compile_error_test_step.dependOn(&failing_object.step);
     }
 
     // A static library is only built so its documentation can be emitted;
@@ -336,7 +340,7 @@ pub fn build(b: *std.Build) void {
     const run_counts = b.addRunArtifact(counts_executable);
     if (b.args) |arguments| run_counts.addArgs(arguments);
     b.step("counts", "Count each scenario's instructions per frame under Callgrind (x86_64 Linux with Valgrind)").dependOn(&run_counts.step);
-    test_step.dependOn(&counts_executable.step);
+    bench_tools_step.dependOn(&counts_executable.step);
 
     const bench_compare_executable = b.addExecutable(.{
         .name = "zui-bench-compare",
@@ -352,7 +356,7 @@ pub fn build(b: *std.Build) void {
     run_bench_compare.addArgs(&.{ "--zig", b.graph.zig_exe, "--repository", b.pathFromRoot(".") });
     if (b.args) |arguments| run_bench_compare.addArgs(arguments);
     b.step("bench-compare", "Alternate the benchmarks of two commits, pinned to one core: -- <base> [<head>], or -- --calibrate").dependOn(&run_bench_compare.step);
-    test_step.dependOn(&bench_compare_executable.step);
+    bench_tools_step.dependOn(&bench_compare_executable.step);
 
     const bench_report_executable = b.addExecutable(.{
         .name = "zui-bench-report",
@@ -366,14 +370,14 @@ pub fn build(b: *std.Build) void {
     const run_bench_report = b.addRunArtifact(bench_report_executable);
     if (b.args) |arguments| run_bench_report.addArgs(arguments);
     b.step("bench-report", "Set side by side each machine's results for one commit: -- <results dir> [<commit>]").dependOn(&run_bench_report.step);
-    test_step.dependOn(&bench_report_executable.step);
+    bench_tools_step.dependOn(&bench_report_executable.step);
 
     const bench_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("bench/statistics.zig"),
         .target = target,
         .optimize = optimize,
     }) });
-    test_step.dependOn(&b.addRunArtifact(bench_tests).step);
+    unit_test_step.dependOn(&b.addRunArtifact(bench_tests).step);
 
     const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "tests", "bench", "zui_testing", "zui_async", "zui_widgets", "zui_reflect", "zui_tracy", "zui_app", "zui_wire", "zui_debug" };
     b.step("fmt", "Format all Zig sources").dependOn(&b.addFmt(.{ .paths = formatted_paths }).step);

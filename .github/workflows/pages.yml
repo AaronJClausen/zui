@@ -1,22 +1,17 @@
 name: Pages
 
+# Published only from a push to main that CI passed, and only when CI ran
+# the site's own check, which it does when the change reaches hosts/web.
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
-    # The packages `hosts/web` builds the site from, by `.path`; sokol is
-    # left out, since only `test-draw` fetches it.
-    paths:
-      - ".github/workflows/pages.yml"
-      - "core/**"
-      - "text/**"
-      - "apps/**"
-      - "renderers/webgl/**"
-      - "hosts/web/**"
-      - "!**.md"
   workflow_dispatch:
 
 permissions:
   contents: read
+  actions: read
   pages: write
   id-token: write
 
@@ -28,8 +23,38 @@ env:
   ZIG_VERSION: 0.16.0
 
 jobs:
+  decide:
+    name: Whether CI passed the site's check
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      publish: ${{ steps.site_check.outputs.publish }}
+    steps:
+      - id: site_check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          CI_RUN: ${{ github.event.workflow_run.id }}
+        run: |
+          if [ "$EVENT" = workflow_dispatch ]; then
+            publish=true
+          else
+            site_check="hosts/web: test-site (headless Chrome)"
+            conclusion=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN/jobs" --paginate --jq ".jobs[] | select(.name == \"$site_check\") | .conclusion")
+            # A skipped job is still listed, so a missing one was renamed.
+            if [ -z "$conclusion" ]; then
+              echo "::error::CI has no job named \"$site_check\"; rename it here too"
+              exit 1
+            fi
+            if [ "$conclusion" = success ]; then publish=true; else publish=false; fi
+          fi
+          echo "publish=$publish" | tee -a "$GITHUB_OUTPUT"
+
   build:
     name: The tour's page, built and checked in headless Chrome
+    needs: decide
+    if: needs.decide.outputs.publish == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -37,6 +62,8 @@ jobs:
         working-directory: hosts/web
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: ${{ env.ZIG_VERSION }}

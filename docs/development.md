@@ -26,6 +26,7 @@ Run these from the root:
 | Command | What it does |
 |---|---|
 | `zig build test` | run the unit, golden, randomized-invariant, widget and compile-error tests (add `-Doptimize=ReleaseSafe` or `ReleaseFast` to test other modes) |
+| `zig build test-unit`, `test-compile-errors` and `check-bench-tools` | the three parts of `test`, which CI runs apart: the unit tests, in the selected optimize mode; every compile error's message; and the benchmark tools, each built in its own fixed mode |
 | `zig build check` | compile one full frame, every widget, the default sources and the test driver without producing output; add `-Dtarget=wasm32-freestanding` to check another target |
 | `zig build test -Dzui-debug=true` | keep id names, so duplicate-id and unbalanced-tree panics name the element |
 | `zig build test -Dzui-tracy=true` | fetch Tracy and test `zui_tracy` with its client linked |
@@ -44,55 +45,71 @@ Run these from the root:
 
 ## CI
 
-CI runs one job for each package, from its directory, on every push
-that changes something a build reads (a push of only Markdown, `docs/`,
-`assets/`, `LICENSE`, `.editorconfig` or Dependabot's settings runs
-nothing), each job and each of its legs within 10 minutes:
-- the format check, the documentation and every package's `check`, from
-  the root;
-- core, from the root, which forwards its steps: the tests in three
-  optimize modes on Linux, Windows and macOS, plus as a 32-bit x86 Linux
-  program, under ThreadSanitizer, which stresses every `zui_async`
-  source with producers on other threads, and with Tracy's client on
-  Linux, Windows and macOS; and `check` for six targets: 32- and 64-bit,
-  big-endian, freestanding and WebAssembly;
-- when a push changes something under `core/`, the benchmarks, failing
-  on any allocation after `init` (times and the SPEC.md §20.2 budgets are
-  reported in the job summary but not compared: runners vary too much,
-  so check for slowdowns on your own machine with `zig build
-  bench-compare`), and instruction counts of this commit and its parent,
-  failing on more than 2% growth, with simulated cache and branch misses
-  reported beside them;
-- the tests of `text/glyphs/`, `text/fonts/`, `text/truetype/`,
-  `apps/showcase/`, `apps/tour/`, `themes/`, `examples/` and
-  `renderers/webgl/` in three optimize modes, and their `check`, on
-  Linux, Windows and macOS;
-- `renderers/raylib/`: its tests and `check` on Windows, `check` on
-  macOS, and on Linux, under `xvfb-run`, its conformance, the `tour`
-  target's visit of every screen, five screenshots, kept as the run's
-  artifacts, the CPU the tour uses while idle, in the job summary, and the
-  `showcase` target's frames;
+CI runs on every push that changes something a build reads (a push of
+only Markdown, `docs/`, `assets/`, `LICENSE`, `.editorconfig`,
+Dependabot's settings or the Pages workflow runs nothing). Its first job,
+`changes`, runs `.github/scripts/affected_packages.py`, which reads each
+package's `build.zig.zon` and names the packages the change reaches: a
+package's jobs run when a file under it, or under a package it names by
+`.path`, directly or not, changed. A change to `ci.yml`, `.github/actions/`
+or `.github/scripts/`, a new branch or a manual run reaches every package.
+Each job, from its package's directory, fits within 10 minutes:
+- the root, on every run: the format check, the documentation, and
+  `check`, which compiles core and the apps through the root's re-exports;
+- core, from the root, when `core/` or the root's build changes:
+  `test-unit` in three optimize modes on Linux, Windows and macOS, as a
+  32-bit x86 Linux program in Debug and ReleaseFast, under
+  ThreadSanitizer, which stresses every `zui_async` source with producers
+  on other threads, and with Tracy's client on Linux, Windows and macOS;
+  `test-compile-errors` and `check-bench-tools`, which no optimize mode
+  changes, once on each OS; the whole `test` with `-Dzui-debug=true`; and
+  `check` for six targets: 32- and 64-bit, big-endian, freestanding and
+  WebAssembly;
+- with core's jobs, the benchmarks, failing on any allocation after
+  `init` (times and the SPEC.md §20.2 budgets are reported in the job
+  summary but not compared: runners vary too much, so check for slowdowns
+  on your own machine with `zig build bench-compare`), and instruction
+  counts of this commit and of the commit the push or pull request is
+  based on, failing on more than 2% growth, with simulated cache and
+  branch misses reported beside them;
+- `text/glyphs/`, `text/fonts/`, `text/truetype/`, `apps/showcase/`,
+  `apps/tour/`, `themes/`, `examples/` and `renderers/webgl/`, which are
+  pure Zig and compile for `wasm32-freestanding`: each optimize mode's
+  tests in a job of its own on Linux, and `check` there and for x86-64
+  Windows and ARM64 macOS; `text/truetype/`, which compiles
+  stb_truetype's C, is also tested on Windows;
+- `renderers/raylib/`: its tests and `check` on Linux, Windows and macOS,
+  and `check -Dzui-tracy=true` on Linux; and in a job of its own on
+  Linux, under `xvfb-run`, its conformance, the `tour` target's visit of
+  every screen, five screenshots, the CPU the tour uses while idle, shown
+  in the job summary, and the `showcase` target's frames. Only Linux
+  runners give it OpenGL 3.3, through Mesa;
 - `renderers/sokol/`: its tests and `check` on Linux, Windows and macOS,
-  its `check -Dgl=true` on Windows, and its conformance on Linux under
-  `xvfb-run`;
+  its `check` for `wasm32-freestanding` on Linux and with `-Dgl=true` on
+  Windows; and its conformance, which reads back through OpenGL, in a job
+  of its own on Linux under `xvfb-run`;
 - `renderers/terminal/`: its tests, its conformance, its `check`, the
-  `showcase` target's `--dump` and the `tour` target's `--dump` of every
-  screen it is offered, on Linux, Windows and macOS;
+  `showcase` target's `--dump`, and the `tour` target's
+  `--dump --every-screen`, which fails when a screen cuts a line of text
+  short at the side of its clip, on Linux, Windows and macOS;
 - `hosts/native/`: its tests in Debug and ReleaseSafe and its `check`, on
   Windows, and on Linux under a headless Weston with a D-Bus daemon of
-  its own, where the `tour` target also visits every screen and must
-  report no layer or glyph atlas overflow and clean diagnostics, and the
-  `showcase` target draws its frames; and `check` for x86-64 and ARM64
-  Windows from Linux. The other examples are compiled there and run on a
-  desktop;
-- `hosts/web/`: its tests in three optimize modes and its `check`, on
-  Linux, Windows and macOS; and on Linux, `test-demo` in Debug and
-  ReleaseSafe, `test-input` and `test-site` in headless Google Chrome, and
-  `test-draw` under `xvfb-run`, keeping the frames that do not match as
-  the run's artifacts. On every push to `main` that changes the code of
-  `hosts/web/` or a package it builds the site from (`core/`, `text/`,
-  `apps/`, `renderers/webgl/`), the Pages workflow builds the site in
-  ReleaseSmall, runs `test-site` on it, and publishes it.
+  its own (`.github/actions/wayland-session`); `check` for ARM64 Windows
+  from Linux; and in a job of its own under Weston, the `services` and
+  `theme` examples' `--check`, the `tour` target's visit of every screen,
+  which must report no layer or glyph atlas overflow and clean
+  diagnostics, its CPU while idle, shown in the job summary, and the
+  `showcase` target's frames. The Windows examples are compiled there and
+  run on a desktop;
+- `hosts/web/`: on Linux, each optimize mode's tests, `check` there and
+  for x86-64 Windows and ARM64 macOS, `test-demo` in Debug and in
+  ReleaseSafe, and `test-input`, each in a job of its own; `test-site` in
+  headless Google Chrome; and `test-draw` under `xvfb-run`, keeping the
+  frames that do not match as the run's artifacts.
+
+When CI passes on a push to `main` and its `test-site` job ran, the Pages
+workflow builds the site in ReleaseSmall, runs `test-site` on it, and
+publishes it; `workflow_dispatch` publishes without asking CI.
 
 Those targets exist to catch assumptions about the host machine early:
 the first 32-bit build found two places that used a 64-bit hash as an

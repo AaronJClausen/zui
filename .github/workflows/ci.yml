@@ -12,6 +12,7 @@ on:
       - "LICENSE"
       - ".editorconfig"
       - ".github/dependabot.yml"
+      - ".github/workflows/pages.yml"
   pull_request:
     paths-ignore: *ci_irrelevant_paths
   workflow_dispatch:
@@ -27,8 +28,47 @@ env:
   ZIG_VERSION: 0.16.0
 
 jobs:
+  changes:
+    name: Which packages the change affects
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      base: ${{ steps.base.outputs.base }}
+      root-build: ${{ steps.affected.outputs.root-build }}
+      core: ${{ steps.affected.outputs.core }}
+      pure-packages: ${{ steps.affected.outputs.pure-packages }}
+      text-truetype: ${{ steps.affected.outputs.text-truetype }}
+      renderers-terminal: ${{ steps.affected.outputs.renderers-terminal }}
+      renderers-raylib: ${{ steps.affected.outputs.renderers-raylib }}
+      renderers-sokol: ${{ steps.affected.outputs.renderers-sokol }}
+      hosts-native: ${{ steps.affected.outputs.hosts-native }}
+      hosts-web: ${{ steps.affected.outputs.hosts-web }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # A new branch, a manual run, or a base that cannot be fetched (a
+      # force-push) leaves the base empty, which affects every package.
+      - id: base
+        env:
+          EVENT: ${{ github.event_name }}
+          PUSHED_ONTO: ${{ github.event.before }}
+          PULL_REQUEST_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          case "$EVENT" in
+            push) base="$PUSHED_ONTO" ;;
+            pull_request) base="$PULL_REQUEST_BASE" ;;
+            *) base="" ;;
+          esac
+          if [ -n "$base" ] && ! git fetch --no-tags --depth=1 origin "$base"; then base=""; fi
+          echo "base=$base" | tee -a "$GITHUB_OUTPUT"
+      - id: affected
+        env:
+          BASE: ${{ steps.base.outputs.base }}
+        run: |
+          set -o pipefail
+          python3 .github/scripts/affected_packages.py "$BASE" --matrix pure-packages=text/glyphs,text/fonts,text/truetype,apps/showcase,apps/tour,themes,examples,renderers/webgl | tee -a "$GITHUB_OUTPUT"
+
   lint:
-    name: Format, docs and every package's check
+    name: "root: format, docs and check"
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -38,36 +78,43 @@ jobs:
           version: ${{ env.ZIG_VERSION }}
       - run: zig build fmt-check
       - run: zig build docs
-      - name: Install raylib's and sokol's X11, OpenGL and PulseAudio dependencies, and EGL, Wayland and xkbcommon
-        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev libpulse-dev libegl-dev libwayland-dev libxkbcommon-dev
-      - run: zig build check-all
+      - name: Check core, and the apps through the root's re-exports
+        run: zig build check
 
-  # The root forwards core's steps under their own names, and adds to
-  # `check` the aggregator's re-exports, so core's legs run there.
+  # The root forwards core's steps under their own names, so core's legs run
+  # there. The compile errors and the benchmark tools do not depend on
+  # `-Doptimize`, so they run once on each OS rather than in every mode.
   core:
     name: "core: ${{ matrix.leg }} (${{ matrix.os }})"
+    needs: changes
+    if: needs.changes.outputs.core == 'true' || needs.changes.outputs.root-build == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { leg: test, os: ubuntu-latest, run: zig build test }
-          - { leg: test ReleaseSafe, os: ubuntu-latest, run: zig build test -Doptimize=ReleaseSafe }
-          - { leg: test ReleaseFast, os: ubuntu-latest, run: zig build test -Doptimize=ReleaseFast }
-          - { leg: test, os: windows-latest, run: zig build test }
-          - { leg: test ReleaseSafe, os: windows-latest, run: zig build test -Doptimize=ReleaseSafe }
-          - { leg: test ReleaseFast, os: windows-latest, run: zig build test -Doptimize=ReleaseFast }
-          - { leg: test, os: macos-latest, run: zig build test }
-          - { leg: test ReleaseSafe, os: macos-latest, run: zig build test -Doptimize=ReleaseSafe }
-          - { leg: test ReleaseFast, os: macos-latest, run: zig build test -Doptimize=ReleaseFast }
-          - { leg: Tracy, os: ubuntu-latest, run: zig build test -Dzui-tracy=true }
-          - { leg: Tracy, os: windows-latest, run: zig build test -Dzui-tracy=true }
-          - { leg: Tracy, os: macos-latest, run: zig build test -Dzui-tracy=true }
+          - { leg: unit tests, os: ubuntu-latest, run: zig build test-unit }
+          - { leg: unit tests ReleaseSafe, os: ubuntu-latest, run: zig build test-unit -Doptimize=ReleaseSafe }
+          - { leg: unit tests ReleaseFast, os: ubuntu-latest, run: zig build test-unit -Doptimize=ReleaseFast }
+          - { leg: unit tests, os: windows-latest, run: zig build test-unit }
+          - { leg: unit tests ReleaseSafe, os: windows-latest, run: zig build test-unit -Doptimize=ReleaseSafe }
+          - { leg: unit tests ReleaseFast, os: windows-latest, run: zig build test-unit -Doptimize=ReleaseFast }
+          - { leg: unit tests, os: macos-latest, run: zig build test-unit }
+          - { leg: unit tests ReleaseSafe, os: macos-latest, run: zig build test-unit -Doptimize=ReleaseSafe }
+          - { leg: unit tests ReleaseFast, os: macos-latest, run: zig build test-unit -Doptimize=ReleaseFast }
+          - { leg: compile errors and benchmark tools, os: ubuntu-latest, run: zig build test-compile-errors check-bench-tools }
+          - { leg: compile errors and benchmark tools, os: windows-latest, run: zig build test-compile-errors check-bench-tools }
+          - { leg: compile errors and benchmark tools, os: macos-latest, run: zig build test-compile-errors check-bench-tools }
+          - { leg: zui-debug, os: ubuntu-latest, run: zig build test -Dzui-debug=true }
+          - { leg: Tracy, os: ubuntu-latest, run: zig build test-unit -Dzui-tracy=true }
+          - { leg: Tracy, os: windows-latest, run: zig build test-unit -Dzui-tracy=true }
+          - { leg: Tracy, os: macos-latest, run: zig build test-unit -Dzui-tracy=true }
           # ThreadSanitizer cannot place its shadow memory with the runner's
           # default ASLR entropy, and exits before any test runs.
-          - { leg: ThreadSanitizer, os: ubuntu-latest, run: sudo sysctl vm.mmap_rnd_bits=28 && zig build test -Dzui-sanitize-thread=true }
-          - { leg: 32-bit x86 Linux, os: ubuntu-latest, run: zig build test -Dtarget=x86-linux && zig build test -Dtarget=x86-linux -Doptimize=ReleaseFast }
+          - { leg: ThreadSanitizer, os: ubuntu-latest, run: sudo sysctl vm.mmap_rnd_bits=28 && zig build test-unit -Dzui-sanitize-thread=true }
+          - { leg: unit tests x86-linux, os: ubuntu-latest, run: zig build test-unit -Dtarget=x86-linux }
+          - { leg: unit tests x86-linux ReleaseFast, os: ubuntu-latest, run: zig build test-unit -Dtarget=x86-linux -Doptimize=ReleaseFast }
           - { leg: check wasm32-freestanding, os: ubuntu-latest, run: zig build check -Dtarget=wasm32-freestanding }
           - { leg: check x86-linux, os: ubuntu-latest, run: zig build check -Dtarget=x86-linux }
           - { leg: check aarch64-linux, os: ubuntu-latest, run: zig build check -Dtarget=aarch64-linux }
@@ -81,42 +128,10 @@ jobs:
           version: ${{ env.ZIG_VERSION }}
       - run: ${{ matrix.run }}
 
-  # Benchmarks and instruction counts measure core alone, so they run only
-  # when what is pushed changes something under core/.
-  core-changed:
-    name: Whether core/ changed
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    outputs:
-      core: ${{ steps.diff.outputs.core }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - id: diff
-        env:
-          EVENT: ${{ github.event_name }}
-          PUSHED_ONTO: ${{ github.event.before }}
-          PULL_REQUEST_BASE: ${{ github.event.pull_request.base.sha }}
-        run: |
-          case "$EVENT" in
-            push) base="$PUSHED_ONTO" ;;
-            pull_request) base="$PULL_REQUEST_BASE" ;;
-            *) base="" ;;
-          esac
-          # A new branch, a manual run, or a base that cannot be fetched
-          # (a force-push) counts as changing core.
-          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ] || ! git fetch --no-tags --depth=1 origin "$base"; then
-            core=true
-          elif git diff --name-only "$base" HEAD | grep -q '^core/'; then
-            core=true
-          else
-            core=false
-          fi
-          echo "core=$core" | tee -a "$GITHUB_OUTPUT"
-
   bench:
     name: "core: benchmarks"
-    needs: core-changed
-    if: needs.core-changed.outputs.core == 'true'
+    needs: changes
+    if: needs.changes.outputs.core == 'true' || needs.changes.outputs.root-build == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -127,7 +142,7 @@ jobs:
       # Times are reported, never compared: a runner can time one commit 45%
       # slower than its parent when no other machine can reproduce it. This
       # still fails on any allocation after init, which no CPU can change.
-      - name: Benchmark
+      - name: Benchmark, failing on any allocation after init
         run: |
           # Without this, `| tee` hides a failing benchmark: steps without a
           # `shell:` run as `bash -e`, not `bash -eo pipefail`.
@@ -137,8 +152,8 @@ jobs:
 
   counts:
     name: "core: instruction counts"
-    needs: core-changed
-    if: needs.core-changed.outputs.core == 'true'
+    needs: changes
+    if: needs.changes.outputs.core == 'true' || needs.changes.outputs.root-build == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -149,32 +164,46 @@ jobs:
         with:
           version: ${{ env.ZIG_VERSION }}
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends valgrind
-      # Each commit is counted by its own scenarios. A parent from before
-      # `counts` existed has nothing to compare against.
-      - name: Count the parent commit
+      # Compared with what the push or the pull request is based on, so a
+      # push of several commits cannot grow by 2% in each of them. A base
+      # from before `counts` existed has nothing to compare against.
+      - name: Count the commit this is based on
+        env:
+          BASE: ${{ needs.changes.outputs.base }}
         run: |
-          git worktree add --detach "$RUNNER_TEMP/parent" HEAD^
-          cd "$RUNNER_TEMP/parent"
+          base="${BASE:-HEAD^}"
+          git fetch --no-tags --depth=1 origin "$base" 2>/dev/null || true
+          git worktree add --detach "$RUNNER_TEMP/base" "$base"
+          cd "$RUNNER_TEMP/base"
           if zig build -l | grep -q '^  counts '; then
-            zig build counts -- --json "$RUNNER_TEMP/parent.json"
+            zig build counts -- --json "$RUNNER_TEMP/base.json"
           fi
       - name: Count this commit, failing on more than 2% growth
         run: |
           set -o pipefail
           compare=()
-          if [ -f "$RUNNER_TEMP/parent.json" ]; then compare=(--compare "$RUNNER_TEMP/parent.json"); fi
+          if [ -f "$RUNNER_TEMP/base.json" ]; then compare=(--compare "$RUNNER_TEMP/base.json"); fi
           zig build counts -- --json counts.json "${compare[@]}" | tee counts.txt
           { echo '```'; cat counts.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
+  # These packages are pure Zig and compile for wasm32-freestanding, so their
+  # tests run on Linux, and Windows and macOS are cross-checked.
   packages:
-    name: "${{ matrix.package }}: test and check (${{ matrix.os }})"
-    runs-on: ${{ matrix.os }}
+    name: "${{ matrix.package }}: ${{ matrix.leg }}"
+    needs: changes
+    if: needs.changes.outputs.pure-packages != '[]'
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
-        package: [text/glyphs, text/fonts, text/truetype, apps/showcase, apps/tour, themes, examples, renderers/webgl]
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        package: ${{ fromJSON(needs.changes.outputs.pure-packages) }}
+        leg: [tests, tests ReleaseSafe, tests ReleaseFast, checks]
+        include:
+          - { leg: tests, run: zig build test }
+          - { leg: tests ReleaseSafe, run: zig build test -Doptimize=ReleaseSafe }
+          - { leg: tests ReleaseFast, run: zig build test -Doptimize=ReleaseFast }
+          - { leg: checks, run: zig build check && zig build check -Dtarget=x86_64-windows && zig build check -Dtarget=aarch64-macos }
     defaults:
       run:
         working-directory: ${{ matrix.package }}
@@ -183,13 +212,30 @@ jobs:
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: ${{ env.ZIG_VERSION }}
+      - run: ${{ matrix.run }}
+
+  # stb_truetype is C, so the one package that compiles it is also tested
+  # where Windows' C ABI is native.
+  truetype-windows:
+    name: "text/truetype: tests (windows-latest)"
+    needs: changes
+    if: needs.changes.outputs.text-truetype == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: text/truetype
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: ${{ env.ZIG_VERSION }}
       - run: zig build test
-      - run: zig build test -Doptimize=ReleaseSafe
-      - run: zig build test -Doptimize=ReleaseFast
-      - run: zig build check
 
   terminal:
-    name: "renderers/terminal: test and build (${{ matrix.os }})"
+    name: "renderers/terminal: test, check and dumps (${{ matrix.os }})"
+    needs: changes
+    if: needs.changes.outputs.renderers-terminal == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     strategy:
@@ -209,16 +255,17 @@ jobs:
       - run: zig build check
       - name: Render the showcase offscreen
         shell: bash
-        run: zig build showcase -- --dump | tee dump.txt && grep -q "zui + terminal" dump.txt
-      - name: Render every screen of the tour a terminal draws, offscreen
-        shell: bash
         run: |
-          for screen in welcome layout_lab box_storm gallery mission_control window_manager robot_workshop pixel_pad typography light_and_depth classic; do
-            zig build tour -- --dump --screen $screen > /dev/null
-          done
+          set -o pipefail
+          zig build showcase -- --dump | tee dump.txt
+          grep -q "zui + terminal" dump.txt
+      - name: Render every screen of the tour a terminal draws, failing on text cut short
+        run: zig build tour -- --dump --every-screen
 
   raylib:
-    name: "renderers/raylib: test and build (${{ matrix.os }})"
+    name: "renderers/raylib: test and check (${{ matrix.os }})"
+    needs: changes
+    if: needs.changes.outputs.renderers-raylib == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     strategy:
@@ -235,47 +282,60 @@ jobs:
           version: ${{ env.ZIG_VERSION }}
       - name: Install raylib's X11 and OpenGL dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev xvfb
-      # macOS runners have no display for raylib's windows, so it is
-      # compiled there and run elsewhere.
-      - if: runner.os != 'macOS'
-        run: zig build test
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev
+      - run: zig build test
       - run: zig build check
-      - name: Run zui's renderer and host suites
+      - name: Check with Tracy's client linked
         if: runner.os == 'Linux'
+        run: zig build check -Dzui-tracy=true
+
+  # Only Linux runners give raylib a display, and an OpenGL 3.3 one, through
+  # Xvfb and Mesa.
+  raylib-display:
+    name: "renderers/raylib: conformance and targets (ubuntu-latest, Xvfb)"
+    needs: changes
+    if: needs.changes.outputs.renderers-raylib == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: renderers/raylib
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - name: Install raylib's X11 and OpenGL dependencies, and Xvfb
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev xvfb
+      - name: Run zui's renderer and host suites
         run: xvfb-run --auto-servernum zig build conformance
       - name: Visit every screen of the tour
-        if: runner.os == 'Linux'
         run: |
           set -o pipefail
           xvfb-run --auto-servernum zig build tour -- --hidden --frames 600 --cycle 50 2>&1 | tee cycle.log
           grep "diagnostics ok: true" cycle.log
-      - name: Render the tour offscreen
-        if: runner.os == 'Linux'
+      - name: Screenshot the tour's screens without crashing
         run: |
           for screen in welcome gallery mission_control typography light_and_depth; do
             xvfb-run --auto-servernum zig build tour -- --screenshot "$PWD/tour-$screen.png" --screen $screen
           done
-      - name: Report the CPU used while idle
-        if: runner.os == 'Linux'
+      # Xvfb draws through software OpenGL on a shared runner, so the CPU it
+      # reports is shown, not judged.
+      - name: Run the tour idle without crashing, and show the CPU it used
         run: |
+          set -o pipefail
           timeout 60 xvfb-run --auto-servernum zig build tour -- --measure-idle 2>&1 | grep "^idle" | tee idle.log
-          echo "The tour's welcome screen, $(cat idle.log)" >> "$GITHUB_STEP_SUMMARY"
+          echo "The tour's welcome screen under Xvfb, $(cat idle.log)" >> "$GITHUB_STEP_SUMMARY"
       - name: Draw the showcase
-        if: runner.os == 'Linux'
         run: |
           set -o pipefail
           xvfb-run --auto-servernum zig build showcase -- --hidden --frames 60 2>&1 | tee showcase.log
           grep "diagnostics ok: true" showcase.log
-      - name: Keep the renders
-        if: runner.os == 'Linux'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: tour-screenshots
-          path: renderers/raylib/tour*.png
 
   sokol:
-    name: "renderers/sokol: test and build (${{ matrix.os }})"
+    name: "renderers/sokol: test and check (${{ matrix.os }})"
+    needs: changes
+    if: needs.changes.outputs.renderers-sokol == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     strategy:
@@ -290,29 +350,47 @@ jobs:
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: ${{ env.ZIG_VERSION }}
-      - name: Install sokol's X11, OpenGL and PulseAudio dependencies, EGL and Wayland's, and Xvfb
+      - name: Install sokol's X11, OpenGL and PulseAudio dependencies, and EGL and Wayland's
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxi-dev libxcursor-dev libgl1-mesa-dev libpulse-dev libegl-dev libwayland-dev xvfb
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxi-dev libxcursor-dev libgl1-mesa-dev libpulse-dev libegl-dev libwayland-dev
       - run: zig build test
       - run: zig build check
-      - name: Compile the renderer for a native host's win32 window, with OpenGL
+      - name: Check for wasm32-freestanding
+        if: runner.os == 'Linux'
+        run: zig build check -Dtarget=wasm32-freestanding
+      - name: Check the renderer for a native host's win32 window, with OpenGL
         if: runner.os == 'Windows'
         run: zig build check -Dgl=true
+
+  # The suite reads frames back through OpenGL, which only Linux runners
+  # offer, through Xvfb and Mesa.
+  sokol-display:
+    name: "renderers/sokol: conformance (ubuntu-latest, Xvfb)"
+    needs: changes
+    if: needs.changes.outputs.renderers-sokol == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: renderers/sokol
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - name: Install sokol's X11, OpenGL and PulseAudio dependencies, EGL and Wayland's, and Xvfb
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxi-dev libxcursor-dev libgl1-mesa-dev libpulse-dev libegl-dev libwayland-dev xvfb
       - name: Run zui's renderer suite, with OpenGL under Xvfb
-        if: runner.os == 'Linux'
         run: xvfb-run --auto-servernum zig build conformance
 
-  native-host:
-    name: "hosts/native: ${{ matrix.leg }}"
-    runs-on: ${{ matrix.os }}
+  # Windows runners have a desktop session, but its examples need one that
+  # shows windows, so they are compiled here and run on a desktop.
+  native-windows:
+    name: "hosts/native: test and check (windows-latest)"
+    needs: changes
+    if: needs.changes.outputs.hosts-native == 'true'
+    runs-on: windows-latest
     timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { leg: test and build (Windows), os: windows-latest }
-          - { leg: "test and build (Linux, Wayland under a headless Weston)", os: ubuntu-latest }
-          - { leg: cross-compile for Windows (Linux), os: ubuntu-latest, cross: true }
     defaults:
       run:
         working-directory: hosts/native
@@ -321,71 +399,111 @@ jobs:
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: ${{ env.ZIG_VERSION }}
-      - if: matrix.cross
-        run: zig build check -Dtarget=x86_64-windows
-      - if: matrix.cross
-        run: zig build check -Dtarget=aarch64-windows
-      - name: Install Wayland, xkbcommon, EGL, sokol's X11, OpenGL and PulseAudio dependencies, Weston and a D-Bus daemon
-        if: ${{ !matrix.cross && runner.os == 'Linux' }}
-        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev libegl-dev libx11-dev libxi-dev libxcursor-dev libgl1-mesa-dev libpulse-dev weston dbus-daemon
-      - name: Start a headless Weston for the host suite
-        if: ${{ !matrix.cross && runner.os == 'Linux' }}
-        run: |
-          export XDG_RUNTIME_DIR="$RUNNER_TEMP/xdg"
-          mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
-          echo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" >> "$GITHUB_ENV"
-          echo "WAYLAND_DISPLAY=wayland-ci" >> "$GITHUB_ENV"
-          weston --backend=headless --socket=wayland-ci --idle-time=0 &
-          timeout 10 sh -c 'until [ -S "$XDG_RUNTIME_DIR/wayland-ci" ]; do sleep 0.1; done'
-      # No session bus runs here, so the host's environment stays at its
-      # defaults; on this bus of the tests' own, a test plays the portal.
-      - name: Start a session bus for the D-Bus test
-        if: ${{ !matrix.cross && runner.os == 'Linux' }}
-        run: |
-          dbus-daemon --session --nofork --address=unix:abstract=/zui-host-ci --print-address > "$RUNNER_TEMP/bus-address" &
-          timeout 10 sh -c 'until [ -s "$RUNNER_TEMP/bus-address" ]; do sleep 0.1; done'
-          echo "ZUI_HOST_TEST_SESSION_BUS=$(head -1 "$RUNNER_TEMP/bus-address")" >> "$GITHUB_ENV"
-      # The examples need a desktop session to show, so on Windows they are
-      # compiled here and run on a desktop.
       - name: Run the unit tests and zui's host suite against a window the user never sees
-        if: ${{ !matrix.cross }}
         run: zig build test --summary all
-      - if: ${{ !matrix.cross }}
-        run: zig build test -Doptimize=ReleaseSafe
-      - if: ${{ !matrix.cross }}
-        run: zig build check
-      # The headless Weston draws in software, so Mesa's EGL hands it
-      # shared-memory buffers.
+      - run: zig build test -Doptimize=ReleaseSafe
+      - run: zig build check
+
+  native-aarch64-windows:
+    name: "hosts/native: check aarch64-windows (ubuntu-latest)"
+    needs: changes
+    if: needs.changes.outputs.hosts-native == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: hosts/native
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - run: zig build check -Dtarget=aarch64-windows
+
+  native-linux:
+    name: "hosts/native: test and check (ubuntu-latest, Weston)"
+    needs: changes
+    if: needs.changes.outputs.hosts-native == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: hosts/native
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - uses: ./.github/actions/wayland-session
+      - name: Run the unit tests and zui's host suite against a window the user never sees
+        run: zig build test --summary all
+      - run: zig build test -Doptimize=ReleaseSafe
+      - run: zig build check
+
+  # The headless Weston draws in software, so Mesa's EGL hands it
+  # shared-memory buffers.
+  native-linux-targets:
+    name: "hosts/native: examples and targets (ubuntu-latest, Weston)"
+    needs: changes
+    if: needs.changes.outputs.hosts-native == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      LIBGL_ALWAYS_SOFTWARE: "1"
+    defaults:
+      run:
+        working-directory: hosts/native
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - uses: ./.github/actions/wayland-session
+      - name: Answer every host service through the host's fake
+        run: |
+          set -o pipefail
+          timeout 120 zig build services -- --check 2>&1 | tee services.log
+          grep "every service answered" services.log
+      - name: Restyle a window when its theme file is rewritten
+        run: |
+          set -o pipefail
+          timeout 120 zig build theme -- --check 2>&1 | tee theme.log
+          grep "restyled in frame" theme.log
       - name: Visit every screen of the tour, drawn by the sokol renderer
-        if: ${{ !matrix.cross && runner.os == 'Linux' }}
-        env:
-          LIBGL_ALWAYS_SOFTWARE: "1"
         run: |
           set -o pipefail
           timeout 300 zig build tour -- --frames 300 --cycle 30 2>&1 | tee cycle.log
           grep "0 layer overflows, 0 glyph atlas overflows, diagnostics ok: true" cycle.log
+      - name: Run the tour idle without crashing, and show the CPU it used
+        run: |
+          set -o pipefail
+          timeout 60 zig build tour -- --measure-idle 2>&1 | grep "^idle" | tee idle.log
+          echo "The tour's welcome screen under a headless Weston, $(cat idle.log)" >> "$GITHUB_STEP_SUMMARY"
       - name: Draw the showcase, by the sokol renderer
-        if: ${{ !matrix.cross && runner.os == 'Linux' }}
-        env:
-          LIBGL_ALWAYS_SOFTWARE: "1"
         run: |
           set -o pipefail
           timeout 120 zig build showcase -- --frames 60 2>&1 | tee showcase.log
           grep "diagnostics ok: true" showcase.log
 
-  web-host:
-    name: "hosts/web: ${{ matrix.leg }} (${{ matrix.os }})"
-    runs-on: ${{ matrix.os }}
+  # What the browser runs compiles for wasm32-freestanding, so the tests run
+  # on Linux, and Windows and macOS are cross-checked.
+  web:
+    name: "hosts/web: ${{ matrix.leg }}"
+    needs: changes
+    if: needs.changes.outputs.hosts-web == 'true'
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { leg: test and check, os: ubuntu-latest }
-          - { leg: test and check, os: windows-latest }
-          - { leg: test and check, os: macos-latest }
-          - { leg: "the tour's stream decoded and its input written by the browser's client, the tour run in a worker, and its published page (Node, headless Chrome)", os: ubuntu-latest, browser: true }
-          - { leg: "the tour's frames drawn in headless Chrome by the WebGL renderer, against the sokol renderer (Xvfb)", os: ubuntu-latest, drawing: true }
+          - { leg: tests, run: zig build test }
+          - { leg: tests ReleaseSafe, run: zig build test -Doptimize=ReleaseSafe }
+          - { leg: tests ReleaseFast, run: zig build test -Doptimize=ReleaseFast }
+          - { leg: checks, run: zig build check && zig build check -Dtarget=x86_64-windows && zig build check -Dtarget=aarch64-macos }
+          - { leg: test-demo (Node), run: node --version && zig build test-demo }
+          - { leg: test-demo ReleaseSafe (Node), run: node --version && zig build test-demo -Doptimize=ReleaseSafe }
+          - { leg: test-input (headless Chrome), run: google-chrome --version && zig build test-input -Dbrowser=google-chrome }
     defaults:
       run:
         working-directory: hosts/web
@@ -394,36 +512,48 @@ jobs:
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: ${{ env.ZIG_VERSION }}
-      - if: ${{ !matrix.browser && !matrix.drawing }}
-        run: zig build test
-      - if: ${{ !matrix.browser && !matrix.drawing }}
-        run: zig build test -Doptimize=ReleaseSafe
-      - if: ${{ !matrix.browser && !matrix.drawing }}
-        run: zig build test -Doptimize=ReleaseFast
-      - name: Check, including the client and the tour's worker compiled for wasm32-freestanding
-        if: ${{ !matrix.browser && !matrix.drawing }}
-        run: zig build check
-      - if: matrix.browser
-        run: node --version
-      - if: matrix.browser
-        run: zig build test-demo
-      - if: matrix.browser
-        run: zig build test-demo -Doptimize=ReleaseSafe
-      - if: matrix.browser || matrix.drawing
-        run: google-chrome --version
-      - if: matrix.browser
-        run: zig build test-input -Dbrowser=google-chrome
-      - if: matrix.browser
-        run: zig build test-site -Dbrowser=google-chrome
+      - run: ${{ matrix.run }}
+
+  # Pages publishes only after this job, under this name, passed.
+  web-site:
+    name: "hosts/web: test-site (headless Chrome)"
+    needs: changes
+    if: needs.changes.outputs.hosts-web == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: hosts/web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - run: google-chrome --version
+      - run: zig build test-site -Dbrowser=google-chrome
+
+  web-draw:
+    name: "hosts/web: test-draw (headless Chrome against sokol, Xvfb)"
+    needs: changes
+    if: needs.changes.outputs.hosts-web == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: hosts/web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - run: google-chrome --version
       - name: Install sokol's X11, OpenGL, PulseAudio, EGL and Wayland dependencies, which the reference drawing links, and Xvfb
-        if: matrix.drawing
         run: sudo apt-get update && sudo apt-get install -y libx11-dev libxi-dev libxcursor-dev libgl1-mesa-dev libpulse-dev libegl-dev libwayland-dev xvfb
-      - if: matrix.drawing
-        run: xvfb-run --auto-servernum zig build test-draw -Dbrowser=google-chrome
+      - run: xvfb-run --auto-servernum zig build test-draw -Dbrowser=google-chrome
         env:
           ZUI_WEB_DRAW_FAILURES: ${{ runner.temp }}/draw-failures
       - name: Upload each frame that did not match, drawn and reference
-        if: matrix.drawing && failure()
+        if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: draw-failures

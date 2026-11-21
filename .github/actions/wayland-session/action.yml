@@ -1,0 +1,25 @@
+name: Wayland session
+description: Install what the native host links on Linux, and start a headless Weston and a session bus of the tests' own
+runs:
+  using: composite
+  steps:
+    - name: Install Wayland, xkbcommon, EGL, sokol's X11, OpenGL and PulseAudio dependencies, Weston and a D-Bus daemon
+      shell: bash
+      run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev libegl-dev libx11-dev libxi-dev libxcursor-dev libgl1-mesa-dev libpulse-dev weston dbus-daemon
+    - name: Start a headless Weston
+      shell: bash
+      run: |
+        export XDG_RUNTIME_DIR="$RUNNER_TEMP/xdg"
+        mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
+        echo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" >> "$GITHUB_ENV"
+        echo "WAYLAND_DISPLAY=wayland-ci" >> "$GITHUB_ENV"
+        weston --backend=headless --socket=wayland-ci --idle-time=0 &
+        timeout 10 sh -c 'until [ -S "$XDG_RUNTIME_DIR/wayland-ci" ]; do sleep 0.1; done'
+    # The runner has no session bus, so the host's environment stays at its
+    # defaults; on this one, a test plays the portal.
+    - name: Start a session bus for the D-Bus test
+      shell: bash
+      run: |
+        dbus-daemon --session --nofork --address=unix:abstract=/zui-host-ci --print-address > "$RUNNER_TEMP/bus-address" &
+        timeout 10 sh -c 'until [ -s "$RUNNER_TEMP/bus-address" ]; do sleep 0.1; done'
+        echo "ZUI_HOST_TEST_SESSION_BUS=$(head -1 "$RUNNER_TEMP/bus-address")" >> "$GITHUB_ENV"
