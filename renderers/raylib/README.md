@@ -51,7 +51,11 @@ pub fn main(init: std.process.Init) !void {
 `.library`, raylib's own window: each `zuiSubmit` begins raylib's
 drawing, clears to `clear_color`, draws the frame and presents it, or
 with `drawOffscreen()` draws into a render texture that
-`saveScreenshot(path)` saves, as the tour's `--screenshot` does; with
+`saveScreenshot(path)` saves, as the tour's `--screenshot` does. The
+window asks raylib for four samples per pixel, which smooths the edges
+of shapes; the render texture is drawn through a framebuffer with as
+many and resolved after each frame, when the driver can multisample one.
+With
 `.presentation = .draws_into_current_target` it only draws, into the
 target its caller began, as its conformance harness does. raylib is
 built with `SUPPORT_CUSTOM_FRAME_CONTROL`, so `EndDrawing` neither

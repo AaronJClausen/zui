@@ -318,7 +318,7 @@ pub const Renderer = struct {
         if (format == .sdr) return .{ .swapchain = context.swapchain(.sdr) };
         const swapchain = context.swapchain(.scrgb_fp16);
         const size: [2]u32 = .{ @intCast(swapchain.width), @intCast(swapchain.height) };
-        if (!self.offscreen.prepare(size, .scrgb_fp16, 1) or !self.scrgb_present.prepare()) return error.UnsupportedSurface;
+        if (!self.offscreen.prepare(size, .scrgb_fp16, context.sampleCount()) or !self.scrgb_present.prepare()) return error.UnsupportedSurface;
         return .{ .scrgb_window = swapchain };
     }
 

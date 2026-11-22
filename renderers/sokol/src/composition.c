@@ -30,7 +30,9 @@ typedef struct zui_sokol_composition {
     ID3D11Device *device;
     ID3D11DeviceContext *context;
     IDXGISwapChain1 *swapchain;
-    ID3D11RenderTargetView *render_view;
+    ID3D11RenderTargetView *back_buffer_view;
+    ID3D11Texture2D *multisampled_color;
+    ID3D11RenderTargetView *multisampled_view;
     ID3D11Texture2D *depth_stencil;
     ID3D11DepthStencilView *depth_stencil_view;
     composition_object *composition;
@@ -39,6 +41,7 @@ typedef struct zui_sokol_composition {
     HMODULE dcomp_library;
     HWND hwnd;
     UINT width, height;
+    UINT sample_count;
     BOOL in_scrgb;
     float sdr_white_scale;
     ULONGLONG sdr_white_read_at;
@@ -47,6 +50,9 @@ typedef struct zui_sokol_composition {
 // Read at most this often, since the SDR content brightness slider tells
 // no window when it moves.
 enum { sdr_white_read_interval_ms = 500, max_display_paths = 32 };
+
+// Smooths the edges of shapes, which the renderer draws as plain triangles.
+enum { wanted_sample_count = 4 };
 
 static void release(void *object) {
     if (object) IUnknown_Release((IUnknown *)object);
@@ -57,28 +63,64 @@ static HRESULT call0(composition_object *object, int index) {
 }
 
 static void release_views(zui_sokol_composition *self) {
-    release(self->render_view);
+    release(self->back_buffer_view);
+    release(self->multisampled_view);
+    release(self->multisampled_color);
     release(self->depth_stencil_view);
     release(self->depth_stencil);
-    self->render_view = NULL;
+    self->back_buffer_view = NULL;
+    self->multisampled_view = NULL;
+    self->multisampled_color = NULL;
     self->depth_stencil_view = NULL;
     self->depth_stencil = NULL;
+}
+
+static DXGI_FORMAT color_format(BOOL in_scrgb) {
+    return in_scrgb ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_B8G8R8A8_UNORM;
+}
+
+static BOOL multisamples(ID3D11Device *device, DXGI_FORMAT format, UINT sample_count) {
+    UINT quality_levels = 0;
+    return SUCCEEDED(ID3D11Device_CheckMultisampleQualityLevels(device, format, sample_count, &quality_levels)) && quality_levels > 0;
+}
+
+static UINT supported_sample_count(ID3D11Device *device) {
+    BOOL every_format = multisamples(device, color_format(FALSE), wanted_sample_count) &&
+        multisamples(device, color_format(TRUE), wanted_sample_count) &&
+        multisamples(device, DXGI_FORMAT_D24_UNORM_S8_UINT, wanted_sample_count);
+    return every_format ? wanted_sample_count : 1;
 }
 
 static HRESULT create_views(zui_sokol_composition *self) {
     ID3D11Texture2D *back_buffer = NULL;
     HRESULT result = IDXGISwapChain1_GetBuffer(self->swapchain, 0, &iid_d3d11_texture2d, (void **)&back_buffer);
     if (FAILED(result)) return result;
-    result = ID3D11Device_CreateRenderTargetView(self->device, (ID3D11Resource *)back_buffer, NULL, &self->render_view);
+    result = ID3D11Device_CreateRenderTargetView(self->device, (ID3D11Resource *)back_buffer, NULL, &self->back_buffer_view);
     release(back_buffer);
     if (FAILED(result)) return result;
+    if (self->sample_count > 1) {
+        D3D11_TEXTURE2D_DESC color = {
+            .Width = self->width,
+            .Height = self->height,
+            .MipLevels = 1,
+            .ArraySize = 1,
+            .Format = color_format(self->in_scrgb),
+            .SampleDesc = {.Count = self->sample_count},
+            .Usage = D3D11_USAGE_DEFAULT,
+            .BindFlags = D3D11_BIND_RENDER_TARGET,
+        };
+        result = ID3D11Device_CreateTexture2D(self->device, &color, NULL, &self->multisampled_color);
+        if (FAILED(result)) return result;
+        result = ID3D11Device_CreateRenderTargetView(self->device, (ID3D11Resource *)self->multisampled_color, NULL, &self->multisampled_view);
+        if (FAILED(result)) return result;
+    }
     D3D11_TEXTURE2D_DESC depth = {
         .Width = self->width,
         .Height = self->height,
         .MipLevels = 1,
         .ArraySize = 1,
         .Format = DXGI_FORMAT_D24_UNORM_S8_UINT,
-        .SampleDesc = {.Count = 1},
+        .SampleDesc = {.Count = self->sample_count},
         .Usage = D3D11_USAGE_DEFAULT,
         .BindFlags = D3D11_BIND_DEPTH_STENCIL,
     };
@@ -123,6 +165,7 @@ HRESULT zui_sokol_composition_create(HWND hwnd, UINT width, UINT height, void *s
     } else {
         result = D3D11CreateDevice(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, D3D11_CREATE_DEVICE_BGRA_SUPPORT, &level, 1, D3D11_SDK_VERSION, &self->device, NULL, &self->context);
     }
+    if (SUCCEEDED(result)) self->sample_count = supported_sample_count(self->device);
     if (SUCCEEDED(result)) result = ID3D11Device_QueryInterface(self->device, &iid_dxgi_device, (void **)&dxgi_device);
     if (SUCCEEDED(result)) result = IDXGIDevice_GetAdapter(dxgi_device, &adapter);
     if (SUCCEEDED(result)) result = IDXGIAdapter_GetParent(adapter, &iid_dxgi_factory2, (void **)&factory);
@@ -130,7 +173,7 @@ HRESULT zui_sokol_composition_create(HWND hwnd, UINT width, UINT height, void *s
         DXGI_SWAP_CHAIN_DESC1 description = {
             .Width = self->width,
             .Height = self->height,
-            .Format = DXGI_FORMAT_B8G8R8A8_UNORM,
+            .Format = color_format(FALSE),
             .SampleDesc = {.Count = 1},
             .BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT,
             .BufferCount = 2,
@@ -169,6 +212,7 @@ void *zui_sokol_composition_device(zui_sokol_composition *self) { return self->d
 void zui_sokol_device_retain(void *device) { ID3D11Device_AddRef((ID3D11Device *)device); }
 void zui_sokol_device_release(void *device) { release(device); }
 void *zui_sokol_composition_device_context(zui_sokol_composition *self) { return self->context; }
+UINT zui_sokol_composition_sample_count(zui_sokol_composition *self) { return self->sample_count; }
 
 static HRESULT set_color_space(zui_sokol_composition *self, BOOL in_scrgb) {
     IDXGISwapChain3 *swapchain3 = NULL;
@@ -181,8 +225,10 @@ static HRESULT set_color_space(zui_sokol_composition *self, BOOL in_scrgb) {
 
 // Resizes the buffers to the window's client area, and changes their format
 // between 8-bit sRGB and half-float scRGB, when either changed, and gives
-// the views to draw this frame into.
-HRESULT zui_sokol_composition_frame(zui_sokol_composition *self, UINT width, UINT height, BOOL in_scrgb, void **render_view, void **depth_stencil_view) {
+// the views to draw this frame into. With more than one sample a pixel,
+// `render_view` is multisampled and resolved into `resolve_view`, the back
+// buffer's; otherwise it is the back buffer's and `resolve_view` is null.
+HRESULT zui_sokol_composition_frame(zui_sokol_composition *self, UINT width, UINT height, BOOL in_scrgb, void **render_view, void **resolve_view, void **depth_stencil_view) {
     width = width ? width : 1;
     height = height ? height : 1;
     in_scrgb = in_scrgb != 0;
@@ -190,8 +236,7 @@ HRESULT zui_sokol_composition_frame(zui_sokol_composition *self, UINT width, UIN
         release_views(self);
         ID3D11DeviceContext_OMSetRenderTargets(self->context, 0, NULL, NULL);
         ID3D11DeviceContext_Flush(self->context);
-        DXGI_FORMAT format = in_scrgb ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_B8G8R8A8_UNORM;
-        HRESULT result = IDXGISwapChain1_ResizeBuffers(self->swapchain, 0, width, height, format, 0);
+        HRESULT result = IDXGISwapChain1_ResizeBuffers(self->swapchain, 0, width, height, color_format(in_scrgb), 0);
         if (FAILED(result)) return result;
         self->width = width;
         self->height = height;
@@ -203,7 +248,9 @@ HRESULT zui_sokol_composition_frame(zui_sokol_composition *self, UINT width, UIN
         result = create_views(self);
         if (FAILED(result)) return result;
     }
-    *render_view = self->render_view;
+    BOOL multisampled = self->multisampled_view != NULL;
+    *render_view = multisampled ? self->multisampled_view : self->back_buffer_view;
+    *resolve_view = multisampled ? self->back_buffer_view : NULL;
     *depth_stencil_view = self->depth_stencil_view;
     return S_OK;
 }

@@ -485,7 +485,7 @@ pub const Renderer = struct {
     glyph_texture: Texture = .{},
     clear_color: zui.Color = .black,
     presentation: Presentation = .presents_each_frame,
-    offscreen: ?c.RenderTexture2D = null,
+    offscreen: ?Offscreen = null,
     /// When the first frame was presented, on raylib's clock: seconds
     /// since the window opened.
     first_present_seconds: ?f64 = null,
@@ -509,7 +509,7 @@ pub const Renderer = struct {
     }
 
     pub fn deinit(self: *Renderer) void {
-        if (self.offscreen) |texture| c.UnloadRenderTexture(texture);
+        if (self.offscreen) |*offscreen| offscreen.deinit();
         if (self.glyph_texture.id != 0) c.UnloadTexture(self.glyph_texture);
         if (self.glyphs) |atlas| atlas.destroy(std.heap.page_allocator);
         self.* = .{};
@@ -523,16 +523,17 @@ pub const Renderer = struct {
     }
 
     /// Draws every frame into a texture of the window's size instead of
-    /// the window, for `saveScreenshot`.
+    /// the window, for `saveScreenshot`, with as many samples a pixel as
+    /// the window's, when the driver can multisample a framebuffer.
     pub fn drawOffscreen(self: *Renderer) void {
-        if (self.offscreen == null) self.offscreen = c.LoadRenderTexture(c.GetScreenWidth(), c.GetScreenHeight());
+        if (self.offscreen == null) self.offscreen = .init(c.GetScreenWidth(), c.GetScreenHeight());
     }
 
     /// Saves the last frame drawn offscreen as an image file, such as a
     /// PNG.
     pub fn saveScreenshot(self: *Renderer, path: [:0]const u8) !void {
-        const texture = self.offscreen orelse return error.NotDrawingOffscreen;
-        var image = c.LoadImageFromTexture(texture.texture);
+        const offscreen = self.offscreen orelse return error.NotDrawingOffscreen;
+        var image = c.LoadImageFromTexture(offscreen.resolved.texture);
         defer c.UnloadImage(image);
         c.ImageFlipVertical(&image);
         if (!c.ExportImage(image, path.ptr)) return error.ScreenshotFailed;
@@ -543,10 +544,13 @@ pub const Renderer = struct {
     pub fn zuiSubmit(self: *Renderer, surface: zui.Surface, frame: anytype) error{UnsupportedSurface}!void {
         if (surface != .library) return error.UnsupportedSurface;
         if (self.presentation == .draws_into_current_target) return self.draw(frame);
-        if (self.offscreen) |texture| c.BeginTextureMode(texture) else c.BeginDrawing();
+        if (self.offscreen) |offscreen| c.BeginTextureMode(offscreen.drawnInto()) else c.BeginDrawing();
         c.ClearBackground(toRaylibColor(self.clear_color));
         self.draw(frame);
-        if (self.offscreen != null) return c.EndTextureMode();
+        if (self.offscreen) |offscreen| {
+            c.EndTextureMode();
+            return offscreen.resolve();
+        }
         c.EndDrawing();
         c.SwapScreenBuffer();
         if (self.first_present_seconds == null) self.first_present_seconds = c.GetTime();
@@ -733,6 +737,82 @@ const ImageOutline = struct {
 
 /// zui's clip rectangles are already intersected with every enclosing
 /// clip, so restoring the enclosing one on `clip_end` is all that is needed.
+/// Where frames are drawn instead of the window: `resolved`, read back for a
+/// screenshot, and, when the driver can, a framebuffer with
+/// `sample_count` samples a pixel that each frame is drawn into and then
+/// resolved into `resolved`, so its edges are smoothed as the window's are.
+const Offscreen = struct {
+    resolved: c.RenderTexture2D,
+    multisampled: ?Multisampled,
+
+    const sample_count = 4;
+
+    const Multisampled = struct {
+        framebuffer: c_uint,
+        color: c_uint,
+        delete_renderbuffers: *const fn (count: c_int, ids: [*]const c_uint) callconv(.c) void,
+    };
+
+    const gl_renderbuffer = 0x8D41;
+    const gl_rgba8 = 0x8058;
+    const gl_color_buffer_bit = 0x4000;
+    const gl_framebuffer = 0x8D40;
+
+    fn init(width: c_int, height: c_int) Offscreen {
+        return .{ .resolved = c.LoadRenderTexture(width, height), .multisampled = loadMultisampled(width, height) };
+    }
+
+    fn loadMultisampled(width: c_int, height: c_int) ?Multisampled {
+        const GenRenderbuffers = *const fn (count: c_int, ids: [*]c_uint) callconv(.c) void;
+        const BindRenderbuffer = *const fn (target: c_uint, id: c_uint) callconv(.c) void;
+        const RenderbufferStorageMultisample = *const fn (target: c_uint, samples: c_int, format: c_uint, width: c_int, height: c_int) callconv(.c) void;
+        const gen: GenRenderbuffers = @ptrCast(rlgl.rlGetProcAddress("glGenRenderbuffers") orelse return null);
+        const bind: BindRenderbuffer = @ptrCast(rlgl.rlGetProcAddress("glBindRenderbuffer") orelse return null);
+        const storage: RenderbufferStorageMultisample = @ptrCast(rlgl.rlGetProcAddress("glRenderbufferStorageMultisample") orelse return null);
+        const delete: @FieldType(Multisampled, "delete_renderbuffers") = @ptrCast(rlgl.rlGetProcAddress("glDeleteRenderbuffers") orelse return null);
+
+        var color: [1]c_uint = .{0};
+        gen(1, &color);
+        bind(gl_renderbuffer, color[0]);
+        storage(gl_renderbuffer, sample_count, gl_rgba8, width, height);
+        bind(gl_renderbuffer, 0);
+        const framebuffer = rlgl.rlLoadFramebuffer();
+        rlgl.rlFramebufferAttach(framebuffer, color[0], rlgl.RL_ATTACHMENT_COLOR_CHANNEL0, rlgl.RL_ATTACHMENT_RENDERBUFFER, 0);
+        if (framebuffer == 0 or !rlgl.rlFramebufferComplete(framebuffer)) {
+            if (framebuffer != 0) rlgl.rlUnloadFramebuffer(framebuffer);
+            delete(1, &color);
+            return null;
+        }
+        return .{ .framebuffer = framebuffer, .color = color[0], .delete_renderbuffers = delete };
+    }
+
+    fn deinit(self: *Offscreen) void {
+        if (self.multisampled) |multisampled| {
+            rlgl.rlUnloadFramebuffer(multisampled.framebuffer);
+            multisampled.delete_renderbuffers(1, &.{multisampled.color});
+        }
+        c.UnloadRenderTexture(self.resolved);
+    }
+
+    /// What `BeginTextureMode` binds: raylib reads only its framebuffer
+    /// and its texture's size.
+    fn drawnInto(self: Offscreen) c.RenderTexture2D {
+        const multisampled = self.multisampled orelse return self.resolved;
+        var target = self.resolved;
+        target.id = multisampled.framebuffer;
+        return target;
+    }
+
+    fn resolve(self: Offscreen) void {
+        const multisampled = self.multisampled orelse return;
+        const size = .{ self.resolved.texture.width, self.resolved.texture.height };
+        rlgl.rlBindFramebuffer(rlgl.RL_READ_FRAMEBUFFER, multisampled.framebuffer);
+        rlgl.rlBindFramebuffer(rlgl.RL_DRAW_FRAMEBUFFER, self.resolved.id);
+        rlgl.rlBlitFramebuffer(0, 0, size[0], size[1], 0, 0, size[0], size[1], gl_color_buffer_bit);
+        rlgl.rlBindFramebuffer(gl_framebuffer, 0);
+    }
+};
+
 const ScissorStack = struct {
     /// raylib's scissor is in screen units, which the drawing's zoom does not reach.
     zoom: f32,

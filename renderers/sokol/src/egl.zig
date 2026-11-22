@@ -27,6 +27,8 @@ const EGL_BLUE_SIZE = 0x3022;
 const EGL_ALPHA_SIZE = 0x3021;
 const EGL_DEPTH_SIZE = 0x3025;
 const EGL_STENCIL_SIZE = 0x3026;
+const EGL_SAMPLES = 0x3031;
+const EGL_SAMPLE_BUFFERS = 0x3032;
 const EGL_CONTEXT_MAJOR_VERSION = 0x3098;
 const EGL_CONTEXT_MINOR_VERSION = 0x30FB;
 const EGL_CONTEXT_OPENGL_PROFILE_MASK = 0x30FD;
@@ -57,7 +59,12 @@ pub const Device = struct {
     display: EGLDisplay,
     config: EGLConfig,
     context: EGLContext,
+    /// Of every window's default framebuffer: `wanted_sample_count` when
+    /// the display offers it, which smooths the edges of shapes, or 1.
+    sample_count: i32,
 };
+
+const wanted_sample_count = 4;
 
 /// One Wayland surface's window surface, drawn by its device's context,
 /// presenting with vsync. Its pixels are opaque: the configuration has no
@@ -77,7 +84,11 @@ pub const Context = struct {
         if (eglInitialize(display, null, null) == 0) return error.NoEglDisplay;
         errdefer _ = eglTerminate(display);
         if (eglBindAPI(EGL_OPENGL_API) == 0) return error.NoOpenGlContext;
-        const config = try opaqueConfig(display);
+        var sample_count: i32 = wanted_sample_count;
+        const config = opaqueConfig(display, wanted_sample_count) catch blk: {
+            sample_count = 1;
+            break :blk try opaqueConfig(display, 1);
+        };
 
         const context_attributes = [_]EGLint{
             EGL_CONTEXT_MAJOR_VERSION,       4,
@@ -87,7 +98,7 @@ pub const Context = struct {
         };
         const context = eglCreateContext(display, config, null, &context_attributes) orelse return error.NoOpenGlContext;
         errdefer _ = eglDestroyContext(display, context);
-        return initSharing(wayland_surface, .{ .display = display, .config = config, .context = context });
+        return initSharing(wayland_surface, .{ .display = display, .config = config, .context = context, .sample_count = sample_count });
     }
 
     /// A window surface for `wayland_surface` on `device`, another
@@ -104,9 +115,11 @@ pub const Context = struct {
         return .{ .device = device, .wayland_surface = wayland_surface, .egl_surface = egl_surface, .window = window, .size = initial_size };
     }
 
-    /// The first configuration without alpha, since a Wayland compositor
-    /// blends a surface by the alpha it holds.
-    fn opaqueConfig(display: EGLDisplay) error{NoEglConfig}!EGLConfig {
+    /// A configuration with `sample_count` samples a pixel, preferring one
+    /// without alpha, since a Wayland compositor blends a surface by the
+    /// alpha it holds.
+    fn opaqueConfig(display: EGLDisplay, sample_count: EGLint) error{NoEglConfig}!EGLConfig {
+        const multisampled = sample_count > 1;
         const attributes = [_]EGLint{
             EGL_SURFACE_TYPE,    EGL_WINDOW_BIT,
             EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT,
@@ -116,16 +129,30 @@ pub const Context = struct {
             EGL_ALPHA_SIZE,      0,
             EGL_DEPTH_SIZE,      24,
             EGL_STENCIL_SIZE,    8,
+            EGL_SAMPLE_BUFFERS,  @intFromBool(multisampled),
+            EGL_SAMPLES,         if (multisampled) sample_count else 0,
             EGL_NONE,
         };
         var configs: [64]EGLConfig = undefined;
         var count: EGLint = 0;
         if (eglChooseConfig(display, &attributes, &configs, configs.len, &count) == 0 or count == 0) return error.NoEglConfig;
-        for (configs[0..@intCast(count)]) |config| {
-            var alpha_bits: EGLint = -1;
-            if (eglGetConfigAttrib(display, config, EGL_ALPHA_SIZE, &alpha_bits) != 0 and alpha_bits == 0) return config;
+        const matching = configs[0..@intCast(count)];
+        for (matching) |config| {
+            if (configAttribute(display, config, EGL_ALPHA_SIZE) == 0 and samplesOf(display, config) == sample_count) return config;
         }
-        return configs[0];
+        for (matching) |config| {
+            if (samplesOf(display, config) == sample_count) return config;
+        }
+        return error.NoEglConfig;
+    }
+
+    fn samplesOf(display: EGLDisplay, config: EGLConfig) EGLint {
+        return @max(configAttribute(display, config, EGL_SAMPLES), 1);
+    }
+
+    fn configAttribute(display: EGLDisplay, config: EGLConfig, attribute: EGLint) EGLint {
+        var value: EGLint = -1;
+        return if (eglGetConfigAttrib(display, config, attribute, &value) != 0) value else -1;
     }
 
     /// The device, held until `releaseDevice` whichever contexts on it are
@@ -152,10 +179,11 @@ pub const Context = struct {
         wl_egl_window_destroy(self.window);
     }
 
-    const defaults: sg.EnvironmentDefaults = .{ .color_format = .RGBA8, .depth_format = .DEPTH_STENCIL, .sample_count = 1 };
+    const color_format: sg.PixelFormat = .RGBA8;
+    const depth_format: sg.PixelFormat = .DEPTH_STENCIL;
 
-    pub fn environment(_: *const Context) sg.Environment {
-        return .{ .defaults = defaults };
+    pub fn environment(self: *const Context) sg.Environment {
+        return .{ .defaults = .{ .color_format = color_format, .depth_format = depth_format, .sample_count = self.device.sample_count } };
     }
 
     /// Draws what follows into this surface: the device's one context
@@ -177,9 +205,9 @@ pub const Context = struct {
         return .{
             .width = wanted[0],
             .height = wanted[1],
-            .sample_count = defaults.sample_count,
-            .color_format = defaults.color_format,
-            .depth_format = defaults.depth_format,
+            .sample_count = self.device.sample_count,
+            .color_format = color_format,
+            .depth_format = depth_format,
             .gl = .{ .framebuffer = 0 },
         };
     }

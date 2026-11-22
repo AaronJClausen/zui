@@ -16,7 +16,8 @@ extern fn zui_sokol_composition_create(hwnd: HWND, width: c_uint, height: c_uint
 extern fn zui_sokol_composition_destroy(self: *Composition) callconv(.c) void;
 extern fn zui_sokol_composition_device(self: *Composition) callconv(.c) ?*anyopaque;
 extern fn zui_sokol_composition_device_context(self: *Composition) callconv(.c) ?*anyopaque;
-extern fn zui_sokol_composition_frame(self: *Composition, width: c_uint, height: c_uint, in_scrgb: c_int, render_view: *?*anyopaque, depth_stencil_view: *?*anyopaque) callconv(.c) i32;
+extern fn zui_sokol_composition_frame(self: *Composition, width: c_uint, height: c_uint, in_scrgb: c_int, render_view: *?*anyopaque, resolve_view: *?*anyopaque, depth_stencil_view: *?*anyopaque) callconv(.c) i32;
+extern fn zui_sokol_composition_sample_count(self: *Composition) callconv(.c) c_uint;
 extern fn zui_sokol_composition_sdr_white_scale(self: *Composition) callconv(.c) f32;
 extern fn zui_sokol_composition_present(self: *Composition) callconv(.c) i32;
 extern fn zui_sokol_device_retain(device: *anyopaque) callconv(.c) void;
@@ -58,7 +59,7 @@ pub const Context = struct {
 
     pub fn environment(self: *const Context) sg.Environment {
         return .{
-            .defaults = .{ .color_format = .BGRA8, .depth_format = .DEPTH_STENCIL, .sample_count = 1 },
+            .defaults = .{ .color_format = .BGRA8, .depth_format = .DEPTH_STENCIL, .sample_count = self.sampleCount() },
             .d3d11 = .{ .device = zui_sokol_composition_device(self.composition), .device_context = zui_sokol_composition_device_context(self.composition) },
         };
     }
@@ -69,19 +70,27 @@ pub const Context = struct {
     pub fn swapchain(self: *const Context, format: zui.OutputFormat) sg.Swapchain {
         const size = clientSize(self.hwnd);
         var render_view: ?*anyopaque = null;
+        var resolve_view: ?*anyopaque = null;
         var depth_stencil_view: ?*anyopaque = null;
-        _ = zui_sokol_composition_frame(self.composition, size[0], size[1], @intFromBool(format == .scrgb_fp16), &render_view, &depth_stencil_view);
+        _ = zui_sokol_composition_frame(self.composition, size[0], size[1], @intFromBool(format == .scrgb_fp16), &render_view, &resolve_view, &depth_stencil_view);
         return .{
             .width = @intCast(size[0]),
             .height = @intCast(size[1]),
-            .sample_count = 1,
+            .sample_count = self.sampleCount(),
             .color_format = switch (format) {
                 .sdr => .BGRA8,
                 .scrgb_fp16 => .RGBA16F,
             },
             .depth_format = .DEPTH_STENCIL,
-            .d3d11 = .{ .render_view = render_view, .depth_stencil_view = depth_stencil_view },
+            .d3d11 = .{ .render_view = render_view, .resolve_view = resolve_view, .depth_stencil_view = depth_stencil_view },
         };
+    }
+
+    /// Samples a pixel of every frame drawn into the window: 4, which
+    /// smooths the edges of shapes, when the device can multisample each
+    /// of its formats, or 1.
+    pub fn sampleCount(self: *const Context) i32 {
+        return @intCast(zui_sokol_composition_sample_count(self.composition));
     }
 
     /// What a color in zui's scRGB, where 1.0 is SDR white, is multiplied
