@@ -2512,11 +2512,11 @@ And for extra roles:
 
 ```zig
 pub const Preferences = struct {
-    theme: zui.Environment.Theme,
-    contrast: zui.Environment.Contrast,
-    text_scale: f32,
-    reduced_transparency: bool,
-    accent: ?zui.Color,                 // the user's, else the system's, else the design's seed
+    theme: zui.Environment.Theme = .light,
+    contrast: zui.Environment.Contrast = .normal,
+    text_scale: f32 = 1,
+    reduced_transparency: bool = false,
+    accent: ?zui.Color = null,          // the user's, else the system's, else the design's seed
     density: Density = .comfortable,     // zui.design.Density: enum { compact, comfortable, roomy }
     color_vision: ColorVision = .typical, // enum { typical, protan, deutan, tritan, achromat }
     corners: CornerPreference = .as_designed, // enum { sharper, as_designed, rounder }: one `CornerSize` step
@@ -2526,17 +2526,20 @@ pub const Preferences = struct {
 const preferences: zui_design.Preferences = .from(ui.environment(), app.choices);
 if (!std.meta.eql(preferences, app.preferences)) {
     app.preferences = preferences;
-    _ = app.design.resolve(preferences, &app.tokens);
+    _ = zui_design.resolve(app.design, preferences, &app.tokens);
 }
 ```
 
 - **What the OS reports comes from the environment** (§7.2), including
   `accent`. Density, color vision, the corner preference and the pointer
   are the user's choices in the application, which `choices` carries.
+- **`resolve` is a free function,** since `Design` is the core's and a
+  module cannot give it methods. It takes the tokens as a pointer to any
+  `zui.design.Tokens(Ui, ExtraRoles)`.
 - **`resolve` allocates nothing,** writes every token, and returns what
   it repaired (§18.4).
-- **A design resolved at comptime,** `comptime design.resolve(…)` for
-  each theme and contrast, is checked during the build.
+- **A design resolved at comptime,** `comptime zui_design.resolve(design,
+  …)` for each theme and contrast, is checked during the build.
 
 ### 18.4 Color, contrast and color vision
 
@@ -3205,7 +3208,7 @@ nothing until it builds with Tracy.
 ### 19.11 `zui_design`
 
 The default maker of `zui.design.Tokens` (§18): `Preferences.from` the
-environment and the user's choices, and `design.resolve(preferences,
+environment and the user's choices, and `resolve(design, preferences,
 *Tokens)`, which makes palettes from seeds, solves every declared pair's
 contrast and color vision, applies the density and the type scale, and
 returns what it repaired, without allocating. It also holds the audit of

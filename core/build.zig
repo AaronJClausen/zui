@@ -255,12 +255,20 @@ pub fn build(b: *std.Build) void {
         .imports = &.{.{ .name = "zui", .module = zui_module }},
     });
 
+    const design_module = b.addModule("zui_design", .{
+        .root_source_file = b.path("zui_design/zui_design.zig"),
+        .target = target,
+        .optimize = optimize,
+        .sanitize_thread = if (sanitize_thread) true else null,
+        .imports = &.{.{ .name = "zui", .module = zui_module }},
+    });
+
     const test_step = b.step("test", "Run the unit tests and the compile-error tests, and compile the benchmark tools");
     const unit_test_step = b.step("test-unit", "Run the unit tests, in the selected optimize mode");
     const compile_error_test_step = b.step("test-compile-errors", "Check every compile error's message, which no optimize mode changes");
     const bench_tools_step = b.step("check-bench-tools", "Compile counts, bench-compare and bench-report, each in its own fixed optimize mode");
     for ([_]*std.Build.Step{ unit_test_step, compile_error_test_step, bench_tools_step }) |part| test_step.dependOn(part);
-    const tested_modules = [_]*std.Build.Module{ zui_module, testing_module, async_module, widgets_module, reflect_module, tracy_module, app_module, wire_module, debug_module, motion_module, color_module };
+    const tested_modules = [_]*std.Build.Module{ zui_module, testing_module, async_module, widgets_module, reflect_module, tracy_module, app_module, wire_module, debug_module, motion_module, color_module, design_module };
     for (tested_modules) |tested_module| {
         const module_tests = b.addTest(.{ .root_module = tested_module, .use_llvm = if (sanitize_thread) true else null });
         unit_test_step.dependOn(&b.addRunArtifact(module_tests).step);
@@ -296,6 +304,7 @@ pub fn build(b: *std.Build) void {
                     .{ .name = "zui_debug", .module = debug_module },
                     .{ .name = "zui_motion", .module = motion_module },
                     .{ .name = "zui_color", .module = color_module },
+                    .{ .name = "zui_design", .module = design_module },
                 },
             }),
         });
@@ -336,10 +345,25 @@ pub fn build(b: *std.Build) void {
                 .{ .name = "zui_debug", .module = debug_module },
                 .{ .name = "zui_motion", .module = motion_module },
                 .{ .name = "zui_color", .module = color_module },
+                .{ .name = "zui_design", .module = design_module },
             },
         }),
     });
-    b.step("check", "Type-check zui for the selected target").dependOn(&check_object.step);
+    const design_check_object = b.addObject(.{
+        .name = "zui_design_check",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("zui_design/check.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zui", .module = zui_module },
+                .{ .name = "zui_design", .module = design_module },
+            },
+        }),
+    });
+    const check_step = b.step("check", "Type-check zui for the selected target");
+    check_step.dependOn(&check_object.step);
+    check_step.dependOn(&design_check_object.step);
 
     const bench_zui = releaseFastZui(b, target, build_options);
     const bench_options = b.addOptions();
@@ -428,7 +452,7 @@ pub fn build(b: *std.Build) void {
     }) });
     unit_test_step.dependOn(&b.addRunArtifact(bench_tests).step);
 
-    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "tests", "bench", "zui_testing", "zui_async", "zui_widgets", "zui_reflect", "zui_tracy", "zui_app", "zui_wire", "zui_debug", "zui_motion", "zui_color" };
+    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "tests", "bench", "zui_testing", "zui_async", "zui_widgets", "zui_reflect", "zui_tracy", "zui_app", "zui_wire", "zui_debug", "zui_motion", "zui_color", "zui_design" };
     b.step("fmt", "Format all Zig sources").dependOn(&b.addFmt(.{ .paths = formatted_paths }).step);
     b.step("fmt-check", "Fail if any Zig source is not formatted").dependOn(&b.addFmt(.{ .paths = formatted_paths, .check = true }).step);
 }

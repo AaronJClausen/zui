@@ -26,7 +26,7 @@ is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:11-profiling-guide` A profiling guide | done |
 | `11-polish:12-developer-experience-audit` A developer-experience audit | not started |
 | `11-polish:13-design-vocabulary` The design vocabulary and the appearance contract | done |
-| `11-polish:14-zui-design` `zui_design`: tokens from seeds and preferences | not started |
+| `11-polish:14-zui-design` `zui_design`: tokens from seeds and preferences | in progress |
 | `11-polish:15-type-scale` The type scale | not started |
 | `11-polish:16-corner-shapes` Corner shapes | not started |
 | `11-polish:17-nested-corners` Nested corners | not started |
@@ -729,6 +729,35 @@ apart under every simulation; a resolve allocates nothing, and changing
 one preference resolves in under 50 µs in ReleaseFast.
 
 **Spec.** §18.3, §18.4, §18.5, §19.11.
+
+**Decided here.** `zui_design` carries the OKLab conversions it needs
+(`core/zui_design/oklab.zig`: to and from linear sRGB, gamut mapping by
+chroma, and the sRGB transfer as two 256-entry tables, as `zui_color`
+builds them) over `zui.design.Oklch`, rather than being handed them by
+the application, which would put a color module in every resolve's
+signature. Measured with a fresh cache, type-checking
+`core/zui_design/check.zig` takes 0.20 s with a design resolved at
+comptime in dark high contrast and 0.19 s without it, so the comptime
+cost of carrying them is too small to weigh. `resolve` is a free
+function, `zui_design.resolve(design, preferences, &tokens)`, since
+`Design` is the core's and a module cannot give it methods; SPEC.md
+§18.3 and §19.11 say so.
+
+**Status.** Slice 1 done: `core/zui_design/`, wired as a module and
+re-exported by the root, with `Preferences`, `Preferences.from` (the
+accent from `Choices` alone until `11-polish:18-system-accent`),
+`Repairs` (empty until slice 3) and `resolve`, which writes spacing
+from the density table, each shape role's radius one `CornerSize` step
+from its design's by `Preferences.corners` (`bubble` is 65,536 units,
+which emission's clamp makes a pill), the design's corner shape, target
+floors of 24 and 44 (44 for both under `pointer = .touch`), an outline
+of 1 and a focus ring of 2, `text_padding_scale` as 1 + (text_scale −
+1) / 2, text styles at the modular scale's sizes in the design's fonts
+with `text_scale` to a power from 1 at `caption` to 0.5 at `display`,
+and a measure of 66 characters of half the body size. `zig build check`
+type-checks `core/zui_design/check.zig`, which resolves at run time and
+at comptime, in `zui.Color` and `zui.ExtendedColor`, with extra roles.
+Slice 2, color, is next.
 
 ## 11-polish:15-type-scale — The type scale
 
