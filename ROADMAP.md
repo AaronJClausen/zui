@@ -113,7 +113,7 @@ is in the file its group names.
 
 | Item | Where | Waits for | Status |
 |---|---|---|---|
-| `10-reach:01-linux-host` | `hosts/native/`, `renderers/sokol/` | | in progress; slice 7, many windows, is next |
+| `10-reach:01-linux-host` | `hosts/native/`, `renderers/sokol/` | | in progress; slice 8, the material, is next |
 | `10-reach:02-web-host` | `hosts/web/`, `renderers/webgl/` | | in progress; slice 3, the browser and the tour on it, is next |
 | `10-reach:04-window-decorations` | `core/src/chrome.zig`, `core/src/context.zig`, `core/zui_app/`, `hosts/native/` | | waiting on a person: the checklist under its *Status*, on `zig build title-bar` in `hosts/native/` |
 | `11-polish:13-design-vocabulary` | `core/src/design.zig`, `core/src/contracts.zig` | | |

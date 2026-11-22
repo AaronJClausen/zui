@@ -58,7 +58,7 @@ for the examples sokol's
 | `zig build accessible` | `zui_widgets` controls for Narrator and Accessibility Insights (Windows) |
 | `zig build services` | every host service from buttons, each answer shown; `-- --check` runs it against the fake |
 | `zig build title-bar` | a title bar the application draws, which the OS still drags, maximizes and resizes (Windows also snaps it); `-- --check` hit-tests it hidden |
-| `zig build many-windows` | one application in two windows, each with its own UI; `-- --check` clicks and closes them hidden (Windows) |
+| `zig build many-windows` | one application in two windows, each with its own UI; `-- --check` clicks and closes them, hidden on Windows and shown on Linux |
 
 The tests and examples need a Wayland compositor on Linux (CI runs a
 headless Weston), and an example without `--check`, `--frames` or
@@ -157,12 +157,24 @@ sends each window the messages Windows would.
 
 ## The Linux host
 
-On Linux, `zui_host.Host` opens a Wayland window through libwayland-client
-and xdg-shell, and gives renderers its `wayland` surface (the `wl_display`
-and `wl_surface`). It reads and dispatches the compositor's events on the
-thread that polls it, since a Wayland client has no modal loop to escape.
-So far it:
+On Linux, `zui_host.Host` opens Wayland windows through libwayland-client
+and xdg-shell, and gives renderers each one's `wayland` surface (the
+`wl_display` and its `wl_surface`). It reads and dispatches the
+compositor's events on the thread that polls it, since a Wayland client
+has no modal loop to escape. So far it:
 
+- opens many windows (`zui_capabilities.windows = .many`): `init` opens
+  `.main`, and `zuiOpenWindow(options)` up to `Host.max_windows - 1` more,
+  returning once the compositor has configured it, each with an id never
+  given twice, its own surface, events, scale, requests and chrome
+  regions, polled by its id; `zuiCloseWindow(window)` destroys any of
+  them, `.main` included. The pointer's events reach the window whose
+  surface it entered, keys the one with the keyboard's focus, a drop the
+  one the drag entered and an input method's text the one with the
+  text-input focus. The seat, the clipboard, the watches and the services
+  belong to the host, so they keep working whichever windows are open,
+  and a terminate request, the system sleeping and the desktop's
+  settings reach every window. One wait covers them all;
 - reports the scale the compositor prefers: fractional
   (`wp_fractional_scale_v1`, in 120ths) where it also offers
   `wp_viewporter`, the buffer drawn at physical pixels and the viewport
@@ -260,9 +272,10 @@ bus of their own, which reads nothing while no call waits for an
 answer. Low memory, reduced transparency, the input method's composing
 text, a system material and X11 are still to come.
 
-It passes zui's host suite (`zui_testing.expectHostConforms`) against a
-window the compositor never shows, whose harness delivers what a
-compositor would to the host's own handlers; without a compositor to
+It passes zui's host suite (`zui_testing.expectHostConforms`) against
+windows the compositor never shows, two of them for its many-windows
+steps, whose harness delivers what a compositor would to the host's own
+handlers, entering the window each event is posted to first; without a compositor to
 connect to, the suite and the host's own tests are skipped with a
 message. The services are answered there through the host's fake
 (`Host.fakeServices`), so nothing shows. A test with
@@ -501,21 +514,27 @@ never comes.
 its own clicks, and a count shared by both is published into each
 window's `zui_async.Latest(u32)`. Any window opens another or closes
 itself, and the run ends with the last. The sokol renderer draws each
-through its own swapchain on one device.
+through its own swapchain on one device, or on Linux through its own EGL
+surface on one context. It runs on Windows and on Linux.
 
 ```sh
 zig build many-windows                         # interactive windows
-zig build many-windows -- --check              # open, click and close hidden windows, then quit
+zig build many-windows -- --check              # open, click and close windows, then quit
 zig build many-windows -- --measure-idle       # CPU time of two idle windows over 10 s
 zig build many-windows -- --measure-animation  # frame rates of one, then two, windows animating
 ```
 
-`--check` opens a hidden second window, clicks its buttons through the
+`--check` opens a second window, clicks its buttons through the
 host, and exits 0 only when the second counts its own click, both show
 the shared count, the first counted none, and the first draws on after
-the second closes. On a 144 Hz monitor, two windows animating at once
-each hold 143 frames a second, as one alone holds 144, and two idle
-windows use no CPU.
+the second closes. On Windows its windows are hidden; on Linux they are
+shown for the moment the check takes, since a frame drawn into a surface
+the compositor never shows waits in its swap for a frame callback that
+never comes. On a 144 Hz monitor on Windows, two windows animating at
+once each hold 143 frames a second, as one alone holds 144, and two idle
+windows use no CPU. On Linux under Hyprland at 144 Hz, one window alone
+and each of two draw 72 frames a second, as the one-window tour does
+there, and two idle windows use 0.9 to 21 ms of CPU over 10 s.
 
 ## The tour on a native host
 

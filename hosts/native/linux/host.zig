@@ -14,8 +14,8 @@ pub const chrome = @import("chrome.zig");
 
 const Proxy = wayland.Proxy;
 
-/// zui's host contract on a Wayland window, through libwayland-client and
-/// xdg-shell, on the thread that polls it: a Wayland client has no modal
+/// zui's host contract on Wayland windows, through libwayland-client and
+/// xdg-shell, on the thread that polls them: a Wayland client has no modal
 /// loop to escape, so events are read and dispatched in `zuiPoll` and
 /// `zuiWait`.
 ///
@@ -34,6 +34,14 @@ const Proxy = wayland.Proxy;
 /// display, the desktop's buses, its transfers and watches, a wake and a
 /// deadline.
 ///
+/// `init` opens `.main`, and `zuiOpenWindow` up to `max_windows - 1` more,
+/// each a surface with its own events, scale, requests and chrome. The
+/// pointer's and the keyboard's events reach the window whose surface
+/// they entered. The seat, the clipboard, the watches and the services
+/// belong to the host, so they work whichever windows are open, and a
+/// terminate request, the system sleeping and the desktop's settings
+/// reach every window.
+///
 /// A window opened with `title_bar = .custom` asks the compositor, through
 /// xdg-decoration where it is offered, to leave the decorations to the
 /// window. Presses on the frame's chrome regions go to the compositor: the
@@ -43,10 +51,10 @@ const Proxy = wayland.Proxy;
 /// `window_maximized`. A compositor that insists on drawing its own title
 /// bar gets it, and `custom_title_bar` is then false.
 ///
-/// `init` opens the window and `deinit` closes it; the host must not move
-/// in between, since the compositor's listeners and the signal handler
-/// hold pointers to it. A window opened with `visible = false` is a
-/// surface without a role, which the compositor never shows.
+/// `deinit` closes every window; the host must not move after `init`,
+/// since the compositor's listeners and the signal handler hold pointers
+/// into it. A window opened with `visible = false` is a surface without a
+/// role, which the compositor never shows.
 ///
 /// ```zig
 /// const App = struct {
@@ -57,7 +65,10 @@ const Proxy = wayland.Proxy;
 /// ```
 pub const Host = struct {
     pub const zui_surfaces: zui.SurfaceKinds = .initOne(.wayland);
-    pub const zui_capabilities: zui.HostCapabilities = .{ .windows = .one, .custom_title_bar = true };
+    pub const zui_capabilities: zui.HostCapabilities = .{ .windows = .many, .custom_title_bar = true };
+
+    /// The windows open at once, `.main` among them.
+    pub const max_windows = 4;
 
     /// The clipboard's selection, as text. `write` offers it as UTF-8 to
     /// any reader, up to `data_device.DataDevice.clipboard_text_capacity`
@@ -120,7 +131,8 @@ pub const Host = struct {
     /// `error.Unavailable`.
     pub const zuiFileDialogs = struct {
         pub fn show(host: *Host, window: zui.WindowId, request: zui.ServiceRequest, dialog: zui.FileDialog, sink: zui.ServiceSink) zui.ServiceError!void {
-            if (window != .main or host.closed) return error.Unavailable;
+            const target = host.windowById(window) orelse return error.Unavailable;
+            if (target.closed) return error.Unavailable;
             return host.services.showFileDialog(host.io, request, window, dialog, sink);
         }
     };
@@ -142,16 +154,9 @@ pub const Host = struct {
     display: *wayland.Display,
     registry: *Proxy,
     globals: Globals,
-    surface: *Proxy,
-    xdg_surface: ?*Proxy,
-    toplevel: ?*Proxy,
     pointer: ?*Proxy,
     keyboard: ?*Proxy,
     cursor_shape_device: ?*Proxy,
-    /// Both null unless the compositor offers fractional scales and
-    /// viewports, which the host uses together.
-    fractional_scale: ?*Proxy,
-    viewport: ?*Proxy,
     xkb_context: *xkb.Context,
     keymap: ?*xkb.Keymap,
     key_state: ?*xkb.State,
@@ -159,53 +164,39 @@ pub const Host = struct {
     /// returns, so a wake that came before the wait ends it.
     wake_fd: i32,
 
-    inbox: Inbox,
-    /// Something reached the inbox, or changed the next frame's size or
-    /// scale, since the last poll.
-    input_arrived: bool,
-    closed: bool,
-    configured: bool,
-    /// In surface coordinates, which are physical pixels over
-    /// `pixelsPerSurfaceCoordinate()`.
-    surface_size: [2]u32,
-    configured_size: ?[2]u32,
-    buffer_scale: i32,
-    /// In 120ths, null until the compositor first prefers one; from then
-    /// on the buffer scale stays 1 and the viewport sizes the surface.
-    preferred_fractional_scale: ?u32,
-    /// The surface size the viewport was last given.
-    viewport_destination: ?[2]u32,
-    /// What the last poll converted surface coordinates to layout units by.
-    surface_coordinates_per_unit: f32,
+    windows: [max_windows]Window,
+    /// The id the next window opens with; ids are never given twice.
+    next_window_id: u32,
+    /// The window whose surface the pointer entered, until it leaves.
+    pointer_window: ?*Window,
+    /// The window whose surface has the keyboard's focus.
+    keyboard_window: ?*Window,
+    /// The window whose surface has the seat's text-input focus.
+    text_input_window: ?*Window,
+    /// The window the last drag entered, which its drop's files reach.
+    drag_window: ?*Window,
 
+    /// In the surface coordinates of `pointer_window`.
     pointer_position: [2]f32,
     pointer_enter_serial: ?u32,
     /// The serial of the last key, button or focus, which setting the
     /// clipboard's selection names.
     latest_input_serial: u32,
-    /// In surface coordinates.
+    /// In the surface coordinates of `drag_window`.
     drag_position: [2]f32,
     wheel_notches: [2]?i32,
     modifiers: zui.Modifiers,
-    requests: zui.HostRequests,
-    applied_cursor: ?zui.Cursor,
     key_repeat: KeyRepeat,
 
     data_device: data_device.DataDevice,
     text_input: text_input.TextInput,
-    window_chrome: chrome.WindowChrome,
     file_watches: file_watch.Watches,
     desktop: desktop_bus.DesktopBus,
     desktop_settings: DesktopSettings,
     services: services.Services,
-    /// Null until `init` reports the whole environment.
-    reported_environment: ?ReportedEnvironment,
 
     /// Set by the signal handler, and delivered by the next poll.
     termination_signalled: std.atomic.Value(bool),
-    /// The poll after the one that delivered a terminate request reports
-    /// the window closed.
-    terminate_delivered: bool,
     /// For each of `termination_signals`, whether this host handles it,
     /// and what `deinit` gives it back.
     handled_signals: [termination_signals.len]bool,
@@ -321,6 +312,184 @@ pub const Host = struct {
         }
     };
 
+    /// One of the host's windows: its surface and the role that shows it,
+    /// what it has been told and asked since its last poll, its size and
+    /// scale, and its chrome.
+    pub const Window = struct {
+        host: *Host,
+        id: zui.WindowId = .main,
+        /// Holds an open window, from `zuiOpenWindow` to `zuiCloseWindow`.
+        in_use: bool = false,
+        surface: *Proxy = undefined,
+        xdg_surface: ?*Proxy = null,
+        toplevel: ?*Proxy = null,
+        /// Both null unless the compositor offers fractional scales and
+        /// viewports, which the host uses together.
+        fractional_scale: ?*Proxy = null,
+        viewport: ?*Proxy = null,
+
+        inbox: Inbox = .{},
+        /// Something reached the inbox, or changed the next frame's size or
+        /// scale, since the last poll.
+        input_arrived: bool = false,
+        closed: bool = false,
+        configured: bool = false,
+        /// The poll after the one that delivered a terminate request reports
+        /// the window closed.
+        terminate_delivered: bool = false,
+        /// In surface coordinates, which are physical pixels over
+        /// `pixelsPerSurfaceCoordinate()`.
+        surface_size: [2]u32 = .{ 0, 0 },
+        configured_size: ?[2]u32 = null,
+        buffer_scale: i32 = 1,
+        /// In 120ths, null until the compositor first prefers one; from then
+        /// on the buffer scale stays 1 and the viewport sizes the surface.
+        preferred_fractional_scale: ?u32 = null,
+        /// The surface size the viewport was last given.
+        viewport_destination: ?[2]u32 = null,
+        /// What the last poll converted surface coordinates to layout units by.
+        surface_coordinates_per_unit: f32 = 1,
+        requests: zui.HostRequests = .{},
+        applied_cursor: ?zui.Cursor = null,
+        window_chrome: chrome.WindowChrome = .{},
+        /// Null until the window has reported the whole environment.
+        reported_environment: ?ReportedEnvironment = null,
+
+        fn deliver(self: *Window, event: zui.Event) void {
+            self.inbox.push(event);
+            self.input_arrived = true;
+        }
+
+        fn deliverText(self: *Window, utf8: []const u8) void {
+            self.inbox.pushText(utf8);
+            self.input_arrived = true;
+        }
+
+        /// The buffer's physical pixels per surface coordinate: the fractional
+        /// scale once the compositor prefers one, the buffer scale until then.
+        /// The renderer sizes the buffer at the viewport times the scale,
+        /// which is the surface's size times this.
+        pub fn pixelsPerSurfaceCoordinate(self: *const Window) f32 {
+            if (self.preferred_fractional_scale) |scale_120ths| return @as(f32, @floatFromInt(scale_120ths)) / wayland.fractional_scale_denominator;
+            return @floatFromInt(self.buffer_scale);
+        }
+
+        /// At a fractional scale the buffer is drawn at physical pixels, so
+        /// the viewport gives the surface its size in surface coordinates; the
+        /// renderer's next commit applies it.
+        fn sizeViewport(self: *Window) void {
+            if (self.preferred_fractional_scale == null) return;
+            const viewport = self.viewport orelse return;
+            if (std.meta.eql(self.viewport_destination, @as(?[2]u32, self.surface_size))) return;
+            self.viewport_destination = self.surface_size;
+            wayland.send(viewport, wayland.viewport_set_destination, .{ @as(i32, @intCast(self.surface_size[0])), @as(i32, @intCast(self.surface_size[1])) });
+        }
+
+        fn windowManager(self: *const Window) chrome.WindowManager {
+            return .{ .toplevel = self.toplevel, .seat = self.host.globals.seat };
+        }
+
+        fn workCaptionButton(self: *Window, kind: zui.ChromeKind) void {
+            switch (kind) {
+                .minimize_button => self.window_chrome.minimize(self.windowManager()),
+                .maximize_button => self.window_chrome.toggleMaximized(self.windowManager()),
+                .close_button => self.onClose(),
+                else => {},
+            }
+        }
+
+        /// Until the host reports the whole environment, a change waits for it.
+        fn reportEnvironmentOnceReported(self: *Window) void {
+            if (self.reported_environment != null) self.reportEnvironment(self.host.desktop_settings);
+        }
+
+        /// Reports each setting that differs from what the window last
+        /// reported, or every one the first time.
+        fn reportEnvironment(self: *Window, settings: DesktopSettings) void {
+            const current: ReportedEnvironment = .{
+                .theme = settings.theme,
+                .contrast = settings.contrast,
+                .reduced_motion = settings.reduced_motion,
+                .power = if (settings.power_saver) .saver else if (settings.on_battery) .battery else .plugged,
+                .custom_title_bar = self.window_chrome.isCustom(),
+                .window_maximized = self.window_chrome.maximized,
+            };
+            const reported = self.reported_environment;
+            inline for (std.meta.fields(ReportedEnvironment)) |field| {
+                const value = @field(current, field.name);
+                if (reported == null or @field(reported.?, field.name) != value) {
+                    self.deliver(.{ .environment = @unionInit(zui.EnvironmentChange, field.name, value) });
+                }
+            }
+            self.reported_environment = current;
+        }
+
+        fn destroyObjects(self: *Window) void {
+            if (self.fractional_scale) |fractional_scale| wayland.destroy(fractional_scale, wayland.fractional_scale_destroy);
+            if (self.viewport) |viewport| wayland.destroy(viewport, wayland.viewport_destroy);
+            self.window_chrome.deinit();
+            if (self.toplevel) |toplevel| wayland.destroy(toplevel, wayland.xdg_toplevel_destroy);
+            if (self.xdg_surface) |xdg_surface| wayland.destroy(xdg_surface, wayland.xdg_surface_destroy);
+            wayland.destroy(self.surface, wayland.surface_destroy);
+            self.fractional_scale = null;
+            self.viewport = null;
+            self.toplevel = null;
+            self.xdg_surface = null;
+        }
+
+        // =============================================================
+        // What the compositor reports about this window. A harness calls
+        // these as the compositor's events would.
+        // =============================================================
+
+        pub fn onConfigure(self: *Window, serial: u32) void {
+            if (self.xdg_surface) |xdg_surface| wayland.send(xdg_surface, wayland.xdg_surface_ack_configure, .{serial});
+            if (self.configured_size) |size| self.surface_size = size;
+            self.configured = true;
+            self.input_arrived = true;
+            if (self.window_chrome.applyConfigure()) self.reportEnvironmentOnceReported();
+        }
+
+        /// A size of zero leaves the window's size to the client. `states` are
+        /// `xdg_toplevel.state`s, of which the host reads `maximized`.
+        pub fn onToplevelConfigure(self: *Window, width: i32, height: i32, states: []const u32) void {
+            self.configured_size = if (width > 0 and height > 0) .{ @intCast(width), @intCast(height) } else null;
+            self.window_chrome.configured_maximized = chrome.statesHoldMaximized(states);
+        }
+
+        /// The compositor says who draws the decorations. Drawing its own, it
+        /// takes the title bar back from a custom window.
+        pub fn onDecorationConfigure(self: *Window, mode: chrome.DecorationMode) void {
+            const was_custom = self.window_chrome.isCustom();
+            self.window_chrome.onDecorationMode(mode);
+            if (was_custom != self.window_chrome.isCustom()) self.reportEnvironmentOnceReported();
+        }
+
+        pub fn onClose(self: *Window) void {
+            self.closed = true;
+            self.input_arrived = true;
+        }
+
+        /// Ignored once the compositor has preferred a fractional scale.
+        pub fn onPreferredBufferScale(self: *Window, factor: i32) void {
+            if (self.preferred_fractional_scale != null) return;
+            if (factor < 1 or factor == self.buffer_scale) return;
+            self.buffer_scale = factor;
+            if (wayland.wl_proxy_get_version(self.surface) >= 3) wayland.send(self.surface, wayland.surface_set_buffer_scale, .{factor});
+            self.input_arrived = true;
+        }
+
+        /// In 120ths. The buffer scale returns to 1, since the buffer is then
+        /// drawn at physical pixels.
+        pub fn onPreferredFractionalScale(self: *Window, scale_120ths: u32) void {
+            if (scale_120ths == 0 or self.preferred_fractional_scale == scale_120ths) return;
+            if (self.buffer_scale != 1 and wayland.wl_proxy_get_version(self.surface) >= 3) wayland.send(self.surface, wayland.surface_set_buffer_scale, .{@as(i32, 1)});
+            self.buffer_scale = 1;
+            self.preferred_fractional_scale = scale_120ths;
+            self.input_arrived = true;
+        }
+    };
+
     pub fn init(self: *Host, io: std.Io, options: zui.WindowOptions) !void {
         const display = wayland.wl_display_connect(null) orelse return error.NoWaylandDisplay;
         errdefer wayland.wl_display_disconnect(display);
@@ -335,47 +504,33 @@ pub const Host = struct {
             .display = display,
             .registry = undefined,
             .globals = .{},
-            .surface = undefined,
-            .xdg_surface = null,
-            .toplevel = null,
             .pointer = null,
             .keyboard = null,
             .cursor_shape_device = null,
-            .fractional_scale = null,
-            .viewport = null,
             .xkb_context = xkb.xkb_context_new(0) orelse return error.NoKeyboardContext,
             .keymap = null,
             .key_state = null,
             .wake_fd = undefined,
-            .inbox = .{},
-            .input_arrived = false,
-            .closed = false,
-            .configured = false,
-            .surface_size = options.size,
-            .configured_size = null,
-            .buffer_scale = 1,
-            .preferred_fractional_scale = null,
-            .viewport_destination = null,
-            .surface_coordinates_per_unit = 1,
+            .windows = @splat(.{ .host = self }),
+            .next_window_id = @intFromEnum(zui.WindowId.main) + 1,
+            .pointer_window = null,
+            .keyboard_window = null,
+            .text_input_window = null,
+            .drag_window = null,
             .pointer_position = .{ 0, 0 },
             .pointer_enter_serial = null,
             .latest_input_serial = 0,
             .drag_position = .{ 0, 0 },
             .wheel_notches = .{ null, null },
             .modifiers = .{},
-            .requests = .{},
-            .applied_cursor = null,
             .key_repeat = .{},
             .data_device = .{ .io = io },
             .text_input = .{},
-            .window_chrome = .{ .asked_for_custom = options.title_bar == .custom, .resizable = options.resizable },
             .file_watches = .{},
             .desktop = .{},
             .desktop_settings = .{},
             .services = .{ .fake = service_fake },
-            .reported_environment = null,
             .termination_signalled = .init(false),
-            .terminate_delivered = false,
             .handled_signals = @splat(false),
             .replaced_signal_actions = undefined,
         };
@@ -385,49 +540,111 @@ pub const Host = struct {
         self.wake_fd = @intCast(wake_fd);
         errdefer _ = linux.close(self.wake_fd);
 
-        self.deliver(.{ .environment = .{ .window_focused = false } });
-
         self.registry = wayland.create(wayland.displayProxy(display), wayland.display_get_registry, &wayland.wl_registry_interface, 1, .{wayland.no_id}) orelse return error.NoRegistry;
         wayland.addListener(self.registry, &registry_listener, self);
         if (wayland.wl_display_roundtrip(display) < 0) return error.CompositorUnreachable;
-        const compositor = self.globals.compositor orelse return error.NoCompositor;
+        if (self.globals.compositor == null) return error.NoCompositor;
         const wm_base = self.globals.wm_base orelse return error.NoXdgShell;
         wayland.addListener(wm_base, &wm_base_listener, self);
         if (self.globals.seat) |seat| wayland.addListener(seat, &seat_listener, self);
-
-        self.surface = wayland.create(compositor, wayland.compositor_create_surface, &wayland.wl_surface_interface, wayland.wl_proxy_get_version(compositor), .{wayland.no_id}) orelse return error.NoSurface;
-        wayland.addListener(self.surface, &surface_listener, self);
-        self.useFractionalScale();
         self.openDataDevice();
         self.openTextInput();
-        if (options.visible) {
-            try self.giveToplevelRole(wm_base, options);
-        } else {
-            self.configured = true;
-        }
-        wayland.send(self.surface, wayland.surface_commit, .{});
 
-        // The seat's devices, their keymap and the first configure each
-        // answer what the round trip before them asked for.
-        var round_trips: u32 = 0;
-        while (round_trips < 3 and (!self.configured or round_trips < 2)) : (round_trips += 1) {
-            if (wayland.wl_display_roundtrip(display) < 0) return error.CompositorUnreachable;
-        }
-        if (!self.configured) return error.WindowNotConfigured;
+        // The seat's devices and their keymap each answer what the round
+        // trip before them asked for.
+        try self.openWindowIn(&self.windows[0], .main, options, 2);
 
         self.readDesktopEnvironment();
         self.handleTerminationSignals();
     }
 
-    fn giveToplevelRole(self: *Host, wm_base: *Proxy, options: zui.WindowOptions) !void {
-        const xdg_surface = wayland.create(wm_base, wayland.xdg_wm_base_get_xdg_surface, &wayland.xdg_surface_interface, 1, .{ wayland.no_id, self.surface }) orelse return error.NoXdgSurface;
-        self.xdg_surface = xdg_surface;
-        wayland.addListener(xdg_surface, &xdg_surface_listener, self);
+    /// Opens a window as `init` opens `.main`, hidden or shown as `options`
+    /// say, and returns once the compositor has configured it.
+    pub fn zuiOpenWindow(self: *Host, options: zui.WindowOptions) zui.OpenWindowError!zui.WindowId {
+        const window = for (&self.windows) |*window| {
+            if (!window.in_use) break window;
+        } else return error.TooManyWindows;
+        const id: zui.WindowId = @enumFromInt(self.next_window_id);
+        self.openWindowIn(window, id, options, 0) catch return error.WindowNotCreated;
+        self.next_window_id += 1;
+        window.reportEnvironment(self.desktop_settings);
+        return id;
+    }
+
+    /// Destroys `window`'s surface and frees its slot; its id polls false
+    /// from now on.
+    pub fn zuiCloseWindow(self: *Host, id: zui.WindowId) void {
+        const window = self.windowById(id) orelse return;
+        if (self.pointer_window == window) self.pointer_window = null;
+        if (self.keyboard_window == window) {
+            self.keyboard_window = null;
+            self.key_repeat.held = null;
+        }
+        if (self.text_input_window == window) {
+            self.text_input_window = null;
+            self.text_input.onLeave();
+        }
+        if (self.drag_window == window) self.drag_window = null;
+        window.destroyObjects();
+        window.in_use = false;
+        _ = wayland.wl_display_flush(self.display);
+    }
+
+    /// The open window `id` names, or null.
+    pub fn windowById(self: *Host, id: zui.WindowId) ?*Window {
+        for (&self.windows) |*window| if (window.in_use and window.id == id) return window;
+        return null;
+    }
+
+    fn windowOfSurface(self: *Host, surface: ?*Proxy) ?*Window {
+        const entered = surface orelse return null;
+        for (&self.windows) |*window| if (window.in_use and window.surface == entered) return window;
+        return null;
+    }
+
+    /// Round trips until the compositor has configured the window, and at
+    /// least `least_round_trips` times.
+    fn openWindowIn(self: *Host, window: *Window, id: zui.WindowId, options: zui.WindowOptions, least_round_trips: u32) !void {
+        window.* = .{
+            .host = self,
+            .id = id,
+            .in_use = true,
+            .surface_size = options.size,
+            .window_chrome = .{ .asked_for_custom = options.title_bar == .custom, .resizable = options.resizable },
+        };
+        errdefer window.in_use = false;
+        window.deliver(.{ .environment = .{ .window_focused = false } });
+
+        const compositor = self.globals.compositor.?;
+        window.surface = wayland.create(compositor, wayland.compositor_create_surface, &wayland.wl_surface_interface, wayland.wl_proxy_get_version(compositor), .{wayland.no_id}) orelse return error.NoSurface;
+        errdefer window.destroyObjects();
+        wayland.addListener(window.surface, &surface_listener, window);
+        self.useFractionalScale(window);
+        if (options.visible) {
+            try self.giveToplevelRole(window, options);
+        } else {
+            window.configured = true;
+        }
+        wayland.send(window.surface, wayland.surface_commit, .{});
+
+        const most_round_trips = 3;
+        var round_trips: u32 = 0;
+        while (round_trips < most_round_trips and (!window.configured or round_trips < least_round_trips)) : (round_trips += 1) {
+            if (wayland.wl_display_roundtrip(self.display) < 0) return error.CompositorUnreachable;
+        }
+        if (!window.configured) return error.WindowNotConfigured;
+    }
+
+    fn giveToplevelRole(self: *Host, window: *Window, options: zui.WindowOptions) !void {
+        const wm_base = self.globals.wm_base.?;
+        const xdg_surface = wayland.create(wm_base, wayland.xdg_wm_base_get_xdg_surface, &wayland.xdg_surface_interface, 1, .{ wayland.no_id, window.surface }) orelse return error.NoXdgSurface;
+        window.xdg_surface = xdg_surface;
+        wayland.addListener(xdg_surface, &xdg_surface_listener, window);
         const toplevel = wayland.create(xdg_surface, wayland.xdg_surface_get_toplevel, &wayland.xdg_toplevel_interface, 1, .{wayland.no_id}) orelse return error.NoToplevel;
-        self.toplevel = toplevel;
-        wayland.addListener(toplevel, &toplevel_listener, self);
+        window.toplevel = toplevel;
+        wayland.addListener(toplevel, &toplevel_listener, window);
         if (self.globals.decoration_manager) |manager| {
-            if (self.window_chrome.decorate(manager, toplevel)) |decoration| wayland.addListener(decoration, &toplevel_decoration_listener, self);
+            if (window.window_chrome.decorate(manager, toplevel)) |decoration| wayland.addListener(decoration, &toplevel_decoration_listener, window);
         }
         var title: [256:0]u8 = @splat(0);
         const title_len = @min(options.title.len, title.len);
@@ -442,17 +659,17 @@ pub const Host = struct {
         }
     }
 
-    fn useFractionalScale(self: *Host) void {
+    fn useFractionalScale(self: *Host, window: *Window) void {
         const manager = self.globals.fractional_scale_manager orelse return;
         const viewporter = self.globals.viewporter orelse return;
-        const viewport = wayland.create(viewporter, wayland.viewporter_get_viewport, &wayland.viewport_interface, 1, .{ wayland.no_id, self.surface }) orelse return;
-        const fractional_scale = wayland.create(manager, wayland.fractional_scale_manager_get_fractional_scale, &wayland.fractional_scale_interface, 1, .{ wayland.no_id, self.surface }) orelse {
+        const viewport = wayland.create(viewporter, wayland.viewporter_get_viewport, &wayland.viewport_interface, 1, .{ wayland.no_id, window.surface }) orelse return;
+        const fractional_scale = wayland.create(manager, wayland.fractional_scale_manager_get_fractional_scale, &wayland.fractional_scale_interface, 1, .{ wayland.no_id, window.surface }) orelse {
             wayland.destroy(viewport, wayland.viewport_destroy);
             return;
         };
-        self.viewport = viewport;
-        self.fractional_scale = fractional_scale;
-        wayland.addListener(fractional_scale, &fractional_scale_listener, self);
+        window.viewport = viewport;
+        window.fractional_scale = fractional_scale;
+        wayland.addListener(fractional_scale, &fractional_scale_listener, window);
     }
 
     fn openDataDevice(self: *Host) void {
@@ -481,16 +698,11 @@ pub const Host = struct {
         if (self.globals.data_device_manager) |manager| wayland.wl_proxy_destroy(manager);
         self.text_input.deinit();
         if (self.globals.text_input_manager) |manager| wayland.destroy(manager, wayland.text_input_manager_destroy);
-        if (self.fractional_scale) |fractional_scale| wayland.destroy(fractional_scale, wayland.fractional_scale_destroy);
-        if (self.viewport) |viewport| wayland.destroy(viewport, wayland.viewport_destroy);
+        for (&self.windows) |*window| if (window.in_use) window.destroyObjects();
         if (self.globals.fractional_scale_manager) |manager| wayland.destroy(manager, wayland.fractional_scale_manager_destroy);
         if (self.globals.viewporter) |viewporter| wayland.destroy(viewporter, wayland.viewporter_destroy);
         self.releaseDevices(.{});
-        self.window_chrome.deinit();
         if (self.globals.decoration_manager) |manager| wayland.destroy(manager, wayland.decoration_manager_destroy);
-        if (self.toplevel) |toplevel| wayland.destroy(toplevel, wayland.xdg_toplevel_destroy);
-        if (self.xdg_surface) |xdg_surface| wayland.destroy(xdg_surface, wayland.xdg_surface_destroy);
-        wayland.destroy(self.surface, wayland.surface_destroy);
         if (self.globals.cursor_shape_manager) |manager| wayland.destroy(manager, wayland.cursor_shape_manager_destroy);
         if (self.globals.seat) |seat| {
             if (wayland.wl_proxy_get_version(seat) >= 5) wayland.destroy(seat, wayland.seat_release) else wayland.wl_proxy_destroy(seat);
@@ -510,30 +722,30 @@ pub const Host = struct {
         return .fromTimestamp(std.Io.Timestamp.now(self.io, .awake));
     }
 
-    pub fn zuiPoll(self: *Host, window: zui.WindowId, record: *zui.RecordBuilder) bool {
-        std.debug.assert(window == .main);
-        if (self.terminate_delivered) return false;
+    pub fn zuiPoll(self: *Host, id: zui.WindowId, record: *zui.RecordBuilder) bool {
+        const window = self.windowById(id) orelse return false;
+        if (window.terminate_delivered) return false;
         self.readAvailableEvents();
-        if (self.closed) return false;
+        if (window.closed) return false;
 
-        const pixels_per_surface_coordinate = self.pixelsPerSurfaceCoordinate();
+        const pixels_per_surface_coordinate = window.pixelsPerSurfaceCoordinate();
         const scale = self.forced_scale orelse pixels_per_surface_coordinate;
         const surface_coordinates_per_unit = scale * record.params.zoom / pixels_per_surface_coordinate;
-        self.surface_coordinates_per_unit = surface_coordinates_per_unit;
-        self.sizeViewport();
+        window.surface_coordinates_per_unit = surface_coordinates_per_unit;
+        window.sizeViewport();
         record.begin(.{
             .now = self.now(),
-            .viewport = .{ @as(f32, @floatFromInt(self.surface_size[0])) / surface_coordinates_per_unit, @as(f32, @floatFromInt(self.surface_size[1])) / surface_coordinates_per_unit },
+            .viewport = .{ @as(f32, @floatFromInt(window.surface_size[0])) / surface_coordinates_per_unit, @as(f32, @floatFromInt(window.surface_size[1])) / surface_coordinates_per_unit },
             .scale = scale,
         });
-        const inbox = &self.inbox;
+        const inbox = &window.inbox;
         for (inbox.events[0..inbox.event_count]) |queued| {
             const converted = inLayoutUnits(queued, surface_coordinates_per_unit);
             switch (converted) {
                 .text => |text| record.appendText(text),
                 .files_dropped => |drop| record.appendFilesDropped(drop),
                 .lifecycle => |change| {
-                    if (change == .terminate_requested) self.terminate_delivered = true;
+                    if (change == .terminate_requested) window.terminate_delivered = true;
                     record.append(converted);
                 },
                 else => record.append(converted),
@@ -542,7 +754,7 @@ pub const Host = struct {
         record.dropped_events +|= inbox.dropped_events;
         record.dropped_text_bytes +|= inbox.dropped_bytes;
         inbox.clear();
-        self.input_arrived = false;
+        window.input_arrived = false;
         return true;
     }
 
@@ -562,24 +774,11 @@ pub const Host = struct {
         position.* = .{ position[0] / surface_coordinates_per_unit, position[1] / surface_coordinates_per_unit };
     }
 
-    /// The buffer's physical pixels per surface coordinate: the fractional
-    /// scale once the compositor prefers one, the buffer scale until then.
-    /// The renderer sizes the buffer at the viewport times the scale,
-    /// which is the surface's size times this.
-    pub fn pixelsPerSurfaceCoordinate(self: *const Host) f32 {
-        if (self.preferred_fractional_scale) |scale_120ths| return @as(f32, @floatFromInt(scale_120ths)) / wayland.fractional_scale_denominator;
-        return @floatFromInt(self.buffer_scale);
-    }
-
-    /// At a fractional scale the buffer is drawn at physical pixels, so
-    /// the viewport gives the surface its size in surface coordinates; the
-    /// renderer's next commit applies it.
-    fn sizeViewport(self: *Host) void {
-        if (self.preferred_fractional_scale == null) return;
-        const viewport = self.viewport orelse return;
-        if (std.meta.eql(self.viewport_destination, @as(?[2]u32, self.surface_size))) return;
-        self.viewport_destination = self.surface_size;
-        wayland.send(viewport, wayland.viewport_set_destination, .{ @as(i32, @intCast(self.surface_size[0])), @as(i32, @intCast(self.surface_size[1])) });
+    /// What the last poll of `id` converted surface coordinates to layout
+    /// units by, or 1 for a window that is not open.
+    pub fn surfaceCoordinatesPerUnit(self: *Host, id: zui.WindowId) f32 {
+        const window = self.windowById(id) orelse return 1;
+        return window.surface_coordinates_per_unit;
     }
 
     /// Reads whatever the compositor and the desktop have sent, without
@@ -600,10 +799,16 @@ pub const Host = struct {
         _ = linux.write(self.wake_fd, std.mem.asBytes(&one), @sizeOf(u64));
     }
 
-    /// Returns on a wake, input, a key's repeat, a signal, or a change of
-    /// size, scale or environment, and for `.at` also at the instant. The
-    /// compositor's and the buses' other messages, such as a buffer
-    /// released after each frame, are dispatched without ending it.
+    /// Something reached a window since its last poll, or one closed.
+    fn anyWindowAwaitsPoll(self: *const Host) bool {
+        for (&self.windows) |*window| if (window.in_use and (window.input_arrived or window.closed)) return true;
+        return false;
+    }
+
+    /// Returns on a wake, input in any window, a key's repeat, a signal, or
+    /// a change of size, scale or environment, and for `.at` also at the
+    /// instant. The compositor's and the buses' other messages, such as a
+    /// buffer released after each frame, are dispatched without ending it.
     pub fn zuiWait(self: *Host, next: zui.NextFrame) void {
         defer self.clearWake();
         const frame_at: ?zui.Instant = switch (next) {
@@ -611,10 +816,10 @@ pub const Host = struct {
             .on_event => null,
             .at => |instant| instant,
         };
-        while (!self.input_arrived and !self.closed) {
+        while (!self.anyWindowAwaitsPoll()) {
             self.deliverDueRepeats();
             self.deliverTerminationSignal();
-            if (self.input_arrived) return;
+            if (self.anyWindowAwaitsPoll()) return;
             const now_instant = self.now();
             if (frame_at) |instant| if (!now_instant.isBefore(instant)) return;
             const wake_at = earlier(earlier(frame_at, self.nextRepeatAt()), self.data_device.nextDeadline());
@@ -638,7 +843,7 @@ pub const Host = struct {
         self.services.publishPending(self.io, self.zuiWaker());
         const display = self.display;
         while (wayland.wl_display_prepare_read(display) != 0) _ = wayland.wl_display_dispatch_pending(display);
-        if (self.input_arrived and timeout_ns != 0) {
+        if (timeout_ns != 0 and self.anyWindowAwaitsPoll()) {
             wayland.wl_display_cancel_read(display);
             return .events;
         }
@@ -674,9 +879,11 @@ pub const Host = struct {
             descriptor.revents = 0;
         };
         if (self.data_device.transfer(descriptors[first_transfer..])) |drop| {
-            self.inbox.dropped_bytes +|= drop.left_out_bytes;
-            self.inbox.pushFilesDropped(self.drag_position, drop.uri_list, self.now());
-            self.input_arrived = true;
+            if (self.drag_window) |window| {
+                window.inbox.dropped_bytes +|= drop.left_out_bytes;
+                window.inbox.pushFilesDropped(self.drag_position, drop.uri_list, self.now());
+                window.input_arrived = true;
+            }
         }
         _ = wayland.wl_display_flush(display);
         if (polled and descriptors[1].revents & linux.POLL.IN != 0) return .woken;
@@ -684,8 +891,7 @@ pub const Host = struct {
     }
 
     fn closeAfterLostDisplay(self: *Host) void {
-        self.closed = true;
-        self.input_arrived = true;
+        for (&self.windows) |*window| if (window.in_use) window.onClose();
     }
 
     fn clearWake(self: *Host) void {
@@ -693,16 +899,17 @@ pub const Host = struct {
         _ = linux.read(self.wake_fd, std.mem.asBytes(&count), @sizeOf(u64));
     }
 
-    pub fn zuiSurface(self: *Host, window: zui.WindowId) zui.Surface {
-        std.debug.assert(window == .main);
-        return .{ .wayland = .{ .display = self.display, .surface = self.surface } };
+    /// Asking for a window that is not open panics.
+    pub fn zuiSurface(self: *Host, id: zui.WindowId) zui.Surface {
+        const window = self.windowById(id) orelse std.debug.panic("zui_host: window {d} is not open", .{@intFromEnum(id)});
+        return .{ .wayland = .{ .display = self.display, .surface = window.surface } };
     }
 
-    pub fn zuiApply(self: *Host, window: zui.WindowId, requests: zui.HostRequests) void {
-        std.debug.assert(window == .main);
-        self.requests = requests;
-        self.applyCursor();
-        self.applyTextInput();
+    pub fn zuiApply(self: *Host, id: zui.WindowId, requests: zui.HostRequests) void {
+        const window = self.windowById(id) orelse return;
+        window.requests = requests;
+        if (self.pointer_window == window) self.applyCursor();
+        if (self.text_input_window == window) self.applyTextInput();
         _ = wayland.wl_display_flush(self.display);
     }
 
@@ -715,126 +922,69 @@ pub const Host = struct {
 
     /// Keeps up to `chrome.ChromeSnapshot.capacity` of `regions`, in
     /// surface coordinates, to hit-test presses against; the rest are cut
-    /// from the end and counted in `window_chrome.snapshot.dropped`. A
-    /// window without a custom title bar keeps none.
-    pub fn zuiChromeRegions(self: *Host, window: zui.WindowId, regions: []const zui.ChromeRegion) void {
-        std.debug.assert(window == .main);
-        self.window_chrome.publish(regions, self.surface_coordinates_per_unit);
+    /// from the end and counted in the window's
+    /// `window_chrome.snapshot.dropped`. A window without a custom title bar
+    /// keeps none.
+    pub fn zuiChromeRegions(self: *Host, id: zui.WindowId, regions: []const zui.ChromeRegion) void {
+        const window = self.windowById(id) orelse return;
+        window.window_chrome.publish(regions, window.surface_coordinates_per_unit);
     }
 
-    /// What a press at `position`, in surface coordinates, would be to the
-    /// window manager, from the last frame's chrome regions: null where it
-    /// reaches zui.
-    pub fn chromeKindAt(self: *const Host, position: [2]f32) ?zui.ChromeKind {
-        return self.window_chrome.kindAt(position);
+    /// What a press at `position`, in `id`'s surface coordinates, would be
+    /// to the window manager, from the window's last frame's chrome
+    /// regions: null where it reaches zui.
+    pub fn chromeKindAt(self: *Host, id: zui.WindowId, position: [2]f32) ?zui.ChromeKind {
+        const window = self.windowById(id) orelse return null;
+        return window.window_chrome.kindAt(position);
     }
 
-    /// Closes the window as its close button does: the next poll returns
-    /// false.
+    /// Closes the main window as its close button does: the next poll
+    /// returns false.
     pub fn close(self: *Host) void {
-        self.onClose();
+        const window = self.windowById(.main) orelse return;
+        window.onClose();
     }
 
-    /// Asks the compositor to minimize the window, as its minimize button
-    /// does, for an application that works its drawn caption buttons from
-    /// `clicked`, as the keyboard and a screen reader press them.
+    /// Asks the compositor to minimize the main window, as its minimize
+    /// button does, for an application that works its drawn caption buttons
+    /// from `clicked`, as the keyboard and a screen reader press them.
     pub fn minimize(self: *Host) void {
-        self.window_chrome.minimize(self.windowManager());
+        const window = self.windowById(.main) orelse return;
+        window.window_chrome.minimize(window.windowManager());
         _ = wayland.wl_display_flush(self.display);
     }
 
-    /// Asks the compositor to maximize the window, or to restore it when
-    /// it is maximized.
+    /// Asks the compositor to maximize the main window, or to restore it
+    /// when it is maximized.
     pub fn toggleMaximized(self: *Host) void {
-        self.window_chrome.toggleMaximized(self.windowManager());
+        const window = self.windowById(.main) orelse return;
+        window.window_chrome.toggleMaximized(window.windowManager());
         _ = wayland.wl_display_flush(self.display);
     }
 
-    fn windowManager(self: *const Host) chrome.WindowManager {
-        return .{ .toplevel = self.toplevel, .seat = self.globals.seat };
-    }
-
-    fn workCaptionButton(self: *Host, kind: zui.ChromeKind) void {
-        switch (kind) {
-            .minimize_button => self.minimize(),
-            .maximize_button => self.toggleMaximized(),
-            .close_button => self.onClose(),
-            else => {},
-        }
-    }
-
-    fn deliver(self: *Host, event: zui.Event) void {
-        self.inbox.push(event);
-        self.input_arrived = true;
-    }
-
-    fn deliverText(self: *Host, utf8: []const u8) void {
-        self.inbox.pushText(utf8);
-        self.input_arrived = true;
+    fn deliverToEveryWindow(self: *Host, event: zui.Event) void {
+        for (&self.windows) |*window| if (window.in_use) window.deliver(event);
     }
 
     // =================================================================
-    // What the compositor reports. A harness calls these as the
-    // compositor's events would.
+    // What the compositor reports about the seat. A harness calls these
+    // as the compositor's events would.
     // =================================================================
 
-    pub fn onConfigure(self: *Host, serial: u32) void {
-        if (self.xdg_surface) |xdg_surface| wayland.send(xdg_surface, wayland.xdg_surface_ack_configure, .{serial});
-        if (self.configured_size) |size| self.surface_size = size;
-        self.configured = true;
-        self.input_arrived = true;
-        if (self.window_chrome.applyConfigure()) self.reportEnvironmentOnceReported();
-    }
-
-    /// A size of zero leaves the window's size to the client. `states` are
-    /// `xdg_toplevel.state`s, of which the host reads `maximized`.
-    pub fn onToplevelConfigure(self: *Host, width: i32, height: i32, states: []const u32) void {
-        self.configured_size = if (width > 0 and height > 0) .{ @intCast(width), @intCast(height) } else null;
-        self.window_chrome.configured_maximized = chrome.statesHoldMaximized(states);
-    }
-
-    /// The compositor says who draws the decorations. Drawing its own, it
-    /// takes the title bar back from a custom window.
-    pub fn onDecorationConfigure(self: *Host, mode: chrome.DecorationMode) void {
-        const was_custom = self.window_chrome.isCustom();
-        self.window_chrome.onDecorationMode(mode);
-        if (was_custom != self.window_chrome.isCustom()) self.reportEnvironmentOnceReported();
-    }
-
-    pub fn onClose(self: *Host) void {
-        self.closed = true;
-        self.input_arrived = true;
-    }
-
-    /// Ignored once the compositor has preferred a fractional scale.
-    pub fn onPreferredBufferScale(self: *Host, factor: i32) void {
-        if (self.preferred_fractional_scale != null) return;
-        if (factor < 1 or factor == self.buffer_scale) return;
-        self.buffer_scale = factor;
-        if (wayland.wl_proxy_get_version(self.surface) >= 3) wayland.send(self.surface, wayland.surface_set_buffer_scale, .{factor});
-        self.input_arrived = true;
-    }
-
-    /// In 120ths. The buffer scale returns to 1, since the buffer is then
-    /// drawn at physical pixels.
-    pub fn onPreferredFractionalScale(self: *Host, scale_120ths: u32) void {
-        if (scale_120ths == 0 or self.preferred_fractional_scale == scale_120ths) return;
-        if (self.buffer_scale != 1 and wayland.wl_proxy_get_version(self.surface) >= 3) wayland.send(self.surface, wayland.surface_set_buffer_scale, .{@as(i32, 1)});
-        self.buffer_scale = 1;
-        self.preferred_fractional_scale = scale_120ths;
-        self.input_arrived = true;
-    }
-
-    /// The seat's text-input focus came to `surface`; on the window's, the
-    /// input method is enabled again if the last frame asked for it.
+    /// The seat's text-input focus came to `surface`; on one of the
+    /// windows', the input method is enabled again if its last frame asked
+    /// for it.
     pub fn onTextInputEnter(self: *Host, surface: ?*Proxy) void {
-        if (surface != self.surface) return;
+        const window = self.windowOfSurface(surface) orelse return;
+        self.text_input_window = window;
         self.text_input.onEnter();
         self.applyTextInput();
     }
 
     pub fn onTextInputLeave(self: *Host, surface: ?*Proxy) void {
-        if (surface != self.surface) return;
+        const window = self.windowOfSurface(surface) orelse return;
+        if (self.text_input_window != window) return;
+        self.text_input_window = null;
         self.text_input.onLeave();
     }
 
@@ -848,21 +998,23 @@ pub const Host = struct {
         self.text_input.onCommitString(utf8);
     }
 
-    /// Text committed since the last `done` is typed, and ends a wait;
-    /// a `done` that commits none does not. The serial is not compared
-    /// with the commits: text is applied whatever it is, and the host
-    /// answers no `done` with requests whose state a stale one would
-    /// change.
+    /// Text committed since the last `done` is typed into the window with
+    /// the text-input focus, and ends a wait; a `done` that commits none
+    /// does not. The serial is not compared with the commits: text is
+    /// applied whatever it is, and the host answers no `done` with requests
+    /// whose state a stale one would change.
     pub fn onTextInputDone(self: *Host, serial: u32) void {
         _ = serial;
         const applied = self.text_input.onDone();
-        self.inbox.dropped_bytes +|= applied.left_out_bytes;
-        if (applied.committed_text.len > 0) self.deliverText(applied.committed_text);
+        const window = self.text_input_window orelse return;
+        window.inbox.dropped_bytes +|= applied.left_out_bytes;
+        if (applied.committed_text.len > 0) window.deliverText(applied.committed_text);
     }
 
-    /// A drag entered the window, at `position` in surface coordinates;
+    /// A drag entered `surface`, at `position` in its surface coordinates;
     /// one that offers a URI list is accepted.
-    pub fn onDragEnter(self: *Host, serial: u32, offer: ?*Proxy, position: [2]f32) void {
+    pub fn onDragEnter(self: *Host, serial: u32, surface: ?*Proxy, offer: ?*Proxy, position: [2]f32) void {
+        self.drag_window = self.windowOfSurface(surface);
         self.data_device.onDragEnter(serial, offer);
         self.drag_position = position;
     }
@@ -890,23 +1042,32 @@ pub const Host = struct {
         self.data_device.receiveDropFrom(read_fd);
     }
 
-    pub fn onPointerEnter(self: *Host, serial: u32, position: [2]f32) void {
+    /// The pointer entered `surface`, at `position` in its surface
+    /// coordinates; until it leaves, its events reach that surface's window.
+    pub fn onPointerEnter(self: *Host, surface: ?*Proxy, serial: u32, position: [2]f32) void {
+        const window = self.windowOfSurface(surface);
+        self.pointer_window = window;
         self.pointer_enter_serial = serial;
-        self.applied_cursor = null;
-        self.applyCursor();
-        self.window_chrome.onPointerEnter();
+        if (window) |entered| {
+            entered.applied_cursor = null;
+            self.applyCursor();
+            entered.window_chrome.onPointerEnter();
+        }
         self.onPointerMotion(position);
     }
 
     pub fn onPointerLeave(self: *Host) void {
         self.pointer_enter_serial = null;
-        if (self.window_chrome.onPointerLeave()) self.deliver(.{ .pointer_cancel = .mouse });
-        self.deliver(.{ .pointer_leave = .mouse });
+        const window = self.pointer_window orelse return;
+        self.pointer_window = null;
+        if (window.window_chrome.onPointerLeave()) window.deliver(.{ .pointer_cancel = .mouse });
+        window.deliver(.{ .pointer_leave = .mouse });
     }
 
     pub fn onPointerMotion(self: *Host, position: [2]f32) void {
         self.pointer_position = position;
-        self.deliver(.{ .pointer_move = .{ .pointer = self.mouseAt(self.now()) } });
+        const window = self.pointer_window orelse return;
+        window.deliver(.{ .pointer_move = .{ .pointer = self.mouseAt(self.now()) } });
     }
 
     /// A press on the title bar or an edge goes to the compositor, with
@@ -915,24 +1076,28 @@ pub const Host = struct {
     /// as `pointer_cancel`: the host works the button, so zui shows the
     /// press and reports no click.
     pub fn onPointerButton(self: *Host, evdev_button: u32, pressed: bool) void {
+        const window = self.pointer_window orelse return;
         const button = keys.buttonFromEvdev(evdev_button) orelse return;
         const press: zui.PointerButton = .{ .pointer = self.mouseAt(self.now()), .button = button };
         if (pressed) {
-            const handled = self.window_chrome.press(button, self.pointer_position, self.latest_input_serial, press.pointer.at, self.windowManager());
+            const handled = window.window_chrome.press(button, self.pointer_position, self.latest_input_serial, press.pointer.at, window.windowManager());
             if (handled == .handed_to_window_manager) {
                 _ = wayland.wl_display_flush(self.display);
                 return;
             }
-        } else switch (self.window_chrome.release(button, self.pointer_position)) {
+        } else switch (window.window_chrome.release(button, self.pointer_position)) {
             .reaches_zui => {},
             .swallowed => return,
             .cancels_press => |worked| {
-                self.deliver(.{ .pointer_cancel = .mouse });
-                if (worked) |kind| self.workCaptionButton(kind);
+                window.deliver(.{ .pointer_cancel = .mouse });
+                if (worked) |kind| {
+                    window.workCaptionButton(kind);
+                    _ = wayland.wl_display_flush(self.display);
+                }
                 return;
             },
         }
-        self.deliver(if (pressed) .{ .pointer_down = press } else .{ .pointer_up = press });
+        window.deliver(if (pressed) .{ .pointer_down = press } else .{ .pointer_up = press });
     }
 
     /// Wheels move in notches, reported before the axis they turn.
@@ -946,8 +1111,9 @@ pub const Host = struct {
         if (axis > wayland.pointer_axis_horizontal) return;
         const distance = if (self.wheel_notches[axis]) |notches| @as(f32, @floatFromInt(notches)) * wheel_step else value;
         self.wheel_notches[axis] = null;
+        const window = self.pointer_window orelse return;
         const delta: [2]f32 = if (axis == wayland.pointer_axis_vertical) .{ 0, distance } else .{ distance, 0 };
-        self.deliver(.{ .wheel = .{ .position = self.pointer_position, .delta = delta, .at = self.now() } });
+        window.deliver(.{ .wheel = .{ .position = self.pointer_position, .delta = delta, .at = self.now() } });
     }
 
     fn mouseAt(self: *const Host, at: zui.Instant) zui.Pointer {
@@ -978,12 +1144,20 @@ pub const Host = struct {
         self.latest_input_serial = serial;
     }
 
-    pub fn onKeyboardFocus(self: *Host, focused: bool) void {
-        if (!focused) {
-            self.modifiers = .{};
-            self.key_repeat.held = null;
-        }
-        self.deliver(.{ .environment = .{ .window_focused = focused } });
+    /// The keyboard's focus came to `surface`; until it leaves, keys reach
+    /// that surface's window.
+    pub fn onKeyboardEnter(self: *Host, surface: ?*Proxy) void {
+        const window = self.windowOfSurface(surface) orelse return;
+        self.keyboard_window = window;
+        window.deliver(.{ .environment = .{ .window_focused = true } });
+    }
+
+    pub fn onKeyboardLeave(self: *Host) void {
+        self.modifiers = .{};
+        self.key_repeat.held = null;
+        const window = self.keyboard_window orelse return;
+        self.keyboard_window = null;
+        window.deliver(.{ .environment = .{ .window_focused = false } });
     }
 
     pub fn onModifiers(self: *Host, depressed: u32, latched: u32, locked: u32, group: u32) void {
@@ -1004,7 +1178,7 @@ pub const Host = struct {
         const at = self.now();
         self.deliverKey(evdev_code, pressed, false, at);
         const repeat = &self.key_repeat;
-        if (pressed and repeat.rate > 0 and self.keyRepeats(evdev_code)) {
+        if (pressed and repeat.rate > 0 and self.keyboard_window != null and self.keyRepeats(evdev_code)) {
             repeat.held = .{ .evdev_code = evdev_code, .next_at = at.addNanoseconds(repeat.delay_ns) };
         } else if (!pressed) if (repeat.held) |held| if (held.evdev_code == evdev_code) {
             repeat.held = null;
@@ -1026,9 +1200,10 @@ pub const Host = struct {
     }
 
     fn deliverKey(self: *Host, evdev_code: u32, pressed: bool, repeat: bool, at: zui.Instant) void {
+        const window = self.keyboard_window orelse return;
         const key_event: zui.KeyEvent = .{ .key = self.keyOf(evdev_code), .modifiers = self.modifiers, .repeat = repeat, .scancode = evdev_code, .at = at };
-        self.deliver(if (pressed) .{ .key_down = key_event } else .{ .key_up = key_event });
-        if (pressed) self.typeKey(evdev_code);
+        window.deliver(if (pressed) .{ .key_down = key_event } else .{ .key_up = key_event });
+        if (pressed) self.typeKey(window, evdev_code);
     }
 
     fn keyRepeats(self: *const Host, evdev_code: u32) bool {
@@ -1069,7 +1244,7 @@ pub const Host = struct {
 
     /// Shortcuts type nothing: Ctrl, Alt and Super keep their letters to
     /// themselves, and control characters are keys.
-    fn typeKey(self: *Host, evdev_code: u32) void {
+    fn typeKey(self: *Host, window: *Window, evdev_code: u32) void {
         const state = self.key_state orelse return;
         if (self.modifiers.control or self.modifiers.alt or self.modifiers.super) return;
         var utf8: [64]u8 = undefined;
@@ -1077,11 +1252,11 @@ pub const Host = struct {
         if (len <= 0 or len >= utf8.len) return;
         const typed = utf8[0..@intCast(len)];
         if (typed.len == 1 and (typed[0] < 0x20 or typed[0] == 0x7F)) return;
-        self.deliverText(typed);
+        window.deliverText(typed);
     }
 
-    /// What the desktop reports; a harness calls this as the buses' replies
-    /// and signals would.
+    /// What the desktop reports, to every window; a harness calls this as
+    /// the buses' replies and signals would.
     pub fn onDesktopReport(self: *Host, report: desktop_bus.Report) void {
         const settings = &self.desktop_settings;
         switch (report) {
@@ -1090,9 +1265,9 @@ pub const Host = struct {
             .reduced_motion => |reduced_motion| settings.reduced_motion = reduced_motion,
             .on_battery => |on_battery| settings.on_battery = on_battery,
             .power_saver => |power_saver| settings.power_saver = power_saver,
-            .preparing_for_sleep => |sleeping| return self.deliver(.{ .lifecycle = if (sleeping) .@"suspend" else .@"resume" }),
+            .preparing_for_sleep => |sleeping| return self.deliverToEveryWindow(.{ .lifecycle = if (sleeping) .@"suspend" else .@"resume" }),
         }
-        self.reportEnvironmentOnceReported();
+        for (&self.windows) |*window| if (window.in_use) window.reportEnvironmentOnceReported();
     }
 
     /// Which of the desktop's services answered. The settings of one that
@@ -1120,34 +1295,7 @@ pub const Host = struct {
             _ = linux.ppoll(&descriptors, descriptors.len, &timeout, null);
             self.desktop.receive(self);
         }
-        self.reportEnvironment();
-    }
-
-    /// Until `init` reports the whole environment, a change waits for it.
-    fn reportEnvironmentOnceReported(self: *Host) void {
-        if (self.reported_environment != null) self.reportEnvironment();
-    }
-
-    /// Reports each setting that differs from what was last reported, or
-    /// every one the first time.
-    fn reportEnvironment(self: *Host) void {
-        const settings = self.desktop_settings;
-        const current: ReportedEnvironment = .{
-            .theme = settings.theme,
-            .contrast = settings.contrast,
-            .reduced_motion = settings.reduced_motion,
-            .power = if (settings.power_saver) .saver else if (settings.on_battery) .battery else .plugged,
-            .custom_title_bar = self.window_chrome.isCustom(),
-            .window_maximized = self.window_chrome.maximized,
-        };
-        const reported = self.reported_environment;
-        inline for (std.meta.fields(ReportedEnvironment)) |field| {
-            const value = @field(current, field.name);
-            if (reported == null or @field(reported.?, field.name) != value) {
-                self.deliver(.{ .environment = @unionInit(zui.EnvironmentChange, field.name, value) });
-            }
-        }
-        self.reported_environment = current;
+        for (&self.windows) |*window| if (window.in_use) window.reportEnvironment(self.desktop_settings);
     }
 
     /// Leaves alone a signal the application handles or ignores. Each
@@ -1183,20 +1331,22 @@ pub const Host = struct {
     }
 
     fn deliverTerminationSignal(self: *Host) void {
-        if (self.termination_signalled.swap(false, .acq_rel)) self.deliver(.{ .lifecycle = .terminate_requested });
+        if (self.termination_signalled.swap(false, .acq_rel)) self.deliverToEveryWindow(.{ .lifecycle = .terminate_requested });
     }
 
     fn applyTextInput(self: *Host) void {
-        const area = self.requests.text_input orelse return self.text_input.apply(null);
-        self.text_input.apply(.covering(area.caret, self.surface_coordinates_per_unit));
+        const window = self.text_input_window orelse return;
+        const area = window.requests.text_input orelse return self.text_input.apply(null);
+        self.text_input.apply(.covering(area.caret, window.surface_coordinates_per_unit));
     }
 
     fn applyCursor(self: *Host) void {
+        const window = self.pointer_window orelse return;
         const serial = self.pointer_enter_serial orelse return;
         const device = self.cursor_shape_device orelse return;
-        const cursor = self.requests.cursor;
-        if (self.applied_cursor == cursor) return;
-        self.applied_cursor = cursor;
+        const cursor = window.requests.cursor;
+        if (window.applied_cursor == cursor) return;
+        window.applied_cursor = cursor;
         wayland.send(device, wayland.cursor_shape_device_set_shape, .{ serial, cursorShape(cursor) });
     }
 
@@ -1292,6 +1442,10 @@ pub const Host = struct {
         return @ptrCast(@alignCast(data.?));
     }
 
+    fn windowFrom(data: ?*anyopaque) *Window {
+        return @ptrCast(@alignCast(data.?));
+    }
+
     const registry_listener: wayland.RegistryListener = .{
         .global = struct {
             fn global(data: ?*anyopaque, registry: ?*Proxy, name: u32, interface_name: [*:0]const u8, version: u32) callconv(.c) void {
@@ -1314,7 +1468,7 @@ pub const Host = struct {
     const xdg_surface_listener: wayland.XdgSurfaceListener = .{
         .configure = struct {
             fn configure(data: ?*anyopaque, _: ?*Proxy, serial: u32) callconv(.c) void {
-                hostFrom(data).onConfigure(serial);
+                windowFrom(data).onConfigure(serial);
             }
         }.configure,
     };
@@ -1322,12 +1476,12 @@ pub const Host = struct {
     const toplevel_listener: wayland.XdgToplevelListener = .{
         .configure = struct {
             fn configure(data: ?*anyopaque, _: ?*Proxy, width: i32, height: i32, states: ?*wayland.Array) callconv(.c) void {
-                hostFrom(data).onToplevelConfigure(width, height, wayland.Array.slice(states, u32));
+                windowFrom(data).onToplevelConfigure(width, height, wayland.Array.slice(states, u32));
             }
         }.configure,
         .close = struct {
             fn close(data: ?*anyopaque, _: ?*Proxy) callconv(.c) void {
-                hostFrom(data).onClose();
+                windowFrom(data).onClose();
             }
         }.close,
     };
@@ -1335,7 +1489,7 @@ pub const Host = struct {
     const toplevel_decoration_listener: wayland.ToplevelDecorationListener = .{
         .configure = struct {
             fn configure(data: ?*anyopaque, _: ?*Proxy, mode: u32) callconv(.c) void {
-                hostFrom(data).onDecorationConfigure(@enumFromInt(mode));
+                windowFrom(data).onDecorationConfigure(@enumFromInt(mode));
             }
         }.configure,
     };
@@ -1345,7 +1499,7 @@ pub const Host = struct {
         .leave = ignoreOutput,
         .preferred_buffer_scale = struct {
             fn preferredBufferScale(data: ?*anyopaque, _: ?*Proxy, factor: i32) callconv(.c) void {
-                hostFrom(data).onPreferredBufferScale(factor);
+                windowFrom(data).onPreferredBufferScale(factor);
             }
         }.preferredBufferScale,
         .preferred_buffer_transform = struct {
@@ -1358,7 +1512,7 @@ pub const Host = struct {
     const fractional_scale_listener: wayland.FractionalScaleListener = .{
         .preferred_scale = struct {
             fn preferredScale(data: ?*anyopaque, _: ?*Proxy, scale_120ths: u32) callconv(.c) void {
-                hostFrom(data).onPreferredFractionalScale(scale_120ths);
+                windowFrom(data).onPreferredFractionalScale(scale_120ths);
             }
         }.preferredScale,
     };
@@ -1370,8 +1524,8 @@ pub const Host = struct {
             }
         }.dataOffer,
         .enter = struct {
-            fn enter(data: ?*anyopaque, _: ?*Proxy, serial: u32, _: ?*Proxy, x: wayland.Fixed, y: wayland.Fixed, offer: ?*Proxy) callconv(.c) void {
-                hostFrom(data).onDragEnter(serial, offer, .{ wayland.fixedToFloat(x), wayland.fixedToFloat(y) });
+            fn enter(data: ?*anyopaque, _: ?*Proxy, serial: u32, surface: ?*Proxy, x: wayland.Fixed, y: wayland.Fixed, offer: ?*Proxy) callconv(.c) void {
+                hostFrom(data).onDragEnter(serial, surface, offer, .{ wayland.fixedToFloat(x), wayland.fixedToFloat(y) });
             }
         }.enter,
         .leave = struct {
@@ -1440,8 +1594,8 @@ pub const Host = struct {
 
     const pointer_listener: wayland.PointerListener = .{
         .enter = struct {
-            fn enter(data: ?*anyopaque, _: ?*Proxy, serial: u32, _: ?*Proxy, x: wayland.Fixed, y: wayland.Fixed) callconv(.c) void {
-                hostFrom(data).onPointerEnter(serial, .{ wayland.fixedToFloat(x), wayland.fixedToFloat(y) });
+            fn enter(data: ?*anyopaque, _: ?*Proxy, serial: u32, surface: ?*Proxy, x: wayland.Fixed, y: wayland.Fixed) callconv(.c) void {
+                hostFrom(data).onPointerEnter(surface, serial, .{ wayland.fixedToFloat(x), wayland.fixedToFloat(y) });
             }
         }.enter,
         .leave = struct {
@@ -1488,14 +1642,14 @@ pub const Host = struct {
             }
         }.keymap,
         .enter = struct {
-            fn enter(data: ?*anyopaque, _: ?*Proxy, serial: u32, _: ?*Proxy, _: ?*wayland.Array) callconv(.c) void {
+            fn enter(data: ?*anyopaque, _: ?*Proxy, serial: u32, surface: ?*Proxy, _: ?*wayland.Array) callconv(.c) void {
                 hostFrom(data).onInputSerial(serial);
-                hostFrom(data).onKeyboardFocus(true);
+                hostFrom(data).onKeyboardEnter(surface);
             }
         }.enter,
         .leave = struct {
             fn leave(data: ?*anyopaque, _: ?*Proxy, _: u32, _: ?*Proxy) callconv(.c) void {
-                hostFrom(data).onKeyboardFocus(false);
+                hostFrom(data).onKeyboardLeave();
             }
         }.leave,
         .key = struct {

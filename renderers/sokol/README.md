@@ -72,7 +72,15 @@ Windows ignores, and SDR only. On Linux the native surface is `.wayland`,
 a native host's Wayland surface, which the renderer draws into with an
 OpenGL 4.3 context made through EGL on a `wl_egl_window`, sized to each
 frame's viewport in physical pixels and presenting with vsync; its
-configuration has no alpha, so the compositor shows the frame opaque:
+configuration has no alpha, so the compositor shows the frame opaque.
+It draws into many Wayland surfaces too: `zuiAttachSurface` makes a
+`wl_egl_window` and an EGL surface for each surface after the first, on
+the first one's EGL display and context, which the renderer holds until
+`deinit`, so any window may close first; the context moves to the
+surface each frame is drawn into, and each window keeps its own
+backdrop-blur and offscreen targets. A frame drawn into a surface the
+compositor never shows waits in its swap for a frame callback that never
+comes, so a Wayland window the renderer draws must be shown:
 
 ```zig
 var renderer: zui_sokol.Renderer = try .initForSurface(&text, host.zuiSurface(.main));

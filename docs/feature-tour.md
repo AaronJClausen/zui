@@ -1903,7 +1903,7 @@ pub const App = struct {
 };
 ```
 
-On the native Windows host, up to four windows open at once, and the sokol renderer draws each through its own swapchain on one device: two windows animating at once each hold a 144 Hz display's rate, and two idle windows use no CPU.
+On the native Windows and Linux hosts, up to four windows open at once, and the sokol renderer draws each through its own swapchain on one Direct3D 11 device, or its own EGL surface on one OpenGL context: two windows animating at once each draw at the rate one alone does, a 144 Hz display's on Windows, and two idle windows use next to no CPU.
 
 <a id="own-loop"></a>
 
@@ -1935,7 +1935,7 @@ A host whose platform owns the loop, as AppKit's or a browser page's does, decla
 
 ## 06. The backend contracts
 
-zui draws nothing and opens no windows itself. Renderers and hosts are plain types checked at compile time, with conformance suites each runs in its package's CI job. Today there are the raylib renderer and adapter host in `renderers/raylib/`, the sokol renderer in `renderers/sokol/`, the terminal renderer and host in `renderers/terminal/`, and, in `hosts/native/`, the native Windows host (message loop on its own thread, per-monitor DPI, Mica, IME, clipboard, opening URLs, dropped files, file watching), and the native Linux host, on Wayland so far (fractional and buffer scale, pointer, wheel, keys through the compositor's keymap with their repeats, typed text, focus, cursor shapes, clipboard, dropped files, file watching through inotify, notifications, the portal's file dialogs and opening URLs, the environment from the desktop portal and UPower over D-Bus, and signals, sleep and waking as lifecycle events); and, in `hosts/web/`, the web host, which runs an application in a Web Worker and draws its frames over `zui_wire` through the WebGL renderer in `renderers/webgl/`.
+zui draws nothing and opens no windows itself. Renderers and hosts are plain types checked at compile time, with conformance suites each runs in its package's CI job. Today there are the raylib renderer and adapter host in `renderers/raylib/`, the sokol renderer in `renderers/sokol/`, the terminal renderer and host in `renderers/terminal/`, and, in `hosts/native/`, the native Windows host (message loop on its own thread, per-monitor DPI, Mica, IME, clipboard, opening URLs, dropped files, file watching), and the native Linux host, on Wayland so far (many windows, fractional and buffer scale, pointer, wheel, keys through the compositor's keymap with their repeats, typed text, focus, cursor shapes, clipboard, dropped files, file watching through inotify, notifications, the portal's file dialogs and opening URLs, the environment from the desktop portal and UPower over D-Bus, and signals, sleep and waking as lifecycle events); and, in `hosts/web/`, the web host, which runs an application in a Web Worker and draws its frames over `zui_wire` through the WebGL renderer in `renderers/webgl/`.
 
 <a id="renderer"></a>
 

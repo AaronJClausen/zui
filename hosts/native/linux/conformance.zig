@@ -46,6 +46,10 @@ const UnshownWindow = struct {
             else => return err,
         };
         if (self.window_host.keymap == null) try self.window_host.useKeymap(null);
+        // As if the seat's pointer and keyboard were already in the window,
+        // without the events entering it reports.
+        self.window_host.pointer_window = self.main();
+        self.window_host.keyboard_window = self.main();
     }
 
     fn close(self: *UnshownWindow) void {
@@ -55,10 +59,19 @@ const UnshownWindow = struct {
     fn host(self: *UnshownWindow) *Host {
         return &self.window_host;
     }
+
+    fn main(self: *UnshownWindow) *Host.Window {
+        return mainOf(&self.window_host);
+    }
 };
 
+fn mainOf(window_host: *Host) *Host.Window {
+    return window_host.windowById(.main).?;
+}
+
 /// Delivers each event the suite posts as the compositor would, at the
-/// surface coordinates the last poll's scale and zoom put it at.
+/// surface coordinates the last poll's scale and zoom put it at, first
+/// moving the pointer or the keyboard into the window it is posted to.
 const CompositorHarness = struct {
     window: UnshownWindow = .{},
 
@@ -67,16 +80,37 @@ const CompositorHarness = struct {
     }
 
     pub fn post(self: *CompositorHarness, event: zui.Event) bool {
+        return self.postTo(.main, event);
+    }
+
+    pub fn postTo(self: *CompositorHarness, id: zui.WindowId, event: zui.Event) bool {
         const window_host = self.host();
+        const target = window_host.windowById(id) orelse return false;
         switch (event) {
-            .pointer_move => |move| window_host.onPointerMotion(surfaceCoordinates(window_host, move.pointer.position)),
-            .pointer_down => window_host.onPointerButton(keys.evdev_button_left, true),
-            .pointer_up => window_host.onPointerButton(keys.evdev_button_left, false),
-            .key_down => |key| window_host.onKey(evdevCodeOf(window_host, key.key) orelse return false, true),
-            .key_up => |key| window_host.onKey(evdevCodeOf(window_host, key.key) orelse return false, false),
+            .pointer_move => |move| {
+                const position = surfaceCoordinates(target, move.pointer.position);
+                if (window_host.pointer_window == target) window_host.onPointerMotion(position) else enterWithPointer(window_host, target, position);
+            },
+            .pointer_down, .pointer_up => |press| {
+                if (window_host.pointer_window != target) enterWithPointer(window_host, target, surfaceCoordinates(target, press.pointer.position));
+                window_host.onPointerButton(keys.evdev_button_left, event == .pointer_down);
+            },
+            .key_down, .key_up => |key| {
+                const evdev_code = evdevCodeOf(window_host, key.key) orelse return false;
+                if (window_host.keyboard_window != target) {
+                    window_host.onKeyboardLeave();
+                    window_host.onKeyboardEnter(target.surface);
+                }
+                window_host.onKey(evdev_code, event == .key_down);
+            },
             else => return false,
         }
         return true;
+    }
+
+    fn enterWithPointer(window_host: *Host, target: *Host.Window, position: [2]f32) void {
+        window_host.onPointerLeave();
+        window_host.onPointerEnter(target.surface, 1, position);
     }
 
     pub fn openedUrl(self: *CompositorHarness) ?[]const u8 {
@@ -100,8 +134,8 @@ const CompositorHarness = struct {
     }
 };
 
-fn surfaceCoordinates(window_host: *const Host, position: [2]f32) [2]f32 {
-    const per_unit = window_host.surface_coordinates_per_unit;
+fn surfaceCoordinates(window: *const Host.Window, position: [2]f32) [2]f32 {
+    const per_unit = window.surface_coordinates_per_unit;
     return .{ position[0] * per_unit, position[1] * per_unit };
 }
 
@@ -158,7 +192,7 @@ test "a new buffer scale moves the scale, and the window keeps its size in layou
     _ = polled.poll(window.host());
     const viewport = polled.builder.params.viewport;
 
-    window.host().onPreferredBufferScale(2);
+    mainOf(window.host()).onPreferredBufferScale(2);
     _ = polled.poll(window.host());
     try testing.expectEqual(@as(f32, 2), polled.builder.params.scale);
     try testing.expectEqual(viewport, polled.builder.params.viewport);
@@ -170,10 +204,10 @@ test "a configured size is the window's size once the configure is done" {
     defer window.close();
     var polled: zui_testing.PolledRecord = .{};
     polled.init();
-    window.host().onToplevelConfigure(500, 400, &.{});
+    mainOf(window.host()).onToplevelConfigure(500, 400, &.{});
     _ = polled.poll(window.host());
     try testing.expectEqual([2]f32{ 320, 240 }, polled.builder.params.viewport);
-    window.host().onConfigure(1);
+    mainOf(window.host()).onConfigure(1);
     _ = polled.poll(window.host());
     try testing.expectEqual([2]f32{ 500, 400 }, polled.builder.params.viewport);
 }
@@ -230,7 +264,7 @@ test "the close button closes the window at the next poll" {
     var polled: zui_testing.PolledRecord = .{};
     polled.init();
     try testing.expect(polled.poll(window.host()));
-    window.host().onClose();
+    mainOf(window.host()).onClose();
     try testing.expect(!polled.poll(window.host()));
 }
 
@@ -386,7 +420,7 @@ test "a modifier pressed while a key is held leaves it repeating; losing focus, 
     const repeat_at = window_host.nextRepeatAt().?;
     window_host.onKey(evdevCodeOf(window_host, .shift).?, true);
     try testing.expectEqual(repeat_at, window_host.nextRepeatAt().?);
-    window_host.onKeyboardFocus(false);
+    window_host.onKeyboardLeave();
     try testing.expectEqual(@as(?zui.Instant, null), window_host.nextRepeatAt());
 
     window_host.onRepeatInfo(0, 600);
@@ -404,13 +438,13 @@ test "a fractional scale of 1.25 or 1.5 is the record's scale, and the viewport 
         polled.init();
         _ = polled.poll(window_host);
 
-        window_host.onPreferredFractionalScale(step[0]);
-        window_host.onPreferredBufferScale(2);
+        mainOf(window_host).onPreferredFractionalScale(step[0]);
+        mainOf(window_host).onPreferredBufferScale(2);
         _ = polled.poll(window_host);
         const params = polled.builder.params;
         try testing.expectEqual(step[1], params.scale);
         try testing.expectEqual([2]f32{ 320, 240 }, params.viewport);
-        try testing.expectEqual(@as(i32, 1), window_host.buffer_scale);
+        try testing.expectEqual(@as(i32, 1), mainOf(window_host).buffer_scale);
         const buffer_width = @round(params.viewport[0] * params.scale * params.zoom);
         try testing.expectEqual(@round(320 * step[1]), buffer_width);
 
@@ -428,7 +462,7 @@ test "a forced scale still wins over a fractional one, and the buffer still take
     defer window.close();
     var polled: zui_testing.PolledRecord = .{};
     polled.init();
-    window.host().onPreferredFractionalScale(150);
+    mainOf(window.host()).onPreferredFractionalScale(150);
     _ = polled.poll(window.host());
     try testing.expectEqual(@as(f32, 1), polled.builder.params.scale);
     try testing.expectApproxEqAbs(@as(f32, 400), polled.builder.params.viewport[0], 1e-3);
@@ -573,6 +607,7 @@ test "a drop's URI list, read from the wait, arrives as files_dropped at the dra
     polled.init();
     _ = polled.poll(window_host);
 
+    window_host.onDragEnter(1, window.main().surface, null, .{ 100, 60 });
     window_host.onDragMotion(.{ 120, 80 });
     const ends = try pipe();
     window_host.receiveDropFrom(ends[0]);
@@ -712,7 +747,7 @@ const PlainBuffer = struct {
         wayland.addListener(registry, &registry_listener, self);
         if (wayland.wl_display_roundtrip(window_host.display) < 0) return error.CompositorUnreachable;
         const shm = self.shm orelse return error.NoShm;
-        const size = window_host.surface_size;
+        const size = mainOf(window_host).surface_size;
         const stride: i32 = @intCast(size[0] * 4);
         const bytes: i32 = stride * @as(i32, @intCast(size[1]));
         const memory = linux.memfd_create("zui-host-test", linux.MFD.CLOEXEC);
@@ -723,8 +758,8 @@ const PlainBuffer = struct {
         const pool = wayland.create(shm, shm_create_pool, &wl_shm_pool_interface, 1, .{ wayland.no_id, memory_fd, bytes }) orelse return error.NoSharedMemory;
         defer wayland.destroy(pool, shm_pool_destroy);
         self.buffer = wayland.create(pool, shm_pool_create_buffer, &wl_buffer_interface, 1, .{ wayland.no_id, @as(i32, 0), @as(i32, @intCast(size[0])), @as(i32, @intCast(size[1])), stride, @as(u32, format_xrgb8888) }) orelse return error.NoBuffer;
-        wayland.send(window_host.surface, surface_attach, .{ self.buffer.?, @as(i32, 0), @as(i32, 0) });
-        wayland.send(window_host.surface, wayland.surface_commit, .{});
+        wayland.send(mainOf(window_host).surface, surface_attach, .{ self.buffer.?, @as(i32, 0), @as(i32, 0) });
+        wayland.send(mainOf(window_host).surface, wayland.surface_commit, .{});
         _ = wayland.wl_display_flush(window_host.display);
     }
 
@@ -816,7 +851,7 @@ test "a file dialog over a window that is not open is unavailable" {
     defer window.close();
     var replies: Replies = .{};
     try testing.expectError(error.Unavailable, Host.zuiFileDialogs.show(window.host(), @enumFromInt(1), .of("open"), .{}, .of(&replies)));
-    window.host().onClose();
+    mainOf(window.host()).onClose();
     try testing.expectError(error.Unavailable, Host.zuiFileDialogs.show(window.host(), .main, .of("open"), .{}, .of(&replies)));
     try testing.expectEqual(@as(u32, 0), window.service_fake.fileDialogsShown());
 }
@@ -851,7 +886,7 @@ test "a frame asking for text input enables the input method once the window has
     window_host.zuiApply(.main, askingForTextInputAt(caret));
     try testing.expectEqual(@as(u32, 0), window_host.text_input.requests_sent);
 
-    window_host.onTextInputEnter(window_host.surface);
+    window_host.onTextInputEnter(mainOf(window_host).surface);
     try testing.expectEqual(@as(u32, 1), window_host.text_input.commits);
     try testing.expectEqual(TextInput.CursorRectangle{ .x = 10, .y = 20, .width = 2, .height = 16 }, window_host.text_input.committed_caret.?);
 }
@@ -863,12 +898,12 @@ test "at a fractional scale and a zoom, the caret's rectangle is in surface coor
     const window_host = window.host();
     var polled: zui_testing.PolledRecord = .{};
     polled.init();
-    window_host.onPreferredFractionalScale(180);
+    mainOf(window_host).onPreferredFractionalScale(180);
     polled.builder.params.zoom = 1.25;
     _ = polled.poll(window_host);
     try testing.expectEqual(@as(f32, 1.5), polled.builder.params.scale);
 
-    window_host.onTextInputEnter(window_host.surface);
+    window_host.onTextInputEnter(mainOf(window_host).surface);
     window_host.zuiApply(.main, askingForTextInputAt(.{ .x = 10, .y = 20, .width = 2, .height = 16 }));
     try testing.expectEqual(TextInput.CursorRectangle{ .x = 12, .y = 25, .width = 3, .height = 20 }, window_host.text_input.committed_caret.?);
 }
@@ -878,7 +913,7 @@ test "a frame whose text-input request is unchanged, or absent while none was en
     try window.open(1);
     defer window.close();
     const window_host = window.host();
-    window_host.onTextInputEnter(window_host.surface);
+    window_host.onTextInputEnter(mainOf(window_host).surface);
 
     window_host.zuiApply(.main, .{});
     window_host.zuiApply(.main, .{ .cursor = .pointer });
@@ -902,7 +937,7 @@ test "an editable losing focus disables the input method" {
     try window.open(1);
     defer window.close();
     const window_host = window.host();
-    window_host.onTextInputEnter(window_host.surface);
+    window_host.onTextInputEnter(mainOf(window_host).surface);
     window_host.zuiApply(.main, askingForTextInputAt(.{ .x = 4, .y = 4, .width = 1, .height = 12 }));
     const sent = window_host.text_input.requests_sent;
 
@@ -922,7 +957,7 @@ test "text the input method commits arrives on done as one text event beside typ
     var polled: zui_testing.PolledRecord = .{};
     polled.init();
     _ = polled.poll(window_host);
-    window_host.onTextInputEnter(window_host.surface);
+    window_host.onTextInputEnter(mainOf(window_host).surface);
     window_host.zuiApply(.main, askingForTextInputAt(.{ .x = 4, .y = 4, .width = 1, .height = 12 }));
 
     window_host.onKey(evdevCodeOf(window_host, .a).?, true);
@@ -951,7 +986,7 @@ test "a done whose serial lags the commits still applies its text, as the protoc
     var polled: zui_testing.PolledRecord = .{};
     polled.init();
     _ = polled.poll(window_host);
-    window_host.onTextInputEnter(window_host.surface);
+    window_host.onTextInputEnter(mainOf(window_host).surface);
     window_host.zuiApply(.main, askingForTextInputAt(.{ .x = 4, .y = 4, .width = 1, .height = 12 }));
     window_host.zuiApply(.main, askingForTextInputAt(.{ .x = 5, .y = 4, .width = 1, .height = 12 }));
 
@@ -970,7 +1005,7 @@ test "composing text alone is kept, reports nothing and does not end a wait" {
     var polled: zui_testing.PolledRecord = .{};
     polled.init();
     _ = polled.poll(window_host);
-    window_host.onTextInputEnter(window_host.surface);
+    window_host.onTextInputEnter(mainOf(window_host).surface);
     window_host.zuiApply(.main, askingForTextInputAt(.{ .x = 4, .y = 4, .width = 1, .height = 12 }));
 
     window_host.onPreeditString("ni", 2, 2);
@@ -994,19 +1029,19 @@ test "leaving and entering the window again enables the input method again, the 
     defer window.close();
     const window_host = window.host();
     const caret: zui.Rect = .{ .x = 4, .y = 4, .width = 1, .height = 12 };
-    window_host.onTextInputEnter(window_host.surface);
+    window_host.onTextInputEnter(mainOf(window_host).surface);
     window_host.zuiApply(.main, askingForTextInputAt(caret));
     window_host.onPreeditString("ni", 2, 2);
     window_host.onTextInputDone(window_host.text_input.commits);
 
-    window_host.onTextInputLeave(window_host.surface);
+    window_host.onTextInputLeave(mainOf(window_host).surface);
     try testing.expectEqual(@as(?TextInput.CursorRectangle, null), window_host.text_input.committed_caret);
     try testing.expectEqualStrings("", window_host.text_input.preeditText());
     const sent = window_host.text_input.requests_sent;
     window_host.zuiApply(.main, askingForTextInputAt(caret));
     try testing.expectEqual(sent, window_host.text_input.requests_sent);
 
-    window_host.onTextInputEnter(window_host.surface);
+    window_host.onTextInputEnter(mainOf(window_host).surface);
     try testing.expectEqual(sent + 3, window_host.text_input.requests_sent);
     try testing.expectEqual(TextInput.CursorRectangle{ .x = 4, .y = 4, .width = 1, .height = 12 }, window_host.text_input.committed_caret.?);
 }
@@ -1030,8 +1065,8 @@ fn reportedEnvironment(polled: *const zui_testing.PolledRecord) zui.Environment 
     return environment;
 }
 
-fn queued(window_host: *const Host, comptime tag: std.meta.Tag(zui.Event)) bool {
-    const inbox = &window_host.inbox;
+fn queued(window_host: *Host, comptime tag: std.meta.Tag(zui.Event)) bool {
+    const inbox = &mainOf(window_host).inbox;
     for (inbox.events[0..inbox.event_count]) |event| if (event == tag) return true;
     return false;
 }
@@ -1088,7 +1123,7 @@ const TitleBarWindow = struct {
     /// The middle of `part`, in surface coordinates.
     fn pointIn(self: *TitleBarWindow, part: Part) [2]f32 {
         const bounds = self.regions[@intFromEnum(part)].bounds;
-        return surfaceCoordinates(self.host(), .{ bounds.x + bounds.width / 2, bounds.y + bounds.height / 2 });
+        return surfaceCoordinates(mainOf(self.host()), .{ bounds.x + bounds.width / 2, bounds.y + bounds.height / 2 });
     }
 
     fn press(self: *TitleBarWindow, point: [2]f32, evdev_button: u32, serial: u32) void {
@@ -1110,18 +1145,18 @@ const TitleBarWindow = struct {
     }
 
     fn lastRequest(self: *TitleBarWindow) ?WindowManagerRequest {
-        return self.host().window_chrome.last_request;
+        return mainOf(self.host()).window_chrome.last_request;
     }
 
     fn requestsSent(self: *TitleBarWindow) u32 {
-        return self.host().window_chrome.requests_sent;
+        return mainOf(self.host()).window_chrome.requests_sent;
     }
 
     fn configureMaximized(self: *TitleBarWindow, maximized: bool, serial: u32) void {
         const maximized_state: u32 = 1;
         const activated_state: u32 = 4;
-        self.host().onToplevelConfigure(0, 0, if (maximized) &.{ activated_state, maximized_state } else &.{activated_state});
-        self.host().onConfigure(serial);
+        mainOf(self.host()).onToplevelConfigure(0, 0, if (maximized) &.{ activated_state, maximized_state } else &.{activated_state});
+        mainOf(self.host()).onConfigure(serial);
     }
 };
 
@@ -1142,14 +1177,14 @@ test "a custom title bar is reported, and a native one is not and keeps no chrom
     try testing.expect(!reportedEnvironment(&polled).custom_title_bar);
     var regions = titleBarRegions(320, 240);
     window.host().zuiChromeRegions(.main, &regions);
-    try testing.expectEqual(@as(usize, 0), window.host().window_chrome.snapshot.count);
+    try testing.expectEqual(@as(usize, 0), mainOf(window.host()).window_chrome.snapshot.count);
 
     window.host().onInputSerial(5);
     window.host().onPointerMotion(.{ 100, 10 });
     window.host().onPointerButton(keys.evdev_button_left, true);
     _ = polled.poll(window.host());
     try testing.expect(polled.find(.pointer_down) != null);
-    try testing.expectEqual(@as(u32, 0), window.host().window_chrome.requests_sent);
+    try testing.expectEqual(@as(u32, 0), mainOf(window.host()).window_chrome.requests_sent);
 }
 
 test "a press on the title bar moves the window with the press's serial, and neither it nor its release reaches zui" {
@@ -1192,7 +1227,7 @@ test "a press on each edge and corner resizes the window from that edge" {
         window_host.onPointerMotion(.{ @as(f32, @floatFromInt(index * 20)) + 5, 105 });
         window_host.onPointerButton(keys.evdev_button_left, true);
         window_host.onPointerButton(keys.evdev_button_left, false);
-        const request = window_host.window_chrome.last_request.?;
+        const request = mainOf(window_host).window_chrome.last_request.?;
         try testing.expectEqual(WindowManagerRequest{ .resize = .{ .serial = serial, .edge = edge[1] } }, request);
         try testing.expectEqual(edge[2], @intFromEnum(request.resize.edge));
     }
@@ -1202,12 +1237,12 @@ test "a window that is not resizable takes presses on its grips as zui's" {
     var window: UnshownWindow = .{ .title_bar = .custom };
     try window.open(1);
     defer window.close();
-    window.host().window_chrome.resizable = false;
+    mainOf(window.host()).window_chrome.resizable = false;
     var regions = titleBarRegions(320, 240);
     window.host().zuiChromeRegions(.main, &regions);
     window.host().onPointerMotion(.{ 316, 236 });
     window.host().onPointerButton(keys.evdev_button_left, true);
-    try testing.expectEqual(@as(u32, 0), window.host().window_chrome.requests_sent);
+    try testing.expectEqual(@as(u32, 0), mainOf(window.host()).window_chrome.requests_sent);
     try testing.expect(queued(window.host(), .pointer_down));
 }
 
@@ -1323,23 +1358,23 @@ test "the regions are kept in surface coordinates at a scale of 2, and at a frac
     var doubled: TitleBarWindow = .{};
     try doubled.open(2);
     defer doubled.close();
-    try testing.expectEqual(zui.ChromeKind.close_button, doubled.host().chromeKindAt(.{ 2 * (320.0 / 2.0 - 10), 2 * 10 }).?);
-    try testing.expectEqual(zui.ChromeKind.resize_bottom_right, doubled.host().chromeKindAt(.{ 317, 237 }).?);
-    try testing.expectEqual(@as(?zui.ChromeKind, null), doubled.host().chromeKindAt(.{ 2 * 40, 2 * 10 }));
+    try testing.expectEqual(zui.ChromeKind.close_button, doubled.host().chromeKindAt(.main, .{ 2 * (320.0 / 2.0 - 10), 2 * 10 }).?);
+    try testing.expectEqual(zui.ChromeKind.resize_bottom_right, doubled.host().chromeKindAt(.main, .{ 317, 237 }).?);
+    try testing.expectEqual(@as(?zui.ChromeKind, null), doubled.host().chromeKindAt(.main, .{ 2 * 40, 2 * 10 }));
 
     var fractional: TitleBarWindow = .{};
     try fractional.window.open(null);
     defer fractional.close();
     fractional.polled.init();
-    fractional.host().onPreferredFractionalScale(180);
+    mainOf(fractional.host()).onPreferredFractionalScale(180);
     fractional.polled.builder.params.zoom = 1.25;
     _ = fractional.polled.poll(fractional.host());
     try testing.expectEqual(@as(f32, 1.5), fractional.polled.builder.params.scale);
     fractional.handRegions();
-    try testing.expectEqual(@as(f32, 1.25), fractional.host().surface_coordinates_per_unit);
+    try testing.expectEqual(@as(f32, 1.25), mainOf(fractional.host()).surface_coordinates_per_unit);
     const close_point = fractional.pointIn(.close);
     try testing.expectApproxEqAbs(@as(f32, 320 - 23.0 * 1.25 / 2.0), close_point[0], 1e-3);
-    try testing.expectEqual(zui.ChromeKind.close_button, fractional.host().chromeKindAt(close_point).?);
+    try testing.expectEqual(zui.ChromeKind.close_button, fractional.host().chromeKindAt(.main, close_point).?);
     fractional.click(close_point, 60);
     try testing.expect(!fractional.polled.poll(fractional.host()));
 }
@@ -1353,10 +1388,10 @@ test "the maximized state follows the compositor's configures, reported only whe
     _ = titled.polled.poll(titled.host());
     try testing.expectEqual(@as(?zui.EnvironmentChange, null), titled.polled.find(.environment));
 
-    titled.host().onToplevelConfigure(0, 0, &.{1});
+    mainOf(titled.host()).onToplevelConfigure(0, 0, &.{1});
     _ = titled.polled.poll(titled.host());
     try testing.expectEqual(@as(?zui.EnvironmentChange, null), titled.polled.find(.environment));
-    titled.host().onConfigure(2);
+    mainOf(titled.host()).onConfigure(2);
     _ = titled.polled.poll(titled.host());
     try testing.expectEqual(zui.EnvironmentChange{ .window_maximized = true }, titled.polled.find(.environment).?);
 
@@ -1375,17 +1410,17 @@ test "a compositor that insists on drawing its own title bar gets it: the window
     defer titled.close();
     _ = titled.polled.poll(titled.host());
 
-    titled.host().onDecorationConfigure(.server_side);
+    mainOf(titled.host()).onDecorationConfigure(.server_side);
     _ = titled.polled.poll(titled.host());
     try testing.expectEqual(zui.EnvironmentChange{ .custom_title_bar = false }, titled.polled.find(.environment).?);
     titled.handRegions();
-    try testing.expectEqual(@as(usize, 0), titled.host().window_chrome.snapshot.count);
+    try testing.expectEqual(@as(usize, 0), mainOf(titled.host()).window_chrome.snapshot.count);
     titled.click(titled.pointIn(.title_bar), 70);
     try testing.expectEqual(@as(u32, 0), titled.requestsSent());
     _ = titled.polled.poll(titled.host());
     try testing.expect(titled.polled.find(.pointer_down) != null);
 
-    titled.host().onDecorationConfigure(.client_side);
+    mainOf(titled.host()).onDecorationConfigure(.client_side);
     _ = titled.polled.poll(titled.host());
     try testing.expectEqual(zui.EnvironmentChange{ .custom_title_bar = true }, titled.polled.find(.environment).?);
 }
@@ -1399,7 +1434,7 @@ test "a toplevel asks the compositor for the decorations its title bar needs, an
         var polled: zui_testing.PolledRecord = .{};
         polled.init();
         _ = polled.poll(window_host);
-        const window_chrome = &window_host.window_chrome;
+        const window_chrome = &mainOf(window_host).window_chrome;
         if (window_host.globals.decoration_manager != null) {
             try testing.expect(window_chrome.decoration != null);
             try testing.expect(window_chrome.decoration_mode != null);
@@ -1407,4 +1442,201 @@ test "a toplevel asks the compositor for the decorations its title bar needs, an
         const client_side = window_chrome.decoration_mode != .server_side;
         try testing.expectEqual(title_bar == .custom and client_side, reportedEnvironment(&polled).custom_title_bar);
     }
+}
+
+const second_window_options: zui.WindowOptions = .{ .title = "zui host suite, second window", .size = .{ 320, 240 }, .visible = false };
+
+test "closing one window by its close button closes it alone, and closing it frees its id" {
+    var window: UnshownWindow = .{};
+    try window.open(1);
+    defer window.close();
+    const window_host = window.host();
+    const second = try window_host.zuiOpenWindow(second_window_options);
+    var polled: zui_testing.PolledRecord = .{};
+    polled.init();
+    try testing.expect(polled.pollWindow(window_host, second));
+
+    window_host.windowById(second).?.onClose();
+    try testing.expect(!polled.pollWindow(window_host, second));
+    try testing.expect(polled.poll(window_host));
+    window_host.zuiCloseWindow(second);
+    try testing.expectEqual(null, window_host.windowById(second));
+    try testing.expect(!polled.pollWindow(window_host, second));
+    try testing.expect(polled.poll(window_host));
+}
+
+test "the pointer's events reach the window it entered, and keys the window with the keyboard's focus" {
+    var window: UnshownWindow = .{};
+    try window.open(1);
+    defer window.close();
+    const window_host = window.host();
+    const second = try window_host.zuiOpenWindow(second_window_options);
+    var first_polled: zui_testing.PolledRecord = .{};
+    first_polled.init();
+    var second_polled: zui_testing.PolledRecord = .{};
+    second_polled.init();
+    _ = first_polled.poll(window_host);
+    _ = second_polled.pollWindow(window_host, second);
+
+    window_host.onPointerLeave();
+    window_host.onPointerEnter(window_host.windowById(second).?.surface, 7, .{ 30, 40 });
+    window_host.onPointerButton(keys.evdev_button_left, true);
+    window_host.onPointerButton(keys.evdev_button_left, false);
+    window_host.onKey(evdevCodeOf(window_host, .a).?, true);
+    _ = first_polled.poll(window_host);
+    _ = second_polled.pollWindow(window_host, second);
+    try testing.expect(first_polled.find(.pointer_leave) != null);
+    try testing.expectEqual(@as(?zui.PointerButton, null), first_polled.find(.pointer_down));
+    try testing.expectEqual(zui.Key.a, first_polled.find(.key_down).?.key);
+    try testing.expectEqual([2]f32{ 30, 40 }, second_polled.find(.pointer_down).?.pointer.position);
+    try testing.expect(second_polled.find(.pointer_up) != null);
+    try testing.expectEqual(@as(?zui.KeyEvent, null), second_polled.find(.key_down));
+
+    window_host.onKeyboardLeave();
+    window_host.onKeyboardEnter(window_host.windowById(second).?.surface);
+    window_host.onKey(evdevCodeOf(window_host, .b).?, true);
+    _ = first_polled.poll(window_host);
+    _ = second_polled.pollWindow(window_host, second);
+    try testing.expectEqual(zui.EnvironmentChange{ .window_focused = false }, first_polled.find(.environment).?);
+    try testing.expectEqual(@as(?zui.KeyEvent, null), first_polled.find(.key_down));
+    try testing.expectEqual(zui.EnvironmentChange{ .window_focused = true }, second_polled.find(.environment).?);
+    try testing.expectEqual(zui.Key.b, second_polled.find(.key_down).?.key);
+}
+
+test "past the windows the host holds, one more is refused, and after one closes a new one opens with a new id" {
+    var window: UnshownWindow = .{};
+    try window.open(1);
+    defer window.close();
+    const window_host = window.host();
+    var opened: [Host.max_windows - 1]zui.WindowId = undefined;
+    for (&opened) |*id| id.* = try window_host.zuiOpenWindow(second_window_options);
+    try testing.expectError(error.TooManyWindows, window_host.zuiOpenWindow(second_window_options));
+
+    window_host.zuiCloseWindow(opened[1]);
+    const reopened = try window_host.zuiOpenWindow(second_window_options);
+    for (opened) |id| try testing.expect(reopened != id);
+    try testing.expect(reopened != .main);
+}
+
+test "with the main window closed, the clipboard still answers, and a dialog over another window answers naming it" {
+    var window: UnshownWindow = .{};
+    try window.open(1);
+    defer window.close();
+    const window_host = window.host();
+    if (window_host.data_device.device == null) {
+        std.debug.print("skipped: the compositor offers no wl_data_device_manager\n", .{});
+        return error.SkipZigTest;
+    }
+    const second = try window_host.zuiOpenWindow(second_window_options);
+    window_host.zuiCloseWindow(.main);
+    try testing.expectEqual(null, window_host.windowById(.main));
+
+    var pasted: ClipboardReplies = .{};
+    try Host.zuiClipboard.write(window_host, "still here");
+    try Host.zuiClipboard.read(window_host, .of("paste"), .of(&pasted));
+    var replies: Replies = .{};
+    try testing.expectError(error.Unavailable, Host.zuiFileDialogs.show(window_host, .main, .of("open"), .{}, .of(&replies)));
+    window.service_fake.scriptFileDialog("/zui/theme.zon\x00");
+    try Host.zuiFileDialogs.show(window_host, second, .of("open"), .{}, .of(&replies));
+
+    var polled: zui_testing.PolledRecord = .{};
+    polled.init();
+    const deadline = window_host.now().addNanoseconds(transfer_bound_ns);
+    while (pasted.count == 0 or replies.count == 0) {
+        if (!window_host.now().isBefore(deadline)) return error.Timeout;
+        try testing.expect(polled.pollWindow(window_host, second));
+        window_host.zuiWait(.{ .at = window_host.now().addSeconds(0.05) });
+    }
+    try testing.expectEqualStrings("still here", pasted.replies[0].text());
+    try testing.expectEqual(second, replies.replies[0].window);
+    try testing.expectEqual(.files_chosen, replies.replies[0].kind);
+}
+
+test "a terminate request reaches every window, and each then reports itself closed" {
+    var window: UnshownWindow = .{};
+    try window.open(1);
+    defer window.close();
+    const window_host = window.host();
+    if (!window_host.handlesSignal(.INT)) {
+        std.debug.print("skipped: SIGINT already has a handler in this process\n", .{});
+        return error.SkipZigTest;
+    }
+    const second = try window_host.zuiOpenWindow(second_window_options);
+    var polled: zui_testing.PolledRecord = .{};
+    polled.init();
+    _ = polled.poll(window_host);
+    _ = polled.pollWindow(window_host, second);
+
+    try std.posix.raise(.INT);
+    window_host.zuiWait(.{ .at = window_host.now().addSeconds(2) });
+    for ([_]zui.WindowId{ .main, second }) |id| {
+        try testing.expect(polled.pollWindow(window_host, id));
+        try testing.expectEqual(zui.Lifecycle.terminate_requested, polled.find(.lifecycle).?);
+        try testing.expect(!polled.pollWindow(window_host, id));
+    }
+}
+
+test "a buffer scale or a fractional scale the compositor prefers for one window moves that window's scale alone" {
+    var window: UnshownWindow = .{};
+    try window.open(null);
+    defer window.close();
+    const window_host = window.host();
+    const second = try window_host.zuiOpenWindow(second_window_options);
+    var polled: zui_testing.PolledRecord = .{};
+    polled.init();
+    _ = polled.poll(window_host);
+    const main_scale = polled.builder.params.scale;
+    _ = polled.pollWindow(window_host, second);
+    const second_scale = polled.builder.params.scale;
+
+    window_host.windowById(second).?.onPreferredBufferScale(@as(i32, @intFromFloat(second_scale)) + 1);
+    _ = polled.pollWindow(window_host, second);
+    try testing.expectEqual(second_scale + 1, polled.builder.params.scale);
+    _ = polled.poll(window_host);
+    try testing.expectEqual(main_scale, polled.builder.params.scale);
+
+    window.main().onPreferredFractionalScale(150);
+    _ = polled.poll(window_host);
+    try testing.expectEqual(@as(f32, 1.25), polled.builder.params.scale);
+    _ = polled.pollWindow(window_host, second);
+    try testing.expectEqual(second_scale + 1, polled.builder.params.scale);
+}
+
+test "each window keeps its own chrome regions, and a press on one window's title bar moves that window alone" {
+    var titled: TitleBarWindow = .{};
+    try titled.open(1);
+    defer titled.close();
+    const window_host = titled.host();
+    var second_options = second_window_options;
+    second_options.title_bar = .custom;
+    const second = try window_host.zuiOpenWindow(second_options);
+    var second_polled: zui_testing.PolledRecord = .{};
+    second_polled.init();
+    _ = second_polled.pollWindow(window_host, second);
+    var close_at_left = [_]zui.ChromeRegion{.{ .id = 1, .bounds = .{ .width = 30, .height = title_bar_height }, .kind = .close_button }};
+    window_host.zuiChromeRegions(second, &close_at_left);
+
+    const on_title_bar = titled.pointIn(.title_bar);
+    try testing.expectEqual(zui.ChromeKind.title_bar, window_host.chromeKindAt(.main, on_title_bar).?);
+    try testing.expectEqual(@as(?zui.ChromeKind, null), window_host.chromeKindAt(second, on_title_bar));
+    try testing.expectEqual(zui.ChromeKind.close_button, window_host.chromeKindAt(second, .{ 10, 10 }).?);
+    try testing.expectEqual(zui.ChromeKind.title_bar, window_host.chromeKindAt(.main, .{ 10, 10 }).?);
+
+    const second_window = window_host.windowById(second).?;
+    window_host.onPointerLeave();
+    window_host.onPointerEnter(second_window.surface, 80, on_title_bar);
+    window_host.onInputSerial(81);
+    window_host.onPointerButton(keys.evdev_button_left, true);
+    _ = second_polled.pollWindow(window_host, second);
+    try testing.expect(second_polled.find(.pointer_down) != null);
+    try testing.expectEqual(@as(u32, 0), titled.requestsSent());
+    try testing.expectEqual(@as(u32, 0), second_window.window_chrome.requests_sent);
+
+    window_host.onPointerButton(keys.evdev_button_left, false);
+    window_host.onPointerLeave();
+    window_host.onPointerEnter(titled.window.main().surface, 82, on_title_bar);
+    window_host.onInputSerial(83);
+    window_host.onPointerButton(keys.evdev_button_left, true);
+    try testing.expectEqual(WindowManagerRequest{ .move = 83 }, titled.lastRequest().?);
+    try testing.expectEqual(@as(u32, 0), second_window.window_chrome.requests_sent);
 }

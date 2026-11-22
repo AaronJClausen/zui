@@ -55,6 +55,7 @@ pub fn build(b: *std.Build) void {
     if (has_host) addTheme(b, target, optimize, host_module, core, check_step, core_options);
     if (has_host) addServicesExample(b, target, optimize, host_module, core, check_step, core_options);
     if (has_host) addTitleBarExample(b, target, optimize, host_module, core, check_step, core_options);
+    if (has_host) addManyWindowsExample(b, target, optimize, host_module, core, check_step, core_options);
     if (windows) addWindowsExamples(b, target, optimize, host_module, core, check_step, core_options);
 
     const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "zui_host.zig", "windows", "linux", "examples" };
@@ -192,8 +193,37 @@ fn addTitleBarExample(b: *std.Build, target: std.Build.ResolvedTarget, optimize:
     check_step.dependOn(&title_bar.step);
 }
 
-/// The remote, material, HDR, accessibility and many-windows examples, which run
-/// only on the Windows host so far.
+/// One application in many windows, on Windows and on Linux.
+fn addManyWindowsExample(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, host_module: *std.Build.Module, core: *std.Build.Dependency, check_step: *std.Build.Step, core_options: CoreOptions) void {
+    const zui_sokol_dependency = sokolDeclaring(b, core_options.on(target, optimize), "zui_sokol") orelse return;
+    const truetype_dependency = truetypeDeclaring(b, core_options.on(target, optimize)) orelse return;
+    const many_windows = b.addExecutable(.{
+        .name = "zui-host-many-windows",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/many_windows.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zui_host", .module = host_module },
+                .{ .name = "zui", .module = core.module("zui") },
+                .{ .name = "zui_app", .module = core.module("zui_app") },
+                .{ .name = "zui_async", .module = core.module("zui_async") },
+                .{ .name = "zui_widgets", .module = core.module("zui_widgets") },
+                .{ .name = "zui_sokol", .module = zui_sokol_dependency.module("zui_sokol") },
+                .{ .name = "zui_truetype", .module = truetype_dependency.module("zui_truetype") },
+            },
+        }),
+    });
+    linkThroughLlvmOnLinux(many_windows);
+    b.installArtifact(many_windows);
+    const run_many_windows = b.addRunArtifact(many_windows);
+    if (b.args) |arguments| run_many_windows.addArgs(arguments);
+    b.step("many-windows", "Run one application in two windows, each with its own UI (`-- --check` clicks and closes them and quits, hidden on Windows; `--measure-idle`, `--measure-animation`)").dependOn(&run_many_windows.step);
+    check_step.dependOn(&many_windows.step);
+}
+
+/// The remote, material, HDR and accessibility examples, which run only on
+/// the Windows host so far.
 fn addWindowsExamples(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, host_module: *std.Build.Module, core: *std.Build.Dependency, check_step: *std.Build.Step, core_options: CoreOptions) void {
     const app_module = core.module("zui_app");
     const zui_sokol_dependency = sokolDeclaring(b, core_options.on(target, optimize), "zui_sokol") orelse return;
@@ -285,29 +315,6 @@ fn addWindowsExamples(b: *std.Build, target: std.Build.ResolvedTarget, optimize:
     if (b.args) |arguments| run_accessible.addArgs(arguments);
     b.step("accessible", "Show zui_widgets controls to UI Automation, for Narrator and Accessibility Insights (`-- --frames 30` quits)").dependOn(&run_accessible.step);
     check_step.dependOn(&accessible.step);
-
-    const many_windows = b.addExecutable(.{
-        .name = "zui-host-many-windows",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("examples/many_windows.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "zui_host", .module = host_module },
-                .{ .name = "zui", .module = core.module("zui") },
-                .{ .name = "zui_app", .module = app_module },
-                .{ .name = "zui_async", .module = core.module("zui_async") },
-                .{ .name = "zui_widgets", .module = core.module("zui_widgets") },
-                .{ .name = "zui_sokol", .module = zui_sokol_dependency.module("zui_sokol") },
-                .{ .name = "zui_truetype", .module = truetype_dependency.module("zui_truetype") },
-            },
-        }),
-    });
-    b.installArtifact(many_windows);
-    const run_many_windows = b.addRunArtifact(many_windows);
-    if (b.args) |arguments| run_many_windows.addArgs(arguments);
-    b.step("many-windows", "Run one application in two windows, each with its own UI (`-- --check` clicks and closes them hidden and quits; `--measure-idle`, `--measure-animation`)").dependOn(&run_many_windows.step);
-    check_step.dependOn(&many_windows.step);
 }
 
 /// The sokol renderer's package, once it has declared `module_name`: until its

@@ -246,8 +246,8 @@ const Check = struct {
             _ = win32.ClientToScreen(host.hwnd, &point);
             return win32.SendMessageW(host.hwnd, win32.WM_NCHITTEST, 0, win32.lparamFromPoint(@intCast(point.x), @intCast(point.y)));
         } else {
-            const surface_coordinates_per_unit = host.surface_coordinates_per_unit;
-            return host.chromeKindAt(.{ at[0] * surface_coordinates_per_unit, at[1] * surface_coordinates_per_unit });
+            const surface_coordinates_per_unit = host.surfaceCoordinatesPerUnit(.main);
+            return host.chromeKindAt(.main, .{ at[0] * surface_coordinates_per_unit, at[1] * surface_coordinates_per_unit });
         }
     }
 

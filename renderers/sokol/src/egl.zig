@@ -1,4 +1,4 @@
-//! An OpenGL context on a Wayland surface a host owns, through EGL, for
+//! An OpenGL context on Wayland surfaces a host owns, through EGL, for
 //! sokol_gfx without sokol_app.
 
 const std = @import("std");
@@ -16,6 +16,7 @@ const WaylandEglWindow = opaque {};
 const EGL_PLATFORM_WAYLAND_KHR = 0x31D8;
 const EGL_OPENGL_API = 0x30A2;
 const EGL_NONE = 0x3038;
+const EGL_DRAW = 0x3059;
 const EGL_SURFACE_TYPE = 0x3033;
 const EGL_WINDOW_BIT = 0x0004;
 const EGL_RENDERABLE_TYPE = 0x3040;
@@ -42,6 +43,7 @@ extern "EGL" fn eglDestroyContext(display: EGLDisplay, context: EGLContext) call
 extern "EGL" fn eglCreatePlatformWindowSurface(display: EGLDisplay, config: EGLConfig, native_window: *anyopaque, attributes: ?[*]const isize) callconv(.c) ?EGLSurface;
 extern "EGL" fn eglDestroySurface(display: EGLDisplay, surface: EGLSurface) callconv(.c) EGLBoolean;
 extern "EGL" fn eglMakeCurrent(display: EGLDisplay, draw: ?EGLSurface, read: ?EGLSurface, context: ?EGLContext) callconv(.c) EGLBoolean;
+extern "EGL" fn eglGetCurrentSurface(which: EGLint) callconv(.c) ?EGLSurface;
 extern "EGL" fn eglSwapInterval(display: EGLDisplay, interval: EGLint) callconv(.c) EGLBoolean;
 extern "EGL" fn eglSwapBuffers(display: EGLDisplay, surface: EGLSurface) callconv(.c) EGLBoolean;
 
@@ -49,16 +51,27 @@ extern "wayland-egl" fn wl_egl_window_create(surface: *anyopaque, width: c_int, 
 extern "wayland-egl" fn wl_egl_window_destroy(window: *WaylandEglWindow) callconv(.c) void;
 extern "wayland-egl" fn wl_egl_window_resize(window: *WaylandEglWindow, width: c_int, height: c_int, dx: c_int, dy: c_int) callconv(.c) void;
 
-/// The surface's OpenGL 4.3 core context, current on the thread that made
-/// it, presenting with vsync. Its pixels are opaque: the configuration has
-/// no alpha, so the compositor never blends what is behind the window.
-pub const Context = struct {
+/// The OpenGL 4.3 core context every window draws with, on the display of
+/// the first, held until `Context.releaseDevice`.
+pub const Device = struct {
     display: EGLDisplay,
+    config: EGLConfig,
     context: EGLContext,
+};
+
+/// One Wayland surface's window surface, drawn by its device's context,
+/// presenting with vsync. Its pixels are opaque: the configuration has no
+/// alpha, so the compositor never blends what is behind the window.
+pub const Context = struct {
+    device: Device,
+    /// The host's `wl_surface`, which finds the context for a frame.
+    wayland_surface: *anyopaque,
     egl_surface: EGLSurface,
     window: *WaylandEglWindow,
     size: [2]i32,
 
+    /// Makes the device on `wayland_display` and the surface's context on
+    /// it, current on the calling thread.
     pub fn init(wayland_display: *anyopaque, wayland_surface: *anyopaque) error{ NoEglDisplay, NoEglConfig, NoOpenGlContext, NoWindowSurface }!Context {
         const display = eglGetPlatformDisplay(EGL_PLATFORM_WAYLAND_KHR, wayland_display, null) orelse return error.NoEglDisplay;
         if (eglInitialize(display, null, null) == 0) return error.NoEglDisplay;
@@ -74,15 +87,21 @@ pub const Context = struct {
         };
         const context = eglCreateContext(display, config, null, &context_attributes) orelse return error.NoOpenGlContext;
         errdefer _ = eglDestroyContext(display, context);
+        return initSharing(wayland_surface, .{ .display = display, .config = config, .context = context });
+    }
 
+    /// A window surface for `wayland_surface` on `device`, another
+    /// context's, made current on the calling thread.
+    pub fn initSharing(wayland_surface: *anyopaque, device: Device) error{ NoWindowSurface, NoOpenGlContext }!Context {
         const initial_size: [2]i32 = .{ 1, 1 };
         const window = wl_egl_window_create(wayland_surface, initial_size[0], initial_size[1]) orelse return error.NoWindowSurface;
         errdefer wl_egl_window_destroy(window);
-        const egl_surface = eglCreatePlatformWindowSurface(display, config, window, null) orelse return error.NoWindowSurface;
-        errdefer _ = eglDestroySurface(display, egl_surface);
-        if (eglMakeCurrent(display, egl_surface, egl_surface, context) == 0) return error.NoOpenGlContext;
-        _ = eglSwapInterval(display, 1);
-        return .{ .display = display, .context = context, .egl_surface = egl_surface, .window = window, .size = initial_size };
+        const egl_surface = eglCreatePlatformWindowSurface(device.display, device.config, window, null) orelse return error.NoWindowSurface;
+        errdefer _ = eglDestroySurface(device.display, egl_surface);
+        if (eglMakeCurrent(device.display, egl_surface, egl_surface, device.context) == 0) return error.NoOpenGlContext;
+        // The interval belongs to the surface current when it is set.
+        _ = eglSwapInterval(device.display, 1);
+        return .{ .device = device, .wayland_surface = wayland_surface, .egl_surface = egl_surface, .window = window, .size = initial_size };
     }
 
     /// The first configuration without alpha, since a Wayland compositor
@@ -109,18 +128,41 @@ pub const Context = struct {
         return configs[0];
     }
 
+    /// The device, held until `releaseDevice` whichever contexts on it are
+    /// freed.
+    pub fn retainDevice(self: *const Context) Device {
+        return self.device;
+    }
+
+    pub fn releaseDevice(device: Device) void {
+        _ = eglMakeCurrent(device.display, null, null, null);
+        _ = eglDestroyContext(device.display, device.context);
+        _ = eglTerminate(device.display);
+    }
+
+    /// Frees the window surface. The device's context stays current
+    /// without a surface, so the GPU objects of other windows can still be
+    /// freed or drawn with.
     pub fn deinit(self: *Context) void {
-        _ = eglMakeCurrent(self.display, null, null, null);
-        _ = eglDestroySurface(self.display, self.egl_surface);
+        const device = self.device;
+        if (eglGetCurrentSurface(EGL_DRAW) == self.egl_surface) {
+            if (eglMakeCurrent(device.display, null, null, device.context) == 0) _ = eglMakeCurrent(device.display, null, null, null);
+        }
+        _ = eglDestroySurface(device.display, self.egl_surface);
         wl_egl_window_destroy(self.window);
-        _ = eglDestroyContext(self.display, self.context);
-        _ = eglTerminate(self.display);
     }
 
     const defaults: sg.EnvironmentDefaults = .{ .color_format = .RGBA8, .depth_format = .DEPTH_STENCIL, .sample_count = 1 };
 
     pub fn environment(_: *const Context) sg.Environment {
         return .{ .defaults = defaults };
+    }
+
+    /// Draws what follows into this surface: the device's one context
+    /// moves to it, when another surface had it.
+    pub fn makeCurrent(self: *const Context) void {
+        if (eglGetCurrentSurface(EGL_DRAW) == self.egl_surface) return;
+        _ = eglMakeCurrent(self.device.display, self.egl_surface, self.egl_surface, self.device.context);
     }
 
     /// The surface's default framebuffer, resized to `size` in physical
@@ -145,6 +187,6 @@ pub const Context = struct {
     /// Attaches the frame to the surface and commits it, waiting for the
     /// compositor's frame callback of the one before.
     pub fn present(self: *const Context) void {
-        _ = eglSwapBuffers(self.display, self.egl_surface);
+        _ = eglSwapBuffers(self.device.display, self.egl_surface);
     }
 };

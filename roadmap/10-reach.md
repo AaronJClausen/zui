@@ -297,7 +297,68 @@ opens the window menu, the grip resizes it, the caption buttons show
 hover and press and each works once, the maximize button shows restore
 while maximized, and a monitor at a fractional scale keeps the parts
 where they are drawn. The Windows check now also expects the grip as
-`HTBOTTOMRIGHT`, compiled here and not run. Slice 7 is next.
+`HTBOTTOMRIGHT`, compiled here and not run.
+
+Slice 7 is done in `hosts/native/` and `renderers/sokol/`
+(`hosts/native/linux/host.zig`, `hosts/native/linux/conformance.zig`,
+`hosts/native/examples/many_windows.zig`, `hosts/native/build.zig`,
+`renderers/sokol/src/egl.zig`, `renderers/sokol/src/renderer.zig`):
+`10-reach:05-many-windows`'s windows on Wayland. The host is `.many`, with
+`Host.max_windows = 4` slots, a `Host.Window` each, holding its
+`wl_surface`, `xdg_surface`, toplevel, fractional-scale and viewport
+objects, inbox, requests, applied cursor, configure state, sizes and
+scale, `WindowChrome`, reported environment and terminate state; every
+call that takes a window finds its slot by id, and the `.main` asserts
+are gone. The seat (pointer, keyboard, xkb, repeat), the data device, the
+text input, the watches, the buses, the services, the wake and the
+signals stay on the host. `wl_pointer.enter`, `wl_keyboard.enter`,
+`zwp_text_input_v3.enter` and `wl_data_device.enter` name a surface, and
+the window it belongs to takes that device's events until it leaves, or
+for a drag until the next one enters. `zuiOpenWindow` round-trips until
+the compositor configures the window, then reports the whole environment
+to it; `zuiCloseWindow` destroys any window's objects, `.main` included,
+and forgets every focus it held. Ids are never given twice. A terminate
+request, the system sleeping and waking and each desktop setting reach
+every open window's record, and a lost display closes them all. One wait
+ends when any window has something to poll. `Host.close`, `minimize` and
+`toggleMaximized` act on `.main`, as on Windows, and `chromeKindAt` and
+`surfaceCoordinatesPerUnit` take the window. The harness declares
+`postTo`, leaving and entering the window an event is posted to as the
+compositor would, so the host suite runs its many-windows steps. The
+sokol renderer draws many Wayland surfaces: `egl.Device` (display,
+configuration, context) is held from `initForSurface` to `deinit`;
+`zuiAttachSurface` makes a `wl_egl_window` and an EGL surface on it for
+each surface after the first, found by `wl_surface` at submit, with its
+own backdrop-blur and offscreen targets, and `zuiDetachSurface` frees
+them, leaving the context current without a surface; each frame makes
+its surface current first, only when another had the context, and sets a
+swap interval of 1 on each new surface. `zig build many-windows` builds on
+Linux from `addManyWindowsExample`; its click enters the window through
+the host's handlers, and its CPU time is `getrusage`'s. 94 of 95 tests
+pass in Debug and ReleaseSafe, the opt-in one skipped: the host suite on
+both windows, and tests that close one window alone, route the pointer
+and the keys to the window each entered, refuse a fifth window and give
+a new id after one closes, answer the clipboard and a dialog over the
+second window after `.main` has closed, deliver SIGINT to every window,
+move one window's buffer scale and the other's fractional scale apart,
+and keep each window's chrome regions and its title bar's move apart.
+`zig build many-windows -- --check` exits 0 under Hyprland, both windows
+shown and drawn; `-- --measure-idle` used 0.9 to 21.3 ms of CPU over 10
+s, 0 to 3 frames, in four runs of five (the fifth 38.5 ms and 75 frames,
+with other builds running and opening windows); `-- --measure-animation`
+drew 71.7 frames a second for one window alone and 72.0 and 71.7 for two
+at once. On this 144 Hz monitor the one-window tour draws at the same
+half rate, 600 frames in 8.5 s at this slice and at `42c0b0a` alike, so
+drawing two windows costs neither its rate; why the EGL path presents at
+half the display's rate is not yet known, and is not queued. Tour idle:
+24.1 to 34.6 ms of CPU over 10 s, 10 to 12 frames, no wakes, in five runs
+of six (the sixth 119.8 ms and 25 frames), against 33.2 to 54.0 ms and 11
+or 12 frames for `42c0b0a` in the same hour, at a load average of 7 to 11.
+`services`, `theme` and `title-bar -- --check`, the tour's cycle and
+`showcase -- --frames 60` pass; the sokol renderer's tests, its four
+checks and `zig build conformance` pass. Not run: dragging, resizing and
+closing the windows by hand, and two windows on monitors of different
+scales. Slice 8 is next.
 
 Decided here:
 - **libwayland-client, linked,** as sokol-zig links it, since the surface
@@ -352,6 +413,17 @@ Decided here:
   compositor border, and the Windows host's top band stands in for a
   border the caption took, which Wayland never had; the application
   declares the edges and grips it resizes from.
+- **A device's events go to the window its `enter` named,** pointer,
+  keyboard, text input and drag each on its own, since a Wayland seat
+  reports which surface it entered and nothing per window after it; the
+  seat's state stays on the host.
+- **The Linux many-windows check shows its windows.** A frame drawn into a
+  surface without a role waits in `eglSwapBuffers` for a frame callback
+  that never comes. A swap interval of 0 for such a surface would need the
+  renderer to know a surface is unshown, which `zui.Surface` does not
+  say, and would change the swap of every window that is; a shown window
+  needs neither, and CI's headless Weston shows windows too. The host's
+  own tests still use surfaces without a role, and draw nothing.
 
 ## 10-reach:02-web-host — Web
 
@@ -1242,10 +1314,10 @@ What remains, and where it went:
   resize it while the other draws. Move one to a monitor at another
   scale. Close the first window and see the others run on, then close
   the last and see the process end.
-- **`10-reach:01-linux-host`, and `14-macos:01-macos-host` once macOS is taken up:** Linux and macOS implement the
-  same contract, and their hosts stay `.one` until then. The sokol renderer's EGL
-  path would attach a `wl_egl_window` and `EGLSurface` per window on one
-  `EGLContext`.
+- **`10-reach:01-linux-host`, done in its slice 7, and `14-macos:01-macos-host` once macOS is taken up:** the
+  Wayland host is `.many`, and the sokol renderer's EGL path attaches a
+  `wl_egl_window` and an EGL surface per window on one EGL context. macOS
+  implements the same contract, and its host stays `.one` until then.
 - **`zui_wire`:** a connection carries one window. Many windows over the
   wire would take a connection per window, and is not queued.
 - **Docking and tear-off panels** (*Later*) can now build on it.

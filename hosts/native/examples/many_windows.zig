@@ -6,7 +6,7 @@
 //!
 //! ```sh
 //! zig build many-windows                         # interactive windows
-//! zig build many-windows -- --check              # open, click and close hidden windows, then quit
+//! zig build many-windows -- --check              # open, click and close windows, then quit
 //! zig build many-windows -- --measure-idle       # CPU time of two idle windows over 10 s
 //! zig build many-windows -- --measure-animation  # frame rates of one, then two, windows animating
 //! ```
@@ -21,6 +21,11 @@ const zui_async = @import("zui_async");
 const zui_widgets = @import("zui_widgets");
 const zui = @import("zui");
 const win32 = zui_host.windows.win32;
+
+/// On Wayland a window the compositor never shows gets no frame callbacks,
+/// so a frame drawn into it would wait in its swap for ever; Windows draws
+/// into a hidden window.
+const check_windows_shown = builtin.os.tag != .windows;
 
 const WindowSources = struct { shared_count: zui_async.Latest(u32) = .{} };
 const Ui = zui.Context(zui_app.contextConfig(zui_sokol.Renderer, .{ .Text = zui_truetype.Text, .Sources = WindowSources }));
@@ -42,7 +47,7 @@ pub fn main(init: std.process.Init) !void {
     try session.start(.{ .gpa = init.gpa, .io = init.io, .process = init }, .{
         .title = "zui: window 0",
         .size = .{ 480, 320 },
-        .visible = mode != .@"--check",
+        .visible = mode != .@"--check" or check_windows_shown,
     });
     defer session.stop();
     try session.app.begin(mode);
@@ -95,7 +100,7 @@ const ManyWindowsApp = struct {
     fn begin(app: *ManyWindowsApp, mode: Mode) !void {
         app.mode = mode;
         switch (mode) {
-            .interactive, .@"--measure-idle", .@"--measure-animation" => try app.openWindow(mode != .@"--check"),
+            .interactive, .@"--measure-idle", .@"--measure-animation" => try app.openWindow(true),
             .@"--check" => {},
         }
     }
@@ -168,7 +173,7 @@ const ManyWindowsApp = struct {
         if (app.mode == .@"--check") app.check.closed = window;
     }
 
-    /// Opens a hidden second window, clicks its buttons through the host,
+    /// Opens a second window, hidden on Windows, clicks its buttons through the host,
     /// expects only it to count its own click and both to show the shared
     /// count, then closes it and expects the first to draw on.
     fn stepCheck(app: *ManyWindowsApp, ui: *const Ui, window: zui.WindowId) void {
@@ -177,7 +182,7 @@ const ManyWindowsApp = struct {
         if (check.turns > 2000) return app.fail("the check did not finish within 2000 frames");
         switch (check.step) {
             .open_second => if (window == .main) {
-                app.openWindow(false) catch return app.fail("could not open the second window");
+                app.openWindow(check_windows_shown) catch return app.fail("could not open the second window");
                 check.second = app.slots[1].id;
                 check.step = .click_second;
             },
@@ -205,14 +210,24 @@ const ManyWindowsApp = struct {
         }
     }
 
-    /// A press and release at the centre of `rect`, sent to the window as
-    /// Windows would.
+    /// A press and release at the centre of `rect`, reported to the window
+    /// as Windows or the compositor would.
     fn clickAt(app: *ManyWindowsApp, window: zui.WindowId, rect: zui.Rect) !void {
         const target = app.host.windowById(window) orelse return error.WindowNotOpen;
-        const pixels_per_unit = app.host.pixelsPerUnit(window);
-        const point = win32.lparamFromPoint(@intFromFloat((rect.x + rect.width / 2) * pixels_per_unit), @intFromFloat((rect.y + rect.height / 2) * pixels_per_unit));
-        for ([_]win32.UINT{ win32.WM_MOUSEMOVE, win32.WM_LBUTTONDOWN, win32.WM_LBUTTONUP }) |message| {
-            _ = win32.SendMessageW(target.hwnd, message, if (message == win32.WM_LBUTTONDOWN) win32.MK_LBUTTON else 0, point);
+        const center: [2]f32 = .{ rect.x + rect.width / 2, rect.y + rect.height / 2 };
+        if (comptime builtin.os.tag == .windows) {
+            const pixels_per_unit = app.host.pixelsPerUnit(window);
+            const point = win32.lparamFromPoint(@intFromFloat(center[0] * pixels_per_unit), @intFromFloat(center[1] * pixels_per_unit));
+            for ([_]win32.UINT{ win32.WM_MOUSEMOVE, win32.WM_LBUTTONDOWN, win32.WM_LBUTTONUP }) |message| {
+                _ = win32.SendMessageW(target.hwnd, message, if (message == win32.WM_LBUTTONDOWN) win32.MK_LBUTTON else 0, point);
+            }
+        } else {
+            const per_unit = app.host.surfaceCoordinatesPerUnit(window);
+            const left_button = zui_host.linux.keys.evdev_button_left;
+            app.host.onPointerLeave();
+            app.host.onPointerEnter(target.surface, 0, .{ center[0] * per_unit, center[1] * per_unit });
+            app.host.onPointerButton(left_button, true);
+            app.host.onPointerButton(left_button, false);
         }
     }
 
@@ -317,14 +332,22 @@ const Animation = struct {
     }
 };
 
+/// User and kernel time of every thread of this process.
 fn processCpuNanoseconds() u64 {
-    if (comptime builtin.os.tag != .windows) return 0;
-    var creation: u64 = 0;
-    var exit: u64 = 0;
-    var kernel: u64 = 0;
-    var user: u64 = 0;
-    _ = win32.GetProcessTimes(win32.GetCurrentProcess(), &creation, &exit, &kernel, &user);
-    return (kernel + user) * 100;
+    if (comptime builtin.os.tag == .windows) {
+        var creation: u64 = 0;
+        var exit: u64 = 0;
+        var kernel: u64 = 0;
+        var user: u64 = 0;
+        _ = win32.GetProcessTimes(win32.GetCurrentProcess(), &creation, &exit, &kernel, &user);
+        return (kernel + user) * 100;
+    }
+    const usage = std.posix.getrusage(std.posix.rusage.SELF);
+    return nanosecondsOf(usage.utime) + nanosecondsOf(usage.stime);
+}
+
+fn nanosecondsOf(time: anytype) u64 {
+    return @as(u64, @intCast(time.sec)) * std.time.ns_per_s + @as(u64, @intCast(time.usec)) * std.time.ns_per_us;
 }
 
 /// The sokol renderer as `zui_app` opens one, with each window after the
