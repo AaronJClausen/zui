@@ -243,6 +243,8 @@ pub fn App(comptime config: Config) type {
                     if (builtin.os.tag != .freestanding) std.debug.print("{f}\n", .{report});
                     app.idle_measurement = null;
                     app.closeHost();
+                    // The host sees it closed only when it polls again, and an idle screen asks for no frame.
+                    ui.requestFrame();
                 } else {
                     ui.requestFrameAt(measurement.nextCheckpoint());
                 }

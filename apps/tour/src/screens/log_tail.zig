@@ -110,7 +110,7 @@ const endpoints = [_]Endpoint{
 
 fn serviceLine(random: std.Random, sequence: u32, milliseconds: u32) Line {
     const roll = random.uintLessThan(u32, 100);
-    const endpoint = endpoints[random.uintLessThan(usize, endpoints.len)];
+    const endpoint = endpoints[random.uintLessThan(u32, endpoints.len)];
     const id = random.intRangeAtMost(u32, 1000, 99999);
     if (roll < 30) return .init(.debug, sequence, milliseconds, "cache hit key=customer:{d} ttl={d}s", .{ id, random.intRangeAtMost(u32, 5, 300) });
     if (roll < 85) return .init(.info, sequence, milliseconds, "{s} {s}/{d} 200 {d}ms", .{ endpoint.method, endpoint.path, id, random.intRangeAtMost(u32, 2, 90) });

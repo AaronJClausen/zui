@@ -1502,7 +1502,7 @@ pub fn Using(comptime kit: type) type {
             var name_buffer: [40]u8 = undefined;
             const service: u16 = @intCast(random.uintLessThan(u32, service_count));
             const name = serviceName(service, &name_buffer);
-            const region = regions[random.uintLessThan(usize, regions.len)];
+            const region = regions[random.uintLessThan(u32, regions.len)];
             return switch (random.uintLessThan(u32, 10)) {
                 0, 1, 2 => .init(.info, "{s} scaled to {d} replicas", .{ name, 3 + random.uintLessThan(u32, 9) }),
                 3 => .init(.warn, "{s} p95 above 400 ms for 2 minutes", .{name}),

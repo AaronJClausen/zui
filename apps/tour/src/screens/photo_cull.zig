@@ -144,10 +144,10 @@ const Exposure = struct {
         const isos = [_]u32{ 100, 200, 400, 800, 1600 };
         const focals = [_]u32{ 24, 35, 50, 85, 135 };
         return .{
-            .shutter_denominator = shutters[random.uintLessThan(usize, shutters.len)],
-            .aperture = apertures[random.uintLessThan(usize, apertures.len)],
-            .iso = isos[random.uintLessThan(usize, isos.len)],
-            .focal_millimeters = focals[random.uintLessThan(usize, focals.len)],
+            .shutter_denominator = shutters[random.uintLessThan(u32, shutters.len)],
+            .aperture = apertures[random.uintLessThan(u32, apertures.len)],
+            .iso = isos[random.uintLessThan(u32, isos.len)],
+            .focal_millimeters = focals[random.uintLessThan(u32, focals.len)],
         };
     }
 };
