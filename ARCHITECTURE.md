@@ -306,7 +306,6 @@ roadmap item named:
 
 | Today | The spec | Where today | Item |
 |---|---|---|---|
-| no design vocabulary: a look is the skin's raw colors and numbers, over `zui_widgets.Part` alone, so no declaration says which text sits on which background | `zui.design`'s roles, tiers, `Design` and `Tokens`, and the appearance contract any component declares (SPEC.md §18.1, §18.2) | `core/src/` | `11-polish:13-design-vocabulary` |
 | no `zui_design`, and `zui_glyphs.FontMetrics` has no x-height or cap height | tokens resolved from seeds and preferences, contrast and color vision solved, density and the type scale applied; the audit and the permutations (SPEC.md §18.3 to §18.6, §18.8, §19.11) | `core/`, `text/glyphs/` | `11-polish:14-zui-design`, `11-polish:15-type-scale`, `11-polish:20-appearance-audit`, `11-polish:21-permutations` |
 | every corner is round, emission does not clamp a radius, and no corner follows its parent's | corner shapes the renderer declares, lowered to round, and nested corners (SPEC.md §18.7) | `core/src/`, `renderers/` | `11-polish:16-corner-shapes`, `11-polish:17-nested-corners` |
 | the environment has no accent; the Linux host passes over the portal's `accent-color` | `Environment.accent`, from every host (SPEC.md §7.2) | `core/src/`, `hosts/` | `11-polish:18-system-accent` |

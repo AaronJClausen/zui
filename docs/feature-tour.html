@@ -1825,6 +1825,55 @@ pub const widgets: zui_widgets.Widgets(Ui, FlatSkin) = .{ .skin = .{} };
 </script>
       </article>
 
+      <article class="feature" id="appearance" data-title="Looks in roles">
+        <div class="feature-head"><h3>Looks in roles: the appearance contract</h3><span class="pill shipped">Shipped</span></div>
+        <p>A component of your own declares its look in roles, not colors: each part names a <code class="z">zui.design.ColorRole</code> for its surface, its text or icon and its outline, a <code class="z">ShapeRole</code>, padding and gap in <code class="z">Space</code> tiers, a <code class="z">TypeRole</code> and a hit <code class="z">Target</code>. Text and icons name the part they are drawn <code class="z">.on</code>, so every pair the component can draw is known before it is drawn, and a part that forgets fails to compile with a message naming it. <code class="z">zuiDistinguish</code> lists the parts, or one part in two states, that must not look alike. A raw color is allowed only as <code class="z">.unchecked(color, reason)</code>, and the appearance lists each one with its reason. <code class="z">tokens.look(Component, part, state)</code> answers a part's decoration, padding, gap, text style and least size from a <code class="z">zui.design.Tokens</code>, checking the contract the first time it reads a component. The tokens are filled by hand today; resolving them from a <code class="z">Design</code>'s seeds and the user's preferences is still to come.</p>
+<script type="text/x-zig" data-file="src/ui/album_chip.zig">
+const AlbumChip = struct {
+    pub const Part = enum { container, container_selected, name, remove };
+
+    pub const zuiAppearance = zui.design.Appearance(Part, .{
+        .container = .{ .surface = .secondary_container, .shape = .chip, .padding = .{ .x = .s, .y = .xs }, .gap = .xs },
+        .container_selected = .{ .surface = .accent_container, .shape = .chip, .padding = .{ .x = .s, .y = .xs }, .gap = .xs },
+        .name = .{ .text = .on_secondary_container, .type = .label, .on = .container },
+        .remove = .{ .icon = .on_secondary_container, .on = .container, .target = .touch },
+    });
+
+    pub const zuiDistinguish = .{
+        .{ .container, .container_selected },
+    };
+};
+
+pub fn albumChip(ui: *Ui, tokens: *const zui.design.Tokens(Ui, void), album: Album, index: usize, selected: bool) void {
+    const id: zui.Id = .indexed("album_chip", index);
+    const container = tokens.look(AlbumChip, if (selected) .container_selected else .container, ui.widgetState(id));
+    ui.open(.{ .id = id, .interactive = true, .decoration = container.decoration, .layout = .{ .padding = container.padding, .child_gap = container.gap } });
+    defer ui.close();
+    ui.text(album.name, tokens.look(AlbumChip, .name, .idle).text);
+}
+</script>
+        <p>An application adds roles of its own as an enum that says which role each pairs with, and names them in a part with <code class="z">.extra</code>:</p>
+<script type="text/x-zig" data-file="src/ui/frame_counter.zig">
+const DarkroomRoles = enum {
+    film_strip,
+    on_film_strip,
+
+    pub const zuiPairs = .{ .film_strip = .on_film_strip, .on_film_strip = .film_strip };
+};
+
+const FrameCounter = struct {
+    pub const Part = enum { strip, count };
+
+    pub const zuiAppearance = zui.design.AppearanceWith(Part, DarkroomRoles, .{
+        .strip = .{ .surface = .extra(.film_strip), .shape = .indicator },
+        .count = .{ .text = .extra(.on_film_strip), .type = .numeric, .on = .strip },
+    });
+};
+
+pub var tokens: zui.design.Tokens(Ui, DarkroomRoles) = .{};
+</script>
+      </article>
+
       <article class="feature" id="reflect" data-title="zui_reflect">
         <div class="feature-head"><h3><code>zui_reflect</code>: an editor from any struct</h3><span class="pill shipped">Shipped</span></div>
         <p><code class="z">inspector</code> walks a struct with <code class="z">@typeInfo</code> and declares an editor per field. A <code class="z">bool</code> gets a checkbox, a number with min and max gets a slider, other numbers get − and + buttons, an enum gets a dropdown, <code class="z">EditableText</code> gets a text field, a string is shown read-only, and a nested struct gets a collapsible section. Options live beside the type in <code class="z">zui_inspector</code>, and a misspelled field name there fails to compile.</p>
@@ -2480,7 +2529,7 @@ fn present(renderer: *Renderer, surface: zui.Surface, frame: *const Ui.Frame) !v
       <p class="group-intro">These names compile, but they don't do anything yet. This list is from <code>ARCHITECTURE.md</code> §7 and the roadmap.</p>
       <ul class="gap-list">
         <li><b>A host that runs its own loop</b><span><code class="z">zuiRun</code> and the <code class="z">zui.Driver</code> it is handed, with <code class="z">suspendSurfaces</code> and <code class="z">resumeSurfaces</code> for a surface the platform takes away, compile and pass <code class="z">zui_app</code>'s tests against a scripted host, but no shipped host declares <code class="z">zuiRun</code> yet; macOS, iOS and Android's are to come.</span></li>
-        <li><b>Still to come</b><span>Multi-line text editing, the design system (roles, tokens from seeds, density, a type scale, corner shapes and nested corners, and a review of every permutation), theme packs, the inspector over the wire, and more hosts (Linux and web; macOS later).</span></li>
+        <li><b>Still to come</b><span>Multi-line text editing, the rest of the design system (tokens from seeds, density, a type scale, corner shapes and nested corners, and a review of every permutation), theme packs, the inspector over the wire, and more hosts (Linux and web; macOS later).</span></li>
       </ul>
     </section>
 

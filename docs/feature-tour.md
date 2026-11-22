@@ -1666,6 +1666,63 @@ const FlatSkin = struct {
 pub const widgets: zui_widgets.Widgets(Ui, FlatSkin) = .{ .skin = .{} };
 ```
 
+<a id="appearance"></a>
+
+### Looks in roles: the appearance contract · *shipped*
+
+A component of your own declares its look in roles, not colors: each part names a `zui.design.ColorRole` for its surface, its text or icon and its outline, a `ShapeRole`, padding and gap in `Space` tiers, a `TypeRole` and a hit `Target`. Text and icons name the part they are drawn `.on`, so every pair the component can draw is known before it is drawn, and a part that forgets fails to compile with a message naming it. `zuiDistinguish` lists the parts, or one part in two states, that must not look alike. A raw color is allowed only as `.unchecked(color, reason)`, and the appearance lists each one with its reason. `tokens.look(Component, part, state)` answers a part's decoration, padding, gap, text style and least size from a `zui.design.Tokens`, checking the contract the first time it reads a component. The tokens are filled by hand today; resolving them from a `Design`'s seeds and the user's preferences is still to come.
+
+`src/ui/album_chip.zig`
+
+```zig
+const AlbumChip = struct {
+    pub const Part = enum { container, container_selected, name, remove };
+
+    pub const zuiAppearance = zui.design.Appearance(Part, .{
+        .container = .{ .surface = .secondary_container, .shape = .chip, .padding = .{ .x = .s, .y = .xs }, .gap = .xs },
+        .container_selected = .{ .surface = .accent_container, .shape = .chip, .padding = .{ .x = .s, .y = .xs }, .gap = .xs },
+        .name = .{ .text = .on_secondary_container, .type = .label, .on = .container },
+        .remove = .{ .icon = .on_secondary_container, .on = .container, .target = .touch },
+    });
+
+    pub const zuiDistinguish = .{
+        .{ .container, .container_selected },
+    };
+};
+
+pub fn albumChip(ui: *Ui, tokens: *const zui.design.Tokens(Ui, void), album: Album, index: usize, selected: bool) void {
+    const id: zui.Id = .indexed("album_chip", index);
+    const container = tokens.look(AlbumChip, if (selected) .container_selected else .container, ui.widgetState(id));
+    ui.open(.{ .id = id, .interactive = true, .decoration = container.decoration, .layout = .{ .padding = container.padding, .child_gap = container.gap } });
+    defer ui.close();
+    ui.text(album.name, tokens.look(AlbumChip, .name, .idle).text);
+}
+```
+
+An application adds roles of its own as an enum that says which role each pairs with, and names them in a part with `.extra`:
+
+`src/ui/frame_counter.zig`
+
+```zig
+const DarkroomRoles = enum {
+    film_strip,
+    on_film_strip,
+
+    pub const zuiPairs = .{ .film_strip = .on_film_strip, .on_film_strip = .film_strip };
+};
+
+const FrameCounter = struct {
+    pub const Part = enum { strip, count };
+
+    pub const zuiAppearance = zui.design.AppearanceWith(Part, DarkroomRoles, .{
+        .strip = .{ .surface = .extra(.film_strip), .shape = .indicator },
+        .count = .{ .text = .extra(.on_film_strip), .type = .numeric, .on = .strip },
+    });
+};
+
+pub var tokens: zui.design.Tokens(Ui, DarkroomRoles) = .{};
+```
+
 <a id="reflect"></a>
 
 ### `zui_reflect`: an editor from any struct · *shipped*
@@ -2403,7 +2460,7 @@ Build with `-Dzui-tracy=true` to link Tracy's client, then connect profiler 0.14
 These names compile, but they don't do anything yet. This list is from `ARCHITECTURE.md` §7 and the roadmap.
 
 - **A host that runs its own loop**: `zuiRun` and the `zui.Driver` it is handed, with `suspendSurfaces` and `resumeSurfaces` for a surface the platform takes away, compile and pass `zui_app`'s tests against a scripted host, but no shipped host declares `zuiRun` yet; macOS, iOS and Android's are to come.
-- **Still to come**: Multi-line text editing, the design system (roles, tokens from seeds, density, a type scale, corner shapes and nested corners, and a review of every permutation), theme packs, the inspector over the wire, and more hosts (Linux and web; macOS later).
+- **Still to come**: Multi-line text editing, the rest of the design system (tokens from seeds, density, a type scale, corner shapes and nested corners, and a review of every permutation), theme packs, the inspector over the wire, and more hosts (Linux and web; macOS later).
 
 <a id="dx"></a>
 

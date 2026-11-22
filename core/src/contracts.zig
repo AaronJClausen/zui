@@ -10,11 +10,13 @@ const record = @import("record.zig");
 const semantics = @import("semantics.zig");
 const chrome = @import("chrome.zig");
 const services = @import("services.zig");
+const design = @import("design.zig");
+const WidgetState = @import("interaction.zig").WidgetState;
 
 /// Every `zui`-prefixed declaration of every contract. One that is not
 /// here belongs to no contract, which is almost always a misspelling.
 const known_declarations = text_declarations ++ source_declarations ++ renderer_declarations ++
-    host_declarations ++ tracer_declarations ++ skin_declarations ++ wire_declarations ++ app_declarations;
+    host_declarations ++ tracer_declarations ++ skin_declarations ++ wire_declarations ++ app_declarations ++ design_declarations;
 
 const text_declarations = [_][]const u8{ "zuiMeasure", "zuiSegment", "zui_thread_safe", "zuiFingerprint" };
 const source_declarations = [_][]const u8{ "zuiSwap", "zuiView", "zuiDelivery", "zuiInject", "zuiPending", "zuiEndFrame", "zuiRefusedCount" };
@@ -36,6 +38,9 @@ const skin_declarations = [_][]const u8{"zuiStyle"};
 const wire_declarations = [_][]const u8{ "zuiSerialize", "zuiDeserialize" };
 /// Declared by an application that `zui_app` runs.
 const app_declarations = [_][]const u8{ "zuiDeclare", "zuiLoader" };
+/// Declared by a component that `zui.design.Tokens` styles, and by an
+/// application's extra roles.
+const design_declarations = [_][]const u8{ "zuiAppearance", "zuiDistinguish", "zuiPairs" };
 
 pub fn checkText(comptime Text: type, comptime FontId: type) void {
     if (@typeInfo(Text) != .@"struct") @compileError("zui: Text must be a struct type, got " ++ @typeName(Text));
@@ -393,6 +398,106 @@ pub fn checkTracer(comptime Tracer: type) void {
     const End = fn (@TypeOf(Tracer.zuiBegin(trace.TraceZone.begin_frame))) void;
     if (@TypeOf(Tracer.zuiEnd) != End) {
         @compileError("zui: " ++ @typeName(Tracer) ++ ".zuiEnd must be " ++ @typeName(End) ++ ", the span zuiBegin returns, found " ++ @typeName(@TypeOf(Tracer.zuiEnd)));
+    }
+}
+
+/// The appearance contract, for `Tokens` whose extra roles are
+/// `ExtraRoles`: a `Part` enum and a `zuiAppearance` declaring each of its
+/// parts, each text and icon drawn `.on` a part with a surface, each
+/// `.unchecked` color with a reason, and optionally `zuiDistinguish`.
+pub fn checkAppearance(comptime Component: type, comptime ExtraRoles: type) void {
+    const name = @typeName(Component);
+    if (@typeInfo(Component) != .@"struct") @compileError("zui: a component must be a struct type, got " ++ name);
+    checkKnownDeclarations(Component);
+    if (!@hasDecl(Component, "Part")) @compileError("zui: " ++ name ++ " declares no `Part`, the enum of its parts");
+    if (!@hasDecl(Component, "zuiAppearance")) @compileError("zui: " ++ name ++ " declares no `zuiAppearance`");
+    const Part = Component.Part;
+    const Declared = Component.zuiAppearance;
+    const declares_appearance = @TypeOf(Declared) == type and @typeInfo(Declared) == .@"struct" and
+        @hasDecl(Declared, "parts") and @hasDecl(Declared, "Part") and @hasDecl(Declared, "ExtraRoles") and Declared.Part == Part;
+    if (!declares_appearance) @compileError("zui: " ++ name ++ ".zuiAppearance must be a zui.design.Appearance(" ++ @typeName(Part) ++ ", …)");
+    if (Declared.ExtraRoles != void and Declared.ExtraRoles != ExtraRoles) {
+        @compileError("zui: " ++ name ++ "'s appearance names the extra roles " ++ @typeName(Declared.ExtraRoles) ++ ", but the tokens' extra roles are " ++ @typeName(ExtraRoles));
+    }
+    for (std.meta.fieldNames(Part)) |part_name| {
+        const part = @field(Declared.parts, part_name) orelse
+            @compileError("zui: " ++ name ++ "'s appearance has no part `" ++ part_name ++ "` of " ++ @typeName(Part));
+        checkPartAppearance(Component, Declared.parts, part_name, part);
+    }
+    if (@hasDecl(Component, "zuiDistinguish")) checkDistinguish(Component);
+}
+
+fn checkPartAppearance(comptime Component: type, comptime parts: anytype, comptime part_name: []const u8, comptime part: anytype) void {
+    const name = @typeName(Component) ++ "." ++ part_name;
+    var draws_text = part.text != null;
+    var draws_icon = part.icon != null;
+    checkUncheckedReasons(name, part);
+    for (std.meta.fieldNames(@TypeOf(part.states))) |state| {
+        const colors = @field(part.states, state) orelse continue;
+        draws_text = draws_text or colors.text != null;
+        draws_icon = draws_icon or colors.icon != null;
+        checkUncheckedReasons(name, colors);
+    }
+    if (draws_text and draws_icon) @compileError("zui: " ++ name ++ " draws both text and an icon; give each a part of its own");
+    const on = part.on orelse {
+        if (draws_text) @compileError("zui: " ++ name ++ " draws text but names no part it is drawn `.on`");
+        if (draws_icon) @compileError("zui: " ++ name ++ " draws an icon but names no part it is drawn `.on`");
+        return;
+    };
+    const on_name = @tagName(on);
+    if (!@hasField(Component.Part, on_name)) @compileError("zui: " ++ name ++ " is drawn on `" ++ on_name ++ "`, which is not a part of " ++ @typeName(Component.Part));
+    const beneath = @field(parts, on_name) orelse return;
+    if (beneath.surface == null) @compileError("zui: " ++ name ++ " is drawn on `" ++ on_name ++ "`, which has no surface");
+}
+
+fn checkUncheckedReasons(comptime name: []const u8, comptime colors: anytype) void {
+    inline for (.{ colors.surface, colors.text, colors.icon, colors.outline }) |maybe_choice| {
+        const choice = maybe_choice orelse continue;
+        if (choice == .unchecked_color and choice.unchecked_color.reason.len == 0) @compileError("zui: " ++ name ++ "'s `.unchecked` color needs a reason");
+    }
+}
+
+/// Each entry is two parts, `.{ .checked, .unchecked }`, or a part and two
+/// states, `.{ .row, .idle, .hovered }`.
+fn checkDistinguish(comptime Component: type) void {
+    const name = @typeName(Component) ++ ".zuiDistinguish";
+    const Part = Component.Part;
+    inline for (Component.zuiDistinguish) |entry| {
+        const Entry = @TypeOf(entry);
+        const is_tuple = @typeInfo(Entry) == .@"struct" and @typeInfo(Entry).@"struct".is_tuple;
+        if (!is_tuple or (entry.len != 2 and entry.len != 3)) @compileError("zui: each entry of " ++ name ++ " is two parts, or a part and two states");
+        const part_count = if (entry.len == 2) 2 else 1;
+        inline for (0..entry.len) |index| {
+            const tag = @tagName(entry[index]);
+            if (index < part_count) {
+                if (!@hasField(Part, tag)) @compileError("zui: " ++ name ++ " names `" ++ tag ++ "`, which is not a part of " ++ @typeName(Part));
+            } else if (!@hasField(WidgetState, tag)) {
+                @compileError("zui: " ++ name ++ " names `" ++ tag ++ "`, which is not a zui.WidgetState");
+            }
+        }
+    }
+}
+
+/// `void`, or an enum of roles that are not `ColorRole`s, declaring
+/// `zuiPairs`: the role each of its roles is checked against.
+pub fn checkExtraRoles(comptime ExtraRoles: type) void {
+    if (ExtraRoles == void) return;
+    const name = @typeName(ExtraRoles);
+    if (@typeInfo(ExtraRoles) != .@"enum") @compileError("zui: ExtraRoles must be an enum or void, got " ++ name);
+    for (std.meta.fieldNames(ExtraRoles)) |role| {
+        if (@hasField(design.ColorRole, role)) @compileError("zui: " ++ name ++ "'s `" ++ role ++ "` is already a zui.design.ColorRole");
+    }
+    if (!@hasDecl(ExtraRoles, "zuiPairs")) @compileError("zui: " ++ name ++ " declares no `zuiPairs`, the role each of its roles pairs with");
+    const pairs = ExtraRoles.zuiPairs;
+    for (std.meta.fieldNames(@TypeOf(pairs))) |role| {
+        if (!@hasField(ExtraRoles, role)) @compileError("zui: " ++ name ++ ".zuiPairs names `" ++ role ++ "`, which is not a role of " ++ name);
+        const partner = @tagName(@field(pairs, role));
+        if (!@hasField(design.ColorRole, partner) and !@hasField(ExtraRoles, partner)) {
+            @compileError("zui: " ++ name ++ ".zuiPairs pairs `" ++ role ++ "` with `" ++ partner ++ "`, which is neither a zui.design.ColorRole nor a role of " ++ name);
+        }
+    }
+    for (std.meta.fieldNames(ExtraRoles)) |role| {
+        if (!@hasField(@TypeOf(pairs), role)) @compileError("zui: " ++ name ++ ".zuiPairs gives no pair for `" ++ role ++ "`");
     }
 }
 

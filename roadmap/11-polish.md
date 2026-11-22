@@ -25,7 +25,7 @@ is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:10-samples` Samples | not started |
 | `11-polish:11-profiling-guide` A profiling guide | done |
 | `11-polish:12-developer-experience-audit` A developer-experience audit | not started |
-| `11-polish:13-design-vocabulary` The design vocabulary and the appearance contract | not started |
+| `11-polish:13-design-vocabulary` The design vocabulary and the appearance contract | done |
 | `11-polish:14-zui-design` `zui_design`: tokens from seeds and preferences | not started |
 | `11-polish:15-type-scale` The type scale | not started |
 | `11-polish:16-corner-shapes` Corner shapes | not started |
@@ -650,6 +650,41 @@ instruction counts do not move.
 
 **Spec.** §18.1, §18.2.
 
+**Status.** Done:
+- `core/src/design.zig`, `zui.design`: the roles and tiers of SPEC.md
+  §18.1 and `Density`; `Design`, with the density table of §18.5 and the
+  type scale's 1.2 and 15 as defaults, its fonts the integer values of
+  the application's `FontId`; `Tokens(Ui, ExtraRoles)`, a color per role
+  in each `WidgetState`, filled by a resolver, with `space` and `look`,
+  which takes its part and state at run time, switching to a look made
+  at comptime for each;
+  `Appearance(Part, parts)` and `AppearanceWith(Part, ExtraRoles, parts)`
+  for parts that name the application's own roles as `.extra(.brand)`.
+  `zui.CornerShape` is a plain enum in `core/src/style.zig`.
+- An extra role declares its pair in its enum's `zuiPairs`. A part's
+  colors are a `ColorChoice`, a union whose void tags are the
+  `ColorRole`s, so `.accent`, `.extra(.brand)` and `.unchecked(…)` all
+  take a result type: `parts` is a struct with a field per part, not
+  `anytype`, since a decl literal has none in an anonymous literal.
+- The contract, `checkAppearance` and `checkExtraRoles` in
+  `core/src/contracts.zig`, runs when `look` first reads a component and
+  when `Tokens` is made. Its 22 messages each have a compile-error case.
+- 12 tests in `core/src/tests/design.zig`; `core/tests/instantiate.zig`
+  looks at a component of built-in roles and one of extra roles. Core's
+  tests in Debug, ReleaseFast and ReleaseSafe; `check` natively, for
+  `wasm32-freestanding` and `powerpc-linux`; `test-all` and `check-all`.
+- Instruction counts against `42c0b0a`: all 175 rows identical (4096
+  boxes at depth 8 still declare in 436,605).
+- SPEC.md §18: a state was named `.normal`, which `zui.WidgetState`
+  calls `.idle`; `Appearance`'s `parts` is typed; every message is
+  quoted, as a `Chip` in `demo.zig` prints.
+
+For `11-polish:14-zui-design`: `Design` has no seed for an extra role,
+so the resolver picks its ramp; a part's outline is paired with its own
+surface unless it names `.on`. For `11-polish:16-corner-shapes`: `look`
+does not yet answer the shape role's `CornerShape`, which
+`Decoration.corner_shape` will carry.
+
 ## 11-polish:14-zui-design — `zui_design`: tokens from seeds and preferences
 
 The default maker of `Tokens`: palettes from a few seeds, solved for
@@ -740,8 +775,10 @@ does not clamp. Lowering reports what it replaced in
 `diagnostics.lowered` (`core/src/context.zig:158`).
 
 **Plan.**
-1. `zui.CornerShape` (`round`, `continuous`, `chamfer`),
-   `Decoration.corner_shape`, and `Config.corner_shapes`, the shapes the
+1. `Decoration.corner_shape`, over `zui.CornerShape` (`round`,
+   `continuous`, `chamfer`; `core/src/style.zig`), which
+   `11-polish:13-design-vocabulary` added as a plain enum since `Design`
+   and `Tokens` hold it, and `Config.corner_shapes`, the shapes the
    renderer draws. A command carries its shape only when that set holds
    more than `round`, so the commands of an application that declares
    none are unchanged.

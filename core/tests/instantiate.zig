@@ -751,6 +751,54 @@ export fn zuiCheckColor(red: u8, amount: f32) u8 {
     return zui_color.shiftLightness(zui_color.withLightness(extended.toColor(), amount), amount).r +% color_tones[1].g;
 }
 
+const CheckChip = struct {
+    pub const Part = enum { container, label, close };
+
+    pub const zuiAppearance = zui.design.Appearance(Part, .{
+        .container = .{ .surface = .secondary_container, .shape = .chip, .padding = .{ .x = .s, .y = .xs }, .gap = .xs, .states = .{ .pressed = .{ .surface = .accent_container } } },
+        .label = .{ .text = .on_secondary_container, .type = .label, .on = .container },
+        .close = .{ .icon = .unchecked(.rgb(0xff00ff), "the brand's mark"), .on = .container, .target = .touch, .outline = .outline },
+    });
+
+    pub const zuiDistinguish = .{
+        .{ .container, .label },
+        .{ .close, .idle, .hovered },
+    };
+};
+
+const CheckRoles = enum {
+    brand,
+    on_brand,
+
+    pub const zuiPairs = .{ .brand = .on_brand, .on_brand = .brand };
+};
+
+const CheckBadge = struct {
+    pub const Part = enum { body, count };
+
+    pub const zuiAppearance = zui.design.AppearanceWith(Part, CheckRoles, .{
+        .body = .{ .surface = .extra(.brand), .shape = .indicator },
+        .count = .{ .text = .extra(.on_brand), .type = .numeric, .on = .body },
+    });
+};
+
+var check_tokens: zui.design.Tokens(Ui, CheckRoles) = .{};
+
+export fn zuiCheckDesign(state_index: u8) usize {
+    const state: zui.WidgetState = @enumFromInt(state_index % std.enums.values(zui.WidgetState).len);
+    const container = check_tokens.look(CheckChip, .container, state);
+    const close = check_tokens.look(CheckChip, .close, state);
+    const body = check_tokens.look(CheckBadge, .body, state);
+    const count = check_tokens.look(CheckBadge, .count, state);
+    const plain_tokens: zui.design.Tokens(Ui, void) = .{};
+    const label = plain_tokens.look(CheckChip, .label, state);
+    const check_design: zui.design.Design = .{ .seeds = .{ .accent = .{ .lightness = 0.6, .chroma = 0.1, .hue = 200 }, .neutral = .{ .lightness = 0.5, .chroma = 0, .hue = 0 } } };
+    const shape: zui.CornerShape = check_design.corner_shape;
+    return @intFromBool(container.decoration.background != null) + @intFromBool(close.decoration.border != null) + body.decoration.background.?.r +
+        count.text.color.g + label.text.color.b + @as(usize, @intFromFloat(container.padding.left + close.min_size[0] + check_tokens.space(.m))) +
+        @intFromEnum(shape) + CheckChip.zuiAppearance.unchecked_colors.len;
+}
+
 const CheckPanelTheme = zui_debug.PanelTheme(u16, zui.Color);
 const PanelThemeSources = struct {
     theme_files: zui_async.Stream(zui.FileChange, .{ .capacity = 4 }) = .{},

@@ -2396,30 +2396,48 @@ pub const design = struct {
     pub const ShapeRole = enum { control, container, popup, chip, image, indicator };
     pub const CornerSize = enum { square, sharp, smooth, soft, bubble };
     pub const Target = enum { none, pointer, touch };
+    pub const Density = enum { compact, comfortable, roomy };
 
     pub const Design = struct { ... };                             // what an application or theme pack declares
     pub fn Tokens(comptime Ui: type, comptime ExtraRoles: type) type // resolved values; `ExtraRoles` an enum or void
-    pub fn Appearance(comptime Part: type, comptime parts: anytype) type
+    pub fn Appearance(comptime Part: type, comptime parts: Parts(Part, void)) type
+    pub fn AppearanceWith(comptime Part: type, comptime ExtraRoles: type, comptime parts: Parts(Part, ExtraRoles)) type
+    pub fn ColorChoice(comptime ExtraRoles: type) type             // a role, `.extra(role)` or `.unchecked(color, reason)`
 };
 ```
 
 - **`ColorRole`** names what a color is for, never what it looks like.
   Each `on_*` role is the text and icons on its partner. An application
   adds its own roles as an enum, `ExtraRoles`, each declared with the
-  role it pairs with; they are solved and checked like the built-in ones.
+  role it pairs with in its `zuiPairs`; they are solved and checked like
+  the built-in ones. A part names one as `.extra(.brand)`, in an
+  appearance made with `AppearanceWith(Part, ExtraRoles, …)`.
+
+  ```zig
+  const Roles = enum {
+      brand, on_brand, chart_line,
+      pub const zuiPairs = .{ .brand = .on_brand, .on_brand = .brand, .chart_line = .surface };
+  };
+  ```
 - **`Space`** tiers are on a base unit of 4 (§18.5).
 - **`TypeRole`** is the only way a design names a text style (§18.6).
 - **`CornerSize`**, from `square` (no radius) to `bubble` (half the
   shorter side, a pill), is what a `ShapeRole` resolves to (§18.7).
 - **`Design`** holds the seeds, the type scale's inputs and fonts, each
-  shape role's size and the corner family, and the density table. It is
-  plain data, so a theme pack imports only `zui`.
-- **`Tokens`** holds a color per role in the resolved theme, a length per
-  tier, a `TextStyle` per type role, a `CornerRadius` and `CornerShape`
-  per shape role, the target floors, and the body text's measure;
-  `tokens.space(.m)` reads a tier.
+  shape role's size and the corner family, and the density table, a
+  length per `Space` at each `Density`. It is plain data, so a theme pack
+  imports only `zui`: its fonts are the integer values of the
+  application's `FontId`, and its seeds are OKLCH as `zui.design.Oklch`.
+- **`Tokens`** holds a color per role in each `WidgetState`'s layer of the
+  resolved theme, a length per tier, a `TextStyle` per type role, a
+  `CornerRadius` and `CornerShape` per shape role, the target floors, the
+  outline and focus ring widths, the factor a part that draws text pads
+  by, and the body text's measure; `tokens.space(.m)` reads a tier. Every
+  field is empty until a resolver writes it.
   `tokens.look(Component, part, state)` answers a part's decoration,
-  padding, gap, text style and minimum size in one `WidgetState`.
+  padding, gap, text style and minimum size in one `WidgetState`, and
+  checks the component's appearance the first time it is read, so a
+  component no tokens read costs nothing.
 
 ### 18.2 The appearance contract
 
@@ -2448,25 +2466,47 @@ const look = tokens.look(Chip, .container, ui.widgetState(id));
 - **`.on`** names the part a text, an icon or an outline is drawn on, so
   every pair the component can draw is known at comptime and checked in
   every theme, contrast and color vision (§18.4). A part that draws
-  text or an icon and names no `.on` is a compile error.
+  text or an icon and names no `.on` is a compile error, and so is one
+  drawn on a part with no surface; an outline with no `.on` is drawn on
+  its own part's surface. A part draws text or an icon, not both.
 - **States** come from the resolver's state layers: hovered, pressed,
   focused and disabled are derived from the part's roles, and the focus
-  ring is the `focus` role. A part may give a state its own roles with
-  `.states = .{ .pressed = .{ ... } }`.
+  ring is the `focus` role, drawn as the outline of a part with a
+  `target` while it is focused. A part may give a state its own colors
+  with `.states = .{ .pressed = .{ ... } }`, read in that state's layer.
 - **`zuiDistinguish`** lists the pairs of parts that must look
   different, as a checked and an unchecked box are parts of their own
-  (§16.7); `.{ .part, .normal, .hovered }` pairs one part in two states. Under every color vision simulation, they must stay apart in
+  (§16.7); `.{ .part, .idle, .hovered }` pairs one part in two states. Under every color vision simulation, they must stay apart in
   lightness, or differ in a cue that is not color: `zui_widgets`'
   checkbox has its mark, a selected tab its indicator.
 - **A raw color** is `.unchecked(.rgb(0xff00ff), "the brand's logo")`. It
-  compiles, it is drawn, and the audit (§18.8) lists it with its reason,
-  every time.
+  compiles, it is drawn in every state as given, and the audit (§18.8)
+  lists it with its reason, every time, from the appearance's
+  `unchecked_colors`.
 
-The messages:
+The messages, for a `Chip` declared in `demo.zig`:
 ``"zui: demo.Chip's appearance has no part `container` of demo.Chip.Part"``;
-``"zui: demo.Chip.label draws text but names no part it is drawn `.on`"``;
+``"zui: demo.Chip.label draws text but names no part it is drawn `.on`"``
+(``draws an icon`` for an icon);
 ``"zui: demo.Chip.label is drawn on `badge`, which is not a part of demo.Chip.Part"``;
-``"zui: demo.Chip.close's `.unchecked` color needs a reason"``.
+``"zui: demo.Chip.label is drawn on `close`, which has no surface"``;
+``"zui: demo.Chip.close draws both text and an icon; give each a part of its own"``;
+``"zui: demo.Chip.close's `.unchecked` color needs a reason"``;
+``"zui: demo.Chip declares no `Part`, the enum of its parts"``;
+``"zui: demo.Chip declares no `zuiAppearance`"``;
+``"zui: demo.Chip.zuiAppearance must be a zui.design.Appearance(demo.Chip.Part, …)"``;
+``"zui: an appearance's Part must be an enum, got demo.Chip.Part"``;
+``"zui: demo.Badge's appearance names the extra roles demo.Roles, but the tokens' extra roles are void"``;
+``"zui: each entry of demo.Chip.zuiDistinguish is two parts, or a part and two states"``;
+``"zui: demo.Chip.zuiDistinguish names `badge`, which is not a part of demo.Chip.Part"``;
+``"zui: demo.Chip.zuiDistinguish names `normal`, which is not a zui.WidgetState"``.
+And for extra roles:
+``"zui: ExtraRoles must be an enum or void, got u8"``;
+``"zui: demo.Roles's `accent` is already a zui.design.ColorRole"``;
+``"zui: demo.Roles declares no `zuiPairs`, the role each of its roles pairs with"``;
+``"zui: demo.Roles.zuiPairs gives no pair for `on_brand`"``;
+``"zui: demo.Roles.zuiPairs pairs `brand` with `logo`, which is neither a zui.design.ColorRole nor a role of demo.Roles"``;
+``"zui: demo.Roles.zuiPairs names `logo`, which is not a role of demo.Roles"``.
 
 ### 18.3 Preferences and resolution
 
@@ -2477,7 +2517,7 @@ pub const Preferences = struct {
     text_scale: f32,
     reduced_transparency: bool,
     accent: ?zui.Color,                 // the user's, else the system's, else the design's seed
-    density: Density = .comfortable,     // enum { compact, comfortable, roomy }
+    density: Density = .comfortable,     // zui.design.Density: enum { compact, comfortable, roomy }
     color_vision: ColorVision = .typical, // enum { typical, protan, deutan, tritan, achromat }
     corners: CornerPreference = .as_designed, // enum { sharper, as_designed, rounder }: one `CornerSize` step
     pointer: Target = .pointer,          // `.touch` raises every target floor
@@ -2612,7 +2652,7 @@ if (!std.meta.eql(preferences, app.preferences)) {
   itself resolves first.
 
   ```zig
-  ui.open(.{ .id = .of("card"), .decoration = tokens.look(Card, .container, .normal).decoration, .layout = .{ .padding = .all(tokens.space(.m)) } });
+  ui.open(.{ .id = .of("card"), .decoration = tokens.look(Card, .container, .idle).decoration, .layout = .{ .padding = .all(tokens.space(.m)) } });
   defer ui.close();
   ui.open(.{ .id = .of("thumbnail"), .decoration = .{ .nested_corners = .{} } });
   ```

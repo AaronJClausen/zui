@@ -144,6 +144,16 @@ pub const SemanticsDropped = semantics.SemanticsDropped;
 pub const ChromeKind = chrome.ChromeKind;
 pub const ChromeRegion = chrome.ChromeRegion;
 
+/// The design vocabulary: the roles, tiers and appearance contract a
+/// component declares its look in, `Design`, what an application or a
+/// theme pack declares, and `Tokens`, the resolved values a frame reads.
+///
+/// ```zig
+/// const look = app.tokens.look(Chip, .container, ui.widgetState(id));
+/// ui.open(.{ .id = id, .decoration = look.decoration, .layout = .{ .padding = look.padding, .child_gap = app.tokens.space(.xs) } });
+/// ```
+pub const design = @import("design.zig");
+
 pub const Exit = exit.Exit;
 pub const ExitFade = exit.ExitFade;
 
@@ -181,6 +191,7 @@ pub const Color = style.Color;
 pub const ExtendedColor = style.ExtendedColor;
 pub const Edges = style.Edges;
 pub const CornerRadius = style.CornerRadius;
+pub const CornerShape = style.CornerShape;
 pub const Rect = style.Rect;
 pub const Border = style.Border;
 pub const BorderWith = style.BorderWith;
@@ -255,4 +266,5 @@ test {
     _ = @import("tests/semantics.zig");
     _ = @import("tests/chrome.zig");
     _ = @import("tests/exit_animations.zig");
+    _ = @import("tests/design.zig");
 }

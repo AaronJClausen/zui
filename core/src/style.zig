@@ -263,6 +263,11 @@ pub const CornerRadius = struct {
     }
 };
 
+/// The family of an element's four corners, whatever their radii:
+/// `round` is circular arcs, `continuous` a superellipse whose curvature
+/// does not break where the corner meets the side, and `chamfer` a 45° cut.
+pub const CornerShape = enum(u8) { round, continuous, chamfer };
+
 pub const Rect = struct {
     x: f32 = 0,
     y: f32 = 0,
