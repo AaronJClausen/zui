@@ -349,21 +349,8 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
-    const design_check_object = b.addObject(.{
-        .name = "zui_design_check",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("zui_design/check.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "zui", .module = zui_module },
-                .{ .name = "zui_design", .module = design_module },
-            },
-        }),
-    });
     const check_step = b.step("check", "Type-check zui for the selected target");
     check_step.dependOn(&check_object.step);
-    check_step.dependOn(&design_check_object.step);
 
     const bench_zui = releaseFastZui(b, target, build_options);
     const bench_options = b.addOptions();

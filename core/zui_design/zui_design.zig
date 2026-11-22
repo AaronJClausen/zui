@@ -12,6 +12,7 @@
 
 const std = @import("std");
 const zui = @import("zui");
+const palette = @import("palette.zig");
 
 const design = zui.design;
 const Design = design.Design;
@@ -60,7 +61,7 @@ pub const Preferences = struct {
     /// ```zig
     /// const preferences: zui_design.Preferences = .from(ui.environment(), .{ .density = .compact });
     /// ```
-    pub fn from(environment: zui.Environment, choices: Choices) Preferences {
+    pub fn from(environment: *const zui.Environment, choices: Choices) Preferences {
         return .{
             .theme = environment.theme,
             .contrast = environment.contrast,
@@ -83,6 +84,11 @@ pub const Repairs = struct {};
 /// from `resolved_design` under `preferences`, allocating nothing. It runs
 /// at comptime too, which checks a static design during the build.
 ///
+/// Each seed is a tonal ramp of its hue and chroma, and each role a
+/// lightness on one, per theme and contrast; the seed's own lightness is
+/// not read. An extra role is colored as the built-in role
+/// `builtInRoleOf` names.
+///
 /// ```zig
 /// var tokens: zui.design.Tokens(Ui, void) = .{};
 /// _ = zui_design.resolve(app.design, .from(ui.environment(), app.choices), &tokens);
@@ -94,6 +100,8 @@ pub const Repairs = struct {};
 /// };
 /// ```
 pub fn resolve(resolved_design: Design, preferences: Preferences, tokens: anytype) Repairs {
+    @setEvalBranchQuota(2_000_000);
+    writeColors(resolved_design.seeds, preferences, tokens);
     tokens.spacing = resolved_design.density.get(preferences.density);
     tokens.text_padding_scale = 1 + (preferences.text_scale - 1) / 2;
     writeTextStyles(resolved_design.type, preferences.text_scale, tokens);
@@ -113,12 +121,16 @@ pub fn resolve(resolved_design: Design, preferences: Preferences, tokens: anytyp
 /// shorter side makes a pill.
 pub const bubble_radius: f32 = 1 << 16;
 
+/// The width of an outline that shows a part's edge or state.
 pub const outline_width: f32 = 1;
+/// The width of the focus ring, which no density narrows.
 pub const focus_ring_width: f32 = 2;
 
 /// A part a pointer hits is at least this wide and tall, whatever the
 /// density.
 pub const pointer_floor: f32 = 24;
+/// A part a finger hits, or any part a pointer hits under
+/// `Preferences.pointer = .touch`, is at least this wide and tall.
 pub const touch_floor: f32 = 44;
 
 /// `size` moved one step by `preference`.
@@ -132,6 +144,7 @@ pub fn cornerSizeFor(size: CornerSize, preference: CornerPreference) CornerSize 
     };
 }
 
+/// The radius of each corner of a shape role at `size`.
 pub fn cornerRadiusOf(size: CornerSize, density: Density) f32 {
     return switch (size) {
         .square => 0,
@@ -140,6 +153,42 @@ pub fn cornerRadiusOf(size: CornerSize, density: Density) f32 {
         .soft => 16,
         .bubble => bubble_radius,
     };
+}
+
+/// A resolved color in OKLCH with its alpha.
+pub const Shade = palette.Shade;
+/// A `Shade` for each built-in role.
+pub const Palette = palette.Palette;
+/// The built-in role an extra role is colored as, from its `zuiPairs`.
+pub const builtInRoleOf = palette.builtInRoleOf;
+/// The role each built-in role is checked against.
+pub const partnerOf = palette.partnerOf;
+
+/// Every built-in role's color in every state, before it is encoded in a
+/// context's color type.
+pub fn palettesFor(seeds: Design.Seeds, preferences: Preferences) palette.PalettesByState {
+    const ramps = palette.rampSeeds(seeds, preferences.accent);
+    const scheme: palette.Scheme = .of(preferences.theme, preferences.contrast);
+    return palette.stateLayers(palette.idlePalette(ramps, scheme, preferences.reduced_transparency));
+}
+
+fn writeColors(seeds: Design.Seeds, preferences: Preferences, tokens: anytype) void {
+    const Color = @TypeOf(tokens.colors).Value.Value;
+    const palettes = palettesFor(seeds, preferences);
+    for (std.enums.values(zui.WidgetState)) |state| {
+        const shades = palettes.getPtrConst(state);
+        const colors = tokens.colors.getPtr(state);
+        for (std.enums.values(design.ColorRole)) |role| colors.set(role, shades.get(role).encoded(Color));
+    }
+    if (@TypeOf(tokens.extra_colors) == void) return;
+    const ExtraRoles = @TypeOf(tokens.extra_colors).Value.Key;
+    for (std.enums.values(zui.WidgetState)) |state| {
+        const colors = tokens.colors.getPtrConst(state);
+        const extra_colors = tokens.extra_colors.getPtr(state);
+        inline for (comptime std.enums.values(ExtraRoles)) |role| {
+            extra_colors.set(role, colors.get(comptime builtInRoleOf(ExtraRoles, role)));
+        }
+    }
 }
 
 fn targetFloorsFor(pointer: Target) std.EnumArray(Target, f32) {
@@ -186,7 +235,7 @@ fn writeTextStyles(scale: Design.TypeScale, text_scale: f32, tokens: anytype) vo
             else => scale.fonts.regular,
         };
         const size = scale.body_size * std.math.pow(f32, scale.ratio, scaleStepOf(role)) * std.math.pow(f32, text_scale, textScalePowerOf(role));
-        tokens.text_styles.set(role, .{ .font = fontIdOf(@FieldType(TextStyle, "font"), font_index), .size = size });
+        tokens.text_styles.set(role, .{ .font = fontIdOf(@FieldType(TextStyle, "font"), font_index), .size = size, .color = tokens.colors.get(.idle).get(.on_surface) });
     }
 }
 

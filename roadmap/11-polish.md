@@ -735,10 +735,11 @@ one preference resolves in under 50 µs in ReleaseFast.
 chroma, and the sRGB transfer as two 256-entry tables, as `zui_color`
 builds them) over `zui.design.Oklch`, rather than being handed them by
 the application, which would put a color module in every resolve's
-signature. Measured with a fresh cache, type-checking
-`core/zui_design/check.zig` takes 0.20 s with a design resolved at
-comptime in dark high contrast and 0.19 s without it, so the comptime
-cost of carrying them is too small to weigh. `resolve` is a free
+signature. Measured with a fresh cache, type-checking the module's
+instantiation (now in `core/tests/instantiate.zig`) took 0.37 s with a design resolved at
+comptime in dark high contrast with three extra roles, colors and all,
+and 0.32 s without it (0.20 s and 0.19 s before slice 2's colors), so a
+comptime resolve costs about 0.05 s of the build. `resolve` is a free
 function, `zui_design.resolve(design, preferences, &tokens)`, since
 `Design` is the core's and a module cannot give it methods; SPEC.md
 §18.3 and §19.11 say so.
@@ -755,9 +756,35 @@ of 1 and a focus ring of 2, `text_padding_scale` as 1 + (text_scale −
 1) / 2, text styles at the modular scale's sizes in the design's fonts
 with `text_scale` to a power from 1 at `caption` to 0.5 at `display`,
 and a measure of 66 characters of half the body size. `zig build check`
-type-checks `core/zui_design/check.zig`, which resolves at run time and
-at comptime, in `zui.Color` and `zui.ExtendedColor`, with extra roles.
-Slice 2, color, is next.
+type-checks `zuiCheckDesignResolve` in `core/tests/instantiate.zig`,
+which resolves at run time and at comptime, in `zui.Color` and `zui.ExtendedColor`, with extra roles.
+
+Slice 2 done: color (`core/zui_design/palette.zig`). Each seed is a
+tonal ramp of its hue and chroma: the neutral, the accent (its hue and
+chroma replaced by `Preferences.accent`), and danger, warning and
+success at the design's hues or 27°, 75° and 150°, at chroma 0.16. Each
+role is a lightness on a ramp, with a share of its chroma, in a table
+for each of light, dark, light high contrast and dark high contrast;
+dark's raised surfaces are lighter than its page; the seed's own
+lightness is not read. Every color is brought into sRGB by reducing its
+chroma, and encoded in `Ui.Color`, linear for `zui.ExtendedColor`. The
+state layers move each fill 8%, 10% and 16% of the way to its `on_*`
+role in OKLab when hovered, focused and pressed; text, icons and
+outlines keep their idle color, and disabled, every role but the page's
+surfaces and the scrim loses its chroma and keeps 38% of its alpha.
+Reduced transparency raises the scrim to 85% opacity. An extra role is
+colored as `builtInRoleOf` says: the partner of the built-in role its
+pair names, in turn along a chain of extra roles, and `accent` and
+`on_accent` alternating from the first declared around a cycle. Palettes
+stay in OKLCH (`palettesFor`, `Shade`) until they are encoded, so slice
+3 can move a foreground's lightness alone. Measured: in ReleaseFast a
+resolve of every token with six extra roles, alternating theme and
+accent, takes a median of 8.7 µs (47.6 µs in Debug), under the 50 µs of
+the Done when. Before contrast is solved, `on_surface` on `surface`
+is 16.6:1 in light, 14.9:1 in dark, 20.1:1 in light high contrast and
+20.4:1 in dark high contrast in WCAG 2, which a test holds at 4.5:1;
+APCA is not measured yet. 17 tests in `core/zui_design/tests.zig`.
+Slice 3, contrast, is next.
 
 ## 11-polish:15-type-scale — The type scale
 

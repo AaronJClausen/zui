@@ -14,6 +14,7 @@ const zui_wire = @import("zui_wire");
 const zui_debug = @import("zui_debug");
 const zui_motion = @import("zui_motion");
 const zui_color = @import("zui_color");
+const zui_design = @import("zui_design");
 
 /// A freestanding target has no default log output, so an application there
 /// brings its own, as this one does.
@@ -797,6 +798,37 @@ export fn zuiCheckDesign(state_index: u8) usize {
     return @intFromBool(container.decoration.background != null) + @intFromBool(close.decoration.border != null) + body.decoration.background.?.r +
         count.text.color.g + label.text.color.b + @as(usize, @intFromFloat(container.padding.left + close.min_size[0] + check_tokens.space(.m))) +
         @intFromEnum(shape) + CheckChip.zuiAppearance.unchecked_colors.len;
+}
+
+const ExtendedDesignUi = zui.Context(.{ .limits = .{ .max_elements = 8 }, .Color = zui.ExtendedColor, .FontId = enum(u8) { regular, strong, monospace } });
+
+const ResolvedRoles = enum {
+    brand,
+    on_brand,
+    chart_line,
+
+    pub const zuiPairs = .{ .brand = .on_brand, .on_brand = .brand, .chart_line = .surface };
+};
+
+const resolved_design: zui.design.Design = .{
+    .seeds = .{ .accent = .{ .lightness = 0.55, .chroma = 0.14, .hue = 250 }, .neutral = .{ .lightness = 0.5, .chroma = 0.01, .hue = 250 } },
+};
+
+var resolved_tokens: zui.design.Tokens(Ui, void) = .{};
+var resolved_extended_tokens: zui.design.Tokens(ExtendedDesignUi, ResolvedRoles) = .{};
+var resolved_environment: zui.Environment = .{};
+
+const tokens_resolved_at_comptime = resolved: {
+    var tokens: zui.design.Tokens(Ui, ResolvedRoles) = .{};
+    _ = zui_design.resolve(resolved_design, .{ .theme = .dark, .contrast = .high }, &tokens);
+    break :resolved tokens;
+};
+
+export fn zuiCheckDesignResolve() f32 {
+    const preferences: zui_design.Preferences = .from(&resolved_environment, .{ .accent = .rgb(0xff8800) });
+    _ = zui_design.resolve(resolved_design, preferences, &resolved_tokens);
+    _ = zui_design.resolve(resolved_design, preferences, &resolved_extended_tokens);
+    return resolved_tokens.space(.m) + resolved_extended_tokens.space(.m) + tokens_resolved_at_comptime.measure;
 }
 
 const CheckPanelTheme = zui_debug.PanelTheme(u16, zui.Color);
