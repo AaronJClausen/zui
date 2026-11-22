@@ -59,6 +59,6 @@ test "the renderer conforms, its frames handed to a page that draws none" {
     try harness.drawn.init(.{ .web = .{ .canvas = 0 } }, &harness.boxes);
     defer harness.drawn.deinit();
     try zui_testing.expectRendererConforms(PageRenderer, &harness, .{ .gpa = std.testing.allocator, .io = std.testing.io });
-    try std.testing.expectEqual(5, harness.drawn.page.frames);
+    try std.testing.expectEqual(6, harness.drawn.page.frames);
     try std.testing.expectEqual(0, harness.drawn.drawListOverflows());
 }

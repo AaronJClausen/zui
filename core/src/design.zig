@@ -442,7 +442,10 @@ pub fn Tokens(comptime Ui: type, comptime ExtraRoles: type) type {
             const foreground = comptime if (colors.text != null) colors.text else colors.icon;
             if (foreground) |drawn| result.text.color = self.colorOf(drawn, state);
             if (colors.surface) |surface| result.decoration.background = self.colorOf(surface, state);
-            if (declared.shape) |shape| result.decoration.corner_radius = self.corner_radii.get(shape);
+            if (declared.shape) |shape| {
+                result.decoration.corner_radius = self.corner_radii.get(shape);
+                result.decoration.corner_shape = self.corner_shapes.get(shape);
+            }
             const draws_focus_ring = state == .focused and declared.target != .none and
                 (declared.states.focused == null or declared.states.focused.?.outline == null);
             if (draws_focus_ring) {

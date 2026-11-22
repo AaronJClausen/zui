@@ -36,6 +36,7 @@ pub const SweepFailure = sweeps.SweepFailure;
 
 pub const OptionalCommand = commands.OptionalCommand;
 pub const CommandSet = commands.CommandSet;
+pub const cornerShapeOf = commands.cornerShapeOf;
 pub const Surface = surface.Surface;
 pub const SurfaceKind = surface.SurfaceKind;
 pub const SurfaceKinds = surface.SurfaceKinds;
@@ -192,6 +193,7 @@ pub const ExtendedColor = style.ExtendedColor;
 pub const Edges = style.Edges;
 pub const CornerRadius = style.CornerRadius;
 pub const CornerShape = style.CornerShape;
+pub const CornerShapeSet = style.CornerShapeSet;
 pub const Rect = style.Rect;
 pub const Border = style.Border;
 pub const BorderWith = style.BorderWith;
@@ -267,4 +269,5 @@ test {
     _ = @import("tests/chrome.zig");
     _ = @import("tests/exit_animations.zig");
     _ = @import("tests/design.zig");
+    _ = @import("tests/corners.zig");
 }

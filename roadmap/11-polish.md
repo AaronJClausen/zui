@@ -26,9 +26,9 @@ is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:11-profiling-guide` A profiling guide | done |
 | `11-polish:12-developer-experience-audit` A developer-experience audit | not started |
 | `11-polish:13-design-vocabulary` The design vocabulary and the appearance contract | done |
-| `11-polish:14-zui-design` `zui_design`: tokens from seeds and preferences | not started |
+| `11-polish:14-zui-design` `zui_design`: tokens from seeds and preferences | in progress |
 | `11-polish:15-type-scale` The type scale | not started |
-| `11-polish:16-corner-shapes` Corner shapes | not started |
+| `11-polish:16-corner-shapes` Corner shapes | done |
 | `11-polish:17-nested-corners` Nested corners | not started |
 | `11-polish:18-system-accent` The system's accent color | not started |
 | `11-polish:19-default-design` The default design | not started |
@@ -731,6 +731,62 @@ one preference resolves in under 50 µs in ReleaseFast.
 
 **Spec.** §18.3, §18.4, §18.5, §19.11.
 
+**Decided here.** `zui_design` carries the OKLab conversions it needs
+(`core/zui_design/oklab.zig`: to and from linear sRGB, gamut mapping by
+chroma, and the sRGB transfer as two 256-entry tables, as `zui_color`
+builds them) over `zui.design.Oklch`, rather than being handed them by
+the application, which would put a color module in every resolve's
+signature. Measured with a fresh cache, type-checking the module's
+instantiation (now in `core/tests/instantiate.zig`) took 0.37 s with a design resolved at
+comptime in dark high contrast with three extra roles, colors and all,
+and 0.32 s without it (0.20 s and 0.19 s before slice 2's colors), so a
+comptime resolve costs about 0.05 s of the build. `resolve` is a free
+function, `zui_design.resolve(design, preferences, &tokens)`, since
+`Design` is the core's and a module cannot give it methods; SPEC.md
+§18.3 and §19.11 say so.
+
+**Status.** Slice 1 done: `core/zui_design/`, wired as a module and
+re-exported by the root, with `Preferences`, `Preferences.from` (the
+accent from `Choices` alone until `11-polish:18-system-accent`),
+`Repairs` (empty until slice 3) and `resolve`, which writes spacing
+from the density table, each shape role's radius one `CornerSize` step
+from its design's by `Preferences.corners` (`bubble` is 65,536 units,
+which emission's clamp makes a pill), the design's corner shape, target
+floors of 24 and 44 (44 for both under `pointer = .touch`), an outline
+of 1 and a focus ring of 2, `text_padding_scale` as 1 + (text_scale −
+1) / 2, text styles at the modular scale's sizes in the design's fonts
+with `text_scale` to a power from 1 at `caption` to 0.5 at `display`,
+and a measure of 66 characters of half the body size. `zig build check`
+type-checks `zuiCheckDesignResolve` in `core/tests/instantiate.zig`,
+which resolves at run time and at comptime, in `zui.Color` and `zui.ExtendedColor`, with extra roles.
+
+Slice 2 done: color (`core/zui_design/palette.zig`). Each seed is a
+tonal ramp of its hue and chroma: the neutral, the accent (its hue and
+chroma replaced by `Preferences.accent`), and danger, warning and
+success at the design's hues or 27°, 75° and 150°, at chroma 0.16. Each
+role is a lightness on a ramp, with a share of its chroma, in a table
+for each of light, dark, light high contrast and dark high contrast;
+dark's raised surfaces are lighter than its page; the seed's own
+lightness is not read. Every color is brought into sRGB by reducing its
+chroma, and encoded in `Ui.Color`, linear for `zui.ExtendedColor`. The
+state layers move each fill 8%, 10% and 16% of the way to its `on_*`
+role in OKLab when hovered, focused and pressed; text, icons and
+outlines keep their idle color, and disabled, every role but the page's
+surfaces and the scrim loses its chroma and keeps 38% of its alpha.
+Reduced transparency raises the scrim to 85% opacity. An extra role is
+colored as `builtInRoleOf` says: the partner of the built-in role its
+pair names, in turn along a chain of extra roles, and `accent` and
+`on_accent` alternating from the first declared around a cycle. Palettes
+stay in OKLCH (`palettesFor`, `Shade`) until they are encoded, so slice
+3 can move a foreground's lightness alone. Measured: in ReleaseFast a
+resolve of every token with six extra roles, alternating theme and
+accent, takes a median of 8.7 µs (47.6 µs in Debug), under the 50 µs of
+the Done when. Before contrast is solved, `on_surface` on `surface`
+is 16.6:1 in light, 14.9:1 in dark, 20.1:1 in light high contrast and
+20.4:1 in dark high contrast in WCAG 2, which a test holds at 4.5:1;
+APCA is not measured yet. 17 tests in `core/zui_design/tests.zig`.
+Slice 3, contrast, is next.
+
 ## 11-polish:15-type-scale — The type scale
 
 Type roles that look right: sizes from a modular scale set by the face's
@@ -785,16 +841,68 @@ does not clamp. Lowering reports what it replaced in
    none are unchanged.
 2. Emission clamps each corner to half the shorter side, and draws a
    shape the renderer does not declare as round, reporting it lowered.
-3. The sokol and WebGL renderers draw all three, as signed distances;
-   the raylib and terminal renderers declare only `round`.
+3. The sokol and WebGL renderers draw all three, traced into the
+   outlines they already draw every rounded shape and effect with
+   (`corner_segments` per corner, the WebGL one triangle for triangle as
+   the sokol one), not as signed distances: neither renderer has a
+   distance shader to give them; the raylib and terminal renderers
+   declare only `round`.
 4. The renderer suite draws each declared shape and reads a pixel inside
    the chamfer's cut and outside a round corner's arc.
 
-**Done when.** Core's tests and counts (unchanged with no shapes
-declared); `test-all`; the sokol and WebGL renderers pass the suite with
+**Done when.** Core's tests and counts (within CI's 2% gate with no
+shapes declared); `test-all`; the sokol and WebGL renderers pass the suite with
 every shape; `test-draw` in `hosts/web/` passes.
 
 **Spec.** §4, §10.1, §13.1, §13.3, §18.7.
+
+**Status.** Done:
+- `Decoration.corner_shape` and `Image.corner_shape`;
+  `zui.CornerShapeSet`, a renderer's `zui_corner_shapes`, checked and
+  always with `round`, carried by `zui_app.contextConfig` into
+  `Config.corner_shapes`. Each payload with corners has a
+  `corner_shape`, `void` unless the set holds more than `round`;
+  `zui.cornerShapeOf` reads either. Two compile errors pin a set without
+  `round`.
+- Emission clamps each radius to half the snapped bounds' shorter side,
+  and draws a shape the renderer lacks round, listing it in
+  `Diagnostics.lowered_corner_shapes`, a field of its own (a set of
+  shapes, not `CommandSet`, which holds commands); `Diagnostics` stays 96
+  bytes. Square corners skip both, by one test of the radii's bits.
+- `Tokens.look` sets the part's shape role's shape with its radius.
+- The sokol and WebGL renderers declare every shape and trace them in
+  one `Outline`: a continuous corner is the superellipse
+  |x|⁴ + |y|⁴ = r⁴, the circle's points with each coordinate's square
+  root; a chamfer is its cut's two ends, moved by (2 − √2) × an inset so
+  a border's inner edge stays at 45°. No shader rounds a corner itself.
+- The renderer suite draws a box of each shape in a scene of its own and
+  reads pixels near each's top-left and bottom-right corners that tell
+  the three apart, a shape the renderer lacks checked as round; a
+  renderer that draws every corner round fails it. sokol passes it in
+  every target; WebGL's laid-out fans are checked by test. Six scenes
+  overflowed the suite's frame time on `x86-linux`, now in `u64`.
+- `hosts/web`'s `DemoUi` and `PageRenderer` carry the WebGL renderer's
+  shapes, as they carry its commands; `test-draw` and `test-demo` pass.
+- Instruction counts against `f6051f4`, with no shapes declared, each
+  growth the clamp and shape test on corners, or the new byte a
+  declared decoration stores:
+
+  | Row | Growth |
+  |---|---|
+  | 3000 cells, tooltip first / last, endFrame | +0.76% / +0.78% |
+  | documents view, endFrame | +0.38% |
+  | 4096 boxes, depth 8, declare | +0.35% |
+  | 4000 children of one parent, endFrame | +0.12% |
+  | 4096 interactive boxes, declare / pressed / clicked | +0.12% to +0.14% |
+  | 4096 boxes, depth 8, endFrame; static-styled, endFrame | +0.08% |
+  | 4096 interactive boxes, endFrame (all three) | +0.05% |
+  | 1000 labels, rendered, endFrame | +0.01% |
+
+  Without the square-corner test the cells rows grew 4.1% and 4.2%.
+  The owner accepted this growth over compiling the clamp and the
+  report out of a context that declares only `round`
+  (`roadmap/decisions.md`), and the *Done when* now asks for counts
+  within CI's 2% gate.
 
 ## 11-polish:17-nested-corners — Nested corners
 

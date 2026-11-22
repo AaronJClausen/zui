@@ -26,11 +26,13 @@ const compile_error_cases = [_]struct { name: []const u8, expected_error: []cons
     .{ .name = "custom_without_custom_data", .expected_error = "zui: custom() needs Config.CustomData set to your payload type" },
     .{ .name = "state_type_too_large", .expected_error = "zui: state type state_type_too_large.History is 80 bytes, but a state slot holds at most 64; store an index into your own storage instead" },
     .{ .name = "config_material_without_handle", .expected_error = "zui: commands includes .material but MaterialHandle is void" },
+    .{ .name = "config_corner_shapes_without_round", .expected_error = "zui: corner_shapes does not include .round, which every other shape is drawn as" },
     .{ .name = "renderer_missing_submit", .expected_error = "zui: renderer_missing_submit.Renderer does not implement zui.Renderer: missing `zuiSubmit`" },
     .{ .name = "renderer_submit_wrong_signature", .expected_error = "zui: renderer_submit_wrong_signature.Renderer.zuiSubmit must be fn (*renderer_submit_wrong_signature.Renderer, zui.Surface, frame: anytype) !void" },
     .{ .name = "renderer_unknown_declaration", .expected_error = "zui: renderer_unknown_declaration.Renderer declares unknown `zui_command`" },
     .{ .name = "renderer_without_surfaces", .expected_error = "zui: renderer_without_surfaces.Renderer.zui_surfaces names no surface kind, so no host can give it one" },
     .{ .name = "renderer_material_without_handle", .expected_error = "zui: renderer_material_without_handle.Renderer.zui_commands includes .material but renderer_material_without_handle.Renderer.MaterialHandle is void" },
+    .{ .name = "renderer_corner_shapes_without_round", .expected_error = "zui: renderer_corner_shapes_without_round.Renderer.zui_corner_shapes does not include .round, which every other shape is drawn as" },
     .{ .name = "renderer_output_formats_without_sdr", .expected_error = "zui: renderer_output_formats_without_sdr.Renderer.zui_output_formats does not include .sdr, which every window falls back to" },
     .{ .name = "renderer_hdr_output_without_extended_color", .expected_error = "zui: renderer_hdr_output_without_extended_color.Renderer.zui_output_formats includes .scrgb_fp16 but renderer_hdr_output_without_extended_color.Renderer.zui_extended_color is not true, so it would be given only clamped colors" },
     .{ .name = "renderer_render_thread_not_bool", .expected_error = "zui: renderer_render_thread_not_bool.Renderer.zui_render_thread must be a bool, found comptime_int" },
@@ -126,7 +128,7 @@ const compile_error_cases = [_]struct { name: []const u8, expected_error: []cons
     .{ .name = "skin_not_a_struct", .expected_error = "zui_widgets: a skin must be a struct type, got u32" },
     .{ .name = "skin_unknown_declaration", .expected_error = "zui_widgets: skin_unknown_declaration.Skin declares unknown `zuiStlye`" },
     .{ .name = "skin_missing_style", .expected_error = "zui_widgets: skin_missing_style.Skin does not implement the skin contract: missing `zuiStyle`" },
-    .{ .name = "skin_wrong_style_signature", .expected_error = "zui_widgets: skin_wrong_style_signature.Skin.zuiStyle must be fn (*const skin_wrong_style_signature.Skin, zui_widgets.Part, zui.WidgetState, *const zui.Environment) zui_widgets.Style(Ui), found fn (*const skin_wrong_style_signature.Skin, zui_widgets.Part, interaction.WidgetState) zui_widgets.Style(context.Context(.{ .limits = .{ ... }, .Text = skin_wrong_style_signature.Text, .Sources = void, .commands = .{ ... }, .ImageHandle = void, .CustomData = void, .MaterialHandle = void, .FontId = u16, .Color = style.Color, .extended_color = false, .features = .{ ... }, .frames_in_flight = 2 }))" },
+    .{ .name = "skin_wrong_style_signature", .expected_error = "zui_widgets: skin_wrong_style_signature.Skin.zuiStyle must be fn (*const skin_wrong_style_signature.Skin, zui_widgets.Part, zui.WidgetState, *const zui.Environment) zui_widgets.Style(Ui), found fn (*const skin_wrong_style_signature.Skin, zui_widgets.Part, interaction.WidgetState) zui_widgets.Style(context.Context(.{ .limits = .{ ... }, .Text = skin_wrong_style_signature.Text, .Sources = void, .commands = .{ ... }, .ImageHandle = void, .CustomData = void, .MaterialHandle = void, .FontId = u16, .Color = style.Color, .extended_color = false, .corner_shapes = .{ ... }, .features = .{ ... }, .frames_in_flight = 2 }))" },
     .{ .name = "appearance_missing_part", .expected_error = "zui: appearance_missing_part.Chip's appearance has no part `container` of appearance_missing_part.Chip.Part" },
     .{ .name = "appearance_text_without_on", .expected_error = "zui: appearance_text_without_on.Chip.label draws text but names no part it is drawn `.on`" },
     .{ .name = "appearance_icon_without_on", .expected_error = "zui: appearance_icon_without_on.Chip.close draws an icon but names no part it is drawn `.on`" },
@@ -255,12 +257,20 @@ pub fn build(b: *std.Build) void {
         .imports = &.{.{ .name = "zui", .module = zui_module }},
     });
 
+    const design_module = b.addModule("zui_design", .{
+        .root_source_file = b.path("zui_design/zui_design.zig"),
+        .target = target,
+        .optimize = optimize,
+        .sanitize_thread = if (sanitize_thread) true else null,
+        .imports = &.{.{ .name = "zui", .module = zui_module }},
+    });
+
     const test_step = b.step("test", "Run the unit tests and the compile-error tests, and compile the benchmark tools");
     const unit_test_step = b.step("test-unit", "Run the unit tests, in the selected optimize mode");
     const compile_error_test_step = b.step("test-compile-errors", "Check every compile error's message, which no optimize mode changes");
     const bench_tools_step = b.step("check-bench-tools", "Compile counts, bench-compare and bench-report, each in its own fixed optimize mode");
     for ([_]*std.Build.Step{ unit_test_step, compile_error_test_step, bench_tools_step }) |part| test_step.dependOn(part);
-    const tested_modules = [_]*std.Build.Module{ zui_module, testing_module, async_module, widgets_module, reflect_module, tracy_module, app_module, wire_module, debug_module, motion_module, color_module };
+    const tested_modules = [_]*std.Build.Module{ zui_module, testing_module, async_module, widgets_module, reflect_module, tracy_module, app_module, wire_module, debug_module, motion_module, color_module, design_module };
     for (tested_modules) |tested_module| {
         const module_tests = b.addTest(.{ .root_module = tested_module, .use_llvm = if (sanitize_thread) true else null });
         unit_test_step.dependOn(&b.addRunArtifact(module_tests).step);
@@ -296,6 +306,7 @@ pub fn build(b: *std.Build) void {
                     .{ .name = "zui_debug", .module = debug_module },
                     .{ .name = "zui_motion", .module = motion_module },
                     .{ .name = "zui_color", .module = color_module },
+                    .{ .name = "zui_design", .module = design_module },
                 },
             }),
         });
@@ -336,10 +347,12 @@ pub fn build(b: *std.Build) void {
                 .{ .name = "zui_debug", .module = debug_module },
                 .{ .name = "zui_motion", .module = motion_module },
                 .{ .name = "zui_color", .module = color_module },
+                .{ .name = "zui_design", .module = design_module },
             },
         }),
     });
-    b.step("check", "Type-check zui for the selected target").dependOn(&check_object.step);
+    const check_step = b.step("check", "Type-check zui for the selected target");
+    check_step.dependOn(&check_object.step);
 
     const bench_zui = releaseFastZui(b, target, build_options);
     const bench_options = b.addOptions();
@@ -428,7 +441,7 @@ pub fn build(b: *std.Build) void {
     }) });
     unit_test_step.dependOn(&b.addRunArtifact(bench_tests).step);
 
-    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "tests", "bench", "zui_testing", "zui_async", "zui_widgets", "zui_reflect", "zui_tracy", "zui_app", "zui_wire", "zui_debug", "zui_motion", "zui_color" };
+    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "tests", "bench", "zui_testing", "zui_async", "zui_widgets", "zui_reflect", "zui_tracy", "zui_app", "zui_wire", "zui_debug", "zui_motion", "zui_color", "zui_design" };
     b.step("fmt", "Format all Zig sources").dependOn(&b.addFmt(.{ .paths = formatted_paths }).step);
     b.step("fmt-check", "Fail if any Zig source is not formatted").dependOn(&b.addFmt(.{ .paths = formatted_paths, .check = true }).step);
 }

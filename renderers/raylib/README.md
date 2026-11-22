@@ -107,7 +107,8 @@ What raylib cannot do:
   release between two frames is lost, as it is to raylib itself.
 - **Corner radii.** raylib rounds all four corners of a rectangle or a
   border the same, so the largest of zui's four radii is used; an image
-  rounds each corner by its own.
+  rounds each corner by its own. It draws no other corner shape, so zui
+  draws continuous and chamfered corners round.
 - **No IME window.** raylib cannot place one, so a text-input request is
   not applied.
 - **One window.** `zui_capabilities.windows` is `.one`.

@@ -6,7 +6,8 @@ under one scissor rectangle, and `web/frame_drawer.mjs` draws them on a
 canvas through WebGL 2, with four samples per pixel resolved to one,
 which smooth every edge as the sokol renderer's multisampled targets do with
 `sample_count = 4`: rectangles, borders, clips, gradients, shadows and
-transforms, and text, once the page hands over the stream's fonts:
+transforms, with round, continuous and chamfered corners traced point
+for point as the sokol renderer traces them, and text, once the page hands over the stream's fonts:
 glyphs placed where `zui_glyphs` lays them out, from a `zui_glyphs` atlas
 of RG8 texels, as the sokol renderer places and packs its own; text in a
 font id the text has no face for is not drawn. It draws any text's fonts,
@@ -28,8 +29,8 @@ in the same WebAssembly instance and handing the laid-out frame, a
 canvas id, through the two imports `frameDrawerImports` gives the module.
 Its `init(surface, text)` takes the text the frames were measured with,
 or anything `zui_glyphs.Fonts.of` erases, and reserves its memory; it
-declares the commands it draws, with the sokol renderer's image and
-material shapes, so a context configured for it carries what it draws:
+declares the commands and the corner shapes it draws, with the sokol
+renderer's image and material shapes, so a context configured for it carries what it draws:
 
 ```zig
 const Ui = zui.Context(zui_app.contextConfig(zui_webgl.Renderer, .{ .Text = zui_truetype.Text }));

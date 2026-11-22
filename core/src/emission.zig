@@ -421,7 +421,14 @@ fn Emitter(comptime Ui: type) type {
                 .none => {},
                 .image => if (Ui.RenderCommand.has_image and drawn) {
                     const image = frame.imageOf(element);
-                    self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = level.z, .payload = .{ .image = .{ .handle = image.handle, .tint = self.commandColor(image.tint), .corner_radius = image.corner_radius } } });
+                    const snapped = self.snap(bounds);
+                    const corners = self.cornersIn(snapped, image.corner_radius, image.corner_shape);
+                    self.push(.{ .bounds = snapped, .id = element_id, .z = level.z, .payload = .{ .image = .{
+                        .handle = image.handle,
+                        .tint = self.commandColor(image.tint),
+                        .corner_radius = corners.radius,
+                        .corner_shape = corners.shape,
+                    } } });
                 },
                 .custom => if (Ui.RenderCommand.has_custom and drawn) self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = level.z, .payload = .{ .custom = frame.customs[frame.content_index[element]] } }),
                 .text => if (Ui.has_text) self.emitText(element, element_id, level),
@@ -581,9 +588,39 @@ fn Emitter(comptime Ui: type) type {
             return count;
         }
 
-        fn cornerRadiusOf(self: *const Self, element: Ui.Index) style.CornerRadius {
-            const decoration = self.frame.decorationOf(element) orelse return .zero;
-            return decoration.corner_radius;
+        const Corners = struct {
+            radius: style.CornerRadius,
+            shape: Ui.RenderCommand.CornerShape,
+
+            const square: Corners = .{ .radius = .zero, .shape = if (Ui.RenderCommand.carries_corner_shape) .round else {} };
+        };
+
+        fn decorationCornersIn(self: *Self, snapped: style.Rect, element: Ui.Index) Corners {
+            const decoration = self.frame.decorationOf(element) orelse return .square;
+            return self.cornersIn(snapped, decoration.corner_radius, decoration.corner_shape);
+        }
+
+        /// Each radius at most half the shorter side of `snapped`, and the
+        /// shape round when the renderer does not draw it, which is
+        /// reported. Square corners have no shape to draw or lower.
+        inline fn cornersIn(self: *Self, snapped: style.Rect, radius: style.CornerRadius, shape: style.CornerShape) Corners {
+            if (isSquare(radius)) return .square;
+            return .{ .radius = radius.clampedTo(snapped), .shape = self.drawnShape(shape) };
+        }
+
+        /// By their bits, which tests all four in one instruction.
+        inline fn isSquare(radius: style.CornerRadius) bool {
+            const radii: @Vector(4, u32) = @bitCast(@Vector(4, f32){ radius.top_left, radius.top_right, radius.bottom_left, radius.bottom_right });
+            return @reduce(.Or, radii) == 0;
+        }
+
+        inline fn drawnShape(self: *Self, shape: style.CornerShape) Ui.RenderCommand.CornerShape {
+            const drawn = comptime Ui.RenderCommand.corner_shapes;
+            const carries = comptime Ui.RenderCommand.carries_corner_shape;
+            if (comptime drawn.eql(.initFull())) return shape;
+            if (drawn.contains(shape)) return if (carries) shape else {};
+            self.frame.diagnostics.lowered_corner_shapes.insert(shape);
+            return if (carries) .round else {};
         }
 
         /// Culled by what it paints rather than by the element's box, so the
@@ -594,60 +631,84 @@ fn Emitter(comptime Ui: type) type {
                 return;
             }
             if (shadow.paintedBounds(bounds).intersect(clip).isEmpty()) return;
-            self.push(.{ .bounds = self.snap(bounds), .id = self.frame.element_id[element], .z = z, .payload = .{ .shadow = .{
+            const snapped = self.snap(bounds);
+            const corners = self.decorationCornersIn(snapped, element);
+            self.push(.{ .bounds = snapped, .id = self.frame.element_id[element], .z = z, .payload = .{ .shadow = .{
                 .color = self.commandColor(shadow.color),
                 .offset = shadow.offset,
                 .blur = shadow.blur,
                 .spread = shadow.spread,
-                .corner_radius = self.cornerRadiusOf(element),
+                .corner_radius = corners.radius,
+                .corner_shape = corners.shape,
             } } });
         }
 
         fn emitGradient(self: *Self, element: Ui.Index, bounds: style.Rect, z: i16, gradient: *const Ui.Gradient) void {
             const element_id = self.frame.element_id[element];
-            const corner_radius = self.cornerRadiusOf(element);
+            const snapped = self.snap(bounds);
+            const corners = self.decorationCornersIn(snapped, element);
             if (comptime !Ui.RenderCommand.commands.contains(.gradient)) {
                 self.frame.diagnostics.lowered.insert(.gradient);
-                self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = z, .payload = .{ .rectangle = .{ .color = self.commandColor(gradient.meanColor()), .corner_radius = corner_radius } } });
+                self.push(.{ .bounds = snapped, .id = element_id, .z = z, .payload = .{ .rectangle = .{
+                    .color = self.commandColor(gradient.meanColor()),
+                    .corner_radius = corners.radius,
+                    .corner_shape = corners.shape,
+                } } });
                 return;
             }
-            self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = z, .payload = .{ .gradient = .{
+            self.push(.{ .bounds = snapped, .id = element_id, .z = z, .payload = .{ .gradient = .{
                 .from = self.commandColor(gradient.from),
                 .to = self.commandColor(gradient.to),
                 .angle = gradient.angle,
-                .corner_radius = corner_radius,
+                .corner_radius = corners.radius,
+                .corner_shape = corners.shape,
             } } });
         }
 
         inline fn emitBackground(self: *Self, element_id: u64, bounds: style.Rect, z: i16, decoration: *const Ui.Decoration) void {
             if (decoration.materialOf()) |material| {
                 if (comptime Ui.RenderCommand.commands.contains(.material)) {
-                    self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = z, .payload = .{ .material = .{
+                    const snapped = self.snap(bounds);
+                    const corners = self.cornersIn(snapped, decoration.corner_radius, decoration.corner_shape);
+                    self.push(.{ .bounds = snapped, .id = element_id, .z = z, .payload = .{ .material = .{
                         .handle = material,
                         .fallback = self.commandColor(decoration.background orelse .transparent),
-                        .corner_radius = decoration.corner_radius,
+                        .corner_radius = corners.radius,
+                        .corner_shape = corners.shape,
                     } } });
                     return;
                 }
                 self.frame.diagnostics.lowered.insert(.material);
             }
             if (decoration.background) |color| {
-                self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = z, .payload = .{ .rectangle = .{ .color = self.commandColor(color), .corner_radius = decoration.corner_radius } } });
+                const snapped = self.snap(bounds);
+                const corners = self.cornersIn(snapped, decoration.corner_radius, decoration.corner_shape);
+                self.push(.{ .bounds = snapped, .id = element_id, .z = z, .payload = .{ .rectangle = .{
+                    .color = self.commandColor(color),
+                    .corner_radius = corners.radius,
+                    .corner_shape = corners.shape,
+                } } });
             }
         }
 
         fn emitBackdropBlur(self: *Self, element: Ui.Index, bounds: style.Rect, z: i16, blur: *const Ui.BackdropBlur) void {
             const element_id = self.frame.element_id[element];
-            const corner_radius = self.cornerRadiusOf(element);
+            const snapped = self.snap(bounds);
+            const corners = self.decorationCornersIn(snapped, element);
             if (comptime !Ui.RenderCommand.commands.contains(.backdrop_blur)) {
                 self.frame.diagnostics.lowered.insert(.backdrop_blur);
-                self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = z, .payload = .{ .rectangle = .{ .color = self.commandColor(blur.tint), .corner_radius = corner_radius } } });
+                self.push(.{ .bounds = snapped, .id = element_id, .z = z, .payload = .{ .rectangle = .{
+                    .color = self.commandColor(blur.tint),
+                    .corner_radius = corners.radius,
+                    .corner_shape = corners.shape,
+                } } });
                 return;
             }
-            self.push(.{ .bounds = self.snap(bounds), .id = element_id, .z = z, .payload = .{ .backdrop_blur = .{
+            self.push(.{ .bounds = snapped, .id = element_id, .z = z, .payload = .{ .backdrop_blur = .{
                 .radius = blur.radius,
                 .tint = self.commandColor(blur.tint),
-                .corner_radius = corner_radius,
+                .corner_radius = corners.radius,
+                .corner_shape = corners.shape,
             } } });
         }
 
@@ -761,10 +822,13 @@ fn Emitter(comptime Ui: type) type {
             if (widths.left == 0 and widths.right == 0 and widths.top == 0 and widths.bottom == 0) return;
             const bounds = self.rectOf(element);
             if (bounds.intersect(level.outer_clip).isEmpty()) return;
-            self.push(.{ .bounds = self.snap(bounds), .id = frame.element_id[element], .z = level.z, .payload = .{ .border = .{
+            const snapped = self.snap(bounds);
+            const corners = self.cornersIn(snapped, found.corner_radius, found.corner_shape);
+            self.push(.{ .bounds = snapped, .id = frame.element_id[element], .z = level.z, .payload = .{ .border = .{
                 .color = self.commandColor(border.color),
                 .widths = widths,
-                .corner_radius = found.corner_radius,
+                .corner_radius = corners.radius,
+                .corner_shape = corners.shape,
             } } });
         }
 

@@ -123,6 +123,7 @@ fn panel(seconds: f32) Ui.Decoration {
 |---|---|
 | `rectangle` | sokol_gl quads, or a triangle fan with each corner's own radius |
 | `border` | a ring of triangles inside the bounds, with per-edge widths and per-corner radii |
+| corner shapes | every shape (`zui_corner_shapes` is `.initFull()`), traced into each outline: `round` and `continuous` corners in `corner_segments` segments each (8 by default), a continuous one along the superellipse \|x\|⁴ + \|y\|⁴ = r⁴, and a chamfer as one straight cut, which a border's inner edge or a shadow's spread moves parallel to itself |
 | `text` | laid out by `zui_glyphs` as it was measured, in the fonts of the text contract `init` was given, its glyphs rasterized at the text's size in physical pixels into a `zui_glyphs` atlas and drawn as sokol_gl quads; text in a font id those fonts lack is not drawn |
 | `image` | a textured sokol_gl quad colored by the tint, or a triangle fan with each corner's own radius |
 | `gradient` | the rounded outline cut into bands at most 4 units long across the gradient (64 at most), each vertex colored by `colorAt`, so sokol_gl's sRGB blend between vertices stays within a step of zui's OKLab one |

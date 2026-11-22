@@ -97,6 +97,16 @@ test "look answers the tokens of the roles a part names, in each state" {
     }
 }
 
+test "look gives a part its shape role's corner shape with its radius, and a part with no shape role keeps round corners" {
+    var tokens = filledTokens(void);
+    tokens.corner_shapes.set(.chip, .chamfer);
+    tokens.corner_shapes.set(.indicator, .continuous);
+    const container = tokens.look(Chip, .container, .idle);
+    try testing.expectEqual(zui.CornerShape.chamfer, container.decoration.corner_shape);
+    try testing.expectEqual(tokens.corner_radii.get(.chip), container.decoration.corner_radius);
+    try testing.expectEqual(zui.CornerShape.round, tokens.look(Chip, .label, .idle).decoration.corner_shape);
+}
+
 test "a part's target sets its least size, and draws the focus ring while focused" {
     const tokens = filledTokens(void);
     const idle = tokens.look(Chip, .close, .idle);

@@ -370,6 +370,29 @@ fn panelFor(id: zui.Id) Ui.Element {
 }
 ```
 
+<a id="corner-shapes"></a>
+
+### Corner shapes · *shipped*
+
+Every corner is round by default. `Decoration.corner_shape` makes an element's four corners `.continuous`, a superellipse that meets its sides with no break in curvature, or `.chamfer`, a 45° cut; an image takes `corner_shape` beside its `corner_radius`. Emission clamps each radius to half the element's shorter side, so `.all(1000)` makes a pill of any box. A renderer names the shapes it draws in `zui_corner_shapes`, always with `.round`, and `zui_app.contextConfig` carries them into `Config.corner_shapes`; only then do its commands carry `corner_shape`, so a context whose renderer draws round corners alone emits the same commands as before. A shape the renderer does not draw is drawn round, and `frame.diagnostics.lowered_corner_shapes` names it. `zui.cornerShapeOf(payload)` reads a command's shape either way. `Tokens.look` gives each part its shape role's shape with its radius. The sokol and WebGL renderers trace all three, point for point alike; the raylib and terminal renderers draw them round. The renderer suite reads pixels near each shape's corners, where the three differ.
+
+`src/ui/albums.zig`
+
+```zig
+const Ui = zui.Context(zui_app.contextConfig(Renderer, .{}));
+
+fn albumCover(ui: *Ui, album: *const Album) void {
+    ui.open(.{ .id = .of(album.name), .decoration = .{ .background = .rgb(0x23232d), .corner_radius = .all(14), .corner_shape = .continuous } });
+    defer ui.close();
+    ui.image(.{ .handle = album.cover, .corner_radius = .all(10), .corner_shape = .continuous }, .{ .layout = .{ .sizing = .{ .width = .fixed(160), .height = .fixed(160) } } });
+    ui.box(.{ .decoration = .{ .background = .rgb(0xe0a030), .corner_radius = .all(6), .corner_shape = .chamfer }, .layout = .{ .sizing = .{ .width = .fixed(40), .height = .fixed(16) } } });
+}
+
+fn reportShapes(frame: *const Ui.Frame) void {
+    if (frame.diagnostics.lowered_corner_shapes.count() != 0) std.log.info("this renderer draws some corners round", .{});
+}
+```
+
 <a id="extended-color"></a>
 
 ### HDR and wide-gamut color · *shipped*
@@ -1670,7 +1693,7 @@ pub const widgets: zui_widgets.Widgets(Ui, FlatSkin) = .{ .skin = .{} };
 
 ### Looks in roles: the appearance contract · *shipped*
 
-A component of your own declares its look in roles, not colors: each part names a `zui.design.ColorRole` for its surface, its text or icon and its outline, a `ShapeRole`, padding and gap in `Space` tiers, a `TypeRole` and a hit `Target`. Text and icons name the part they are drawn `.on`, so every pair the component can draw is known before it is drawn, and a part that forgets fails to compile with a message naming it. `zuiDistinguish` lists the parts, or one part in two states, that must not look alike. A raw color is allowed only as `.unchecked(color, reason)`, and the appearance lists each one with its reason. `tokens.look(Component, part, state)` answers a part's decoration, padding, gap, text style and least size from a `zui.design.Tokens`, checking the contract the first time it reads a component. The tokens are filled by hand today; resolving them from a `Design`'s seeds and the user's preferences is still to come.
+A component of your own declares its look in roles, not colors: each part names a `zui.design.ColorRole` for its surface, its text or icon and its outline, a `ShapeRole`, padding and gap in `Space` tiers, a `TypeRole` and a hit `Target`. Text and icons name the part they are drawn `.on`, so every pair the component can draw is known before it is drawn, and a part that forgets fails to compile with a message naming it. `zuiDistinguish` lists the parts, or one part in two states, that must not look alike. A raw color is allowed only as `.unchecked(color, reason)`, and the appearance lists each one with its reason. `tokens.look(Component, part, state)` answers a part's decoration, padding, gap, text style and least size from a `zui.design.Tokens`, checking the contract the first time it reads a component. `zui_design` resolves the tokens from a `Design`'s seeds and the user's preferences (below), or they can be filled by hand.
 
 `src/ui/album_chip.zig`
 
@@ -1721,6 +1744,41 @@ const FrameCounter = struct {
 };
 
 pub var tokens: zui.design.Tokens(Ui, DarkroomRoles) = .{};
+```
+
+<a id="design-tokens"></a>
+
+### `zui_design`: tokens from seeds and preferences · *shipped*
+
+`zui_design` makes the `zui.design.Tokens` that `look` reads, from a `Design` and the user's `Preferences`. Each seed becomes a tonal ramp in OKLCH, and every role is a lightness on one in light, dark and high contrast; a hovered, focused or pressed fill moves toward the role drawn on it, and a disabled one greys and fades. Spacing comes from the density the user chose, corners from the design's shape table moved a size sharper or rounder at the user's word, and target floors stay at 24 units, 44 for touch. Your own roles take the colors of the roles their pairs name. `resolve` allocates nothing, and runs at comptime as well as at run time, so a design's dark high-contrast tokens can be a constant. Contrast solving and color vision are still to come.
+
+`src/appearance.zig`
+
+```zig
+pub const darkroom: zui.design.Design = .{
+    .seeds = .{ .accent = .{ .lightness = 0.6, .chroma = 0.15, .hue = 35 }, .neutral = .{ .lightness = 0.5, .chroma = 0.01, .hue = 35 } },
+    .corner_shape = .continuous,
+};
+
+pub const Appearance = struct {
+    choices: zui_design.Choices = .{},
+    preferences: ?zui_design.Preferences = null,
+    tokens: zui.design.Tokens(Ui, DarkroomRoles) = .{},
+
+    /// Called before each frame is declared; resolves only when a preference changed.
+    pub fn follow(self: *Appearance, ui: *const Ui) void {
+        const preferences: zui_design.Preferences = .from(ui.environment(), self.choices);
+        if (self.preferences) |current| if (std.meta.eql(current, preferences)) return;
+        self.preferences = preferences;
+        _ = zui_design.resolve(darkroom, preferences, &self.tokens);
+    }
+};
+
+pub const print_proof_tokens = proof: {
+    var tokens: zui.design.Tokens(Ui, DarkroomRoles) = .{};
+    _ = zui_design.resolve(darkroom, .{ .contrast = .high }, &tokens);
+    break :proof tokens;
+};
 ```
 
 <a id="reflect"></a>
@@ -2460,7 +2518,7 @@ Build with `-Dzui-tracy=true` to link Tracy's client, then connect profiler 0.14
 These names compile, but they don't do anything yet. This list is from `ARCHITECTURE.md` §7 and the roadmap.
 
 - **A host that runs its own loop**: `zuiRun` and the `zui.Driver` it is handed, with `suspendSurfaces` and `resumeSurfaces` for a surface the platform takes away, compile and pass `zui_app`'s tests against a scripted host, but no shipped host declares `zuiRun` yet; macOS, iOS and Android's are to come.
-- **Still to come**: Multi-line text editing, the rest of the design system (tokens from seeds, density, a type scale, corner shapes and nested corners, and a review of every permutation), theme packs, the inspector over the wire, and more hosts (Linux and web; macOS later).
+- **Still to come**: Multi-line text editing, the rest of the design system (contrast solving and color vision in `zui_design`, density's coupling to text size, a type scale, corner shapes and nested corners, and a review of every permutation), theme packs, the inspector over the wire, and more hosts (Linux and web; macOS later).
 
 <a id="dx"></a>
 

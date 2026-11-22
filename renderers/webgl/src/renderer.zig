@@ -30,6 +30,7 @@ pub fn RendererOn(comptime Page: type) type {
 
         pub const zui_surfaces: zui.SurfaceKinds = .initOne(.web);
         pub const zui_commands: zui.CommandSet = .initMany(&.{ .gradient, .shadow, .backdrop_blur, .transform, .material });
+        pub const zui_corner_shapes: zui.CornerShapeSet = .initFull();
         pub const zui_extended_color = true;
         pub const ImageHandle = Image;
         pub const MaterialHandle = Material;
@@ -229,6 +230,7 @@ const TestUi = zui.Context(.{
     .extended_color = TestRenderer.zui_extended_color,
     .ImageHandle = TestRenderer.ImageHandle,
     .MaterialHandle = TestRenderer.MaterialHandle,
+    .corner_shapes = TestRenderer.zui_corner_shapes,
     .limits = .{ .max_elements = 8 },
 });
 
@@ -274,6 +276,30 @@ test "a frame is laid out and handed to the canvas its surface names, the atlas 
     try std.testing.expectEqual(null, renderer.page.frame.changed_glyph_atlas);
     try std.testing.expectEqual(0, renderer.drawListOverflows());
     try std.testing.expectEqual(0, renderer.glyphOverflows());
+}
+
+test "a chamfered rectangle is a fan to one cut per corner, a continuous one to as many points as a round one" {
+    var renderer: TestRenderer = .{};
+    try renderer.init(.{ .web = .{ .canvas = 0 } }, &zui_glyphs.Fonts.none);
+    defer renderer.deinit();
+    const vertex_counts = [_]struct { zui.CornerShape, u32 }{ .{ .chamfer, 3 * 8 }, .{ .continuous, 3 * 4 * (DrawList.corner_segments + 1) }, .{ .round, 3 * 4 * (DrawList.corner_segments + 1) } };
+    for (vertex_counts) |shape_and_count| {
+        const shape, const vertex_count = shape_and_count;
+        const shaped = [_]TestUi.RenderCommand{
+            .{ .bounds = .{ .x = 0, .y = 0, .width = 40, .height = 40 }, .id = 1, .payload = .{ .rectangle = .{ .color = .white, .corner_radius = .all(10), .corner_shape = shape } } },
+        };
+        try renderer.zuiSubmit(.{ .web = .{ .canvas = 0 } }, &ListedFrame{ .params = .{ .now = .zero, .viewport = .{ 40, 40 } }, .list = &shaped });
+        try std.testing.expectEqual(vertex_count, renderer.draw_list.vertex_count);
+    }
+    renderer.draw_list.layOut(&[_]TestUi.RenderCommand{
+        .{ .bounds = .{ .x = 0, .y = 0, .width = 40, .height = 40 }, .id = 1, .payload = .{ .rectangle = .{ .color = .white, .corner_radius = .all(10), .corner_shape = .chamfer } } },
+    }, .{ .now = .zero, .viewport = .{ 40, 40 } }, &zui_glyphs.Fonts.none);
+    const cut_start = renderer.draw_list.vertices()[1].position;
+    const cut_end = renderer.draw_list.vertices()[2].position;
+    try std.testing.expectApproxEqAbs(@as(f32, 0), cut_start[0], 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 10), cut_start[1], 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 10), cut_end[0], 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), cut_end[1], 0.001);
 }
 
 test "a canvas that cannot blur has its backdrop blurs laid out as their tint" {

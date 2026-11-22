@@ -261,12 +261,29 @@ pub const CornerRadius = struct {
     pub fn all(radius: f32) CornerRadius {
         return .{ .top_left = radius, .top_right = radius, .bottom_left = radius, .bottom_right = radius };
     }
+
+    /// Each corner at most half the shorter side of `bounds`, so a radius
+    /// of any size makes a pill of a box.
+    pub fn clampedTo(self: CornerRadius, bounds: Rect) CornerRadius {
+        const Radii = @Vector(4, f32);
+        const radii: Radii = .{ self.top_left, self.top_right, self.bottom_left, self.bottom_right };
+        const clamped = @min(radii, @as(Radii, @splat(@min(bounds.width, bounds.height) * 0.5)));
+        return .{ .top_left = clamped[0], .top_right = clamped[1], .bottom_left = clamped[2], .bottom_right = clamped[3] };
+    }
 };
 
 /// The family of an element's four corners, whatever their radii:
 /// `round` is circular arcs, `continuous` a superellipse whose curvature
 /// does not break where the corner meets the side, and `chamfer` a 45° cut.
 pub const CornerShape = enum(u8) { round, continuous, chamfer };
+
+/// The corner shapes a renderer draws, its `zui_corner_shapes`. It always
+/// holds `round`, which every other shape is drawn as where it is missing.
+///
+/// ```zig
+/// pub const zui_corner_shapes: zui.CornerShapeSet = .initFull();
+/// ```
+pub const CornerShapeSet = std.EnumSet(CornerShape);
 
 pub const Rect = struct {
     x: f32 = 0,
@@ -679,8 +696,8 @@ pub const Transform = struct {
     }
 };
 
-/// Background, border and corner radius: what an element draws behind and
-/// around its children.
+/// Background, border, corner radius and shape: what an element draws
+/// behind and around its children.
 pub const Decoration = DecorationWith(Color, void);
 
 /// `Decoration` in a context's own color type, and with a `material`, the
@@ -695,7 +712,10 @@ pub fn DecorationWith(comptime ColorType: type, comptime MaterialHandle: type) t
     return struct {
         background: ?ColorType = null,
         border: ?BorderWith(ColorType) = null,
+        /// Each at most half the shorter side, however large declared.
         corner_radius: CornerRadius = .zero,
+        /// Drawn as `round` by a renderer whose `zui_corner_shapes` lacks it.
+        corner_shape: CornerShape = .round,
         /// Drawn over the bounds, in the corners, by a renderer that
         /// declares `.material`. Any other draws `background` instead, so
         /// the background is the material's fallback.
