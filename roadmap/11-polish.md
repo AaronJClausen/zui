@@ -17,7 +17,7 @@ is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:02-exit-animations` Exit animations | done |
 | `11-polish:03-zui-color` `zui_color` | done |
 | `11-polish:04-skin-contract` The skin contract | done |
-| `11-polish:05-default-skin` The default skin | not started |
+| `11-polish:05-default-skin` The default skin | retired: merged into `11-polish:19-default-design` |
 | `11-polish:06-text-editing` Text editing | not started |
 | `11-polish:07-zui-icons` `zui_icons` | not started |
 | `11-polish:08-zui-themes` `zui_themes` | not started |
@@ -25,6 +25,40 @@ is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:10-samples` Samples | not started |
 | `11-polish:11-profiling-guide` A profiling guide | done |
 | `11-polish:12-developer-experience-audit` A developer-experience audit | not started |
+| `11-polish:13-design-vocabulary` The design vocabulary and the appearance contract | not started |
+| `11-polish:14-zui-design` `zui_design`: tokens from seeds and preferences | not started |
+| `11-polish:15-type-scale` The type scale | not started |
+| `11-polish:16-corner-shapes` Corner shapes | not started |
+| `11-polish:17-nested-corners` Nested corners | not started |
+| `11-polish:18-system-accent` The system's accent color | not started |
+| `11-polish:19-default-design` The default design | not started |
+| `11-polish:20-appearance-audit` The appearance audit | not started |
+| `11-polish:21-permutations` Every permutation of a component | not started |
+| `11-polish:22-appearance-review` The appearance review | not started |
+| `11-polish:23-design-workbench` The design workbench | not started |
+
+### The design system
+
+Items 13 to 23 build SPEC.md §18: a design system that makes an
+accessible, coherent app the easy path. They replace the default skin
+(`11-polish:05-default-skin`, retired into `11-polish:19-default-design`)
+and turn `11-polish:08-zui-themes` into seed sets, so they come ahead of
+the rest of stage 11. The owner's decisions are under *Made* in
+`roadmap/decisions.md`.
+
+How the pieces divide, given that modules cannot import one another
+(SPEC.md §3.3):
+- **The core** holds the vocabulary that every piece speaks: roles,
+  tiers, the appearance contract and its check, `Design`, what an
+  application or a theme pack declares, and `Tokens`, the resolved
+  values. It also gains the corner shapes and nested corners,
+  which emission and the renderers need.
+- **`zui_design`** makes `Tokens`: palettes from seeds, contrast
+  solving, color vision, density, the type scale. It also audits a
+  frame and lists a component's permutations.
+- **`zui_widgets`** styles its controls from `Tokens` through
+  `DesignSkin`, without importing `zui_design`.
+- **`apps/review/`** is the review tool, an app that can import them all.
 
 ---
 
@@ -502,6 +536,10 @@ tour's `--dump --every-screen` passes. `core/bench/` does not use
 
 Light, dark and high contrast, following the environment.
 
+**Status.** Retired before it started, by the owner's decision to build
+the design system (SPEC.md §18): its light, dark and high-contrast skin
+is `11-polish:19-default-design`'s, made from tokens instead of tables.
+
 ## 11-polish:06-text-editing — Text editing
 
 Selection, word movement, the clipboard through the host, multiple lines,
@@ -511,8 +549,17 @@ and IME composition with the IME area in `HostRequests`.
 
 ## 11-polish:08-zui-themes — `zui_themes`
 
-Skins for Windows, GNOME and KDE, in `themes/`. macOS's skin is set aside
-as `14-macos:03-macos-skin`.
+The design languages of Windows (Fluent), GNOME (libadwaita) and KDE
+(Breeze), in `themes/`, each one a `zui.design.Design`: its seeds, type
+roles, density defaults, shape roles and corner family, following the
+system's accent (`11-polish:18-system-accent`). A design is data in the
+core's vocabulary, so `zui_themes` still imports only `zui`; its tests
+check each design with `zui_design` at comptime, in light, dark and high
+contrast, as every design is checked. macOS's is set aside as
+`14-macos:03-macos-skin`.
+
+**Waits for** `11-polish:19-default-design`, whose design is the
+template each language starts from.
 
 ## 11-polish:09-template-project — The template project
 
@@ -563,3 +610,342 @@ documentation, not run here, since neither is installed.
 
 A new user builds each sample from the docs alone, and every place they
 get stuck becomes an item.
+
+## 11-polish:13-design-vocabulary — The design vocabulary and the appearance contract
+
+`zui.design`: the roles, tiers and contract a component declares its look
+in, so that every look can be checked before it is drawn.
+
+**Grounding** (at `3f4ff58`). A look today is the skin contract's:
+`zuiStyle(part, state, environment) Style`
+(`core/zui_widgets/zui_widgets.zig:196`), over `Part`, a closed enum of the
+parts `zui_widgets` draws (`:103`), so a component of the application's
+own cannot join it. `Style(Ui)` (`:165`) holds raw colors and numbers; no
+declaration says which text sits on which background, so contrast cannot
+be checked without drawing. `zui.Color`, `CornerRadius`
+(`core/src/style.zig:253`) and `Decoration` (`core/src/style.zig:679`)
+are core vocabulary already; modules cannot import one another (SPEC.md
+§3.3), so the roles that `zui_widgets`, `zui_design` and `zui_themes`
+all name must be the core's too.
+
+**Plan.**
+1. `core/src/design.zig`, exported as `zui.design`: `ColorRole`, `Space`,
+   `TypeRole`, `ShapeRole`, `CornerSize`, `Target`; `Design`, what an
+   application or a theme pack declares; `Tokens(Ui, ExtraRoles)`, the
+   resolved values; `tokens.look(Component, part, state)`, a part's
+   decoration, padding, gap, text style and minimum size in one state.
+2. The appearance contract, checked in `core/src/contracts.zig`: a
+   component declares `Part` and `zuiAppearance`, and may declare
+   `zuiDistinguish`. A part's text or icon names the part it sits `.on`;
+   a raw color is `.unchecked(color, reason)`.
+3. The compile errors SPEC.md §18.2 quotes, one case each in
+   `core/tests/compile_errors/`.
+4. `core/tests/instantiate.zig` instantiates `Tokens` and `look` for a
+   component with parts and one with extra roles.
+
+**Done when.** Core's tests in all three modes, `check` for
+`wasm32-freestanding` and `powerpc-linux`; every message of §18.2
+pinned; a component with no `zuiAppearance` costs nothing: the
+instruction counts do not move.
+
+**Spec.** §18.1, §18.2.
+
+## 11-polish:14-zui-design — `zui_design`: tokens from seeds and preferences
+
+The default maker of `Tokens`: palettes from a few seeds, solved for
+contrast and color vision, spaced by the user's density.
+
+**Grounding** (at `3f4ff58`). `zui_color` (`core/zui_color/zui_color.zig`)
+has OKLab and OKLCH (`:23`, `:99`), `withLightness` (`:253`) and
+`lightnessScale` (`:277`), all usable at comptime: what solving a
+lightness needs. It cannot be imported by another module, so
+`zui_design` carries the conversions it needs or is given them; which,
+the item's first slice decides by measuring the comptime cost. The
+environment (`core/src/input.zig:311`) reports theme, contrast,
+`text_scale` and reduced transparency, but no density or color vision,
+which are the user's choices in the application, not the OS's.
+
+**Plan.** In slices, each a commit.
+1. `core/zui_design/`, the module, wired as CLAUDE.md lists:
+   `Preferences.from(environment, choices)` and
+   `design.resolve(preferences, *Tokens)`, with no allocation.
+2. Color: tonal ramps from `Design.seeds` in OKLCH; every role in light,
+   dark and high contrast; state layers for hover, press and disabled.
+3. Contrast: APCA and WCAG 2 for each declared pair, at the targets of
+   SPEC.md §18.4. The resolver moves a foreground's lightness, keeping
+   its hue and chroma. A design resolved at comptime that cannot meet a
+   target is a compile error naming the pair and the lightness that
+   passes. One resolved at run time is repaired, and `resolve` returns
+   what it repaired.
+4. Color vision: simulated protanopia, deuteranopia, tritanopia and
+   achromatopsia (Machado et al., 2009, at full severity) for every
+   `zuiDistinguish` pair and every status role. A pair that collapses is
+   moved apart in lightness, or, if it cannot be, reported as needing a
+   cue that is not color.
+5. Density: the tier table of SPEC.md §18.5, with the target floors and
+   `text_scale` coupling.
+
+**Done when.** `zui_design`'s tests in all three modes and its `check`
+for `wasm32-freestanding`: a seed of every hue resolves to tokens that
+meet every target in every theme and contrast; a static design that
+cannot is a compile error with its message; a run-time accent of pure
+yellow on white is repaired and reported; every status role pair stays
+apart under every simulation; a resolve allocates nothing, and changing
+one preference resolves in under 50 µs in ReleaseFast.
+
+**Spec.** §18.3, §18.4, §18.5, §19.11.
+
+## 11-polish:15-type-scale — The type scale
+
+Type roles that look right: sizes from a modular scale set by the face's
+x-height, line heights on the grid, tracking by size, and `text_scale`
+applied by role.
+
+**Grounding** (at `3f4ff58`). `zui_glyphs.FontMetrics`
+(`text/glyphs/src/fonts.zig:12`) holds `ascent`, `descent` and
+`line_gap`, but no x-height or cap height, which stb_truetype reads from
+a face's OS/2 table. Letter spacing reaches measurement and drawing
+already (`MeasureKey`, SPEC.md §9.1). No widget reads `text_scale`
+(`11-polish:04-skin-contract`'s Grounding).
+
+**Plan.**
+1. `FontMetrics.x_height` and `cap_height`, from `zui_truetype`, with a
+   documented estimate for a face without an OS/2 table.
+2. In `zui_design`, the type roles of SPEC.md §18.6 from `Design.type`:
+   the scale's ratio, the body size, a font for each of regular, strong
+   and monospace, and the body face's metrics.
+3. Each role's line height snapped to the 4-unit grid, its tracking by
+   size, `text_scale` applied less to larger roles, and the body text's
+   measure in `Tokens`.
+
+**Done when.** `zui_design`'s tests: two bundled faces of different
+x-heights give body text whose x-heights differ by at most 0.5 units; at
+`text_scale = 2`, body doubles and display grows by at most 1.5×; every
+role's line height is a multiple of 4; the text packages' tests and
+`check` pass.
+
+**Spec.** §9.1, §18.6.
+
+## 11-polish:16-corner-shapes — Corner shapes
+
+Round, continuous and chamfered corners, drawn by the renderers that
+declare them and lowered to round by the rest.
+
+**Grounding** (at `3f4ff58`). `CornerRadius` is four floats
+(`core/src/style.zig:253`); every command that carries one is round
+(`core/src/commands.zig:77`, `:83`). The sokol renderer clamps each
+corner to half the shorter side (`renderers/sokol/src/renderer.zig:842`,
+`:851`), so a radius of a pill drawn there is already clamped; emission
+does not clamp. Lowering reports what it replaced in
+`diagnostics.lowered` (`core/src/context.zig:158`).
+
+**Plan.**
+1. `zui.CornerShape` (`round`, `continuous`, `chamfer`),
+   `Decoration.corner_shape`, and `Config.corner_shapes`, the shapes the
+   renderer draws. A command carries its shape only when that set holds
+   more than `round`, so the commands of an application that declares
+   none are unchanged.
+2. Emission clamps each corner to half the shorter side, and draws a
+   shape the renderer does not declare as round, reporting it lowered.
+3. The sokol and WebGL renderers draw all three, as signed distances;
+   the raylib and terminal renderers declare only `round`.
+4. The renderer suite draws each declared shape and reads a pixel inside
+   the chamfer's cut and outside a round corner's arc.
+
+**Done when.** Core's tests and counts (unchanged with no shapes
+declared); `test-all`; the sokol and WebGL renderers pass the suite with
+every shape; `test-draw` in `hosts/web/` passes.
+
+**Spec.** §4, §10.1, §13.1, §13.3, §18.7.
+
+## 11-polish:17-nested-corners — Nested corners
+
+A child's corners that follow its parent's at the child's own inset,
+resolved where both boxes are known.
+
+**Grounding** (at `3f4ff58`). The sokol renderer already insets a
+border's inner edge by the concentric rule: its inner radius is the outer
+one less the larger of the two adjacent border widths
+(`renderers/sokol/src/renderer.zig:844-847`). Emission knows an element's
+bounds and its parent's as it walks the tree in pre-order
+(`core/src/emission.zig:388`, `cornerRadiusOf`), so a parent's resolved
+radius is known before its children are emitted.
+
+**Plan.**
+1. `Decoration.nested_corners: ?NestedCorners`, behind
+   `Features.nested_corners`.
+2. At emission, each corner's radius is the parent's, less the child's
+   distance from that corner of the parent along the farther axis, by
+   the family's rule of SPEC.md §18.7. A parent that is itself nested
+   resolves first.
+3. Below `NestedCorners.minimum`, the corner keeps the minimum. A corner
+   farther from the parent's than the parent's radius takes the minimum
+   too.
+
+**Done when.** Core's tests: a card of radius 16 and padding 6 gives its
+filling child radius 10; a child that touches only the card's top edge
+follows only the top corners; a chamfer nests by `(2 − √2)·d`; a
+three-deep nesting resolves; counts are unchanged with the feature off.
+
+**Spec.** §4, §10.1, §18.7.
+
+## 11-polish:18-system-accent — The system's accent color
+
+`Environment.accent`, reported by each host, so a design follows the
+user's accent.
+
+**Grounding** (at `3f4ff58`). The Linux host's portal settings carry
+`accent-color` as `(ddd)`, and the host passes it over
+(`hosts/native/linux/desktop_bus.zig:364-385`, its test). Windows
+reports its accent through `UISettings` and `DwmGetColorizationColor`;
+the web host can read the page's `AccentColor` system color.
+
+**Plan.** `Environment.accent: ?Color` and its `EnvironmentChange`; the
+Windows, Linux and web hosts report it; the host suite checks that a
+change reaches the environment; `zui_design.Preferences` takes it as the
+accent seed unless the application overrides it.
+
+**Done when.** Core's tests; each host's tests and suite; the Linux host
+reports the portal's accent; the Windows host's is waiting on CI if it
+cannot be run here.
+
+**Spec.** §7.2, §18.3.
+
+## 11-polish:19-default-design — The default design
+
+zui's own design, and every widget styled from tokens: light, dark and
+high contrast, every density, following the environment.
+
+**Grounding** (at `3f4ff58`). `DefaultSkin(Ui)`
+(`core/zui_widgets/zui_widgets.zig:216`) is two tables, a `Theme` for
+light and one for dark, and reads neither `contrast` nor `text_scale`.
+The tour builds a theme each frame from its palette
+(`apps/tour/src/kit.zig`).
+
+**Plan.**
+1. `zui_design.default`, a `Design` on the bundled fonts.
+2. `zui_widgets.DesignSkin(Ui)`, a skin over a `*const Tokens`: each
+   `Part` declares its appearance, and `zuiStyle` answers from
+   `tokens.look`. `DefaultSkin` is removed, and its callers move.
+3. The tour and the showcase resolve tokens on a change of preferences,
+   and the tour gains a screen of density, color vision, contrast and
+   text scale for the user to choose.
+
+**Done when.** `test-all`, `check-all`; every widget meets SPEC.md §18.4
+in every theme, contrast and density, by `11-polish:20-appearance-audit`
+when it lands and by `zui_design`'s pair checks until then; the raylib
+tour's cycle prints `diagnostics ok: true`; the terminal tour's `--dump
+--every-screen` passes.
+
+**Waits for** `11-polish:14-zui-design`, `11-polish:15-type-scale`,
+`11-polish:16-corner-shapes`.
+
+**Spec.** §16.7, §18, §19.2.
+
+## 11-polish:20-appearance-audit — The appearance audit
+
+Checks of a finished frame's commands, which catch what the declarations
+cannot: custom drawing and colors declared `.unchecked`.
+
+**Grounding** (at `3f4ff58`). A frame's commands are in paint order
+(SPEC.md §13.2), so the rectangle beneath a text command is found by
+walking back. The terminal tour already fails on text cut short
+(`renderers/terminal/examples/tour.zig:40`). Hit regions and semantics
+are kept beside the frame (SPEC.md §13.4, §13.5).
+
+**Plan.** `zui_design.audit(Ui, frame, tokens, options) Findings`, into
+room the caller gives: text contrast against what is painted beneath,
+focus ring contrast, hit target size, text cut short, overlapping
+controls, and each `zuiDistinguish` pair under every color vision
+simulation. Each finding names its element, its check and the measured
+value.
+
+**Done when.** `zui_design`'s tests: a scene with one fault of each kind
+reports exactly those; the tour's every screen audits clean, or each
+finding is an item.
+
+**Waits for** `11-polish:14-zui-design`.
+
+**Spec.** §18.8.
+
+## 11-polish:21-permutations — Every permutation of a component
+
+The axes a component is seen under, at the levels a person can review,
+each permutation with a stable key and a hash of its commands.
+
+**Grounding** (at `3f4ff58`). `zui_testing.Driver`
+(`core/zui_testing/zui_testing.zig:71`) runs complete frames headlessly,
+and its snapshot writes one line per command (`:441`). The tour already
+declares every screen on renderers that draw every optional command and
+none (`apps/tour/src/tests.zig`).
+
+**Plan.** In `zui_design`: `Axes`, the axes of SPEC.md §18.8;
+`Permutations(level)`, at `glance`, `sweep`, `pairs` (a covering array
+built at comptime) and `full`; the `zuiPreviews` contract for a
+component's content fixtures; and `PermutationKey` with a command hash
+that is identical in Debug and release builds.
+
+**Done when.** `zui_design`'s tests: every pair of axis values appears in
+`pairs`; the same declaration hashes the same on every target `check`
+builds; a change of one color changes only the hashes of permutations
+that draw it.
+
+**Waits for** `11-polish:13-design-vocabulary`.
+
+**Spec.** §18.8.
+
+## 11-polish:22-appearance-review — The appearance review
+
+A person steps through the permutations, answers yes or no with an
+optional remark, and gets a report of what needs work.
+
+**Grounding** (at `3f4ff58`). The tour is one app over any host,
+renderer and font system (`apps/tour/src/tour.zig`), run natively and in
+a browser; the raylib renderer takes screenshots
+(`renderers/raylib/examples/tour.zig`).
+
+**Plan.**
+1. `apps/review/`, the module `zui_review`: an app over the application's
+   components that shows each permutation of a level with its axis
+   values and the audit's findings; **Y**, **N** and **R** (a remark,
+   with a region dragged over the part it is about); arrows step, `[`
+   and `]` move between axes.
+2. Verdicts in a ZON file in the application's repository, keyed by
+   `PermutationKey` and holding the command hash; a verdict whose hash
+   no longer matches is stale and asked again.
+3. The report, in Markdown and as an HTML page with an image of each
+   permutation, grouped by component, then by the axis that brings the
+   trouble, with the token or part to change where it can be told.
+4. A build step that fails on a permutation that is stale, flagged, or
+   failing the audit, for CI.
+
+**Done when.** The review app's headless test steps a scripted session
+of verdicts, writes them, changes one token, and finds exactly the
+permutations it touched stale; the report of that session is pinned as
+a golden; the raylib and web builds open it.
+
+**Waits for** `11-polish:20-appearance-audit`, `11-polish:21-permutations`.
+
+**Spec.** §18.8.
+
+## 11-polish:23-design-workbench — The design workbench
+
+One component, live, in a grid of its glance permutations, restyled as
+its design file is saved, with a badge on the moment a check fails.
+
+**Grounding** (at `3f4ff58`). Editing a theme file restyles a running
+window within 4 ms through the host's file watch (stage 5);
+`zui_debug`'s inspector reloads its theme the same way
+(`core/zui_debug/zui_debug.zig:136`).
+
+**Plan.** A mode of the review app: the glance permutations of the
+component under work, the design read from a watched ZON file, the audit
+run on every frame that changes, and `zig build --watch` for code.
+
+**Done when.** Saving a design file restyles every permutation in the
+grid within 50 ms of the save on this machine; a change that fails a
+check shows its badge in the same frame.
+
+**Waits for** `11-polish:22-appearance-review`.
+
+**Spec.** §18.8.

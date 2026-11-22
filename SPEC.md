@@ -113,11 +113,11 @@ packages.
 | Layer | Holds | Bound |
 |---|---|---|
 | **Core** (`zui`) | layout, interaction, state, the frame boundary, sources and demand, the shared vocabulary, every contract and its checks | no OS calls, no drawing, no threads of its own beyond `Io` it is given; identical behavior on every target |
-| **Modules** (`zui_*`, in `core/`) | defaults built on the public API: async sources, widgets, reflection, testing, tracing, the app runner, wire, debug, motion, color, icons | the public API only, enforced by the module boundary (§3.3) |
+| **Modules** (`zui_*`, in `core/`) | defaults built on the public API: async sources, widgets, reflection, testing, tracing, the app runner, wire, debug, motion, color, icons, design | the public API only, enforced by the module boundary (§3.3) |
 | **Text** | font systems, typefaces, and the layout of a run that font systems and renderers share | implement the text contract; never import a renderer |
 | **Renderers** | drawing, images, materials, and text where its layout places it | implement the renderer contract, and may implement the text contract; never import a host |
 | **Hosts** | windows, the event loop, OS events and services, frame pacing | implement the host contract; never import a renderer |
-| **Theme packs** | design languages as skins | data only |
+| **Theme packs** | design languages as `zui.design.Design`s (§18) | data only; import only `zui` |
 
 ```
                           application
@@ -210,6 +210,8 @@ pub const Config = struct {
     FontId: type = u16,           // the renderer's font identifier, passed back in `MeasureKey`
     Color: type = zui.Color,      // `zui.Color` (RGBA8) or `zui.ExtendedColor` (HDR)
     extended_color: bool = false, // the renderer's `zui_extended_color`; without it the commands carry `zui.Color`
+    /// Corner shapes the renderer draws; the rest are drawn round (§18.7).
+    corner_shapes: CornerShapeSet = .initOne(.round),
 
     features: Features = .{},
     /// Frames alive at once: one being declared plus those a renderer holds.
@@ -241,6 +243,7 @@ pub const Features = struct {
     flex_wrap: bool = false,                          // `wrapChildren()` (§8.1)
     chrome_regions: bool = false,                     // `Frame.chromeRegions()`, a custom title bar (§13.4)
     safety_sweeps: bool = std.debug.runtime_safety,   // invariant checks at the end of `endFrame` (§20.1)
+    nested_corners: bool = false,                     // `Decoration.nested_corners` (§18.7)
     /// The tracer contract (§16.5). `void` compiles tracing out.
     Tracer: type = void,
 };
@@ -644,6 +647,7 @@ pub const Environment = struct {
     system_material: bool = false,  // the window shows the system's material where nothing is drawn
     custom_title_bar: bool = false, // the application draws the title bar (§13.4)
     window_maximized: bool = false, // the window fills its monitor's work area
+    accent: ?Color = null,          // the user's accent color in the OS, where it has one
 };
 
 /// One field's new value: `.{ .environment = .{ .theme = .dark } }`.
@@ -1048,6 +1052,8 @@ pub const Decoration = struct {
     background: ?config.Color = null,  // also the material's fallback
     border: ?Border = null,
     corner_radius: CornerRadius = .{},
+    corner_shape: CornerShape = .round,      // enum { round, continuous, chamfer } (§18.7)
+    nested_corners: ?NestedCorners = null,   // concentric with the parent's corners; needs `features.nested_corners` (§18.7)
     material: ?config.MaterialHandle = null, // drawn in place of the background; `void` without a handle
 };
 
@@ -1498,6 +1504,7 @@ never sees it:
 | backdrop blur | a rectangle in its tint |
 | transform | the untransformed element; its hit region stays untransformed |
 | material | the element's fallback background |
+| a corner shape outside `Config.corner_shapes` | the same corners, round |
 | `ExtendedColor` without `zui_extended_color` | the color clamped to `Color`, and `Diagnostics.clamped_colors` set when that changed it |
 
 Capabilities are comptime-known, so lowering costs nothing when the
@@ -2290,7 +2297,9 @@ instantiated. A skin is a struct that declares `zuiStyle` and no other
 - **No cost beyond the call.** `Skin` is a comptime type and `zuiStyle` a
   direct call, so `Widgets` is exactly as large as its skin and has no
   vtable.
-- **`zui_widgets.DefaultSkin(Ui)`** is zui's own skin (§19.2).
+- **`zui_widgets.DesignSkin(Ui)`** is zui's own skin (§19.2): each
+  `Part` declares its appearance (§18.2), and `zuiStyle` answers from the
+  `Tokens` (§18.1) it holds.
 
 The messages:
 ``"zui_widgets: a skin must be a struct type, got u32"``;
@@ -2350,6 +2359,307 @@ way:
 - **Comptime precomputation:** colors in OKLCH or hex, palettes, and
   whole static styles (§10.3) are computed during the build and live in
   read-only memory.
+
+**The design system** builds on these without changing them. An
+application can still style by hand. One that declares its components'
+looks in roles instead gets light, dark and high contrast, the user's
+density, text size and color vision, coherent type and shape, and
+contrast checked in every one of those, without writing any of it.
+Making an inaccessible application should take effort. The pieces:
+
+| Piece | Holds | Where |
+|---|---|---|
+| the vocabulary | roles, tiers, `Design`, `Tokens`, the appearance contract and its check | core, `zui.design` |
+| the maker of tokens | palettes from seeds, contrast solving, color vision, density, the type scale; the audit and the permutations | `zui_design` (§19.11) |
+| the widgets' look | `DesignSkin(Ui)`, a skin over `Tokens` | `zui_widgets` (§19.2) |
+| design languages | Fluent, libadwaita and Breeze as `Design`s | `zui_themes` |
+| the review | stepping through permutations, verdicts and the report | `apps/review/` |
+
+Tokens are resolved when a preference changes, never during a frame. A
+frame reads plain values, as a theme's field is read, so there is still
+no cascade.
+
+### 18.1 The vocabulary
+
+```zig
+pub const design = struct {
+    pub const ColorRole = enum {
+        background, surface, surface_raised, surface_sunken, surface_inverse,
+        on_surface, on_surface_muted, on_surface_inverse,
+        accent, on_accent, accent_container, on_accent_container,
+        secondary_container, on_secondary_container,
+        danger, on_danger, warning, on_warning, success, on_success,
+        outline, outline_muted, focus, scrim,
+    };
+    pub const Space = enum { none, hair, xs, s, m, l, xl, xxl };
+    pub const TypeRole = enum { display, headline, title, body, body_strong, label, caption, code, numeric };
+    pub const ShapeRole = enum { control, container, popup, chip, image, indicator };
+    pub const CornerSize = enum { square, sharp, smooth, soft, bubble };
+    pub const Target = enum { none, pointer, touch };
+
+    pub const Design = struct { ... };                             // what an application or theme pack declares
+    pub fn Tokens(comptime Ui: type, comptime ExtraRoles: type) type // resolved values; `ExtraRoles` an enum or void
+    pub fn Appearance(comptime Part: type, comptime parts: anytype) type
+};
+```
+
+- **`ColorRole`** names what a color is for, never what it looks like.
+  Each `on_*` role is the text and icons on its partner. An application
+  adds its own roles as an enum, `ExtraRoles`, each declared with the
+  role it pairs with; they are solved and checked like the built-in ones.
+- **`Space`** tiers are on a base unit of 4 (§18.5).
+- **`TypeRole`** is the only way a design names a text style (§18.6).
+- **`CornerSize`**, from `square` (no radius) to `bubble` (half the
+  shorter side, a pill), is what a `ShapeRole` resolves to (§18.7).
+- **`Design`** holds the seeds, the type scale's inputs and fonts, each
+  shape role's size and the corner family, and the density table. It is
+  plain data, so a theme pack imports only `zui`.
+- **`Tokens`** holds a color per role in the resolved theme, a length per
+  tier, a `TextStyle` per type role, a `CornerRadius` and `CornerShape`
+  per shape role, the target floors, and the body text's measure;
+  `tokens.space(.m)` reads a tier.
+  `tokens.look(Component, part, state)` answers a part's decoration,
+  padding, gap, text style and minimum size in one `WidgetState`.
+
+### 18.2 The appearance contract
+
+```zig
+const Chip = struct {
+    pub const Part = enum { container, container_selected, label, close };
+
+    pub const zuiAppearance = zui.design.Appearance(Part, .{
+        .container = .{ .surface = .secondary_container, .shape = .chip, .padding = .{ .x = .s, .y = .xs }, .gap = .xs },
+        .container_selected = .{ .surface = .accent_container, .shape = .chip, .padding = .{ .x = .s, .y = .xs }, .gap = .xs },
+        .label = .{ .text = .on_secondary_container, .type = .label, .on = .container },
+        .close = .{ .icon = .on_secondary_container, .on = .container, .target = .touch },
+    });
+
+    pub const zuiDistinguish = .{
+        .{ .container, .container_selected },
+    };
+};
+
+const look = tokens.look(Chip, .container, ui.widgetState(id));
+```
+
+- **A part** gives roles, never values: a `surface`, a `text` or `icon`
+  role, an `outline`, a `shape`, `padding` and `gap` in tiers, a `type`
+  role and a `target`.
+- **`.on`** names the part a text, an icon or an outline is drawn on, so
+  every pair the component can draw is known at comptime and checked in
+  every theme, contrast and color vision (§18.4). A part that draws
+  text or an icon and names no `.on` is a compile error.
+- **States** come from the resolver's state layers: hovered, pressed,
+  focused and disabled are derived from the part's roles, and the focus
+  ring is the `focus` role. A part may give a state its own roles with
+  `.states = .{ .pressed = .{ ... } }`.
+- **`zuiDistinguish`** lists the pairs of parts that must look
+  different, as a checked and an unchecked box are parts of their own
+  (§16.7); `.{ .part, .normal, .hovered }` pairs one part in two states. Under every color vision simulation, they must stay apart in
+  lightness, or differ in a cue that is not color: `zui_widgets`'
+  checkbox has its mark, a selected tab its indicator.
+- **A raw color** is `.unchecked(.rgb(0xff00ff), "the brand's logo")`. It
+  compiles, it is drawn, and the audit (§18.8) lists it with its reason,
+  every time.
+
+The messages:
+``"zui: demo.Chip's appearance has no part `container` of demo.Chip.Part"``;
+``"zui: demo.Chip.label draws text but names no part it is drawn `.on`"``;
+``"zui: demo.Chip.label is drawn on `badge`, which is not a part of demo.Chip.Part"``;
+``"zui: demo.Chip.close's `.unchecked` color needs a reason"``.
+
+### 18.3 Preferences and resolution
+
+```zig
+pub const Preferences = struct {
+    theme: zui.Environment.Theme,
+    contrast: zui.Environment.Contrast,
+    text_scale: f32,
+    reduced_transparency: bool,
+    accent: ?zui.Color,                 // the user's, else the system's, else the design's seed
+    density: Density = .comfortable,     // enum { compact, comfortable, roomy }
+    color_vision: ColorVision = .typical, // enum { typical, protan, deutan, tritan, achromat }
+    corners: CornerPreference = .as_designed, // enum { sharper, as_designed, rounder }: one `CornerSize` step
+    pointer: Target = .pointer,          // `.touch` raises every target floor
+};
+
+const preferences: zui_design.Preferences = .from(ui.environment(), app.choices);
+if (!std.meta.eql(preferences, app.preferences)) {
+    app.preferences = preferences;
+    _ = app.design.resolve(preferences, &app.tokens);
+}
+```
+
+- **What the OS reports comes from the environment** (§7.2), including
+  `accent`. Density, color vision, the corner preference and the pointer
+  are the user's choices in the application, which `choices` carries.
+- **`resolve` allocates nothing,** writes every token, and returns what
+  it repaired (§18.4).
+- **A design resolved at comptime,** `comptime design.resolve(…)` for
+  each theme and contrast, is checked during the build.
+
+### 18.4 Color, contrast and color vision
+
+- **From seeds.** `Design.seeds` gives an accent and a neutral in OKLCH,
+  and optionally a hue for each status role. Each becomes a tonal ramp,
+  and every role is taken from a ramp per theme. Dark is solved from the
+  same ramps, not inverted: its raised surfaces are lighter, not shadowed.
+- **Contrast is solved, not only checked.** Each declared pair must meet
+  both APCA's lightness contrast and WCAG 2's ratio:
+
+  | Pair | Normal contrast | High contrast |
+  |---|---|---|
+  | body text, `label`, `caption`, `code` | Lc 75 and 4.5:1 | Lc 90 and 7:1 |
+  | `title` and larger | Lc 60 and 3:1 | Lc 75 and 4.5:1 |
+  | icons, outlines that show a state, the focus ring | Lc 45 and 3:1 | Lc 60 and 4.5:1 |
+  | disabled | none: disabled text is not required to be read | |
+
+  The resolver moves the foreground's OKLCH lightness, keeping its hue
+  and chroma, until both pass; if that cannot be done, it moves the
+  background's.
+- **A design that cannot meet a target at comptime is a compile error**
+  naming the pair, the theme and the lightness that would pass:
+  ``"zui_design: demo.design's on_accent on accent is Lc 52 in dark, needs 75; on_accent at L 0.21 passes"``.
+- **A color that arrives at run time,** the user's accent or the
+  system's, is repaired the same way, and `resolve` returns each repair.
+- **Color vision.** For each `zuiDistinguish` pair and each pair of status
+  roles, the resolver simulates protanopia, deuteranopia, tritanopia and
+  achromatopsia (Machado et al., 2009, at full severity). A pair whose
+  OKLab lightness differs by less than 0.15 under any of them is moved
+  apart in lightness; if it cannot be, the pair needs a cue that is not
+  color, which a component with no such cue fails on at comptime.
+  `Preferences.color_vision` adapts the status roles further for the
+  user who chose it. Images and custom drawing are not recolored.
+
+### 18.5 Spacing and density
+
+| `Space` | compact | comfortable | roomy |
+|---|---|---|---|
+| `none` | 0 | 0 | 0 |
+| `hair` | 1 | 1 | 2 |
+| `xs` | 2 | 4 | 6 |
+| `s` | 4 | 8 | 10 |
+| `m` | 8 | 12 | 16 |
+| `l` | 12 | 16 | 24 |
+| `xl` | 16 | 24 | 32 |
+| `xxl` | 24 | 32 | 48 |
+
+- **Density is not one factor.** The small tiers shrink most and the
+  large ones least, so grouping survives a compact layout. A `Design`
+  may give its own table.
+- **Floors no density breaks:** a part with `target = .pointer` is at
+  least 24 units on each side, with `.touch` (or
+  `Preferences.pointer = .touch`) at least 44; the focus ring keeps its
+  2 units.
+- **Text scale reaches spacing by half:** a part that draws text pads by
+  its tier × (1 + (text_scale − 1) / 2), so large text has room without
+  the layout outgrowing the window.
+
+### 18.6 Typography
+
+- **Sizes from a scale.** `Design.type` gives a ratio (1.2 by default),
+  the body size (15), and a font for regular, strong and monospace text.
+  Each `TypeRole` is a step of the scale: `caption` −2, `label` −1,
+  `body` 0, `title` 1, `headline` 2, `display` 4. `body_strong` is body
+  in the strong font; `code` and `numeric` are body in monospace and
+  tabular figures.
+- **Set by the face.** Sizes are scaled so the body face's x-height
+  (`zui_glyphs.FontMetrics.x_height`) is the design's, so two faces at
+  the same role look the same size.
+- **Line height** falls with size, from 1.5 at 14 and below to 1.15 at 40
+  and above, and is rounded to the 4-unit grid.
+- **Tracking** is +1% of the size at 12 and below, none at 16, and −2% at
+  32 and above, between them in proportion.
+- **Text scale by role.** A role's size is multiplied by `text_scale` to
+  a power that falls from 1 for `caption` to 0.5 for `display`, so
+  headings do not outgrow the screen at 200%.
+- **Measure.** `Tokens.measure` is the width of 66 average characters of
+  body text, for a column to cap its width at.
+
+### 18.7 Shape
+
+- **A family and a size.** `zui.CornerShape` is `round` (circular arcs),
+  `continuous` (a superellipse, with no break in curvature where the
+  corner meets the side) or `chamfer` (a 45° cut);
+  `Decoration.corner_shape` sets it for an element's four corners.
+  `Design.shapes` maps each `ShapeRole` to a `CornerSize`, and
+  `Design.corner_shape` sets the family. `Preferences.corners` moves
+  every role one size sharper or rounder.
+
+  | `CornerSize` | radius |
+  |---|---|
+  | `square` | 0 |
+  | `sharp` | 2 at `compact`, 4 otherwise |
+  | `smooth` | 8 |
+  | `soft` | 16 |
+  | `bubble` | half the shorter side |
+
+- **Emission clamps** each corner to half the element's shorter side, so
+  `bubble` is any radius that large.
+- **Renderers declare their shapes.** `Config.corner_shapes` is the set
+  the renderer draws, `round` alone by default. A command carries its
+  shape only when that set holds more than `round`. A shape a renderer
+  does not draw is drawn round, and lowered (§13.3).
+- **Nested corners.** `Decoration.nested_corners = .{ .minimum = 2 }`
+  (behind `Features.nested_corners`) gives each corner the radius that is
+  concentric with its parent's. Its inset is the child's distance from
+  that corner of the parent, along the farther axis, as laid out, so a
+  child that does not reach a corner does not follow it. By the family:
+  `round` and `continuous` take the parent's radius less the inset, and
+  `chamfer` shortens its cut by (2 − √2) × the inset. Below `minimum`,
+  or past the parent's radius, a corner takes `minimum`. Emission
+  resolves it, since only it knows both boxes; a parent that is nested
+  itself resolves first.
+
+  ```zig
+  ui.open(.{ .id = .of("card"), .decoration = tokens.look(Card, .container, .normal).decoration, .layout = .{ .padding = .all(tokens.space(.m)) } });
+  defer ui.close();
+  ui.open(.{ .id = .of("thumbnail"), .decoration = .{ .nested_corners = .{} } });
+  ```
+
+### 18.8 Seeing every permutation
+
+**The axes** a component is seen under: theme, contrast, density, text
+scale (1, 1.5, 2), color vision, reading direction, corner preference,
+reduced transparency, each `WidgetState`, and its content.
+
+- **Content.** A component may declare `zuiPreviews`, the content it
+  shows under review: short, long, empty, overflowing, right to left,
+  large numbers. Without it, it is shown with what it is declared with.
+- **Levels.**
+
+  | Level | What | About |
+  |---|---|---|
+  | `glance` | the defaults, and the extremes designed to break things together: dark, high contrast, 200%, compact, right to left | 5 per component |
+  | `sweep` | one axis through its values, the rest at their defaults | 5 to 10 per axis |
+  | `pairs` | a covering array: every pair of two axes' values in at least one permutation | 30 to 60 per component |
+  | `full` | every combination, for the audit in CI | thousands |
+
+- **The audit** (`zui_design.audit`) checks a finished frame's commands,
+  not the declarations, so custom drawing and `.unchecked` colors are
+  caught too: text against what is painted beneath it, the focus ring
+  against its surroundings, hit target sizes, text cut short,
+  overlapping controls, and each `zuiDistinguish` pair under every
+  simulation. Each finding names its element, its check and the value.
+- **Keys and hashes.** Each permutation has a `PermutationKey`: the
+  component, its preview and every axis value. Its command hash is the
+  same in Debug and release and on every target.
+- **The review** (`apps/review/`) shows each permutation of a level with
+  its axis values and its findings. **Y** accepts it, **N** flags it,
+  **R** adds a remark, with a region dragged over the part it is about.
+  Arrows step, `[` and `]` move between axes. Verdicts are kept in a ZON
+  file in the application's repository, by key, each with its command
+  hash. When the hash changes, the verdict is stale and the permutation
+  is asked again, so an approved look is a golden for free.
+- **The report**, in Markdown and as an HTML page with an image of each
+  permutation, groups the flags and findings by component, then by the
+  axis that brings them ("fails under deuteranopia in high contrast"),
+  and names the token or part to change where it can be told.
+- **In CI,** a build step fails on a permutation that is stale, flagged
+  or failing the audit.
+- **The workbench** is a mode of the review: one component in a grid of
+  its glance permutations, restyled as its design file is saved, with a
+  badge the moment a check fails.
 
 ---
 
@@ -2463,8 +2773,10 @@ that implements the skin contract
 (`zuiStyle(part, state, environment) Style`, §16.7), so theme packs and
 applications bring their own look without forking the widgets.
 `widgets.style(ui, part, state)` asks the skin for an element that should
-match a widget. The default skin, `zui_widgets.DefaultSkin(Ui)`, follows
-the environment's theme and contrast.
+match a widget. The default skin, `zui_widgets.DesignSkin(Ui)`, styles
+every control from `zui.design.Tokens` (§18), so the widgets follow the
+theme, the contrast, the density, the text scale and the color vision
+the tokens were resolved for.
 
 | Widget | Edits | Returns |
 |---|---|---|
@@ -2850,6 +3162,18 @@ Without it, `Tracer` is `void`, so an application keeps
 `.features = .{ .Tracer = zui_tracy.Tracer }` in its `Config` and pays
 nothing until it builds with Tracy.
 
+### 19.11 `zui_design`
+
+The default maker of `zui.design.Tokens` (§18): `Preferences.from` the
+environment and the user's choices, and `design.resolve(preferences,
+*Tokens)`, which makes palettes from seeds, solves every declared pair's
+contrast and color vision, applies the density and the type scale, and
+returns what it repaired, without allocating. It also holds the audit of
+a finished frame (`audit`), the axes and levels of a component's
+permutations (`Permutations`, `PermutationKey`), and the verdict file and
+report the review writes (§18.8). `zui_design.default` is zui's own
+design, on the bundled fonts.
+
 ---
 
 ## 20. Verification and budgets
@@ -2978,7 +3302,7 @@ The order follows the dependencies of the design, not a calendar.
 | 8. Effects | optional commands, lowering, transforms with hit inversion, materials, `ExtendedColor` | lowering tested for each; one renderer draws each; HDR white brighter than SDR on the Windows host |
 | 9. Seeing the UI | `zui_debug`, semantics with accessibility actions, safety sweeps, the demo in a browser | the Windows host bridges semantics to UI Automation |
 | 10. Reach | Linux and web hosts; services; window decorations; many windows | each host passes its suite and runs the demo unchanged |
-| 11. Polish | `zui_motion` and exit ghosts; full text editing with IME; `zui_color`, `zui_icons`, skins and theme packs; samples and the template | each with `zui_testing` coverage; IME on Windows |
+| 11. Polish | `zui_motion` and exit ghosts; the design system: its vocabulary and appearance contract, `zui_design`, the type scale, corner shapes and nested corners, the system's accent, the default design, the audit, permutations and the review; full text editing with IME; `zui_color`, `zui_icons`, skins and theme packs; samples and the template | each with `zui_testing` coverage; every widget meets §18.4 in every theme, contrast and density; IME on Windows |
 | Later | docking, a grid layout, layout islands, static subtrees, SIMD | only with a measured win or a demonstrated need |
 | Set aside | the macOS host, and macOS's counters, skin and IME; the contracts keep their macOS shapes (the `cocoa` surface, vibrancy) | not built until macOS is taken up |
 

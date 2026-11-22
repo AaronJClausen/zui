@@ -194,7 +194,12 @@ The stage is the one in SPEC.md §21 that builds it.
 | motion and exit animations | `zui_motion`'s tweens and springs, over `state` and `dt`; ghost buffer in the core, for exit animations | 11 |
 | text editing and IME | `zui_widgets`; composition events and the IME area from the core | 11 |
 | color spaces, palettes, icons | `zui_color`'s OKLab, OKLCH and HSL, mixing, ramps and lightness scales, gamut-mapped by chroma and usable at comptime; `zui_icons` | 11 |
-| themes and skins | `zui_widgets`' default skin; `zui_themes`, in `themes/` | 11 |
+| the design vocabulary: roles, tiers, `Design`, `Tokens`, the appearance contract and its check | core (`zui.design`) | 11 |
+| tokens from seeds and preferences: palettes, contrast solving, color vision, density, the type scale; the audit and the permutations | `zui_design` | 11 |
+| corner shapes and nested corners | core decoration and emission, lowered to round; the sokol and WebGL renderers draw every shape | 11 |
+| the system's accent | host reports it in the environment; `zui_design` takes it as the accent seed | 11 |
+| themes and skins | `zui_widgets.DesignSkin` over tokens; design languages as `Design`s in `zui_themes`, in `themes/` | 11 |
+| the review of every permutation, its verdicts and report, and the workbench | `zui_review`, in `apps/review/` | 11 |
 | one layout for measuring and drawing, the placement a renderer declares, the glyph atlas | `zui_glyphs` in `text/glyphs/` | — |
 | fonts, shaping, bidirectional text | behind the text contract: `zui_truetype` in `text/truetype/` on stb_truetype, `zui_fonts`' typefaces in `text/fonts/`; shaping and fallback later, beside them | — |
 | number, date and plural formatting | out of scope: a localization library | — |
@@ -301,7 +306,12 @@ roadmap item named:
 
 | Today | The spec | Where today | Item |
 |---|---|---|---|
-| `zui_widgets.DefaultSkin` follows the environment's theme, with a `Theme` for light and one for dark, and leaves `contrast` and `text_scale` unread | the default skin follows the theme and the contrast, and applies `text_scale` | `core/zui_widgets/` | `11-polish:05-default-skin` |
+| no design vocabulary: a look is the skin's raw colors and numbers, over `zui_widgets.Part` alone, so no declaration says which text sits on which background | `zui.design`'s roles, tiers, `Design` and `Tokens`, and the appearance contract any component declares (SPEC.md §18.1, §18.2) | `core/src/` | `11-polish:13-design-vocabulary` |
+| no `zui_design`, and `zui_glyphs.FontMetrics` has no x-height or cap height | tokens resolved from seeds and preferences, contrast and color vision solved, density and the type scale applied; the audit and the permutations (SPEC.md §18.3 to §18.6, §18.8, §19.11) | `core/`, `text/glyphs/` | `11-polish:14-zui-design`, `11-polish:15-type-scale`, `11-polish:20-appearance-audit`, `11-polish:21-permutations` |
+| every corner is round, emission does not clamp a radius, and no corner follows its parent's | corner shapes the renderer declares, lowered to round, and nested corners (SPEC.md §18.7) | `core/src/`, `renderers/` | `11-polish:16-corner-shapes`, `11-polish:17-nested-corners` |
+| the environment has no accent; the Linux host passes over the portal's `accent-color` | `Environment.accent`, from every host (SPEC.md §7.2) | `core/src/`, `hosts/` | `11-polish:18-system-accent` |
+| `zui_widgets.DefaultSkin` follows the environment's theme, with a `Theme` for light and one for dark, and leaves `contrast` and `text_scale` unread | `zui_widgets.DesignSkin`, every control styled from tokens (SPEC.md §16.7, §19.2) | `core/zui_widgets/` | `11-polish:19-default-design` |
+| no review of a component's permutations | the review app, its verdicts, its report and the workbench (SPEC.md §18.8) | `apps/review/` | `11-polish:22-appearance-review`, `11-polish:23-design-workbench` |
 | no host gives a `.web` surface: `zui_webgl.Renderer` draws on the canvases the client's page names, and the tour runs in a worker on a stepped host whose frames reach the page over `zui_wire` | a web host whose platform pushes its loop, drawing on a `.web` canvas (SPEC.md §16.3, §16.4) | `hosts/web/` | `10-reach:02-web-host` |
 | `zui_debug`'s inspector runs in the application's process; a frame on the wire carries no elements for it | over the wire, the inspector runs in another process (SPEC.md §19.7) | `core/zui_debug/`, `core/zui_wire/` | not yet queued |
 | a frame on the wire carries no chrome regions, and the wire host declares no `zuiChromeRegions`, so a remote window keeps the system's title bar | chrome over the wire | `core/zui_wire/` | not yet queued |

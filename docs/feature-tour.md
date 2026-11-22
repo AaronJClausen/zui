@@ -2403,7 +2403,7 @@ Build with `-Dzui-tracy=true` to link Tracy's client, then connect profiler 0.14
 These names compile, but they don't do anything yet. This list is from `ARCHITECTURE.md` §7 and the roadmap.
 
 - **A host that runs its own loop**: `zuiRun` and the `zui.Driver` it is handed, with `suspendSurfaces` and `resumeSurfaces` for a surface the platform takes away, compile and pass `zui_app`'s tests against a scripted host, but no shipped host declares `zuiRun` yet; macOS, iOS and Android's are to come.
-- **Still to come**: Multi-line text editing, theme packs, the inspector over the wire, and more hosts (Linux and web; macOS later).
+- **Still to come**: Multi-line text editing, the design system (roles, tokens from seeds, density, a type scale, corner shapes and nested corners, and a review of every permutation), theme packs, the inspector over the wire, and more hosts (Linux and web; macOS later).
 
 <a id="dx"></a>
 
