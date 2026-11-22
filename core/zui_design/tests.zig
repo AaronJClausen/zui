@@ -2,6 +2,7 @@ const std = @import("std");
 const zui = @import("zui");
 const zui_design = @import("zui_design.zig");
 const oklab = @import("oklab.zig");
+const contrast_solver = @import("contrast.zig");
 
 const testing = std.testing;
 const design = zui.design;
@@ -211,6 +212,11 @@ const Roles = enum {
     };
 };
 
+fn palettesOf(seeds: design.Design.Seeds, preferences: zui_design.Preferences) zui_design.PalettesByState {
+    var repairs: zui_design.Repairs = .{};
+    return zui_design.palettesFor(seeds, preferences, &repairs);
+}
+
 fn hueDistance(from: f32, to: f32) f32 {
     const apart = @abs(from - to);
     return @min(apart, 360 - apart);
@@ -252,7 +258,7 @@ test "a seed of each of twelve hues resolves in gamut and without NaN in every s
 }
 
 test "roles take their seed's hue, and a chosen accent replaces it" {
-    const palettes = zui_design.palettesFor(harbor.seeds, .{});
+    const palettes = palettesOf(harbor.seeds, .{});
     const idle = palettes.get(.idle);
     try testing.expectEqual(250, idle.get(.accent).color.hue);
     try testing.expectEqual(250, idle.get(.surface).color.hue);
@@ -260,7 +266,7 @@ test "roles take their seed's hue, and a chosen accent replaces it" {
     try testing.expect(hueDistance(idle.get(.danger).color.hue, 27) < 1);
 
     const orange: zui.Color = .rgb(0xff8800);
-    const chosen = zui_design.palettesFor(harbor.seeds, .{ .accent = orange }).get(.idle);
+    const chosen = palettesOf(harbor.seeds, .{ .accent = orange }).get(.idle);
     const orange_hue = oklab.oklchOfColor(orange).hue;
     try testing.expectApproxEqAbs(orange_hue, chosen.get(.accent).color.hue, 0.01);
     try testing.expectApproxEqAbs(orange_hue, chosen.get(.focus).color.hue, 0.01);
@@ -268,21 +274,21 @@ test "roles take their seed's hue, and a chosen accent replaces it" {
 
     var with_hues = harbor;
     with_hues.seeds.success_hue = 180;
-    try testing.expectEqual(180, zui_design.palettesFor(with_hues.seeds, .{}).get(.idle).get(.success).color.hue);
+    try testing.expectEqual(180, palettesOf(with_hues.seeds, .{}).get(.idle).get(.success).color.hue);
 }
 
 test "dark raises its surfaces lighter, and high contrast moves text further from its surface" {
     for ([_]zui.Environment.Contrast{ .normal, .high }) |contrast| {
-        const dark = zui_design.palettesFor(harbor.seeds, .{ .theme = .dark, .contrast = contrast }).get(.idle);
+        const dark = palettesOf(harbor.seeds, .{ .theme = .dark, .contrast = contrast }).get(.idle);
         try testing.expect(dark.get(.surface_raised).color.lightness > dark.get(.surface).color.lightness);
         try testing.expect(dark.get(.surface).color.lightness > dark.get(.background).color.lightness);
         try testing.expect(dark.get(.on_surface).color.lightness > dark.get(.surface).color.lightness);
-        const light = zui_design.palettesFor(harbor.seeds, .{ .contrast = contrast }).get(.idle);
+        const light = palettesOf(harbor.seeds, .{ .contrast = contrast }).get(.idle);
         try testing.expect(light.get(.on_surface).color.lightness < light.get(.surface).color.lightness);
     }
     for (every_theme) |theme| {
-        const normal = zui_design.palettesFor(harbor.seeds, .{ .theme = theme }).get(.idle);
-        const high = zui_design.palettesFor(harbor.seeds, .{ .theme = theme, .contrast = .high }).get(.idle);
+        const normal = palettesOf(harbor.seeds, .{ .theme = theme }).get(.idle);
+        const high = palettesOf(harbor.seeds, .{ .theme = theme, .contrast = .high }).get(.idle);
         const normal_apart = @abs(normal.get(.on_surface).color.lightness - normal.get(.surface).color.lightness);
         const high_apart = @abs(high.get(.on_surface).color.lightness - high.get(.surface).color.lightness);
         try testing.expect(high_apart > normal_apart);
@@ -359,4 +365,137 @@ test "a resolve at comptime matches one at run time" {
     _ = zui_design.resolve(harbor, .{ .theme = .dark, .contrast = .high, .accent = .rgb(0x10a050) }, &at_run_time);
     try testing.expectEqual(at_comptime.colors, at_run_time.colors);
     try testing.expectEqual(at_comptime.extra_colors, at_run_time.extra_colors);
+}
+
+test "APCA and WCAG 2 match their published values" {
+    const black: zui.Color = .rgb(0x000000);
+    const white: zui.Color = .rgb(0xffffff);
+    try testing.expectApproxEqAbs(106.04, contrast_solver.apcaLightnessContrast(black, white), 0.05);
+    try testing.expectApproxEqAbs(-107.88, contrast_solver.apcaLightnessContrast(white, black), 0.05);
+    try testing.expectApproxEqAbs(63.06, contrast_solver.apcaLightnessContrast(.rgb(0x888888), white), 0.05);
+    try testing.expectEqual(0, contrast_solver.apcaLightnessContrast(.rgb(0x888888), .rgb(0x888888)));
+    try testing.expectApproxEqAbs(21, contrast_solver.wcagRatio(black, white), 0.001);
+    try testing.expectApproxEqAbs(21, contrast_solver.wcagRatio(white, black), 0.001);
+    try testing.expectApproxEqAbs(4.48, contrast_solver.wcagRatio(.rgb(0x777777), white), 0.005);
+    try testing.expectEqual(1, contrast_solver.wcagRatio(.rgb(0x336699), .rgb(0x336699)));
+}
+
+test "text roles take the text tier, outlines and the focus ring the non-text tier, and decoration none" {
+    try testing.expectEqual(.text, zui_design.tierOf(.on_accent));
+    try testing.expectEqual(.text, zui_design.tierOf(.on_surface_muted));
+    try testing.expectEqual(.non_text, zui_design.tierOf(.focus));
+    try testing.expectEqual(null, zui_design.tierOf(.outline_muted));
+    try testing.expectEqual(null, zui_design.tierOf(.scrim));
+    try testing.expectEqual(null, zui_design.tierOf(.accent));
+    try testing.expectEqual(contrast_solver.Target{ .lightness_contrast = 90, .ratio = 7 }, contrast_solver.Tier.text.target(.high));
+    try testing.expectEqual(contrast_solver.Target{ .lightness_contrast = 45, .ratio = 3 }, contrast_solver.Tier.non_text.target(.normal));
+    for (zui_design.checked_pairs) |pair| try testing.expect(zui_design.tierOf(pair.foreground) != null);
+    for (zui_design.checked_pairs, 0..) |pair, index| {
+        for (zui_design.checked_pairs[index + 1 ..]) |other| try testing.expect(!std.meta.eql(pair, other));
+    }
+    var on_surface_backgrounds: usize = 0;
+    for (zui_design.checked_pairs) |pair| on_surface_backgrounds += @intFromBool(pair.foreground == .on_surface);
+    try testing.expectEqual(4, on_surface_backgrounds);
+    try testing.expectEqual(14, zui_design.checked_pairs.len);
+}
+
+fn expectEveryPairMeetsItsTarget(tokens: *const Tokens, contrast_setting: zui.Environment.Contrast) !void {
+    for ([_]zui.WidgetState{ .idle, .hovered, .focused, .pressed }) |state| {
+        const colors = tokens.colors.get(state);
+        for (zui_design.checked_pairs) |pair| {
+            const measured: zui_design.Contrast = .of(colors.get(pair.foreground), colors.get(pair.background));
+            if (!measured.meets(pair.target(contrast_setting))) {
+                std.debug.print("{t} on {t} {t}: Lc {d:.1}, {d:.2}:1\n", .{ pair.foreground, pair.background, state, measured.lightness_contrast, measured.ratio });
+                return error.TestUnexpectedResult;
+            }
+        }
+    }
+}
+
+test "a seed of every hue meets every target in every state of every scheme, with nothing repaired" {
+    for (0..12) |step| {
+        const hue: f32 = @floatFromInt(step * 30);
+        for ([_]f32{ 0.05, 0.25, 0.37 }) |accent_chroma| {
+            var seeded = harbor;
+            seeded.seeds = .{ .accent = .{ .lightness = 0.6, .chroma = accent_chroma, .hue = hue }, .neutral = .{ .lightness = 0.5, .chroma = 0.03, .hue = hue } };
+            for (every_theme) |theme| {
+                for (every_contrast) |contrast_setting| {
+                    var tokens: Tokens = .{};
+                    const repairs = zui_design.resolve(seeded, .{ .theme = theme, .contrast = contrast_setting }, &tokens);
+                    try testing.expect(repairs.isEmpty());
+                    try expectEveryPairMeetsItsTarget(&tokens, contrast_setting);
+                }
+            }
+        }
+    }
+}
+
+test "a chosen pure yellow accent keeps its lightness, and its pair is repaired and reported" {
+    const yellow = comptime zui.Color.rgb(0xffff00);
+    var tokens: Tokens = .{};
+    const repairs = zui_design.resolve(harbor, .{ .accent = yellow }, &tokens);
+    try testing.expectEqual(1, repairs.slice().len);
+    const repair = repairs.slice()[0];
+    try testing.expectEqual(.on_accent, repair.foreground);
+    try testing.expectEqual(.accent, repair.background);
+    try testing.expectEqual(.light, repair.scheme);
+    try testing.expect(!repair.before.meets(repair.target));
+    try testing.expectApproxEqAbs(oklab.oklchOfColor(yellow).lightness, repair.background_moved.?.from, 0.0001);
+    try testing.expect(repair.background_moved.?.to < repair.background_moved.?.from);
+    try testing.expectEqual(0, repairs.dropped);
+    try expectEveryPairMeetsItsTarget(&tokens, .normal);
+
+    const repaired_at_comptime = comptime repaired: {
+        var at_comptime: Tokens = .{};
+        break :repaired zui_design.resolve(harbor, .{ .accent = yellow }, &at_comptime).kept_count;
+    };
+    try testing.expectEqual(1, repaired_at_comptime);
+}
+
+test "a chosen accent that meets its targets is the accent fill as it is" {
+    const blue: zui.Color = .rgb(0x2050c0);
+    for (every_theme) |theme| {
+        var repairs: zui_design.Repairs = .{};
+        const idle = zui_design.palettesFor(harbor.seeds, .{ .theme = theme, .accent = blue }, &repairs).get(.idle);
+        try testing.expect(repairs.isEmpty());
+        try testing.expectApproxEqAbs(oklab.oklchOfColor(blue).lightness, idle.get(.accent).color.lightness, 0.0001);
+    }
+}
+
+test "passingLightness keeps a passing color and finds the nearest lightness that passes" {
+    const white: design.Oklch = .{ .lightness = 1, .chroma = 0, .hue = 0 };
+    const dark_grey: design.Oklch = .{ .lightness = 0.2, .chroma = 0, .hue = 0 };
+    const mid_blue: design.Oklch = .{ .lightness = 0.65, .chroma = 0.12, .hue = 250 };
+    const body = contrast_solver.Tier.text.target(.normal);
+    try testing.expectEqual(0.2, zui_design.passingLightness(dark_grey, white, .foreground, body).?);
+
+    const darker = zui_design.passingLightness(mid_blue, white, .foreground, body).?;
+    try testing.expect(darker < mid_blue.lightness);
+    var moved = mid_blue;
+    moved.lightness = darker;
+    try testing.expect(zui_design.Contrast.ofShades(moved, white).meets(body));
+    moved.lightness = darker + 0.01;
+    try testing.expect(!zui_design.Contrast.ofShades(moved, white).meets(body));
+
+    const lighter_background = zui_design.passingLightness(dark_grey, mid_blue, .background, body).?;
+    try testing.expect(lighter_background > mid_blue.lightness);
+    try testing.expectEqual(null, zui_design.passingLightness(.{ .lightness = 0.5, .chroma = 0, .hue = 0 }, white, .background, contrast_solver.Tier.text.target(.high)));
+}
+
+test "repairs past capacity are counted as dropped" {
+    var repairs: zui_design.Repairs = .{};
+    const repair: zui_design.Repair = .{ .foreground = .on_accent, .background = .accent, .scheme = .dark, .target = contrast_solver.Tier.text.target(.normal), .before = .{ .lightness_contrast = 50, .ratio = 3 } };
+    for (0..zui_design.Repairs.capacity + 3) |_| repairs.record(repair);
+    try testing.expectEqual(zui_design.Repairs.capacity, repairs.slice().len);
+    try testing.expectEqual(3, repairs.dropped);
+    try testing.expect(!repairs.isEmpty());
+}
+
+test "a fill whose text leaves no room toward it is layered toward white or black instead" {
+    var repairs: zui_design.Repairs = .{};
+    const palettes = zui_design.palettesFor(harbor.seeds, .{}, &repairs);
+    const idle_warning = palettes.get(.idle).get(.warning).color.lightness;
+    try testing.expect(palettes.get(.hovered).get(.warning).color.lightness > idle_warning);
+    try testing.expect(palettes.get(.pressed).get(.warning).color.lightness > palettes.get(.hovered).get(.warning).color.lightness);
+    try testing.expect(palettes.get(.pressed).get(.accent).color.lightness > palettes.get(.idle).get(.accent).color.lightness);
 }

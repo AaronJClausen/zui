@@ -2528,7 +2528,7 @@ pub const Preferences = struct {
     contrast: zui.Environment.Contrast = .normal,
     text_scale: f32 = 1,
     reduced_transparency: bool = false,
-    accent: ?zui.Color = null,          // the user's, else the system's, else the design's seed
+    accent: ?zui.Color = null,          // the user's, else the system's, as it is; else the design's seed
     density: Density = .comfortable,     // zui.design.Density: enum { compact, comfortable, roomy }
     color_vision: ColorVision = .typical, // enum { typical, protan, deutan, tritan, achromat }
     corners: CornerPreference = .as_designed, // enum { sharper, as_designed, rounder }: one `CornerSize` step
@@ -2558,7 +2558,10 @@ if (!std.meta.eql(preferences, app.preferences)) {
 - **From seeds.** `Design.seeds` gives an accent and a neutral in OKLCH,
   and optionally a hue for each status role. Each becomes a tonal ramp,
   and every role is taken from a ramp per theme. Dark is solved from the
-  same ramps, not inverted: its raised surfaces are lighter, not shadowed.
+  same ramps, not inverted: its raised surfaces are lighter, not shadowed,
+  and its filled roles are darker than their light text. A chosen accent,
+  the user's or the system's, is the accent fill as it is, its lightness
+  included; the design's accent seed gives only its hue and chroma.
 - **Contrast is solved, not only checked.** Each declared pair must meet
   both APCA's lightness contrast and WCAG 2's ratio:
 
@@ -2569,14 +2572,28 @@ if (!std.meta.eql(preferences, app.preferences)) {
   | icons, outlines that show a state, the focus ring | Lc 45 and 3:1 | Lc 60 and 4.5:1 |
   | disabled | none: disabled text is not required to be read | |
 
-  The resolver moves the foreground's OKLCH lightness, keeping its hue
-  and chroma, until both pass; if that cannot be done, it moves the
-  background's.
+  Both are measured on the color as it is encoded in sRGB, its alpha
+  ignored. Each `on_*` role is text; `outline` and `focus` are the
+  non-text tier; `outline_muted`, the surfaces and `scrim` have no target.
+  The resolver moves the foreground's OKLCH lightness away from the
+  background, keeping its hue and chroma, until both pass; if no
+  lightness of it passes, it goes to white or black and the background
+  moves too. The hovered, focused and pressed layers are held to the same
+  targets: a fill whose pairs would fall below them moves less of the way
+  toward its `on_*` role, or, when too little of the way would show, moves
+  as far toward white or black instead.
 - **A design that cannot meet a target at comptime is a compile error**
-  naming the pair, the theme and the lightness that would pass:
-  ``"zui_design: demo.design's on_accent on accent is Lc 52 in dark, needs 75; on_accent at L 0.21 passes"``.
+  naming the design by `Design.name`, the pair, the scheme and the
+  lightness that would pass, as for a design in `demo.zig` whose
+  `danger_hue` is green:
+  ``"zui_design: demo.design's on_danger on danger is Lc 73 in light, needs 75; on_danger at L 1.00 passes"``.
+  A pair that misses only WCAG 2's ratio is named by its ratio and the
+  ratio it needs. A design is named "the design" until it sets `name`.
 - **A color that arrives at run time,** the user's accent or the
-  system's, is repaired the same way, and `resolve` returns each repair.
+  system's, is repaired the same way, never fatally, even at comptime, and
+  `resolve` returns each repair in `Repairs`: the pair, the scheme, its
+  contrast before and the lightness each side took, the first 32 kept and
+  the rest counted as dropped.
 - **Color vision.** For each `zuiDistinguish` pair and each pair of status
   roles, the resolver simulates protanopia, deuteranopia, tritanopia and
   achromatopsia (Machado et al., 2009, at full severity). A pair whose

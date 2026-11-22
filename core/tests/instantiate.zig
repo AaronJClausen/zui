@@ -813,6 +813,7 @@ const ResolvedRoles = enum {
 };
 
 const resolved_design: zui.design.Design = .{
+    .name = "instantiate.resolved_design",
     .seeds = .{ .accent = .{ .lightness = 0.55, .chroma = 0.14, .hue = 250 }, .neutral = .{ .lightness = 0.5, .chroma = 0.01, .hue = 250 } },
 };
 
@@ -828,9 +829,10 @@ const tokens_resolved_at_comptime = resolved: {
 
 export fn zuiCheckDesignResolve() f32 {
     const preferences: zui_design.Preferences = .from(&resolved_environment, .{ .accent = .rgb(0xff8800) });
-    _ = zui_design.resolve(resolved_design, preferences, &resolved_tokens);
+    const repairs = zui_design.resolve(resolved_design, preferences, &resolved_tokens);
     _ = zui_design.resolve(resolved_design, preferences, &resolved_extended_tokens);
-    return resolved_tokens.space(.m) + resolved_extended_tokens.space(.m) + tokens_resolved_at_comptime.measure;
+    const repaired: f32 = @floatFromInt(repairs.slice().len + repairs.dropped);
+    return resolved_tokens.space(.m) + resolved_extended_tokens.space(.m) + tokens_resolved_at_comptime.measure + repaired;
 }
 
 const CheckPanelTheme = zui_debug.PanelTheme(u16, zui.Color);

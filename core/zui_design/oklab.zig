@@ -111,7 +111,8 @@ fn clampedToGamut(rgb: [3]f32) [3]f32 {
 // `std.math.pow` at comptime spends hundreds of backward branches a call,
 // so the transfer function is paid once here, for every byte, rather than
 // in each conversion of a comptime resolve.
-const linear_of_byte: [256]f32 = transferTable(0);
+/// Each encoded sRGB byte's linear value.
+pub const linear_of_byte: [256]f32 = transferTable(0);
 const linear_rounding_up_to_byte: [256]f32 = transferTable(0.5);
 
 fn transferTable(comptime offset_in_bytes: f32) [256]f32 {

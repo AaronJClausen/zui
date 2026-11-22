@@ -13,6 +13,8 @@
 const std = @import("std");
 const zui = @import("zui");
 const palette = @import("palette.zig");
+const contrast = @import("contrast.zig");
+const repairs_file = @import("repairs.zig");
 
 const design = zui.design;
 const Design = design.Design;
@@ -76,9 +78,11 @@ pub const Preferences = struct {
     }
 };
 
-/// What a resolve changed from its design to meet a target. It holds
-/// nothing until the resolver repairs contrast.
-pub const Repairs = struct {};
+/// What a resolve changed from its design to meet a target.
+pub const Repairs = repairs_file.Repairs;
+/// One pair a resolve moved, with its contrast before and the lightness
+/// it took.
+pub const Repair = repairs_file.Repair;
 
 /// Writes every field of `tokens`, a `*zui.design.Tokens(Ui, ExtraRoles)`,
 /// from `resolved_design` under `preferences`, allocating nothing. It runs
@@ -88,6 +92,11 @@ pub const Repairs = struct {};
 /// lightness on one, per theme and contrast; the seed's own lightness is
 /// not read. An extra role is colored as the built-in role
 /// `builtInRoleOf` names.
+///
+/// Every pair of `checked_pairs` is moved in lightness until it meets its
+/// target in APCA and WCAG 2, and the returned `Repairs` lists each move.
+/// At comptime a move the design's own seeds need is a compile error that
+/// names the lightness that passes; one a chosen accent needs is repaired.
 ///
 /// ```zig
 /// var tokens: zui.design.Tokens(Ui, void) = .{};
@@ -101,7 +110,9 @@ pub const Repairs = struct {};
 /// ```
 pub fn resolve(resolved_design: Design, preferences: Preferences, tokens: anytype) Repairs {
     @setEvalBranchQuota(2_000_000);
-    writeColors(resolved_design.seeds, preferences, tokens);
+    var repairs: Repairs = .{};
+    writeColors(palettesFor(resolved_design.seeds, preferences, &repairs), tokens);
+    if (@inComptime()) failOnRepairsTheDesignNeeds(resolved_design, preferences, &repairs);
     tokens.spacing = resolved_design.density.get(preferences.density);
     tokens.text_padding_scale = 1 + (preferences.text_scale - 1) / 2;
     writeTextStyles(resolved_design.type, preferences.text_scale, tokens);
@@ -114,7 +125,47 @@ pub fn resolve(resolved_design: Design, preferences: Preferences, tokens: anytyp
     tokens.outline_width = outline_width;
     tokens.focus_ring_width = focus_ring_width;
     tokens.measure = measure_characters * average_character_width * tokens.text_styles.get(.body).size;
-    return .{};
+    return repairs;
+}
+
+fn failOnRepairsTheDesignNeeds(resolved_design: Design, preferences: Preferences, repairs: *const Repairs) void {
+    for (repairs.slice()) |repair| {
+        const moves_chosen_accent = preferences.accent != null and
+            (palette.rampOf(repair.foreground, repair.scheme) == .accent or palette.rampOf(repair.background, repair.scheme) == .accent);
+        if (!moves_chosen_accent) @compileError(repairMessage(resolved_design.name, repair));
+    }
+}
+
+/// "zui_design: demo.design's on_danger on danger is Lc 73 in light, needs
+/// 75; on_danger at L 1.00 passes"
+fn repairMessage(comptime design_name: []const u8, comptime repair: Repair) []const u8 {
+    const fmt = std.fmt.comptimePrint;
+    const lightness_contrast: u32 = @intFromFloat(@floor(@abs(repair.before.lightness_contrast)));
+    const needed_lightness_contrast: u32 = @intFromFloat(repair.target.lightness_contrast);
+    const measured = if (lightness_contrast < needed_lightness_contrast)
+        fmt("Lc {d} in {s}, needs {d}", .{ lightness_contrast, repair.scheme.name(), needed_lightness_contrast })
+    else
+        fmt("{s}:1 in {s}, needs {s}:1", .{ tenths(@floor(repair.before.ratio * 10)), repair.scheme.name(), tenths(repair.target.ratio * 10) });
+    const foreground = @tagName(repair.foreground);
+    const background = @tagName(repair.background);
+    const passing = if (repair.background_moved) |background_moved|
+        fmt("{s} at L {s} and {s} at L {s} pass", .{ foreground, hundredthsPast(repair.foreground_moved.?), background, hundredthsPast(background_moved) })
+    else
+        fmt("{s} at L {s} passes", .{ foreground, hundredthsPast(repair.foreground_moved.?) });
+    return fmt("zui_design: {s}'s {s} on {s} is {s}; {s}", .{ design_name, foreground, background, measured, passing });
+}
+
+fn tenths(comptime value_in_tenths: f32) []const u8 {
+    const whole: u32 = @intFromFloat(@round(value_in_tenths));
+    return std.fmt.comptimePrint("{d}.{d}", .{ whole / 10, whole % 10 });
+}
+
+/// Rounded on in the direction of the move, so the lightness written passes
+/// too.
+fn hundredthsPast(comptime move: repairs_file.LightnessMove) []const u8 {
+    const lightness_in_hundredths = move.to * 100;
+    const whole: u32 = @intFromFloat(if (move.to > move.from) @ceil(lightness_in_hundredths) else @floor(lightness_in_hundredths));
+    return std.fmt.comptimePrint("{d}.{d:0>2}", .{ whole / 100, whole % 100 });
 }
 
 /// A radius larger than any element, so emission's clamp to half the
@@ -165,16 +216,33 @@ pub const builtInRoleOf = palette.builtInRoleOf;
 pub const partnerOf = palette.partnerOf;
 
 /// Every built-in role's color in every state, before it is encoded in a
-/// context's color type.
-pub fn palettesFor(seeds: Design.Seeds, preferences: Preferences) palette.PalettesByState {
+/// context's color type, with each checked pair's contrast solved in the
+/// idle palette, so the state layers derive from solved colors.
+pub fn palettesFor(seeds: Design.Seeds, preferences: Preferences, repairs: *Repairs) palette.PalettesByState {
     const ramps = palette.rampSeeds(seeds, preferences.accent);
     const scheme: palette.Scheme = .of(preferences.theme, preferences.contrast);
-    return palette.stateLayers(palette.idlePalette(ramps, scheme, preferences.reduced_transparency));
+    var idle = palette.idlePalette(ramps, scheme, preferences.reduced_transparency, preferences.accent);
+    contrast.solve(&idle, scheme, repairs);
+    return palette.stateLayers(idle, contrast.layerShares(idle, scheme));
 }
 
-fn writeColors(seeds: Design.Seeds, preferences: Preferences, tokens: anytype) void {
+/// A `Palette` for each state's layer.
+pub const PalettesByState = palette.PalettesByState;
+/// The theme and contrast a palette is resolved for.
+pub const Scheme = palette.Scheme;
+/// The measures of a pair's contrast, APCA's Lc and WCAG 2's ratio.
+pub const Contrast = contrast.Contrast;
+/// The least `Contrast` a pair needs.
+pub const ContrastTarget = contrast.Target;
+/// The tier of a foreground role, which sets its `ContrastTarget`.
+pub const tierOf = contrast.tierOf;
+/// Every foreground role and the background it is checked on.
+pub const checked_pairs = contrast.checked_pairs;
+/// The lightness at which a pair meets a target, moving one of its colors.
+pub const passingLightness = contrast.passingLightness;
+
+fn writeColors(palettes: palette.PalettesByState, tokens: anytype) void {
     const Color = @TypeOf(tokens.colors).Value.Value;
-    const palettes = palettesFor(seeds, preferences);
     for (std.enums.values(zui.WidgetState)) |state| {
         const shades = palettes.getPtrConst(state);
         const colors = tokens.colors.getPtr(state);

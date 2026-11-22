@@ -126,6 +126,7 @@ const compile_error_cases = [_]struct { name: []const u8, expected_error: []cons
     .{ .name = "text_segment_wrong_signature", .expected_error = "zui: text_segment_wrong_signature.Text.zuiSegment must be fn (*text_segment_wrong_signature.Text, []const u8, *text.BreakSink) void, found fn (*text_segment_wrong_signature.Text, []const u8, []u32) void" },
     .{ .name = "color_ramp_too_few_steps", .expected_error = "zui_color: ramp needs at least 2 steps, one for each end; got 0" },
     .{ .name = "color_lightness_scale_too_few_steps", .expected_error = "zui_color: lightnessScale needs at least 2 steps, one for each end; got 1" },
+    .{ .name = "design_pair_below_target", .expected_error = "zui_design: demo.design's on_danger on danger is Lc 73 in light, needs 75; on_danger at L 1.00 passes" },
     .{ .name = "skin_not_a_struct", .expected_error = "zui_widgets: a skin must be a struct type, got u32" },
     .{ .name = "skin_unknown_declaration", .expected_error = "zui_widgets: skin_unknown_declaration.Skin declares unknown `zuiStlye`" },
     .{ .name = "skin_missing_style", .expected_error = "zui_widgets: skin_missing_style.Skin does not implement the skin contract: missing `zuiStyle`" },

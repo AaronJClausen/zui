@@ -745,6 +745,39 @@ function, `zui_design.resolve(design, preferences, &tokens)`, since
 `Design` is the core's and a module cannot give it methods; SPEC.md
 §18.3 and §19.11 say so.
 
+Slice 3 decided four things. First, slice 2's tone tables missed §18.4's
+APCA targets at every accent hue: dark text on the dark themes' fills
+(L 0.70 to 0.82) reached only Lc 47 to 78, light's amber `warning` Lc 61,
+and dark's `on_surface_muted` and `outline` Lc 55 and 36. The owner chose
+light text on darker fills in the dark themes, and these lightnesses
+changed, chroma share in brackets where it changed:
+
+| Scheme | Role | Before | After |
+|---|---|---|---|
+| light | `warning`, `on_warning` | 0.78, 0.25 | 0.86, 0.18 |
+| dark | `accent`, `danger`, `warning`, `success` | 0.74, 0.70, 0.82, 0.74 | 0.45 each |
+| dark | `on_accent`, `on_danger`, `on_warning`, `on_success` | 0.22 to 0.24 (0.5) | 0.99 (0.05) |
+| dark | `on_surface_muted`, `outline` | 0.74, 0.62 | 0.88, 0.72 |
+| light high contrast | `warning`, `on_warning` | 0.80, 0.15 | 0.93, 0.10 |
+| light high contrast | `on_accent_container` | 0.20 | 0.16 |
+| dark high contrast | `accent`, `danger`, `warning`, `success` | 0.82, 0.78, 0.86, 0.80 | 0.30 each |
+| dark high contrast | `on_accent`, `on_danger`, `on_warning`, `on_success` | 0.12 to 0.14 (0.5) | 1, neutral |
+| dark high contrast | `on_surface_muted` | 0.86 | 0.94 |
+
+Second, the state layers cannot all keep a pair passing at 16% toward
+its text, whatever the tables: light high contrast's `on_surface` on
+`surface` falls to Lc 79 pressed, and a dark-text fill such as light's
+`warning` would need an idle lightness above 0.97. So `layerShares`
+solves each surface and fill's share of the layers, the largest that
+keeps every pair on it passing when pressed, searched to 1/256; a share
+under 0.25, which would hardly show, becomes a move as far toward white
+or black, away from the text. Light's `warning` and light high contrast's
+status fills and containers move that way; light's `surface` keeps about
+0.35 of the layers. Third, a chosen accent keeps its own lightness, the
+owner's call, so a run-time color that fails is a real repair. Fourth,
+`zui.design.Design.name` names a design in the compile error, "the
+design" by default, rather than a separate comptime entry point.
+
 **Status.** Slice 1 done: `core/zui_design/`, wired as a module and
 re-exported by the root, with `Preferences`, `Preferences.from` (the
 accent from `Choices` alone until `11-polish:18-system-accent`),
@@ -785,7 +818,40 @@ the Done when. Before contrast is solved, `on_surface` on `surface`
 is 16.6:1 in light, 14.9:1 in dark, 20.1:1 in light high contrast and
 20.4:1 in dark high contrast in WCAG 2, which a test holds at 4.5:1;
 APCA is not measured yet. 17 tests in `core/zui_design/tests.zig`.
-Slice 3, contrast, is next.
+
+Slice 3 done: contrast (`core/zui_design/contrast.zig`,
+`core/zui_design/repairs.zig`). APCA-W3 0.0.98G-4g's Lc and WCAG 2's
+ratio, on each color as encoded in sRGB, alpha ignored (only the scrim is
+translucent, and it has no target); tests pin black on white at Lc
+106.04, white on black at −107.88, #888 on white at 63.06, 21:1 and
+#777 on white at 4.48:1. `tierOf` gives every `on_*` role the text tier
+(Lc 75 and 4.5:1, Lc 90 and 7:1 under high contrast) and `outline` and
+`focus` the non-text tier (Lc 45 and 3:1, Lc 60 and 4.5:1); the
+surfaces, fills, `outline_muted` and `scrim` have none. `checked_pairs`
+is each role and its partner once, 14 pairs, `on_surface` on all four
+surfaces; an extra role is colored as a built-in role, so its pair is
+one of them. `solve` moves a failing foreground's lightness away from
+its background by `passingLightness`, a 14-step bisection that keeps hue
+and chroma, and when no lightness passes takes it to white or black and
+moves the background; it runs on the idle palette before the state
+layers, which take the shares above. `resolve` returns `Repairs`, the
+first 32 `Repair`s (the pair, the scheme, the target, the contrast
+before, each side's lightness from and to) and a count of the dropped.
+At comptime a repair that does not involve a chosen accent is a compile
+error, pinned by `design_pair_below_target`:
+`zui_design: demo.design's on_danger on danger is Lc 73 in light, needs
+75; on_danger at L 1.00 passes`. Measured: an accent of every hue from
+0° to 330° in 30° steps, at chroma 0.05, 0.25 and 0.37, resolves with no
+repair in all four schemes, every pair passing idle, hovered, focused and
+pressed; the tightest idle pairs are light's status fills at Lc 77.9 to
+78.4 and light high contrast's at Lc 90.4 to 91.9. A chosen pure yellow
+(`0xffff00`, L 0.97) under near-white `on_accent` in light is one repair:
+`on_accent` goes to white and `accent` darkens until both pass. In
+ReleaseFast a resolve of every token with six extra roles, alternating
+theme and accent, takes a median of 30.7 µs (135 µs in Debug), measured
+while other builds shared the machine; the layer shares cost about 14 µs
+of it, and APCA's powers are `@exp(@log(x) · e)`. 25 tests in
+`core/zui_design/tests.zig`. Slice 4, color vision, is next.
 
 ## 11-polish:15-type-scale — The type scale
 

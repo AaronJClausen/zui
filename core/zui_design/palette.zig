@@ -27,6 +27,23 @@ pub const Scheme = enum {
             .high => if (theme == .light) .light_high_contrast else .dark_high_contrast,
         };
     }
+
+    pub fn environmentContrast(self: Scheme) zui.Environment.Contrast {
+        return switch (self) {
+            .light, .dark => .normal,
+            .light_high_contrast, .dark_high_contrast => .high,
+        };
+    }
+
+    /// As a sentence names it: "dark high contrast".
+    pub fn name(self: Scheme) []const u8 {
+        return switch (self) {
+            .light => "light",
+            .dark => "dark",
+            .light_high_contrast => "light high contrast",
+            .dark_high_contrast => "dark high contrast",
+        };
+    }
 };
 
 /// A role's place on its ramp: its lightness, the share of the ramp's
@@ -89,8 +106,14 @@ pub fn rampSeeds(seeds: Seeds, accent: ?zui.Color) std.EnumArray(Ramp, Oklch) {
     });
 }
 
-/// Each role's idle color in `scheme`.
-pub fn idlePalette(ramps: std.EnumArray(Ramp, Oklch), scheme: Scheme, reduced_transparency: bool) Palette {
+/// The ramp `role` is taken from in `scheme`.
+pub fn rampOf(role: ColorRole, scheme: Scheme) Ramp {
+    return tones.get(scheme).get(role).ramp;
+}
+
+/// Each role's idle color in `scheme`. A `chosen_accent` is the accent fill
+/// as it is, its lightness included, in every scheme.
+pub fn idlePalette(ramps: std.EnumArray(Ramp, Oklch), scheme: Scheme, reduced_transparency: bool, chosen_accent: ?zui.Color) Palette {
     var palette: Palette = undefined;
     for (std.enums.values(ColorRole)) |role| {
         const tone = tones.get(scheme).get(role);
@@ -98,23 +121,31 @@ pub fn idlePalette(ramps: std.EnumArray(Ramp, Oklch), scheme: Scheme, reduced_tr
         const alpha = if (reduced_transparency and tone.alpha < 1) @max(tone.alpha, reduced_transparency_alpha) else tone.alpha;
         palette.set(role, .{ .color = .{ .lightness = tone.lightness, .chroma = ramp.chroma * tone.chroma_share, .hue = ramp.hue }, .alpha = alpha });
     }
+    if (chosen_accent) |accent| palette.getPtr(.accent).color = oklab.oklchOfColor(accent);
     return palette;
 }
 
+/// How much of each state layer a role takes: 1 as `hovered_layer`,
+/// `focused_layer` and `pressed_layer` give it, less to keep its pairs
+/// passing, and negative to move toward white or black, away from its
+/// partner, instead.
+pub const LayerShares = std.EnumArray(ColorRole, f32);
+
 /// Each state's layer of `idle`: a fill moves toward its `on_*` partner
-/// as it is hovered, focused and pressed; text, icons and outlines stay as
-/// they are. Disabled, every role but the page's surfaces and the scrim
-/// greys and fades.
-pub fn stateLayers(idle: Palette) PalettesByState {
+/// as it is hovered, focused and pressed, by its share of each layer; text,
+/// icons and outlines stay as they are. Disabled, every role but the page's
+/// surfaces and the scrim greys and fades.
+pub fn stateLayers(idle: Palette, shares: LayerShares) PalettesByState {
     var layers: PalettesByState = .initFill(idle);
     for (std.enums.values(ColorRole)) |role| {
         const own = idle.get(role);
         switch (kindOf(role)) {
             .fill, .base_surface => {
-                const partner = idle.get(partnerOf(role)).color;
-                layers.getPtr(.hovered).set(role, layered(own, partner, hovered_layer));
-                layers.getPtr(.focused).set(role, layered(own, partner, focused_layer));
-                layers.getPtr(.pressed).set(role, layered(own, partner, pressed_layer));
+                const share = shares.get(role);
+                const toward = if (share < 0) awayFrom(own.color, idle.get(partnerOf(role)).color) else idle.get(partnerOf(role)).color;
+                layers.getPtr(.hovered).set(role, layered(own, toward, hovered_layer * @abs(share)));
+                layers.getPtr(.focused).set(role, layered(own, toward, focused_layer * @abs(share)));
+                layers.getPtr(.pressed).set(role, layered(own, toward, pressed_layer * @abs(share)));
             },
             .foreground, .scrim => {},
         }
@@ -187,6 +218,14 @@ fn cycleFrom(comptime ExtraRoles: type, comptime role: ExtraRoles) []const Extra
 
 const RoleKind = enum { base_surface, fill, foreground, scrim };
 
+/// A surface or a fill, which moves in each state's layer.
+pub fn isLayered(role: ColorRole) bool {
+    return switch (kindOf(role)) {
+        .fill, .base_surface => true,
+        .foreground, .scrim => false,
+    };
+}
+
 fn kindOf(role: ColorRole) RoleKind {
     return switch (role) {
         .background, .surface, .surface_raised, .surface_sunken, .surface_inverse => .base_surface,
@@ -196,7 +235,13 @@ fn kindOf(role: ColorRole) RoleKind {
     };
 }
 
-fn layered(own: Shade, partner: Oklch, amount: f32) Shade {
+/// White when `own` is lighter than `partner`, black when darker.
+pub fn awayFrom(own: Oklch, partner: Oklch) Oklch {
+    return .{ .lightness = if (own.lightness > partner.lightness) 1 else 0, .chroma = 0, .hue = own.hue };
+}
+
+/// `own` moved `amount` of the way to `partner` in OKLab.
+pub fn layered(own: Shade, partner: Oklch, amount: f32) Shade {
     const mixed = oklab.Oklab.fromOklch(own.color).mix(.fromOklch(partner), amount).toOklch();
     return .{ .color = mixed, .alpha = own.alpha };
 }
@@ -238,8 +283,8 @@ const tones: std.EnumArray(Scheme, RoleTones) = .init(.{
         .on_secondary_container = on(.accent, 0.28, 0.3),
         .danger = on(.danger, 0.55, 1),
         .on_danger = on(.danger, 0.99, 0.05),
-        .warning = on(.warning, 0.78, 1),
-        .on_warning = on(.warning, 0.25, 0.5),
+        .warning = on(.warning, 0.86, 1),
+        .on_warning = on(.warning, 0.18, 0.5),
         .success = on(.success, 0.52, 1),
         .on_success = on(.success, 0.99, 0.05),
         .outline = neutral(0.58),
@@ -254,21 +299,21 @@ const tones: std.EnumArray(Scheme, RoleTones) = .init(.{
         .surface_sunken = neutral(0.14),
         .surface_inverse = neutral(0.93),
         .on_surface = neutral(0.94),
-        .on_surface_muted = neutral(0.74),
+        .on_surface_muted = neutral(0.88),
         .on_surface_inverse = neutral(0.24),
-        .accent = on(.accent, 0.74, 1),
-        .on_accent = on(.accent, 0.22, 0.5),
+        .accent = on(.accent, 0.45, 1),
+        .on_accent = on(.accent, 0.99, 0.05),
         .accent_container = on(.accent, 0.36, 0.5),
         .on_accent_container = on(.accent, 0.91, 0.4),
         .secondary_container = on(.accent, 0.32, 0.2),
         .on_secondary_container = on(.accent, 0.90, 0.2),
-        .danger = on(.danger, 0.70, 1),
-        .on_danger = on(.danger, 0.22, 0.5),
-        .warning = on(.warning, 0.82, 1),
-        .on_warning = on(.warning, 0.24, 0.5),
-        .success = on(.success, 0.74, 1),
-        .on_success = on(.success, 0.22, 0.5),
-        .outline = neutral(0.62),
+        .danger = on(.danger, 0.45, 1),
+        .on_danger = on(.danger, 0.99, 0.05),
+        .warning = on(.warning, 0.45, 1),
+        .on_warning = on(.warning, 0.99, 0.05),
+        .success = on(.success, 0.45, 1),
+        .on_success = on(.success, 0.99, 0.05),
+        .outline = neutral(0.72),
         .outline_muted = neutral(0.34),
         .focus = on(.accent, 0.78, 1),
         .scrim = .{ .ramp = .neutral, .lightness = 0.05, .alpha = 0.6 },
@@ -285,13 +330,13 @@ const tones: std.EnumArray(Scheme, RoleTones) = .init(.{
         .accent = on(.accent, 0.42, 1),
         .on_accent = neutral(1),
         .accent_container = on(.accent, 0.93, 0.4),
-        .on_accent_container = on(.accent, 0.20, 0.8),
+        .on_accent_container = on(.accent, 0.16, 0.8),
         .secondary_container = on(.accent, 0.95, 0.2),
         .on_secondary_container = on(.accent, 0.18, 0.3),
         .danger = on(.danger, 0.45, 1),
         .on_danger = neutral(1),
-        .warning = on(.warning, 0.80, 1),
-        .on_warning = on(.warning, 0.15, 0.4),
+        .warning = on(.warning, 0.93, 1),
+        .on_warning = on(.warning, 0.10, 0.4),
         .success = on(.success, 0.42, 1),
         .on_success = neutral(1),
         .outline = neutral(0.32),
@@ -306,20 +351,20 @@ const tones: std.EnumArray(Scheme, RoleTones) = .init(.{
         .surface_sunken = neutral(0.06),
         .surface_inverse = neutral(1),
         .on_surface = neutral(1),
-        .on_surface_muted = neutral(0.86),
+        .on_surface_muted = neutral(0.94),
         .on_surface_inverse = neutral(0.10),
-        .accent = on(.accent, 0.82, 1),
-        .on_accent = on(.accent, 0.12, 0.5),
+        .accent = on(.accent, 0.30, 1),
+        .on_accent = neutral(1),
         .accent_container = on(.accent, 0.28, 0.5),
         .on_accent_container = on(.accent, 0.96, 0.3),
         .secondary_container = on(.accent, 0.24, 0.2),
         .on_secondary_container = on(.accent, 0.96, 0.2),
-        .danger = on(.danger, 0.78, 1),
-        .on_danger = on(.danger, 0.12, 0.5),
-        .warning = on(.warning, 0.86, 1),
-        .on_warning = on(.warning, 0.14, 0.5),
-        .success = on(.success, 0.80, 1),
-        .on_success = on(.success, 0.12, 0.5),
+        .danger = on(.danger, 0.30, 1),
+        .on_danger = neutral(1),
+        .warning = on(.warning, 0.30, 1),
+        .on_warning = neutral(1),
+        .success = on(.success, 0.30, 1),
+        .on_success = neutral(1),
         .outline = neutral(0.80),
         .outline_muted = neutral(0.55),
         .focus = on(.accent, 0.85, 1),

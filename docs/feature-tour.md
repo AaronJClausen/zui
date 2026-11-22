@@ -1769,12 +1769,13 @@ pub var tokens: zui.design.Tokens(Ui, DarkroomRoles) = .{};
 
 ### `zui_design`: tokens from seeds and preferences · *shipped*
 
-`zui_design` makes the `zui.design.Tokens` that `look` reads, from a `Design` and the user's `Preferences`. Each seed becomes a tonal ramp in OKLCH, and every role is a lightness on one in light, dark and high contrast; a hovered, focused or pressed fill moves toward the role drawn on it, and a disabled one greys and fades. Spacing comes from the density the user chose, corners from the design's shape table moved a size sharper or rounder at the user's word, and target floors stay at 24 units, 44 for touch. Your own roles take the colors of the roles their pairs name. `resolve` allocates nothing, and runs at comptime as well as at run time, so a design's dark high-contrast tokens can be a constant. Contrast solving and color vision are still to come.
+`zui_design` makes the `zui.design.Tokens` that `look` reads, from a `Design` and the user's `Preferences`. Each seed becomes a tonal ramp in OKLCH, and every role is a lightness on one in light, dark and high contrast; a hovered, focused or pressed fill moves toward the role drawn on it, and a disabled one greys and fades. Spacing comes from the density the user chose, corners from the design's shape table moved a size sharper or rounder at the user's word, and target floors stay at 24 units, 44 for touch. Your own roles take the colors of the roles their pairs name. `resolve` allocates nothing, and runs at comptime as well as at run time, so a design's dark high-contrast tokens can be a constant. Every pair of a role on its partner is held to APCA's lightness contrast and WCAG 2's ratio at once: Lc 75 and 4.5:1 for text, Lc 45 and 3:1 for outlines and the focus ring, more under high contrast, in every state's layer. A design whose own seeds miss a target fails to compile with a message naming the pair, the scheme and the lightness that would pass; a color that arrives at run time, such as the user's accent, keeps its own lightness and is moved until it passes, and `resolve` returns each repair. Color vision is still to come.
 
 `src/appearance.zig`
 
 ```zig
 pub const darkroom: zui.design.Design = .{
+    .name = "appearance.darkroom",
     .seeds = .{ .accent = .{ .lightness = 0.6, .chroma = 0.15, .hue = 35 }, .neutral = .{ .lightness = 0.5, .chroma = 0.01, .hue = 35 } },
     .corner_shape = .continuous,
 };
@@ -1789,7 +1790,8 @@ pub const Appearance = struct {
         const preferences: zui_design.Preferences = .from(ui.environment(), self.choices);
         if (self.preferences) |current| if (std.meta.eql(current, preferences)) return;
         self.preferences = preferences;
-        _ = zui_design.resolve(darkroom, preferences, &self.tokens);
+        const repairs = zui_design.resolve(darkroom, preferences, &self.tokens);
+        for (repairs.slice()) |repair| log.info("{t} on {t} repaired in {t}", .{ repair.foreground, repair.background, repair.scheme });
     }
 };
 
@@ -2537,7 +2539,7 @@ Build with `-Dzui-tracy=true` to link Tracy's client, then connect profiler 0.14
 These names compile, but they don't do anything yet. This list is from `ARCHITECTURE.md` §7 and the roadmap.
 
 - **A host that runs its own loop**: `zuiRun` and the `zui.Driver` it is handed, with `suspendSurfaces` and `resumeSurfaces` for a surface the platform takes away, compile and pass `zui_app`'s tests against a scripted host, but no shipped host declares `zuiRun` yet; macOS, iOS and Android's are to come.
-- **Still to come**: Multi-line text editing, the rest of the design system (contrast solving and color vision in `zui_design`, density's coupling to text size, a type scale, and a review of every permutation), theme packs, the inspector over the wire, and more hosts (Linux and web; macOS later).
+- **Still to come**: Multi-line text editing, the rest of the design system (color vision in `zui_design`, density's coupling to text size, a type scale, and a review of every permutation), theme packs, the inspector over the wire, and more hosts (Linux and web; macOS later).
 
 <a id="dx"></a>
 

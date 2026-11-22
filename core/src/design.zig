@@ -71,12 +71,16 @@ pub const Oklch = struct {
 ///
 /// ```zig
 /// pub const harbor: zui.design.Design = .{
+///     .name = "themes.harbor",
 ///     .seeds = .{ .accent = .{ .lightness = 0.55, .chroma = 0.14, .hue = 250 }, .neutral = .{ .lightness = 0.5, .chroma = 0.01, .hue = 250 } },
 ///     .type = .{ .ratio = 1.25, .fonts = .{ .regular = fonts.inter, .strong = fonts.inter_bold, .monospace = fonts.mono } },
 ///     .corner_shape = .continuous,
 /// };
 /// ```
 pub const Design = struct {
+    /// How a resolver's messages name the design, as its declaration,
+    /// `demo.design`.
+    name: []const u8 = "the design",
     seeds: Seeds,
     type: TypeScale = .{},
     shapes: std.EnumArray(ShapeRole, CornerSize) = default_shapes,
