@@ -39,7 +39,7 @@ pub const App = zui_tour.App(.{ .Host = PageHost, .Renderer = PageRenderer, .Tex
 /// ```
 pub const TourSession = struct {
     /// The threads the tour's tasks take turns on, the same wherever it
-    /// runs, since how many run at once changes what it draws: a Gallery
+    /// runs, since how many run at once changes what it draws: a photo
     /// tile waits to start loading while sixteen tasks hold a thread.
     pub const thread_count = 16;
 

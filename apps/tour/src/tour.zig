@@ -1,14 +1,15 @@
-//! The tour's frame: a header, a rail of screens, the screen itself, and a
-//! performance strip that is always on screen.
+//! The tour's frame: a header, a rail of screens marked by lane, the
+//! screen itself, and a performance strip that is always on screen.
 
 const std = @import("std");
 const zui = @import("zui");
-const zui_showcase = @import("zui_showcase");
 const shared = @import("shared.zig");
 const Screen = shared.Screen;
 const Perf = shared.Perf;
 
 const rail_width = 236;
+
+const floating_panel_effects: zui.Effects = .{ .shadow = .{ .color = .rgba(0x00000060), .offset = .{ 0, 8 }, .blur = 24 } };
 
 const ids = zui.ids(.{
     "root",
@@ -41,19 +42,21 @@ pub fn Tour(comptime kit: type) type {
     const Shell = kit.Shell;
 
     const Screens = struct {
-        welcome: ScreenOf(.welcome, "Welcome", @import("screens/welcome.zig")),
-        layout_lab: ScreenOf(.layout_lab, "LayoutLab", @import("screens/layout_lab.zig")),
-        box_storm: ScreenOf(.box_storm, "BoxStorm", @import("screens/box_storm.zig")),
-        gallery: ScreenOf(.gallery, "Gallery", @import("screens/gallery.zig")),
-        mission_control: ScreenOf(.mission_control, "MissionControl", @import("screens/mission_control.zig")),
-        window_manager: ScreenOf(.window_manager, "WindowManager", @import("screens/window_manager.zig")),
-        robot_workshop: ScreenOf(.robot_workshop, "RobotWorkshop", @import("screens/robot_workshop.zig")),
-        pixel_pad: ScreenOf(.pixel_pad, "PixelPad", @import("screens/pixel_pad.zig")),
-        typography: ScreenOf(.typography, "Typography", @import("screens/typography.zig")),
-        light_and_depth: ScreenOf(.light_and_depth, "LightAndDepth", @import("screens/light_and_depth.zig")),
-        transforms: ScreenOf(.transforms, "Transforms", @import("screens/transforms.zig")),
-        materials: ScreenOf(.materials, "Materials", @import("screens/materials.zig")),
-        classic: zui_showcase.Showcase(Ui),
+        overview: ScreenOf(.overview, "Overview", @import("screens/overview.zig")),
+        /// Harbor X-ray is this same console with its overlay on, so the
+        /// two screens share one state.
+        harbor: ScreenOf(.harbor, "Harbor", @import("screens/harbor.zig")),
+        photo_cull: ScreenOf(.photo_cull, "PhotoCull", @import("screens/photo_cull.zig")),
+        log_tail: ScreenOf(.log_tail, "LogTail", @import("screens/log_tail.zig")),
+        kanban: ScreenOf(.kanban, "Kanban", @import("screens/kanban.zig")),
+        settings_form: ScreenOf(.settings_form, "SettingsForm", @import("screens/settings_form.zig")),
+        quiet_machine: ScreenOf(.quiet_machine, "QuietMachine", @import("screens/quiet_machine.zig")),
+        time_machine: ScreenOf(.time_machine, "TimeMachine", @import("screens/time_machine.zig")),
+        break_it: ScreenOf(.break_it, "BreakIt", @import("screens/break_it.zig")),
+        gesture_arena: ScreenOf(.gesture_arena, "GestureArena", @import("screens/gesture_arena.zig")),
+        light_lab: ScreenOf(.light_lab, "LightLab", @import("screens/light_lab.zig")),
+        one_declaration: ScreenOf(.one_declaration, "OneDeclaration", @import("screens/one_declaration.zig")),
+        clickable_chaos: ScreenOf(.clickable_chaos, "ClickableChaos", @import("screens/clickable_chaos.zig")),
 
         /// `void` for a screen the renderer is not offered, so it costs nothing.
         fn ScreenOf(comptime screen: Screen, comptime name: []const u8, comptime file: type) type {
@@ -67,7 +70,7 @@ pub fn Tour(comptime kit: type) type {
         io: std.Io,
         sources: shared.Sources = .{},
         screens: Screens,
-        current: Screen = .welcome,
+        current: Screen = .overview,
         requested_screen: ?Screen = null,
         perf: Perf = .{},
         environment_changes: shared.EnvironmentQueue = .{},
@@ -96,10 +99,7 @@ pub fn Tour(comptime kit: type) type {
         pub fn init(tour: *Self, io: std.Io, started_at: zui.Instant, fonts: kit.Fonts) void {
             tour.* = .{ .io = io, .started_at = started_at, .fonts = fonts, .screens = undefined };
             inline for (@typeInfo(Screens).@"struct".fields) |field| {
-                if (field.type != void) @field(tour.screens, field.name) = if (comptime std.mem.eql(u8, field.name, "classic")) .{
-                    .title = "zui + " ++ kit.renderer_name,
-                    .widgets = .{ .skin = .{ .theme = .{ .text = .{ .size = 16, .color = .rgb(0xe8e8f0) } } } },
-                } else .{};
+                if (field.type != void) @field(tour.screens, field.name) = .{};
                 if (comptime hasHook(field.type, "init")) @field(tour.screens, field.name).init();
             }
             tour.environment_changes.push(.{ .theme = .dark });
@@ -112,9 +112,9 @@ pub fn Tour(comptime kit: type) type {
             }
         }
 
-        /// Shows `screen`, or the welcome screen if this renderer is not offered it.
+        /// Shows `screen`, or the overview if this renderer is not offered it.
         pub fn show(tour: *Self, screen: Screen) void {
-            tour.current = if (std.mem.indexOfScalar(Screen, kit.offered_screens, screen) != null) screen else .welcome;
+            tour.current = if (std.mem.indexOfScalar(Screen, kit.offered_screens, screen) != null) screen else .overview;
             tour.frames_on_screen = 0;
         }
 
@@ -208,7 +208,7 @@ pub fn Tour(comptime kit: type) type {
 
         fn declareScreen(tour: *Self, ui: *Ui, frame_shell: *const Shell) void {
             switch (tour.current) {
-                .classic => tour.screens.classic.declare(ui),
+                .x_ray => tour.screens.harbor.declareXray(ui, frame_shell),
                 inline else => |screen| if (comptime kit.offers(screen)) @field(tour.screens, @tagName(screen)).declare(ui, frame_shell) else unreachable,
             }
         }
@@ -242,21 +242,26 @@ pub fn Tour(comptime kit: type) type {
             const info = kit.info(tour.current);
             ui.open(.{
                 .id = ids.header,
-                .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(60) }, .padding = .symmetric(16, 0), .child_gap = 14, .child_alignment = .{ .y = .center } },
+                .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(60) }, .padding = .symmetric(20, 0), .child_gap = 12, .child_alignment = .{ .y = .center } },
                 .decoration = .{ .background = palette.surface, .border = .{ .color = palette.border, .widths = .{ .bottom = 1 } } },
             });
             defer ui.close();
 
-            ui.open(.{
-                .layout = .{ .padding = .symmetric(10, 6) },
-                .decoration = .{ .background = palette.accent, .corner_radius = .{ .top_left = 12, .bottom_right = 12, .top_right = 3, .bottom_left = 3 } },
-            });
-            ui.text("zui", .{ .size = 26, .font = frame_shell.fonts.bold, .letter_spacing = 1, .color = palette.on_accent });
-            ui.close();
             {
-                ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow }, .child_gap = 4 } });
+                ui.open(.{ .layout = .{ .sizing = .{ .width = .fixed(rail_width - 40) }, .child_gap = 6, .child_alignment = .{ .y = .center } } });
                 defer ui.close();
-                frame_shell.label(ui, .heading, info.title);
+                ui.text("zui", .{ .size = 20 * frame_shell.text_scale, .font = frame_shell.fonts.bold, .color = palette.text });
+                frame_shell.labelColored(ui, .body, palette.faint, "tour");
+            }
+            {
+                ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow }, .child_gap = 2 } });
+                defer ui.close();
+                {
+                    ui.open(.{ .layout = .{ .child_gap = 10, .child_alignment = .{ .y = .center } } });
+                    defer ui.close();
+                    frame_shell.label(ui, .heading, info.title);
+                    frame_shell.lanePill(ui, info.lane);
+                }
                 frame_shell.label(ui, .caption, info.tagline);
             }
 
@@ -286,25 +291,29 @@ pub fn Tour(comptime kit: type) type {
                 const selected = tour.current == screen;
                 const state = ui.widgetState(id);
                 const info = kit.info(screen);
-                const swatch = shared.hueColor(info.hue, 0.55, 0.95);
+                const lane_color = info.lane.color(palette);
                 ui.open(.{
                     .id = id,
                     .focusable = true,
                     .cursor = .pointer,
-                    .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(40) }, .padding = .{ .left = 8, .right = 6 }, .child_gap = 8, .child_alignment = .{ .y = .center } },
+                    .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(40) }, .padding = .{ .left = 10, .right = 8 }, .child_gap = 10, .child_alignment = .{ .y = .center } },
                     .decoration = .{
-                        .background = if (selected) palette.hovered else if (state == .hovered or state == .pressed) palette.raised else null,
-                        .border = if (ui.focused(id)) .{ .color = palette.focus, .widths = .all(1) } else if (selected) .{ .color = swatch, .widths = .{ .left = 3 } } else null,
+                        .background = if (selected) palette.raised else if (state == .hovered or state == .pressed) palette.hovered else null,
+                        .border = if (ui.focused(id)) .{ .color = palette.focus, .widths = .all(1) } else null,
                         .corner_radius = .all(6),
                     },
                 });
-                ui.open(.{
-                    .layout = .{ .sizing = .{ .width = .fixed(22), .height = .fixed(22) }, .child_alignment = .{ .x = .center, .y = .center } },
-                    .decoration = .{ .background = if (selected) swatch else palette.sunken, .corner_radius = .all(11) },
+                ui.box(.{
+                    .layout = .{ .sizing = .{ .width = .fixed(3), .height = .fixed(24) } },
+                    .decoration = .{ .background = if (selected) lane_color else lane_color.mix(palette.surface, 0.7), .corner_radius = .all(1.5) },
                 });
-                if (kit.shortcutDigit(screen)) |digit| frame_shell.printColored(ui, .caption, if (selected) palette.on_accent else palette.muted, "{d}", .{digit});
-                ui.close();
-                ui.text(info.title, .{ .size = 15 * frame_shell.text_scale, .font = if (selected) frame_shell.fonts.bold else frame_shell.fonts.body, .color = if (selected) palette.text else palette.muted, .wrap = .none });
+                {
+                    ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow }, .child_gap = 1 } });
+                    defer ui.close();
+                    ui.text(info.title, .{ .size = 14 * frame_shell.text_scale, .font = if (selected) frame_shell.fonts.bold else frame_shell.fonts.body, .color = if (selected) palette.text else palette.muted, .wrap = .none });
+                    ui.text(info.lane.name(), .{ .size = 11 * frame_shell.text_scale, .font = frame_shell.fonts.body, .color = palette.faint, .wrap = .none });
+                }
+                if (kit.shortcutDigit(screen)) |digit| frame_shell.printColored(ui, .tiny, palette.faint, "^{d}", .{digit});
                 ui.close();
                 if (ui.clicked(id)) tour.requested_screen = screen;
             }
@@ -315,7 +324,6 @@ pub fn Tour(comptime kit: type) type {
             frame_shell.label(ui, .tiny, "Ctrl+I  frame inspector");
             if (kit.Inspector != void) frame_shell.label(ui, .tiny, "F12  zui_debug inspector");
             frame_shell.label(ui, .tiny, "Ctrl+L  live mode");
-            frame_shell.label(ui, .tiny, "Tab  move focus");
         }
 
         fn strip(tour: *Self, ui: *Ui, frame_shell: *const Shell) void {
@@ -324,12 +332,12 @@ pub fn Tour(comptime kit: type) type {
             const latest = perf.latest();
             ui.open(.{
                 .id = ids.strip,
-                .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(78) }, .padding = .symmetric(14, 8), .child_gap = 18, .child_alignment = .{ .y = .center } },
+                .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(64) }, .padding = .symmetric(16, 8), .child_gap = 18, .child_alignment = .{ .y = .center } },
                 .decoration = .{ .background = palette.sunken, .border = .{ .color = palette.border, .widths = .{ .top = 1 } } },
             });
             defer ui.close();
 
-            sparkline(ui, frame_shell, perf, 56);
+            sparkline(ui, frame_shell, perf, 44);
             {
                 ui.open(.{ .id = .of("strip.stats"), .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow }, .child_gap = 6 }, .scroll = .{ .horizontal = true, .vertical = false } });
                 defer ui.close();
@@ -371,7 +379,8 @@ pub fn Tour(comptime kit: type) type {
                 .interactive = true,
                 .floating = .{ .attach_to = .root, .offset = tour.inspector_position, .z = 500 },
                 .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(360) } },
-                .decoration = .{ .background = palette.surface, .border = .{ .color = palette.accent, .widths = .all(2) }, .corner_radius = .all(10) },
+                .decoration = .{ .background = palette.surface, .border = .{ .color = palette.border, .widths = .all(1) }, .corner_radius = .all(10) },
+                .effects = &floating_panel_effects,
             });
             defer ui.close();
             const dragging = kit.drag(ui, ids.inspector_title, &tour.inspector_position);
@@ -381,19 +390,19 @@ pub fn Tour(comptime kit: type) type {
                     .interactive = true,
                     .cursor = if (dragging) .grabbing else .grab,
                     .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(34) }, .padding = .symmetric(12, 0), .child_alignment = .{ .y = .center } },
-                    .decoration = .{ .background = palette.accent, .corner_radius = .{ .top_left = 8, .top_right = 8 } },
+                    .decoration = .{ .background = palette.raised, .border = .{ .color = palette.border, .widths = .{ .bottom = 1 } }, .corner_radius = .{ .top_left = 10, .top_right = 10 } },
                 });
                 defer ui.close();
-                frame_shell.labelColored(ui, .body, palette.on_accent, "Frame inspector");
+                frame_shell.label(ui, .body, "Frame inspector");
                 frame_shell.spacer(ui);
                 ui.open(.{
                     .id = ids.inspector_close,
                     .interactive = true,
                     .cursor = .pointer,
                     .layout = .{ .padding = .symmetric(8, 2) },
-                    .decoration = .{ .background = if (ui.hovered(ids.inspector_close)) palette.on_accent.mix(palette.accent, 0.7) else null, .corner_radius = .all(4) },
+                    .decoration = .{ .background = if (ui.hovered(ids.inspector_close)) palette.hovered else null, .corner_radius = .all(4) },
                 });
-                frame_shell.labelColored(ui, .body, palette.on_accent, "x");
+                frame_shell.labelColored(ui, .body, palette.muted, "x");
                 ui.close();
                 if (ui.clicked(ids.inspector_close)) tour.inspector_open = false;
             }

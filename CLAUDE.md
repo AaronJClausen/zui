@@ -72,7 +72,7 @@ Stop and ask the user instead of guessing when:
 | a bundled typeface | `text/fonts/`, its file and licence beside `zui_fonts.zig`, which makes it a `pub const` of its `@embedFile` bytes and adds both to `.paths` in `text/fonts/build.zig.zon` |
 | a new face, shaper or rasterizer | a package of its own beside `text/truetype/`, depending on `zui_glyphs`, and in the root's `packages`, `.paths` and `.dependencies` |
 | the tour | `apps/tour/src/`, the `zui_tour` module, which the root re-exports: `zui_tour.App(.{ .Host, .Renderer, .Text, .renderer_name })` is the application `zui_app` runs. A screen is `apps/tour/src/screens/<name>.zig`, generic over the tour's `Kit` through `Using(kit)`, a field of `Screens` in `apps/tour/src/tour.zig` and a case of `Screen` in `apps/tour/src/shared.zig`; one that needs an optional command is offered only by `Kit.offers`. The tour imports no renderer, host or font system, and compiles for `wasm32-freestanding`. Its headless test is `apps/tour/src/tests.zig`, its compile errors `apps/tour/tests/compile_errors/<case>.zig` with a row in `compile_error_cases` in `apps/tour/build.zig` |
-| the showcase | `apps/showcase/zui_showcase.zig`, the `zui_showcase` module, which the root re-exports and the tour's classic screen declares: `zui_showcase.App(.{ .Host, .Renderer, .Text, .title })` is the application `zui_app` runs. It imports only `zui`, `zui_widgets`, `zui_app` and `zui_glyphs` |
+| the showcase | `apps/showcase/zui_showcase.zig`, the `zui_showcase` module, which the root re-exports: `zui_showcase.App(.{ .Host, .Renderer, .Text, .title })` is the application `zui_app` runs. It imports only `zui`, `zui_widgets`, `zui_app` and `zui_glyphs` |
 | a target: a `main` that runs an app on a host, a renderer and a font system | `examples/<app>.zig` in the renderer's or host's package (`renderers/raylib/`, `renderers/terminal/`, `hosts/native/`; sokol's are `hosts/native/`'s), built as the step named after the app, `tour` or `showcase`. It names the app, the host, the renderer and the font system at one place, and adds only what its host or its flags need, such as screenshots or `--dump` |
 | the design vocabulary: roles, tiers, `Design`, `Tokens`, the appearance contract | `core/src/design.zig`, exported as `zui.design`; its check in `core/src/contracts.zig` |
 | an OS design language | `themes/src/<design language>.zig`, exported from `themes/src/root.zig` (the `zui_themes` module), with its tests beside it. It is a `zui.design.Design`, data the widgets reach through `zui_widgets.DesignSkin`: it imports only `zui`, its tests also `zui_design`, and it holds no drawing or OS code |
@@ -159,8 +159,8 @@ with `--frames`).
 In `renderers/raylib/`, run `zig build test`, `zig build check` and
 `zig build conformance`; the tour's cycle,
 `zig build tour -- --hidden --frames 600 --cycle 50`, which must print
-`diagnostics ok: true`; a screenshot of each of `welcome`, `gallery`,
-`mission_control`, `typography` and `light_and_depth` with
+`diagnostics ok: true`; a screenshot of each of `overview`, `harbor`,
+`x_ray`, `log_tail` and `light_lab` with
 `zig build tour -- --screenshot <absolute path> --screen <name>`;
 `zig build tour -- --measure-idle`;
 `zig build showcase -- --hidden --frames 60`, which must print

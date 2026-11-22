@@ -1,5 +1,5 @@
 //! What every screen of the tour shares, whatever draws it: its sources,
-//! screens, typefaces and palettes, and the text it measures with.
+//! screens and lanes, typefaces and palettes, and the text it measures with.
 
 const std = @import("std");
 const zui_glyphs = @import("zui_glyphs");
@@ -9,40 +9,107 @@ pub const zui_widgets = @import("zui_widgets");
 pub const zui_reflect = @import("zui_reflect");
 pub const zui_async = @import("zui_async");
 pub const Perf = @import("perf.zig").Perf;
-const mission = @import("screens/mission_control.zig");
-const gallery = @import("screens/gallery.zig");
+const harbor = @import("screens/harbor.zig");
+const photo_cull = @import("screens/photo_cull.zig");
+const log_tail = @import("screens/log_tail.zig");
+const quiet_machine = @import("screens/quiet_machine.zig");
 
 pub const Sources = struct {
-    telemetry: mission.TelemetrySource = .{},
-    mission_log: mission.LogSource = .{},
-    launch: mission.LaunchTask = .{},
-    tiles: gallery.TileLoads = .{},
-    tile_outcomes: gallery.TileOutcomesSource = .{},
+    harbor_metrics: harbor.MetricsSource = .{},
+    harbor_events: harbor.EventSource = .{},
+    photos: photo_cull.PhotoLoads = .{},
+    photo_outcomes: photo_cull.PhotoOutcomesSource = .{},
+    log_rate: log_tail.RateSource = .{},
+    log_lines: log_tail.LineSource = .{},
+    quiet_reading: quiet_machine.ReadingSource = .{},
 };
 
 /// Every screen of the tour, in the rail's order. A renderer that does not
 /// draw what a screen needs is not offered it: `Kit.offered_screens`.
 pub const Screen = enum {
-    welcome,
-    layout_lab,
-    box_storm,
-    gallery,
-    mission_control,
-    window_manager,
-    robot_workshop,
-    pixel_pad,
-    typography,
-    light_and_depth,
-    transforms,
-    materials,
-    classic,
+    overview,
+    harbor,
+    x_ray,
+    photo_cull,
+    log_tail,
+    kanban,
+    settings_form,
+    quiet_machine,
+    time_machine,
+    break_it,
+    gesture_arena,
+    light_lab,
+    one_declaration,
+    clickable_chaos,
 
     pub const Info = struct {
         title: []const u8,
         tagline: []const u8,
         features: []const []const u8,
-        hue: f32,
+        lane: Lane,
     };
+};
+
+/// The four ways the tour shows zui: where to start, a product built on it,
+/// real problems solved plainly, and pages built to impress.
+pub const Lane = enum {
+    start,
+    flagship,
+    field_case,
+    spectacle,
+
+    pub fn name(lane: Lane) []const u8 {
+        return switch (lane) {
+            .start => "Start",
+            .flagship => "Flagship",
+            .field_case => "Field case",
+            .spectacle => "Spectacle",
+        };
+    }
+
+    pub fn color(lane: Lane, palette: Palette) zui.Color {
+        return switch (lane) {
+            .start => palette.muted,
+            .flagship => palette.accent,
+            .field_case => palette.good,
+            .spectacle => palette.spectacle,
+        };
+    }
+};
+
+/// A producer that runs only while the UI reads its source: the UI demands
+/// it each frame it reads, releases it once it stops, and the producer
+/// checks `keepGoing` before each publication.
+pub const DemandedProducer = struct {
+    const Phase = enum(u8) { stopped, running, stopping };
+
+    phase: std.atomic.Value(Phase) = .init(.stopped),
+
+    /// UI thread. Returns true when the caller must start the producer.
+    pub fn demand(self: *DemandedProducer) bool {
+        while (true) switch (self.phase.load(.acquire)) {
+            .running => return false,
+            .stopping => if (self.phase.cmpxchgWeak(.stopping, .running, .acq_rel, .acquire) == null) return false,
+            .stopped => {
+                self.phase.store(.running, .release);
+                return true;
+            },
+        };
+    }
+
+    /// UI thread.
+    pub fn release(self: *DemandedProducer) void {
+        _ = self.phase.cmpxchgStrong(.running, .stopping, .acq_rel, .acquire);
+    }
+
+    /// Producer thread: false once it should exit, after which it must not publish.
+    pub fn keepGoing(self: *DemandedProducer) bool {
+        while (true) switch (self.phase.load(.acquire)) {
+            .running => return true,
+            .stopping => if (self.phase.cmpxchgStrong(.stopping, .stopped, .acq_rel, .acquire) == null) return false,
+            .stopped => return false,
+        };
+    }
 };
 
 /// The three typefaces the tour's text is set in, each given to the font
@@ -52,7 +119,7 @@ pub const Typeface = enum {
     bold,
     mono,
 
-    /// The name the typography screen shows it under.
+    /// The typeface's family name, as a screen shows it.
     pub fn name(typeface: Typeface) []const u8 {
         return switch (typeface) {
             .body => "Atkinson Hyperlegible",
@@ -129,8 +196,8 @@ fn checkFontSystem(comptime FontSystem: type) void {
     }
 }
 
-/// Whether `Material` is a pattern between two colors, as the materials
-/// screen describes one: `.pattern` from its `Pattern` enum, `.first` and
+/// Whether `Material` is a pattern between two colors, as the light lab
+/// describes one: `.pattern` from its `Pattern` enum, `.first` and
 /// `.second`, `.phase` in turns and `.scale` in layout units.
 pub fn offersPatterns(comptime Material: type) bool {
     if (@typeInfo(Material) != .@"struct" or !@hasDecl(Material, "Pattern") or @typeInfo(Material.Pattern) != .@"enum") return false;
@@ -146,6 +213,8 @@ pub const DragGrip = struct {
     grab_offset: [2]f32 = .{ 0, 0 },
 };
 
+/// The tour's colors: neutral surfaces in three depths, one accent, the
+/// three states, and the spectacles' violet.
 pub const Palette = struct {
     background: zui.Color,
     surface: zui.Color,
@@ -161,45 +230,48 @@ pub const Palette = struct {
     good: zui.Color,
     warn: zui.Color,
     bad: zui.Color,
+    spectacle: zui.Color,
     focus: zui.Color,
     overlay: zui.Color,
 
     pub const dark: Palette = .{
-        .background = .rgb(0x111118),
-        .surface = .rgb(0x1a1a24),
-        .sunken = .rgb(0x0c0c12),
-        .raised = .rgb(0x232332),
-        .hovered = .rgb(0x2f2f44),
-        .border = .rgb(0x33334a),
-        .text = .rgb(0xeaeaf4),
-        .muted = .rgb(0x9a9ab4),
-        .faint = .rgb(0x5a5a74),
-        .accent = .rgb(0x6c8cff),
-        .on_accent = .rgb(0x0b0b14),
-        .good = .rgb(0x4ade80),
-        .warn = .rgb(0xfbbf24),
-        .bad = .rgb(0xf87171),
-        .focus = .rgb(0xffc65c),
-        .overlay = .rgba(0x000000aa),
+        .background = .rgb(0x0e1014),
+        .surface = .rgb(0x161920),
+        .sunken = .rgb(0x0a0c0f),
+        .raised = .rgb(0x1e222b),
+        .hovered = .rgb(0x272c37),
+        .border = .rgb(0x2a2f3a),
+        .text = .rgb(0xe6e8ee),
+        .muted = .rgb(0x9097a6),
+        .faint = .rgb(0x5c6372),
+        .accent = .rgb(0x5b8cff),
+        .on_accent = .rgb(0x0a0c10),
+        .good = .rgb(0x3ecf8e),
+        .warn = .rgb(0xf0b43c),
+        .bad = .rgb(0xf06a6a),
+        .spectacle = .rgb(0xa98bff),
+        .focus = .rgb(0x8fb0ff),
+        .overlay = .rgba(0x000000a0),
     };
 
     pub const light: Palette = .{
-        .background = .rgb(0xeef0f6),
+        .background = .rgb(0xf4f5f8),
         .surface = .rgb(0xffffff),
-        .sunken = .rgb(0xdde1ec),
-        .raised = .rgb(0xf6f7fb),
-        .hovered = .rgb(0xe2e7f8),
-        .border = .rgb(0xc4c9d8),
-        .text = .rgb(0x1b1d2a),
-        .muted = .rgb(0x5b6077),
-        .faint = .rgb(0x9aa0b4),
-        .accent = .rgb(0x3355dd),
+        .sunken = .rgb(0xe9ebf0),
+        .raised = .rgb(0xf8f9fb),
+        .hovered = .rgb(0xeceff5),
+        .border = .rgb(0xd7dbe3),
+        .text = .rgb(0x161a22),
+        .muted = .rgb(0x596070),
+        .faint = .rgb(0x9aa1b0),
+        .accent = .rgb(0x2f62e9),
         .on_accent = .rgb(0xffffff),
-        .good = .rgb(0x168a4a),
-        .warn = .rgb(0xb7790b),
-        .bad = .rgb(0xc93030),
-        .focus = .rgb(0xe08a00),
-        .overlay = .rgba(0x1b1d2a66),
+        .good = .rgb(0x15885a),
+        .warn = .rgb(0xa86a00),
+        .bad = .rgb(0xc93535),
+        .spectacle = .rgb(0x6c4ad6),
+        .focus = .rgb(0x2f62e9),
+        .overlay = .rgba(0x161a2266),
     };
 
     pub fn forEnvironment(environment: *const zui.Environment) Palette {
@@ -223,10 +295,10 @@ pub const Tone = enum {
 
     pub fn size(tone: Tone) f32 {
         return switch (tone) {
-            .hero => 88,
-            .title => 34,
-            .heading => 22,
-            .body => 16,
+            .hero => 56,
+            .title => 28,
+            .heading => 18,
+            .body => 15,
             .caption => 13,
             .tiny => 11,
         };

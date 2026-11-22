@@ -102,8 +102,8 @@ declares a frame only when one is due, and posts back the frame's wire
 bytes, or none, and when to step it next. The tour's
 strip and frame inspector time each frame's beginFrame, declaration and
 layout on the worker's `performance.now()`, and show the page's time to
-draw the frame before as its submit time. The tour's loaders, the
-Gallery's tiles and Mission Control's producers, run on an `Io` of the
+draw the frame before as its submit time. The tour's loaders,
+Photo Culling's loads and Log Tail's producers, run on an `Io` of the
 worker's own, `SteppedIo`: its clocks read the page's instant, and its
 tasks take turns on 16 threads, each a worker of its own on the same
 memory (`web/tour_thread.mjs`), one at a time and only while the frame
@@ -173,10 +173,10 @@ publishes it from `main`. `zig build test-site` serves that site without
 the isolation headers, as GitHub Pages does, opens it in headless
 Chromium, and checks that the service worker isolated it after one
 reload, that the page draws the worker's frames, timed above 0 µs, that
-it sleeps while idle, drawing 1 frame a second on Welcome while the
+it sleeps while idle, drawing 1 frame a second on the Overview while the
 display runs at 60, and that input wakes it and reaches the tour: the
 mouse over the rail shows the pointer cursor the tour asks for,
-Ctrl+PageDown draws the next screen, and a click on Mission Control starts
+Ctrl+PageDown draws the next screen, and a click on Log Tail starts
 its producers' tasks, whose frames keep coming without input. Then, on
-the Gallery, every tile's load must finish without input, and the page
+Photo Culling, every photo's load must finish without input, and the page
 sleep again.

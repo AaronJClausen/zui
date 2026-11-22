@@ -2,9 +2,9 @@
 //!
 //! ```sh
 //! zig build tour                                     # interactive window
-//! zig build tour -- --screen box_storm               # start on one screen
+//! zig build tour -- --screen break_it                # start on one screen
 //! zig build tour -- --hidden --frames 600 --cycle 50 # visit every screen, 50 frames each, then quit
-//! zig build tour -- --screenshot $PWD/tour.png --screen gallery  # render offscreen, save a PNG and quit
+//! zig build tour -- --screenshot $PWD/tour.png --screen photo_cull  # render offscreen, save a PNG and quit
 //! zig build tour -- --measure-idle                   # report the CPU time used over 10 idle seconds
 //! zig build tour -- --measure-startup                # report the time from process start to the first presented frame
 //! zig build tour -- --zui-debug                      # open zui_debug's inspector, which F12 toggles
@@ -35,7 +35,7 @@ fn logAndKeepRunReport(notice: zui_app.Notice) void {
 }
 
 /// Frames drawn before a screenshot, in live mode, so it shows a settled
-/// layout and the gallery's first tiles.
+/// layout and the first photos loaded.
 const screenshot_after_frames = 45;
 
 /// The tour, with what raylib's window adds: screenshots drawn offscreen,

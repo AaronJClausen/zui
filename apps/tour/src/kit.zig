@@ -31,6 +31,8 @@ pub fn Kit(comptime spec: Spec) type {
         pub const Perf = shared.Perf;
         pub const Sources = shared.Sources;
         pub const Screen = shared.Screen;
+        pub const Lane = shared.Lane;
+        pub const DemandedProducer = shared.DemandedProducer;
         pub const Typeface = shared.Typeface;
         pub const Palette = shared.Palette;
         pub const Tone = shared.Tone;
@@ -65,8 +67,8 @@ pub fn Kit(comptime spec: Spec) type {
 
         pub const draws_frost = config.commands.contains(.backdrop_blur);
         pub const draws_transforms = config.commands.contains(.transform);
-        /// The renderer's materials, which the materials screen shows only
-        /// when they offer the patterns it picks between.
+        /// The renderer's materials, which the light lab shows only when
+        /// they offer the patterns it picks between.
         pub const Material = config.MaterialHandle;
         pub const draws_material_patterns = config.commands.contains(.material) and shared.offersPatterns(Material);
 
@@ -81,8 +83,7 @@ pub fn Kit(comptime spec: Spec) type {
 
         pub fn offers(comptime screen: Screen) bool {
             return switch (screen) {
-                .transforms => draws_transforms,
-                .materials => draws_material_patterns,
+                .clickable_chaos => draws_transforms,
                 else => true,
             };
         }
@@ -101,22 +102,20 @@ pub fn Kit(comptime spec: Spec) type {
 
         pub fn info(screen: Screen) Screen.Info {
             return switch (screen) {
-                .welcome => .{ .title = "Welcome", .tagline = "A guided tour of zui, drawn by " ++ renderer_name, .features = &.{ "requestFrameAt", "floating", "focus" }, .hue = 0.62 },
-                .layout_lab => .{ .title = "Layout Lab", .tagline = "Every sizing rule, alignment and gap, live", .features = &.{ "fit/grow/fixed/percent", "zui_reflect", "rectOf" }, .hue = 0.55 },
-                .box_storm => .{ .title = "Box Storm", .tagline = "Thousands of elements, timed every frame", .features = &.{ "16k elements", "string cache", "depth 90" }, .hue = 0.0 },
-                .gallery => .{ .title = "Infinite Gallery", .tagline = "10,000 tiles loaded only when seen", .features = &.{ "KeyedLoads", "virtual scroll", "cancellation" }, .hue = 0.8 },
-                .mission_control => .{ .title = "Mission Control", .tagline = "Threads publish; the UI never waits", .features = &.{ "Latest", "Stream", "Task" }, .hue = 0.08 },
-                .window_manager => .{ .title = "Window Manager", .tagline = "Floating layers, anchors and focus scopes", .features = &.{ "floating z", "anchors", "focus scope" }, .hue = 0.45 },
-                .robot_workshop => .{ .title = "Robot Workshop", .tagline = "An editor generated from a struct", .features = &.{ "zui_reflect", "widgets", "environment" }, .hue = 0.3 },
-                .pixel_pad => .{ .title = "Pixel Pad", .tagline = "Pointer, keys, chords and typed text", .features = &.{ "pointerLocal", "chords", "keyEvents" }, .hue = 0.92 },
-                .typography => .{ .title = "Typography", .tagline = "Three TrueType fonts, wrapping and spacing", .features = &.{ "wrap modes", "letter spacing", "zoom" }, .hue = 0.15 },
-                .light_and_depth => if (draws_frost)
-                    .{ .title = "Light & Depth", .tagline = "Gradients in OKLab, shadows, glow and frost", .features = &.{ "Gradient", "Shadow", "BackdropBlur" }, .hue = 0.75 }
-                else
-                    .{ .title = "Light & Depth", .tagline = "Gradients in OKLab, shadows and glow", .features = &.{ "Gradient", "Shadow", "glow" }, .hue = 0.75 },
-                .transforms => .{ .title = "Transforms", .tagline = "Moved, scaled and turned as painted, hit where drawn", .features = &.{ "Transform", "hit inversion", "origin" }, .hue = 0.5 },
-                .materials => .{ .title = "Materials", .tagline = "The renderer's own shader, or its fallback", .features = &.{ "Material", "phase", "fallback" }, .hue = 0.4 },
-                .classic => .{ .title = "Classic", .tagline = "The showcase every zui renderer shares", .features = &.{ "shared demo", "compare renderers" }, .hue = 0.7 },
+                .overview => .{ .title = "Overview", .tagline = "Four ways to see zui, drawn by " ++ renderer_name, .lane = .start, .features = &.{ "flagship", "field cases", "spectacles" } },
+                .harbor => .{ .title = "Harbor", .tagline = "An operations console built on zui", .lane = .flagship, .features = &.{ "sources", "virtual scroll", "floating", "focus" } },
+                .x_ray => .{ .title = "Harbor X-ray", .tagline = "The same console, with every feature pointed out", .lane = .flagship, .features = &.{ "rectOf", "attach_to", "live counts" } },
+                .photo_cull => .{ .title = "Photo Culling", .tagline = "Thousands of photos, loaded only when seen", .lane = .field_case, .features = &.{ "KeyedLoads", "cancellation", "keyboard" } },
+                .log_tail => .{ .title = "Log Tail", .tagline = "Follow a busy service's log without stalling", .lane = .field_case, .features = &.{ "Stream", "Latest", "framesSinceRead" } },
+                .kanban => .{ .title = "Kanban", .tagline = "Cards dragged between lists, or moved by keys", .lane = .field_case, .features = &.{ "drag and drop", "focus", "actions" } },
+                .settings_form => .{ .title = "Settings Form", .tagline = "A form that holds up at any size and direction", .lane = .field_case, .features = &.{ "textField", "validation", "right-to-left" } },
+                .quiet_machine => .{ .title = "Quiet Machine", .tagline = "A busy page that declares almost no frames", .lane = .spectacle, .features = &.{ "requestFrameAt", "NextFrame", "idle" } },
+                .time_machine => .{ .title = "Time Machine", .tagline = "Scrub a session back and forth, frame by frame", .lane = .spectacle, .features = &.{ "determinism", "replay", "scrubbing" } },
+                .break_it => .{ .title = "Break It", .tagline = "Push every limit and watch nothing corrupt", .lane = .spectacle, .features = &.{ "Limits", "Diagnostics", "graceful" } },
+                .gesture_arena => .{ .title = "Gesture Arena", .tagline = "Nested gestures, each going to its owner", .lane = .spectacle, .features = &.{ "Gestures", "momentum", "claim" } },
+                .light_lab => .{ .title = "Light Lab", .tagline = "Gradients, shadows, frost and materials, or their fallbacks", .lane = .spectacle, .features = &.{ "Effects", "lowering", "Material" } },
+                .one_declaration => .{ .title = "One Declaration", .tagline = "The same UI in every theme, size and direction", .lane = .spectacle, .features = &.{ "Environment", "right-to-left", "contrast" } },
+                .clickable_chaos => .{ .title = "Clickable Chaos", .tagline = "Hundreds of turning cards, each hit where drawn", .lane = .spectacle, .features = &.{ "Transform", "hit inversion" } },
             };
         }
 
@@ -161,7 +160,7 @@ pub fn Kit(comptime spec: Spec) type {
                 .popup_background = palette.surface,
                 .option_highlight = palette.hovered,
                 .selected_option = palette.accent.mix(palette.surface, 0.6),
-                .corner_radius = 5,
+                .corner_radius = 6,
                 .control_height = @round(30 * text_scale),
                 .label_width = 150,
             };
@@ -219,7 +218,7 @@ pub fn Kit(comptime spec: Spec) type {
                         .hero, .title, .heading => self.fonts.bold,
                         .body, .caption, .tiny => self.fonts.body,
                     },
-                    .letter_spacing = if (tone == .hero) 2 else 0,
+                    .letter_spacing = 0,
                 };
             }
 
@@ -261,10 +260,36 @@ pub fn Kit(comptime spec: Spec) type {
 
             fn openCardWith(self: *const Shell, ui: *Ui, element: Ui.Element, title: []const u8) void {
                 var card = element;
-                card.layout = .{ .direction = .top_to_bottom, .sizing = element.layout.?.sizing, .padding = .all(14), .child_gap = 10 };
-                card.decoration = .{ .background = self.palette.surface, .border = .{ .color = self.palette.border, .widths = .all(1) }, .corner_radius = .all(10) };
+                card.layout = .{ .direction = .top_to_bottom, .sizing = element.layout.?.sizing, .padding = .all(16), .child_gap = 10 };
+                card.decoration = .{ .background = self.palette.surface, .border = .{ .color = self.palette.border, .widths = .all(1) }, .corner_radius = .all(8) };
                 ui.open(card);
                 if (title.len != 0) self.label(ui, .heading, title);
+            }
+
+            /// A page's opening: a small colored eyebrow, its title, and a
+            /// sentence saying what it is for.
+            pub fn pageHeading(self: *const Shell, ui: *Ui, eyebrow: []const u8, title: []const u8, description: []const u8) void {
+                ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow }, .child_gap = 4 } });
+                defer ui.close();
+                self.labelColored(ui, .caption, self.palette.accent, eyebrow);
+                self.label(ui, .title, title);
+                self.labelColored(ui, .body, self.palette.muted, description);
+            }
+
+            /// The lane's name in a quiet pill of its color.
+            pub fn lanePill(self: *const Shell, ui: *Ui, lane: Lane) void {
+                const color = lane.color(self.palette);
+                ui.open(.{
+                    .layout = .{ .padding = .symmetric(8, 2) },
+                    .decoration = .{ .background = color.mix(self.palette.surface, 0.85), .corner_radius = .all(9) },
+                });
+                self.labelColored(ui, .tiny, color, lane.name());
+                ui.close();
+            }
+
+            /// Shows `screen` from the next frame on.
+            pub fn requestScreen(self: *const Shell, screen: Screen) void {
+                self.requested_screen.* = screen;
             }
 
             pub fn chip(self: *const Shell, ui: *Ui, content: []const u8, color: zui.Color) void {

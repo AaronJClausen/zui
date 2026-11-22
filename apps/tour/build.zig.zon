@@ -8,7 +8,6 @@
         .zui_glyphs = .{ .path = "../../text/glyphs" },
         .zui_fonts = .{ .path = "../../text/fonts" },
         .zui_truetype = .{ .path = "../../text/truetype" },
-        .zui_showcase = .{ .path = "../showcase" },
     },
     .paths = .{ "build.zig", "build.zig.zon", "src", "tests" },
 }

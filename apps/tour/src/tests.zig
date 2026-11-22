@@ -171,19 +171,18 @@ test "a renderer is offered the screens and the frost it draws everything of" {
     const plain = KitFor(FakeRenderer(false, cells));
     try testing.expectEqualSlices(tour.Screen, std.enums.values(tour.Screen), every.offered_screens);
     try testing.expect(every.draws_frost);
-    try testing.expect(std.mem.indexOfScalar(tour.Screen, plain.offered_screens, .transforms) == null);
-    try testing.expect(std.mem.indexOfScalar(tour.Screen, plain.offered_screens, .materials) == null);
-    try testing.expectEqual(std.enums.values(tour.Screen).len - 2, plain.offered_screens.len);
+    try testing.expect(std.mem.indexOfScalar(tour.Screen, plain.offered_screens, .clickable_chaos) == null);
+    try testing.expectEqual(std.enums.values(tour.Screen).len - 1, plain.offered_screens.len);
     try testing.expect(!plain.draws_frost);
 
     var harness: Harness(plain) = .{};
     try harness.init();
     defer harness.deinit();
-    harness.tour.show(.materials);
-    try testing.expectEqual(tour.Screen.welcome, harness.tour.current);
+    harness.tour.show(.clickable_chaos);
+    try testing.expectEqual(tour.Screen.overview, harness.tour.current);
 }
 
-test "a material without patterns is not offered the materials screen" {
+test "a material without patterns is not shown as one" {
     const NumberedMaterials = struct {
         pub const zui_surfaces: zui.SurfaceKinds = .initOne(.offscreen);
         pub const zui_commands: zui.CommandSet = .initOne(.material);
@@ -191,15 +190,15 @@ test "a material without patterns is not offered the materials screen" {
 
         pub fn zuiSubmit(_: *@This(), _: zui.Surface, _: anytype) !void {}
     };
-    try testing.expect(!KitFor(NumberedMaterials).offers(.materials));
+    try testing.expect(!KitFor(NumberedMaterials).draws_material_patterns);
 }
 
-test "F12 opens zui_debug's panel over the classic screen, listing its elements, and closes it" {
+test "F12 opens zui_debug's panel over the overview, listing its elements, and closes it" {
     const kit = KitFor(FakeRenderer(true, .pixel_grid));
     var harness: Harness(kit) = .{};
     try harness.init();
     defer harness.deinit();
-    harness.ui.release(harness.settledFrame(.classic, default_window));
+    harness.ui.release(harness.settledFrame(.overview, default_window));
 
     const f12: zui.Event = .{ .key_down = .{ .key = .f12, .at = .zero } };
     harness.ui.release(harness.frameWith(default_window, &.{f12}));
@@ -209,11 +208,11 @@ test "F12 opens zui_debug's panel over the classic screen, listing its elements,
     const panel = opened.lookup(kit.Inspector.default_panel_id.hash).?;
     const panel_elements = opened.inspect(panel).subtree_end - panel;
     try testing.expectEqual(opened.elementCount() - panel_elements, harness.tour.zui_debug_inspector.rows().len);
-    var documents: usize = 0;
+    var rail_titles: usize = 0;
     for (harness.tour.zui_debug_inspector.rows()) |row| {
-        if (row.kind == .text and std.mem.startsWith(u8, row.textPreview(), "Document ")) documents += 1;
+        if (row.kind == .text and std.mem.eql(u8, row.textPreview(), "Harbor X-ray")) rail_titles += 1;
     }
-    try testing.expect(documents > 0);
+    try testing.expect(rail_titles > 0);
 
     harness.ui.release(harness.frameWith(default_window, &.{f12}));
     const closed = harness.frame(default_window);
@@ -319,9 +318,9 @@ test "zui_app runs the tour through every screen it is offered, and stops at the
 fn ignoreNotice(_: zui_app.Notice) void {}
 
 test "the options take the targets' flags" {
-    const arguments = [_][:0]const u8{ "tour", "--screen", "gallery", "--frames", "600", "--cycle", "50", "--zui-debug", "--screenshot", "tour.png" };
+    const arguments = [_][:0]const u8{ "tour", "--screen", "photo_cull", "--frames", "600", "--cycle", "50", "--zui-debug", "--screenshot", "tour.png" };
     const options: tour.Options = try .parse(&arguments);
-    try testing.expectEqual(tour.Screen.gallery, options.screen.?);
+    try testing.expectEqual(tour.Screen.photo_cull, options.screen.?);
     try testing.expectEqual(@as(u64, 600), options.frame_limit.?);
     try testing.expectEqual(@as(u32, 50), options.cycle_every.?);
     try testing.expect(options.zui_debug and options.hidden);

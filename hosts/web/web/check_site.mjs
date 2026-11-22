@@ -8,9 +8,9 @@
 // host does, drawing only the tour's once-a-second heartbeat while the
 // display runs on, until input wakes it: the mouse over the rail turns the
 // cursor to the pointer the tour asks for, Ctrl+PageDown draws the next
-// screen, and a click on Mission Control's entry starts its producers'
-// tasks, whose frames keep coming without input. On the Gallery, its
-// tiles must all load without input, and the page then sleep again.
+// screen, and a click on Log Tail's entry starts its producers'
+// tasks, whose frames keep coming without input. On Photo Culling, its
+// photos must all load without input, and the page then sleep again.
 
 import { readdir } from "node:fs/promises";
 import { extname, join, relative, sep } from "node:path";
@@ -148,21 +148,21 @@ async function chord(key, code, windowsVirtualKeyCode) {
 const nextScreen = () => chord("PageDown", "PageDown", 34);
 const previousScreen = () => chord("PageUp", "PageUp", 33);
 
-const welcomeIdle = await idleFrames("Welcome");
+const overviewIdle = await idleFrames("the Overview");
 
 await expectDrawnAfter("the mouse moved over the rail", () => send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 50, y: 266 }));
 await waitUntil(`tour.drawer.canvas.style.cursor === "pointer"`, "the canvas did not show the pointer cursor over the rail");
-await idleFrames("Welcome, under the mouse");
+await idleFrames("the Overview, under the mouse");
 
-const welcomeDigest = await evaluate("canvasDigest()");
+const overviewDigest = await evaluate("canvasDigest()");
 await expectDrawnAfter("Ctrl+PageDown", nextScreen);
-await waitUntil(`canvasDigest() !== ${welcomeDigest}`, "the canvas still showed Welcome after Ctrl+PageDown");
+await waitUntil(`canvasDigest() !== ${overviewDigest}`, "the canvas still showed the Overview after Ctrl+PageDown");
 
 const tasksBefore = await evaluate("tour.tasks.started");
 await send("Input.dispatchMouseEvent", { type: "mousePressed", x: 50, y: 266, button: "left", buttons: 1, clickCount: 1 });
 await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: 50, y: 266, button: "left", buttons: 0, clickCount: 1 });
-await waitUntil(`tour.tasks.started > ${tasksBefore}`, "the tour started no tasks after the click on Mission Control's entry");
-const missionTasks = await evaluate("tour.tasks");
+await waitUntil(`tour.tasks.started > ${tasksBefore}`, "the tour started no tasks after the click on Log Tail's entry");
+const logTasks = await evaluate("tour.tasks");
 
 // How fast the page draws is the machine's: a runner's software GPU draws a
 // few frames a second. What the page decides is not: it must ask to be
@@ -171,31 +171,31 @@ const missionTasks = await evaluate("tour.tasks");
 await evaluate(`(globalThis.stepsSeen = [], tour.onStep = (step) => stepsSeen.push(step), true)`);
 const stepsSince = (from) => evaluate(`stepsSeen.slice(${from}).map(({ now, wakeAt, tasks }) => ({ waitMilliseconds: wakeAt - now, tasksLeft: tasks.started - tasks.finished }))`);
 
-// Mission Control's telemetry publishes 30 times a second, so each of the
+// Log Tail's rate publishes 30 times a second, so each of the
 // page's waits ends by the next publication.
 const producerMilliseconds = 2_000;
 const producerPeriodMilliseconds = 1000 / 30;
 const producedFramesFewest = 2;
-const missionFramesBefore = await evaluate("tour.framesDrawn");
+const logFramesBefore = await evaluate("tour.framesDrawn");
 await pause(producerMilliseconds);
-const missionFrames = (await evaluate("tour.framesDrawn")) - missionFramesBefore;
-const missionSteps = await stepsSince(0);
-if (missionFrames < producedFramesFewest) await fail(`Mission Control drew ${missionFrames} frames in ${producerMilliseconds / 1000} s of its producers publishing`);
-const missionLongestWait = Math.max(...missionSteps.map((step) => step.waitMilliseconds));
-if (missionLongestWait > producerPeriodMilliseconds + 1) await fail(`the page waited ${missionLongestWait.toFixed(1)} ms between Mission Control's publications, ${producerPeriodMilliseconds.toFixed(1)} ms apart`);
+const logFrames = (await evaluate("tour.framesDrawn")) - logFramesBefore;
+const logSteps = await stepsSince(0);
+if (logFrames < producedFramesFewest) await fail(`Log Tail drew ${logFrames} frames in ${producerMilliseconds / 1000} s of its producers publishing`);
+const logLongestWait = Math.max(...logSteps.map((step) => step.waitMilliseconds));
+if (logLongestWait > producerPeriodMilliseconds + 1) await fail(`the page waited ${logLongestWait.toFixed(1)} ms between Log Tail's publications, ${producerPeriodMilliseconds.toFixed(1)} ms apart`);
 
 await expectDrawnAfter("Ctrl+PageUp", previousScreen);
-const galleryStepsFrom = (await evaluate("stepsSeen.length")) - 1;
-const loadsFinished = `tour.tasks.started > ${missionTasks.started} && tour.tasks.finished === tour.tasks.started`;
+const photoStepsFrom = (await evaluate("stepsSeen.length")) - 1;
+const loadsFinished = `tour.tasks.started > ${logTasks.started} && tour.tasks.finished === tour.tasks.started`;
 for (let finishedBefore = -1, unchangedSince = Date.now(); !(await evaluate(loadsFinished)); await pause(50)) {
   const finished = await evaluate("tour.tasks.finished");
   if (finished !== finishedBefore) [finishedBefore, unchangedSince] = [finished, Date.now()];
-  if (Date.now() - unchangedSince > settleMilliseconds) await fail(`no task of the Gallery's tiles or Mission Control's producers finished for ${settleMilliseconds / 1000} s, ${finished} of ${await evaluate("tour.tasks.started")}`);
+  if (Date.now() - unchangedSince > settleMilliseconds) await fail(`no task of the photos or Log Tail's producers finished for ${settleMilliseconds / 1000} s, ${finished} of ${await evaluate("tour.tasks.started")}`);
 }
-const gallerySteps = await stepsSince(galleryStepsFrom);
-if (gallerySteps.some((step) => step.tasksLeft > 0 && step.waitMilliseconds === Infinity)) await fail("the page waited for input while the Gallery's tiles or Mission Control's producers were left");
-const galleryTasks = await evaluate("tour.tasks");
-const galleryIdle = await idleFrames("the Gallery, its tiles loaded");
+const photoSteps = await stepsSince(photoStepsFrom);
+if (photoSteps.some((step) => step.tasksLeft > 0 && step.waitMilliseconds === Infinity)) await fail("the page waited for input while the photos or Log Tail's producers were left");
+const photoTasks = await evaluate("tour.tasks");
+const photoIdle = await idleFrames("Photo Culling, its photos loaded");
 if (page.pageErrors.length > 0) await fail(`the page failed: ${page.pageErrors.join("\n")}`);
 
 clearTimeout(watchdog);
@@ -203,8 +203,8 @@ await page.close();
 const perSecond = ({ drawn, animation }) => `${(drawn / (idleMilliseconds / 1000)).toFixed(1)} frames a second of the display's ${(animation / (idleMilliseconds / 1000)).toFixed(0)}`;
 console.log(
   `check_site: isolated by its service worker after one reload; ${distinctColors} colors, the newest frame declared in ${frameMicroseconds.toFixed(0)} µs; ` +
-    `idle, ${perSecond(welcomeIdle)} on Welcome and ${perSecond(galleryIdle)} on the Gallery; ` +
+    `idle, ${perSecond(overviewIdle)} on the Overview and ${perSecond(photoIdle)} on Photo Culling; ` +
     `woken and drawn by the mouse over the rail, which shows the pointer, and by Ctrl+PageDown; ` +
-    `${missionTasks.started} tasks started after the click on Mission Control, ${(missionFrames / (producerMilliseconds / 1000)).toFixed(0)} frames a second of its producers, ` +
-    `and ${galleryTasks.finished - missionTasks.finished} tasks finished without input on the Gallery`,
+    `${logTasks.started} tasks started after the click on Log Tail, ${(logFrames / (producerMilliseconds / 1000)).toFixed(0)} frames a second of its producers, ` +
+    `and ${photoTasks.finished - logTasks.finished} tasks finished without input on Photo Culling`,
 );

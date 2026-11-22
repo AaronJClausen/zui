@@ -1,6 +1,7 @@
-//! zui's tour: every feature of zui on screens of its own, for any host,
-//! renderer and font system. A target names the three, and `zui_app` runs
-//! it:
+//! zui's tour: zui shown four ways, for any host, renderer and font
+//! system: an operations console built on it, the same console with each
+//! feature pointed out, real problems solved plainly, and pages built to
+//! impress. A target names the three, and `zui_app` runs it:
 //!
 //! ```zig
 //! const App = zui_tour.App(.{ .Host = zui_raylib.Host, .Renderer = zui_raylib.Renderer, .Text = zui_truetype.Text, .renderer_name = "raylib" });
@@ -13,9 +14,9 @@
 //! The tour gives the font system Atkinson Hyperlegible, its bold and
 //! Liberation Mono from `zui_fonts`, and lays text out for the placement
 //! the renderer draws. A screen is offered only when the renderer draws
-//! what it needs: `transforms` needs `.transform`, `materials` needs
-//! `.material` with a `MaterialHandle` of patterns, and the frost of
-//! `light_and_depth` needs `.backdrop_blur`.
+//! what it needs: `clickable_chaos` needs `.transform`. The light lab
+//! draws a material only for a `MaterialHandle` of patterns, and frost
+//! only with `.backdrop_blur`; otherwise it shows what they lower to.
 
 const std = @import("std");
 const builtin = @import("builtin");

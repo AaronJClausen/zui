@@ -316,7 +316,7 @@ jobs:
           grep "diagnostics ok: true" cycle.log
       - name: Screenshot the tour's screens without crashing
         run: |
-          for screen in welcome gallery mission_control typography light_and_depth; do
+          for screen in overview harbor x_ray log_tail light_lab; do
             xvfb-run --auto-servernum zig build tour -- --screenshot "$PWD/tour-$screen.png" --screen $screen
           done
       # Xvfb draws through software OpenGL on a shared runner, so the CPU it
@@ -325,7 +325,7 @@ jobs:
         run: |
           set -o pipefail
           timeout 60 xvfb-run --auto-servernum zig build tour -- --measure-idle 2>&1 | grep "^idle" | tee idle.log
-          echo "The tour's welcome screen under Xvfb, $(cat idle.log)" >> "$GITHUB_STEP_SUMMARY"
+          echo "The tour's overview under Xvfb, $(cat idle.log)" >> "$GITHUB_STEP_SUMMARY"
       - name: Draw the showcase
         run: |
           set -o pipefail
@@ -474,7 +474,7 @@ jobs:
         run: |
           set -o pipefail
           timeout 60 zig build tour -- --measure-idle 2>&1 | grep "^idle" | tee idle.log
-          echo "The tour's welcome screen under a headless Weston, $(cat idle.log)" >> "$GITHUB_STEP_SUMMARY"
+          echo "The tour's overview under a headless Weston, $(cat idle.log)" >> "$GITHUB_STEP_SUMMARY"
       - name: Draw the showcase, by the sokol renderer
         run: |
           set -o pipefail

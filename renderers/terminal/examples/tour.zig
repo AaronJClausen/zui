@@ -3,9 +3,9 @@
 //!
 //! ```sh
 //! zig build tour                                 # in this terminal; Ctrl+C or Ctrl+Q quits
-//! zig build tour -- --screen box_storm           # start on one screen
+//! zig build tour -- --screen break_it            # start on one screen
 //! zig build tour -- --frames 300 --cycle 30      # visit every screen, 30 frames each, then quit
-//! zig build tour -- --dump --screen typography   # print a screen's glyphs, with no terminal
+//! zig build tour -- --dump --screen harbor   # print a screen's glyphs, with no terminal
 //! zig build tour -- --dump --every-screen        # print every offered screen's, failing on text cut short
 //! ```
 
@@ -32,7 +32,7 @@ pub fn main(init: std.process.Init) !void {
             std.log.err("{t}; --dump takes --screen <name> or --every-screen", .{err});
             return err;
         };
-        const screen = options.screen orelse .welcome;
+        const screen = options.screen orelse .overview;
         if (std.mem.indexOfScalar(zui_tour.Screen, App.kit.offered_screens, screen) == null) {
             std.log.err("a terminal does not draw everything {t} needs, so the tour does not offer it", .{screen});
             return error.ScreenNotOffered;

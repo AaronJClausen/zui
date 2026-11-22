@@ -14,10 +14,10 @@ const kit = tour_session.kit;
 const Ui = tour_session.Ui;
 const Screen = kit.Screen;
 
-/// The rail's fifth entry, Mission Control, on a canvas 1280 by 800 CSS
+/// The rail's fifth entry, Log Tail, on a canvas 1280 by 800 CSS
 /// pixels.
 const rail_entry: [2]f32 = .{ 50, 266 };
-const rail_entry_screen: Screen = .mission_control;
+const rail_entry_screen: Screen = .log_tail;
 const rail_entry_id: zui.Id = .indexed("rail_item", @intFromEnum(rail_entry_screen));
 
 /// What one record must hold, its events' instants and scancodes left out,
@@ -51,11 +51,11 @@ const expected_records = [_]ExpectedRecord{
     },
     .{
         .events = &.{ .{ .key_down = key(.control, control) }, .{ .key_down = key(.digit_3, control) }, .{ .key_up = key(.digit_3, control) }, .{ .key_up = key(.control, .{}) } },
-        .screen_after = .box_storm,
+        .screen_after = .x_ray,
     },
     .{
         .events = &.{ .{ .key_down = key(.control, control) }, .{ .key_down = key(.page_down, control) }, .{ .key_up = key(.page_down, control) }, .{ .key_up = key(.control, .{}) } },
-        .screen_after = .gallery,
+        .screen_after = .photo_cull,
     },
     .{ .events = &.{ .{ .key_down = key(.a, .{}) }, .{ .text = "a" }, .{ .key_up = key(.a, .{}) }, .{ .key_down = key(.digit_2, .{}) }, .{ .text = "é" }, .{ .key_up = key(.digit_2, .{}) } } },
     .{ .events = &.{.{ .wheel = .{ .position = wheeled_at, .delta = .{ 0, 120 }, .at = .zero } }} },

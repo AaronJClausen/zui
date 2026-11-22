@@ -4,7 +4,7 @@
 //!
 //! ```sh
 //! zig build tour                               # interactive window
-//! zig build tour -- --screen box_storm         # start on one screen
+//! zig build tour -- --screen break_it          # start on one screen
 //! zig build tour -- --frames 300 --cycle 30    # visit every screen, 30 frames each, then quit
 //! zig build tour -- --measure-idle             # report the CPU time used over 10 idle seconds
 //! zig build tour -- --screenshot tour.bmp      # save the window after a few frames, then quit (Windows)

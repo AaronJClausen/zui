@@ -161,10 +161,10 @@ const Script = struct {
 
     const Step = struct { screen: zui_tour.Screen, key: ?zui.Key };
     const steps = [_]Step{
-        .{ .screen = .welcome, .key = null },
-        .{ .screen = .layout_lab, .key = .digit_2 },
-        .{ .screen = .gallery, .key = .digit_4 },
-        .{ .screen = .typography, .key = .digit_9 },
+        .{ .screen = .overview, .key = null },
+        .{ .screen = .harbor, .key = .digit_2 },
+        .{ .screen = .photo_cull, .key = .digit_4 },
+        .{ .screen = .time_machine, .key = .digit_9 },
     };
 
     fn post(self: *Script, record: *zui.RecordBuilder, now: zui.Instant) void {
