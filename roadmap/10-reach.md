@@ -509,8 +509,36 @@ nothing. The client submits each frame it decodes through the renderer
 checks the renderer's drawing against the sokol renderer's: `test-demo`
 in Debug and ReleaseSafe, `test-draw`, `test-input` and `test-site` (also
 in ReleaseSmall, where `zui-web.wasm` is 80 KB, from 82) pass. The
-decision on where the host runs is recorded under *Made*. Slice 2, the
-host's Zig half, is next.
+decision on where the host runs is recorded under *Made*.
+
+Slice 2 is done: `zui_web.HostOn(Platform)` (`hosts/web/src/host.zig`)
+is the host's logic, a pushed host whose `zuiRun` is `noreturn` exactly
+when its platform's `run` is. `Platform` declares `now`, `schedule(Schedule)`
+(`.animation_frame`, `.timer` at an instant, `.input`, `.ended`), `wake`
+(from any thread), `showCursor` and `run(Turns)`, each checked, a
+compile error pinned in `hosts/web/tests/compile_errors/`. The page's
+canvas arrives by id with its CSS size and `devicePixelRatio`
+(`attachCanvas`, `resize`), and the driver starts on the first turn
+after it; its events, read through `browser_input`, wait in an inbox of
+256 events and 1,024 text bytes in CSS pixels, the page's own
+coordinates, and a poll converts them to layout units over the zoom, as
+the Linux host converts surface coordinates; overflow is counted in the
+record. Each turn steps a `SteppedIo` (`SteppedIo.behind(io)`, by its
+vtable) to the page's clock, steps the driver, and schedules the next
+from its `NextFrame` folded with the `SteppedIo`'s next wake by `sooner`;
+a wake during the step, or input, makes it an animation frame. A lost
+context suspends the surfaces on the next turn and its return resumes
+them; the cursor reaches the platform only when it changes. On a
+scripted platform whose loop waits on the real clock it passes
+`expectPushedHostConforms` in Debug, ReleaseFast and ReleaseSafe and
+under ThreadSanitizer, with nine tests of its own; `check` compiles it
+for `wasm32-freestanding` on a platform of imports nothing runs
+(`src/browser_host_check.zig`), and `test-demo` passes in Debug and
+ReleaseSafe. The browser's platform is left to slice 3, since its
+imports and exports are one protocol with `web/host_worker.mjs`: how a
+task's worker wakes the host's, and whether the page's events cross as
+one export each, as the client's do, or as batches. Slice 3, the browser
+and the tour on it, is next.
 
 ## 10-reach:03-services — Services
 

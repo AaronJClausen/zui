@@ -312,7 +312,7 @@ roadmap item named:
 | the environment has no accent; the Linux host passes over the portal's `accent-color` | `Environment.accent`, from every host (SPEC.md §7.2) | `core/src/`, `hosts/` | `11-polish:18-system-accent` |
 | `zui_widgets.DefaultSkin` follows the environment's theme, with a `Theme` for light and one for dark, and leaves `contrast` and `text_scale` unread | `zui_widgets.DesignSkin`, every control styled from tokens (SPEC.md §16.7, §19.2) | `core/zui_widgets/` | `11-polish:19-default-design` |
 | no review of a component's permutations | the review app, its verdicts, its report and the workbench (SPEC.md §18.8) | `apps/review/` | `11-polish:22-appearance-review`, `11-polish:23-design-workbench` |
-| no host gives a `.web` surface: `zui_webgl.Renderer` draws on the canvases the client's page names, and the tour runs in a worker on a stepped host whose frames reach the page over `zui_wire` | a web host whose platform pushes its loop, drawing on a `.web` canvas (SPEC.md §16.3, §16.4) | `hosts/web/` | `10-reach:02-web-host` |
+| no host gives a `.web` surface in the browser: `zui_web.HostOn(Platform)` holds the web host's logic, checked on a scripted platform, but no platform over the browser's imports runs it; `zui_webgl.Renderer` draws on the canvases the client's page names, and the tour runs in a worker on a stepped host whose frames reach the page over `zui_wire` | a web host whose platform pushes its loop, drawing on a `.web` canvas (SPEC.md §16.3, §16.4) | `hosts/web/` | `10-reach:02-web-host` |
 | `zui_debug`'s inspector runs in the application's process; a frame on the wire carries no elements for it | over the wire, the inspector runs in another process (SPEC.md §19.7) | `core/zui_debug/`, `core/zui_wire/` | not yet queued |
 | a frame on the wire carries no chrome regions, and the wire host declares no `zuiChromeRegions`, so a remote window keeps the system's title bar | chrome over the wire | `core/zui_wire/` | not yet queued |
 | the sokol renderer attaches and detaches only `.win32` windows, so a lost `.wayland` or `.library` surface cannot be given back: `zuiAttachSurface` returns `UnsupportedSurface`, and `resumeSurfaces` with it | a renderer that a platform may take surfaces from keeps each surface's resources in `zuiAttachSurface` and `zuiDetachSurface` | `renderers/sokol/` | the first host that loses a surface (Android) |
@@ -515,7 +515,10 @@ a Web Worker through `src/tour_session.zig`, which steps a
 stepped host over the page's records and a renderer that declares what
 `zui_webgl.Renderer` declares and writes each frame as wire bytes for the
 page, folding the `Io`'s next wake into the session's with
-`NextFrame.sooner`. `web/` holds the page, its service worker, the worker glue and the
+`NextFrame.sooner`. `src/host.zig` is the web host's logic,
+`HostOn(Platform)`, a pushed host over a platform type that gives it the
+page's clock, events and event loop, tested natively on a scripted one
+and compiled for the browser by `src/browser_host_check.zig`. `web/` holds the page, its service worker, the worker glue and the
 Node scripts the checks run, and `tools/` the native programs they run:
 the tour's stream (`demo_stream.zig`), its frames in a worker's ticks
 (`tour_frames.zig`), the sokol renderer's drawing of them

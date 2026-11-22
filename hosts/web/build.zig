@@ -1,11 +1,16 @@
 const std = @import("std");
 
+const compile_error_cases = [_]struct { name: []const u8, expected_error: []const u8 }{
+    .{ .name = "platform_without_run", .expected_error = "zui_web: platform_without_run.PlatformWithoutRun is not a web host's platform: missing `run`, which must be fn (*platform_without_run.PlatformWithoutRun, zui_web.Turns) !void, or noreturn" },
+    .{ .name = "platform_clock_in_milliseconds", .expected_error = "zui_web: platform_clock_in_milliseconds.PlatformClockInMilliseconds.now must be fn (*platform_clock_in_milliseconds.PlatformClockInMilliseconds) zui.Instant, found fn (*platform_clock_in_milliseconds.PlatformClockInMilliseconds) f64" },
+};
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const core_options: CoreOptions = .declare(b);
 
-    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "tools" };
+    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "tests", "tools" };
     b.step("fmt", "Format all Zig sources").dependOn(&b.addFmt(.{ .paths = formatted_paths }).step);
     b.step("fmt-check", "Fail if any Zig source is not formatted").dependOn(&b.addFmt(.{ .paths = formatted_paths, .check = true }).step);
 
@@ -13,15 +18,34 @@ pub fn build(b: *std.Build) void {
     // step here needs it.
     if (truetypeDeclaring(b, core_options.on(target, optimize)) == null) return;
     const web_module = webModule(b, "src/root.zig", target, optimize, core_options);
+    web_module.addImport("zui_testing", b.dependency("zui_core", core_options.on(target, optimize)).module("zui_testing"));
+    web_module.sanitize_thread = core_options.sanitize_thread;
     const unit_tests = b.addTest(.{ .root_module = web_module });
-    b.step("test", "Run the unit tests").dependOn(&b.addRunArtifact(unit_tests).step);
+    const test_step = b.step("test", "Run the unit tests, the web host's conformance on a scripted page, and the compile errors");
+    test_step.dependOn(&b.addRunArtifact(unit_tests).step);
+    for (compile_error_cases) |case| {
+        const failing_object = b.addObject(.{
+            .name = case.name,
+            .root_module = b.createModule(.{
+                .root_source_file = b.path(b.fmt("tests/compile_errors/{s}.zig", .{case.name})),
+                .target = target,
+                .imports = &.{
+                    .{ .name = "zui", .module = b.dependency("zui_core", core_options.on(target, optimize)).module("zui") },
+                    .{ .name = "zui_web", .module = web_module },
+                },
+            }),
+        });
+        failing_object.expect_errors = .{ .contains = case.expected_error };
+        test_step.dependOn(&failing_object.step);
+    }
 
     const browser_target = b.resolveTargetQuery(.{ .cpu_arch = .wasm32, .os_tag = .freestanding });
     const client = browserModule(b, "zui-web", "src/browser.zig", browser_target, optimize, core_options);
     b.getInstallStep().dependOn(&b.addInstallArtifact(client, .{ .dest_dir = .{ .override = .{ .custom = "web" } } }).step);
-    const check_step = b.step("check", "Compile the unit tests, the client and the tour's worker for the browser, and the native tools that run the tour, without running them");
+    const check_step = b.step("check", "Compile the unit tests, the client, the web host and the tour's worker for the browser, and the native tools that run the tour, without running them");
     check_step.dependOn(&unit_tests.step);
     check_step.dependOn(&client.step);
+    check_step.dependOn(&browserModule(b, "zui-web-host-check", "src/browser_host_check.zig", browser_target, optimize, core_options).step);
 
     const test_demo = b.step("test-demo", "Stream the tour, headless, to the browser's client under Node, and check every frame decodes to what was drawn; run the tour in a worker under Node, and check every frame is the one it draws natively");
     const test_draw = b.step("test-draw", "Draw frames of the tour in headless Chromium, with one sample per pixel and with four, and check each against the sokol renderer drawing it alike; needs a display");

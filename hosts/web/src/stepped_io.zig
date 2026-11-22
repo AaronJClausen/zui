@@ -112,6 +112,16 @@ pub const SteppedIo = struct {
         return .{ .userdata = self, .vtable = &vtable };
     }
 
+    /// The `SteppedIo` that `stepped_or_not` is the `io()` of, or null
+    /// when it is another `Io`.
+    ///
+    /// ```zig
+    /// if (SteppedIo.behind(io)) |stepped| stepped.step(now_nanoseconds);
+    /// ```
+    pub fn behind(stepped_or_not: Io) ?*SteppedIo {
+        return if (stepped_or_not.vtable == &vtable) of(stepped_or_not.userdata) else null;
+    }
+
     /// Sets every clock to `now_nanoseconds`, which never goes back, and
     /// gives each task whose sleep has ended, or that was woken or started,
     /// its turn until every task waits for a later instant or another task.

@@ -6,6 +6,11 @@ pub const FrameStream = @import("frame_stream.zig").FrameStream;
 pub const DemoUi = @import("demo_ui.zig").DemoUi;
 pub const RecordStream = @import("record_stream.zig").RecordStream;
 pub const SteppedIo = @import("stepped_io.zig").SteppedIo;
+const host = @import("host.zig");
+pub const HostOn = host.HostOn;
+pub const Schedule = host.Schedule;
+pub const Turns = host.Turns;
+pub const BrowserPointer = host.BrowserPointer;
 const browser_input = @import("browser_input.zig");
 const DrawList = @import("zui_webgl").DrawList;
 const Text = @import("text.zig").Text;
@@ -580,6 +585,7 @@ test "a material is a batch of its own, its vertices at their place in the eleme
 }
 
 test {
+    _ = host;
     _ = @import("stepped_io.zig");
     _ = @import("text.zig");
 }

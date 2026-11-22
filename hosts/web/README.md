@@ -4,9 +4,9 @@
 application streamed over `zui_wire` (`09-seeing-the-ui:04-demo-in-browser`),
 the [tour](../../apps/tour/README.md) in a Web Worker, and the page that
 puts them together, published to GitHub Pages by the Pages workflow;
-later a web host with a canvas surface (`10-reach:02-web-host`). It
-exports no module yet: its steps run from `hosts/web/` (see
-*Development*). Everything under its `src/` that the browser runs
+and the web host's logic, `HostOn(Platform)`, which a canvas surface in
+a worker will run on (`10-reach:02-web-host`). It exports no module yet:
+its steps run from `hosts/web/` (see *Development*). Everything under its `src/` that the browser runs
 compiles for `wasm32-freestanding`.
 
 ## Development
@@ -22,9 +22,9 @@ display for the sokol renderer's OpenGL window (CI runs it under
 
 | Command | What it does |
 |---|---|
-| `zig build test` | run the client's and the stepped `Io`'s unit tests |
+| `zig build test` | run the client's, the stepped `Io`'s and the web host's unit tests, the web host's conformance on a scripted page, and its compile errors |
 | `zig build` | write the client, `zig-out/web/zui-web.wasm`, and the tour for a worker, `zig-out/web/zui-web-tour.wasm` |
-| `zig build check` | compile without running: the client and the tour's worker for `wasm32-freestanding`, and the native tools that run the tour |
+| `zig build check` | compile without running: the client, the web host's logic and the tour's worker for `wasm32-freestanding`, and the native tools that run the tour |
 | `zig build test-demo` | stream the tour to the client under Node, and check every frame decodes to what was drawn; run the tour in a worker under Node, and check every frame is the one the tour draws natively |
 | `zig build test-draw` | draw a frame of each of the tour's screens in headless Chromium, with one sample per pixel and with four, and check each against the sokol renderer drawing it alike |
 | `zig build test-input` | give the page input in headless Chromium, run the tour on the records the client wrote of it, and check the tour took them and the page shows the cursor it asks for |
@@ -118,6 +118,36 @@ byte for byte, the frame the tour draws natively on the same ticks
 (`tools/tour_frames.zig`), that its tasks ran alike, and that the client
 decodes every frame. Real timings differ from run to run, so there both
 time frames on a steady stopwatch, 1 µs a reading.
+
+**The web host** is `HostOn(Platform)` (`src/host.zig`), a pushed host
+whose loop is the page's event loop, with its logic apart from the
+browser: `Platform` gives it the page's clock (`now`), takes the next
+turn as the host schedules it (`schedule`: an animation frame, a timer at
+an instant, nothing until input, or the run's end), wakes it from any
+thread (`wake`), shows the canvas's cursor (`showCursor`), and runs the
+event loop (`run(Turns)`, which returns, or is `noreturn` where the loop
+is the browser's); a platform missing one, or of another type, is a
+compile error naming it. From the page the platform hands the host the
+canvas, by the id the page gave it, with its size in CSS pixels and
+`devicePixelRatio` (`attachCanvas`, `resize`), its pointers, wheel,
+keys and text, read as `browser_input` maps the browser's events, and a
+lost or restored WebGL context (`loseContext`, `restoreContext`). Each
+turn steps the `Io` to the page's clock when it is a `SteppedIo`,
+polls and steps the application, and schedules the next as the step's
+`NextFrame` asks, folded with the `SteppedIo`'s next wake: an animation
+frame at once, a timer at an instant, or nothing until input; a wake
+from a task during the step, or input, makes it due at once. The driver
+starts on the first turn after the canvas arrives, its surface is
+`.web` with that id, a lost context suspends the surfaces on the next
+turn and its return resumes them, and the cursor goes to the platform
+only when it changes. Input waits in an inbox of 256 events and 1,024
+bytes of text, in CSS pixels until a poll converts them to layout units
+over the application's zoom; what does not fit is dropped and counted
+in the record. `zig build test` runs `zui_testing.expectPushedHostConforms`
+on it over a scripted platform whose loop waits on the real clock, and
+`check` compiles it for `wasm32-freestanding` on a platform of imports.
+The browser's platform, the worker that runs it, and the tour on it are
+next.
 
 **The published page** puts it all together: `web/index.html` starts the
 tour's worker, draws each frame it sends on the canvas, and sends it the
