@@ -33,13 +33,15 @@ pub fn build(b: *std.Build) void {
     });
 
     moveSystemLibrariesOntoModule(raylib_dependency.artifact("raylib"), backend_module);
+    shareFrameworkPaths(raylib_dependency.artifact("raylib"), backend_module);
 
-    const backend_tests = b.addTest(.{ .root_module = backend_module });
-    linkThroughLlvmOnLinux(backend_tests);
-    b.step("test", "Run the backend's unit tests").dependOn(&b.addRunArtifact(backend_tests).step);
+    const check: Check = .{ .step = b.step("check", "Compile the backend, the targets and the renderer suite without producing output"), .links = target.query.isNative() };
+
+    b.step("test", "Run the backend's unit tests").dependOn(&b.addRunArtifact(addTest(b, backend_module)).step);
+    check.compile(addTest(b, backend_module));
 
     // Needs a display, which `test` does not: on Linux CI it runs under Xvfb.
-    const conformance_tests = b.addTest(.{ .root_module = b.createModule(.{
+    const conformance_module = b.createModule(.{
         .root_source_file = b.path("src/conformance.zig"),
         .target = target,
         .optimize = optimize,
@@ -50,13 +52,10 @@ pub fn build(b: *std.Build) void {
             .{ .name = "zui_testing", .module = core.module("zui_testing") },
             .{ .name = "zui_truetype", .module = zui_truetype_module },
         },
-    }) });
-    linkThroughLlvmOnLinux(conformance_tests);
-    b.step("conformance", "Run zui's renderer and host suites against the renderer and the host, in hidden windows").dependOn(&b.addRunArtifact(conformance_tests).step);
+    });
+    b.step("conformance", "Run zui's renderer and host suites against the renderer and the host, in hidden windows").dependOn(&b.addRunArtifact(addTest(b, conformance_module)).step);
+    check.compile(addTest(b, conformance_module));
 
-    const check_step = b.step("check", "Compile the backend, the targets and the renderer suite without producing output");
-    check_step.dependOn(&backend_tests.step);
-    check_step.dependOn(&conformance_tests.step);
     const target_imports: []const std.Build.Module.Import = &.{
         .{ .name = "zui_raylib", .module = backend_module },
         .{ .name = "zui", .module = zui_module },
@@ -70,18 +69,41 @@ pub fn build(b: *std.Build) void {
         .{ .name = "showcase", .description = "Run zui's showcase (`-- --hidden --frames 60` draws 60 frames and quits)" },
     };
     for (apps) |app| {
-        const executable = b.addExecutable(.{
-            .name = b.fmt("zui-raylib-{s}", .{app.name}),
-            .root_module = b.createModule(.{ .root_source_file = b.path(b.fmt("examples/{s}.zig", .{app.name})), .target = target, .optimize = optimize, .imports = target_imports }),
-        });
-        if (target.result.os.tag == .windows) executable.subsystem = .windows;
-        linkThroughLlvmOnLinux(executable);
+        const app_module = b.createModule(.{ .root_source_file = b.path(b.fmt("examples/{s}.zig", .{app.name})), .target = target, .optimize = optimize, .imports = target_imports });
+        const executable = addAppExecutable(b, app.name, app_module);
         b.installArtifact(executable);
-        check_step.dependOn(&executable.step);
+        check.compile(addAppExecutable(b, app.name, app_module));
         const run = b.addRunArtifact(executable);
         if (b.args) |arguments| run.addArgs(arguments);
         b.step(app.name, app.description).dependOn(&run.step);
     }
+}
+
+/// `check` compiles its own copy of each artifact, which nothing else runs
+/// or installs. For another target it asks for no binary, so the build only
+/// analyses the code: linking would need that target's SDK, such as macOS's
+/// frameworks.
+const Check = struct {
+    step: *std.Build.Step,
+    links: bool,
+
+    fn compile(check: Check, artifact: *std.Build.Step.Compile) void {
+        if (check.links) _ = artifact.getEmittedBin();
+        check.step.dependOn(&artifact.step);
+    }
+};
+
+fn addTest(b: *std.Build, module: *std.Build.Module) *std.Build.Step.Compile {
+    const tests = b.addTest(.{ .root_module = module });
+    linkThroughLlvmOnLinux(tests);
+    return tests;
+}
+
+fn addAppExecutable(b: *std.Build, app_name: []const u8, module: *std.Build.Module) *std.Build.Step.Compile {
+    const executable = b.addExecutable(.{ .name = b.fmt("zui-raylib-{s}", .{app_name}), .root_module = module });
+    if (module.resolved_target.?.result.os.tag == .windows) executable.subsystem = .windows;
+    linkThroughLlvmOnLinux(executable);
+    return executable;
 }
 
 /// The font system the targets and the renderer suite measure with, once
@@ -118,6 +140,15 @@ fn moveSystemLibrariesOntoModule(library: *std.Build.Step.Compile, module: *std.
             else => index += 1,
         }
     }
+}
+
+/// raylib finds macOS's frameworks through `-iframework` paths of its own
+/// when cross-compiling, which do not reach the artifacts that link it.
+fn shareFrameworkPaths(library: *std.Build.Step.Compile, module: *std.Build.Module) void {
+    for (library.root_module.include_dirs.items) |include_directory| switch (include_directory) {
+        .framework_path, .framework_path_system => |directory| module.addSystemFrameworkPath(directory),
+        else => {},
+    };
 }
 
 /// Core's options as the package depending on this one gave them, each

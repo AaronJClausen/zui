@@ -133,6 +133,7 @@ compiles it:
 | `zig build test` | run the renderer's and host's unit tests |
 | `zig build conformance` | run zui's renderer and host suites against them, in hidden windows; needs a display |
 | `zig build check` | compile the renderer, its tests, the conformance suites and the targets without producing output |
+| `zig build check -Dtarget=aarch64-macos` | analyse the same for another target without linking, which would need its SDK; it catches what only that target rejects, such as a cast its alignment forbids |
 | `zig build tour` | run the tour |
 | `zig build tour -- --screen photo_cull` | start on one screen |
 | `zig build tour -- --frames 900 --cycle 40` | visit every screen, 40 frames each, then quit; add `--hidden` to do it in a hidden window |

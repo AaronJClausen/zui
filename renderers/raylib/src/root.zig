@@ -766,10 +766,10 @@ const Offscreen = struct {
         const GenRenderbuffers = *const fn (count: c_int, ids: [*]c_uint) callconv(.c) void;
         const BindRenderbuffer = *const fn (target: c_uint, id: c_uint) callconv(.c) void;
         const RenderbufferStorageMultisample = *const fn (target: c_uint, samples: c_int, format: c_uint, width: c_int, height: c_int) callconv(.c) void;
-        const gen: GenRenderbuffers = @ptrCast(rlgl.rlGetProcAddress("glGenRenderbuffers") orelse return null);
-        const bind: BindRenderbuffer = @ptrCast(rlgl.rlGetProcAddress("glBindRenderbuffer") orelse return null);
-        const storage: RenderbufferStorageMultisample = @ptrCast(rlgl.rlGetProcAddress("glRenderbufferStorageMultisample") orelse return null);
-        const delete: @FieldType(Multisampled, "delete_renderbuffers") = @ptrCast(rlgl.rlGetProcAddress("glDeleteRenderbuffers") orelse return null);
+        const gen: GenRenderbuffers = @ptrCast(@alignCast(rlgl.rlGetProcAddress("glGenRenderbuffers") orelse return null));
+        const bind: BindRenderbuffer = @ptrCast(@alignCast(rlgl.rlGetProcAddress("glBindRenderbuffer") orelse return null));
+        const storage: RenderbufferStorageMultisample = @ptrCast(@alignCast(rlgl.rlGetProcAddress("glRenderbufferStorageMultisample") orelse return null));
+        const delete: @FieldType(Multisampled, "delete_renderbuffers") = @ptrCast(@alignCast(rlgl.rlGetProcAddress("glDeleteRenderbuffers") orelse return null));
 
         var color: [1]c_uint = .{0};
         gen(1, &color);
