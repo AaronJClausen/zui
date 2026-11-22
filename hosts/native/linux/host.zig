@@ -11,6 +11,7 @@ pub const text_input = @import("text_input.zig");
 pub const file_watch = @import("file_watch.zig");
 pub const services = @import("services.zig");
 pub const chrome = @import("chrome.zig");
+pub const material = @import("material.zig");
 
 const Proxy = wayland.Proxy;
 
@@ -51,6 +52,13 @@ const Proxy = wayland.Proxy;
 /// `window_maximized`. A compositor that insists on drawing its own title
 /// bar gets it, and `custom_title_bar` is then false.
 ///
+/// A window opened with a `material` other than `.none` gets a surface
+/// that holds alpha and a blur behind the whole of it, through
+/// `ext_background_effect_v1`, or KWin's `org_kde_kwin_blur` where only
+/// that is offered, and reports `system_material` true unless reduced
+/// transparency is on. Where the compositor blurs through neither, the
+/// window stays opaque and reports it false.
+///
 /// `deinit` closes every window; the host must not move after `init`,
 /// since the compositor's listeners and the signal handler hold pointers
 /// into it. A window opened with `visible = false` is a surface without a
@@ -65,7 +73,7 @@ const Proxy = wayland.Proxy;
 /// ```
 pub const Host = struct {
     pub const zui_surfaces: zui.SurfaceKinds = .initOne(.wayland);
-    pub const zui_capabilities: zui.HostCapabilities = .{ .windows = .many, .custom_title_bar = true };
+    pub const zui_capabilities: zui.HostCapabilities = .{ .windows = .many, .system_material = true, .custom_title_bar = true };
 
     /// The windows open at once, `.main` among them.
     pub const max_windows = 4;
@@ -150,10 +158,18 @@ pub const Host = struct {
     /// Answers services as a test says instead of handing them to the
     /// bus, so nothing shows or opens.
     service_fake: ?*services.ServiceFake = null,
+    /// Behaves as under a compositor that blurs behind no window, so the
+    /// fallback can be seen where one does.
+    system_material_unavailable: bool = false,
+    /// What the compositor offers to blur through, in place of what it
+    /// advertises, for tests that must not depend on the compositor: the
+    /// blur managers are then not bound, and nothing is sent.
+    forced_blur_offers: ?material.BlurOffers = null,
 
     display: *wayland.Display,
     registry: *Proxy,
     globals: Globals,
+    blur_offers: material.BlurOffers,
     pointer: ?*Proxy,
     keyboard: ?*Proxy,
     cursor_shape_device: ?*Proxy,
@@ -230,6 +246,7 @@ pub const Host = struct {
         theme: zui.Environment.Theme = .light,
         contrast: zui.Environment.Contrast = .normal,
         reduced_motion: bool = false,
+        reduced_transparency: bool = false,
         on_battery: bool = false,
         power_saver: bool = false,
     };
@@ -240,7 +257,9 @@ pub const Host = struct {
         theme: zui.Environment.Theme,
         contrast: zui.Environment.Contrast,
         reduced_motion: bool,
+        reduced_transparency: bool,
         power: zui.Environment.Power,
+        system_material: bool,
         custom_title_bar: bool,
         window_maximized: bool,
     };
@@ -255,6 +274,8 @@ pub const Host = struct {
         fractional_scale_manager: ?*Proxy = null,
         text_input_manager: ?*Proxy = null,
         decoration_manager: ?*Proxy = null,
+        background_effect_manager: ?*Proxy = null,
+        kde_blur_manager: ?*Proxy = null,
     };
 
     const Inbox = struct {
@@ -352,6 +373,7 @@ pub const Host = struct {
         requests: zui.HostRequests = .{},
         applied_cursor: ?zui.Cursor = null,
         window_chrome: chrome.WindowChrome = .{},
+        window_material: material.WindowMaterial = .{},
         /// Null until the window has reported the whole environment.
         reported_environment: ?ReportedEnvironment = null,
 
@@ -410,7 +432,9 @@ pub const Host = struct {
                 .theme = settings.theme,
                 .contrast = settings.contrast,
                 .reduced_motion = settings.reduced_motion,
+                .reduced_transparency = settings.reduced_transparency,
                 .power = if (settings.power_saver) .saver else if (settings.on_battery) .battery else .plugged,
+                .system_material = self.showsBlur() and !settings.reduced_transparency,
                 .custom_title_bar = self.window_chrome.isCustom(),
                 .window_maximized = self.window_chrome.maximized,
             };
@@ -424,7 +448,19 @@ pub const Host = struct {
             self.reported_environment = current;
         }
 
+        /// The window holds alpha and the compositor still offers the blur
+        /// it was opened with.
+        fn showsBlur(self: *const Window) bool {
+            const protocol = self.window_material.protocol orelse return false;
+            return self.host.blur_offers.offers(protocol);
+        }
+
+        fn coverWithBlur(self: *Window) void {
+            self.window_material.cover(self.host.globals.compositor.?, self.surface_size);
+        }
+
         fn destroyObjects(self: *Window) void {
+            self.window_material.deinit();
             if (self.fractional_scale) |fractional_scale| wayland.destroy(fractional_scale, wayland.fractional_scale_destroy);
             if (self.viewport) |viewport| wayland.destroy(viewport, wayland.viewport_destroy);
             self.window_chrome.deinit();
@@ -496,14 +532,19 @@ pub const Host = struct {
         const forced_scale = self.forced_scale;
         const bus_addresses = self.bus_addresses;
         const service_fake = self.service_fake;
+        const system_material_unavailable = self.system_material_unavailable;
+        const forced_blur_offers = self.forced_blur_offers;
         self.* = .{
             .io = io,
             .forced_scale = forced_scale,
             .bus_addresses = bus_addresses,
             .service_fake = service_fake,
+            .system_material_unavailable = system_material_unavailable,
+            .forced_blur_offers = forced_blur_offers,
             .display = display,
             .registry = undefined,
             .globals = .{},
+            .blur_offers = forced_blur_offers orelse .{},
             .pointer = null,
             .keyboard = null,
             .cursor_shape_device = null,
@@ -633,6 +674,11 @@ pub const Host = struct {
             if (wayland.wl_display_roundtrip(self.display) < 0) return error.CompositorUnreachable;
         }
         if (!window.configured) return error.WindowNotConfigured;
+        // After the round trips, which bring the background effect's
+        // capabilities.
+        const offers: material.BlurOffers = if (self.system_material_unavailable) .{} else self.blur_offers;
+        window.window_material.begin(options.material, offers, .{ .background_effect = self.globals.background_effect_manager, .kde_blur = self.globals.kde_blur_manager }, window.surface);
+        window.coverWithBlur();
     }
 
     fn giveToplevelRole(self: *Host, window: *Window, options: zui.WindowOptions) !void {
@@ -703,6 +749,8 @@ pub const Host = struct {
         if (self.globals.viewporter) |viewporter| wayland.destroy(viewporter, wayland.viewporter_destroy);
         self.releaseDevices(.{});
         if (self.globals.decoration_manager) |manager| wayland.destroy(manager, wayland.decoration_manager_destroy);
+        if (self.globals.background_effect_manager) |manager| wayland.destroy(manager, wayland.background_effect_manager_destroy);
+        if (self.globals.kde_blur_manager) |manager| wayland.wl_proxy_destroy(manager);
         if (self.globals.cursor_shape_manager) |manager| wayland.destroy(manager, wayland.cursor_shape_manager_destroy);
         if (self.globals.seat) |seat| {
             if (wayland.wl_proxy_get_version(seat) >= 5) wayland.destroy(seat, wayland.seat_release) else wayland.wl_proxy_destroy(seat);
@@ -733,6 +781,7 @@ pub const Host = struct {
         const surface_coordinates_per_unit = scale * record.params.zoom / pixels_per_surface_coordinate;
         window.surface_coordinates_per_unit = surface_coordinates_per_unit;
         window.sizeViewport();
+        window.coverWithBlur();
         record.begin(.{
             .now = self.now(),
             .viewport = .{ @as(f32, @floatFromInt(window.surface_size[0])) / surface_coordinates_per_unit, @as(f32, @floatFromInt(window.surface_size[1])) / surface_coordinates_per_unit },
@@ -902,7 +951,7 @@ pub const Host = struct {
     /// Asking for a window that is not open panics.
     pub fn zuiSurface(self: *Host, id: zui.WindowId) zui.Surface {
         const window = self.windowById(id) orelse std.debug.panic("zui_host: window {d} is not open", .{@intFromEnum(id)});
-        return .{ .wayland = .{ .display = self.display, .surface = window.surface } };
+        return .{ .wayland = .{ .display = self.display, .surface = window.surface, .transparent = window.window_material.holdsAlpha() } };
     }
 
     pub fn zuiApply(self: *Host, id: zui.WindowId, requests: zui.HostRequests) void {
@@ -1263,6 +1312,7 @@ pub const Host = struct {
             .theme => |theme| settings.theme = theme,
             .contrast => |contrast| settings.contrast = contrast,
             .reduced_motion => |reduced_motion| settings.reduced_motion = reduced_motion,
+            .reduced_transparency => |reduced_transparency| settings.reduced_transparency = reduced_transparency,
             .on_battery => |on_battery| settings.on_battery = on_battery,
             .power_saver => |power_saver| settings.power_saver = power_saver,
             .preparing_for_sleep => |sleeping| return self.deliverToEveryWindow(.{ .lifecycle = if (sleeping) .@"suspend" else .@"resume" }),
@@ -1419,6 +1469,13 @@ pub const Host = struct {
         self.useKeymap(@ptrCast(mapped.ptr)) catch {};
     }
 
+    /// Whether `ext_background_effect_manager_v1` blurs, as its
+    /// `capabilities` event says; a change reaches every window.
+    pub fn onBackgroundEffectCapabilities(self: *Host, capabilities: u32) void {
+        self.blur_offers.background_effect_blurs = capabilities & wayland.background_effect_capability_blur != 0;
+        for (&self.windows) |*window| if (window.in_use) window.reportEnvironmentOnceReported();
+    }
+
     fn onGlobal(self: *Host, registry: *Proxy, name: u32, interface_name: []const u8, version: u32) void {
         const Wanted = struct { interface: *const wayland.Interface, slot: *?*Proxy, highest_version: u32 };
         const wanted = [_]Wanted{
@@ -1435,6 +1492,19 @@ pub const Host = struct {
         for (wanted) |global| {
             if (global.slot.* != null or !std.mem.eql(u8, interface_name, std.mem.span(global.interface.name))) continue;
             global.slot.* = wayland.bind(registry, name, global.interface, @min(version, global.highest_version));
+        }
+        if (self.forced_blur_offers == null) self.bindBlurManager(registry, name, interface_name);
+    }
+
+    fn bindBlurManager(self: *Host, registry: *Proxy, name: u32, interface_name: []const u8) void {
+        const globals = &self.globals;
+        if (globals.background_effect_manager == null and std.mem.eql(u8, interface_name, std.mem.span(wayland.background_effect_manager_interface.name))) {
+            const manager = wayland.bind(registry, name, &wayland.background_effect_manager_interface, 1) orelse return;
+            globals.background_effect_manager = manager;
+            wayland.addListener(manager, &background_effect_manager_listener, self);
+        } else if (globals.kde_blur_manager == null and std.mem.eql(u8, interface_name, std.mem.span(wayland.kde_blur_manager_interface.name))) {
+            globals.kde_blur_manager = wayland.bind(registry, name, &wayland.kde_blur_manager_interface, 1);
+            self.blur_offers.kde_blur = globals.kde_blur_manager != null;
         }
     }
 
@@ -1484,6 +1554,14 @@ pub const Host = struct {
                 windowFrom(data).onClose();
             }
         }.close,
+    };
+
+    const background_effect_manager_listener: wayland.BackgroundEffectManagerListener = .{
+        .capabilities = struct {
+            fn capabilities(data: ?*anyopaque, _: ?*Proxy, flags: u32) callconv(.c) void {
+                hostFrom(data).onBackgroundEffectCapabilities(flags);
+            }
+        }.capabilities,
     };
 
     const toplevel_decoration_listener: wayland.ToplevelDecorationListener = .{
@@ -1691,4 +1769,5 @@ test {
     _ = file_watch;
     _ = services;
     _ = chrome;
+    _ = material;
 }

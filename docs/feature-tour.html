@@ -1173,7 +1173,7 @@ fn wasEverOpened(ui: *Ui) bool {
 
       <article class="feature" id="environment" data-title="Environment">
         <div class="feature-head"><h3>The environment</h3><span class="pill shipped">Shipped</span></div>
-        <p>The host reports the user's settings as events, and <code class="z">ui.environment()</code> holds the current values: theme, contrast, reduced motion and transparency, text scale, locale, reading direction, HDR headroom, power, window focus, and whether the system material (Mica) shows behind the window. the native Windows host reads them from the system, and the native Linux host reads the theme, contrast and reduced motion from the XDG desktop portal and power from UPower and power-profiles-daemon, over D-Bus; where no portal answers, they stay at their defaults.</p>
+        <p>The host reports the user's settings as events, and <code class="z">ui.environment()</code> holds the current values: theme, contrast, reduced motion and transparency, text scale, locale, reading direction, HDR headroom, power, window focus, and whether the system material (Mica on Windows, a compositor's blur on Wayland) shows behind the window. the native Windows host reads them from the system, and the native Linux host reads the theme, contrast and reduced motion from the XDG desktop portal and power from UPower and power-profiles-daemon, over D-Bus, and shows the material where the compositor offers <code class="z">ext_background_effect_v1</code> or KWin's blur; where no portal answers, they stay at their defaults.</p>
 <script type="text/x-zig" data-file="src/ui/palette.zig">
 const Palette = struct { window: ?zui.Color, panel: zui.Color, text: zui.Color, accent: zui.Color };
 

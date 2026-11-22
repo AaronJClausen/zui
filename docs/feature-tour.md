@@ -910,7 +910,7 @@ fn wasEverOpened(ui: *Ui) bool {
 
 ### The environment · *shipped*
 
-The host reports the user's settings as events, and `ui.environment()` holds the current values: theme, contrast, reduced motion and transparency, text scale, locale, reading direction, HDR headroom, power, window focus, and whether the system material (Mica) shows behind the window. the native Windows host reads them from the system, and the native Linux host reads the theme, contrast and reduced motion from the XDG desktop portal and power from UPower and power-profiles-daemon, over D-Bus; where no portal answers, they stay at their defaults.
+The host reports the user's settings as events, and `ui.environment()` holds the current values: theme, contrast, reduced motion and transparency, text scale, locale, reading direction, HDR headroom, power, window focus, and whether the system material (Mica on Windows, a compositor's blur on Wayland) shows behind the window. the native Windows host reads them from the system, and the native Linux host reads the theme, contrast and reduced motion from the XDG desktop portal and power from UPower and power-profiles-daemon, over D-Bus, and shows the material where the compositor offers `ext_background_effect_v1` or KWin's blur; where no portal answers, they stay at their defaults.
 
 `src/ui/palette.zig`
 

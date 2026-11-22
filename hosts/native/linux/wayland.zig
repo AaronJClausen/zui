@@ -65,6 +65,7 @@ pub extern "wayland-client" const wl_data_device_manager_interface: Interface;
 pub extern "wayland-client" const wl_data_device_interface: Interface;
 pub extern "wayland-client" const wl_data_source_interface: Interface;
 pub extern "wayland-client" const wl_data_offer_interface: Interface;
+pub extern "wayland-client" const wl_region_interface: Interface;
 
 pub fn displayProxy(display: *Display) *Proxy {
     return @ptrCast(display);
@@ -91,6 +92,9 @@ pub const no_id: ?*anyopaque = null;
 pub const display_get_registry = 1;
 pub const registry_bind = 0;
 pub const compositor_create_surface = 0;
+pub const compositor_create_region = 1;
+pub const region_destroy = 0;
+pub const region_add = 1;
 pub const surface_destroy = 0;
 pub const surface_commit = 6;
 pub const surface_set_buffer_scale = 8;
@@ -365,6 +369,66 @@ pub const text_input_interface: Interface = .{
     },
 };
 
+pub const background_effect_manager_destroy = 0;
+pub const background_effect_manager_get_background_effect = 1;
+/// `ext_background_effect_manager_v1.capability`'s bit for blur.
+pub const background_effect_capability_blur = 1;
+pub const background_effect_manager_interface: Interface = .{
+    .name = "ext_background_effect_manager_v1",
+    .version = 1,
+    .method_count = 2,
+    .methods = &[_]Message{
+        message("destroy", "", &untyped),
+        message("get_background_effect", "no", &.{ &background_effect_interface, &wl_surface_interface }),
+    },
+    .event_count = 1,
+    .events = &[_]Message{message("capabilities", "u", &untyped)},
+};
+
+pub const background_effect_destroy = 0;
+pub const background_effect_set_blur_region = 1;
+pub const background_effect_interface: Interface = .{
+    .name = "ext_background_effect_surface_v1",
+    .version = 1,
+    .method_count = 2,
+    .methods = &[_]Message{
+        message("destroy", "", &untyped),
+        message("set_blur_region", "?o", &.{&wl_region_interface}),
+    },
+    .event_count = 0,
+    .events = null,
+};
+
+pub const kde_blur_manager_create = 0;
+pub const kde_blur_manager_unset = 1;
+pub const kde_blur_manager_interface: Interface = .{
+    .name = "org_kde_kwin_blur_manager",
+    .version = 1,
+    .method_count = 2,
+    .methods = &[_]Message{
+        message("create", "no", &.{ &kde_blur_interface, &wl_surface_interface }),
+        message("unset", "o", &.{&wl_surface_interface}),
+    },
+    .event_count = 0,
+    .events = null,
+};
+
+pub const kde_blur_commit = 0;
+pub const kde_blur_set_region = 1;
+pub const kde_blur_release = 2;
+pub const kde_blur_interface: Interface = .{
+    .name = "org_kde_kwin_blur",
+    .version = 1,
+    .method_count = 3,
+    .methods = &[_]Message{
+        message("commit", "", &untyped),
+        message("set_region", "?o", &.{&wl_region_interface}),
+        message("release", "", &untyped),
+    },
+    .event_count = 0,
+    .events = null,
+};
+
 pub const RegistryListener = extern struct {
     global: *const fn (?*anyopaque, ?*Proxy, u32, [*:0]const u8, u32) callconv(.c) void,
     global_remove: *const fn (?*anyopaque, ?*Proxy, u32) callconv(.c) void,
@@ -426,6 +490,10 @@ pub const ToplevelDecorationListener = extern struct {
 
 pub const FractionalScaleListener = extern struct {
     preferred_scale: *const fn (?*anyopaque, ?*Proxy, u32) callconv(.c) void,
+};
+
+pub const BackgroundEffectManagerListener = extern struct {
+    capabilities: *const fn (?*anyopaque, ?*Proxy, u32) callconv(.c) void,
 };
 
 pub const DataDeviceListener = extern struct {

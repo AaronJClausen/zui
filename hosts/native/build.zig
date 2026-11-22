@@ -56,6 +56,7 @@ pub fn build(b: *std.Build) void {
     if (has_host) addServicesExample(b, target, optimize, host_module, core, check_step, core_options);
     if (has_host) addTitleBarExample(b, target, optimize, host_module, core, check_step, core_options);
     if (has_host) addManyWindowsExample(b, target, optimize, host_module, core, check_step, core_options);
+    if (has_host) addMaterialExample(b, target, optimize, host_module, core, check_step, core_options);
     if (windows) addWindowsExamples(b, target, optimize, host_module, core, check_step, core_options);
 
     const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "zui_host.zig", "windows", "linux", "examples" };
@@ -222,8 +223,36 @@ fn addManyWindowsExample(b: *std.Build, target: std.Build.ResolvedTarget, optimi
     check_step.dependOn(&many_windows.step);
 }
 
-/// The remote, material, HDR and accessibility examples, which run only on
-/// the Windows host so far.
+/// The desktop through a window, where the system has a material, on
+/// Windows and on Linux.
+fn addMaterialExample(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, host_module: *std.Build.Module, core: *std.Build.Dependency, check_step: *std.Build.Step, core_options: CoreOptions) void {
+    const zui_sokol_dependency = sokolDeclaring(b, core_options.on(target, optimize), "zui_sokol") orelse return;
+    const truetype_dependency = truetypeDeclaring(b, core_options.on(target, optimize)) orelse return;
+    const material = b.addExecutable(.{
+        .name = "zui-host-material",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/material.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zui_host", .module = host_module },
+                .{ .name = "zui", .module = core.module("zui") },
+                .{ .name = "zui_sokol", .module = zui_sokol_dependency.module("zui_sokol") },
+                .{ .name = "zui_app", .module = core.module("zui_app") },
+                .{ .name = "zui_truetype", .module = truetype_dependency.module("zui_truetype") },
+            },
+        }),
+    });
+    linkThroughLlvmOnLinux(material);
+    b.installArtifact(material);
+    const run_material = b.addRunArtifact(material);
+    if (b.args) |arguments| run_material.addArgs(arguments);
+    b.step("material", "Show the desktop through a window, or the solid fallback (`-- --no-system-material`; `-- --check` reports a hidden window's material and quits)").dependOn(&run_material.step);
+    check_step.dependOn(&material.step);
+}
+
+/// The remote, HDR and accessibility examples, which run only on the
+/// Windows host so far.
 fn addWindowsExamples(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, host_module: *std.Build.Module, core: *std.Build.Dependency, check_step: *std.Build.Step, core_options: CoreOptions) void {
     const app_module = core.module("zui_app");
     const zui_sokol_dependency = sokolDeclaring(b, core_options.on(target, optimize), "zui_sokol") orelse return;
@@ -251,27 +280,6 @@ fn addWindowsExamples(b: *std.Build, target: std.Build.ResolvedTarget, optimize:
     if (b.args) |arguments| run_remote.addArgs(arguments);
     b.step("remote", "Run the tour in one process and draw it in this one, over zui_wire (`-- --check tour.bmp` scripts it)").dependOn(&run_remote.step);
     check_step.dependOn(&remote.step);
-
-    const material = b.addExecutable(.{
-        .name = "zui-host-material",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("examples/material.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "zui_host", .module = host_module },
-                .{ .name = "zui", .module = core.module("zui") },
-                .{ .name = "zui_sokol", .module = zui_sokol_dependency.module("zui_sokol") },
-                .{ .name = "zui_app", .module = app_module },
-                .{ .name = "zui_truetype", .module = truetype_dependency.module("zui_truetype") },
-            },
-        }),
-    });
-    b.installArtifact(material);
-    const run_material = b.addRunArtifact(material);
-    if (b.args) |arguments| run_material.addArgs(arguments);
-    b.step("material", "Show the desktop through a window, or the solid fallback (`-- --no-system-material`)").dependOn(&run_material.step);
-    check_step.dependOn(&material.step);
 
     const hdr = b.addExecutable(.{
         .name = "zui-host-hdr",

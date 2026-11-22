@@ -30,8 +30,8 @@ const App = struct {
 The host must not move between `init` and `deinit`, since its window
 thread (on Windows) and the compositor's listeners (on Linux) hold a
 pointer to it, as does the Linux host's signal handler. `forced_scale`,
-`system_material_unavailable` (Windows) and `bus_addresses` (Linux) may
-be set before `init`, which keeps them; `zui_app` starts each field at
+`system_material_unavailable`, and on Linux `bus_addresses` and
+`forced_blur_offers`, may be set before `init`, which keeps them; `zui_app` starts each field at
 its default. `service_fake` may be set before `init` too, or after it
 with `Host.fakeServices(fake)`, before the first service call.
 
@@ -51,7 +51,7 @@ for the examples sokol's
 | `zig build check` | compile the host, its tests and the examples; add `-Dtarget=x86_64-windows` or `aarch64-windows` to cross-compile |
 | `zig build tour` | run the tour, drawn by the sokol renderer (Windows, Direct3D 11; Linux, OpenGL through EGL on Wayland); `-- --frames 300 --cycle 30` visits every screen and quits, `-- --measure-idle` reports the CPU used over 10 idle seconds |
 | `zig build showcase` | run the showcase, drawn by the sokol renderer; `-- --frames 60` quits after 60 frames |
-| `zig build material` | show the system material, or its fallback (Windows) |
+| `zig build material` | show the system material, or its fallback; `-- --check` reports a hidden window's material and quits, `-- --frames 120` quits after 120 frames |
 | `zig build hdr` | show HDR white beside SDR white (Windows) |
 | `zig build remote` | run the tour in another process and draw it here, over `zui_wire` (Windows) |
 | `zig build theme` | a window styled by a theme file, restyled when it changes; `-- --check` scripts it |
@@ -206,6 +206,19 @@ has no modal loop to escape. So far it:
   `text/uri-list` accepted for copying), each `file://` URI on this
   machine percent-decoded to its path, at the drop's position;
 - closes when its close button or the compositor asks;
+- shows what is behind a window opened with a `WindowOptions.material`
+  other than `.none`, blurred, where the compositor blurs through
+  `ext_background_effect_v1` (with its `blur` capability) or KWin's
+  `org_kde_kwin_blur`, preferring the first: the window's `.wayland`
+  surface is then `transparent`, so the renderer keeps alpha, and a blur
+  region covers the whole window, following its size. `.window` and
+  `.transient` blur alike, since neither protocol has a strength. It
+  reports `Environment.system_material` true unless
+  `reduced_transparency` is on, and again whenever that, or the
+  background effect's capabilities, change. Under a compositor that
+  blurs through neither, or with `system_material_unavailable` set, the
+  window stays opaque and reports false. No portal setting carries
+  reduced transparency yet, so it stays false;
 - leaves the title bar to the application for a window opened with
   `WindowOptions.title_bar = .custom`, asking the compositor for
   client-side decorations (xdg-decoration), and reports
@@ -269,8 +282,8 @@ the desktop's current settings, so the first frame has them. A window
 opened with `visible = false` is a surface with no role, which the
 compositor never shows. The services have a connection to the session
 bus of their own, which reads nothing while no call waits for an
-answer. Low memory, reduced transparency, the input method's composing
-text, a system material and X11 are still to come.
+answer. Low memory, reduced transparency from the desktop, the input
+method's composing text and X11 are still to come.
 
 It passes zui's host suite (`zui_testing.expectHostConforms`) against
 windows the compositor never shows, two of them for its many-windows
@@ -338,9 +351,15 @@ shown is exposed too.
 `zig build material` shows a window whose root draws no background while
 `ui.environment().system_material` is true, and the theme's background
 otherwise: the same code shows Mica on Windows 11 and a solid background
-on Windows 10. `-- --no-system-material` makes the host behave as on
+on Windows 10, and on Wayland the compositor's blur behind a window
+whose surface holds alpha, or a solid background where the compositor
+offers no blur. `-- --no-system-material` makes the host behave as on
 Windows 10, `-- --transient` asks for Acrylic, and `-- --screenshot
-file.bmp` saves what the screen shows. The renderer clears to transparent
+file.bmp` (Windows) saves what the screen shows. `-- --check` opens the
+window hidden, polls it once, prints `system material: <bool>`, and on
+Linux checks that the renderer presents alpha exactly where the surface
+is `transparent`, also on a second hidden window asked to be, then
+quits without drawing; `-- --frames 120` draws 120 frames and quits. The renderer clears to transparent
 and must keep its alpha: the sokol renderer does, with D3D11, through a
 swapchain DirectComposition composes into the window; Windows ignores the
 alpha of an OpenGL window, so with `-Dgl=true` the backdrop would be

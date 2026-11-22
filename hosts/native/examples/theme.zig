@@ -150,7 +150,12 @@ pub fn main(init: std.process.Init) !void {
             host.forced_display_color = null;
             host.system_material_unavailable = false;
         },
-        .linux => host.bus_addresses = null,
+        .linux => {
+            host.bus_addresses = null;
+            host.service_fake = null;
+            host.forced_blur_offers = null;
+            host.system_material_unavailable = false;
+        },
         else => {},
     }
     try host.init(io, .{ .title = "zui: a theme from a file", .size = .{ 720, 360 } });

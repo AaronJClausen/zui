@@ -360,6 +360,71 @@ checks and `zig build conformance` pass. Not run: dragging, resizing and
 closing the windows by hand, and two windows on monitors of different
 scales. Slice 8 is next.
 
+Slice 8 is done in `hosts/native/`, `renderers/sokol/` and
+`core/src/surface.zig` (`hosts/native/linux/material.zig`,
+`hosts/native/linux/host.zig`, `hosts/native/linux/wayland.zig`,
+`hosts/native/linux/desktop_bus.zig`, `hosts/native/linux/conformance.zig`,
+`hosts/native/examples/material.zig`, `hosts/native/build.zig`,
+`renderers/sokol/src/egl.zig`, `renderers/sokol/src/renderer.zig`): the
+system material on Wayland. The host declares `system_material`.
+`ext_background_effect_manager_v1` (its `capabilities` event and
+`get_background_effect`, then `set_blur_region`), KWin's
+`org_kde_kwin_blur_manager` (`create`, then `set_region`, `commit` and
+`release`) and `wl_compositor.create_region` with `wl_region.add` are
+written in Zig as the other interfaces are. A window opened with
+`material` other than `.none`, where the background effect's capabilities
+hold `blur` or only KWin's blur is bound (the first preferred), is
+chosen at open, after the round trips that bring the capabilities:
+`zuiSurface` gives it as `.wayland` with `transparent = true`, and a
+region covering the whole window is set, again whenever a poll finds the
+surface's size changed, applied at the renderer's next commit. It reports
+`system_material` as the blur still offered and reduced transparency off,
+on the first record and on every change, through the same environment
+path as the other settings, with `reduced_transparency` beside it; a
+window without a material, or under a compositor offering neither blur,
+or with `system_material_unavailable`, stays opaque and reports false. No
+portal setting carries reduced transparency (`org.freedesktop.appearance`
+has `color-scheme`, `accent-color`, `contrast` and `reduced-motion`), so
+`desktop_bus.Report.reduced_transparency` is reported only by a harness
+and the record says false otherwise. The sokol renderer's `egl.Device`
+holds an opaque configuration and, where the display has
+`EGL_KHR_no_config_context` and an 8-bit-alpha configuration of the same
+samples, an alpha one, with the context made without a configuration;
+`initForSurface` and `zuiAttachSurface` make a `transparent` surface in
+the alpha configuration, falling back to the opaque one if it cannot be
+made current, and every other surface in the opaque one, which
+`Renderer.presentsAlpha(surface)` reports. 103 of 104 tests pass in
+Debug and ReleaseSafe, the opt-in one skipped: tests play the offers
+(`Host.forced_blur_offers`, which leaves the real managers unbound) and
+check that a `.window` window under the background effect holds alpha,
+covers 320 by 240, then 400 by 300 after a configure and nothing more on
+an unchanged poll, and reports true; that a `.transient` one under KWin's
+blur alone does the same through it, and the background effect wins
+where both are offered; that under neither, or with
+`system_material_unavailable`, it stays opaque, sends no region and
+reports false; that `.none` never asks; that reduced transparency turns
+it false and its end true again, the surface keeping its alpha; that the
+background effect losing `blur` turns it false until it blurs again,
+while a window opened without one stays opaque; that of three windows
+each keeps its own material; and, against the real compositor, that a
+toplevel holds alpha and an effect exactly where a blur protocol is
+bound. Hyprland offers `ext_background_effect_manager_v1` at version 1,
+with `blur`, though `org_kde_kwin_blur_manager` is not offered:
+`zig build material -- --check` builds on Linux from
+`addMaterialExample` and prints `system material: true`, that the window
+presents alpha, and that a second hidden window asked to be transparent
+does too, so the NVIDIA driver's EGL has the extension and the
+configuration; `-- --frames 300`, shown, drew the wallpaper through the
+window with the translucent card over it, and `-- --no-system-material`
+a solid background. On this desktop the wallpaper showed unblurred: the
+compositor accepts the region, and its blur is its own policy. The tour
+idled at 5.2 to 7.9 ms of CPU over 10 s, 1 frame, no wakes, in three
+runs at a load average of about 1; its cycle, `showcase -- --frames 60`,
+`services`, `theme`, `title-bar` and `many-windows -- --check` pass, as
+do the sokol renderer's tests, its four checks and `zig build
+conformance`. Not run: KWin, and a compositor that blurs through
+`ext_background_effect_v1` by default. Slice 9, X11, is next.
+
 Decided here:
 - **libwayland-client, linked,** as sokol-zig links it, since the surface
   must be its objects; xdg-shell's and cursor-shape-v1's interfaces are
@@ -424,6 +489,29 @@ Decided here:
   say, and would change the swap of every window that is; a shown window
   needs neither, and CI's headless Weston shows windows too. The host's
   own tests still use surfaces without a role, and draw nothing.
+- **A material is a blur behind an alpha surface, only where one is
+  offered:** a window asks for `.window` or `.transient`, and gets an alpha
+  surface and a blur region only where the compositor blurs through
+  `ext_background_effect_v1` or KWin's blur, the first preferred as any
+  compositor may implement it; otherwise it stays opaque and reports
+  `system_material` false, so the application draws its own background,
+  as on Windows 10. `.window` and `.transient` blur alike, since neither
+  protocol has a strength. The choice is made at open and kept: reduced
+  transparency, or a background effect that stops blurring, turns
+  `system_material` false and leaves the surface's alpha, over which the
+  application then draws its background.
+- **The host tells the renderer which surfaces hold alpha,** through
+  `transparent` on the `.wayland` surface, and the renderer chooses an
+  EGL configuration per surface. A compositor blends by the alpha the
+  buffer holds, so an alpha configuration for every window would leave an
+  opaque window's alpha to its `clear_color` (the material example clears
+  to transparent whatever the host gives it) and to every pass that
+  writes without blending, any of which would show the desktop through
+  it; a configuration without alpha cannot. One
+  context draws into both kinds where the display has
+  `EGL_KHR_no_config_context`, as Mesa and NVIDIA do; without it, a
+  transparent surface is drawn opaque. X11 will carry the same field on
+  `.x11` and draw through the same `Device`.
 
 ## 10-reach:02-web-host — Web
 

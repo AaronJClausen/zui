@@ -12,6 +12,8 @@ pub const Report = union(enum) {
     theme: zui.Environment.Theme,
     contrast: zui.Environment.Contrast,
     reduced_motion: bool,
+    /// No portal key carries it yet, so only a harness reports it.
+    reduced_transparency: bool,
     on_battery: bool,
     power_saver: bool,
     /// True before the system sleeps, false after it wakes.

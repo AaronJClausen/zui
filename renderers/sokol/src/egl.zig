@@ -1,6 +1,3 @@
-//! An OpenGL context on Wayland surfaces a host owns, through EGL, for
-//! sokol_gfx without sokol_app.
-
 const std = @import("std");
 const sokol = @import("sokol");
 const sg = sokol.gfx;
@@ -16,6 +13,7 @@ const WaylandEglWindow = opaque {};
 const EGL_PLATFORM_WAYLAND_KHR = 0x31D8;
 const EGL_OPENGL_API = 0x30A2;
 const EGL_NONE = 0x3038;
+const EGL_EXTENSIONS = 0x3055;
 const EGL_DRAW = 0x3059;
 const EGL_SURFACE_TYPE = 0x3033;
 const EGL_WINDOW_BIT = 0x0004;
@@ -40,7 +38,8 @@ extern "EGL" fn eglTerminate(display: EGLDisplay) callconv(.c) EGLBoolean;
 extern "EGL" fn eglBindAPI(api: c_uint) callconv(.c) EGLBoolean;
 extern "EGL" fn eglChooseConfig(display: EGLDisplay, attributes: [*]const EGLint, configs: [*]EGLConfig, capacity: EGLint, count: *EGLint) callconv(.c) EGLBoolean;
 extern "EGL" fn eglGetConfigAttrib(display: EGLDisplay, config: EGLConfig, attribute: EGLint, value: *EGLint) callconv(.c) EGLBoolean;
-extern "EGL" fn eglCreateContext(display: EGLDisplay, config: EGLConfig, share: ?EGLContext, attributes: [*]const EGLint) callconv(.c) ?EGLContext;
+extern "EGL" fn eglQueryString(display: EGLDisplay, name: EGLint) callconv(.c) ?[*:0]const u8;
+extern "EGL" fn eglCreateContext(display: EGLDisplay, config: ?EGLConfig, share: ?EGLContext, attributes: [*]const EGLint) callconv(.c) ?EGLContext;
 extern "EGL" fn eglDestroyContext(display: EGLDisplay, context: EGLContext) callconv(.c) EGLBoolean;
 extern "EGL" fn eglCreatePlatformWindowSurface(display: EGLDisplay, config: EGLConfig, native_window: *anyopaque, attributes: ?[*]const isize) callconv(.c) ?EGLSurface;
 extern "EGL" fn eglDestroySurface(display: EGLDisplay, surface: EGLSurface) callconv(.c) EGLBoolean;
@@ -57,7 +56,12 @@ extern "wayland-egl" fn wl_egl_window_resize(window: *WaylandEglWindow, width: c
 /// the first, held until `Context.releaseDevice`.
 pub const Device = struct {
     display: EGLDisplay,
-    config: EGLConfig,
+    /// Of an opaque window, preferring no alpha.
+    opaque_config: EGLConfig,
+    /// Of a transparent window, where the display has one with 8 bits of
+    /// alpha and the context was made without a configuration, so it draws
+    /// into windows of either.
+    alpha_config: ?EGLConfig,
     context: EGLContext,
     /// Of every window's default framebuffer: `wanted_sample_count` when
     /// the display offers it, which smooths the edges of shapes, or 1.
@@ -67,8 +71,11 @@ pub const Device = struct {
 const wanted_sample_count = 4;
 
 /// One Wayland surface's window surface, drawn by its device's context,
-/// presenting with vsync. Its pixels are opaque: the configuration has no
-/// alpha, so the compositor never blends what is behind the window.
+/// presenting with vsync. An opaque window's configuration has no alpha
+/// where the display offers one without, since a Wayland compositor blends
+/// a surface by the alpha its buffer holds, so stray alpha below 1 from
+/// blended draws never shows what is behind the window. A transparent
+/// window's has alpha.
 pub const Context = struct {
     device: Device,
     /// The host's `wl_surface`, which finds the context for a frame.
@@ -76,19 +83,24 @@ pub const Context = struct {
     egl_surface: EGLSurface,
     window: *WaylandEglWindow,
     size: [2]i32,
+    /// The window surface was made in the device's `alpha_config`.
+    holds_alpha: bool,
 
     /// Makes the device on `wayland_display` and the surface's context on
-    /// it, current on the calling thread.
-    pub fn init(wayland_display: *anyopaque, wayland_surface: *anyopaque) error{ NoEglDisplay, NoEglConfig, NoOpenGlContext, NoWindowSurface }!Context {
+    /// it, current on the calling thread; `transparent` as the `.wayland`
+    /// surface says.
+    pub fn init(wayland_display: *anyopaque, wayland_surface: *anyopaque, transparent: bool) error{ NoEglDisplay, NoEglConfig, NoOpenGlContext, NoWindowSurface }!Context {
         const display = eglGetPlatformDisplay(EGL_PLATFORM_WAYLAND_KHR, wayland_display, null) orelse return error.NoEglDisplay;
         if (eglInitialize(display, null, null) == 0) return error.NoEglDisplay;
         errdefer _ = eglTerminate(display);
         if (eglBindAPI(EGL_OPENGL_API) == 0) return error.NoOpenGlContext;
         var sample_count: i32 = wanted_sample_count;
-        const config = opaqueConfig(display, wanted_sample_count) catch blk: {
+        const opaque_config = windowConfig(display, wanted_sample_count, .opaque_preferred) catch blk: {
             sample_count = 1;
-            break :blk try opaqueConfig(display, 1);
+            break :blk try windowConfig(display, 1, .opaque_preferred);
         };
+        const draws_without_config = hasExtension(display, "EGL_KHR_no_config_context");
+        const alpha_config: ?EGLConfig = if (draws_without_config) windowConfig(display, sample_count, .with_alpha) catch null else null;
 
         const context_attributes = [_]EGLint{
             EGL_CONTEXT_MAJOR_VERSION,       4,
@@ -96,37 +108,55 @@ pub const Context = struct {
             EGL_CONTEXT_OPENGL_PROFILE_MASK, EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT,
             EGL_NONE,
         };
-        const context = eglCreateContext(display, config, null, &context_attributes) orelse return error.NoOpenGlContext;
+        // Without a configuration of its own, the context draws into the
+        // windows of both configurations.
+        const context = eglCreateContext(display, if (alpha_config != null) null else opaque_config, null, &context_attributes) orelse return error.NoOpenGlContext;
         errdefer _ = eglDestroyContext(display, context);
-        return initSharing(wayland_surface, .{ .display = display, .config = config, .context = context, .sample_count = sample_count });
+        return initSharing(wayland_surface, .{ .display = display, .opaque_config = opaque_config, .alpha_config = alpha_config, .context = context, .sample_count = sample_count }, transparent);
     }
 
     /// A window surface for `wayland_surface` on `device`, another
-    /// context's, made current on the calling thread.
-    pub fn initSharing(wayland_surface: *anyopaque, device: Device) error{ NoWindowSurface, NoOpenGlContext }!Context {
+    /// context's, made current on the calling thread. A `transparent` one
+    /// holds alpha where the device has `alpha_config`, and is opaque
+    /// otherwise.
+    pub fn initSharing(wayland_surface: *anyopaque, device: Device, transparent: bool) error{ NoWindowSurface, NoOpenGlContext }!Context {
+        if (transparent) if (device.alpha_config) |alpha_config| {
+            if (initIn(wayland_surface, device, alpha_config)) |context| {
+                var transparent_context = context;
+                transparent_context.holds_alpha = true;
+                return transparent_context;
+            } else |_| {}
+        };
+        return initIn(wayland_surface, device, device.opaque_config);
+    }
+
+    fn initIn(wayland_surface: *anyopaque, device: Device, config: EGLConfig) error{ NoWindowSurface, NoOpenGlContext }!Context {
         const initial_size: [2]i32 = .{ 1, 1 };
         const window = wl_egl_window_create(wayland_surface, initial_size[0], initial_size[1]) orelse return error.NoWindowSurface;
         errdefer wl_egl_window_destroy(window);
-        const egl_surface = eglCreatePlatformWindowSurface(device.display, device.config, window, null) orelse return error.NoWindowSurface;
+        const egl_surface = eglCreatePlatformWindowSurface(device.display, config, window, null) orelse return error.NoWindowSurface;
         errdefer _ = eglDestroySurface(device.display, egl_surface);
         if (eglMakeCurrent(device.display, egl_surface, egl_surface, device.context) == 0) return error.NoOpenGlContext;
         // The interval belongs to the surface current when it is set.
         _ = eglSwapInterval(device.display, 1);
-        return .{ .device = device, .wayland_surface = wayland_surface, .egl_surface = egl_surface, .window = window, .size = initial_size };
+        return .{ .device = device, .wayland_surface = wayland_surface, .egl_surface = egl_surface, .window = window, .size = initial_size, .holds_alpha = false };
     }
 
-    /// A configuration with `sample_count` samples a pixel, preferring one
-    /// without alpha, since a Wayland compositor blends a surface by the
-    /// alpha it holds.
-    fn opaqueConfig(display: EGLDisplay, sample_count: EGLint) error{NoEglConfig}!EGLConfig {
+    const Alpha = enum { opaque_preferred, with_alpha };
+
+    /// A configuration with `sample_count` samples a pixel: for
+    /// `.opaque_preferred` one without alpha where the display has one,
+    /// and for `.with_alpha` one with 8 bits of it.
+    fn windowConfig(display: EGLDisplay, sample_count: EGLint, alpha: Alpha) error{NoEglConfig}!EGLConfig {
         const multisampled = sample_count > 1;
+        const alpha_bits: EGLint = if (alpha == .with_alpha) 8 else 0;
         const attributes = [_]EGLint{
             EGL_SURFACE_TYPE,    EGL_WINDOW_BIT,
             EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT,
             EGL_RED_SIZE,        8,
             EGL_GREEN_SIZE,      8,
             EGL_BLUE_SIZE,       8,
-            EGL_ALPHA_SIZE,      0,
+            EGL_ALPHA_SIZE,      alpha_bits,
             EGL_DEPTH_SIZE,      24,
             EGL_STENCIL_SIZE,    8,
             EGL_SAMPLE_BUFFERS,  @intFromBool(multisampled),
@@ -138,12 +168,20 @@ pub const Context = struct {
         if (eglChooseConfig(display, &attributes, &configs, configs.len, &count) == 0 or count == 0) return error.NoEglConfig;
         const matching = configs[0..@intCast(count)];
         for (matching) |config| {
-            if (configAttribute(display, config, EGL_ALPHA_SIZE) == 0 and samplesOf(display, config) == sample_count) return config;
+            if (configAttribute(display, config, EGL_ALPHA_SIZE) == alpha_bits and samplesOf(display, config) == sample_count) return config;
         }
+        if (alpha == .with_alpha) return error.NoEglConfig;
         for (matching) |config| {
             if (samplesOf(display, config) == sample_count) return config;
         }
         return error.NoEglConfig;
+    }
+
+    fn hasExtension(display: EGLDisplay, name: []const u8) bool {
+        const extensions = eglQueryString(display, EGL_EXTENSIONS) orelse return false;
+        var names = std.mem.tokenizeScalar(u8, std.mem.span(extensions), ' ');
+        while (names.next()) |extension| if (std.mem.eql(u8, extension, name)) return true;
+        return false;
     }
 
     fn samplesOf(display: EGLDisplay, config: EGLConfig) EGLint {

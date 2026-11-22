@@ -25,6 +25,11 @@ const UnshownWindow = struct {
     /// True gives the surface a toplevel's role, which the compositor
     /// configures but, without a buffer, still never shows.
     has_toplevel: bool = false,
+    material: zui.SystemMaterial = .none,
+    /// What the compositor is played to offer to blur through; null binds
+    /// what it advertises.
+    blur_offers: ?zui_host.linux.material.BlurOffers = .{},
+    system_material_unavailable: bool = false,
 
     /// With `forced_scale` set, a surface coordinate is that many layout
     /// units at a zoom of 1 and a buffer scale of 1. The window reads no
@@ -38,7 +43,9 @@ const UnshownWindow = struct {
         self.window_host.forced_scale = forced_scale;
         self.window_host.bus_addresses = bus_addresses;
         self.window_host.service_fake = if (self.fakes_services) &self.service_fake else null;
-        self.window_host.init(testing.io, .{ .title = "zui host suite", .size = .{ 320, 240 }, .visible = self.has_toplevel, .title_bar = self.title_bar }) catch |err| switch (err) {
+        self.window_host.forced_blur_offers = self.blur_offers;
+        self.window_host.system_material_unavailable = self.system_material_unavailable;
+        self.window_host.init(testing.io, .{ .title = "zui host suite", .size = .{ 320, 240 }, .visible = self.has_toplevel, .title_bar = self.title_bar, .material = self.material }) catch |err| switch (err) {
             error.NoWaylandDisplay => {
                 std.debug.print("skipped: no Wayland compositor to connect to (WAYLAND_DISPLAY and XDG_RUNTIME_DIR)\n", .{});
                 return error.SkipZigTest;
@@ -286,7 +293,7 @@ test "without a bus to read, the first poll reports the environment at zui's def
     polled.init();
     _ = polled.poll(window.host());
     const reported = environmentOf(&polled);
-    try testing.expectEqual(@as(usize, 6), reported.changes);
+    try testing.expectEqual(@as(usize, 8), reported.changes);
     try testing.expectEqual(zui.Environment{ .window_focused = true }, reported.environment);
     try testing.expectEqual(desktop_bus.Sources{}, window.host().environmentSources());
 }
@@ -301,7 +308,7 @@ test "the desktop's own buses, where they run, report the whole environment with
     var polled: zui_testing.PolledRecord = .{};
     polled.init();
     _ = polled.poll(window.host());
-    try testing.expectEqual(@as(usize, 6), environmentOf(&polled).changes);
+    try testing.expectEqual(@as(usize, 8), environmentOf(&polled).changes);
 }
 
 test "a setting the desktop changes is reported, and only what changed" {
@@ -1639,4 +1646,180 @@ test "each window keeps its own chrome regions, and a press on one window's titl
     window_host.onPointerButton(keys.evdev_button_left, true);
     try testing.expectEqual(WindowManagerRequest{ .move = 83 }, titled.lastRequest().?);
     try testing.expectEqual(@as(u32, 0), second_window.window_chrome.requests_sent);
+}
+
+const material = zui_host.linux.material;
+const BlurOffers = material.BlurOffers;
+
+fn systemMaterialOf(polled: *const zui_testing.PolledRecord) ?bool {
+    for (polled.builder.events()) |event| if (event == .environment and event.environment == .system_material) return event.environment.system_material;
+    return null;
+}
+
+fn holdsAlpha(window_host: *Host, id: zui.WindowId) bool {
+    return window_host.zuiSurface(id).wayland.transparent;
+}
+
+const MaterialWindow = struct {
+    window: UnshownWindow,
+    polled: zui_testing.PolledRecord = .{},
+
+    fn open(self: *MaterialWindow) !void {
+        try self.window.open(1);
+        self.polled.init();
+        _ = self.polled.poll(self.host());
+    }
+
+    fn close(self: *MaterialWindow) void {
+        self.window.close();
+    }
+
+    fn host(self: *MaterialWindow) *Host {
+        return self.window.host();
+    }
+
+    fn windowMaterial(self: *MaterialWindow) *const material.WindowMaterial {
+        return &mainOf(self.host()).window_material;
+    }
+
+    fn resize(self: *MaterialWindow, size: [2]i32, serial: u32) void {
+        mainOf(self.host()).onToplevelConfigure(size[0], size[1], &.{});
+        mainOf(self.host()).onConfigure(serial);
+        _ = self.polled.poll(self.host());
+    }
+};
+
+test "a window with a material, where the background effect blurs, holds alpha and is blurred behind its whole size, resized with it" {
+    var window: MaterialWindow = .{ .window = .{ .material = .window, .blur_offers = .{ .background_effect_blurs = true } } };
+    try window.open();
+    defer window.close();
+    try testing.expect(holdsAlpha(window.host(), .main));
+    try testing.expectEqual(material.BlurProtocol.background_effect, window.windowMaterial().protocol.?);
+    try testing.expectEqual([2]u32{ 320, 240 }, window.windowMaterial().blur_region_size.?);
+    try testing.expectEqual(true, systemMaterialOf(&window.polled).?);
+
+    window.resize(.{ 400, 300 }, 7);
+    try testing.expectEqual([2]u32{ 400, 300 }, window.windowMaterial().blur_region_size.?);
+    try testing.expectEqual(@as(u32, 2), window.windowMaterial().blur_regions_sent);
+    try testing.expectEqual(null, systemMaterialOf(&window.polled));
+    _ = window.polled.poll(window.host());
+    try testing.expectEqual(@as(u32, 2), window.windowMaterial().blur_regions_sent);
+}
+
+test "a transient material, where only KWin's blur is offered, is blurred through it, and the background effect wins where both are" {
+    var kde: MaterialWindow = .{ .window = .{ .material = .transient, .blur_offers = .{ .kde_blur = true } } };
+    try kde.open();
+    defer kde.close();
+    try testing.expect(holdsAlpha(kde.host(), .main));
+    try testing.expectEqual(material.BlurProtocol.kde_blur, kde.windowMaterial().protocol.?);
+    try testing.expectEqual([2]u32{ 320, 240 }, kde.windowMaterial().blur_region_size.?);
+    try testing.expectEqual(true, systemMaterialOf(&kde.polled).?);
+    kde.resize(.{ 500, 200 }, 3);
+    try testing.expectEqual([2]u32{ 500, 200 }, kde.windowMaterial().blur_region_size.?);
+
+    var both: MaterialWindow = .{ .window = .{ .material = .window, .blur_offers = .{ .background_effect_blurs = true, .kde_blur = true } } };
+    try both.open();
+    defer both.close();
+    try testing.expectEqual(material.BlurProtocol.background_effect, both.windowMaterial().protocol.?);
+}
+
+test "where the compositor blurs through neither protocol, or the material is unavailable, the window stays opaque and reports none" {
+    const neither = [_]UnshownWindow{
+        .{ .material = .window, .blur_offers = .{} },
+        .{ .material = .window, .blur_offers = .{ .background_effect_blurs = true }, .system_material_unavailable = true },
+    };
+    for (neither) |unshown| {
+        var window: MaterialWindow = .{ .window = unshown };
+        try window.open();
+        defer window.close();
+        try testing.expect(!holdsAlpha(window.host(), .main));
+        try testing.expectEqual(null, window.windowMaterial().protocol);
+        try testing.expectEqual(@as(u32, 0), window.windowMaterial().blur_regions_sent);
+        try testing.expectEqual(false, systemMaterialOf(&window.polled).?);
+    }
+}
+
+test "a window opened without a material never asks for a blur, wherever one is offered" {
+    var window: MaterialWindow = .{ .window = .{ .material = .none, .blur_offers = .{ .background_effect_blurs = true, .kde_blur = true } } };
+    try window.open();
+    defer window.close();
+    try testing.expect(!holdsAlpha(window.host(), .main));
+    window.resize(.{ 400, 300 }, 2);
+    try testing.expectEqual(@as(u32, 0), window.windowMaterial().blur_regions_sent);
+    try testing.expectEqual(false, systemMaterialOf(&window.polled) orelse reportedEnvironment(&window.polled).system_material);
+}
+
+test "reduced transparency turns the system material off, and its end turns it on again" {
+    var window: MaterialWindow = .{ .window = .{ .material = .window, .blur_offers = .{ .background_effect_blurs = true } } };
+    try window.open();
+    defer window.close();
+    const window_host = window.host();
+
+    window_host.onDesktopReport(.{ .reduced_transparency = true });
+    _ = window.polled.poll(window_host);
+    try testing.expectEqual(false, systemMaterialOf(&window.polled).?);
+    try testing.expect(reportedEnvironment(&window.polled).reduced_transparency);
+    try testing.expect(holdsAlpha(window_host, .main));
+
+    window_host.onDesktopReport(.{ .reduced_transparency = false });
+    _ = window.polled.poll(window_host);
+    try testing.expectEqual(true, systemMaterialOf(&window.polled).?);
+}
+
+test "a background effect that stops blurring turns the system material off until it blurs again; one that never blurred leaves the window opaque" {
+    var window: MaterialWindow = .{ .window = .{ .material = .window, .blur_offers = .{ .background_effect_blurs = true } } };
+    try window.open();
+    defer window.close();
+    const window_host = window.host();
+    window_host.onBackgroundEffectCapabilities(0);
+    _ = window.polled.poll(window_host);
+    try testing.expectEqual(false, systemMaterialOf(&window.polled).?);
+    window_host.onBackgroundEffectCapabilities(1);
+    _ = window.polled.poll(window_host);
+    try testing.expectEqual(true, systemMaterialOf(&window.polled).?);
+
+    var never: MaterialWindow = .{ .window = .{ .material = .window, .blur_offers = .{} } };
+    try never.open();
+    defer never.close();
+    never.host().onBackgroundEffectCapabilities(1);
+    _ = never.polled.poll(never.host());
+    try testing.expectEqual(null, systemMaterialOf(&never.polled));
+    try testing.expect(!holdsAlpha(never.host(), .main));
+}
+
+test "each window's material is its own" {
+    var window: MaterialWindow = .{ .window = .{ .material = .window, .blur_offers = .{ .background_effect_blurs = true } } };
+    try window.open();
+    defer window.close();
+    const window_host = window.host();
+    const opaque_window = try window_host.zuiOpenWindow(second_window_options);
+    var second_options = second_window_options;
+    second_options.material = .transient;
+    second_options.size = .{ 200, 100 };
+    const blurred_window = try window_host.zuiOpenWindow(second_options);
+
+    try testing.expect(holdsAlpha(window_host, .main));
+    try testing.expect(!holdsAlpha(window_host, opaque_window));
+    try testing.expect(holdsAlpha(window_host, blurred_window));
+    try testing.expectEqual([2]u32{ 200, 100 }, window_host.windowById(blurred_window).?.window_material.blur_region_size.?);
+    try testing.expectEqual(@as(u32, 0), window_host.windowById(opaque_window).?.window_material.blur_regions_sent);
+
+    var polled: zui_testing.PolledRecord = .{};
+    polled.init();
+    _ = polled.pollWindow(window_host, opaque_window);
+    try testing.expectEqual(false, systemMaterialOf(&polled).?);
+    _ = polled.pollWindow(window_host, blurred_window);
+    try testing.expectEqual(true, systemMaterialOf(&polled).?);
+}
+
+test "under the real compositor, a window with a material is blurred and holds alpha exactly where a blur protocol is bound" {
+    var window: MaterialWindow = .{ .window = .{ .material = .window, .blur_offers = null, .has_toplevel = true } };
+    try window.open();
+    defer window.close();
+    const window_host = window.host();
+    const blurs = window_host.blur_offers.preferred() != null;
+    try testing.expectEqual(blurs, holdsAlpha(window_host, .main));
+    try testing.expectEqual(blurs, window.windowMaterial().effect != null);
+    try testing.expectEqual(blurs, systemMaterialOf(&window.polled).?);
+    if (window_host.globals.kde_blur_manager == null and window_host.globals.background_effect_manager == null) try testing.expect(!blurs);
 }

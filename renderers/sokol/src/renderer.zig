@@ -147,7 +147,7 @@ pub const Renderer = struct {
     pub fn initForSurface(text: anytype, surface: zui.Surface) !Renderer {
         var context = switch (surface) {
             .win32 => |window| if (comptime draws_into_win32) try native.Context.init(window.hwnd) else return error.UnsupportedSurface,
-            .wayland => |window| if (comptime draws_into_wayland) try native.Context.init(window.display, window.surface) else return error.UnsupportedSurface,
+            .wayland => |window| if (comptime draws_into_wayland) try native.Context.init(window.display, window.surface, window.transparent) else return error.UnsupportedSurface,
             else => return error.UnsupportedSurface,
         };
         errdefer context.deinit();
@@ -196,7 +196,11 @@ pub const Renderer = struct {
         const slot = for (&self.attached) |*slot| {
             if (slot.* == null) break slot;
         } else return error.TooManySurfaces;
-        slot.* = .{ .context = try native.Context.initSharing(@ptrFromInt(window), device) };
+        const context = switch (surface) {
+            .wayland => |wayland| if (comptime draws_into_wayland) try native.Context.initSharing(@ptrFromInt(window), device, wayland.transparent) else unreachable,
+            else => if (comptime draws_into_win32) try native.Context.initSharing(@ptrFromInt(window), device) else unreachable,
+        };
+        slot.* = .{ .context = context };
     }
 
     /// Frees what the renderer keeps for `surface`'s window, the first one
@@ -216,6 +220,18 @@ pub const Renderer = struct {
             slot.* = null;
             return;
         };
+    }
+
+    /// Whether the window `surface` names presents alpha, which a
+    /// compositor blends over what is behind it: on Wayland, a surface
+    /// the host made `transparent` where the display has an alpha
+    /// configuration the context can draw into. False for a window the
+    /// renderer does not draw into.
+    pub fn presentsAlpha(self: *Renderer, surface: zui.Surface) bool {
+        if (comptime !draws_into_wayland) return false;
+        const window = nativeWindowOf(surface) orelse return false;
+        const context = self.contextOf(window) orelse return false;
+        return context.holds_alpha;
     }
 
     /// The address of the window a native surface names, which finds the

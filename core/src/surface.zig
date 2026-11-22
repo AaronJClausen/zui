@@ -45,7 +45,10 @@ pub const OutputFormats = std.EnumSet(OutputFormat);
 pub const Surface = union(SurfaceKind) {
     win32: struct { hwnd: *anyopaque, format: OutputFormat = .sdr },
     cocoa: struct { view: *anyopaque, format: OutputFormat = .sdr },
-    wayland: struct { display: *anyopaque, surface: *anyopaque, format: OutputFormat = .sdr },
+    /// `transparent`: the compositor blends the surface over what is behind
+    /// the window by the alpha it holds, so its renderer keeps alpha;
+    /// otherwise every pixel it presents is opaque.
+    wayland: struct { display: *anyopaque, surface: *anyopaque, format: OutputFormat = .sdr, transparent: bool = false },
     x11: struct { display: *anyopaque, window: u64, format: OutputFormat = .sdr },
     /// The canvas the web host created, by the id it gave it.
     web: struct { canvas: u32, format: OutputFormat = .sdr },

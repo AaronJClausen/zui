@@ -71,8 +71,17 @@ calls both. With `-Dgl=true` it is an OpenGL 4.3 context, whose alpha
 Windows ignores, and SDR only. On Linux the native surface is `.wayland`,
 a native host's Wayland surface, which the renderer draws into with an
 OpenGL 4.3 context made through EGL on a `wl_egl_window`, sized to each
-frame's viewport in physical pixels and presenting with vsync; its
-configuration has no alpha, so the compositor shows the frame opaque.
+frame's viewport in physical pixels and presenting with vsync. A surface
+the host made `transparent` (a window showing the system's material) gets
+a configuration with 8 bits of alpha, which the compositor blends over
+the blur behind the window: the renderer then clears to `clear_color` and
+keeps the alpha it draws, premultiplied, since its blending adds alpha as
+the source over the destination. Every other surface gets one without
+alpha, so the compositor shows it opaque whatever alpha the frame draws.
+Both kinds are drawn by one context, made without a configuration
+through `EGL_KHR_no_config_context`; on a display without that extension
+or an alpha configuration, a transparent surface is drawn opaque, and
+`presentsAlpha(surface)` says which it got.
 Every native window is drawn with four samples per pixel, which smooths
 the edges of shapes, wherever the GPU offers them, and with one
 otherwise: on Linux a multisampled EGL configuration; with D3D11 a
