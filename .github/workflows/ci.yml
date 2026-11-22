@@ -74,17 +74,40 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+      - uses: ./.github/actions/setup-zig
         with:
-          version: ${{ env.ZIG_VERSION }}
+          use-cache: false
       - run: zig build fmt-check
       - run: zig build docs
       - name: Check core, and the apps through the root's re-exports
         run: zig build check
 
   # The root forwards core's steps under their own names, so core's legs run
-  # there. The compile errors and the benchmark tools do not depend on
-  # `-Doptimize`, so they run once on each OS rather than in every mode.
+  # there. A release build of every unit test outlasts a small runner, so
+  # each mode's tests run as `test-unit`'s two shards, in jobs of their own.
+  core-release:
+    name: "core: unit tests ${{ matrix.optimize }}, shard ${{ matrix.shard }} of 2 (${{ matrix.os }})"
+    needs: changes
+    if: needs.changes.outputs.core == 'true' || needs.changes.outputs.root-build == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        optimize: [ReleaseSafe, ReleaseFast]
+        shard: [1, 2]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The shards share what does not change with core: the build runner,
+      # and compiler_rt for the mode.
+      - uses: ./.github/actions/setup-zig
+        with:
+          cache-key: ${{ matrix.optimize }}
+      - run: zig build test-unit-${{ matrix.shard }} -Doptimize=${{ matrix.optimize }}
+
+  # `test` is the unit tests in Debug, the compile errors and the benchmark
+  # tools, which no optimize mode changes.
   core:
     name: "core: ${{ matrix.leg }} (${{ matrix.os }})"
     needs: changes
@@ -95,18 +118,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { leg: unit tests, os: ubuntu-latest, run: zig build test-unit }
-          - { leg: unit tests ReleaseSafe, os: ubuntu-latest, run: zig build test-unit -Doptimize=ReleaseSafe }
-          - { leg: unit tests ReleaseFast, os: ubuntu-latest, run: zig build test-unit -Doptimize=ReleaseFast }
-          - { leg: unit tests, os: windows-latest, run: zig build test-unit }
-          - { leg: unit tests ReleaseSafe, os: windows-latest, run: zig build test-unit -Doptimize=ReleaseSafe }
-          - { leg: unit tests ReleaseFast, os: windows-latest, run: zig build test-unit -Doptimize=ReleaseFast }
-          - { leg: unit tests, os: macos-latest, run: zig build test-unit }
-          - { leg: unit tests ReleaseSafe, os: macos-latest, run: zig build test-unit -Doptimize=ReleaseSafe }
-          - { leg: unit tests ReleaseFast, os: macos-latest, run: zig build test-unit -Doptimize=ReleaseFast }
-          - { leg: compile errors and benchmark tools, os: ubuntu-latest, run: zig build test-compile-errors check-bench-tools }
-          - { leg: compile errors and benchmark tools, os: windows-latest, run: zig build test-compile-errors check-bench-tools }
-          - { leg: compile errors and benchmark tools, os: macos-latest, run: zig build test-compile-errors check-bench-tools }
+          - { leg: tests, os: ubuntu-latest, run: zig build test }
+          - { leg: tests, os: windows-latest, run: zig build test }
+          - { leg: tests, os: macos-latest, run: zig build test }
           - { leg: zui-debug, os: ubuntu-latest, run: zig build test -Dzui-debug=true }
           - { leg: Tracy, os: ubuntu-latest, run: zig build test-unit -Dzui-tracy=true }
           - { leg: Tracy, os: windows-latest, run: zig build test-unit -Dzui-tracy=true }
@@ -115,18 +129,21 @@ jobs:
           # default ASLR entropy, and exits before any test runs.
           - { leg: ThreadSanitizer, os: ubuntu-latest, run: sudo sysctl vm.mmap_rnd_bits=28 && zig build test-unit -Dzui-sanitize-thread=true }
           - { leg: unit tests x86-linux, os: ubuntu-latest, run: zig build test-unit -Dtarget=x86-linux }
-          - { leg: unit tests x86-linux ReleaseFast, os: ubuntu-latest, run: zig build test-unit -Dtarget=x86-linux -Doptimize=ReleaseFast }
-          - { leg: check wasm32-freestanding, os: ubuntu-latest, run: zig build check -Dtarget=wasm32-freestanding }
-          - { leg: check x86-linux, os: ubuntu-latest, run: zig build check -Dtarget=x86-linux }
-          - { leg: check aarch64-linux, os: ubuntu-latest, run: zig build check -Dtarget=aarch64-linux }
-          - { leg: check aarch64-macos, os: ubuntu-latest, run: zig build check -Dtarget=aarch64-macos }
-          - { leg: check x86_64-windows, os: ubuntu-latest, run: zig build check -Dtarget=x86_64-windows }
-          - { leg: check powerpc-linux, os: ubuntu-latest, run: zig build check -Dtarget=powerpc-linux }
+          - { leg: "unit tests x86-linux ReleaseFast, shard 1 of 2", os: ubuntu-latest, run: zig build test-unit-1 -Dtarget=x86-linux -Doptimize=ReleaseFast }
+          - { leg: "unit tests x86-linux ReleaseFast, shard 2 of 2", os: ubuntu-latest, run: zig build test-unit-2 -Dtarget=x86-linux -Doptimize=ReleaseFast }
+          - leg: checks for six targets
+            os: ubuntu-latest
+            run: >-
+              zig build check -Dtarget=wasm32-freestanding && zig build check -Dtarget=x86-linux &&
+              zig build check -Dtarget=aarch64-linux && zig build check -Dtarget=aarch64-macos &&
+              zig build check -Dtarget=x86_64-windows && zig build check -Dtarget=powerpc-linux
+            without-cache: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+      - uses: ./.github/actions/setup-zig
         with:
-          version: ${{ env.ZIG_VERSION }}
+          cache-key: ${{ matrix.leg }}
+          use-cache: ${{ !matrix.without-cache }}
       - run: ${{ matrix.run }}
 
   bench:
@@ -137,9 +154,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
-        with:
-          version: ${{ env.ZIG_VERSION }}
+      - uses: ./.github/actions/setup-zig
       # Times are reported, never compared: a runner can time one commit 45%
       # slower than its parent when no other machine can reproduce it. This
       # still fails on any allocation after init, which no CPU can change.
@@ -161,9 +176,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 2
-      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
-        with:
-          version: ${{ env.ZIG_VERSION }}
+      - uses: ./.github/actions/setup-zig
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends valgrind
       # Compared with what the push or the pull request is based on, so a
       # push of several commits cannot grow by 2% in each of them. A base
@@ -199,20 +212,21 @@ jobs:
       fail-fast: false
       matrix:
         package: ${{ fromJSON(needs.changes.outputs.pure-packages) }}
-        leg: [tests, tests ReleaseSafe, tests ReleaseFast, checks]
+        leg: [tests and checks, tests ReleaseSafe, tests ReleaseFast]
         include:
-          - { leg: tests, run: zig build test }
+          - { leg: tests and checks, run: zig build test && zig build check && zig build check -Dtarget=x86_64-windows && zig build check -Dtarget=aarch64-macos }
           - { leg: tests ReleaseSafe, run: zig build test -Doptimize=ReleaseSafe }
           - { leg: tests ReleaseFast, run: zig build test -Doptimize=ReleaseFast }
-          - { leg: checks, run: zig build check && zig build check -Dtarget=x86_64-windows && zig build check -Dtarget=aarch64-macos }
     defaults:
       run:
         working-directory: ${{ matrix.package }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+      # One cache for a package's legs keeps the repository's caches within
+      # GitHub's limit.
+      - uses: ./.github/actions/setup-zig
         with:
-          version: ${{ env.ZIG_VERSION }}
+          cache-key: ${{ matrix.package }}
       - run: ${{ matrix.run }}
 
   # stb_truetype is C, so the one package that compiles it is also tested
@@ -228,9 +242,7 @@ jobs:
         working-directory: text/truetype
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
-        with:
-          version: ${{ env.ZIG_VERSION }}
+      - uses: ./.github/actions/setup-zig
       - run: zig build test
 
   terminal:
@@ -248,9 +260,7 @@ jobs:
         working-directory: renderers/terminal
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
-        with:
-          version: ${{ env.ZIG_VERSION }}
+      - uses: ./.github/actions/setup-zig
       - name: Run the tests and zui's renderer suite
         run: zig build test
       - run: zig build check
@@ -278,12 +288,10 @@ jobs:
         working-directory: renderers/raylib
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
-        with:
-          version: ${{ env.ZIG_VERSION }}
+      - uses: ./.github/actions/setup-zig
       - name: Install raylib's X11 and OpenGL dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev
       - run: zig build test
       - run: zig build check
       - name: Check with Tracy's client linked
@@ -303,11 +311,9 @@ jobs:
         working-directory: renderers/raylib
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
-        with:
-          version: ${{ env.ZIG_VERSION }}
+      - uses: ./.github/actions/setup-zig
       - name: Install raylib's X11 and OpenGL dependencies, and Xvfb
-        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev xvfb
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev xvfb xauth
       - name: Run zui's renderer and host suites
         run: xvfb-run --auto-servernum zig build conformance
       - name: Visit every screen of the tour
@@ -348,12 +354,10 @@ jobs:
         working-directory: renderers/sokol
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
-        with:
-          version: ${{ env.ZIG_VERSION }}
+      - uses: ./.github/actions/setup-zig
       - name: Install sokol's X11, OpenGL and PulseAudio dependencies, and EGL and Wayland's
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxi-dev libxcursor-dev libgl1-mesa-dev libpulse-dev libegl-dev libwayland-dev
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libx11-dev libxi-dev libxcursor-dev libgl1-mesa-dev libpulse-dev libegl-dev libwayland-dev
       - run: zig build test
       - run: zig build check
       - name: Check for wasm32-freestanding
@@ -376,11 +380,9 @@ jobs:
         working-directory: renderers/sokol
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
-        with:
-          version: ${{ env.ZIG_VERSION }}
+      - uses: ./.github/actions/setup-zig
       - name: Install sokol's X11, OpenGL and PulseAudio dependencies, EGL and Wayland's, and Xvfb
-        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxi-dev libxcursor-dev libgl1-mesa-dev libpulse-dev libegl-dev libwayland-dev xvfb
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libx11-dev libxi-dev libxcursor-dev libgl1-mesa-dev libpulse-dev libegl-dev libwayland-dev xvfb xauth
       - name: Run zui's renderer suite, with OpenGL under Xvfb
         run: xvfb-run --auto-servernum zig build conformance
 
@@ -397,32 +399,14 @@ jobs:
         working-directory: hosts/native
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
-        with:
-          version: ${{ env.ZIG_VERSION }}
+      - uses: ./.github/actions/setup-zig
       - name: Run the unit tests and zui's host suite against a window the user never sees
         run: zig build test --summary all
       - run: zig build test -Doptimize=ReleaseSafe
       - run: zig build check
 
-  native-aarch64-windows:
-    name: "hosts/native: check aarch64-windows (ubuntu-latest)"
-    needs: changes
-    if: needs.changes.outputs.hosts-native == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: hosts/native
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
-        with:
-          version: ${{ env.ZIG_VERSION }}
-      - run: zig build check -Dtarget=aarch64-windows
-
   native-linux:
-    name: "hosts/native: test and check (ubuntu-latest, Weston)"
+    name: "hosts/native: test and check, and check aarch64-windows (ubuntu-latest, Weston)"
     needs: changes
     if: needs.changes.outputs.hosts-native == 'true'
     runs-on: ubuntu-latest
@@ -432,14 +416,13 @@ jobs:
         working-directory: hosts/native
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
-        with:
-          version: ${{ env.ZIG_VERSION }}
+      - uses: ./.github/actions/setup-zig
       - uses: ./.github/actions/wayland-session
       - name: Run the unit tests and zui's host suite against a window the user never sees
         run: zig build test --summary all
       - run: zig build test -Doptimize=ReleaseSafe
       - run: zig build check
+      - run: zig build check -Dtarget=aarch64-windows
 
   # The headless Weston draws in software, so Mesa's EGL hands it
   # shared-memory buffers. It has no input devices, so it offers no seat and
@@ -457,9 +440,7 @@ jobs:
         working-directory: hosts/native
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
-        with:
-          version: ${{ env.ZIG_VERSION }}
+      - uses: ./.github/actions/setup-zig
       - uses: ./.github/actions/wayland-session
       - name: Restyle a window when its theme file is rewritten
         run: |
@@ -494,10 +475,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { leg: tests, run: zig build test }
+          - { leg: tests and checks, run: zig build test && zig build check && zig build check -Dtarget=x86_64-windows && zig build check -Dtarget=aarch64-macos }
           - { leg: tests ReleaseSafe, run: zig build test -Doptimize=ReleaseSafe }
           - { leg: tests ReleaseFast, run: zig build test -Doptimize=ReleaseFast }
-          - { leg: checks, run: zig build check && zig build check -Dtarget=x86_64-windows && zig build check -Dtarget=aarch64-macos }
           - { leg: test-demo (Node), run: node --version && zig build test-demo }
           - { leg: test-demo ReleaseSafe (Node), run: node --version && zig build test-demo -Doptimize=ReleaseSafe }
           - { leg: test-input (headless Chrome), run: google-chrome --version && zig build test-input -Dbrowser=google-chrome }
@@ -506,9 +486,9 @@ jobs:
         working-directory: hosts/web
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+      - uses: ./.github/actions/setup-zig
         with:
-          version: ${{ env.ZIG_VERSION }}
+          cache-key: ${{ matrix.leg }}
       - run: ${{ matrix.run }}
 
   # Pages publishes only after this job, under this name, passed.
@@ -523,9 +503,7 @@ jobs:
         working-directory: hosts/web
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
-        with:
-          version: ${{ env.ZIG_VERSION }}
+      - uses: ./.github/actions/setup-zig
       - run: google-chrome --version
       - run: zig build test-site -Dbrowser=google-chrome
 
@@ -540,12 +518,10 @@ jobs:
         working-directory: hosts/web
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
-        with:
-          version: ${{ env.ZIG_VERSION }}
+      - uses: ./.github/actions/setup-zig
       - run: google-chrome --version
       - name: Install sokol's X11, OpenGL, PulseAudio, EGL and Wayland dependencies, which the reference drawing links, and Xvfb
-        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxi-dev libxcursor-dev libgl1-mesa-dev libpulse-dev libegl-dev libwayland-dev xvfb
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libx11-dev libxi-dev libxcursor-dev libgl1-mesa-dev libpulse-dev libegl-dev libwayland-dev xvfb xauth
       - run: xvfb-run --auto-servernum zig build test-draw -Dbrowser=google-chrome
         env:
           ZUI_WEB_DRAW_FAILURES: ${{ runner.temp }}/draw-failures

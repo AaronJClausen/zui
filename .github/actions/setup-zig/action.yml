@@ -1,0 +1,21 @@
+name: Set up Zig
+description: Install the workflow's Zig and restore its cache, with Windows Defender kept from scanning every file a build writes
+inputs:
+  cache-key:
+    description: What, beside the job and the OS, keeps a matrix leg's cache apart from its other legs'
+    default: ""
+  use-cache:
+    description: Whether to restore and save Zig's cache, which a job too quick to gain from it leaves off
+    default: "true"
+runs:
+  using: composite
+  steps:
+    - name: Stop Windows Defender's real-time scanning
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: Set-MpPreference -DisableRealtimeMonitoring $true
+    - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+      with:
+        version: ${{ env.ZIG_VERSION }}
+        use-cache: ${{ inputs.use-cache }}
+        cache-key: ${{ inputs.cache-key }}

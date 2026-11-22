@@ -274,10 +274,28 @@ pub fn build(b: *std.Build) void {
     const compile_error_test_step = b.step("test-compile-errors", "Check every compile error's message, which no optimize mode changes");
     const bench_tools_step = b.step("check-bench-tools", "Compile counts, bench-compare and bench-report, each in its own fixed optimize mode");
     for ([_]*std.Build.Step{ unit_test_step, compile_error_test_step, bench_tools_step }) |part| test_step.dependOn(part);
-    const tested_modules = [_]*std.Build.Module{ zui_module, testing_module, async_module, widgets_module, reflect_module, tracy_module, app_module, wire_module, debug_module, motion_module, color_module, design_module };
-    for (tested_modules) |tested_module| {
-        const module_tests = b.addTest(.{ .root_module = tested_module, .use_llvm = if (sanitize_thread) true else null });
-        unit_test_step.dependOn(&b.addRunArtifact(module_tests).step);
+    const bench_statistics_module = b.createModule(.{
+        .root_source_file = b.path("bench/statistics.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    // Each binary compiles all of zui again, so a release build of every one
+    // outlasts a small CI runner, and CI runs each shard as a job of its own.
+    // zui's own binary is the longest, so its shard takes the cheap ones.
+    const unit_test_shards = [_][]const *std.Build.Module{
+        &.{ zui_module, bench_statistics_module, color_module, design_module, motion_module, tracy_module, reflect_module },
+        &.{ testing_module, app_module, debug_module, async_module, widgets_module, wire_module },
+    };
+    for (unit_test_shards, 1..) |shard_modules, shard_number| {
+        const shard_step = b.step(
+            b.fmt("test-unit-{d}", .{shard_number}),
+            b.fmt("Run shard {d} of {d} of the unit tests, which CI runs as jobs of their own", .{ shard_number, unit_test_shards.len }),
+        );
+        unit_test_step.dependOn(shard_step);
+        for (shard_modules) |tested_module| {
+            const module_tests = b.addTest(.{ .root_module = tested_module, .use_llvm = if (sanitize_thread) true else null });
+            shard_step.dependOn(&b.addRunArtifact(module_tests).step);
+        }
     }
     for ([_]*std.Build.Module{ async_module, widgets_module, reflect_module, tracy_module, wire_module, debug_module, motion_module }) |module_with_driven_tests| {
         module_with_driven_tests.addImport("zui_testing", testing_module);
@@ -437,13 +455,6 @@ pub fn build(b: *std.Build) void {
     if (b.args) |arguments| run_bench_report.addArgs(arguments);
     b.step("bench-report", "Set side by side each machine's results for one commit: -- <results dir> [<commit>]").dependOn(&run_bench_report.step);
     bench_tools_step.dependOn(&bench_report_executable.step);
-
-    const bench_tests = b.addTest(.{ .root_module = b.createModule(.{
-        .root_source_file = b.path("bench/statistics.zig"),
-        .target = target,
-        .optimize = optimize,
-    }) });
-    unit_test_step.dependOn(&b.addRunArtifact(bench_tests).step);
 
     const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "tests", "bench", "zui_testing", "zui_async", "zui_widgets", "zui_reflect", "zui_tracy", "zui_app", "zui_wire", "zui_debug", "zui_motion", "zui_color", "zui_design" };
     b.step("fmt", "Format all Zig sources").dependOn(&b.addFmt(.{ .paths = formatted_paths }).step);

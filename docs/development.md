@@ -27,7 +27,8 @@ Run these from the root:
 | Command | What it does |
 |---|---|
 | `zig build test` | run the unit, golden, randomized-invariant, widget and compile-error tests (add `-Doptimize=ReleaseSafe` or `ReleaseFast` to test other modes) |
-| `zig build test-unit`, `test-compile-errors` and `check-bench-tools` | the three parts of `test`, which CI runs apart: the unit tests, in the selected optimize mode; every compile error's message; and the benchmark tools, each built in its own fixed mode |
+| `zig build test-unit`, `test-compile-errors` and `check-bench-tools` | the three parts of `test`: the unit tests, in the selected optimize mode; every compile error's message; and the benchmark tools, each built in its own fixed mode |
+| `zig build test-unit-1` and `test-unit-2` | the two shards of `test-unit`, which CI runs as jobs of their own in ReleaseSafe and ReleaseFast: each test binary compiles zui again, and a release build of all of them takes nine minutes on a macOS runner. The first holds zui's own tests, the longest to build, with the cheap ones |
 | `zig build check` | compile one full frame, every widget, the default sources and the test driver without producing output; add `-Dtarget=wasm32-freestanding` to check another target |
 | `zig build test -Dzui-debug=true` | keep id names, so duplicate-id and unbalanced-tree panics name the element |
 | `zig build test -Dzui-tracy=true` | fetch Tracy and test `zui_tracy` with its client linked |
@@ -125,15 +126,16 @@ within 10 minutes:
 - the root, on every run: the format check, the documentation, and
   `check`, which compiles core and the apps through the root's
   re-exports;
-- core, from the root, when `core/` or the root's build changes:
-  `test-unit` in three optimize modes on Linux, Windows and macOS, as a
-  32-bit x86 Linux program in Debug and ReleaseFast, under
-  ThreadSanitizer, which stresses every `zui_async` source with
-  producers on other threads, and with Tracy's client on Linux, Windows
-  and macOS; `test-compile-errors` and `check-bench-tools`, which no
-  optimize mode changes, once on each OS; the whole `test` with
-  `-Dzui-debug=true`; and `check` for six targets: 32- and 64-bit,
-  big-endian, freestanding and WebAssembly;
+- core, from the root, when `core/` or the root's build changes: `test`
+  (the unit tests in Debug, the compile errors and the benchmark tools)
+  on Linux, Windows and macOS; each of `test-unit`'s two shards in
+  ReleaseSafe and in ReleaseFast there, a job apiece; `test-unit` as a
+  32-bit x86 Linux program in Debug, and its shards in ReleaseFast;
+  `test-unit` under ThreadSanitizer, which stresses every `zui_async`
+  source with producers on other threads, and with Tracy's client on
+  Linux, Windows and macOS; the whole `test` with `-Dzui-debug=true`;
+  and, in one job, `check` for six targets: 32- and 64-bit, big-endian,
+  freestanding and WebAssembly;
 - with core's jobs, the benchmarks, failing on any allocation after
   `init` (times and the SPEC.md §20.2 budgets are reported in the job
   summary but not compared: runners vary too much, so check for
@@ -143,10 +145,10 @@ within 10 minutes:
   cache and branch misses reported beside them;
 - `text/glyphs/`, `text/fonts/`, `text/truetype/`, `apps/showcase/`,
   `apps/tour/`, `themes/`, `examples/` and `renderers/webgl/`, which are
-  pure Zig and compile for `wasm32-freestanding`: each optimize mode's
-  tests in a job of its own on Linux, and `check` there and for x86-64
-  Windows and ARM64 macOS; `text/truetype/`, which compiles
-  stb_truetype's C, is also tested on Windows;
+  pure Zig and compile for `wasm32-freestanding`: on Linux, three jobs
+  for each, its tests in Debug with `check` there and for x86-64 Windows
+  and ARM64 macOS, and its tests in each release mode; `text/truetype/`,
+  which compiles stb_truetype's C, is also tested on Windows;
 - `renderers/raylib/`: its tests and `check` on Linux, Windows and
   macOS, and `check -Dzui-tracy=true` on Linux; and in a job of its own
   on Linux, under `xvfb-run`, its conformance, the `tour` target's visit
@@ -163,21 +165,29 @@ within 10 minutes:
   short at the side of its clip, on Linux, Windows and macOS;
 - `hosts/native/`: its tests in Debug and ReleaseSafe and its `check`,
   on Windows, and on Linux under a headless Weston with a D-Bus daemon
-  of its own (`.github/actions/wayland-session`); `check` for ARM64
-  Windows from Linux; and in a job of its own under Weston, the `theme`
-  example's `--check`, the `tour` target's visit of every screen, which
-  must report no layer or glyph atlas overflow and clean diagnostics,
-  its CPU while idle, shown in the job summary, and the `showcase`
-  target's frames. A headless Weston has no seat, so no clipboard, and
-  the `services` example's `--check` runs on a desktop, as the Windows
-  examples do;
-- `hosts/web/`: on Linux, each optimize mode's tests, `check` there and
-  for x86-64 Windows and ARM64 macOS, `test-demo` in Debug and in
-  ReleaseSafe, and `test-input`, each in a job of its own; `test-site`
-  in headless Google Chrome; and `test-draw` under `xvfb-run`, keeping
-  the frames that do not match as the run's artifacts. `test-host`, the
-  tour on the web host in headless Chromium, has no job yet and runs
-  locally.
+  of its own (`.github/actions/wayland-session`), where `check` for
+  ARM64 Windows runs too; and in a job of its own under Weston, the
+  `theme` example's `--check`, the `tour` target's visit of every
+  screen, which must report no layer or glyph atlas overflow and clean
+  diagnostics, its CPU while idle, shown in the job summary, and the
+  `showcase` target's frames. A headless Weston has no seat, so no
+  clipboard, and the `services` example's `--check` runs on a desktop,
+  as the Windows examples do;
+- `hosts/web/`: on Linux, its tests in Debug with `check` there and for
+  x86-64 Windows and ARM64 macOS, its tests in each release mode,
+  `test-demo` in Debug and in ReleaseSafe, and `test-input`, each in a
+  job of its own; `test-site` in headless Google Chrome; and `test-draw`
+  under `xvfb-run`, keeping the frames that do not match as the run's
+  artifacts. `test-host`, the tour on the web host in headless Chromium,
+  has no job yet and runs locally.
+
+Every job sets Zig up through `.github/actions/setup-zig`, which turns
+off Windows Defender's real-time scanning on Windows, where it slows
+every build, and keeps a cache of Zig's for each job, OS and the leg its
+`cache-key` names. A repository's caches are held to 10 GB, and a run
+saves one of each, so legs that share most of their build share a key (a
+package's legs, the shards of one optimize mode), and the quickest jobs
+keep none.
 
 When CI passes on a push to `main` and its `test-site` job ran, the
 Pages workflow builds the site in ReleaseSmall, runs `test-site` on it,

@@ -76,7 +76,7 @@ pub fn build(b: *std.Build) void {
         b.modules.put(b.graph.arena, name, b.dependency(name, .{ .target = target, .optimize = optimize, .@"zui-sanitize-thread" = sanitize_thread, .@"zui-debug" = debug, .@"zui-tracy" = tracy }).module(name)) catch @panic("OOM");
     }
 
-    for ([_][]const u8{ "test", "test-unit", "test-compile-errors", "check-bench-tools", "check" }) |name| forwardStep(b, core, name).dependOn(&core.builder.top_level_steps.get(name).?.step);
+    for ([_][]const u8{ "test", "test-unit", "test-unit-1", "test-unit-2", "test-compile-errors", "check-bench-tools", "check" }) |name| forwardStep(b, core, name).dependOn(&core.builder.top_level_steps.get(name).?.step);
     b.top_level_steps.get("check").?.step.dependOn(&reexportsCheck(b, target, optimize).step);
     forwardStep(b, core, "docs").dependOn(&b.addInstallDirectory(.{
         .source_dir = core.namedLazyPath("docs"),
