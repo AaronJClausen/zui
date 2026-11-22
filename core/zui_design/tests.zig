@@ -3,6 +3,8 @@ const zui = @import("zui");
 const zui_design = @import("zui_design.zig");
 const oklab = @import("oklab.zig");
 const contrast_solver = @import("contrast.zig");
+const color_vision = @import("color_vision.zig");
+const palette = @import("palette.zig");
 
 const testing = std.testing;
 const design = zui.design;
@@ -499,3 +501,194 @@ test "a fill whose text leaves no room toward it is layered toward white or blac
     try testing.expect(palettes.get(.pressed).get(.warning).color.lightness > palettes.get(.hovered).get(.warning).color.lightness);
     try testing.expect(palettes.get(.pressed).get(.accent).color.lightness > palettes.get(.idle).get(.accent).color.lightness);
 }
+
+fn expectLinearApprox(expected: [3]f32, actual: [3]f32) !void {
+    for (expected, actual) |expected_channel, actual_channel| try testing.expectApproxEqAbs(expected_channel, actual_channel, 0.000001);
+}
+
+test "each simulation applies Machado et al.'s matrix at full severity, or luminance alone" {
+    try expectLinearApprox(.{ 0.152286, 0.114503, 0 }, color_vision.simulatedLinear(.{ 1, 0, 0 }, .protanopia));
+    try expectLinearApprox(.{ 1, 0.786281, 0 }, color_vision.simulatedLinear(.{ 0, 1, 0 }, .protanopia));
+    try expectLinearApprox(.{ 0.367322, 0.280085, 0 }, color_vision.simulatedLinear(.{ 1, 0, 0 }, .deuteranopia));
+    try expectLinearApprox(.{ 0, 0.047413, 0.968881 }, color_vision.simulatedLinear(.{ 0, 0, 1 }, .deuteranopia));
+    try expectLinearApprox(.{ 0, 0.147602, 0.303900 }, color_vision.simulatedLinear(.{ 0, 0, 1 }, .tritanopia));
+    try expectLinearApprox(.{ 1, 0, 0.004733 }, color_vision.simulatedLinear(.{ 1, 0, 0 }, .tritanopia));
+    try expectLinearApprox(.{ 0.2126, 0.2126, 0.2126 }, color_vision.simulatedLinear(.{ 1, 0, 0 }, .achromatopsia));
+    try expectLinearApprox(.{ 0.25, 0.25, 0.25 }, color_vision.simulatedLinear(.{ 0.25, 0.25, 0.25 }, .deuteranopia));
+
+    for (std.enums.values(zui_design.Deficiency)) |deficiency| {
+        try testing.expectApproxEqAbs(1, zui_design.simulatedLightnessOfColor(.rgb(0xffffff), deficiency), 0.001);
+        try testing.expectApproxEqAbs(0, zui_design.simulatedLightnessOfColor(.rgb(0x000000), deficiency), 0.001);
+    }
+    try testing.expectApproxEqAbs(std.math.cbrt(@as(f32, 0.2126)), zui_design.simulatedLightnessOfColor(.rgb(0xff0000), .achromatopsia), 0.001);
+    try testing.expect(zui_design.simulatedLightnessOfColor(.rgb(0xff0000), .protanopia) < oklab.oklchOfColor(.rgb(0xff0000)).lightness - 0.1);
+}
+
+fn expectStatusRolesApart(tokens: *const Tokens, least: f32) !void {
+    const idle = tokens.colors.get(.idle);
+    for (color_vision.status_roles, 0..) |first, index| {
+        for (color_vision.status_roles[index + 1 ..]) |second| {
+            const nearest = zui_design.nearestOfColors(idle.get(first), idle.get(second));
+            if (!nearest.isApart(least)) {
+                std.debug.print("{t} and {t}: {d:.3} under {t}\n", .{ first, second, nearest.lightness_difference, nearest.deficiency });
+                return error.TestUnexpectedResult;
+            }
+        }
+    }
+}
+
+test "the status fills stay apart in lightness under every simulation, for an accent of every hue, in every scheme" {
+    for (0..12) |step| {
+        const hue: f32 = @floatFromInt(step * 30);
+        for ([_]f32{ 0.05, 0.25, 0.37 }) |accent_chroma| {
+            var seeded = harbor;
+            seeded.seeds = .{ .accent = .{ .lightness = 0.6, .chroma = accent_chroma, .hue = hue }, .neutral = .{ .lightness = 0.5, .chroma = 0.03, .hue = hue } };
+            for (every_theme) |theme| {
+                for (every_contrast) |contrast_setting| {
+                    var tokens: Tokens = .{};
+                    const repairs = zui_design.resolve(seeded, .{ .theme = theme, .contrast = contrast_setting }, &tokens);
+                    try testing.expect(repairs.isEmpty());
+                    try expectStatusRolesApart(&tokens, zui_design.least_lightness_difference);
+                    try expectEveryPairMeetsItsTarget(&tokens, contrast_setting);
+                }
+            }
+        }
+    }
+}
+
+test "status fills that collapse are moved apart, keeping their contrast, and reported" {
+    var red_success = harbor;
+    red_success.seeds.success_hue = 20;
+    var tokens: Tokens = .{};
+    const repairs = zui_design.resolve(red_success, .{ .contrast = .high }, &tokens);
+    try testing.expectEqual(1, repairs.slice().len);
+    const repair = repairs.slice()[0];
+    try testing.expectEqual(.color_vision, repair.kind);
+    try testing.expectEqual(.danger, repair.foreground);
+    try testing.expectEqual(.success, repair.background);
+    try testing.expectEqual(.light_high_contrast, repair.scheme);
+    try testing.expect(!repair.nearest.?.isApart(zui_design.least_lightness_difference));
+    try testing.expectEqual(null, repair.foreground_moved);
+    try testing.expect(repair.background_moved.?.to > repair.background_moved.?.from);
+    try expectStatusRolesApart(&tokens, zui_design.least_lightness_difference);
+    try expectEveryPairMeetsItsTarget(&tokens, .high);
+}
+
+test "status fills no lightness can part while keeping their contrast are reported as needing a cue" {
+    var shades = palettesOf(harbor.seeds, .{}).get(.idle);
+    for (color_vision.status_roles) |role| {
+        shades.getPtr(role).color.lightness = 0.93;
+        shades.getPtr(zui_design.partnerOf(role)).color = .{ .lightness = 0, .chroma = 0, .hue = 0 };
+    }
+    var repairs: zui_design.Repairs = .{};
+    color_vision.separateStatusRoles(&shades, .light, zui_design.least_lightness_difference, &repairs);
+    var needing_cue: usize = 0;
+    for (repairs.slice()) |repair| needing_cue += @intFromBool(repair.kind == .needs_non_color_cue);
+    try testing.expect(needing_cue > 0);
+    for (color_vision.status_roles) |role| {
+        const text = shades.get(zui_design.partnerOf(role)).color;
+        try testing.expect(zui_design.Contrast.ofShades(text, shades.get(role).color).meets(contrast_solver.Tier.text.target(.normal)));
+    }
+}
+
+fn simulatedChromaticDistance(first: zui.Color, second: zui.Color, deficiency: zui_design.Deficiency) f32 {
+    const linear = oklab.linear_of_byte;
+    const first_seen = oklab.Oklab.fromLinear(color_vision.simulatedLinear(.{ linear[first.r], linear[first.g], linear[first.b] }, deficiency));
+    const second_seen = oklab.Oklab.fromLinear(color_vision.simulatedLinear(.{ linear[second.r], linear[second.g], linear[second.b] }, deficiency));
+    const green_red = first_seen.green_red - second_seen.green_red;
+    const blue_yellow = first_seen.blue_yellow - second_seen.blue_yellow;
+    return @sqrt(green_red * green_red + blue_yellow * blue_yellow);
+}
+
+fn statusChromaticDistance(first: design.ColorRole, second: design.ColorRole, chosen: zui_design.ColorVision, deficiency: zui_design.Deficiency, theme: zui.Environment.Theme, contrast_setting: zui.Environment.Contrast) f32 {
+    var tokens: Tokens = .{};
+    _ = zui_design.resolve(harbor, .{ .theme = theme, .contrast = contrast_setting, .color_vision = chosen }, &tokens);
+    const idle = tokens.colors.get(.idle);
+    return simulatedChromaticDistance(idle.get(first), idle.get(second), deficiency);
+}
+
+test "a chosen color vision moves the status hues off its confused axis, or holds them further apart without color" {
+    const confusions = [_]struct { zui_design.ColorVision, zui_design.Deficiency, design.ColorRole, design.ColorRole }{
+        .{ .protan, .protanopia, .danger, .success },
+        .{ .deutan, .deuteranopia, .danger, .success },
+    };
+    for (every_theme) |theme| {
+        for (every_contrast) |contrast_setting| {
+            for (confusions) |confusion| {
+                const chosen, const deficiency, const first, const second = confusion;
+                const typical = statusChromaticDistance(first, second, .typical, deficiency, theme, contrast_setting);
+                const adapted = statusChromaticDistance(first, second, chosen, deficiency, theme, contrast_setting);
+                if (adapted <= typical) {
+                    std.debug.print("{t} {t} {t}: {t} and {t} {d:.3} -> {d:.3}\n", .{ chosen, theme, contrast_setting, first, second, typical, adapted });
+                    return error.TestUnexpectedResult;
+                }
+            }
+            for ([_]zui_design.ColorVision{ .protan, .deutan, .tritan, .achromat }) |chosen| {
+                var tokens: Tokens = .{};
+                _ = zui_design.resolve(harbor, .{ .theme = theme, .contrast = contrast_setting, .color_vision = chosen }, &tokens);
+                try expectStatusRolesApart(&tokens, color_vision.leastStatusDifferenceFor(chosen));
+                try expectEveryPairMeetsItsTarget(&tokens, contrast_setting);
+            }
+        }
+    }
+    const protan_hues = zui_design.statusHuesFor(.protan).?;
+    try testing.expectEqual(230, protan_hues.success);
+    try testing.expectEqual(null, zui_design.statusHuesFor(.typical));
+    try testing.expectEqual(null, zui_design.statusHuesFor(.achromat));
+    try testing.expectEqual(null, zui_design.statusHuesFor(.tritan));
+}
+
+test "a chosen color vision is adapted for, never fatally, at comptime" {
+    const repaired = comptime repaired: {
+        var count: u32 = 0;
+        for (every_theme) |theme| {
+            for (every_contrast) |contrast_setting| {
+                var tokens: Tokens = .{};
+                count += zui_design.resolve(harbor, .{ .theme = theme, .contrast = contrast_setting, .color_vision = .achromat }, &tokens).kept_count;
+            }
+        }
+        break :repaired count;
+    };
+    try testing.expect(repaired > 0);
+    var tokens: Tokens = .{};
+    const repairs = zui_design.resolve(harbor, .{ .contrast = .high, .color_vision = .achromat }, &tokens);
+    for (repairs.slice()) |repair| try testing.expectEqual(.color_vision, repair.kind);
+}
+
+const StatusBanner = struct {
+    pub const Part = enum { failed, passed, label };
+
+    pub const zuiAppearance = design.Appearance(Part, .{
+        .failed = .{ .surface = .danger, .shape = .container },
+        .passed = .{ .surface = .success, .shape = .container },
+        .label = .{ .text = .on_danger, .type = .label, .on = .failed },
+    });
+
+    pub const zuiDistinguish = .{
+        .{ .failed, .passed },
+    };
+};
+
+const CuedChip = struct {
+    pub const Part = enum { container, container_selected, close };
+
+    pub const zuiAppearance = design.Appearance(Part, .{
+        .container = .{ .surface = .secondary_container, .shape = .chip },
+        .container_selected = .{ .surface = .accent_container, .shape = .chip, .cue = "a check mark before its label" },
+        .close = .{ .icon = .on_secondary_container, .on = .container, .target = .touch, .cue = "the pointer over it" },
+    });
+
+    pub const zuiDistinguish = .{
+        .{ .container, .container_selected },
+        .{ .close, .idle, .hovered },
+    };
+};
+
+test "checkDistinguished passes pairs apart in lightness, and pairs with a cue that is not color" {
+    comptime zui_design.checkDistinguished(harbor, .{ StatusBanner, CuedChip, Logo });
+}
+
+const Logo = struct {
+    pub const Part = enum { mark };
+    pub const zuiAppearance = design.Appearance(Part, .{ .mark = .{ .surface = .unchecked(.rgb(0xff00ff), "the brand's logo") } });
+};

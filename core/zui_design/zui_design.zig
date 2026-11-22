@@ -15,6 +15,8 @@ const zui = @import("zui");
 const palette = @import("palette.zig");
 const contrast = @import("contrast.zig");
 const repairs_file = @import("repairs.zig");
+const color_vision = @import("color_vision.zig");
+const distinguish = @import("distinguish.zig");
 
 const design = zui.design;
 const Design = design.Design;
@@ -23,8 +25,10 @@ const Density = design.Density;
 const Target = design.Target;
 const TypeRole = design.TypeRole;
 
-/// The color vision the status roles are adapted for.
-pub const ColorVision = enum { typical, protan, deutan, tritan, achromat };
+/// The color vision the status roles are adapted for: `protan` and
+/// `deutan` move danger toward orange and success to azure; `tritan` and
+/// `achromat` hold them further apart in lightness.
+pub const ColorVision = color_vision.ColorVision;
 
 /// Every shape role one `CornerSize` sharper or rounder than its design
 /// gives it; `square` and `bubble` go no further.
@@ -94,9 +98,12 @@ pub const Repair = repairs_file.Repair;
 /// `builtInRoleOf` names.
 ///
 /// Every pair of `checked_pairs` is moved in lightness until it meets its
-/// target in APCA and WCAG 2, and the returned `Repairs` lists each move.
+/// target in APCA and WCAG 2, then each pair of status fills is moved
+/// apart until they differ in lightness under every simulated color
+/// vision, and the returned `Repairs` lists each move.
 /// At comptime a move the design's own seeds need is a compile error that
-/// names the lightness that passes; one a chosen accent needs is repaired.
+/// names the lightness that passes; one a chosen accent or a chosen color
+/// vision needs is repaired.
 ///
 /// ```zig
 /// var tokens: zui.design.Tokens(Ui, void) = .{};
@@ -132,8 +139,28 @@ fn failOnRepairsTheDesignNeeds(resolved_design: Design, preferences: Preferences
     for (repairs.slice()) |repair| {
         const moves_chosen_accent = preferences.accent != null and
             (palette.rampOf(repair.foreground, repair.scheme) == .accent or palette.rampOf(repair.background, repair.scheme) == .accent);
-        if (!moves_chosen_accent) @compileError(repairMessage(resolved_design.name, repair));
+        const adapts_to_chosen_color_vision = repair.kind != .contrast and preferences.color_vision != .typical;
+        if (moves_chosen_accent or adapts_to_chosen_color_vision) continue;
+        @compileError(switch (repair.kind) {
+            .contrast => repairMessage(resolved_design.name, repair),
+            .color_vision, .needs_non_color_cue => separationMessage(resolved_design.name, repair),
+        });
     }
+}
+
+/// "zui_design: demo.design's danger and success are 0.08 apart in
+/// lightness under deuteranopia in light, need 0.15; success at L 0.61
+/// passes"
+fn separationMessage(comptime design_name: []const u8, comptime repair: Repair) []const u8 {
+    const fmt = std.fmt.comptimePrint;
+    const nearest = repair.nearest.?;
+    const measured = fmt("zui_design: {s}'s {t} and {t} are {s} apart in lightness under {s} in {s}, need {s}", .{
+        design_name,               repair.foreground,    repair.background,                                                      distinguish.flooredHundredths(nearest.lightness_difference),
+        nearest.deficiency.name(), repair.scheme.name(), distinguish.flooredHundredths(color_vision.least_lightness_difference),
+    });
+    if (repair.kind == .needs_non_color_cue) return measured ++ "; no lightness of either keeps its contrast, so they need a cue that is not color";
+    const moved_role, const move = if (repair.foreground_moved) |move| .{ repair.foreground, move } else .{ repair.background, repair.background_moved.? };
+    return fmt("{s}; {t} at L {s} passes", .{ measured, moved_role, hundredthsPast(move) });
 }
 
 /// "zui_design: demo.design's on_danger on danger is Lc 73 in light, needs
@@ -216,15 +243,73 @@ pub const builtInRoleOf = palette.builtInRoleOf;
 pub const partnerOf = palette.partnerOf;
 
 /// Every built-in role's color in every state, before it is encoded in a
-/// context's color type, with each checked pair's contrast solved in the
-/// idle palette, so the state layers derive from solved colors.
+/// context's color type, with each checked pair's contrast solved and the
+/// status fills held apart for color vision in the idle palette, so the
+/// state layers derive from solved colors.
 pub fn palettesFor(seeds: Design.Seeds, preferences: Preferences, repairs: *Repairs) palette.PalettesByState {
-    const ramps = palette.rampSeeds(seeds, preferences.accent);
+    const ramps = palette.rampSeeds(seedsFor(seeds, preferences.color_vision), preferences.accent);
     const scheme: palette.Scheme = .of(preferences.theme, preferences.contrast);
     var idle = palette.idlePalette(ramps, scheme, preferences.reduced_transparency, preferences.accent);
     contrast.solve(&idle, scheme, repairs);
+    color_vision.separateStatusRoles(&idle, scheme, color_vision.leastStatusDifferenceFor(preferences.color_vision), repairs);
     return palette.stateLayers(idle, contrast.layerShares(idle, scheme));
 }
+
+/// `seeds` with the status hues `color_vision` replaces them with.
+fn seedsFor(seeds: Design.Seeds, chosen_color_vision: ColorVision) Design.Seeds {
+    const hues = color_vision.statusHuesFor(chosen_color_vision) orelse return seeds;
+    var adapted = seeds;
+    adapted.danger_hue = hues.danger;
+    adapted.warning_hue = hues.warning;
+    adapted.success_hue = hues.success;
+    return adapted;
+}
+
+/// Fails the build on each entry of a component's `zuiDistinguish` that
+/// `resolved_design`, in any scheme, does not show apart under every
+/// simulated color vision, by at least `least_lightness_difference` in
+/// OKLab lightness in some color the two draw, when neither part declares
+/// a `cue` that is not color. The roles are shared by every component, so
+/// a pair is checked, not moved. Two parts are compared idle, since a
+/// state's layer is feedback on one part at a time; a part in two states,
+/// in those two.
+///
+/// ```zig
+/// comptime zui_design.checkDistinguished(app.design, .{ Checkbox, Tab, StatusBadge });
+/// ```
+pub fn checkDistinguished(comptime resolved_design: Design, comptime components: anytype) void {
+    comptime {
+        @setEvalBranchQuota(20_000_000);
+        var palettes: distinguish.PalettesBySchemes = undefined;
+        for (std.enums.values(Scheme)) |scheme| {
+            var ignored: Repairs = .{};
+            const theme: zui.Environment.Theme = if (scheme == .light or scheme == .light_high_contrast) .light else .dark;
+            palettes.set(scheme, palettesFor(resolved_design.seeds, .{ .theme = theme, .contrast = scheme.environmentContrast() }, &ignored));
+        }
+        for (components) |Component| distinguish.checkComponent(resolved_design.name, Component, palettes);
+    }
+}
+
+/// A dichromacy at full severity, or achromatopsia, as a color is
+/// simulated for it.
+pub const Deficiency = color_vision.Deficiency;
+/// A linear sRGB color as seen with a `Deficiency`, by Machado et al.'s
+/// matrices at full severity.
+pub const simulatedLinear = color_vision.simulatedLinear;
+/// A color's OKLab lightness as seen with a `Deficiency`.
+pub const simulatedLightness = color_vision.simulatedLightness;
+/// An encoded color's OKLab lightness as seen with a `Deficiency`.
+pub const simulatedLightnessOfColor = color_vision.simulatedLightnessOfColor;
+/// Two encoded colors' nearest approach in lightness over every simulation.
+pub const nearestOfColors = color_vision.nearestOfColors;
+/// Two OKLCH colors' nearest approach in lightness over every simulation.
+pub const nearestUnderSimulation = color_vision.nearestUnderSimulation;
+/// Where two colors are nearest in lightness, and by how much.
+pub const Nearest = color_vision.Nearest;
+/// How far apart in lightness two colors are told apart without hue.
+pub const least_lightness_difference = color_vision.least_lightness_difference;
+/// The status roles' hues for a chosen color vision.
+pub const statusHuesFor = color_vision.statusHuesFor;
 
 /// A `Palette` for each state's layer.
 pub const PalettesByState = palette.PalettesByState;

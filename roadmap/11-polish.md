@@ -778,6 +778,56 @@ owner's call, so a run-time color that fails is a real repair. Fourth,
 `zui.design.Design.name` names a design in the compile error, "the
 design" by default, rather than a separate comptime entry point.
 
+Slice 4 decided five things. First, the owner's rule for the dark themes
+(light text on darker fills) leaves the three status fills no room to
+differ in lightness: white text caps a fill at about L 0.54 (Lc 75) and
+0.44 (Lc 90), and three fills 0.15 apart below that put `danger` at the
+surface's own lightness, 0.20 on 0.21 in dark and 0.10 on 0.10 in dark
+high contrast. Simulation moves a fill's lightness little: protanopia
+darkens red by about 0.08 at L 0.5 and amber by 0.035, and lightens green
+by 0.025; the others move a fill by 0.03 or less. So the owner made one
+exception: `warning` alone takes dark text on a light amber fill in the
+dark themes, as light already does. `danger` is the darker of the two
+white-text fills in every scheme, since protanopia darkens red further.
+The tables changed, chroma share in brackets where it changed:
+
+| Scheme | Role | Before | After |
+|---|---|---|---|
+| light | `danger`, `success` | 0.55, 0.52 | 0.34, 0.53 |
+| dark | `danger`, `success` | 0.45, 0.45 | 0.32, 0.52 |
+| dark | `warning`, `on_warning` | 0.45, 0.99 (0.05) | 0.87, 0.18 (0.5) |
+| light high contrast | `danger`, `success` | 0.45, 0.42 | 0.23, 0.41 |
+| dark high contrast | `danger`, `success` | 0.30, 0.30 | 0.23, 0.41 |
+| dark high contrast | `warning`, `on_warning` | 0.30, 1 (neutral) | 0.93, 0.10 (0.4) |
+
+With them no seed reaches a contrast failure any more: a scan of every
+status hue in 10° steps and every neutral hue in 30° steps at chroma up
+to 0.3 repairs no contrast pair. So `design_pair_below_target`, whose
+green `danger` passed after the retune, became
+`design_status_roles_collapse`, a design whose `success_hue` is red (20°),
+the one kind of fatal repair a design's own hues still reach, and SPEC.md
+§18.4 describes the contrast message's form instead of quoting it.
+Second, `zuiDistinguish` pairs are checked, not moved, by
+`zui_design.checkDistinguished(design, components)` at comptime, since
+their roles are shared by every component, and a part declares a cue that
+is not color as `PartAppearance.cue`, a string naming it. Two parts are
+compared idle only: compared in every layer, a `danger` part and a
+`success` part fail when hovered, 0.08 apart under deuteranopia in light,
+because `danger` takes its layers toward its white text and `success`,
+too near its text's limit for that, takes them toward black. A state's
+layer is feedback on one part, which an entry of a part in two states
+checks. Third, separation is measured on the colors as encoded in sRGB,
+as contrast is; measured before encoding, achromatopsia's 0.20 came out
+at 0.199 after rounding. Fourth, `Preferences.color_vision`: `protan` and
+`deutan` move `danger` to 40° and `success` to 230°, with `warning` at
+85°, which in a test widens their simulated chromatic distance under
+protanopia and deuteranopia in every scheme. A move of `warning`'s hue
+for `tritan` did nothing: a scan of its hue from 20° to 110° moved its
+tritanopia distance from `success` by at most 0.01, since a light fill
+has little chroma to show. So `tritan` and `achromat` keep the hues and
+hold the fills 0.20 apart instead. Fifth, a repair a chosen color vision
+needs is never fatal at comptime, as a chosen accent's is not.
+
 **Status.** Slice 1 done: `core/zui_design/`, wired as a module and
 re-exported by the root, with `Preferences`, `Preferences.from` (the
 accent from `Choices` alone until `11-polish:18-system-accent`),
@@ -852,6 +902,46 @@ theme and accent, takes a median of 30.7 µs (135 µs in Debug), measured
 while other builds shared the machine; the layer shares cost about 14 µs
 of it, and APCA's powers are `@exp(@log(x) · e)`. 25 tests in
 `core/zui_design/tests.zig`. Slice 4, color vision, is next.
+
+Slice 4 done: color vision (`core/zui_design/color_vision.zig`,
+`core/zui_design/distinguish.zig`). `simulatedLinear` applies Machado,
+Oliveira and Fernandes's severity-1 matrices for protanopia,
+deuteranopia and tritanopia on linear sRGB, clamped into the gamut, and
+achromatopsia's luminance alone; a test pins each matrix's columns, white
+and black under each, and red's lightness without color at ∛0.2126.
+`separateStatusRoles` runs after contrast is solved: a pair of status
+fills nearer than 0.15 in lightness under any simulation is parted by
+moving the fill with the shorter move away from the other, as far as its
+`on_*` text still passes, a 9-step bisection; a pair no move parts is
+recorded as needing a cue that is not color. `Repair` gained a `kind`
+(`contrast`, `color_vision`, `needs_non_color_cue`) and `nearest`, the
+simulation and difference before. At comptime a color-vision repair is a
+compile error unless the user chose the color vision, pinned by
+`design_status_roles_collapse`: `zui_design: demo.design's danger and
+success are 0.14 apart in lightness under protanopia in light high
+contrast, need 0.15; success at L 0.42 passes`.
+`zui_design.checkDistinguished` is pinned by `distinguish_without_cue`
+and `distinguish_states_without_cue`, and `core/tests/instantiate.zig`
+checks a component of extra roles with it. No component in
+`zui_widgets`, `themes/` or `apps/` declares `zuiDistinguish` yet.
+Measured on the default tables: an accent of every hue from 0° to 330° in
+30° steps, at chroma 0.05, 0.25 and 0.37, resolves with no repair in all
+four schemes, every contrast target met idle, hovered, focused and
+pressed, and every status pair at least 0.15 apart. The tightest are
+`danger` and `success` under tritanopia, 0.170 in light, 0.182 in dark,
+and 0.167 in both high-contrast schemes; the tightest status contrast is
+`on_success` on `success`, Lc 76.7 in light, 77.9 in dark and 93.1 in
+high contrast. In ReleaseFast a resolve of every token with six extra
+roles, alternating theme and accent, takes a median of 30.7 to 31.6 µs
+in two runs with typical color vision (slice 3: 30.7 µs), 31.0 to
+31.2 µs for `deutan`, and 37.7 to 38.3 µs for `achromat`, which moves
+fills on every resolve (141 µs in Debug with typical color vision), under the 50 µs budget, measured
+while other builds shared the machine. Holding the other fills' simulated
+lightness fixed for the search, and searching to 1/512 rather than
+1/4096, brought a mix
+of half typical and half `achromat` resolves down from a median of 53 to
+57 µs (90th percentile 75 µs) to 36 µs. 32 tests in `core/zui_design/tests.zig`. Slice 5, density,
+is next.
 
 ## 11-polish:15-type-scale — The type scale
 

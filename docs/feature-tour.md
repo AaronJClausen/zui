@@ -1722,7 +1722,7 @@ const AlbumChip = struct {
 
     pub const zuiAppearance = zui.design.Appearance(Part, .{
         .container = .{ .surface = .secondary_container, .shape = .chip, .padding = .{ .x = .s, .y = .xs }, .gap = .xs },
-        .container_selected = .{ .surface = .accent_container, .shape = .chip, .padding = .{ .x = .s, .y = .xs }, .gap = .xs },
+        .container_selected = .{ .surface = .accent_container, .shape = .chip, .padding = .{ .x = .s, .y = .xs }, .gap = .xs, .cue = "a check mark before its name" },
         .name = .{ .text = .on_secondary_container, .type = .label, .on = .container },
         .remove = .{ .icon = .on_secondary_container, .on = .container, .target = .touch },
     });
@@ -1769,7 +1769,7 @@ pub var tokens: zui.design.Tokens(Ui, DarkroomRoles) = .{};
 
 ### `zui_design`: tokens from seeds and preferences · *shipped*
 
-`zui_design` makes the `zui.design.Tokens` that `look` reads, from a `Design` and the user's `Preferences`. Each seed becomes a tonal ramp in OKLCH, and every role is a lightness on one in light, dark and high contrast; a hovered, focused or pressed fill moves toward the role drawn on it, and a disabled one greys and fades. Spacing comes from the density the user chose, corners from the design's shape table moved a size sharper or rounder at the user's word, and target floors stay at 24 units, 44 for touch. Your own roles take the colors of the roles their pairs name. `resolve` allocates nothing, and runs at comptime as well as at run time, so a design's dark high-contrast tokens can be a constant. Every pair of a role on its partner is held to APCA's lightness contrast and WCAG 2's ratio at once: Lc 75 and 4.5:1 for text, Lc 45 and 3:1 for outlines and the focus ring, more under high contrast, in every state's layer. A design whose own seeds miss a target fails to compile with a message naming the pair, the scheme and the lightness that would pass; a color that arrives at run time, such as the user's accent, keeps its own lightness and is moved until it passes, and `resolve` returns each repair. Color vision is still to come.
+`zui_design` makes the `zui.design.Tokens` that `look` reads, from a `Design` and the user's `Preferences`. Each seed becomes a tonal ramp in OKLCH, and every role is a lightness on one in light, dark and high contrast; a hovered, focused or pressed fill moves toward the role drawn on it, and a disabled one greys and fades. Spacing comes from the density the user chose, corners from the design's shape table moved a size sharper or rounder at the user's word, and target floors stay at 24 units, 44 for touch. Your own roles take the colors of the roles their pairs name. `resolve` allocates nothing, and runs at comptime as well as at run time, so a design's dark high-contrast tokens can be a constant. Every pair of a role on its partner is held to APCA's lightness contrast and WCAG 2's ratio at once: Lc 75 and 4.5:1 for text, Lc 45 and 3:1 for outlines and the focus ring, more under high contrast, in every state's layer. A design whose own seeds miss a target fails to compile with a message naming the pair, the scheme and the lightness that would pass; a color that arrives at run time, such as the user's accent, keeps its own lightness and is moved until it passes, and `resolve` returns each repair. Under simulated protanopia, deuteranopia, tritanopia and achromatopsia, the danger, warning and success fills stay at least 0.15 apart in lightness, so they can be told apart without their hue; a user who chose a color vision gets status hues moved off the axis they confuse, or the fills held further apart. Pairs your components list in `zuiDistinguish` are checked against your design with `zui_design.checkDistinguished`, and one that would look alike without color fails to compile unless a part names its `.cue`.
 
 `src/appearance.zig`
 
@@ -1800,6 +1800,10 @@ pub const print_proof_tokens = proof: {
     _ = zui_design.resolve(darkroom, .{ .contrast = .high }, &tokens);
     break :proof tokens;
 };
+
+comptime {
+    zui_design.checkDistinguished(darkroom, .{AlbumChip});
+}
 ```
 
 <a id="reflect"></a>
@@ -2539,7 +2543,7 @@ Build with `-Dzui-tracy=true` to link Tracy's client, then connect profiler 0.14
 These names compile, but they don't do anything yet. This list is from `ARCHITECTURE.md` §7 and the roadmap.
 
 - **A host that runs its own loop**: `zuiRun` and the `zui.Driver` it is handed, with `suspendSurfaces` and `resumeSurfaces` for a surface the platform takes away, compile and pass `zui_app`'s tests against a scripted host, but no shipped host declares `zuiRun` yet; macOS, iOS and Android's are to come.
-- **Still to come**: Multi-line text editing, the rest of the design system (color vision in `zui_design`, density's coupling to text size, a type scale, and a review of every permutation), theme packs, the inspector over the wire, and more hosts (Linux and web; macOS later).
+- **Still to come**: Multi-line text editing, the rest of the design system (density's coupling to text size, a type scale, and a review of every permutation), theme packs, the inspector over the wire, and more hosts (Linux and web; macOS later).
 
 <a id="dx"></a>
 

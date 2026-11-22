@@ -116,7 +116,7 @@ is in the file its group names.
 | `10-reach:01-linux-host` | `hosts/native/`, `renderers/sokol/` | | in progress; slice 9, X11, is next |
 | `10-reach:02-web-host` | `hosts/web/`, `renderers/webgl/` | | in progress; slice 4, the environment, is next |
 | `10-reach:04-window-decorations` | `core/src/chrome.zig`, `core/src/context.zig`, `core/zui_app/`, `hosts/native/` | | waiting on a person: the checklist under its *Status*, on `zig build title-bar` in `hosts/native/` |
-| `11-polish:14-zui-design` | `core/zui_design/` | | in progress; slice 4, color vision, is next |
+| `11-polish:14-zui-design` | `core/zui_design/` | | in progress; slice 5, density, is next |
 | `11-polish:15-type-scale` | `core/zui_design/`, `text/glyphs/`, `text/truetype/` | `11-polish:14-zui-design` | |
 | `11-polish:18-system-accent` | `core/src/input.zig`, `hosts/` | | |
 | `11-polish:19-default-design` | `core/zui_design/`, `core/zui_widgets/`, `apps/` | `11-polish:14-zui-design`, `11-polish:15-type-scale` | |

@@ -827,8 +827,27 @@ const tokens_resolved_at_comptime = resolved: {
     break :resolved tokens;
 };
 
+const StatusBadge = struct {
+    pub const Part = enum { failed, passed, selected };
+
+    pub const zuiAppearance = zui.design.AppearanceWith(Part, ResolvedRoles, .{
+        .failed = .{ .surface = .danger },
+        .passed = .{ .surface = .success },
+        .selected = .{ .surface = .extra(.brand), .cue = "a check mark" },
+    });
+
+    pub const zuiDistinguish = .{
+        .{ .failed, .passed },
+        .{ .passed, .selected },
+    };
+};
+
+comptime {
+    zui_design.checkDistinguished(resolved_design, .{StatusBadge});
+}
+
 export fn zuiCheckDesignResolve() f32 {
-    const preferences: zui_design.Preferences = .from(&resolved_environment, .{ .accent = .rgb(0xff8800) });
+    const preferences: zui_design.Preferences = .from(&resolved_environment, .{ .accent = .rgb(0xff8800), .color_vision = .deutan });
     const repairs = zui_design.resolve(resolved_design, preferences, &resolved_tokens);
     _ = zui_design.resolve(resolved_design, preferences, &resolved_extended_tokens);
     const repaired: f32 = @floatFromInt(repairs.slice().len + repairs.dropped);

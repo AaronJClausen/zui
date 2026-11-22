@@ -2459,7 +2459,7 @@ const Chip = struct {
 
     pub const zuiAppearance = zui.design.Appearance(Part, .{
         .container = .{ .surface = .secondary_container, .shape = .chip, .padding = .{ .x = .s, .y = .xs }, .gap = .xs },
-        .container_selected = .{ .surface = .accent_container, .shape = .chip, .padding = .{ .x = .s, .y = .xs }, .gap = .xs },
+        .container_selected = .{ .surface = .accent_container, .shape = .chip, .padding = .{ .x = .s, .y = .xs }, .gap = .xs, .cue = "a check mark before its label" },
         .label = .{ .text = .on_secondary_container, .type = .label, .on = .container },
         .close = .{ .icon = .on_secondary_container, .on = .container, .target = .touch },
     });
@@ -2490,7 +2490,11 @@ const look = tokens.look(Chip, .container, ui.widgetState(id));
   different, as a checked and an unchecked box are parts of their own
   (§16.7); `.{ .part, .idle, .hovered }` pairs one part in two states. Under every color vision simulation, they must stay apart in
   lightness, or differ in a cue that is not color: `zui_widgets`'
-  checkbox has its mark, a selected tab its indicator.
+  checkbox has its mark, a selected tab its indicator. A part names its
+  cue as `.cue = "a check mark before its label"`, and a pair either of
+  whose parts has one is not measured. The core does not resolve colors,
+  so the pairs are checked against a design by
+  `comptime zui_design.checkDistinguished(design, .{ Chip, … })` (§18.4).
 - **A raw color** is `.unchecked(.rgb(0xff00ff), "the brand's logo")`. It
   compiles, it is drawn in every state as given, and the audit (§18.8)
   lists it with its reason, every time, from the appearance's
@@ -2512,6 +2516,11 @@ The messages, for a `Chip` declared in `demo.zig`:
 ``"zui: each entry of demo.Chip.zuiDistinguish is two parts, or a part and two states"``;
 ``"zui: demo.Chip.zuiDistinguish names `badge`, which is not a part of demo.Chip.Part"``;
 ``"zui: demo.Chip.zuiDistinguish names `normal`, which is not a zui.WidgetState"``.
+And from `zui_design.checkDistinguished`, for the `Chip` above without its
+cue:
+``"zui_design: under demo.design, demo.Chip's container and container_selected are 0.01 apart in lightness under protanopia in light, need 0.15; give one a `.cue` that is not color"``
+(``demo.Chip.close's idle and hovered layers are`` … ``give it a `.cue` `` for
+a part in two states).
 And for extra roles:
 ``"zui: ExtraRoles must be an enum or void, got u8"``;
 ``"zui: demo.Roles's `accent` is already a zui.design.ColorRole"``;
@@ -2559,7 +2568,9 @@ if (!std.meta.eql(preferences, app.preferences)) {
   and optionally a hue for each status role. Each becomes a tonal ramp,
   and every role is taken from a ramp per theme. Dark is solved from the
   same ramps, not inverted: its raised surfaces are lighter, not shadowed,
-  and its filled roles are darker than their light text. A chosen accent,
+  and its filled roles are darker than their light text, all but
+  `warning`, a light amber under dark text in every theme, which leaves
+  the three status fills room to differ in lightness. A chosen accent,
   the user's or the system's, is the accent fill as it is, its lightness
   included; the design's accent seed gives only its hue and chroma.
 - **Contrast is solved, not only checked.** Each declared pair must meet
@@ -2584,24 +2595,52 @@ if (!std.meta.eql(preferences, app.preferences)) {
   as far toward white or black instead.
 - **A design that cannot meet a target at comptime is a compile error**
   naming the design by `Design.name`, the pair, the scheme and the
-  lightness that would pass, as for a design in `demo.zig` whose
-  `danger_hue` is green:
-  ``"zui_design: demo.design's on_danger on danger is Lc 73 in light, needs 75; on_danger at L 1.00 passes"``.
-  A pair that misses only WCAG 2's ratio is named by its ratio and the
-  ratio it needs. A design is named "the design" until it sets `name`.
+  lightness that would pass, as "zui_design: *design*'s *foreground* on
+  *background* is Lc *measured* in *scheme*, needs *target*; *foreground*
+  at L *lightness* passes". A pair that misses only WCAG 2's ratio is
+  named by its ratio and the ratio it needs. No seed of the built-in
+  tables reaches it, since their status fills keep a margin at every hue;
+  the status roles' separation, below, is the comptime error a design's
+  own hues can reach. A design is named "the design" until it sets
+  `name`.
 - **A color that arrives at run time,** the user's accent or the
   system's, is repaired the same way, never fatally, even at comptime, and
-  `resolve` returns each repair in `Repairs`: the pair, the scheme, its
-  contrast before and the lightness each side took, the first 32 kept and
-  the rest counted as dropped.
-- **Color vision.** For each `zuiDistinguish` pair and each pair of status
-  roles, the resolver simulates protanopia, deuteranopia, tritanopia and
-  achromatopsia (Machado et al., 2009, at full severity). A pair whose
-  OKLab lightness differs by less than 0.15 under any of them is moved
-  apart in lightness; if it cannot be, the pair needs a cue that is not
-  color, which a component with no such cue fails on at comptime.
-  `Preferences.color_vision` adapts the status roles further for the
-  user who chose it. Images and custom drawing are not recolored.
+  `resolve` returns each repair in `Repairs`: what was measured
+  (contrast, color vision, or a pair that needs a cue that is not color),
+  the pair, the scheme, its contrast or its nearest simulation before,
+  and the lightness each side took, the first 32 kept and the rest
+  counted as dropped.
+- **Color vision.** Each color is simulated, as it is encoded in sRGB,
+  under protanopia, deuteranopia, tritanopia and achromatopsia (Machado
+  et al., 2009, at full severity, on linear sRGB; achromatopsia keeps the
+  luminance alone), and two colors are apart when their OKLab lightness
+  differs by at least 0.15 under each.
+  - **The status fills,** `danger`, `warning` and `success`, are held
+    apart in pairs by `resolve`, in the idle palette after contrast is
+    solved. A pair that is not is moved apart: the fill whose move is
+    the shorter goes away from the other in lightness, as far as its
+    `on_*` role still meets its target, and the move is reported. A pair
+    no such move parts is reported as needing a cue that is not color.
+    At comptime either is a compile error unless the user chose the
+    color vision, as for a design in `demo.zig` whose `success_hue` is
+    red, resolved in high contrast:
+    ``"zui_design: demo.design's danger and success are 0.14 apart in lightness under protanopia in light high contrast, need 0.15; success at L 0.42 passes"``.
+  - **`zuiDistinguish` pairs** are checked, not moved: their roles are
+    shared by every component, so moving one for one pair would move it
+    for all. `comptime zui_design.checkDistinguished(design, components)`
+    resolves the design in every scheme and compares two parts' surfaces,
+    text or icons, and outlines idle, and one part's in its two states;
+    an entry passes when one of those colors is apart under every
+    simulation, or when a part declares a `.cue`, and fails the build
+    otherwise (§18.2).
+  - **`Preferences.color_vision`** adapts the status roles further for
+    the user who chose it: `protan` and `deutan` move `danger` to hue
+    40° and `success` to 230°, apart on the blue-yellow axis that is
+    left, and `warning` to 85°; `tritan` and `achromat` keep the hues,
+    since red and green stay apart without blue and yellow and warning's
+    light fill has too little chroma for its hue to show, and hold the
+    status fills 0.20 apart instead. Images and custom drawing are not
+    recolored.
 
 ### 18.5 Spacing and density
 
@@ -3261,7 +3300,9 @@ The default maker of `zui.design.Tokens` (§18): `Preferences.from` the
 environment and the user's choices, and `resolve(design, preferences,
 *Tokens)`, which makes palettes from seeds, solves every declared pair's
 contrast and color vision, applies the density and the type scale, and
-returns what it repaired, without allocating. It also holds the audit of
+returns what it repaired, without allocating, and
+`checkDistinguished(design, components)`, which checks each component's
+`zuiDistinguish` pairs against a design at comptime. It also holds the audit of
 a finished frame (`audit`), the axes and levels of a component's
 permutations (`Permutations`, `PermutationKey`), and the verdict file and
 report the review writes (§18.8). `zui_design.default` is zui's own

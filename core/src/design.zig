@@ -225,6 +225,10 @@ pub fn PartAppearance(comptime ExtraRoles: type) type {
         /// Each state's colors default to the part's own, in that state's
         /// layer; one given here replaces them in that state.
         states: States = .{},
+        /// What shows this part apart from those its component's
+        /// `zuiDistinguish` pairs it with, without color, as "its check
+        /// mark"; a pair with a cue need not differ in lightness.
+        cue: ?[]const u8 = null,
 
         pub const Choice = ColorChoice(ExtraRoles);
 
@@ -291,9 +295,9 @@ pub fn Parts(comptime Part: type, comptime ExtraRoles: type) type {
 ///
 ///     pub const zuiAppearance = zui.design.Appearance(Part, .{
 ///         .container = .{ .surface = .secondary_container, .shape = .chip, .padding = .{ .x = .s, .y = .xs }, .gap = .xs },
-///         .container_selected = .{ .surface = .accent_container, .shape = .chip, .padding = .{ .x = .s, .y = .xs }, .gap = .xs },
+///         .container_selected = .{ .surface = .accent_container, .shape = .chip, .padding = .{ .x = .s, .y = .xs }, .gap = .xs, .cue = "a check mark before its label" },
 ///         .label = .{ .text = .on_secondary_container, .type = .label, .on = .container },
-///         .close = .{ .icon = .on_secondary_container, .on = .container, .target = .touch },
+///         .close = .{ .icon = .on_secondary_container, .on = .container, .target = .touch, .cue = "the pointer over it" },
 ///     });
 ///
 ///     pub const zuiDistinguish = .{
