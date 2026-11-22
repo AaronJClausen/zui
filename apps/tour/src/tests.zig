@@ -23,12 +23,13 @@ const PatternMaterial = struct {
     pub const Pattern = enum { flat, stripes };
 };
 
-/// Draws nothing, and declares that it draws every optional command, or
-/// none of them, in `placement`.
+/// Draws nothing, and declares that it draws every optional command and
+/// corner shape, or none of them but round corners, in `placement`.
 fn FakeRenderer(comptime draws_every_command: bool, comptime placement: zui_glyphs.Placement) type {
     return struct {
         pub const zui_surfaces: zui.SurfaceKinds = .initOne(.offscreen);
         pub const zui_commands: zui.CommandSet = if (draws_every_command) .initFull() else .initEmpty();
+        pub const zui_corner_shapes: zui.CornerShapeSet = if (draws_every_command) .initFull() else .initOne(.round);
         pub const MaterialHandle = if (draws_every_command) PatternMaterial else void;
         pub const glyph_placement = placement;
 
@@ -180,6 +181,24 @@ test "a renderer is offered the screens and the frost it draws everything of" {
     defer harness.deinit();
     harness.tour.show(.clickable_chaos);
     try testing.expectEqual(tour.Screen.overview, harness.tour.current);
+}
+
+test "Harbor's continuous corners are drawn by a renderer that draws them, and drawn round and reported by one that does not" {
+    inline for (.{ FakeRenderer(true, .pixel_grid), FakeRenderer(false, .pixel_grid) }) |Renderer| {
+        const kit = KitFor(Renderer);
+        var harness: Harness(kit) = .{};
+        try harness.init();
+        defer harness.deinit();
+        const settled = harness.settledFrame(.harbor, default_window);
+        defer harness.ui.release(settled);
+        const lowered = settled.diagnostics.lowered_corner_shapes;
+        if (kit.draws_every_corner_shape) {
+            try testing.expectEqual(0, lowered.count());
+        } else {
+            try testing.expectEqual(zui.CornerShapeSet.initOne(kit.panel_corner_shape), lowered);
+        }
+        try testing.expect(settled.diagnostics.ok());
+    }
 }
 
 test "a material without patterns is not shown as one" {

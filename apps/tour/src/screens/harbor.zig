@@ -256,6 +256,7 @@ const Feature = enum {
     text_cache,
     idle,
     effects,
+    corner_shapes,
     semantics,
     environment,
 
@@ -272,6 +273,7 @@ const Feature = enum {
             .text_cache => "Text measurement",
             .idle => "Idle by default",
             .effects => "Effects that lower",
+            .corner_shapes => "Corner shapes",
             .semantics => "Semantics",
             .environment => "Environment",
         };
@@ -290,6 +292,7 @@ const Feature = enum {
             .text_cache => "Typing or scrolling measures only the strings not seen before. A frame with nothing new measures nothing.",
             .idle => "With nothing changing, the console costs nothing. The timeline shows why each recent frame was declared.",
             .effects => "A renderer that cannot draw an effect lowers it: a gradient becomes its mean color, a shadow is left out. The layout is the same either way.",
+            .corner_shapes => "Every panel asks for continuous corners, whose curve meets the side without a kink. A renderer that draws only circular arcs draws them round, and the layout cannot tell the difference.",
             .semantics => "The accessibility tree comes from the same declaration as the pixels, so it cannot drift from what is drawn.",
             .environment => "Every screen follows the environment with no code of its own: right to left mirrors the layout, high contrast strengthens the borders.",
         };
@@ -616,7 +619,7 @@ pub fn Using(comptime kit: type) type {
                 ui.open(.{
                     .id = id,
                     .layout = .{ .direction = .top_to_bottom, .sizing = sizing, .padding = .all(16), .child_gap = 10 },
-                    .decoration = .{ .background = shell.palette.surface, .border = .{ .color = shell.palette.border, .widths = .all(1) }, .corner_radius = .all(8) },
+                    .decoration = .{ .background = shell.palette.surface, .border = .{ .color = shell.palette.border, .widths = .all(1) }, .corner_radius = .all(8), .corner_shape = kit.panel_corner_shape },
                 });
             }
 
@@ -696,7 +699,7 @@ pub fn Using(comptime kit: type) type {
                         .id = tile_id,
                         .semantics = self.semantic(.{ .role = .group, .label = tile[0], .value = .{ .text = value } }),
                         .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow_equal }, .padding = .all(12), .child_gap = 6 },
-                        .decoration = .{ .background = palette.surface, .border = .{ .color = palette.border, .widths = .all(1) }, .corner_radius = .all(8) },
+                        .decoration = .{ .background = palette.surface, .border = .{ .color = palette.border, .widths = .all(1) }, .corner_radius = .all(8), .corner_shape = kit.panel_corner_shape },
                     });
                     defer ui.close();
                     ui.text(tile[0], noWrap(shell.style(.caption, palette.muted)));
@@ -1052,7 +1055,7 @@ pub fn Using(comptime kit: type) type {
                         .exit = .{ .seconds = 0.3, .fade = .ease_out },
                         .semantics = self.semantic(.{ .role = .label, .label = toast.text() }),
                         .layout = .{ .padding = .symmetric(14, 10), .child_gap = 10, .child_alignment = .{ .y = .center } },
-                        .decoration = .{ .background = palette.raised, .border = .{ .color = palette.border, .widths = .all(1) }, .corner_radius = .all(8) },
+                        .decoration = .{ .background = palette.raised, .border = .{ .color = palette.border, .widths = .all(1) }, .corner_radius = .all(8), .corner_shape = kit.panel_corner_shape },
                         .effects = &floating_shadow,
                     });
                     defer ui.close();
@@ -1087,7 +1090,7 @@ pub fn Using(comptime kit: type) type {
                     .focus_scope = true,
                     .semantics = self.semantic(.{ .role = .dialog, .label = "Deploy" }),
                     .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(440) }, .padding = .all(20), .child_gap = 12 },
-                    .decoration = .{ .background = palette.surface, .border = .{ .color = palette.border, .widths = .all(1) }, .corner_radius = .all(10) },
+                    .decoration = .{ .background = palette.surface, .border = .{ .color = palette.border, .widths = .all(1) }, .corner_radius = .all(10), .corner_shape = kit.panel_corner_shape },
                     .effects = &floating_shadow,
                 });
                 defer ui.close();
@@ -1123,7 +1126,7 @@ pub fn Using(comptime kit: type) type {
                     ui.open(.{
                         .id = ids.harbor_xray_bar,
                         .layout = .{ .sizing = .{ .width = .grow }, .padding = .symmetric(12, 6), .child_gap = 12, .child_alignment = .{ .y = .center } },
-                        .decoration = .{ .background = palette.accent.mix(palette.surface, 0.88), .corner_radius = .all(8) },
+                        .decoration = .{ .background = palette.accent.mix(palette.surface, 0.88), .corner_radius = .all(8), .corner_shape = kit.panel_corner_shape },
                     });
                     defer ui.close();
                     ui.text("X-ray", noWrap(shell.style(.heading, palette.accent)));
@@ -1178,6 +1181,7 @@ pub fn Using(comptime kit: type) type {
                     .text_cache => ids.harbor_filter,
                     .idle => ids.harbor_timeline_toggle,
                     .effects => ids.harbor_deploy,
+                    .corner_shapes => .indexed("harbor_kpi", 1),
                     .semantics => ids.harbor_table_header,
                     .environment => ids.harbor_environment_readout,
                 };
@@ -1252,7 +1256,7 @@ pub fn Using(comptime kit: type) type {
                     .semantics = self.semantic(.{ .role = .group, .label = feature.title() }),
                     .floating = .{ .attach_to = .{ .element = nodeId(feature) }, .anchor = anchor, .attach_point = attach_point, .offset = overlap, .z = 810 },
                     .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(340) }, .padding = .all(14), .child_gap = 8 },
-                    .decoration = .{ .background = palette.surface, .border = .{ .color = palette.accent.mix(palette.border, 0.5), .widths = .all(1) }, .corner_radius = .all(8) },
+                    .decoration = .{ .background = palette.surface, .border = .{ .color = palette.accent.mix(palette.border, 0.5), .widths = .all(1) }, .corner_radius = .all(8), .corner_shape = kit.panel_corner_shape },
                     .effects = &floating_shadow,
                 });
                 defer ui.close();
@@ -1295,6 +1299,7 @@ pub fn Using(comptime kit: type) type {
                     .text_cache => shell.labelColored(ui, .body, palette.text, "Every label is measured once and cached. The filter re-measures only names it has not shown before."),
                     .idle => shell.labelColored(ui, .body, palette.text, "zui declares a frame only for a reason: input, a source publishing, a timer coming due, or a request."),
                     .effects => shell.labelColored(ui, .body, palette.text, "The primary buttons carry a gradient, and floating panels a soft shadow."),
+                    .corner_shapes => shell.labelColored(ui, .body, palette.text, "Tiles, panels, toasts and the dialog declare corner_shape = .continuous beside their radius."),
                     .semantics => shell.printColored(ui, .body, palette.text, "Rows, headers, buttons and the dialog declare a role and a label: {d} nodes this frame.", .{self.semantic_nodes}),
                     .environment => shell.labelColored(ui, .body, palette.text, "Direction, text size, contrast and motion come from the environment the host reports."),
                 }
@@ -1381,7 +1386,13 @@ pub fn Using(comptime kit: type) type {
                         proofRow(ui, shell, "renderer draws gradients", "{s}", .{yesNo(kit.config.commands.contains(.gradient))});
                         proofRow(ui, shell, "renderer draws shadows", "{s}", .{yesNo(kit.config.commands.contains(.shadow))});
                         var lowered_buffer: [64]u8 = undefined;
-                        proofRow(ui, shell, "lowered, last frame", "{s}", .{describeCommands(&lowered_buffer, perf.diagnostics.lowered)});
+                        proofRow(ui, shell, "lowered, last frame", "{s}", .{describeSet(&lowered_buffer, perf.diagnostics.lowered)});
+                    },
+                    .corner_shapes => {
+                        var drawn_buffer: [64]u8 = undefined;
+                        var lowered_buffer: [64]u8 = undefined;
+                        proofRow(ui, shell, "renderer draws", "{s}", .{describeSet(&drawn_buffer, kit.config.corner_shapes)});
+                        proofRow(ui, shell, "drawn round, last frame", "{s}", .{describeSet(&lowered_buffer, perf.diagnostics.lowered_corner_shapes)});
                     },
                     .semantics => {
                         var name_buffer: [40]u8 = undefined;
@@ -1414,7 +1425,7 @@ pub fn Using(comptime kit: type) type {
                         if (environment.direction == .left_to_right) "Right to left" else "Left to right",
                         if (environment.contrast == .normal) "High contrast" else "Normal contrast",
                     },
-                    .demand, .anchors, .effects, .semantics => .{ null, null },
+                    .demand, .anchors, .effects, .corner_shapes, .semantics => .{ null, null },
                 };
                 if (first == null) return;
                 ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 8 } });
@@ -1451,7 +1462,7 @@ pub fn Using(comptime kit: type) type {
                         if (self.environment_restore.direction == null) self.environment_restore.direction = environment.direction;
                         shell.changeEnvironment(.{ .direction = if (environment.direction == .left_to_right) .right_to_left else .left_to_right });
                     },
-                    .demand, .anchors, .effects, .semantics => {},
+                    .demand, .anchors, .effects, .corner_shapes, .semantics => {},
                 }
             }
 
@@ -1628,12 +1639,13 @@ pub fn Using(comptime kit: type) type {
             return @tagName(producer.phase.load(.acquire));
         }
 
-        fn describeCommands(buffer: *[64]u8, commands: zui.CommandSet) []const u8 {
-            if (commands.count() == 0) return "nothing";
+        /// The names in an `EnumSet`, comma separated, as many as fit.
+        fn describeSet(buffer: *[64]u8, set: anytype) []const u8 {
+            if (set.count() == 0) return "nothing";
             var length: usize = 0;
-            var iterator = commands.iterator();
-            while (iterator.next()) |command| {
-                const name = @tagName(command);
+            var iterator = set.iterator();
+            while (iterator.next()) |member| {
+                const name = @tagName(member);
                 const separator: []const u8 = if (length == 0) "" else ", ";
                 if (length + separator.len + name.len > buffer.len) break;
                 @memcpy(buffer[length..][0..separator.len], separator);

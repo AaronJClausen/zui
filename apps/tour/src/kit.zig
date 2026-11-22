@@ -68,6 +68,10 @@ pub fn Kit(comptime spec: Spec) type {
         pub const TextStyle = Ui.TextStyle;
 
         pub const draws_frost = config.commands.contains(.backdrop_blur);
+        pub const draws_every_corner_shape = config.corner_shapes.eql(.initFull());
+        /// Of every card and panel. A renderer that draws only round
+        /// corners draws these round and reports it in `Diagnostics`.
+        pub const panel_corner_shape: zui.CornerShape = .continuous;
         pub const draws_transforms = config.commands.contains(.transform);
         /// The renderer's materials, which the light lab shows only when
         /// they offer the patterns it picks between.
@@ -115,7 +119,7 @@ pub fn Kit(comptime spec: Spec) type {
                 .time_machine => .{ .title = "Time Machine", .tagline = "Scrub a session back and forth, frame by frame", .lane = .spectacle, .features = &.{ "determinism", "replay", "scrubbing" } },
                 .break_it => .{ .title = "Break It", .tagline = "Push every limit and watch nothing corrupt", .lane = .spectacle, .features = &.{ "Limits", "Diagnostics", "graceful" } },
                 .gesture_arena => .{ .title = "Gesture Arena", .tagline = "Nested gestures, each going to its owner", .lane = .spectacle, .features = &.{ "Gestures", "momentum", "claim" } },
-                .light_lab => .{ .title = "Light Lab", .tagline = "Gradients, shadows, frost and materials, or their fallbacks", .lane = .spectacle, .features = &.{ "Effects", "lowering", "Material" } },
+                .light_lab => .{ .title = "Light Lab", .tagline = "Gradients, shadows, frost, materials and corners, or their fallbacks", .lane = .spectacle, .features = &.{ "Effects", "Material", "CornerShape" } },
                 .one_declaration => .{ .title = "One Declaration", .tagline = "The same UI in every theme, size and direction", .lane = .spectacle, .features = &.{ "Environment", "right-to-left", "contrast" } },
                 .clickable_chaos => .{ .title = "Clickable Chaos", .tagline = "Hundreds of turning cards, each hit where drawn", .lane = .spectacle, .features = &.{ "Transform", "hit inversion" } },
             };
@@ -263,7 +267,7 @@ pub fn Kit(comptime spec: Spec) type {
             fn openCardWith(self: *const Shell, ui: *Ui, element: Ui.Element, title: []const u8) void {
                 var card = element;
                 card.layout = .{ .direction = .top_to_bottom, .sizing = element.layout.?.sizing, .padding = .all(16), .child_gap = 10 };
-                card.decoration = .{ .background = self.palette.surface, .border = .{ .color = self.palette.border, .widths = .all(1) }, .corner_radius = .all(8) };
+                card.decoration = .{ .background = self.palette.surface, .border = .{ .color = self.palette.border, .widths = .all(1) }, .corner_radius = .all(8), .corner_shape = panel_corner_shape };
                 ui.open(card);
                 if (title.len != 0) self.label(ui, .heading, title);
             }

@@ -1127,3 +1127,8 @@ yet: HDR white in the Light Lab, since the tour's `Ui` declares
 not say a wheel moved it; custom semantic actions on Kanban's cards,
 which zui lacks. Break It keeps its render-command load below the limit
 until the emitter keeps room for open clips (ARCHITECTURE.md §7).
+Since `11-polish:16-corner-shapes`, cards and Harbor's panels declare
+continuous corners, which the raylib and terminal tours draw round and
+report; Harbor's X-ray has a fourteenth node for them, and the Light Lab
+shows all three shapes. The tour's palette moves to `zui_design`'s
+tokens in `11-polish:19-default-design`.

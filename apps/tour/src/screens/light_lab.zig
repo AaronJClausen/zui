@@ -30,7 +30,8 @@ pub fn Using(comptime kit: type) type {
     const patterns = if (kit.draws_material_patterns) std.enums.values(Material.Pattern) else &[_]void{};
     return struct {
         /// Gradients, shadows, frost and the renderer's materials over a
-        /// drifting scene, each beside what a renderer without it draws.
+        /// drifting scene, and the three corner shapes, each beside what a
+        /// renderer without it draws.
         pub const LightLab = struct {
             angle_degrees: f32 = 35,
             from_hue: f32 = 0.92,
@@ -148,6 +149,7 @@ pub fn Using(comptime kit: type) type {
                     shell.label(ui, .caption, kit.renderer_name ++ " has no materials to show.");
                 }
                 shell.divider(ui);
+                self.cornerShapes(ui, shell);
                 shell.sliderRow(ui, .of("light_lab.radius"), "corner radius", &self.corner_radius, 0, 60, 1, "{d:.0}");
                 _ = widgets.checkbox(ui, .of("light_lab.animate"), "move the scene", &self.animate, .{});
                 if (shell.reduced_motion) shell.label(ui, .caption, "Reduced motion is on, so the scene holds still.");
@@ -312,6 +314,39 @@ pub fn Using(comptime kit: type) type {
                     swatchLabel(ui, shell, name);
                     ui.close();
                 }
+            }
+
+            /// The three corner shapes at the lab's radius, in the controls
+            /// beside the radius they follow.
+            fn cornerShapes(self: *const LightLab, ui: *Ui, shell: *const Shell) void {
+                const palette = shell.palette;
+                {
+                    ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 8, .child_alignment = .{ .y = .center } } });
+                    defer ui.close();
+                    shell.labelColored(ui, .caption, palette.spectacle, "CORNERS");
+                    shell.spacer(ui);
+                    shell.chip(ui, if (kit.draws_every_corner_shape) "drawn" else "lowered", if (kit.draws_every_corner_shape) palette.good else palette.warn);
+                }
+                ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 8 } });
+                defer ui.close();
+                for (std.enums.values(zui.CornerShape)) |shape| {
+                    ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow_equal }, .child_gap = 4, .child_alignment = .{ .x = .center } } });
+                    defer ui.close();
+                    ui.box(.{
+                        .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(64) } },
+                        .decoration = .{ .background = palette.accent.mix(palette.surface, 0.35), .corner_radius = .all(self.corner_radius), .corner_shape = shape },
+                    });
+                    const lowered = !kit.config.corner_shapes.contains(shape);
+                    swatchLabel(ui, shell, if (lowered) loweredName(shape) else @tagName(shape));
+                }
+            }
+
+            fn loweredName(shape: zui.CornerShape) []const u8 {
+                return switch (shape) {
+                    .round => "round",
+                    .continuous => "continuous, drawn round",
+                    .chamfer => "chamfer, drawn round",
+                };
             }
 
             fn frostLowering(self: *const LightLab, ui: *Ui, shell: *const Shell, seconds: f32) void {
