@@ -1,6 +1,7 @@
 .zig-cache/
 zig-out/
 zig-pkg/
+__pycache__/
 renderers/raylib/**/*.png
 !renderers/raylib/docs/*.png
 hosts/native/**/*.png
