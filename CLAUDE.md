@@ -66,6 +66,7 @@ Stop and ask the user instead of guessing when:
 | a conformance suite (`expect*Conforms`) | `core/zui_testing/zui_testing.zig`, or `core/zui_testing/<contract>_conformance.zig` exported from it |
 | a conformance harness | `src/conformance.zig` in a renderer's package, `<os>/conformance.zig` in `hosts/native/`, run by the package's `conformance` step. It keeps only its window, its renderer or host, and its read-back; a part two harnesses would repeat goes in `core/zui_testing/harness.zig` (`ReadBack`, `PolledRecord`), generic over the renderer and its text, with its tests in `core/zui_testing/tests.zig` |
 | a benchmark scenario | `core/bench/bench.zig`; its budget, if any, comes from SPEC.md §20.2 |
+| a git hook | `.githooks/<hook>`, a POSIX `sh` script, which `zig build hooks` turns on; what it checks is listed in `docs/development.md` |
 | CI | `.github/workflows/ci.yml`: jobs per package, run from its directory, with a leg for each OS it needs; a package's jobs run only when `changes` (`.github/scripts/affected_packages.py`, which reads every `build.zig.zon`) finds a change under it or a package it names by `.path`. Core's legs (optimize modes, compile errors, Tracy, ThreadSanitizer, `zui-debug`, 32-bit x86, cross-targets), `bench` and `counts` run from the root. A pure-Zig package is tested on Linux and cross-checked for Windows and macOS. A job that needs a display or a compositor is its own job; steps two jobs share go in `.github/actions/`. Every job and leg fits `timeout-minutes: 10`. Publishing the web host's page, `.github/workflows/pages.yml`, after CI passes and runs `hosts/web: test-site` |
 | what font systems and renderers share: the layout of a run into positioned glyphs, the placement a renderer declares, the type-erased fonts a renderer draws through, the glyph atlas, the font systems' conformance suite | `text/glyphs/src/<topic>.zig`, exported from `text/glyphs/src/root.zig` (the `zui_glyphs` module, which the root re-exports); pure Zig, importing nothing but `std` |
 | the default font system, `zui_truetype.Text` on stb_truetype | `text/truetype/src/`, the `zui_truetype` module, reached through `zui.builder.dependency("zui_truetype", …)` and never re-exported, since it builds stb; it lays text out only through `zui_glyphs` and never imports a renderer. stb_truetype is compiled in from `text/truetype/src/stb_truetype.c` without a C library on every target |
@@ -319,8 +320,11 @@ Zig 0.16's package manager behaves in ways that are easy to get wrong:
 ## Commits
 
 - Commit messages follow the history: an imperative subject without a
-  prefix ("Add the tracer contract"), and a body that says what changed
-  and why, with measurements.
+  prefix ("Add the tracer contract"), of at most 72 characters, and a
+  body that says what changed and why, with measurements. The hooks in
+  `.githooks/` (`zig build hooks`) check the message, the staged files'
+  formatting, and the tests of what a push reaches; a refused commit is
+  fixed, never retried with `--no-verify`.
 - Work on `main`, as the history does. **Do not push or tag** unless the
   user says to in this session. Every package names `core/`, and any
   other package it uses, by path, so a change is built and tested against

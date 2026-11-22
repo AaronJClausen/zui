@@ -98,6 +98,10 @@ pub fn build(b: *std.Build) void {
     addStepInEveryPackage(b, "test-all", "test", "Run every package's tests, each in its own directory");
     addStepInEveryPackage(b, "check-all", "check", "Type-check every package for the selected target, each in its own directory");
 
+    const use_checked_in_hooks = b.addSystemCommand(&.{ "git", "config", "core.hooksPath", ".githooks" });
+    use_checked_in_hooks.setCwd(b.path("."));
+    b.step("hooks", "Have git run the hooks in .githooks: format and syntax checks before a commit, tests before a push").dependOn(&use_checked_in_hooks.step);
+
     const formatted_paths = [_][]const u8{ "build.zig", "build.zig.zon", "tests" } ++ packages;
     var excluded_paths: [2 * packages.len + generated_sources.len][]const u8 = undefined;
     for (packages, 0..) |package, index| {

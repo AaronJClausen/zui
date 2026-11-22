@@ -5,6 +5,7 @@
 
 prints `renderers-raylib=true`, `root-build=false`, ... and
 `pure_packages=["themes"]`. An empty or unknown base affects everything.
+`--head <commit>` compares with that commit instead of `HEAD`.
 """
 
 import argparse
@@ -46,14 +47,14 @@ def dependency_closure(package, dependencies_of):
     return reached
 
 
-def changed_files(base):
+def changed_files(base, head):
     if not base or set(base) == {"0"}:
         return None
     try:
         git("cat-file", "-e", f"{base}^{{commit}}")
     except subprocess.CalledProcessError:
         return None
-    return git("diff", "--name-only", base, "HEAD").split()
+    return git("diff", "--name-only", base, head).split()
 
 
 def is_under(path, directory):
@@ -63,12 +64,13 @@ def is_under(path, directory):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("base", nargs="?", default="")
+    parser.add_argument("--head", default="HEAD")
     parser.add_argument("--matrix", action="append", default=[], metavar="NAME=PACKAGE,...")
     arguments = parser.parse_args()
 
     packages = package_directories()
     dependencies_of = {package: path_dependencies(package) for package in packages}
-    changed = changed_files(arguments.base)
+    changed = changed_files(arguments.base, arguments.head)
     changes_everything = changed is None or any(path.startswith(CHANGES_TO_EVERY_JOB) for path in changed)
 
     affected = {}

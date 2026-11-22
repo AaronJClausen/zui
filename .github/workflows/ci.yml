@@ -12,6 +12,7 @@ on:
       - "LICENSE"
       - ".editorconfig"
       - ".github/dependabot.yml"
+      - ".githooks/**"
       - ".github/workflows/pages.yml"
   pull_request:
     paths-ignore: *ci_irrelevant_paths

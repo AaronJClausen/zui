@@ -1,0 +1,55 @@
+#!/bin/sh
+# Skip with `git commit --no-verify`.
+set -eu
+
+message_file=$1
+comment_char=$(git config --get core.commentChar || echo '#')
+[ "$comment_char" = auto ] && comment_char='#'
+
+# `commit.verbose` appends the diff below a scissors line.
+message=$(sed "/^$comment_char -\{24\} >8 -\{24\}\$/,\$d" "$message_file" | git stripspace --strip-comments)
+subject=$(printf '%s\n' "$message" | sed -n 1p)
+line_after_subject=$(printf '%s\n' "$message" | sed -n 2p)
+
+case "$subject" in
+"Merge "* | "Revert \""* | "fixup! "* | "squash! "* | "amend! "*) exit 0 ;;
+esac
+
+failures=0
+fail() {
+    printf 'commit-msg: %s\n' "$1" >&2
+    failures=$((failures + 1))
+}
+
+if printf '%s\n' "$subject" | grep -qiE '^(feat|fix|chore|docs|style|refactor|perf|test|build|ci|revert)(\([^)]*\))?!?:'; then
+    fail "drop the \"type:\" prefix; subjects here are plain imperatives (\"Add the tracer contract\")"
+fi
+
+longest_subject=72
+subject_length=$(printf '%s' "$subject" | wc -m | tr -d ' ')
+if [ "$subject_length" -gt "$longest_subject" ]; then
+    fail "the subject is $subject_length characters; keep it to $longest_subject"
+fi
+
+case "$subject" in
+*.) fail "end the subject without a period" ;;
+esac
+
+if [ -n "$line_after_subject" ]; then
+    fail "leave a blank line between the subject and the body"
+fi
+
+first_word=$(printf '%s\n' "$subject" | sed 's/[^A-Za-z].*//' | tr '[:upper:]' '[:lower:]')
+case "$first_word" in
+bring | string | ring | swing | embed | feed | need | seed | speed | shed | proceed | exceed | succeed) ;;
+*ed | *ing)
+    printf 'commit-msg: warning: "%s" reads as past or progressive; subjects here are imperative ("Add", not "Added")\n' "$first_word" >&2
+    ;;
+esac
+
+if [ "$failures" -gt 0 ]; then
+    rejected_message_file=$(git rev-parse --git-path zui-rejected-commit-msg)
+    printf '%s\n' "$message" >"$rejected_message_file"
+    printf 'commit-msg: `git commit -e -F %s` starts again from your message\n' "$rejected_message_file" >&2
+    exit 1
+fi

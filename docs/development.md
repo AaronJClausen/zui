@@ -42,6 +42,41 @@ Run these from the root:
 | `zig build check-all` | run `zig build check` in every package's directory; `-Dtarget` and `-Doptimize` are passed on |
 | `zig build fmt` | format every Zig source file |
 | `zig build fmt-check` | fail if any file is not formatted, as CI does |
+| `zig build hooks` | have git run the hooks in `.githooks/` (sets `core.hooksPath`); run it once per clone |
+
+## Git hooks
+
+`zig build hooks` turns on three hooks, kept in `.githooks/`.
+`--no-verify` skips the one for a commit or a push.
+
+- **`pre-commit`**, under a second for most commits: on what is staged,
+  not the working tree, it fails on whitespace errors and conflict
+  markers (`git diff --cached --check`), on anything under `zig-out/`,
+  `.zig-cache/` or `zig-pkg/`, on a file over 1 MiB, and on a `.zig` or
+  `.zon` file that `zig fmt` would change or that `zig ast-check`
+  rejects. It also fails when a change leaves out a file that must come
+  with it: a new case in `core/tests/compile_errors/` or
+  `apps/tour/tests/compile_errors/` without that package's `build.zig`;
+  a changed `.glsl` in `renderers/sokol/src/` without its `.glsl.zig`;
+  a new `core/zui_<name>/zui_<name>.zig` without `core/build.zig`,
+  `core/build.zig.zon` and the root's `build.zig`. When `core/`, `tests/`
+  or the root's build files are staged, it runs `zig build check` on the
+  working tree, 2 to 4 s. It warns, without failing, when a `pub`
+  declaration in `core/src/` changes with no Markdown staged, and when
+  `ROADMAP.md` changes with nothing in `roadmap/`.
+- **`commit-msg`**: fails on a Conventional Commits prefix (`feat:`), a
+  subject over 72 characters or ending in a period, and a body that does
+  not start after a blank line; it warns on a subject that starts with a
+  past or progressive verb ("Added", "Adding"). Merges, reverts and
+  `fixup!` commits pass. A refused message is kept in
+  `.git/zui-rejected-commit-msg`.
+- **`pre-push`**: runs `fmt-check` and `check` at the root, then `test`
+  and `check` in every package that `.github/scripts/affected_packages.py`
+  finds the pushed commits reach, as CI's `changes` job does; about a
+  minute for a change to core, with a warm cache. It tests the working
+  tree, so it warns when that holds uncommitted changes or the pushed
+  commit is not `HEAD`. Display-bound steps, benchmarks, instruction
+  counts, ThreadSanitizer and Tracy are left to CI and to deliberate runs.
 
 ## CI
 

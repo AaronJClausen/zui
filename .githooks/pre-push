@@ -1,0 +1,51 @@
+#!/bin/sh
+# Runs `test` and `check` in every package the pushed commits reach, as CI
+# would, but against the working tree. Skip with `git push --no-verify`.
+set -eu
+
+cd "$(git rev-parse --show-toplevel)"
+
+python=$(command -v python3 || command -v python || true)
+if [ -z "$python" ]; then
+    printf 'pre-push: needs Python to find the affected packages\n' >&2
+    exit 1
+fi
+
+missing_commit=0000000000000000000000000000000000000000
+affected_keys=""
+while read -r _local_ref local_commit _remote_ref remote_commit; do
+    [ "$local_commit" = "$missing_commit" ] && continue
+    if [ "$local_commit" != "$(git rev-parse HEAD)" ]; then
+        printf 'pre-push: warning: pushing %s, but testing the working tree at HEAD\n' "$local_commit" >&2
+    fi
+    base=$remote_commit
+    [ "$base" = "$missing_commit" ] && base=""
+    affected_keys="$affected_keys
+$("$python" .github/scripts/affected_packages.py "$base" --head "$local_commit" | sed -n 's/=true$//p')"
+done
+[ -n "$affected_keys" ] || exit 0
+
+if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+    printf 'pre-push: warning: uncommitted changes are tested along with the pushed commits\n' >&2
+fi
+
+run() {
+    directory=$1
+    shift
+    printf 'pre-push: zig build %s in %s\n' "$*" "$directory" >&2
+    if ! (cd "$directory" && timeout 600 zig build "$@"); then
+        printf 'pre-push: `zig build %s` failed in %s\n' "$*" "$directory" >&2
+        exit 1
+    fi
+}
+
+run . fmt-check
+run . check
+for manifest in $(git ls-files '*/build.zig.zon'); do
+    package=$(dirname "$manifest")
+    key=$(printf '%s' "$package" | tr / -)
+    if printf '%s\n' "$affected_keys" | grep -qxF "$key"; then
+        run "$package" test
+        run "$package" check
+    fi
+done
