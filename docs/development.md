@@ -45,6 +45,7 @@ Run these from the root:
 | `zig build fmt-check` | fail if any file is not formatted, as CI does |
 | `zig build fmt-md` | format every Markdown file with mdformat, run through [uv](https://docs.astral.sh/uv/) (see *Markdown*, below) |
 | `zig build fmt-md-check` | fail if any Markdown file is not formatted, as the `pre-commit` hook does for what is staged |
+| `zig build ci` | run CI's jobs for what `HEAD` changes since its upstream branch, on this machine (see *CI on this machine*, below); `-- --help` lists its options |
 | `zig build hooks` | have git run the hooks in `.githooks/` (sets `core.hooksPath`), and `git blame` skip the commits in `.git-blame-ignore-revs`; run it once per clone |
 
 ## Markdown
@@ -73,7 +74,11 @@ Two things it shows rather than hides:
 ## Git hooks
 
 `zig build hooks` turns on three hooks, kept in `.githooks/`.
-`--no-verify` skips the one for a commit or a push.
+`--no-verify` skips the one for a commit or a push. Claude Code cannot:
+`.claude/settings.json` runs
+`.claude/hooks/refuse-skipping-git-hooks.sh` before each of its shell
+commands, which refuses `--no-verify`, `git commit -n` and any change to
+`core.hooksPath`, outside a heredoc's body.
 
 - **`pre-commit`**, under a second for most commits: on what is staged,
   not the working tree, it fails on whitespace errors and conflict
@@ -99,14 +104,10 @@ Two things it shows rather than hides:
   past or progressive verb ("Added", "Adding"). Merges, reverts and
   `fixup!` commits pass. A refused message is kept in
   `.git/zui-rejected-commit-msg`.
-- **`pre-push`**: runs `fmt-check` and `check` at the root, then `test`
-  and `check` in every package that
-  `.github/scripts/affected_packages.py` finds the pushed commits reach,
-  as CI's `changes` job does; about a minute for a change to core, with
-  a warm cache. It tests the working tree, so it warns when that holds
-  uncommitted changes or the pushed commit is not `HEAD`. Display-bound
-  steps, benchmarks, instruction counts, ThreadSanitizer and Tracy are
-  left to CI and to deliberate runs.
+- **`pre-push`**: runs CI on this machine (below) for each pushed ref,
+  on the pushed commit against the one the remote has, and refuses the
+  push when a leg fails. A new branch, or a remote commit this clone
+  does not have, runs every job.
 
 ## CI
 
@@ -185,6 +186,35 @@ and publishes it; `workflow_dispatch` publishes without asking CI.
 Those targets exist to catch assumptions about the host machine early:
 the first 32-bit build found two places that used a 64-bit hash as an
 index.
+
+## CI on this machine
+
+`zig build ci`, and the `pre-push` hook, run `tools/ci/local_ci.py`
+through uv. It reads `.github/workflows/ci.yml` from the commit it
+tests, runs the `changes` job's script to find the affected jobs,
+expands each job's matrix and runs its legs side by side
+(`-- --jobs <n>`), each within its job's `timeout-minutes`:
+
+- a Linux leg runs its steps in an Ubuntu 26.04 container, the one
+  `ubuntu-latest` runs, built from `tools/ci/Dockerfile`, with Zig,
+  Node, Google Chrome and every package the workflow and its actions
+  `apt-get install`; the image is built once for each set of packages.
+  Its build cache is kept in `.git/local-ci/container-cache`, apart from
+  this machine's;
+- a Windows or macOS leg, which cannot run here, becomes
+  `zig build check -Dtarget=x86_64-windows` or `aarch64-macos`, with the
+  leg's other `-D` options, run here. A cross-check analyses the code
+  without linking it, and catches what only that target rejects, but
+  runs no test, so a Windows-only timing or a macOS-only crash is still
+  CI's to find. sokol's macOS check needs macOS's SDK, and is skipped.
+
+It tests a commit, never the working tree, in a worktree of its own at
+`.git/local-ci/worktree`, kept between runs so its caches stay warm, and
+keeps the last runs' logs in `.git/local-ci/runs/`; a failing leg's log
+ends the report. `-- --all` runs every job, `-- --only <regex>` the legs
+whose names match, `-- --list` names them without running them, and
+`-- --base <commit> --head <commit>` tests another change. It needs uv
+and Docker, which the user must be able to reach without `sudo`.
 
 Why the benchmarks are trusted, and how to profile, quiet the machine
 and compare machines, is in [benchmarking.md](benchmarking.md).

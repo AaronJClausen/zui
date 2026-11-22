@@ -98,12 +98,19 @@ pub fn build(b: *std.Build) void {
     addStepInEveryPackage(b, "test-all", "test", "Run every package's tests, each in its own directory");
     addStepInEveryPackage(b, "check-all", "check", "Type-check every package for the selected target, each in its own directory");
 
-    const hooks = b.step("hooks", "Have git run the hooks in .githooks: format and syntax checks before a commit, tests before a push; and blame skip the commits in .git-blame-ignore-revs");
+    const hooks = b.step("hooks", "Have git run the hooks in .githooks: format and syntax checks before a commit, CI's jobs before a push; and blame skip the commits in .git-blame-ignore-revs");
     for ([_][2][]const u8{ .{ "core.hooksPath", ".githooks" }, .{ "blame.ignoreRevsFile", ".git-blame-ignore-revs" } }) |setting| {
         const set_git_config = b.addSystemCommand(&.{ "git", "config", setting[0], setting[1] });
         set_git_config.setCwd(b.path("."));
         hooks.dependOn(&set_git_config.step);
     }
+
+    const local_ci = b.addSystemCommand(&.{ "uv", "run", "--quiet", "--script" });
+    local_ci.addFileArg(b.path("tools/ci/local_ci.py"));
+    if (b.args) |arguments| local_ci.addArgs(arguments);
+    local_ci.setCwd(b.path("."));
+    local_ci.has_side_effects = true;
+    b.step("ci", "Run CI's jobs for what HEAD changes since its upstream, here: Linux's in a container, Windows' and macOS' as cross-checks (`-- --help`)").dependOn(&local_ci.step);
 
     const formatted_paths = [_][]const u8{ "build.zig", "build.zig.zon", "tests" } ++ packages;
     var excluded_paths: [2 * packages.len + generated_sources.len][]const u8 = undefined;

@@ -200,7 +200,8 @@ Run from the root:
 | `zig build bench` | run the benchmarks |
 | `zig build fmt` | format every Zig source file |
 | `zig build fmt-md` | format every Markdown file with mdformat; needs [uv](https://docs.astral.sh/uv/) |
-| `zig build hooks` | turn on the checked-in git hooks: format and syntax checks before a commit, tests before a push |
+| `zig build ci` | run CI's jobs for what `HEAD` changes, on this machine: Linux's in a container, Windows' and macOS' as cross-checks |
+| `zig build hooks` | turn on the checked-in git hooks: format and syntax checks before a commit, CI's jobs before a push |
 
 [docs/development.md](docs/development.md) lists every step and what CI
 runs, and how a backend runs the conformance suites;
