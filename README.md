@@ -3,21 +3,23 @@
 An immediate-mode UI layout library for Zig, in the spirit of
 [Clay](https://github.com/nicbarker/clay). Each frame, the application
 declares its UI as nested function calls. zui computes the layout and
-returns a flat list of render commands for the application's own renderer
-to draw.
+returns a flat list of render commands for the application's own
+renderer to draw.
 
 **Status:** pre-alpha. The design is specified in [SPEC.md](SPEC.md).
 Implemented so far:
+
 - **0.1–0.4:** the `Context`, the layout passes, text wrapping, render
   commands, input, focus, clipping, scrolling, floating elements, idling
   at 0% CPU, and the `zui_widgets`, `zui_reflect` and `zui_testing`
   modules.
 - **0.5–0.6 and stage 1:** performance, `zig build bench` and
-  `bench-compare`, instruction counts under Callgrind that CI checks, and
-  tracing into [Tracy](https://github.com/wolfpld/tracy) through
+  `bench-compare`, instruction counts under Callgrind that CI checks,
+  and tracing into [Tracy](https://github.com/wolfpld/tracy) through
   `zui_tracy`.
-- **Stage 2:** `Context(config)` with the text contract and limits, frame
-  records, the environment, and sources, with `zui_async`'s defaults.
+- **Stage 2:** `Context(config)` with the text contract and limits,
+  frame records, the environment, and sources, with `zui_async`'s
+  defaults.
 - **Stage 3:** the renderer and host contracts, checked at compile time
   and by conformance suites, `Config.features`, and `zui_app`.
 - **Stage 4:** the first native host, for Windows.
@@ -36,17 +38,17 @@ Implemented so far:
   title bars, many windows, and who owns the loop.
 
 [docs/feature-tour.html](docs/feature-tour.html) walks through every
-shipped feature in the code a consumer writes, with semantic highlighting;
-open it in a browser, or read [docs/feature-tour.md](docs/feature-tour.md).
+shipped feature in the code a consumer writes, with semantic
+highlighting; open it in a browser, or read
+[docs/feature-tour.md](docs/feature-tour.md).
 
 Next, in the order of SPEC.md §21: the rest of the effects and of the
-inspector, more hosts, motion and text editing.
-[ROADMAP.md](ROADMAP.md) keeps the queue of work in order, with each
-item's plan in [`roadmap/`](roadmap/), and
-[ARCHITECTURE.md](ARCHITECTURE.md) shows how the pieces connect.
+inspector, more hosts, motion and text editing. [ROADMAP.md](ROADMAP.md)
+keeps the queue of work in order, with each item's plan in
+[`roadmap/`](roadmap/), and [ARCHITECTURE.md](ARCHITECTURE.md) shows how
+the pieces connect.
 
-The loop by hand, which `zui_app.run` runs for
-you (SPEC.md §6.1):
+The loop by hand, which `zui_app.run` runs for you (SPEC.md §6.1):
 
 ```zig
 const Ui = zui.Context(.{ .Text = MyFonts }); // MyFonts declares zuiMeasure
@@ -75,8 +77,8 @@ turn: which windows are due, the render thread, host requests and
 notices. It steps a `zui_app.Session(App)` from its own frame, on a host
 that declares neither `zuiWait` nor `zuiRun` (a window it already has).
 A host whose platform owns the loop declares `zuiRun`, and `zui_app.run`
-hands it a `zui.Driver` to call from the platform's callbacks
-(SPEC.md §16.3, §19.5); no shipped host declares it yet:
+hands it a `zui.Driver` to call from the platform's callbacks (SPEC.md
+§16.3, §19.5); no shipped host declares it yet:
 
 ```zig
 var session: zui_app.Session(App) = undefined;
@@ -89,7 +91,8 @@ while (editor.running()) {
 
 With `.Sources = AppSources` in the `Config`, a struct whose fields are
 sources (SPEC.md §14), `beginFrame` and `nextFrame` also take
-`&app.sources`, the record is `builder.recordWith(Ui.Deliveries)`, and declaration reads them with `ui.source(.quotes)`:
+`&app.sources`, the record is `builder.recordWith(Ui.Deliveries)`, and
+declaration reads them with `ui.source(.quotes)`:
 
 ```zig
 const AppSources = struct {
@@ -156,17 +159,18 @@ _ = widgets.slider(ui, .of("volume"), &settings.volume, .{ .max = 100 });
 _ = zui_reflect.inspector(widgets, ui, .of("settings"), &settings);
 ```
 
-SPEC.md §19.2 lists the widgets, §16.7 the skin that styles them, and §19.3 covers the inspector's typed
-options. [text/](text/README.md) covers fonts.
+SPEC.md §19.2 lists the widgets, §16.7 the skin that styles them, and
+§19.3 covers the inspector's typed options. [text/](text/README.md)
+covers fonts.
 
 ## Packages
 
 Renderers and hosts are packages of their own, reached through the `zui`
 dependency's builder as `zui.builder.dependency("<name>", …)`, so an
-application fetches only the libraries of the renderers it uses. Give each
-the same `.@"zui-tracy"` you give `zui`, if any, so they build one `zui`
-module and their types match. Each package's README covers its API, what
-it draws or reports, its limits, and its build steps.
+application fetches only the libraries of the renderers it uses. Give
+each the same `.@"zui-tracy"` you give `zui`, if any, so they build one
+`zui` module and their types match. Each package's README covers its
+API, what it draws or reports, its limits, and its build steps.
 
 | Package | Directory | What it is |
 |---|---|---|
@@ -200,20 +204,21 @@ Run from the root:
 [docs/development.md](docs/development.md) lists every step and what CI
 runs, and how a backend runs the conformance suites;
 [docs/benchmarking.md](docs/benchmarking.md) covers profiling and
-measuring on a quiet machine. Each package's own steps are in its README.
+measuring on a quiet machine. Each package's own steps are in its
+README.
 
 ## License
 
 MIT; see [LICENSE](LICENSE).
 
-The zui logo is adapted from the [Zig logo](https://codeberg.org/ziglang/logo)
-and, like it, is licensed under CC BY-SA 4.0; see
-[assets/LICENSE.md](assets/LICENSE.md). zui is not affiliated with or endorsed
-by the Zig Software Foundation.
+The zui logo is adapted from the
+[Zig logo](https://codeberg.org/ziglang/logo) and, like it, is licensed
+under CC BY-SA 4.0; see [assets/LICENSE.md](assets/LICENSE.md). zui is
+not affiliated with or endorsed by the Zig Software Foundation.
 
 The fonts `zui_fonts` bundles, which `zui_truetype` draws in by default
 and the tours use, are under the SIL Open Font License 1.1: Atkinson
 Hyperlegible, copyright 2020 Braille Institute of America, Inc. (see
-[text/fonts/OFL.txt](text/fonts/OFL.txt)), and Liberation Mono, copyright
-2010 Google Corporation and 2012 Red Hat, Inc. (see
+[text/fonts/OFL.txt](text/fonts/OFL.txt)), and Liberation Mono,
+copyright 2010 Google Corporation and 2012 Red Hat, Inc. (see
 [text/fonts/LiberationMono-LICENSE.txt](text/fonts/LiberationMono-LICENSE.txt)).

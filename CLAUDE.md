@@ -1,7 +1,7 @@
 # Working on zui
 
-zui is an immediate-mode UI engine for Zig 0.16. Four documents govern it,
-and each has one job:
+zui is an immediate-mode UI engine for Zig 0.16. Four documents govern
+it, and each has one job:
 
 | Document | Its job | Changes when |
 |---|---|---|
@@ -10,39 +10,41 @@ and each has one job:
 | `ARCHITECTURE.md` | the map: which layer and package holds each part, and how today's code still differs from the spec (§7) | a difference closes or opens, or a feature moves layer or stage |
 | `README.md`, each package's `README.md`, and `docs/development.md` and `docs/benchmarking.md` | what a user sees: in `README.md`, the status in one line per stage, the core API, the packages and the common build commands; in a package's `README.md` (`renderers/<name>/`, `hosts/native/`, `hosts/web/`, `apps/tour/`, `text/`), its API, what it draws or reports, its limits and its build steps; in `docs/development.md`, every root step, CI and the conformance recipe; in `docs/benchmarking.md`, profiling and measuring | a stage or a user-visible API ships, or a build step changes |
 
-The code and these documents move together. A commit that changes one and
-leaves another stale is not done.
+The code and these documents move together. A commit that changes one
+and leaves another stale is not done.
 
 ## "Tackle the next item"
 
-1. **Find it.** Open `ROADMAP.md`, section *The queue*. Take the first row
-   whose status is not `waiting`. An `in progress` row is continued, not
-   restarted: its item's **Status** says which slice comes next.
+1. **Find it.** Open `ROADMAP.md`, section *The queue*. Take the first
+   row whose status is not `waiting`. An `in progress` row is continued,
+   not restarted: its item's **Status** says which slice comes next.
    Work set aside is parked on a branch that the item's **Status**
    names; read it before starting, and build on `main` unless the Status
    says to rebase.
 2. **Read it.** Read the item's entry in its group's file, the part of
    its label before the colon (`10-reach:01-linux-host` is in
    `roadmap/10-reach.md`): its Grounding, Plan and Done when, then every
-   SPEC.md section it names, and the files in its *Where* column. Check the *Waits for* column; if a prerequisite is not
-   done, mark the row `waiting on <item>` and take the next row.
-3. **Check the ground.** The Grounding cites `file:line`; confirm it still
-   holds before building on it. If it does not, fix the Grounding in the
-   same commit.
+   SPEC.md section it names, and the files in its *Where* column. Check
+   the *Waits for* column; if a prerequisite is not done, mark the row
+   `waiting on <item>` and take the next row.
+3. **Check the ground.** The Grounding cites `file:line`; confirm it
+   still holds before building on it. If it does not, fix the Grounding
+   in the same commit.
 4. **Plan a slice.** An item that will not fit one session is done in
-   slices, each one a commit that leaves every check green. Say in a sentence
-   or two what this slice covers before writing code.
+   slices, each one a commit that leaves every check green. Say in a
+   sentence or two what this slice covers before writing code.
 5. **Build it,** putting each piece where the table below says.
 6. **Verify it** with the commands below, and with the item's own *Done
-   when*. A speedup is measured (`zig build bench-compare -- <base>`), or
-   it does not ship.
+   when*. A speedup is measured (`zig build bench-compare -- <base>`),
+   or it does not ship.
 7. **Update the documents** using the checklist below.
 8. **Commit,** one commit per item or slice, and report to the user what
    was done, what was measured, and which row is next.
 
 Stop and ask the user instead of guessing when:
-- the item needs a decision listed under *Open* in `roadmap/decisions.md`
-  that has not been made;
+
+- the item needs a decision listed under *Open* in
+  `roadmap/decisions.md` that has not been made;
 - the work would change a budget in SPEC.md §20.2, retire an item, or
   reorder the queue beyond moving a blocked row down;
 - the *Done when* can only be met by CI or another machine. Commit what
@@ -92,43 +94,43 @@ Stop and ask the user instead of guessing when:
 | the published page | `hosts/web/web/index.html` and what it loads, listed in `site_scripts` in `hosts/web/build.zig`, which `zig build site` writes with the client, the frame drawer, the worker and the fonts |
 
 Everything under `renderers/webgl/src/` and `hosts/web/src/` that the
-browser runs must compile for `wasm32-freestanding`: no `std.fs`, threads
-or OS calls there.
+browser runs must compile for `wasm32-freestanding`: no `std.fs`,
+threads or OS calls there.
 
-Each stage's features and their layer are listed in `ARCHITECTURE.md` §6.
-If an item puts something in a different layer, change §6 too.
+Each stage's features and their layer are listed in `ARCHITECTURE.md`
+§6. If an item puts something in a different layer, change §6 too.
 
 ## Keeping the documents current
 
 In every item's commit:
-- [ ] **ROADMAP.md, the queue:** the row's status. When the item is done,
-      remove its row. When five or fewer open rows remain, add the next
-      items from the next stage of SPEC.md §21, in dependency order, each
-      labelled and entered in its group's file.
+
+- [ ] **ROADMAP.md, the queue:** the row's status. When the item is
+  done, remove its row. When five or fewer open rows remain, add the
+  next items from the next stage of SPEC.md §21, in dependency order,
+  each labelled and entered in its group's file.
 - [ ] **roadmap/<group>.md, the item:** a **Status** line saying what is
-      done and what remains, and its row in the group's *Items* table.
-      When it is done, the Status says so with what it measured, as
-      `01-measure:01-bench-compare` and
-      `01-measure:02-startup-benchmarks` are written, and the item stays
-      where it is.
+  done and what remains, and its row in the group's *Items* table. When
+  it is done, the Status says so with what it measured, as
+  `01-measure:01-bench-compare` and `01-measure:02-startup-benchmarks`
+  are written, and the item stays where it is.
 - [ ] **ROADMAP.md, *Where we are*:** when a stage finishes, or a budget
-      measurement changes.
-- [ ] **ARCHITECTURE.md §7:** remove a row the item closed; add one for any
-      new difference between the code and the spec.
-- [ ] **SPEC.md:** if the implementation shows the spec is wrong, fix the
-      spec in the same commit and give the reason in the commit message.
-      When an open question in §22 is settled, remove it there and record
-      the outcome under *Made* in `roadmap/decisions.md`.
+  measurement changes.
+- [ ] **ARCHITECTURE.md §7:** remove a row the item closed; add one for
+  any new difference between the code and the spec.
+- [ ] **SPEC.md:** if the implementation shows the spec is wrong, fix
+  the spec in the same commit and give the reason in the commit message.
+  When an open question in §22 is settled, remove it there and record
+  the outcome under *Made* in `roadmap/decisions.md`.
 - [ ] **README.md:** the status list's line for the stage when a stage
-      ships; the API example whenever the API it shows changes; the
-      *Packages* table when a package is added. A package's feature, API,
-      limit or build step goes in that package's `README.md`; a root step
-      or a CI job, in `docs/development.md`.
+  ships; the API example whenever the API it shows changes; the
+  *Packages* table when a package is added. A package's feature, API,
+  limit or build step goes in that package's `README.md`; a root step or
+  a CI job, in `docs/development.md`.
 - [ ] **docs/feature-tour.html and docs/feature-tour.md:** when a
-      user-visible feature ships or its API changes, add or update its
-      entry in both, with an example in a consumer's own code; move a
-      feature out of *Declared but not working yet* once it works. The two
-      files carry the same content and change together.
+  user-visible feature ships or its API changes, add or update its entry
+  in both, with an example in a consumer's own code; move a feature out
+  of *Declared but not working yet* once it works. The two files carry
+  the same content and change together.
 - [ ] **Doc comments** on every new or changed `pub` declaration.
 
 A new item takes the next number in its group, and numbers are never
@@ -142,22 +144,22 @@ same names; another package's own steps run from its directory. In
 `text/truetype/`, run `zig build test` in all three optimize modes and
 `zig build check` (which, for the text packages, also compiles their
 tests for `wasm32-freestanding`) before committing; `test-all` and
-`check-all` run them from the root. In `apps/tour/` and `apps/showcase/`,
-run `zig build test` in all three optimize modes, `zig build check`, which
-also compiles the tour or the showcase's tests for `wasm32-freestanding`,
-and the same `check` with `-Dtarget=x86_64-windows`; the tour's `test`
-declares every screen headlessly on renderers that draw every optional
-command and none, in pixels and in cells, and checks its compile errors.
-In `renderers/terminal/`, run `zig build test`
-(which runs `conformance` too), `zig build check`, the same `check` with
-`-Dtarget=x86_64-windows` and `-Dtarget=aarch64-macos`,
-`zig build showcase -- --dump`, which prints the showcase's glyphs and
-must contain "zui + terminal", and `zig build tour -- --dump
---every-screen`, which prints every screen the terminal is offered and
-fails when one cuts text short. Without `--dump` the targets are interactive: never
-run them so outside a terminal of their own (`script` under `timeout`,
-with `--frames`).
-In `renderers/raylib/`, run `zig build test`, `zig build check` and
+`check-all` run them from the root. In `apps/tour/` and
+`apps/showcase/`, run `zig build test` in all three optimize modes,
+`zig build check`, which also compiles the tour or the showcase's tests
+for `wasm32-freestanding`, and the same `check` with
+`-Dtarget=x86_64-windows`; the tour's `test` declares every screen
+headlessly on renderers that draw every optional command and none, in
+pixels and in cells, and checks its compile errors. In
+`renderers/terminal/`, run `zig build test` (which runs `conformance`
+too), `zig build check`, the same `check` with `-Dtarget=x86_64-windows`
+and `-Dtarget=aarch64-macos`, `zig build showcase -- --dump`, which
+prints the showcase's glyphs and must contain "zui + terminal", and
+`zig build tour -- --dump --every-screen`, which prints every screen the
+terminal is offered and fails when one cuts text short. Without `--dump`
+the targets are interactive: never run them so outside a terminal of
+their own (`script` under `timeout`, with `--frames`). In
+`renderers/raylib/`, run `zig build test`, `zig build check` and
 `zig build conformance`; the tour's cycle,
 `zig build tour -- --hidden --frames 600 --cycle 50`, which must print
 `diagnostics ok: true`; a screenshot of each of `overview`, `harbor`,
@@ -165,22 +167,22 @@ In `renderers/raylib/`, run `zig build test`, `zig build check` and
 `zig build tour -- --screenshot <absolute path> --screen <name>`;
 `zig build tour -- --measure-idle`;
 `zig build showcase -- --hidden --frames 60`, which must print
-`diagnostics ok: true`; and `check` with `-Dzui-tracy=true`
-and with `-Dtarget=x86_64-windows`. Conformance and the targets open hidden
+`diagnostics ok: true`; and `check` with `-Dzui-tracy=true` and with
+`-Dtarget=x86_64-windows`. Conformance and the targets open hidden
 windows, so they need a display (CI runs them under `xvfb-run`); never
 run a target without `--hidden --frames`, `--screenshot` or
 `--measure-idle`, since its window stays open until closed. Its links on
-Linux print `warning(link): unexpected LLD stderr` and still succeed.
-In `renderers/sokol/`, run `zig build test`, `zig build check`, the same
+Linux print `warning(link): unexpected LLD stderr` and still succeed. In
+`renderers/sokol/`, run `zig build test`, `zig build check`, the same
 `check` with `-Dtarget=wasm32-freestanding`, with
 `-Dtarget=x86_64-windows` and with `-Dgl=true -Dtarget=x86_64-windows`,
 and `zig build conformance`, which opens a window and must print that
 `zui_sokol.Renderer` passes zui's renderer suite; its tour and showcase
-are `hosts/native/`'s, below. After changing a shader's GLSL,
-run `zig build shaders` and commit the regenerated `.glsl.zig`. Its links
-on Linux print `warning(link): unexpected LLD stderr` and a `failed
-command:` line and still succeed.
-In `hosts/native/`, start a session bus of the tests' own
+are `hosts/native/`'s, below. After changing a shader's GLSL, run
+`zig build shaders` and commit the regenerated `.glsl.zig`. Its links on
+Linux print `warning(link): unexpected LLD stderr` and a
+`failed command:` line and still succeed. In `hosts/native/`, start a
+session bus of the tests' own
 (`dbus-daemon --session --nofork --address=unix:abstract=/zui-host-test --print-address`,
 kept running) and run with its address in `ZUI_HOST_TEST_SESSION_BUS`
 `zig build test --summary all` and the same with
@@ -192,43 +194,45 @@ print that every service answered; `zig build theme -- --check`, which
 must print the frame it restyled in; the tour's cycle,
 `zig build tour -- --frames 300 --cycle 30`, which must print
 `0 layer overflows, 0 glyph atlas overflows, diagnostics ok: true`, also
-after any change to the sokol renderer or the tour; `zig build tour -- --measure-idle`;
-and `zig build showcase -- --frames 60`, which must print
-`diagnostics ok: true`. They need
-a Wayland compositor (CI runs a headless Weston); never run an example
-without `--check`, `--frames` or `--measure-idle`, since its window
-stays open until closed. Its links on Linux print the same LLD noise.
-In `renderers/webgl/`, run `zig build test` in all three optimize modes
-and `zig build check`, which also compiles the tests for
-`wasm32-freestanding`. In `hosts/web/`, run `zig build test` in all three
-optimize modes and `zig build check`, which compiles the client and the
-tour's worker for `wasm32-freestanding`, so a browser break fails there;
-and, each with `timeout` in front:
-`zig build test-demo` (and with `-Doptimize=ReleaseSafe`) after any
-change to the client, `hosts/web/src/demo_ui.zig`, the tour's worker
+after any change to the sokol renderer or the tour;
+`zig build tour -- --measure-idle`; and
+`zig build showcase -- --frames 60`, which must print
+`diagnostics ok: true`. They need a Wayland compositor (CI runs a
+headless Weston); never run an example without `--check`, `--frames` or
+`--measure-idle`, since its window stays open until closed. Its links on
+Linux print the same LLD noise. In `renderers/webgl/`, run
+`zig build test` in all three optimize modes and `zig build check`,
+which also compiles the tests for `wasm32-freestanding`. In
+`hosts/web/`, run `zig build test` in all three optimize modes and
+`zig build check`, which compiles the client and the tour's worker for
+`wasm32-freestanding`, so a browser break fails there; and, each with
+`timeout` in front: `zig build test-demo` (and with
+`-Doptimize=ReleaseSafe`) after any change to the client,
+`hosts/web/src/demo_ui.zig`, the tour's worker
 (`hosts/web/src/tour_*.zig`, `hosts/web/src/stepped_io.zig`,
 `hosts/web/web/tour_*.mjs`), core, `text/` or `apps/tour/`; it needs
 Node. `zig build test-draw` after any change to how the client lays
 frames out or the page draws them (`renderers/webgl/`), or to `text/`,
-`apps/tour/` or the sokol renderer; it needs Node, Chromium (`-Dbrowser=<path>` names another) and
-a display, and `ZUI_WEB_DRAW_FAILURES=<dir>` keeps its failing frames.
+`apps/tour/` or the sokol renderer; it needs Node, Chromium
+(`-Dbrowser=<path>` names another) and a display, and
+`ZUI_WEB_DRAW_FAILURES=<dir>` keeps its failing frames.
 `zig build test-input` after any change to how the client writes records
 or the page reads input or applies host requests; it needs Node and
 Chromium, run headless, and no display. `zig build test-site`, and
-`zig build site -Doptimize=ReleaseSmall` with `test-site` in ReleaseSmall,
-after any change to the published page, its service worker,
-`hosts/web/web/tour_page.mjs` or what it loads, or `site_scripts`; it
-needs Node and Chromium, run headless, and no display, and the Pages
-workflow runs it before publishing. `zig build test-host` after any
-change to the web host (`hosts/web/src/host.zig`, `browser_host.zig`,
-`worker.zig`, `shared_memory.zig`), its worker and page
-(`hosts/web/web/host_*.mjs`, `tour.html`, `input_recorder.mjs`,
-`tour_thread.mjs`, `shared_module.mjs`), `hosts/web/examples/`,
-`renderers/webgl/`, core or `apps/tour/`; it needs Node and Chromium,
-run headless, and no display. Chromium runs headless here, under
-`timeout`, and must leave no Chromium process behind (`pgrep -af --
---headless`). Its tools that run the tour natively print the same LLD
-noise.
+`zig build site -Doptimize=ReleaseSmall` with `test-site` in
+ReleaseSmall, after any change to the published page, its service
+worker, `hosts/web/web/tour_page.mjs` or what it loads, or
+`site_scripts`; it needs Node and Chromium, run headless, and no
+display, and the Pages workflow runs it before publishing.
+`zig build test-host` after any change to the web host
+(`hosts/web/src/host.zig`, `browser_host.zig`, `worker.zig`,
+`shared_memory.zig`), its worker and page (`hosts/web/web/host_*.mjs`,
+`tour.html`, `input_recorder.mjs`, `tour_thread.mjs`,
+`shared_module.mjs`), `hosts/web/examples/`, `renderers/webgl/`, core or
+`apps/tour/`; it needs Node and Chromium, run headless, and no display.
+Chromium runs headless here, under `timeout`, and must leave no Chromium
+process behind (`pgrep -af -- --headless`). Its tools that run the tour
+natively print the same LLD noise.
 
 | Command | When |
 |---|---|
@@ -245,16 +249,16 @@ noise.
 | `zig build counts -- --compare <file>` | any change to a hot path; CI compares with the parent commit and fails on more than 2% growth |
 
 - Every command, test run and CI job has a hard limit of 10 minutes:
-  `timeout 600 zig build test`, `timeout-minutes` in CI. No test may wait
-  without a bound. Work that does not fit is restructured, never given a
-  longer limit.
-- This machine dual-boots. On Windows, Valgrind and Callgrind do not run,
-  but Docker does, so instruction counts are taken in a Linux container.
-  On its bare-metal Linux install (Omarchy) they run natively, and so do
-  hardware counters (`bench --counters`).
-- On the Linux install, the owner switches the CPU between its normal mode
-  (Turbo Boost on, the usual governor) and benchmarking mode (Turbo Boost
-  off, `performance` governor on every core) with a shell command,
+  `timeout 600 zig build test`, `timeout-minutes` in CI. No test may
+  wait without a bound. Work that does not fit is restructured, never
+  given a longer limit.
+- This machine dual-boots. On Windows, Valgrind and Callgrind do not
+  run, but Docker does, so instruction counts are taken in a Linux
+  container. On its bare-metal Linux install (Omarchy) they run
+  natively, and so do hardware counters (`bench --counters`).
+- On the Linux install, the owner switches the CPU between its normal
+  mode (Turbo Boost on, the usual governor) and benchmarking mode (Turbo
+  Boost off, `performance` governor on every core) with a shell command,
   `turbo`, which needs sudo. It toggles, so check the state first:
   `cat /sys/devices/system/cpu/intel_pstate/no_turbo` (1 is benchmarking
   mode) and `cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor`.
@@ -279,8 +283,8 @@ noise.
   goes in a module.
 - **Pay only for what you declare.** A feature that is off, or a payload
   type that is `void`, generates no code.
-- **Names over comments.** Comment only what is not obvious from the code,
-  and do not reference other files or the spec in comments.
+- **Names over comments.** Comment only what is not obvious from the
+  code, and do not reference other files or the spec in comments.
 - LF line endings everywhere.
 
 ## Packages and the build
@@ -299,18 +303,19 @@ Zig 0.16's package manager behaves in ways that are easy to get wrong:
   `tests/reexports.zig`, which imports `zui` and the apps together.
 - **A renderer's or host's entry in the root `build.zig.zon` is not
   lazy.** With `.lazy = true`, `zui.builder.dependency(…)` panics ("must
-  use the lazyDependency function"); a `.path` dependency fetches nothing
-  anyway, and its own third-party libraries stay lazy.
+  use the lazyDependency function"); a `.path` dependency fetches
+  nothing anyway, and its own third-party libraries stay lazy.
 - **A third-party library is lazy and reached with `lazyDependency`,**
   and a package declares its modules only once its libraries are
   fetched. A package that uses another's modules takes the dependency
   only once it has declared the module it needs, as the hosts'
   `sokolDeclaring` does, or it panics with "unable to find module" in
   CI's empty cache while passing here.
-- **"Fetches nothing" is checked with an empty cache:** `zig build --help
-  --global-cache-dir <empty dir>` after deleting any `zig-pkg/`. With the
-  usual cache, Zig copies the lazy packages it already has into
-  `zig-pkg/` without the network, and a fetch goes unnoticed.
+- **"Fetches nothing" is checked with an empty cache:**
+  `zig build --help --global-cache-dir <empty dir>` after deleting any
+  `zig-pkg/`. With the usual cache, Zig copies the lazy packages it
+  already has into `zig-pkg/` without the network, and a fetch goes
+  unnoticed.
 - A dependency's build sees no `-- <args>` and installs into a prefix of
   its own, which is why the root runs and installs core's benchmark
   executables itself.
@@ -327,6 +332,6 @@ Zig 0.16's package manager behaves in ways that are easy to get wrong:
   fixed, never retried with `--no-verify`.
 - Work on `main`, as the history does. **Do not push or tag** unless the
   user says to in this session. Every package names `core/`, and any
-  other package it uses, by path, so a change is built and tested against
-  all of them in place: `zig build test-all` and `zig build check-all`
-  run every package's steps.
+  other package it uses, by path, so a change is built and tested
+  against all of them in place: `zig build test-all` and
+  `zig build check-all` run every package's steps.

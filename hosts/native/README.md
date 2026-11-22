@@ -1,9 +1,9 @@
 # The native hosts
 
 `zui_host` holds the native hosts: each owns its OS's windows and event
-loop, and implements zui's host contract, so any renderer that draws into
-the same kind of surface can draw for it. One directory per OS, chosen
-by the target: Windows, and Linux on Wayland. On Linux it needs
+loop, and implements zui's host contract, so any renderer that draws
+into the same kind of surface can draw for it. One directory per OS,
+chosen by the target: Windows, and Linux on Wayland. On Linux it needs
 `libwayland-dev libxkbcommon-dev libegl-dev`.
 
 ```zig
@@ -31,17 +31,19 @@ The host must not move between `init` and `deinit`, since its window
 thread (on Windows) and the compositor's listeners (on Linux) hold a
 pointer to it, as does the Linux host's signal handler. `forced_scale`,
 `system_material_unavailable`, and on Linux `bus_addresses` and
-`forced_blur_offers`, may be set before `init`, which keeps them; `zui_app` starts each field at
-its default. `service_fake` may be set before `init` too, or after it
-with `Host.fakeServices(fake)`, before the first service call.
+`forced_blur_offers`, may be set before `init`, which keeps them;
+`zui_app` starts each field at its default. `service_fake` may be set
+before `init` too, or after it with `Host.fakeServices(fake)`, before
+the first service call.
 
 The examples below are each drawn by the sokol renderer.
 
 ## Development
 
-Run from `hosts/native/`; the examples fetch sokol-zig and stb for the sokol renderer that draws them, and on
-Linux the build needs `libwayland-dev libxkbcommon-dev libegl-dev`, and
-for the examples sokol's
+Run from `hosts/native/`; the examples fetch sokol-zig and stb for the
+sokol renderer that draws them, and on Linux the build needs
+`libwayland-dev libxkbcommon-dev libegl-dev`, and for the examples
+sokol's
 `libx11-dev libxi-dev libxcursor-dev libgl1-mesa-dev libpulse-dev`:
 
 | Command | What it does |
@@ -62,35 +64,37 @@ for the examples sokol's
 
 The tests and examples need a Wayland compositor on Linux (CI runs a
 headless Weston), and an example without `--check`, `--frames` or
-`--measure-idle` keeps its window open until it is closed. The tests that
-play the desktop portal and the notification daemon need a session bus
-of their own, named by `ZUI_HOST_TEST_SESSION_BUS` (see *The Linux host*).
-Its links on Linux print `warning(link): unexpected LLD stderr` and still
-succeed.
+`--measure-idle` keeps its window open until it is closed. The tests
+that play the desktop portal and the notification daemon need a session
+bus of their own, named by `ZUI_HOST_TEST_SESSION_BUS` (see *The Linux
+host*). Its links on Linux print `warning(link): unexpected LLD stderr`
+and still succeed.
 
 ## The Windows host
 
-`zui_host.Host` opens Win32 windows and gives renderers each one's `win32`
-surface (the `HWND`). Its message loop runs on a thread of its own, so a
-window keeps drawing while the user drags its edges or moves it. It:
+`zui_host.Host` opens Win32 windows and gives renderers each one's
+`win32` surface (the `HWND`). Its message loop runs on a thread of its
+own, so a window keeps drawing while the user drags its edges or moves
+it. It:
 
 - opens many windows (`zui_capabilities.windows = .many`): `init` opens
-  `.main`, and `zuiOpenWindow(options)` up to `Host.max_windows - 1` more,
-  each with an id never given twice, its own events, scale, requests,
-  chrome regions, accessibility bridge and menu bar, polled by its id;
-  `zuiCloseWindow(window)` closes any of them, `.main` included. One wait
-  covers them all. A message-only window anchors the window thread and
-  owns the clipboard and the notification icon, so every service keeps
-  working whichever windows are open, and the console's terminate and
-  low memory reach every window;
+  `.main`, and `zuiOpenWindow(options)` up to `Host.max_windows - 1`
+  more, each with an id never given twice, its own events, scale,
+  requests, chrome regions, accessibility bridge and menu bar, polled by
+  its id; `zuiCloseWindow(window)` closes any of them, `.main` included.
+  One wait covers them all. A message-only window anchors the window
+  thread and owns the clipboard and the notification icon, so every
+  service keeps working whichever windows are open, and the console's
+  terminate and low memory reach every window;
 - reports per-monitor scale (per-monitor DPI awareness v2), keeping the
-  window's size in layout units when it moves to a monitor of another DPI;
-- reports the mouse, the wheel, keys with their modifiers and scan codes,
-  and typed text as UTF-8, surrogate pairs joined and consecutive
+  window's size in layout units when it moves to a monitor of another
+  DPI;
+- reports the mouse, the wheel, keys with their modifiers and scan
+  codes, and typed text as UTF-8, surrogate pairs joined and consecutive
   characters in one event;
-- reports the environment: dark mode (also darkening the title bar), high
-  contrast, animations turned off (`reduced_motion`), power (plugged, on
-  battery, battery saver) and whether the window has focus;
+- reports the environment: dark mode (also darkening the title bar),
+  high contrast, animations turned off (`reduced_motion`), power
+  (plugged, on battery, battery saver) and whether the window has focus;
 - reports lifecycle events: Ctrl+C, Ctrl+Break, the console closing,
   logging off, shutting down and the session ending are
   `.terminate_requested`, after which the next poll reports the window
@@ -98,8 +102,8 @@ window keeps drawing while the user drags its edges or moves it. It:
   low memory is `.low_memory`;
 - reports files dropped onto the window, with their paths and where;
 - sets the cursor a frame asks for, and places the IME's composition and
-  candidate windows at the caret of a frame's text-input request, turning
-  the IME off while no editable asks for one;
+  candidate windows at the caret of a frame's text-input request,
+  turning the IME off while no editable asks for one;
 - waits as `nextFrame` says: at once, until an instant on a
   high-resolution timer, or until input or a wake, which is sticky and
   works from any thread;
@@ -111,30 +115,31 @@ window keeps drawing while the user drags its edges or moves it. It:
   balloon of the window's notification-area icon, which Windows 10 and
   11 show as a toast, answering `.notification_activated` when clicked
   and `.notification_dismissed` when it times out, is closed or is
-  replaced by the next; and `Host.zuiFileDialogs.show(host, window,
-  request, dialog, sink)`, the shell's open, save and folder dialogs,
-  owned by the window and one at a time, answering `.files_chosen` with
-  the paths chosen or `.canceled`; and `Host.zuiMenus`, Windows' own
-  menus: `popup(host, window, request, items, position, sink)`, a context
-  menu at a position in layout units, one at a time with a file dialog,
-  answering the item chosen or `.canceled`, and `setBar(host, window,
-  request, items, sink)`, which replaces the window's menu bar, or
-  removes it given no items, and answers each item chosen from it, or is
-  `error.Unavailable` under a custom title bar, which would hide it. Labels
-  show as written, with shortcuts after them (`Ctrl+Shift+S`). Each call
-  returns at once; the window thread does the work and publishes every
-  answer, a `zui.ServiceReply`, into a source of the application's, so
-  answers never come from two threads;
+  replaced by the next; and
+  `Host.zuiFileDialogs.show(host, window, request, dialog, sink)`, the
+  shell's open, save and folder dialogs, owned by the window and one at
+  a time, answering `.files_chosen` with the paths chosen or
+  `.canceled`; and `Host.zuiMenus`, Windows' own menus:
+  `popup(host, window, request, items, position, sink)`, a context menu
+  at a position in layout units, one at a time with a file dialog,
+  answering the item chosen or `.canceled`, and
+  `setBar(host, window, request, items, sink)`, which replaces the
+  window's menu bar, or removes it given no items, and answers each item
+  chosen from it, or is `error.Unavailable` under a custom title bar,
+  which would hide it. Labels show as written, with shortcuts after them
+  (`Ctrl+Shift+S`). Each call returns at once; the window thread does
+  the work and publishes every answer, a `zui.ServiceReply`, into a
+  source of the application's, so answers never come from two threads;
 - watches up to four directories, each with its subdirectories, through
   `Host.zuiFileWatch.watch(host, directory, sink)`: a thread per
-  directory waits on `ReadDirectoryChangesW` and publishes each change, a
-  `zui.FileChange`, into a source of the application's, waking the window
-  for the first since the last frame;
+  directory waits on `ReadDirectoryChangesW` and publishes each change,
+  a `zui.FileChange`, into a source of the application's, waking the
+  window for the first since the last frame;
 - shows the system's material behind the window when it asks for one
   (`WindowOptions.material`: `.window` is Mica, `.transient` Acrylic),
-  and reports whether it shows as `Environment.system_material`: false on
-  Windows 10 and Windows 11 before 22H2, with transparency effects turned
-  off, or for `.none`;
+  and reports whether it shows as `Environment.system_material`: false
+  on Windows 10 and Windows 11 before 22H2, with transparency effects
+  turned off, or for `.none`;
 - opens the surface in `.scrgb_fp16` while the window's monitor runs in
   HDR, if the window was opened with it (`zui_app` passes it when the
   renderer declares it too), and in `.sdr` otherwise, and reports
@@ -142,9 +147,9 @@ window keeps drawing while the user drags its edges or moves it. It:
   its SDR content brightness slider sets, or 1 in `.sdr`. Moving to
   another monitor and turning HDR on or off change both;
 - bridges `Frame.semantics()` to UI Automation, through `zuiSemantics`,
-  when the window was opened with room for it (`WindowOptions.semantics`,
-  which `zui_app` sizes from `Config.limits` when `features.semantics` is
-  on); see *Accessibility* below;
+  when the window was opened with room for it
+  (`WindowOptions.semantics`, which `zui_app` sizes from `Config.limits`
+  when `features.semantics` is on); see *Accessibility* below;
 - leaves the title bar to the application for a window opened with
   `WindowOptions.title_bar = .custom`, reporting
   `Environment.custom_title_bar` and `.window_maximized`, and answers
@@ -157,24 +162,24 @@ sends each window the messages Windows would.
 
 ## The Linux host
 
-On Linux, `zui_host.Host` opens Wayland windows through libwayland-client
-and xdg-shell, and gives renderers each one's `wayland` surface (the
-`wl_display` and its `wl_surface`). It reads and dispatches the
-compositor's events on the thread that polls it, since a Wayland client
-has no modal loop to escape. So far it:
+On Linux, `zui_host.Host` opens Wayland windows through
+libwayland-client and xdg-shell, and gives renderers each one's
+`wayland` surface (the `wl_display` and its `wl_surface`). It reads and
+dispatches the compositor's events on the thread that polls it, since a
+Wayland client has no modal loop to escape. So far it:
 
 - opens many windows (`zui_capabilities.windows = .many`): `init` opens
-  `.main`, and `zuiOpenWindow(options)` up to `Host.max_windows - 1` more,
-  returning once the compositor has configured it, each with an id never
-  given twice, its own surface, events, scale, requests and chrome
+  `.main`, and `zuiOpenWindow(options)` up to `Host.max_windows - 1`
+  more, returning once the compositor has configured it, each with an id
+  never given twice, its own surface, events, scale, requests and chrome
   regions, polled by its id; `zuiCloseWindow(window)` destroys any of
   them, `.main` included. The pointer's events reach the window whose
   surface it entered, keys the one with the keyboard's focus, a drop the
   one the drag entered and an input method's text the one with the
-  text-input focus. The seat, the clipboard, the watches and the services
-  belong to the host, so they keep working whichever windows are open,
-  and a terminate request, the system sleeping and the desktop's
-  settings reach every window. One wait covers them all;
+  text-input focus. The seat, the clipboard, the watches and the
+  services belong to the host, so they keep working whichever windows
+  are open, and a terminate request, the system sleeping and the
+  desktop's settings reach every window. One wait covers them all;
 - reports the scale the compositor prefers: fractional
   (`wp_fractional_scale_v1`, in 120ths) where it also offers
   `wp_viewporter`, the buffer drawn at physical pixels and the viewport
@@ -194,8 +199,8 @@ has no modal loop to escape. So far it:
   contrast and reduced motion from the XDG desktop portal's settings
   (`org.freedesktop.appearance`), and power from UPower (on battery) and
   power-profiles-daemon (`power-saver` is the saver), each change as it
-  is signalled. Without a session bus, a portal or either daemon, as in a
-  container or under a bare compositor, those settings stay at zui's
+  is signalled. Without a session bus, a portal or either daemon, as in
+  a container or under a bare compositor, those settings stay at zui's
   defaults, and `host.environmentSources()` says which answered;
 - reports lifecycle events: SIGINT, SIGTERM and SIGHUP are
   `.terminate_requested`, after which the next poll reports the window
@@ -237,21 +242,22 @@ has no modal loop to escape. So far it:
   (the preedit) is kept but not reported yet, and no surrounding text or
   content type is sent;
 - offers zui's host services over the session bus, the Windows host's
-  shapes: `Host.zuiNotifications.show(host, request, notification,
-  sink)`, a notification from the desktop's notification daemon
+  shapes:
+  `Host.zuiNotifications.show(host, request, notification, sink)`, a
+  notification from the desktop's notification daemon
   (`org.freedesktop.Notifications`), one at a time and replaced by the
   next, answering `.notification_activated` when clicked and
   `.notification_dismissed` when it expires, is closed or is replaced;
-  `Host.zuiFileDialogs.show(host, window, request, dialog, sink)`, the XDG
-  desktop portal's open, save and folder dialogs (`FileChooser`), one at
-  a time, answering `.files_chosen` with the paths chosen or `.canceled`;
-  and `Host.zuiOpenUrl.open(host, url)`, which hands a URL to the
-  portal's `OpenURI` and refuses paths and `file:` URLs. Each call only
-  sends; the poll and the wait read the bus and publish every answer, a
-  `zui.ServiceReply`, into a source of the application's. Without a
-  session bus each call is `error.Unavailable`, and without a daemon or a
-  portal the answer is `.failed = .unavailable`. There are no menus,
-  which Wayland does not have;
+  `Host.zuiFileDialogs.show(host, window, request, dialog, sink)`, the
+  XDG desktop portal's open, save and folder dialogs (`FileChooser`),
+  one at a time, answering `.files_chosen` with the paths chosen or
+  `.canceled`; and `Host.zuiOpenUrl.open(host, url)`, which hands a URL
+  to the portal's `OpenURI` and refuses paths and `file:` URLs. Each
+  call only sends; the poll and the wait read the bus and publish every
+  answer, a `zui.ServiceReply`, into a source of the application's.
+  Without a session bus each call is `error.Unavailable`, and without a
+  daemon or a portal the answer is `.failed = .unavailable`. There are
+  no menus, which Wayland does not have;
 - waits as `nextFrame` says: at once, until an instant, or until input,
   a key's repeat, a signal or a wake, which is sticky and works from any
   thread (an `eventfd`); the compositor's and the buses' other messages,
@@ -260,13 +266,13 @@ has no modal loop to escape. So far it:
   and `read(host, request, sink)`, through the seat's selection: `write`
   offers up to 64 KiB of UTF-8 as `text/plain;charset=utf-8`,
   `UTF8_STRING` and `text/plain`, and `read` publishes a
-  `zui.ServiceReply` once the selection's owner has written it, up to
-  64 KiB with the rest counted as left out, `""` when the clipboard
-  holds no text, or `.failed` after 2 s. Both directions go through
-  pipes the host's wait reads and writes, so the host can paste its own
-  text, and a reader that closes early does not raise SIGPIPE. The
-  compositor names the selection only to the window with keyboard
-  focus; until it names another, a read answers the last text written;
+  `zui.ServiceReply` once the selection's owner has written it, up to 64
+  KiB with the rest counted as left out, `""` when the clipboard holds
+  no text, or `.failed` after 2 s. Both directions go through pipes the
+  host's wait reads and writes, so the host can paste its own text, and
+  a reader that closes early does not raise SIGPIPE. The compositor
+  names the selection only to the window with keyboard focus; until it
+  names another, a read answers the last text written;
 - watches up to four directories, each with its subdirectories, through
   `Host.zuiFileWatch.watch(host, directory, sink)`: one inotify
   descriptor, read in the host's wait, with a watch for each directory,
@@ -281,16 +287,16 @@ needs no libdbus and allocates nothing. `init` waits up to 250 ms for
 the desktop's current settings, so the first frame has them. A window
 opened with `visible = false` is a surface with no role, which the
 compositor never shows. The services have a connection to the session
-bus of their own, which reads nothing while no call waits for an
-answer. Low memory, reduced transparency from the desktop, the input
-method's composing text and X11 are still to come.
+bus of their own, which reads nothing while no call waits for an answer.
+Low memory, reduced transparency from the desktop, the input method's
+composing text and X11 are still to come.
 
 It passes zui's host suite (`zui_testing.expectHostConforms`) against
 windows the compositor never shows, two of them for its many-windows
 steps, whose harness delivers what a compositor would to the host's own
-handlers, entering the window each event is posted to first; without a compositor to
-connect to, the suite and the host's own tests are skipped with a
-message. The services are answered there through the host's fake
+handlers, entering the window each event is posted to first; without a
+compositor to connect to, the suite and the host's own tests are skipped
+with a message. The services are answered there through the host's fake
 (`Host.fakeServices`), so nothing shows. A test with
 `ZUI_HOST_TEST_SHOWN_WINDOW` set shows a window for a moment, so the
 compositor gives it focus, and reads text written to the clipboard back
@@ -314,11 +320,11 @@ A window opened with `WindowOptions.semantics` answers UI Automation's
 `WM_GETOBJECT` with a fragment root, whose elements are the nodes of the
 last `Frame.semantics()` the host was handed: each with its label as its
 name, its role as a control type, its id in hex as its AutomationId, its
-bounds in screen pixels and its place in the tree, and a heading with its
-level. Each offers the pattern that stands for what it does: Toggle on a
-checkbox, ExpandCollapse on a dropdown or disclosure, RangeValue on a
-slider, Value on a text field or dropdown, SelectionItem on an option or
-radio, Selection on a list, Scroll on a scroll container, Window on a
+bounds in screen pixels and its place in the tree, and a heading with
+its level. Each offers the pattern that stands for what it does: Toggle
+on a checkbox, ExpandCollapse on a dropdown or disclosure, RangeValue on
+a slider, Value on a text field or dropdown, SelectionItem on an option
+or radio, Selection on a list, Scroll on a scroll container, Window on a
 dialog, and Invoke on what is left that clicks.
 
 A client's requests arrive in the next record as the actions that answer
@@ -327,20 +333,20 @@ as a click; a range's SetValue as `adjust` by whole steps; a scroll by a
 notch (a wheel step), a page or to a percentage as `scroll`;
 ShowContextMenu as `show_menu`; a dialog's Close as `dismiss`; and
 SetFocus as `focus`, answered as Tab would be. A text field's text is
-read through its Value pattern and typed from the keyboard, since zui has
-no action that replaces it. Focus, structure and property changes (name,
-value, toggle, expand, selection, enabled, scroll position) are raised
-only while a client listens, from the window thread.
+read through its Value pattern and typed from the keyboard, since zui
+has no action that replaces it. Focus, structure and property changes
+(name, value, toggle, expand, selection, enabled, scroll position) are
+raised only while a client listens, from the window thread.
 
 The host copies each list into one of two snapshots it allocates in
 `init`, so a list past that room is cut from the end and reported, and
 nothing is allocated after `init`. Without room, the window is left to
 Windows' default accessibility.
 
-`zig build accessible` shows a heading, a button, a checkbox, a slider, a
-text field, a dropdown and a scrolling log, from `zui_widgets` and zui,
-for trying with Narrator or Accessibility Insights; `-- --frames 30`
-draws 30 frames and quits. The tour declares its
+`zig build accessible` shows a heading, a button, a checkbox, a slider,
+a text field, a dropdown and a scrolling log, from `zui_widgets` and
+zui, for trying with Narrator or Accessibility Insights;
+`-- --frames 30` draws 30 frames and quits. The tour declares its
 semantics too, so the tour on this host can be read the same way. The
 host's tests read their windows through UI Automation's own client,
 in-process, from a thread that owns no window: a window that was never
@@ -354,27 +360,28 @@ otherwise: the same code shows Mica on Windows 11 and a solid background
 on Windows 10, and on Wayland the compositor's blur behind a window
 whose surface holds alpha, or a solid background where the compositor
 offers no blur. `-- --no-system-material` makes the host behave as on
-Windows 10, `-- --transient` asks for Acrylic, and `-- --screenshot
-file.bmp` (Windows) saves what the screen shows. `-- --check` opens the
-window hidden, polls it once, prints `system material: <bool>`, and on
-Linux checks that the renderer presents alpha exactly where the surface
-is `transparent`, also on a second hidden window asked to be, then
-quits without drawing; `-- --frames 120` draws 120 frames and quits. The renderer clears to transparent
-and must keep its alpha: the sokol renderer does, with D3D11, through a
-swapchain DirectComposition composes into the window; Windows ignores the
-alpha of an OpenGL window, so with `-Dgl=true` the backdrop would be
-added under every pixel.
+Windows 10, `-- --transient` asks for Acrylic, and
+`-- --screenshot file.bmp` (Windows) saves what the screen shows.
+`-- --check` opens the window hidden, polls it once, prints
+`system material: <bool>`, and on Linux checks that the renderer
+presents alpha exactly where the surface is `transparent`, also on a
+second hidden window asked to be, then quits without drawing;
+`-- --frames 120` draws 120 frames and quits. The renderer clears to
+transparent and must keep its alpha: the sokol renderer does, with
+D3D11, through a swapchain DirectComposition composes into the window;
+Windows ignores the alpha of an OpenGL window, so with `-Dgl=true` the
+backdrop would be added under every pixel.
 
 ## HDR white
 
-`zig build hdr` shows boxes of SDR white and of two and four times it, in
-`zui.ExtendedColor`, with the output format and `hdr_headroom` the window
-got. On a monitor in HDR the host opens it in `.scrgb_fp16` and the sokol
-renderer draws into a half-float scRGB swapchain, so the brighter boxes
-show brighter; elsewhere all three show as SDR white. `-- --measure`
-reads the boxes back off the desktop in scRGB, where 1.0 is 80 nits,
-through DXGI's desktop duplication, and fails if twice SDR white does not
-show brighter than SDR white:
+`zig build hdr` shows boxes of SDR white and of two and four times it,
+in `zui.ExtendedColor`, with the output format and `hdr_headroom` the
+window got. On a monitor in HDR the host opens it in `.scrgb_fp16` and
+the sokol renderer draws into a half-float scRGB swapchain, so the
+brighter boxes show brighter; elsewhere all three show as SDR white.
+`-- --measure` reads the boxes back off the desktop in scRGB, where 1.0
+is 80 nits, through DXGI's desktop duplication, and fails if twice SDR
+white does not show brighter than SDR white:
 
 ```
 output scrgb_fp16, headroom 3.81; the desktop shows, in scRGB (1.0 is 80 nits):
@@ -416,12 +423,13 @@ came 18.7 ms after it, in the second frame.
 `zig build services` has a button for each service, with its answer
 beside it: pick a file, save a file, show a notification, open a popup
 menu, set or clear the menu bar, copy, paste, and open
-<https://ziglang.org>. It runs on both hosts; a service the host does not
-offer says so beside its button. A right click anywhere opens the context
-menu, and Ctrl+C, Ctrl+V, Ctrl+O and Ctrl+S do what the menus say.
-Declaration only notes what was asked for, and the loader makes the calls
-between frames through `zui_app.ServicesOf`, so every answer comes back
-through one source, a `zui_async.Stream(zui.ServiceReply(16 * 1024), ...)`:
+<https://ziglang.org>. It runs on both hosts; a service the host does
+not offer says so beside its button. A right click anywhere opens the
+context menu, and Ctrl+C, Ctrl+V, Ctrl+O and Ctrl+S do what the menus
+say. Declaration only notes what was asked for, and the loader makes the
+calls between frames through `zui_app.ServicesOf`, so every answer comes
+back through one source, a
+`zui_async.Stream(zui.ServiceReply(16 * 1024), ...)`:
 
 ```zig
 const services = zui_app.ServicesOf(zui_host.Host);
@@ -442,8 +450,8 @@ zig build services -- --check      # every service against the host's fake, in a
 `--check` hides the window and answers every service through the host's
 fake (`Host.fakeServices`), so nothing opens or shows. It presses each
 button in turn, chooses an item from the menu bar as Windows would
-report it, and fails unless each answer shows in a frame within 10 s.
-It uses the real clipboard, and so replaces what it holds. A paste right
+report it, and fails unless each answer shows in a frame within 10 s. It
+uses the real clipboard, and so replaces what it holds. A paste right
 after a copy often finds the clipboard held by clipboard history, and is
 answered `.failed = .unavailable`; the check presses Paste again, as a
 user would. Setting a menu bar shrinks the window's content by the bar's
@@ -456,9 +464,9 @@ which a renderer's swap waits for.
 
 `zig build title-bar` draws its own title bar, over Mica on Windows: a
 title, a search field and minimize, maximize and close buttons, and a
-resize grip in the bottom-right corner. The application
-marks each part with `Element.chrome`, behind `features.chrome_regions`,
-and opens the window with `.title_bar = .custom`:
+resize grip in the bottom-right corner. The application marks each part
+with `Element.chrome`, behind `features.chrome_regions`, and opens the
+window with `.title_bar = .custom`:
 
 ```zig
 ui.open(.{ .id = .of("title bar"), .chrome = .title_bar, .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(32) } } });
@@ -467,26 +475,26 @@ _ = widgets.textField(ui, .of("search"), &app.search, .{ .label = "Search" }); /
 if (captionButton(ui, .of("close"), .close_button, "Close")) app.host.close(); // the keyboard's or Narrator's click
 ```
 
-The window keeps the system's frame on the left, right and bottom, so DWM
-draws its border, rounded corners and shadow, and only the caption goes.
-`WM_NCHITTEST` is answered from the system's borders first, then a resize
-band the host keeps along the top, then the frame's regions, the last on
-top: a title bar is `HTCAPTION`, so Windows drags the window, maximizes it
-on a double click, opens the system menu on a right click and snaps it
-with Win+arrows; the maximize button is `HTMAXBUTTON`, so hovering it
-shows snap layouts; resize edges and grips are the `HT` code of their
-edge; and the interactive elements inside the title bar stay
-`HTCLIENT`. The host keeps a copy of up to 256 regions, in pixels, under a
-lock the window thread takes shared.
+The window keeps the system's frame on the left, right and bottom, so
+DWM draws its border, rounded corners and shadow, and only the caption
+goes. `WM_NCHITTEST` is answered from the system's borders first, then a
+resize band the host keeps along the top, then the frame's regions, the
+last on top: a title bar is `HTCAPTION`, so Windows drags the window,
+maximizes it on a double click, opens the system menu on a right click
+and snaps it with Win+arrows; the maximize button is `HTMAXBUTTON`, so
+hovering it shows snap layouts; resize edges and grips are the `HT` code
+of their edge; and the interactive elements inside the title bar stay
+`HTCLIENT`. The host keeps a copy of up to 256 regions, in pixels, under
+a lock the window thread takes shared.
 
 Over the caption buttons the pointer still reaches zui, so they show
 hover and press. The host works them itself when a press and its release
-land on the same button, as Windows' own buttons, and ends the press with
-`pointer_cancel` rather than a release, so zui reports no click. An
-application acts on `clicked` only for the keyboard and Narrator, through
-`Host.minimize`, `Host.toggleMaximized` and `Host.close`, so each button
-is worked once. Maximized, the content starts below the edge of the
-monitor.
+land on the same button, as Windows' own buttons, and ends the press
+with `pointer_cancel` rather than a release, so zui reports no click. An
+application acts on `clicked` only for the keyboard and Narrator,
+through `Host.minimize`, `Host.toggleMaximized` and `Host.close`, so
+each button is worked once. Maximized, the content starts below the edge
+of the monitor.
 
 ```sh
 zig build title-bar                          # interactive window
@@ -511,8 +519,8 @@ window, and a secondary press opens the compositor's window menu
 (`show_window_menu`); a press on a resize edge or grip is
 `xdg_toplevel.resize` from that edge. Each goes with the press's serial,
 and neither the press nor its release reaches zui. The caption buttons
-work as on Windows: the press reaches zui, its release on the same button
-arrives as `pointer_cancel`, and the host minimizes, maximizes or
+work as on Windows: the press reaches zui, its release on the same
+button arrives as `pointer_cancel`, and the host minimizes, maximizes or
 restores, or closes the window. `window_maximized` follows the
 `maximized` state of the toplevel's configures. A Wayland window has no
 border of the compositor's, so it resizes only from the edges and grips
@@ -543,10 +551,10 @@ zig build many-windows -- --measure-idle       # CPU time of two idle windows ov
 zig build many-windows -- --measure-animation  # frame rates of one, then two, windows animating
 ```
 
-`--check` opens a second window, clicks its buttons through the
-host, and exits 0 only when the second counts its own click, both show
-the shared count, the first counted none, and the first draws on after
-the second closes. On Windows its windows are hidden; on Linux they are
+`--check` opens a second window, clicks its buttons through the host,
+and exits 0 only when the second counts its own click, both show the
+shared count, the first counted none, and the first draws on after the
+second closes. On Windows its windows are hidden; on Linux they are
 shown for the moment the check takes, since a frame drawn into a surface
 the compositor never shows waits in its swap for a frame callback that
 never comes. On a 144 Hz monitor on Windows, two windows animating at
@@ -557,13 +565,13 @@ there, and two idle windows use 0.9 to 21 ms of CPU over 10 s.
 
 ## The tour on a native host
 
-`zig build tour` runs [the tour](../../apps/tour/README.md) on this host, drawn by the sokol
-renderer, which draws into a `win32` window through sokol_gfx with
-D3D11, or into a `wayland` surface with OpenGL through EGL, without
-sokol_app, and `zig build showcase` runs `zui_showcase` the same way.
-`hosts/native/examples/tour.zig` is the target: it names the tour, this
-host, the sokol renderer and the font system, and adds the screenshot
-this host's window gives:
+`zig build tour` runs [the tour](../../apps/tour/README.md) on this
+host, drawn by the sokol renderer, which draws into a `win32` window
+through sokol_gfx with D3D11, or into a `wayland` surface with OpenGL
+through EGL, without sokol_app, and `zig build showcase` runs
+`zui_showcase` the same way. `hosts/native/examples/tour.zig` is the
+target: it names the tour, this host, the sokol renderer and the font
+system, and adds the screenshot this host's window gives:
 
 ```zig
 const Tour = zui_tour.App(.{ .Host = zui_host.Host, .Renderer = SokolRenderer, .Text = zui_truetype.Text, .renderer_name = "sokol" });
@@ -586,12 +594,13 @@ zig build showcase -- --frames 60            # draw the showcase for 60 frames, 
 Idle, it uses no CPU: on an i9-10900K in ReleaseSafe, the old tour's
 Layout Lab screen used 0.0 ms of CPU over 10 s with no frames and no
 wakes in three runs of four (Windows counts CPU time in 15.6 ms ticks).
-On Linux, under Hyprland with an NVIDIA RTX 2060 SUPER, the overview used
-4.6 ms over 10 s in Debug, with 1 frame and no wakes. `--screenshot` saves
-the window on Windows only so far. With `--frames`, it prints the frames
-drawn, the sokol renderer's layer and glyph atlas overflows, and whether
-every frame's diagnostics were clean (`diagnostics ok: true`), which CI
-checks on Linux under a headless Weston.
+On Linux, under Hyprland with an NVIDIA RTX 2060 SUPER, the overview
+used 4.6 ms over 10 s in Debug, with 1 frame and no wakes.
+`--screenshot` saves the window on Windows only so far. With `--frames`,
+it prints the frames drawn, the sokol renderer's layer and glyph atlas
+overflows, and whether every frame's diagnostics were clean
+(`diagnostics ok: true`), which CI checks on Linux under a headless
+Weston.
 
 ## The tour in another process
 
@@ -601,8 +610,8 @@ added in the same order, so the stream's fingerprint matches, on
 `zui_wire`'s host and renderer, and draws it here: a `zui_wire.Client`
 joins this host and the sokol renderer to it over a loopback TCP
 connection, sending this window's input and drawing the frames that come
-back, each written as the changes from the one before. Closing the window
-ends the tour's process.
+back, each written as the changes from the one before. Closing the
+window ends the tour's process.
 
 ```sh
 zig build remote                         # the tour runs in a second process; this one draws it

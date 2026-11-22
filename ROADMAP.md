@@ -19,6 +19,7 @@ queue, and how items are labelled and judged. Everything else is in
 | [`roadmap/former-ids.md`](roadmap/former-ids.md) | the letter IDs items had before, for commit messages and older reports |
 
 Each item says:
+
 - **Grounding:** what we know, with the code that shows it.
 - **Plan:** what to change.
 - **Done when:** the test or measurement that decides it.
@@ -40,10 +41,10 @@ An item is named `{group}:{item}`, each part a number and a name:
 - **The group** is a stage of SPEC.md §21 under its number there (`01`
   to `11`), then the groups after the stages: `12-font-system`,
   `13-later` and `14-macos`. Its items live in `roadmap/<group>.md`.
-- **The item's number** is its place in the group's planned order when it
-  was written down; its name says what it builds. An item's heading is
-  `## <label> — <title>`, so `grep -rn '^## 10-reach:04' roadmap/` finds
-  it.
+- **The item's number** is its place in the group's planned order when
+  it was written down; its name says what it builds. An item's heading
+  is `## <label> — <title>`, so `grep -rn '^## 10-reach:04' roadmap/`
+  finds it.
 - **Labels are stable.** Commit messages and other documents cite them,
   so a label is never renamed or renumbered, even when the queue is
   reordered. A new item takes the next number in its group, and numbers
@@ -80,10 +81,10 @@ tracked by stage rather than by release number. Each stage may be tagged
 when it is done.
 
 Measured on the reference machine (i9-10900K) in benchmarking mode
-(Turbo Boost off, 3.7 GHz, the `performance` governor), the fastest frame
-at `9154f3f`, after the audit's `06-text-and-layout:14-layer-sort` to
-`06-text-and-layout:18-string-cache-keys-apart`, against the budgets of
-SPEC.md §20.2:
+(Turbo Boost off, 3.7 GHz, the `performance` governor), the fastest
+frame at `9154f3f`, after the audit's `06-text-and-layout:14-layer-sort`
+to `06-text-and-layout:18-string-cache-keys-apart`, against the budgets
+of SPEC.md §20.2:
 
 | Scenario | Declaration | `endFrame` | Budget |
 |---|---|---|---|
@@ -98,16 +99,16 @@ for declaration and 108.6 to 109.0 µs for layout and emission, and warm
 text's 66.5 to 67.4 µs. Until `9154f3f` the budgets were 100 µs, 55 µs
 and 120 µs and were judged with Turbo Boost on, where the box tree had
 measured 48.9 µs and 89.2 µs after
-`06-text-and-layout:05-box-tree-declaration-budget`. The owner moved them
-to the mode `bench-compare` measures in, which is steadier (turbo-on runs
-had drifted by 10% on the same instructions), scaling each by 1.25, the
-box tree's own ratio of turbo-off to turbo-on time.
+`06-text-and-layout:05-box-tree-declaration-budget`. The owner moved
+them to the mode `bench-compare` measures in, which is steadier
+(turbo-on runs had drifted by 10% on the same instructions), scaling
+each by 1.25, the box tree's own ratio of turbo-off to turbo-on time.
 
 ## The queue
 
-Work is taken from the top. The first row whose status is not
-`waiting` is the next item, and CLAUDE.md says how to take it on. An item
-too large for one sitting lands in slices, each a commit with every check
+Work is taken from the top. The first row whose status is not `waiting`
+is the next item, and CLAUDE.md says how to take it on. An item too
+large for one sitting lands in slices, each a commit with every check
 green, and its **Status** line says which slice is next. An item's entry
 is in the file its group names.
 
@@ -136,8 +137,9 @@ system's first (`roadmap/11-polish.md`, *The design system*), by the
 owner's choice. The design system's items have their Grounding, Plan and
 Done when; each of stage 11's other items is given them as it is taken.
 
-The font system ([`roadmap/12-font-system.md`](roadmap/12-font-system.md))
-has no rows yet; its items join the queue when the owner orders them.
+The font system
+([`roadmap/12-font-system.md`](roadmap/12-font-system.md)) has no rows
+yet; its items join the queue when the owner orders them.
 
 macOS is not in the queue. Its work is set aside in
 [`roadmap/14-macos.md`](roadmap/14-macos.md), and none of it is built
@@ -145,14 +147,15 @@ until the owner chooses to take up macOS. Until then, a progress report
 leaves it out.
 
 Statuses: `next` (the first open row), `in progress` (a slice has
-landed), `waiting on <what>` (blocked by something the next session cannot
-do: a decision, CI, a push), or empty (not started). A finished item's
-row is removed, and its group's *Items* table and its own **Status** say
-it is done. An item whose remaining work is waiting on CI or a person
-counts as done for the rows that wait for it, as long as what they need
-from it has landed.
+landed), `waiting on <what>` (blocked by something the next session
+cannot do: a decision, CI, a push), or empty (not started). A finished
+item's row is removed, and its group's *Items* table and its own
+**Status** say it is done. An item whose remaining work is waiting on CI
+or a person counts as done for the rows that wait for it, as long as
+what they need from it has landed.
 
 Things to know:
+
 - **Judge each item against its parent commit,** in benchmarking mode:
   `zig build bench-compare -- HEAD --require-quiet` compares the working
   tree with the last commit. A base from before `4294abe`
@@ -168,8 +171,8 @@ Things to know:
   by the machine's fingerprint; `--calibrate` again after changing the
   setup.
 - **The spec is already written.** Every item implements sections of
-  SPEC.md that exist; an item that finds the spec wrong changes it in the
-  same commit, with the reason.
+  SPEC.md that exist; an item that finds the spec wrong changes it in
+  the same commit, with the reason.
 - **The code has the spec's shape where the feature exists.** What is
   still missing is listed in ARCHITECTURE.md §7 with the item that adds
   it. With `TaskPool` deleted, outside data reaches a frame only through
@@ -183,12 +186,12 @@ Things to know:
   `hosts/web/`, draw and run the tour in a browser.
 - **`bench --check-targets` checks §20.2's budgets,** including
   declaration for the box tree, judged in benchmarking mode (Turbo Boost
-  off, the `performance` governor), the mode `bench-compare` measures in.
-  Times vary by machine; instruction counts (`zig build counts`,
+  off, the `performance` governor), the mode `bench-compare` measures
+  in. Times vary by machine; instruction counts (`zig build counts`,
   `01-measure:03-instruction-counts-in-ci`) do not, and CI fails on more
-  than 2% growth over the parent commit; the simulated misses beside them
-  (`01-measure:10-simulated-misses`) show direction and never fail. They
-  need Valgrind, so on Windows take them in a Linux container.
+  than 2% growth over the parent commit; the simulated misses beside
+  them (`01-measure:10-simulated-misses`) show direction and never fail.
+  They need Valgrind, so on Windows take them in a Linux container.
 
 ## How stages ship
 
@@ -201,8 +204,8 @@ Things to know:
 - **Fix the foundation before building on it.** When an item's counts or
   budgets fail because of the code under it rather than its own, that
   code is profiled and fixed first, as items of their own.
-  `08-effects:01-gradients-shadows-glow` is why the audit's findings went
-  ahead of stage 8.
+  `08-effects:01-gradients-shadows-glow` is why the audit's findings
+  went ahead of stage 8.
 - **One breaking change, made once.** Stage 2 changes the shape of
   `Context`, the frame record, input and outside data together, and
   stage 3 adds the contracts on top, before any native host or wire
@@ -215,8 +218,8 @@ Things to know:
 - **After stage 3, new commands never break renderers.** Optional
   commands are lowered by the core for renderers that do not declare
   them, which is why effects can come in stage 8.
-- **A module before core.** A feature that can be built on the public API
-  is; the core gains only what a module proves it cannot do without.
+- **A module before core.** A feature that can be built on the public
+  API is; the core gains only what a module proves it cannot do without.
 - **Items may land early** once their prerequisites have.
   `06-text-and-layout:01-single-line-fast-path` and
   `06-text-and-layout:02-whole-string-cache`, for example, need only

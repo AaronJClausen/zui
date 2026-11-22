@@ -2,11 +2,11 @@
 
 zui is an immediate-mode UI engine for Zig 0.16. Each frame, the
 application declares its UI as nested function calls. zui lays it out,
-resolves interaction, and returns a frame of plain data: render commands,
-hit regions, semantics and requests to the host. Drawing, windowing,
-fonts, threads and the application's own work all belong to someone else,
-and zui reaches each of them only through a contract checked at compile
-time.
+resolves interaction, and returns a frame of plain data: render
+commands, hit regions, semantics and requests to the host. Drawing,
+windowing, fonts, threads and the application's own work all belong to
+someone else, and zui reaches each of them only through a contract
+checked at compile time.
 
 The whole system fits in one line:
 
@@ -19,8 +19,8 @@ outside data the application's sources received. A **frame** goes out:
 everything a renderer, a host, an accessibility bridge and the
 application's loader need. Between the two, declaration reads only what
 came in, and nothing changes under it. Every feature in this document is
-either part of one of those two values, or part of the state that carries
-from one frame to the next.
+either part of one of those two values, or part of the state that
+carries from one frame to the next.
 
 This document is the contract. Where it states a number, it is a
 **budget** the implementation is measured against (§20). §21 orders the
@@ -39,10 +39,10 @@ packages.
    `beginFrame`, and everything leaving it is produced by `endFrame`.
    Declaration never sees data change under it, so any frame can be
    recorded, relayed, replayed or computed in another process.
-3. **Determinism by construction.** A frame is a function of the previous
-   frame's persistent state and the frame record. zui reads no clock, no
-   environment and no callback during a frame that the record did not
-   carry. The application's side of this is documented in §6.8.
+3. **Determinism by construction.** A frame is a function of the
+   previous frame's persistent state and the frame record. zui reads no
+   clock, no environment and no callback during a frame that the record
+   did not carry. The application's side of this is documented in §6.8.
 4. **Memory fixed at compile time.** All of zui's memory is one
    reservation whose size is a comptime constant. A frame allocates
    nothing, and exceeding a limit is defined, reported behavior, never
@@ -51,13 +51,13 @@ packages.
    text wrapping O(n) in bytes. Elements live in structure-of-arrays in
    declaration order, and no pass recurses.
 6. **Plain data in, plain data out.** Configuration is structs with
-   defaults. Output is slices of tagged unions. There are no callbacks in
-   the hot path, no inheritance and no style cascade.
-7. **Comptime proves, precomputes and prunes.** Comptime is used where it
-   turns a run-time mistake into a compile error, moves work out of the
-   frame, or removes code the application did not ask for. It is not used
-   to specialize the layout engine per tree, because that multiplies code
-   size for no measured gain.
+   defaults. Output is slices of tagged unions. There are no callbacks
+   in the hot path, no inheritance and no style cascade.
+7. **Comptime proves, precomputes and prunes.** Comptime is used where
+   it turns a run-time mistake into a compile error, moves work out of
+   the frame, or removes code the application did not ask for. It is not
+   used to specialize the layout engine per tree, because that
+   multiplies code size for no measured gain.
 8. **Contracts, never implementations.** Every dependency on the outside
    world is a comptime contract defined in the core: text, renderers,
    hosts, sources, tracers. The core names no concrete backend. Every
@@ -162,14 +162,15 @@ zui is one repository, `zui`, of packages:
 
 ### 3.3 The module boundary
 
-Each module's root file is named after it (`core/zui_widgets/zui_widgets.zig`),
-because Zig names types after their file and users read those names in
-compile errors. A module can import only files in its own directory, so
-modules reach zui only through `@import("zui")`: **the compiler keeps
-them on the public API.** Anything a module does, application code can do,
-and any module can be replaced by the application's own. A module may also
-import its own build options (`zui_tracy_options`) and a third-party
-library it binds, never another part of zui.
+Each module's root file is named after it
+(`core/zui_widgets/zui_widgets.zig`), because Zig names types after
+their file and users read those names in compile errors. A module can
+import only files in its own directory, so modules reach zui only
+through `@import("zui")`: **the compiler keeps them on the public API.**
+Anything a module does, application code can do, and any module can be
+replaced by the application's own. A module may also import its own
+build options (`zui_tracy_options`) and a third-party library it binds,
+never another part of zui.
 
 ### 3.4 Build options
 
@@ -182,10 +183,10 @@ Everything else is per-`Context` configuration (§4).
 ### 3.5 Targets
 
 The core builds for every target Zig does, including 32-bit, big-endian,
-`wasm32-freestanding` and freestanding embedded. It uses no OS API, keeps
-no global state, never assumes `usize` is 64 bits, and can run with
-`frames_in_flight = 1` on an `Io` that has no threads (§15). CI builds a
-full frame for each of these classes.
+`wasm32-freestanding` and freestanding embedded. It uses no OS API,
+keeps no global state, never assumes `usize` is 64 bits, and can run
+with `frames_in_flight = 1` on an `Io` that has no threads (§15). CI
+builds a full frame for each of these classes.
 
 ---
 
@@ -264,6 +265,7 @@ pub const Features = struct {
 
 Every check is a `@compileError` with an exact message, pinned by a
 compile-error test:
+
 - `"zui: limits.state_slots must be a power of two, got 1000"` (also
   `measure_cache_entries`, `string_cache_entries`);
 - `"zui: frames_in_flight must be at least 1"`;
@@ -372,10 +374,10 @@ while (host.zuiPoll(window, &builder)) {   // builder: a zui.RecordBuilder (§16
 }
 ```
 
-The loader runs after `endFrame`, so it sees the demand of the frame just
-declared, and before the wait, so work it starts can wake the next one.
-With many windows, each window is a context of its own, and the loop
-polls each and waits once for all (§19.5).
+The loader runs after `endFrame`, so it sees the demand of the frame
+just declared, and before the wait, so work it starts can wake the next
+one. With many windows, each window is a context of its own, and the
+loop polls each and waits once for all (§19.5).
 
 **Who turns the loop.** The steps from the poll to the loader are one
 turn, which never blocks; only the wait does. A host says who waits by
@@ -432,9 +434,10 @@ With `Sources = void`, the `sources` parameter is absent; the variant is
 chosen at comptime.
 
 In order:
-1. **Take a frame arena.** `beginFrame` waits for one if a renderer holds
-   all of them (§15.2), which is zui's only wait. `tryBeginFrame` returns
-   `error.NoFreeFrame` instead, for hosts that cannot block, and
+
+1. **Take a frame arena.** `beginFrame` waits for one if a renderer
+   holds all of them (§15.2), which is zui's only wait. `tryBeginFrame`
+   returns `error.NoFreeFrame` instead, for hosts that cannot block, and
    `hasFreeFrame()` says beforehand whether one would, so a loop that
    cannot block leaves input it could not declare with its host. Only
    the thread that begins frames takes one, so the answer holds until it
@@ -444,8 +447,8 @@ In order:
 3. **Apply events in arrival order** (§7): environment changes, then
    pointer, key, text and action events against the previous frame's hit
    regions.
-4. **Swap each source,** in `Sources` field order, in an `inline for`; or,
-   when `record.deliveries` is set, inject each recorded delivery
+4. **Swap each source,** in `Sources` field order, in an `inline for`;
+   or, when `record.deliveries` is set, inject each recorded delivery
    instead (§14.3). Refusals are added to the diagnostics.
 5. **Relay.** If a relay listener is attached, it receives the applied
    record, with deliveries filled in (§6.8).
@@ -466,10 +469,10 @@ pub fn release(self: *Self, frame: *const Frame) void
 
 `endFrame` checks the tree's balance, runs layout (§8), emits (§13),
 sweeps the frame with `features.safety_sweeps` (§20.1), settles source
-demand (§14.5), and returns the frame. **It always
-returns a usable frame.** If a limit was exceeded, the part that fit was
-laid out, and `frame.diagnostics` says what to raise; an application that
-wants an error writes `try frame.diagnostics.check()`.
+demand (§14.5), and returns the frame. **It always returns a usable
+frame.** If a limit was exceeded, the part that fit was laid out, and
+`frame.diagnostics` says what to raise; an application that wants an
+error writes `try frame.diagnostics.check()`.
 
 ```zig
 pub const Frame = struct {
@@ -504,10 +507,11 @@ pub fn requestFrameAt(self: *Self, instant: Instant) void   // e.g. the caret's 
 ```
 
 `nextFrame` is `.immediately` when a source has something not yet
-swapped (§14.4) or a frame was requested; otherwise `.at` the earliest of
-every `requestFrameAt`, running momentum, and pending long-press and
-double-tap timers; otherwise `.on_event`. The host sleeps accordingly, so
-an idle UI uses no CPU and a blinking caret costs one frame per blink.
+swapped (§14.4) or a frame was requested; otherwise `.at` the earliest
+of every `requestFrameAt`, running momentum, and pending long-press and
+double-tap timers; otherwise `.on_event`. The host sleeps accordingly,
+so an idle UI uses no CPU and a blinking caret costs one frame per
+blink.
 
 `nextFrame` takes the sources, as `beginFrame` does, because zui holds
 no pointer into them between frames (§14.1), and it is called after the
@@ -515,8 +519,8 @@ loader, whose publishes must count.
 
 ### 6.7 One frame of latency
 
-Interaction queries answer for the **previous** frame's layout, because a
-click is resolved against what was on screen when the user clicked.
+Interaction queries answer for the **previous** frame's layout, because
+a click is resolved against what was on screen when the user clicked.
 Declaration therefore never waits for layout, and styles can depend on
 interaction before the element is declared.
 
@@ -542,17 +546,17 @@ pub fn Relay(comptime Record: type) type {   // as `Waker`: the listener's point
   drives declaration to the same commands. No loader runs during replay,
   and declaration starts no work (§14.1), so replay does no real I/O.
 - **The application's side.** Replay is exact if declaration reads the
-  outside world only through the record and its sources: no clock, random
-  number or file read that bypasses them, and no state its own work
-  keeps outside its sources, such as a count of loads finished. A source
-  delivers whatever its view shows that the loader changed between frames,
-  as `KeyedLoads` delivers the keys loading. This is documented, not
-  enforced. Text measurement is the one outside call during a frame; it
-  is deterministic for a given set of fonts, which the wire format
-  fingerprints (§19.6).
-- **Windows.** Opening and closing windows is in no record: each window's
-  context relays and replays its own records, and a replay opens no
-  window.
+  outside world only through the record and its sources: no clock,
+  random number or file read that bypasses them, and no state its own
+  work keeps outside its sources, such as a count of loads finished. A
+  source delivers whatever its view shows that the loader changed
+  between frames, as `KeyedLoads` delivers the keys loading. This is
+  documented, not enforced. Text measurement is the one outside call
+  during a frame; it is deterministic for a given set of fonts, which
+  the wire format fingerprints (§19.6).
+- **Windows.** Opening and closing windows is in no record: each
+  window's context relays and replays its own records, and a replay
+  opens no window.
 
 ---
 
@@ -611,10 +615,11 @@ pub fn lifecycle(self: *const Self) std.EnumSet(Lifecycle)    // what the OS rep
 ```
 
 The rules:
+
 - **Events apply in order.** A press and release in one frame is a
   click; "release, then a new touch" is handled in that order.
-- **Moves coalesce per pointer.** Only the last move before another event
-  of the same pointer is hit-tested; earlier ones are history, for
+- **Moves coalesce per pointer.** Only the last move before another
+  event of the same pointer is hit-tested; earlier ones are history, for
   velocity. A mouse reporting at 8 kHz costs one hover hit test per
   pointer per frame.
 - **Velocity uses the events' instants,** never a clock read in the
@@ -626,8 +631,8 @@ The rules:
   through `zui.InputSampler`, which turns successive states into events.
 - **Dropped files** are copied, whole paths only, into
   `max_dropped_path_bytes`; a path that does not fit is dropped and
-  reported (§17.2). zui does not hit-test a drop: the application compares
-  its position with `rectOf`.
+  reported (§17.2). zui does not hit-test a drop: the application
+  compares its position with `rectOf`.
 - **A terminate request ends the window.** The host delivers
   `.terminate_requested` in one record, so the application can save, and
   its next `zuiPoll` returns false: the OS default, with one frame to
@@ -660,8 +665,8 @@ pub fn environment(self: *const Self) *const Environment
 ```
 
 The environment is state the core keeps; `EnvironmentChange` events
-update it, one field each, so a record carries only what changed, and the
-change applies before the declaration of the frame that carries it.
+update it, one field each, so a record carries only what changed, and
+the change applies before the declaration of the frame that carries it.
 Skins, motion and widgets read it, which is how a theme follows the
 system's dark mode and an animation honors reduced motion.
 `ReadingDirection` holds only left to right and right to left, so it is
@@ -687,8 +692,8 @@ pub fn requestTextInput(self: *Self, editable: Id, caret: Id) void   // ui.reque
 - **The cursor** is that of the innermost element under the hovering
   pointer (the mouse or a pen) that sets `Element.cursor`, so a button
   inside a draggable panel shows the button's. Only interactive elements
-  are hit-tested, so a cursor elsewhere has no effect. Touch never hovers
-  and never sets one.
+  are hit-tested, so a cursor elsewhere has no effect. Touch never
+  hovers and never sets one.
 - **Text input** is requested by the editable each frame, naming the
   element it draws as its caret; when `editable` is focused, the frame
   carries that element's rectangle as laid out in this frame. A frame
@@ -735,18 +740,20 @@ pub const Sizing = struct {
 ```
 
 `Sizing` is a struct with declarations rather than a union so that decl
-literals stay short: `.sizing = .{ .width = .grow, .height = .fixed(48) }`.
+literals stay short:
+`.sizing = .{ .width = .grow, .height = .fixed(48) }`.
 
 The meanings, which follow CSS where CSS has an answer:
+
 - **`fit`** is the size of the content, clamped to `min` and `max`.
 - **`grow`** has a content basis: it starts from its content and shares
   free space by weight, as `flex: auto`. **`grow_from_min`** has a zero
   basis: it starts from `min` and shares the content box by weight, as
-  `flex: 1`, which gives equal columns while keeping weights; it is never
-  narrower than its content's minimum, and the others share what that
-  leaves. The basis is a rule rather than a field of its own because
-  `Sizing` has no room for one without padding: two two-byte fields made
-  the box tree's declaration 3.8% more instructions.
+  `flex: 1`, which gives equal columns while keeping weights; it is
+  never narrower than its content's minimum, and the others share what
+  that leaves. The basis is a rule rather than a field of its own
+  because `Sizing` has no room for one without padding: two two-byte
+  fields made the box tree's declaration 3.8% more instructions.
 - **`percent`** is a fraction of the parent's content box, not counting
   gaps. It contributes nothing to a `fit` parent, whose size would
   otherwise depend on it in a cycle.
@@ -765,26 +772,27 @@ The meanings, which follow CSS where CSS has an answer:
 - **Direction** is logical. A mirrored element (`mirrored`, inherited
   from the parent, and at the root from the environment's `direction`)
   places its children from the right: a row flows from its right edge,
-  `.start` alignment on either axis is the right, its padding's `left` is
-  its start side and lies on the right, its floating children's anchors,
-  attach points and offsets are reflected across the box they attach to,
-  a text's `.start` and `.end` lines swap, and a horizontal scroll offset
-  grows to the left, so the wheel moves it the way the pointer does.
-  `right_to_left` does the same for an element's own children alone, as
-  CSS `row-reverse` does, so in a mirrored element it flows from the left.
-  Positions in a frame are physical, and borders stay physical. A frame
-  in which no element mirrors, in a left-to-right environment, does no
-  mirroring work. `mirrored` is a one-byte enum rather than a `?bool`,
-  which is two bytes and would make every `Layout` four bytes larger, as
-  the aspect ratio's field did. Bidirectional text inside a run is the
-  text contract's (§9.4).
+  `.start` alignment on either axis is the right, its padding's `left`
+  is its start side and lies on the right, its floating children's
+  anchors, attach points and offsets are reflected across the box they
+  attach to, a text's `.start` and `.end` lines swap, and a horizontal
+  scroll offset grows to the left, so the wheel moves it the way the
+  pointer does. `right_to_left` does the same for an element's own
+  children alone, as CSS `row-reverse` does, so in a mirrored element it
+  flows from the left. Positions in a frame are physical, and borders
+  stay physical. A frame in which no element mirrors, in a left-to-right
+  environment, does no mirroring work. `mirrored` is a one-byte enum
+  rather than a `?bool`, which is two bytes and would make every
+  `Layout` four bytes larger, as the aspect ratio's field did.
+  Bidirectional text inside a run is the text contract's (§9.4).
 - **Wrap** moves each child that would overflow a row onto a new line,
   for a row that opts in with `ui.wrapChildren()` after its `open`
-  (§10.1), with `features.flex_wrap` on; without it the call is a compile
-  error, `"zui: wrapChildren() needs Config.features.flex_wrap = true"`,
-  and none of the work below is compiled. A child goes on the current
-  line if it fits at the size its rule asks for before free space is
-  handed out (a `grow_from_min` child at its minimum, a `percent` one
+  (§10.1), with `features.flex_wrap` on; without it the call is a
+  compile error,
+  `"zui: wrapChildren() needs Config.features.flex_wrap = true"`, and
+  none of the work below is compiled. A child goes on the current line
+  if it fits at the size its rule asks for before free space is handed
+  out (a `grow_from_min` child at its minimum, a `percent` one
   resolved), and each line then grows and shrinks its children as a row
   would, so a child wider than the row takes a line of its own and
   shrinks to it. A wrapping row is as wide as its children on one line
@@ -798,8 +806,8 @@ The meanings, which follow CSS where CSS has an answer:
   between lines, across the row. Wrap is a call rather than a `Layout`
   field because a field's value is not known at compile time, so it
   could not fail as a gated API does, and because `Layout` has no byte
-  free: a field would make it 60 bytes, the size that made the box tree's
-  `endFrame` 6.7% slower. The row keeps it in an element flag.
+  free: a field would make it 60 bytes, the size that made the box
+  tree's `endFrame` 6.7% slower. The row keeps it in an element flag.
 
 ### 8.2 Passes
 
@@ -829,11 +837,11 @@ was measured slower, so they stay separate.
   needs an id, because the offset is kept in the state table as a
   `zui.ScrollState`; without one, safe builds panic and release builds
   clip without scrolling.
-- **Scrolled children are not shrunk** along the scrolled axis; they keep
-  their size, which is what makes them scrollable.
+- **Scrolled children are not shrunk** along the scrolled axis; they
+  keep their size, which is what makes them scrollable.
 - **The offset is clamped** to `[0, content − size]` at layout time and
-  written back. `ui.scrollOffset(id)` and `ui.setScrollOffset(id, offset)`
-  read and set it.
+  written back. `ui.scrollOffset(id)` and
+  `ui.setScrollOffset(id, offset)` read and set it.
 - **Routing.** Wheel and pan go to the innermost scroll container under
   the pointer that accepts that axis and still has room, then outward:
   the same rule as every other gesture (§11.4).
@@ -857,27 +865,27 @@ was measured slower, so they stay separate.
   against the parent otherwise.
 - **An element target may be declared later.** A floating subtree whose
   target comes later is placed against its parent in pass 6, then placed
-  again, with its subtree (`index..subtree_end`, contiguous), once pass 6
-  has placed the target. These subtrees are placed in declaration order,
-  so one nested in another follows it; a target inside a floating subtree
-  that is itself placed later is taken where pass 6 left it. A target
-  inside the floating element's own subtree, or an id no element has,
-  falls back to the parent, since the subtree's position would depend on
-  itself.
+  again, with its subtree (`index..subtree_end`, contiguous), once pass
+  6 has placed the target. These subtrees are placed in declaration
+  order, so one nested in another follows it; a target inside a floating
+  subtree that is itself placed later is taken where pass 6 left it. A
+  target inside the floating element's own subtree, or an id no element
+  has, falls back to the parent, since the subtree's position would
+  depend on itself.
 - **They paint in layer `z`,** sorted stably, so declaration order holds
   within a layer, and they escape their ancestors' clips unless
   `.clip = .target`, which cuts them off where their target's children
   are: for `.parent`, as a child in the flow; for an element, by that
-  element's own clip within its ancestors'; for `.root`, by the viewport.
-  That clip, merged with the floating element's own, is pushed in its
-  layer before it draws, since sorting moves the layer away from its
-  ancestors' clips.
-- **They win the hit test** over lower layers when `capture` is true, and
-  their tree ancestors still count as hovered, so a menu stays hovered
-  while the pointer is over its dropdown. With `capture = false` the
-  element has no hit region of its own, so a tooltip lets the pointer
-  through to what it covers; interactive elements inside it still take
-  it.
+  element's own clip within its ancestors'; for `.root`, by the
+  viewport. That clip, merged with the floating element's own, is pushed
+  in its layer before it draws, since sorting moves the layer away from
+  its ancestors' clips.
+- **They win the hit test** over lower layers when `capture` is true,
+  and their tree ancestors still count as hovered, so a menu stays
+  hovered while the pointer is over its dropdown. With `capture = false`
+  the element has no hit region of its own, so a tooltip lets the
+  pointer through to what it covers; interactive elements inside it
+  still take it.
 
 ### 8.5 Layout islands *(later, measured)*
 
@@ -926,8 +934,9 @@ may be reused at once.
 2. **Measure** each distinct segment once per cache lifetime.
 3. **Lay segments into lines** greedily, adding their widths.
 
-- **The fast path.** A text with no paragraph break whose unwrapped width
-  fits its box is emitted as one line without walking its segments.
+- **The fast path.** A text with no paragraph break whose unwrapped
+  width fits its box is emitted as one line without walking its
+  segments.
 - **Segments are never broken.** A text's minimum width is its widest
   segment, and no pass makes an element narrower than its minimum, so an
   over-wide segment gets a line of its own and overflows, as in CSS.
@@ -944,13 +953,13 @@ may be reused at once.
 | strings | `(hash(bytes), MeasureKey, zoom, wrap)` | the whole text's metrics (unwrapped width, widest segment, has break), the widths of up to 16 segments, and the lines of its last wrap if there were at most 4, with the width it was wrapped at | a warm text costs one probe, not one per word, even when it wraps, and is not wrapped again at the same width |
 | segments | `(hash(bytes), MeasureKey)` | one segment's size | text that changes every frame (`"Frame 1234"`) measures only its new segments |
 
-Both are open-addressed, sized by `Limits`, persistent across frames, and
-evict the least recently used entry in the probe window. Hashing is one
-wyhash of the bytes, seeded with the key; a string's key also holds the
-zoom and the wrap mode, because its metrics are in layout units and its
-segments depend on how it wraps. A string of more than 16 segments is
-cached by its metrics alone, and its segments are looked up only if it
-wraps. A string's lines are kept from the second frame that finds it,
+Both are open-addressed, sized by `Limits`, persistent across frames,
+and evict the least recently used entry in the probe window. Hashing is
+one wyhash of the bytes, seeded with the key; a string's key also holds
+the zoom and the wrap mode, because its metrics are in layout units and
+its segments depend on how it wraps. A string of more than 16 segments
+is cached by its metrics alone, and its segments are looked up only if
+it wraps. A string's lines are kept from the second frame that finds it,
 and reused only at exactly the same width. Steady-state frames make
 almost no calls to the text contract.
 
@@ -1016,8 +1025,8 @@ pub const Image = struct {
 };
 ```
 
-An image's natural size is its content, inside its padding. Its width may
-shrink below the natural width, as any leaf does when its parent is
+An image's natural size is its content, inside its padding. Its width
+may shrink below the natural width, as any leaf does when its parent is
 narrower; its height then keeps the natural proportions, unless the
 height's rule is `aspect_ratio`, `fixed` or `percent`, which take
 precedence.
@@ -1074,12 +1083,12 @@ pub const Border = struct {
 `MaterialHandle` or `Color` is set or `features.nested_corners` is on.
 Without a handle `material` is `void`, and without the feature
 `nested_corners` is zero-sized, so every context without them shares one
-set of types and stores nothing more.
-So are the types that hold a color, `Ui.Border`, `Ui.Effects`,
-`Ui.Gradient`, `Ui.Shadow`, `Ui.BackdropBlur` and `Ui.TextStyle`, each
-`zui`'s own unless `Color` is `ExtendedColor`.
-A helper that builds an element for a context with materials names
-`Ui.Element`, since a literal passed through `anytype` is not converted to it.
+set of types and stores nothing more. So are the types that hold a
+color, `Ui.Border`, `Ui.Effects`, `Ui.Gradient`, `Ui.Shadow`,
+`Ui.BackdropBlur` and `Ui.TextStyle`, each `zui`'s own unless `Color` is
+`ExtendedColor`. A helper that builds an element for a context with
+materials names `Ui.Element`, since a literal passed through `anytype`
+is not converted to it.
 
 ```zig
 pub const Effects = struct {
@@ -1116,40 +1125,40 @@ pub const Transform = struct {
 };
 ```
 
-Effects take the shape of the element's box and its decoration's
-corner radius, and paint from the bottom as shadow, backdrop blur,
-background, gradient, then the element's content. A backdrop blur blurs
-what zui drew beneath the element, averaging the pixels as the target
-stores them and sampling only inside the element's box, its edges
-extended, then draws its tint over them; it has one tint, which is also
-what a renderer without blur draws. A gradient is interpolated in
-OKLab along a line through the element's center at `angle`, just long
-enough that the two corners farthest along it take `from` and `to`. A
-shadow is culled by what it paints, not by its element's box. Effects
-are a pointer, not a value in `Element` or `Decoration`, and not part
-of a static `Style`: as a value in `Element`, every declaration copied
-them and the interactive box tree's declaration was 22% slower; in
-`Decoration`, every decorated element copied them; in `Style`, every
-styled element looked for them, 3.5% of the static box tree's
-declaration. Their copies have a limit of their own, `max_effects`,
-since one for every element made each frame 160 KiB larger and `init`
-21% slower. A frame that declares no effects is emitted by a walk that
-never looks for them; one that does pays for the look at every element.
+Effects take the shape of the element's box and its decoration's corner
+radius, and paint from the bottom as shadow, backdrop blur, background,
+gradient, then the element's content. A backdrop blur blurs what zui
+drew beneath the element, averaging the pixels as the target stores them
+and sampling only inside the element's box, its edges extended, then
+draws its tint over them; it has one tint, which is also what a renderer
+without blur draws. A gradient is interpolated in OKLab along a line
+through the element's center at `angle`, just long enough that the two
+corners farthest along it take `from` and `to`. A shadow is culled by
+what it paints, not by its element's box. Effects are a pointer, not a
+value in `Element` or `Decoration`, and not part of a static `Style`: as
+a value in `Element`, every declaration copied them and the interactive
+box tree's declaration was 22% slower; in `Decoration`, every decorated
+element copied them; in `Style`, every styled element looked for them,
+3.5% of the static box tree's declaration. Their copies have a limit of
+their own, `max_effects`, since one for every element made each frame
+160 KiB larger and `init` 21% slower. A frame that declares no effects
+is emitted by a walk that never looks for them; one that does pays for
+the look at every element.
 
 A transform applies when painting only: layout, `rectOf` and the
 element's neighbours are as if it were absent. Its `transform_begin`
 comes before the element's shadow and its `transform_end` after its
 subtree, border and clip, so the element's own clip is transformed with
-it; a floating element's clip, which holds its target's, comes first
-and is not. A floating element on another layer than its parent's
-begins every transform around it again on its own layer, outermost
-first, since the layer sort moves its commands out of theirs. Culling
-inside a transform uses the box around the clip in the element's units,
-so an element laid out outside the clip but moved into it is drawn.
-Hit testing inverts it: each transformed element enters a space, a
-region inside it is hit where the pointer lands in that space's units,
-and only inside the clip around every transformed element enclosing it.
-A transform that scales to nothing draws nothing and is never hit.
+it; a floating element's clip, which holds its target's, comes first and
+is not. A floating element on another layer than its parent's begins
+every transform around it again on its own layer, outermost first, since
+the layer sort moves its commands out of theirs. Culling inside a
+transform uses the box around the clip in the element's units, so an
+element laid out outside the clip but moved into it is drawn. Hit
+testing inverts it: each transformed element enters a space, a region
+inside it is hit where the pointer lands in that space's units, and only
+inside the clip around every transformed element enclosing it. A
+transform that scales to nothing draws nothing and is never hit.
 
 A divider is centered in the gap between two children and spans the
 element across its flow, inside the border's widths. Floating children
@@ -1163,8 +1172,9 @@ dividers alone.
 The four switches are written as booleans, `.focusable = true`, and null
 means false. They are optional because Zig stores a `bool` field as one
 bit and loads it as a byte, which LLVM cannot fold: with `bool`, every
-`open` stored its four defaults to the stack and loaded them back, 14% of
-the box tree's declaration (§20.2). `Axes` is a byte for the same reason.
+`open` stored its four defaults to the stack and loaded them back, 14%
+of the box tree's declaration (§20.2). `Axes` is a byte for the same
+reason.
 
 Only the config kinds that are set are stored. Nesting follows the code,
 with `defer`:
@@ -1198,9 +1208,9 @@ pub const Id = struct {
 pub fn ids(comptime names: anytype) IdSet(names)
 ```
 
-- **64-bit FNV-1a, by content.** 32-bit ids collide in practice: at 8,000
-  ids a frame the birthday bound is about 1% per frame, against about
-  2 × 10⁻¹² at 64 bits.
+- **64-bit FNV-1a, by content.** 32-bit ids collide in practice: at
+  8,000 ids a frame the birthday bound is about 1% per frame, against
+  about 2 × 10⁻¹² at 64 bits.
 - **`of` and `indexed` hash at compile time.** At run time `of` is a
   constant and `indexed` one mix.
 - **Ids are never mixed with their parent implicitly,** so moving an
@@ -1239,8 +1249,8 @@ frames in flight. A `layout` or `decoration` set on the element itself
 replaces the style's.
 
 Config references in element storage are therefore pointers, either into
-the frame arena or to static memory. The extra width on 64-bit targets is
-paid for by never copying a static config; the box tree's declaration
+the frame arena or to static memory. The extra width on 64-bit targets
+is paid for by never copying a static config; the box tree's declaration
 budget (§20.2) is measured with it.
 
 ---
@@ -1278,25 +1288,26 @@ pub fn measureText(self: *Self, content: []const u8, style: TextStyle) [2]f32   
   interactive ancestor containing the pointer are hovered.
 - **Press and click** go to the hot element. A click is a press and a
   release on the same element by the same pointer, and lasts one frame.
-  `pressed` is true while any pointer whose press began on the element is
-  down.
+  `pressed` is true while any pointer whose press began on the element
+  is down.
 - **Keyboard and accessibility activation.** Enter or Space on the
   focused element, and an `invoke` action naming the element, also count
   as `clicked`, so everything clickable works without a pointer.
-- **`widgetState`** is `.disabled`, `.pressed`, `.hovered`, `.focused` or
-  `.idle`, checked in that order. Skins index it with `std.EnumArray`, so
-  a new state is a compile error in every skin until it is handled.
+- **`widgetState`** is `.disabled`, `.pressed`, `.hovered`, `.focused`
+  or `.idle`, checked in that order. Skins index it with
+  `std.EnumArray`, so a new state is a compile error in every skin until
+  it is handled.
 - **The answers come from a compact copy** of the previous frame's
   rectangles, hit regions and tab order, kept in the `Context` so they
   survive `frames_in_flight = 1`.
 
 ### 11.2 Focus
 
-Pressing a focusable element focuses it; pressing elsewhere clears focus;
-an element that stops being declared loses it. Tab and Shift-Tab move in
-declaration order among focusable, enabled elements, and a `focus_scope`
-keeps focus inside its descendants. `requestFocus` takes effect at the
-next `beginFrame`.
+Pressing a focusable element focuses it; pressing elsewhere clears
+focus; an element that stops being declared loses it. Tab and Shift-Tab
+move in declaration order among focusable, enabled elements, and a
+`focus_scope` keeps focus inside its descendants. `requestFocus` takes
+effect at the next `beginFrame`.
 
 ### 11.3 Intents
 
@@ -1337,10 +1348,10 @@ byte) stored in their hit region:
 },
 ```
 
-Declaring any gesture makes an element interactive, as `focusable`
-does: a map that pans is hovered, pressed and tapped like a button. A
-scroll container accepts pan on its scrolled axes by default, with touch
-and pen; the mouse scrolls it with the wheel, so a mouse drag in a list
+Declaring any gesture makes an element interactive, as `focusable` does:
+a map that pans is hovered, pressed and tapped like a button. A scroll
+container accepts pan on its scrolled axes by default, with touch and
+pen; the mouse scrolls it with the wheel, so a mouse drag in a list
 stays with what it pressed, unless the container declares `pan` itself.
 
 - **One rule decides.** Once a pointer passes the touch slop
@@ -1409,9 +1420,9 @@ pub fn draggedOver(self: *Self, target: Id, comptime Payload: type) ?Payload  //
 ```
 
 A drag source declares `.gestures.drag`, so §11.4 decides between
-dragging, scrolling and clicking: past the touch slop, a source takes the
-pointer on the axes no region around it pans on for that pointer, so a
-card in a list that scrolls vertically drags sideways and scrolls the
+dragging, scrolling and clicking: past the touch slop, a source takes
+the pointer on the axes no region around it pans on for that pointer, so
+a card in a list that scrolls vertically drags sideways and scrolls the
 list vertically, and with the mouse, which scrolls the list with its
 wheel, drags on both axes. A region inside the source that pans on the
 axis is nearer and takes it first. The source stays where it is laid out
@@ -1422,14 +1433,14 @@ the application draws what follows it, as a floating element with
 `startDrag` gives the drag its payload, called once `dragging` reports
 it. Called while a pointer's press on the source is still down but
 nothing drags it, it starts the drag with that pointer, taking it from
-whatever else it pressed or panned: this is how a long press, or a custom
-recognizer that claims the pointer, lifts a card out of a list that pans
-on both axes. The payload lives in the state table under the source,
-typed, and stays while the drag lasts, so dropping one type on a target
-that expects another yields `null`, never a reinterpretation, and the
-source may stop being declared while it is dragged. A drag released in
-the record that started it, before declaration could give it a payload,
-drops nothing, and neither does a cancelled pointer.
+whatever else it pressed or panned: this is how a long press, or a
+custom recognizer that claims the pointer, lifts a card out of a list
+that pans on both axes. The payload lives in the state table under the
+source, typed, and stays while the drag lasts, so dropping one type on a
+target that expects another yields `null`, never a reinterpretation, and
+the source may stop being declared while it is dragged. A drag released
+in the record that started it, before declaration could give it a
+payload, drops nothing, and neither does a cancelled pointer.
 
 A target is any element with a hit region: `dropped` and `draggedOver`
 answer for each region the hit test at the pointer passes through, the
@@ -1447,15 +1458,16 @@ pub fn stateIfPresent(self: *Self, id: Id, comptime T: type) ?*T   // null inste
 ```
 
 - **Keyed by `(id, type)`.** The same id can hold a `ScrollState` and an
-  application's `Expanded` flag in separate slots, and asking for another
-  type never returns the wrong one.
-- **Fixed slots.** `@sizeOf(T) <= 64` and `@alignOf(T) <= 16`, checked at
-  comptime; the error says to store an index to the application's own
+  application's `Expanded` flag in separate slots, and asking for
+  another type never returns the wrong one.
+- **Fixed slots.** `@sizeOf(T) <= 64` and `@alignOf(T) <= 16`, checked
+  at comptime; the error says to store an index to the application's own
   storage instead.
 - **Eviction.** A slot untouched for `state_frames_until_eviction`
-  frames is freed at the next `beginFrame`, with backward-shift deletion,
-  so the table accumulates no tombstones. An element that disappears loses its state:
-  the immediate-mode equivalent of unmounting.
+  frames is freed at the next `beginFrame`, with backward-shift
+  deletion, so the table accumulates no tombstones. An element that
+  disappears loses its state: the immediate-mode equivalent of
+  unmounting.
 - **Full table.** `state` returns zeroed scratch memory and the frame
   reports the `state_slots` limit (§17.2). Nothing is corrupted.
 
@@ -1482,8 +1494,8 @@ pub const RenderCommand = struct {
 `ImageHandle` is set and `custom` when `CustomData` is set. An `image`
 carries its handle, tint and corner radius, as declared (§10.1).
 **Optional commands** exist only when `Config.commands` includes them:
-`gradient`, `shadow`, `backdrop_blur`, `transform_begin`/`transform_end`,
-`material`.
+`gradient`, `shadow`, `backdrop_blur`,
+`transform_begin`/`transform_end`, `material`.
 
 `Payload` is a union built with `@Union` from exactly those variants, so
 a renderer's exhaustive `switch` covers what it draws and nothing else.
@@ -1527,12 +1539,12 @@ with `capture = true`.
 `WindowOptions.title_bar = .custom` leaves its title bar to the
 application, and `Environment.custom_title_bar` says whether it did. The
 application marks the parts it draws with `Element.chrome`: a
-`title_bar`, which a press drags, a double click maximizes and a secondary
-click opens the window menu on; the `minimize_button`, `maximize_button`
-and `close_button`, which the host works itself when a press and its
-release land on them, as the system's own; and `resize_*` edges and
-corners. `Frame.chromeRegions()` lists them in tree order, each with its
-id and its bounds as laid out:
+`title_bar`, which a press drags, a double click maximizes and a
+secondary click opens the window menu on; the `minimize_button`,
+`maximize_button` and `close_button`, which the host works itself when a
+press and its release land on them, as the system's own; and `resize_*`
+edges and corners. `Frame.chromeRegions()` lists them in tree order,
+each with its id and its bounds as laid out:
 
 ```zig
 pub const ChromeKind = enum(u8) { title_bar, minimize_button, maximize_button, close_button,
@@ -1549,8 +1561,8 @@ host's `zuiChromeRegions` with every frame (§16.3). The host answers the
 window manager from its copy (`WM_NCHITTEST` on Windows,
 `xdg_toplevel.move` and `resize` on Wayland), and still forwards the
 pointer over the caption buttons, so they show hover and press. A press
-the host works ends as `pointer_cancel`, not a release, so zui reports no
-click and an application that works the buttons on `clicked`, for the
+the host works ends as `pointer_cancel`, not a release, so zui reports
+no click and an application that works the buttons on `clicked`, for the
 keyboard and assistive technologies, never works one twice. Chrome
 changes nothing about an element's interaction, and a frame without the
 feature lists none and costs nothing.
@@ -1562,16 +1574,18 @@ feature lists none and costs nothing.
 `.semantics = .{ .role = .button, .label = "Save" }` adds an entry to
 `Frame.semantics()`: id, role, label, value, bounds, state, supported
 actions and a heading's level, in tree order, each with the index of the
-nearest entry around it, and, for an element that scrolls, where its view
-lies over its content (`SemanticScroll`: offset, content and viewport
-sizes, and the axes it scrolls on, as the frame's layout placed them). A host that declares `zuiSemantics` (§16.3) is handed the list after
-each `endFrame` and bridges it to the platform's accessibility API; the
-window is opened with room for it (`WindowOptions.semantics`). Actions
-come back as `action` events naming the id, answered by the same queries
-as other input (§11.3). An element's flags and gestures are the actions
-it reports, beyond those it declares: `invoke` when it is interactive,
-`focus` when focusable, `scroll` when it scrolls or pans, `show_menu`
-when it takes a long press; a disabled element reports and takes none.
+nearest entry around it, and, for an element that scrolls, where its
+view lies over its content (`SemanticScroll`: offset, content and
+viewport sizes, and the axes it scrolls on, as the frame's layout placed
+them). A host that declares `zuiSemantics` (§16.3) is handed the list
+after each `endFrame` and bridges it to the platform's accessibility
+API; the window is opened with room for it (`WindowOptions.semantics`).
+Actions come back as `action` events naming the id, answered by the same
+queries as other input (§11.3). An element's flags and gestures are the
+actions it reports, beyond those it declares: `invoke` when it is
+interactive, `focus` when focusable, `scroll` when it scrolls or pans,
+`show_menu` when it takes a long press; a disabled element reports and
+takes none.
 
 ```zig
 pub const Semantics = struct {
@@ -1610,9 +1624,9 @@ is ignored, `action` events are dropped, and none of this is compiled.
    inline `Io` from blocking declaration.
 4. **Sources are swapped at `beginFrame`,** so declaration never sees
    them change and every delivery is in the frame record.
-5. **The handoff calls no `Io`.** Publishing is plain atomics over memory
-   reserved up front, so it behaves the same from a thread pool, a fiber,
-   a single-threaded `Io`, an OS thread or a C callback.
+5. **The handoff calls no `Io`.** Publishing is plain atomics over
+   memory reserved up front, so it behaves the same from a thread pool,
+   a fiber, a single-threaded `Io`, an OS thread or a C callback.
 6. **Registration is comptime.** Sources are the fields of one struct
    type. There is no run-time registry, no stored pointer into
    application memory between frames, and no source that can be
@@ -1669,9 +1683,9 @@ pub fn framesSinceRead(self: *const Self, comptime field: SourceField) u64      
 ```
 
 - **`source`** records the frame's demand for the field and returns its
-  `View`. Every read in a frame sees what the swap made readable. Outside
-  a frame it panics, in every build: zui holds the sources only from
-  `beginFrame` to `endFrame`, so there is no view to read.
+  `View`. Every read in a frame sees what the swap made readable.
+  Outside a frame it panics, in every build: zui holds the sources only
+  from `beginFrame` to `endFrame`, so there is no view to read.
 - **Without sources** (`Sources = void`), `source` and `framesSinceRead`
   are compile errors naming the field to set, and `beginFrame`,
   `tryBeginFrame` and `nextFrame` take no `sources` parameter.
@@ -1717,9 +1731,9 @@ the wait is lost. The host conformance suite checks it (§19.4).
   settles nothing for sources it did not read.
 - **Per key:** keyed sources record the keys their view was asked for,
   and settle them in `zuiEndFrame`.
-- **Abandoning.** Keyed and task sources carry an atomic abandon flag the
-  UI sets when demand lapses and the producer reads at its own pace. It
-  is written only when demand changes, and nothing waits on it.
+- **Abandoning.** Keyed and task sources carry an atomic abandon flag
+  the UI sets when demand lapses and the producer reads at its own pace.
+  It is written only when demand changes, and nothing waits on it.
 - **Flicker is free.** A policy counts unread frames before letting go,
   so a tab switch or a collapsed section reopened next frame costs
   nothing.
@@ -1763,15 +1777,15 @@ reader's tail, which races with the read.
 - **A source outlives its producers.** The application joins its work on
   its own `Io` (an `Io.Group`) before freeing its sources.
 - **One reader.** A source is swapped by one `Context`; safe builds
-  assert it in the source, since the core keeps nothing in the source
-  to tell two contexts apart. `zui_async`'s sources assert that the
-  frame numbers `zuiEndFrame` sees only increase.
+  assert it in the source, since the core keeps nothing in the source to
+  tell two contexts apart. `zui_async`'s sources assert that the frame
+  numbers `zuiEndFrame` sees only increase.
 - **Large data travels by handle.** A publish copies its value once, so
   a catalog or decoded image is published as a handle to immutable data,
   and handed back for release by the source.
 - **A producer that may run on the UI thread never waits for space.** On
-  a single-threaded `Io`, the swap that would free space runs on the same
-  thread; it handles `error.Full` instead.
+  a single-threaded `Io`, the swap that would free space runs on the
+  same thread; it handles `error.Full` instead.
 - **Pointers mean nothing in another process.** `zui_wire` requires each
   `Delivery` to be plain data or to declare `zuiSerialize` and
   `zuiDeserialize`, checked when it is instantiated (§19.6).
@@ -1809,17 +1823,17 @@ With `frames_in_flight = 2`, the UI thread declares frame N+1 while a
 render thread submits frame N. `beginFrame` takes the next released
 arena, or waits on an `Io.Event` that `release` sets: the only place zui
 blocks, and the backpressure that keeps the UI at most
-`frames_in_flight` frames ahead. The event is reset before a second check
-for a free arena, which closes the race with a `release` between the
-check and the wait. Each arena owns everything its frame references, so
-the threads share no mutable memory.
+`frames_in_flight` frames ahead. The event is reset before a second
+check for a free arena, which closes the race with a `release` between
+the check and the wait. Each arena owns everything its frame references,
+so the threads share no mutable memory.
 
 ### 15.3 Parallel measurement
 
 With `zui_thread_safe` text, text is measured inline until a frame has
-made `parallel_measure_threshold` calls. The frame is then evidently cold
-(the first frame, a font or zoom change), so zui collects the rest of
-the frame's distinct misses, measures them in batches across an
+made `parallel_measure_threshold` calls. The frame is then evidently
+cold (the first frame, a font or zoom change), so zui collects the rest
+of the frame's distinct misses, measures them in batches across an
 `Io.Group`, stores them in the cache, and continues inline on hits. Warm
 frames never pay for the check. A cancelation of the frame's task keeps
 the measurements made and passes the cancelation on.
@@ -1829,9 +1843,9 @@ the measurements made and passes the cancelation on.
 Contexts share nothing, so separate windows, an offscreen panel or a
 thumbnail render run their frames concurrently with no code in zui. Each
 context has its own sources; data shared between windows is published
-into each. `zui_app` runs one context per window (§19.5). Opening a window
-makes its context, which allocates as `init` does; its frames allocate
-nothing.
+into each. `zui_app` runs one context per window (§19.5). Opening a
+window makes its context, which allocates as `init` does; its frames
+allocate nothing.
 
 ---
 
@@ -1841,8 +1855,8 @@ nothing.
 
 A type implements a contract by declaring `zui`-prefixed members.
 Everything else on the type is its own business, so a contract never
-collides with its API, and one type may implement several (a renderer may
-also be the text contract).
+collides with its API, and one type may implement several (a renderer
+may also be the text contract).
 
 **The exceptions are types the application names directly,** which keep
 their plain names because they are the implementer's own API as much as
@@ -1861,11 +1875,12 @@ payload types, `u16` for `FontId`).
 
 - **A missing required declaration** is a compile error naming the type,
   the contract and the declaration:
-  ``"zui: SokolRenderer does not implement zui.Renderer: missing `zuiSubmit`"``.
+  `` "zui: SokolRenderer does not implement zui.Renderer: missing `zuiSubmit`" ``.
 - **A wrong signature** is reported by name, with the expected type.
 - **An unknown `zui`-prefixed declaration** (one that belongs to no zui
   contract) is a compile error, so a misspelled optional one is never
-  silently ignored: ``"zui: AppSources.quotes declares unknown `zuiPendng`"``.
+  silently ignored:
+  `` "zui: AppSources.quotes declares unknown `zuiPendng`" ``.
 - **Every optional declaration has a documented default.**
 - Each message is pinned by a compile-error test.
 
@@ -1894,22 +1909,23 @@ holds is its exhaustive `switch` over each command's payload: a command
 the renderer did not declare is a compile error at that `switch`.
 `zui.checkRenderer(Renderer)` checks the rest of the contract.
 
-`zui_render_thread` (default `false`) says that `zuiSubmit` may be called
-on a thread other than the one that made the renderer and its surface,
-so `zui_app` may submit from a render thread of its own. A renderer bound
-to its thread's graphics context, as raylib's is, leaves it out.
+`zui_render_thread` (default `false`) says that `zuiSubmit` may be
+called on a thread other than the one that made the renderer and its
+surface, so `zui_app` may submit from a render thread of its own. A
+renderer bound to its thread's graphics context, as raylib's is, leaves
+it out.
 
-`zuiAttachSurface(self, surface) !void` and `zuiDetachSurface(self,
-surface) void` (optional, declared together) give a renderer each window
-after the first that `zui_app` opens, and take back each window before it
-closes, the first included, on the thread that submits. Around a surface
-loss (§19.5) they are called for every window, the first included: each
-surface is detached when the platform takes it away and attached again,
-as the host then names it, when it returns. A renderer that
-keeps a swapchain per window makes and frees it there. Without them a
-renderer draws any surface it is given as it is. One without the other is
-a compile error:
-``"zui: SokolRenderer declares `zuiAttachSurface` without `zuiDetachSurface`; a renderer that keeps something per window declares both"``.
+`zuiAttachSurface(self, surface) !void` and
+`zuiDetachSurface(self, surface) void` (optional, declared together)
+give a renderer each window after the first that `zui_app` opens, and
+take back each window before it closes, the first included, on the
+thread that submits. Around a surface loss (§19.5) they are called for
+every window, the first included: each surface is detached when the
+platform takes it away and attached again, as the host then names it,
+when it returns. A renderer that keeps a swapchain per window makes and
+frees it there. Without them a renderer draws any surface it is given as
+it is. One without the other is a compile error:
+`` "zui: SokolRenderer declares `zuiAttachSurface` without `zuiDetachSurface`; a renderer that keeps something per window declares both" ``.
 
 `zui_app.contextConfig(Renderer, .{ ... })` builds a `Config` from a
 renderer's declarations (commands, payload types, and text unless the
@@ -1984,9 +2000,9 @@ pub fn isOpenableUrl(url: []const u8) bool   // a scheme of two letters or more,
 | | `setBar`, optional | `fn (*Host, zui.WindowId, zui.ServiceRequest, []const zui.MenuItem, zui.ServiceSink) zui.ServiceError!void` |
 | `zuiFileWatch` | `watch` | `fn (*Host, []const u8, zui.FileChangeSink) zui.FileWatchError!void` |
 
-A service that is not a struct, a function missing or of another type, is
-a compile error:
-``"zui: demo.Host.zuiClipboard is missing `read`, which must be fn (*demo.Host, zui.ServiceRequest, zui.ServiceSink) zui.ServiceError!void"``.
+A service that is not a struct, a function missing or of another type,
+is a compile error:
+`` "zui: demo.Host.zuiClipboard is missing `read`, which must be fn (*demo.Host, zui.ServiceRequest, zui.ServiceSink) zui.ServiceError!void" ``.
 A service may declare more functions than these, which are not checked.
 
 ```zig
@@ -2043,31 +2059,34 @@ pub fn checkHostAndRenderer(comptime Host: type, comptime Renderer: type) void  
 ```
 
 - **Two halves.** The *window half* is what every host gives:
-  `zui_surfaces`, `zuiPoll`, `zuiWaker`, `zuiSurface`, `zuiApply`, and the
-  optional declarations below. The *loop half* says who turns the loop
-  (§6.1), and a host declares at most one of its calls: `zuiWait`, and
-  zui waits on it (*pulled*); `zuiRun`, and the platform runs the loop
-  (*pushed*); neither, and only the application's own loop steps it
+  `zui_surfaces`, `zuiPoll`, `zuiWaker`, `zuiSurface`, `zuiApply`, and
+  the optional declarations below. The *loop half* says who turns the
+  loop (§6.1), and a host declares at most one of its calls: `zuiWait`,
+  and zui waits on it (*pulled*); `zuiRun`, and the platform runs the
+  loop (*pushed*); neither, and only the application's own loop steps it
   (*stepped*). Both is a compile error:
-  ``"zui: Win32Host declares both `zuiWait` and `zuiRun`; zui pulls a host's loop or the platform pushes it, never both"``.
+  `` "zui: Win32Host declares both `zuiWait` and `zuiRun`; zui pulls a host's loop or the platform pushes it, never both" ``.
+
 - **`zuiPoll`** starts the record with `begin`, appends what the OS
   reported since the last poll in arrival order, and returns false when
   the window has closed. It is a drain: it never blocks, never presents
   and never begins drawing, so a turn may poll without declaring, and a
   loop that is not zui's may poll whenever it turns.
+
 - **`zuiWait`** returns at once for `.immediately`, at the instant for
   `.at`, and on input or a wake for `.on_event`. Its wake is sticky: it
-  clears the wake after the wait returns, never before, so a wake between
-  `nextFrame` and the wait ends the wait.
+  clears the wake after the wait returns, never before, so a wake
+  between `nextFrame` and the wait ends the wait.
+
 - **`zuiRun(self, io, window, driver) !void`**, or `noreturn` on a
-  platform whose loop never returns (`[NSApp run]`), is the whole life of
-  a pushed host: it opens the window when the platform allows, calls
+  platform whose loop never returns (`[NSApp run]`), is the whole life
+  of a pushed host: it opens the window when the platform allows, calls
   `driver.start(io)` once `zuiSurface(.main)` names its surface, calls
   `driver.step()` from the platform's callbacks and schedules the next
   as the `NextFrame` it returns says, and calls `driver.stop()` before
   the window closes. A pushed host declares no `init` or `deinit`, a
   compile error naming `zuiRun`. Any other type is a compile error:
-  ``"zui: Win32Host.zuiRun must be fn (*Win32Host, std.Io, zui.WindowOptions, zui.Driver) !void, or noreturn, found fn (*Win32Host, host.Driver) void"``.
+  `"zui: Win32Host.zuiRun must be fn (*Win32Host, std.Io, zui.WindowOptions, zui.Driver) !void, or noreturn, found fn (*Win32Host, host.Driver) void"`.
   The `io` it passes to `start` is the one the application's tasks run
   on, which may be its own; such a host steps that `Io` before each turn
   and folds the `Io`'s next wake into what it schedules with
@@ -2086,66 +2105,78 @@ pub fn checkHostAndRenderer(comptime Host: type, comptime Renderer: type) void  
   };
   pub fn sooner(self: NextFrame, other: NextFrame) NextFrame    // on NextFrame: the one that comes first
   ```
+
 - **A stepped host** declares `init` and `deinit` and neither loop call:
   it is a window the application already owns (an editor's panel, a
   game's overlay, a page's canvas behind a host package's exports), and
   its waker is the application's to forward to that loop.
-- **`zuiApply`** takes the frame's `HostRequests`, setting the cursor and
-  placing the IME window.
+
+- **`zuiApply`** takes the frame's `HostRequests`, setting the cursor
+  and placing the IME window.
+
 - **Many windows.** A host whose `zui_capabilities.windows` is `.many`
   declares `zuiOpenWindow` and `zuiCloseWindow`; one whose windows are
   `.one` declares neither, each a compile error otherwise:
-  ``"zui: Win32Host declares zui_capabilities.windows = .many but not `zuiOpenWindow`, which must be fn (*Win32Host, zui.WindowOptions) zui.OpenWindowError!zui.WindowId"``.
-  `init` opens `.main`. `zuiOpenWindow` opens another, on the thread that
-  polls, with an id the host never gives again in the run, and returns
-  `error.TooManyWindows` past the windows it holds. Each window has its
-  own events, viewport, scale and requests, polled with its id;
+  `` "zui: Win32Host declares zui_capabilities.windows = .many but not `zuiOpenWindow`, which must be fn (*Win32Host, zui.WindowOptions) zui.OpenWindowError!zui.WindowId" ``.
+  `init` opens `.main`. `zuiOpenWindow` opens another, on the thread
+  that polls, with an id the host never gives again in the run, and
+  returns `error.TooManyWindows` past the windows it holds. Each window
+  has its own events, viewport, scale and requests, polled with its id;
   `zuiWaker` and `zuiWait` are the host's, so a wake or input in any
   window ends the one wait. `zuiCloseWindow` closes any window, `.main`
   included, after its last frame has been submitted; its id then polls
   false. Lifecycle events reach every open window, since each window's
   context reacts to them.
+
 - **`zuiSemantics`**, optional, is handed `Frame.semantics()` on the UI
   thread after `endFrame` and before the frame is submitted, so a render
   thread never races it; the nodes are valid only during the call. The
   host copies them into room it took when the window opened with
   `WindowOptions.semantics`, which `zui_app` sizes from `Config.limits`,
-  so it allocates nothing after `init`. What does not fit is cut from the
-  end, which leaves a tree since parents come first, and returned in
+  so it allocates nothing after `init`. What does not fit is cut from
+  the end, which leaves a tree since parents come first, and returned in
   `SemanticsDropped`; `zui_app` reports it once. The platform's requests
   are appended to the next record as `action` events, so they relay and
   replay as other input does. A window opened without room is left to
   the OS's default accessibility. `checkHost` checks its signature.
+
 - **`zuiChromeRegions`**, optional, is handed `Frame.chromeRegions()` at
   the same point, valid only during the call. A host whose capabilities
   include `custom_title_bar` must declare it, or `checkHost` fails with
-  ``"zui: Win32Host.zui_capabilities.custom_title_bar is true but Win32Host does not declare zuiChromeRegions, so the OS could not move its window"``.
+  `"zui: Win32Host.zui_capabilities.custom_title_bar is true but Win32Host does not declare zuiChromeRegions, so the OS could not move its window"`.
   It keeps a copy in fixed room, keeping the regions that fit from the
-  first, and answers the window manager from that copy on whatever thread
-  the OS asks on. `checkHost` checks its signature.
+  first, and answers the window manager from that copy on whatever
+  thread the OS asks on. `checkHost` checks its signature.
+
 - **The composition root checks the pair.** `checkHostAndRenderer` is
   called by the application or `zui_app`, the one place naming both:
-  ``"zui: RaylibHost and TerminalRenderer share no surface kind: the host gives .library, the renderer draws into .terminal"``.
+  `"zui: RaylibHost and TerminalRenderer share no surface kind: the host gives .library, the renderer draws into .terminal"`.
+
 - **Native hosts** own the window, one per OS, and pull the loop where
   the OS lets a thread block (Windows, Wayland), or push it where the OS
   owns it (macOS and iOS, whose `zuiRun` is `noreturn`).
+
 - **Adapter hosts** wrap a library that insists on owning its window
   (raylib), with fewer capabilities, through `InputSampler`.
-- **System materials.** A host with `system_material` asks the OS for the
-  window's `material`, and reports whether it shows as
+
+- **System materials.** A host with `system_material` asks the OS for
+  the window's `material`, and reports whether it shows as
   `Environment.system_material`: false on a system without one (Windows
   10), with transparency turned off, or for `.none`. The renderer clears
-  to transparent and keeps the alpha it draws, and the application's root
-  leaves its background off while `system_material` is true, so the same
-  code shows the material or its own solid background.
+  to transparent and keeps the alpha it draws, and the application's
+  root leaves its background off while `system_material` is true, so the
+  same code shows the material or its own solid background.
+
 - **Signal handlers** only set an atomic flag and wake; the lifecycle
-  event arrives in the next record. SIGKILL and SIGSTOP cannot be caught,
-  so they are not values of `Lifecycle`.
+  event arrives in the next record. SIGKILL and SIGSTOP cannot be
+  caught, so they are not values of `Lifecycle`.
+
 - **Services** are optional nested declarations, each a struct of
   functions taking the host first. They are work, so declaration never
   calls one (§14.1): declaration records that the application wants one,
   and the application calls it between frames, usually from `zuiLoader`,
   through `zui_app.ServicesOf(Host)` and its `has_*` guards (§16.6).
+
 - **Every call returns at once.** One that may take the user's time (a
   dialog, a menu, a notification) or the OS's (reading the clipboard,
   which is asynchronous on Wayland and the web) names a
@@ -2156,8 +2187,9 @@ pub fn checkHostAndRenderer(comptime Host: type, comptime Renderer: type) void  
   `zui_async.Stream(zui.ServiceReply(n), ...)` in the application's
   `Sources`, so answers are deliveries that relay and replay, and a
   replayed session sees the file the user chose without opening a
-  dialog. An answer that does not fit `n` bytes keeps what fits, text cut
-  at a character and paths whole, and counts the rest.
+  dialog. An answer that does not fit `n` bytes keeps what fits, text
+  cut at a character and paths whole, and counts the rest.
+
 - **Calls that attach to a window** (dialogs, menus) name it. A host
   shows one dialog or menu at a time, and refuses another with
   `error.Busy`, as it refuses a call of a kind it is still answering.
@@ -2165,58 +2197,63 @@ pub fn checkHostAndRenderer(comptime Host: type, comptime Renderer: type) void  
   replaces the window's menu bar, or removes it given no items; a choice
   the user made from a bar before it was replaced is still answered, to
   that bar's request.
+
 - **Opening a URL** hands it to the system's handler for its scheme. A
   path, or a `file:` URL, is refused with `error.InvalidUrl`, since
   opening it would run what it names (`zui.isOpenableUrl`). A URL the
   system then fails to open is not answered: the system shows its own
   error.
+
 - **Clipboard text** is copied by `write` at once, into the OS's memory
   or, on a host that serves the selection itself, into its own fixed
   buffer (`error.TooLarge` past it). Where the platform offers no
   clipboard, as a compositor without a data device does, `write` and
   `read` are refused with `error.Unavailable`.
+
 - **Text the system cannot show whole,** such as a notification's title
   past its length, is cut at a character, as a label is.
+
 - **Watching files** is the service that is a source:
-  `zuiFileWatch.watch(host, directory, sink)` watches a directory and its
-  subdirectories until the host's `deinit`, and publishes each change into
-  `sink` from a thread of the host's, waking for the publish that made the
-  source fresh. The sink is usually a `zui_async.Stream(zui.FileChange,
-  ...)` in the application's `Sources`, so the changes are deliveries that
-  relay and replay, and a full stream refuses and is reported as any
-  source is (§14.7). Changes the OS lost, or a path that does not fit,
-  arrive as `.rescan`. Declaration sees which files changed; reading them
-  is the loader's, since declaration does no I/O (§14.1), and what it
-  reads reaches a frame through a source of its own, such as a
-  `Latest(Theme)`, so a replayed session restyles as the live one did.
-  `checkHost` checks `watch`'s signature.
+  `zuiFileWatch.watch(host, directory, sink)` watches a directory and
+  its subdirectories until the host's `deinit`, and publishes each
+  change into `sink` from a thread of the host's, waking for the publish
+  that made the source fresh. The sink is usually a
+  `zui_async.Stream(zui.FileChange, ...)` in the application's
+  `Sources`, so the changes are deliveries that relay and replay, and a
+  full stream refuses and is reported as any source is (§14.7). Changes
+  the OS lost, or a path that does not fit, arrive as `.rescan`.
+  Declaration sees which files changed; reading them is the loader's,
+  since declaration does no I/O (§14.1), and what it reads reaches a
+  frame through a source of its own, such as a `Latest(Theme)`, so a
+  replayed session restyles as the live one did. `checkHost` checks
+  `watch`'s signature.
 
 ### 16.4 Surface
 
 `zui.Surface` is a tagged union of native handles: `win32`, `cocoa`,
 `wayland`, `x11`, `web`, `offscreen`; plus `terminal`, a character grid
 by its size in cells, with the `*std.Io.Writer` the host gives its
-renderer to write the grid through; `library`, a window that a library such as
-raylib or sokol_app creates and draws into itself, which only that
-library's adapter host provides; and `wire`, a connection to another
-process that `zui_wire`'s host makes and only its renderer writes into
-(§19.6). A host and renderer whose
-`zui_surfaces` share no kind are a compile error naming both, from
-`checkHostAndRenderer` (§16.3). Output
-formats (an FP16 swapchain for HDR) are negotiated through it, and fall
-back to SDR unless both sides support them: a host and a renderer each
-declare `zui_output_formats: zui.OutputFormats`, which must include
-`.sdr` (SDR alone when left out), and a renderer that names
-`.scrgb_fp16` must also declare `zui_extended_color`, each a compile
-error. The window is opened with `WindowOptions.output_formats`, the
-formats both declare (`zui.sharedOutputFormats(Host, Renderer)`); the
-host picks the best its display shows, and a native surface carries the
-one it chose, which the renderer reads with `surface.outputFormat()`.
-A `wayland` surface also carries `transparent`, true for a window that
-shows the system's material (§16.3): a Wayland compositor blends a
-surface over what is behind it by the alpha its buffer holds, so the
-renderer keeps alpha only there and presents every other surface opaque,
-whatever alpha its blended draws leave.
+renderer to write the grid through; `library`, a window that a library
+such as raylib or sokol_app creates and draws into itself, which only
+that library's adapter host provides; and `wire`, a connection to
+another process that `zui_wire`'s host makes and only its renderer
+writes into (§19.6). A host and renderer whose `zui_surfaces` share no
+kind are a compile error naming both, from `checkHostAndRenderer`
+(§16.3). Output formats (an FP16 swapchain for HDR) are negotiated
+through it, and fall back to SDR unless both sides support them: a host
+and a renderer each declare `zui_output_formats: zui.OutputFormats`,
+which must include `.sdr` (SDR alone when left out), and a renderer that
+names `.scrgb_fp16` must also declare `zui_extended_color`, each a
+compile error. The window is opened with `WindowOptions.output_formats`,
+the formats both declare (`zui.sharedOutputFormats(Host, Renderer)`);
+the host picks the best its display shows, and a native surface carries
+the one it chose, which the renderer reads with
+`surface.outputFormat()`. A `wayland` surface also carries
+`transparent`, true for a window that shows the system's material
+(§16.3): a Wayland compositor blends a surface over what is behind it by
+the alpha its buffer holds, so the renderer keeps alpha only there and
+presents every other surface opaque, whatever alpha its blended draws
+leave.
 
 ### 16.5 Tracer
 
@@ -2254,17 +2291,17 @@ build's instruction counts are unchanged.
 | the application asks for it by name | **a compile error at the call**, unless guarded by `has_*` | notifications on a target without them; a second window on a host with one |
 | the target has it, this machine does not | **a returned status** | Mica on Windows 10; notifications the user denied |
 
-`zui_app` reports every fallback in effect at run time, and the inspector
-lists them, so none is silent to a developer who looks.
+`zui_app` reports every fallback in effect at run time, and the
+inspector lists them, so none is silent to a developer who looks.
 
 The guards are `zui_app.ServicesOf(Host)`'s `has_clipboard`,
 `has_notifications`, `has_file_dialogs`, `has_open_url`, `has_menus`,
-`has_menu_bar` and `has_file_watch`, each known at compile time, so a call
-inside one is not compiled for a host without the service; a call outside
-its guard on such a host fails naming the guard:
-``"zui_app: zui_raylib.Host has no `zuiNotifications`; guard the call with `if (zui_app.ServicesOf(zui_raylib.Host).has_notifications)`"``.
+`has_menu_bar` and `has_file_watch`, each known at compile time, so a
+call inside one is not compiled for a host without the service; a call
+outside its guard on such a host fails naming the guard:
+`` "zui_app: zui_raylib.Host has no `zuiNotifications`; guard the call with `if (zui_app.ServicesOf(zui_raylib.Host).has_notifications)`" ``.
 `zui_app.Windows(App).has_many_windows` guards opening a window:
-``"zui_app: zui_raylib.Host opens one window (its zui_capabilities.windows is .one), so demo.App cannot open another"``.
+`"zui_app: zui_raylib.Host opens one window (its zui_capabilities.windows is .one), so demo.App cannot open another"`.
 
 ### 16.7 Skin
 
@@ -2306,25 +2343,24 @@ instantiated. A skin is a struct that declares `zuiStyle` and no other
   answers `return skin.parts.get(part).get(state);`. A theme pack
   (`zui_themes`) is such a type, generic over `Ui` so the application
   gives it its fonts.
-- **No cost beyond the call.** `Skin` is a comptime type and `zuiStyle` a
-  direct call, so `Widgets` is exactly as large as its skin and has no
+- **No cost beyond the call.** `Skin` is a comptime type and `zuiStyle`
+  a direct call, so `Widgets` is exactly as large as its skin and has no
   vtable.
 - **`zui_widgets.DesignSkin(Ui)`** is zui's own skin (§19.2): each
-  `Part` declares its appearance (§18.2), and `zuiStyle` answers from the
-  `Tokens` (§18.1) it holds.
+  `Part` declares its appearance (§18.2), and `zuiStyle` answers from
+  the `Tokens` (§18.1) it holds.
 
-The messages:
-``"zui_widgets: a skin must be a struct type, got u32"``;
-``"zui_widgets: demo.Skin does not implement the skin contract: missing `zuiStyle`"``;
-``"zui_widgets: demo.Skin.zuiStyle must be fn (*const demo.Skin, zui_widgets.Part, zui.WidgetState, *const zui.Environment) zui_widgets.Style(Ui), found …"``;
-``"zui_widgets: demo.Skin declares unknown `zuiStlye`"``.
+The messages: `"zui_widgets: a skin must be a struct type, got u32"`;
+`` "zui_widgets: demo.Skin does not implement the skin contract: missing `zuiStyle`" ``;
+`"zui_widgets: demo.Skin.zuiStyle must be fn (*const demo.Skin, zui_widgets.Part, zui.WidgetState, *const zui.Environment) zui_widgets.Style(Ui), found …"`;
+`` "zui_widgets: demo.Skin declares unknown `zuiStlye`" ``.
 
 ---
 
 ## 17. Errors and diagnostics
 
-Declaration functions never return errors. Failures are reported once per
-frame, with full context.
+Declaration functions never return errors. Failures are reported once
+per frame, with full context.
 
 ### 17.1 Programmer errors
 
@@ -2345,10 +2381,12 @@ With `-Dzui-debug`, ids keep their names, so messages read
 Elements, depth, text bytes, commands, state slots, cache entries,
 events, pointers, ghost commands and source capacities all fail the same
 way:
+
 1. The part that fits is kept. Overflowing elements are dropped, their
-   subtrees skipped cheaply with depth still tracked, so `close` pairs up.
-2. `frame.diagnostics` records which limit, by how much, the peak needed,
-   and the id where it first happened.
+   subtrees skipped cheaply with depth still tracked, so `close` pairs
+   up.
+2. `frame.diagnostics` records which limit, by how much, the peak
+   needed, and the id where it first happened.
 3. `frame.diagnostics.check()` returns `error.CapacityExceeded` for
    applications that want to stop; `zui_app` logs it once per limit.
 
@@ -2360,9 +2398,9 @@ way:
   comptime conversion from hex. **`ExtendedColor`** is 4×f16 linear
   scRGB, where 1.0 is SDR white; values above it are HDR, values outside
   0–1 are wide gamut. It has `Color`'s helpers, `.rgb` and `.rgba`
-  decoding sRGB, so a theme compiles with either, plus `.linear(r, g, b,
-  a)` and `toColor`, which clamps. `Config.Color` picks one, so an SDR
-  application keeps 4-byte colors.
+  decoding sRGB, so a theme compiles with either, plus
+  `.linear(r, g, b, a)` and `toColor`, which clamps. `Config.Color`
+  picks one, so an SDR application keeps 4-byte colors.
 - **A theme is the application's struct.** zui has no theme registry, no
   inheritance and no cascade. Switching theme passes a different value,
   and costs a field read.
@@ -2431,21 +2469,26 @@ pub const design = struct {
       pub const zuiPairs = .{ .brand = .on_brand, .on_brand = .brand, .chart_line = .surface };
   };
   ```
+
 - **`Space`** tiers are on a base unit of 4 (§18.5).
+
 - **`TypeRole`** is the only way a design names a text style (§18.6).
+
 - **`CornerSize`**, from `square` (no radius) to `bubble` (half the
   shorter side, a pill), is what a `ShapeRole` resolves to (§18.7).
+
 - **`Design`** holds the seeds, the type scale's inputs and fonts, each
   shape role's size and the corner family, and the density table, a
-  length per `Space` at each `Density`. It is plain data, so a theme pack
-  imports only `zui`: its fonts are the integer values of the
+  length per `Space` at each `Density`. It is plain data, so a theme
+  pack imports only `zui`: its fonts are the integer values of the
   application's `FontId`, and its seeds are OKLCH as `zui.design.Oklch`.
-- **`Tokens`** holds a color per role in each `WidgetState`'s layer of the
-  resolved theme, a length per tier, a `TextStyle` per type role, a
-  `CornerRadius` and `CornerShape` per shape role, the target floors, the
-  outline and focus ring widths, the factor a part that draws text pads
-  by, and the body text's measure; `tokens.space(.m)` reads a tier. Every
-  field is empty until a resolver writes it.
+
+- **`Tokens`** holds a color per role in each `WidgetState`'s layer of
+  the resolved theme, a length per tier, a `TextStyle` per type role, a
+  `CornerRadius` and `CornerShape` per shape role, the target floors,
+  the outline and focus ring widths, the factor a part that draws text
+  pads by, and the body text's measure; `tokens.space(.m)` reads a tier.
+  Every field is empty until a resolver writes it.
   `tokens.look(Component, part, state)` answers a part's decoration,
   padding, gap, text style and minimum size in one `WidgetState`, and
   checks the component's appearance the first time it is read, so a
@@ -2477,10 +2520,10 @@ const look = tokens.look(Chip, .container, ui.widgetState(id));
   role and a `target`.
 - **`.on`** names the part a text, an icon or an outline is drawn on, so
   every pair the component can draw is known at comptime and checked in
-  every theme, contrast and color vision (§18.4). A part that draws
-  text or an icon and names no `.on` is a compile error, and so is one
-  drawn on a part with no surface; an outline with no `.on` is drawn on
-  its own part's surface. A part draws text or an icon, not both.
+  every theme, contrast and color vision (§18.4). A part that draws text
+  or an icon and names no `.on` is a compile error, and so is one drawn
+  on a part with no surface; an outline with no `.on` is drawn on its
+  own part's surface. A part draws text or an icon, not both.
 - **States** come from the resolver's state layers: hovered, pressed,
   focused and disabled are derived from the part's roles, and the focus
   ring is the `focus` role, drawn as the outline of a part with a
@@ -2488,46 +2531,47 @@ const look = tokens.look(Chip, .container, ui.widgetState(id));
   with `.states = .{ .pressed = .{ ... } }`, read in that state's layer.
 - **`zuiDistinguish`** lists the pairs of parts that must look
   different, as a checked and an unchecked box are parts of their own
-  (§16.7); `.{ .part, .idle, .hovered }` pairs one part in two states. Under every color vision simulation, they must stay apart in
+  (§16.7); `.{ .part, .idle, .hovered }` pairs one part in two states.
+  Under every color vision simulation, they must stay apart in
   lightness, or differ in a cue that is not color: `zui_widgets`'
   checkbox has its mark, a selected tab its indicator. A part names its
   cue as `.cue = "a check mark before its label"`, and a pair either of
   whose parts has one is not measured. The core does not resolve colors,
   so the pairs are checked against a design by
-  `comptime zui_design.checkDistinguished(design, .{ Chip, … })` (§18.4).
-- **A raw color** is `.unchecked(.rgb(0xff00ff), "the brand's logo")`. It
-  compiles, it is drawn in every state as given, and the audit (§18.8)
-  lists it with its reason, every time, from the appearance's
+  `comptime zui_design.checkDistinguished(design, .{ Chip, … })`
+  (§18.4).
+- **A raw color** is `.unchecked(.rgb(0xff00ff), "the brand's logo")`.
+  It compiles, it is drawn in every state as given, and the audit
+  (§18.8) lists it with its reason, every time, from the appearance's
   `unchecked_colors`.
 
 The messages, for a `Chip` declared in `demo.zig`:
-``"zui: demo.Chip's appearance has no part `container` of demo.Chip.Part"``;
-``"zui: demo.Chip.label draws text but names no part it is drawn `.on`"``
-(``draws an icon`` for an icon);
-``"zui: demo.Chip.label is drawn on `badge`, which is not a part of demo.Chip.Part"``;
-``"zui: demo.Chip.label is drawn on `close`, which has no surface"``;
-``"zui: demo.Chip.close draws both text and an icon; give each a part of its own"``;
-``"zui: demo.Chip.close's `.unchecked` color needs a reason"``;
-``"zui: demo.Chip declares no `Part`, the enum of its parts"``;
-``"zui: demo.Chip declares no `zuiAppearance`"``;
-``"zui: demo.Chip.zuiAppearance must be a zui.design.Appearance(demo.Chip.Part, …)"``;
-``"zui: an appearance's Part must be an enum, got demo.Chip.Part"``;
-``"zui: demo.Badge's appearance names the extra roles demo.Roles, but the tokens' extra roles are void"``;
-``"zui: each entry of demo.Chip.zuiDistinguish is two parts, or a part and two states"``;
-``"zui: demo.Chip.zuiDistinguish names `badge`, which is not a part of demo.Chip.Part"``;
-``"zui: demo.Chip.zuiDistinguish names `normal`, which is not a zui.WidgetState"``.
-And from `zui_design.checkDistinguished`, for the `Chip` above without its
-cue:
-``"zui_design: under demo.design, demo.Chip's container and container_selected are 0.01 apart in lightness under protanopia in light, need 0.15; give one a `.cue` that is not color"``
-(``demo.Chip.close's idle and hovered layers are`` … ``give it a `.cue` `` for
-a part in two states).
-And for extra roles:
-``"zui: ExtraRoles must be an enum or void, got u8"``;
-``"zui: demo.Roles's `accent` is already a zui.design.ColorRole"``;
-``"zui: demo.Roles declares no `zuiPairs`, the role each of its roles pairs with"``;
-``"zui: demo.Roles.zuiPairs gives no pair for `on_brand`"``;
-``"zui: demo.Roles.zuiPairs pairs `brand` with `logo`, which is neither a zui.design.ColorRole nor a role of demo.Roles"``;
-``"zui: demo.Roles.zuiPairs names `logo`, which is not a role of demo.Roles"``.
+`` "zui: demo.Chip's appearance has no part `container` of demo.Chip.Part" ``;
+`` "zui: demo.Chip.label draws text but names no part it is drawn `.on`" ``
+(`draws an icon` for an icon);
+`` "zui: demo.Chip.label is drawn on `badge`, which is not a part of demo.Chip.Part" ``;
+`` "zui: demo.Chip.label is drawn on `close`, which has no surface" ``;
+`"zui: demo.Chip.close draws both text and an icon; give each a part of its own"`;
+`` "zui: demo.Chip.close's `.unchecked` color needs a reason" ``;
+`` "zui: demo.Chip declares no `Part`, the enum of its parts" ``;
+`` "zui: demo.Chip declares no `zuiAppearance`" ``;
+`"zui: demo.Chip.zuiAppearance must be a zui.design.Appearance(demo.Chip.Part, …)"`;
+`"zui: an appearance's Part must be an enum, got demo.Chip.Part"`;
+`"zui: demo.Badge's appearance names the extra roles demo.Roles, but the tokens' extra roles are void"`;
+`"zui: each entry of demo.Chip.zuiDistinguish is two parts, or a part and two states"`;
+`` "zui: demo.Chip.zuiDistinguish names `badge`, which is not a part of demo.Chip.Part" ``;
+`` "zui: demo.Chip.zuiDistinguish names `normal`, which is not a zui.WidgetState" ``.
+And from `zui_design.checkDistinguished`, for the `Chip` above without
+its cue:
+`` "zui_design: under demo.design, demo.Chip's container and container_selected are 0.01 apart in lightness under protanopia in light, need 0.15; give one a `.cue` that is not color" ``
+(`demo.Chip.close's idle and hovered layers are` …
+`` give it a `.cue`  `` for a part in two states). And for extra roles:
+`"zui: ExtraRoles must be an enum or void, got u8"`;
+`` "zui: demo.Roles's `accent` is already a zui.design.ColorRole" ``;
+`` "zui: demo.Roles declares no `zuiPairs`, the role each of its roles pairs with" ``;
+`` "zui: demo.Roles.zuiPairs gives no pair for `on_brand`" ``;
+`` "zui: demo.Roles.zuiPairs pairs `brand` with `logo`, which is neither a zui.design.ColorRole nor a role of demo.Roles" ``;
+`` "zui: demo.Roles.zuiPairs names `logo`, which is not a role of demo.Roles" ``.
 
 ### 18.3 Preferences and resolution
 
@@ -2559,20 +2603,23 @@ if (!std.meta.eql(preferences, app.preferences)) {
   `zui.design.Tokens(Ui, ExtraRoles)`.
 - **`resolve` allocates nothing,** writes every token, and returns what
   it repaired (§18.4).
-- **A design resolved at comptime,** `comptime zui_design.resolve(design,
-  …)` for each theme and contrast, is checked during the build.
+- **A design resolved at comptime,**
+  `comptime zui_design.resolve(design, …)` for each theme and contrast,
+  is checked during the build.
 
 ### 18.4 Color, contrast and color vision
 
 - **From seeds.** `Design.seeds` gives an accent and a neutral in OKLCH,
   and optionally a hue for each status role. Each becomes a tonal ramp,
   and every role is taken from a ramp per theme. Dark is solved from the
-  same ramps, not inverted: its raised surfaces are lighter, not shadowed,
-  and its filled roles are darker than their light text, all but
-  `warning`, a light amber under dark text in every theme, which leaves
-  the three status fills room to differ in lightness. A chosen accent,
-  the user's or the system's, is the accent fill as it is, its lightness
-  included; the design's accent seed gives only its hue and chroma.
+  same ramps, not inverted: its raised surfaces are lighter, not
+  shadowed, and its filled roles are darker than their light text, all
+  but `warning`, a light amber under dark text in every theme, which
+  leaves the three status fills room to differ in lightness. A chosen
+  accent, the user's or the system's, is the accent fill as it is, its
+  lightness included; the design's accent seed gives only its hue and
+  chroma.
+
 - **Contrast is solved, not only checked.** Each declared pair must meet
   both APCA's lightness contrast and WCAG 2's ratio:
 
@@ -2585,36 +2632,40 @@ if (!std.meta.eql(preferences, app.preferences)) {
 
   Both are measured on the color as it is encoded in sRGB, its alpha
   ignored. Each `on_*` role is text; `outline` and `focus` are the
-  non-text tier; `outline_muted`, the surfaces and `scrim` have no target.
-  The resolver moves the foreground's OKLCH lightness away from the
-  background, keeping its hue and chroma, until both pass; if no
+  non-text tier; `outline_muted`, the surfaces and `scrim` have no
+  target. The resolver moves the foreground's OKLCH lightness away from
+  the background, keeping its hue and chroma, until both pass; if no
   lightness of it passes, it goes to white or black and the background
-  moves too. The hovered, focused and pressed layers are held to the same
-  targets: a fill whose pairs would fall below them moves less of the way
-  toward its `on_*` role, or, when too little of the way would show, moves
-  as far toward white or black instead.
+  moves too. The hovered, focused and pressed layers are held to the
+  same targets: a fill whose pairs would fall below them moves less of
+  the way toward its `on_*` role, or, when too little of the way would
+  show, moves as far toward white or black instead.
+
 - **A design that cannot meet a target at comptime is a compile error**
   naming the design by `Design.name`, the pair, the scheme and the
   lightness that would pass, as "zui_design: *design*'s *foreground* on
-  *background* is Lc *measured* in *scheme*, needs *target*; *foreground*
-  at L *lightness* passes". A pair that misses only WCAG 2's ratio is
-  named by its ratio and the ratio it needs. No seed of the built-in
-  tables reaches it, since their status fills keep a margin at every hue;
-  the status roles' separation, below, is the comptime error a design's
-  own hues can reach. A design is named "the design" until it sets
-  `name`.
+  *background* is Lc *measured* in *scheme*, needs *target*;
+  *foreground* at L *lightness* passes". A pair that misses only WCAG
+  2's ratio is named by its ratio and the ratio it needs. No seed of the
+  built-in tables reaches it, since their status fills keep a margin at
+  every hue; the status roles' separation, below, is the comptime error
+  a design's own hues can reach. A design is named "the design" until it
+  sets `name`.
+
 - **A color that arrives at run time,** the user's accent or the
-  system's, is repaired the same way, never fatally, even at comptime, and
-  `resolve` returns each repair in `Repairs`: what was measured
-  (contrast, color vision, or a pair that needs a cue that is not color),
-  the pair, the scheme, its contrast or its nearest simulation before,
-  and the lightness each side took, the first 32 kept and the rest
-  counted as dropped.
+  system's, is repaired the same way, never fatally, even at comptime,
+  and `resolve` returns each repair in `Repairs`: what was measured
+  (contrast, color vision, or a pair that needs a cue that is not
+  color), the pair, the scheme, its contrast or its nearest simulation
+  before, and the lightness each side took, the first 32 kept and the
+  rest counted as dropped.
+
 - **Color vision.** Each color is simulated, as it is encoded in sRGB,
   under protanopia, deuteranopia, tritanopia and achromatopsia (Machado
-  et al., 2009, at full severity, on linear sRGB; achromatopsia keeps the
-  luminance alone), and two colors are apart when their OKLab lightness
-  differs by at least 0.15 under each.
+  et al., 2009, at full severity, on linear sRGB; achromatopsia keeps
+  the luminance alone), and two colors are apart when their OKLab
+  lightness differs by at least 0.15 under each.
+
   - **The status fills,** `danger`, `warning` and `success`, are held
     apart in pairs by `resolve`, in the idle palette after contrast is
     solved. A pair that is not is moved apart: the fill whose move is
@@ -2624,15 +2675,16 @@ if (!std.meta.eql(preferences, app.preferences)) {
     At comptime either is a compile error unless the user chose the
     color vision, as for a design in `demo.zig` whose `success_hue` is
     red, resolved in high contrast:
-    ``"zui_design: demo.design's danger and success are 0.14 apart in lightness under protanopia in light high contrast, need 0.15; success at L 0.42 passes"``.
+    `"zui_design: demo.design's danger and success are 0.14 apart in lightness under protanopia in light high contrast, need 0.15; success at L 0.42 passes"`.
   - **`zuiDistinguish` pairs** are checked, not moved: their roles are
     shared by every component, so moving one for one pair would move it
-    for all. `comptime zui_design.checkDistinguished(design, components)`
-    resolves the design in every scheme and compares two parts' surfaces,
-    text or icons, and outlines idle, and one part's in its two states;
-    an entry passes when one of those colors is apart under every
-    simulation, or when a part declares a `.cue`, and fails the build
-    otherwise (§18.2).
+    for all.
+    `comptime zui_design.checkDistinguished(design, components)`
+    resolves the design in every scheme and compares two parts'
+    surfaces, text or icons, and outlines idle, and one part's in its
+    two states; an entry passes when one of those colors is apart under
+    every simulation, or when a part declares a `.cue`, and fails the
+    build otherwise (§18.2).
   - **`Preferences.color_vision`** adapts the status roles further for
     the user who chose it: `protan` and `deutan` move `danger` to hue
     40° and `success` to 230°, apart on the blue-yellow axis that is
@@ -2677,10 +2729,10 @@ if (!std.meta.eql(preferences, app.preferences)) {
 - **Set by the face.** Sizes are scaled so the body face's x-height
   (`zui_glyphs.FontMetrics.x_height`) is the design's, so two faces at
   the same role look the same size.
-- **Line height** falls with size, from 1.5 at 14 and below to 1.15 at 40
-  and above, and is rounded to the 4-unit grid.
-- **Tracking** is +1% of the size at 12 and below, none at 16, and −2% at
-  32 and above, between them in proportion.
+- **Line height** falls with size, from 1.5 at 14 and below to 1.15 at
+  40 and above, and is rounded to the 4-unit grid.
+- **Tracking** is +1% of the size at 12 and below, none at 16, and −2%
+  at 32 and above, between them in proportion.
 - **Text scale by role.** A role's size is multiplied by `text_scale` to
   a power that falls from 1 for `caption` to 0.5 for `display`, so
   headings do not outgrow the screen at 200%.
@@ -2707,40 +2759,44 @@ if (!std.meta.eql(preferences, app.preferences)) {
 
 - **Emission clamps** each corner to half the element's shorter side, so
   `bubble` is any radius that large.
+
 - **The families' curves.** Within a corner's radius along both sides,
   `round` is the quarter circle, `continuous` the quarter superellipse
   |x|⁴ + |y|⁴ = radius⁴, which meets each side with no curvature, as the
   side has none, and `chamfer` the straight cut between the two sides'
   points. A border's inner edge, or a shadow's spread, moves a chamfer's
   cut parallel to itself.
+
 - **Renderers declare their shapes.** `Config.corner_shapes` is the set
   the renderer draws, its `zui_corner_shapes`, `round` alone by default
   and always with `round`. A command carries its shape, `corner_shape`,
   only when that set holds more than `round`; otherwise the field is
   `void`, and `zui.cornerShapeOf(payload)` reads either as a
   `CornerShape`. A shape a renderer does not draw is drawn round, and
-  lowered (§13.3). Square corners, of radius 0, have no shape to draw, so
-  they are never lowered.
+  lowered (§13.3). Square corners, of radius 0, have no shape to draw,
+  so they are never lowered.
+
 - **Nested corners.** `Decoration.nested_corners = .{ .minimum = 2 }`
-  (behind `Features.nested_corners`) gives each corner the radius that is
-  concentric with its parent's, in place of its own `corner_radius`. The
-  parent is the nearest ancestor with a decoration, so a row or column
-  that only lays children out is passed over; an element with none sits
-  in the window's square corners. Its inset is the child's distance from
-  that corner of the parent, along the farther axis, as laid out, so a
-  child that does not reach a corner does not follow it. By the child's
-  family: `round` and `continuous` take the parent's drawn radius less
-  the inset, and `chamfer` shortens its cut by (2 − √2) × the inset.
-  Below `minimum` (0 by default), or past the parent's radius, a corner
-  takes `minimum`. Emission resolves it, since only it knows both boxes;
-  a parent that is nested itself resolves first. With the feature off the
-  field holds nothing and `Decoration` keeps its size; declaring it is a
-  compile error, `"zui: Decoration.nested_corners needs
-  Config.features.nested_corners = true"`. A field's coercion can raise no
-  custom error, so the message is the name of the field's type, which
-  appears inside Zig's own error for the struct initialization. With the
-  feature on, `Ui.Decoration` is the context's own type (§10.1), so a
-  `zui.Decoration`, such as a look's, is copied into it field by field.
+  (behind `Features.nested_corners`) gives each corner the radius that
+  is concentric with its parent's, in place of its own `corner_radius`.
+  The parent is the nearest ancestor with a decoration, so a row or
+  column that only lays children out is passed over; an element with
+  none sits in the window's square corners. Its inset is the child's
+  distance from that corner of the parent, along the farther axis, as
+  laid out, so a child that does not reach a corner does not follow it.
+  By the child's family: `round` and `continuous` take the parent's
+  drawn radius less the inset, and `chamfer` shortens its cut by (2 −
+  √2) × the inset. Below `minimum` (0 by default), or past the parent's
+  radius, a corner takes `minimum`. Emission resolves it, since only it
+  knows both boxes; a parent that is nested itself resolves first. With
+  the feature off the field holds nothing and `Decoration` keeps its
+  size; declaring it is a compile error,
+  `"zui: Decoration.nested_corners needs Config.features.nested_corners = true"`.
+  A field's coercion can raise no custom error, so the message is the
+  name of the field's type, which appears inside Zig's own error for the
+  struct initialization. With the feature on, `Ui.Decoration` is the
+  context's own type (§10.1), so a `zui.Decoration`, such as a look's,
+  is copied into it field by field.
 
   ```zig
   const look = tokens.look(Card, .container, .idle).decoration;
@@ -2758,6 +2814,7 @@ reduced transparency, each `WidgetState`, and its content.
 - **Content.** A component may declare `zuiPreviews`, the content it
   shows under review: short, long, empty, overflowing, right to left,
   large numbers. Without it, it is shown with what it is declared with.
+
 - **Levels.**
 
   | Level | What | About |
@@ -2773,9 +2830,11 @@ reduced transparency, each `WidgetState`, and its content.
   against its surroundings, hit target sizes, text cut short,
   overlapping controls, and each `zuiDistinguish` pair under every
   simulation. Each finding names its element, its check and the value.
+
 - **Keys and hashes.** Each permutation has a `PermutationKey`: the
   component, its preview and every axis value. Its command hash is the
   same in Debug and release and on every target.
+
 - **The review** (`apps/review/`) shows each permutation of a level with
   its axis values and its findings. **Y** accepts it, **N** flags it,
   **R** adds a remark, with a region dragged over the part it is about.
@@ -2783,12 +2842,15 @@ reduced transparency, each `WidgetState`, and its content.
   file in the application's repository, by key, each with its command
   hash. When the hash changes, the verdict is stale and the permutation
   is asked again, so an approved look is a golden for free.
+
 - **The report**, in Markdown and as an HTML page with an image of each
   permutation, groups the flags and findings by component, then by the
   axis that brings them ("fails under deuteranopia in high contrast"),
   and names the token or part to change where it can be told.
+
 - **In CI,** a build step fails on a permutation that is stale, flagged
   or failing the audit.
+
 - **The workbench** is a mode of the review: one component in a grid of
   its glance permutations, restyled as its design file is saved, with a
   badge the moment a check fails.
@@ -2809,47 +2871,48 @@ rides on, so an application that replaces it knows what to implement.
 | `Task(Result, .{ .Progress })` | one piece of work with a status | one run at a time | `?Status` if it changed |
 | `KeyedLoads(Key, Result, .{ .capacity, .unread_frames_before_release, .owns_resources, .Progress })` | many keyed loads driven by demand: thumbnails, remote rows, search results per query | many | keys completed this frame, with status; relayed, also the keys loading, with progress, and abandoned loads that finished, which the loader changed between frames |
 
-- **`Latest`** is a triple buffer and one atomic byte (middle index and a
-  fresh bit). A publish exchanges the producer's back buffer with the
+- **`Latest`** is a triple buffer and one atomic byte (middle index and
+  a fresh bit). A publish exchanges the producer's back buffer with the
   middle one; a swap exchanges front and middle if fresh. The view reads
   the front buffer in place. Two publishes between swaps lose the first,
   so `Latest` holds plain data or handles the producer keeps alive.
-- **`Stream`** is a bounded ring with a sequence per slot, its capacity a
-  power of two. Many producers claim with a compare-and-swap on the head;
-  one producer compiles to a plain store. A swap first releases the slots
-  the previous frame read, then walks forward while slots are written,
-  stopping without waiting at the first claimed but unwritten slot. Items
-  are read in place, through an iterator, because they may wrap.
-- **`Task`** is a `Latest` of its status plus run bookkeeping. The loader
-  calls `begin(waker)` for a `Run`; the producer calls `progress` and
-  exactly one `finish`. `begin` refuses while the previous run's final
-  status is unswapped, which keeps it single-producer; restartable work
-  is keyed. `CatalogTask.publishing(f)` adapts a plain function into one
-  that finishes a `Run`, taking `f`'s arguments as one tuple. `clear`
-  hands back an owned result once `frames_in_flight` frames have passed
-  since it was last read. The loader can `abandon` a run, which the
-  producer reads from `run.abandoned()`.
+- **`Stream`** is a bounded ring with a sequence per slot, its capacity
+  a power of two. Many producers claim with a compare-and-swap on the
+  head; one producer compiles to a plain store. A swap first releases
+  the slots the previous frame read, then walks forward while slots are
+  written, stopping without waiting at the first claimed but unwritten
+  slot. Items are read in place, through an iterator, because they may
+  wrap.
+- **`Task`** is a `Latest` of its status plus run bookkeeping. The
+  loader calls `begin(waker)` for a `Run`; the producer calls `progress`
+  and exactly one `finish`. `begin` refuses while the previous run's
+  final status is unswapped, which keeps it single-producer; restartable
+  work is keyed. `CatalogTask.publishing(f)` adapts a plain function
+  into one that finishes a `Run`, taking `f`'s arguments as one tuple.
+  `clear` hands back an owned result once `frames_in_flight` frames have
+  passed since it was last read. The loader can `abandon` a run, which
+  the producer reads from `run.abandoned()`.
 - **`KeyedLoads`** moves keys through *wanted* (`get` asked; `.idle`) →
   *loading* (the loader took it from `toStart`; `.running`) → *ready*
   (`.ready`/`.failed`) → *releasing* (unread too long; handed back by
   `toRelease`). `get` never starts work. Completions go through a ring
-  sized by claims, so it can never overflow however rarely it is drained.
-  A slot is reused only after its load's completion is swapped, so an
-  abandoned load never completes the next one; safe builds keep a
+  sized by claims, so it can never overflow however rarely it is
+  drained. A slot is reused only after its load's completion is swapped,
+  so an abandoned load never completes the next one; safe builds keep a
   generation per load to catch one finished twice. An abandoned load
-  still finishes, into `toRelease`. A value is never
-  released before `max(unread_frames_before_release, frames_in_flight)`
-  unread frames, computed rather than configured, so a texture is never
-  freed under a frame in flight. `toRelease` exists only with
-  `owns_resources`, and a forgotten release shows as a full source, not a
-  leak. A key `get` cannot track for lack of space stays `.idle`, and
-  the next frame reports the refusal. `Progress` must fit in a `usize`,
-  checked at comptime, so a producer reports it with one atomic store on
-  every target.
+  still finishes, into `toRelease`. A value is never released before
+  `max(unread_frames_before_release, frames_in_flight)` unread frames,
+  computed rather than configured, so a texture is never freed under a
+  frame in flight. `toRelease` exists only with `owns_resources`, and a
+  forgotten release shows as a full source, not a leak. A key `get`
+  cannot track for lack of space stays `.idle`, and the next frame
+  reports the refusal. `Progress` must fit in a `usize`, checked at
+  comptime, so a producer reports it with one atomic store on every
+  target.
 - **Costs:** a swap with nothing published is one atomic load; a publish
   is one copy and one atomic exchange; producer-side and reader-side
-  atomics sit on separate cache lines; memory is fixed at comptime in the
-  application's own struct.
+  atomics sit on separate cache lines; memory is fixed at comptime in
+  the application's own struct.
 
 ```zig
 // Keyed by a hash of the image's path; with owns_resources, textures come back through toRelease to be freed.
@@ -2904,11 +2967,11 @@ ready.
 that implements the skin contract
 (`zuiStyle(part, state, environment) Style`, §16.7), so theme packs and
 applications bring their own look without forking the widgets.
-`widgets.style(ui, part, state)` asks the skin for an element that should
-match a widget. The default skin, `zui_widgets.DesignSkin(Ui)`, styles
-every control from `zui.design.Tokens` (§18), so the widgets follow the
-theme, the contrast, the density, the text scale and the color vision
-the tokens were resolved for.
+`widgets.style(ui, part, state)` asks the skin for an element that
+should match a widget. The default skin, `zui_widgets.DesignSkin(Ui)`,
+styles every control from `zui.design.Tokens` (§18), so the widgets
+follow the theme, the contrast, the density, the text scale and the
+color vision the tokens were resolved for.
 
 | Widget | Edits | Returns |
 |---|---|---|
@@ -2948,14 +3011,15 @@ edit (the message quotes the `.hidden = true` line that fixes it).
 
 - **`FixedMetricsText`**: deterministic metrics (each byte `size / 2`
   wide plus its letter spacing), so tests never depend on fonts.
-- **`Driver(Ui)`**: runs complete frames from events, by element id, with
-  points as fractions of the element's previous rectangle: `click`,
+- **`Driver(Ui)`**: runs complete frames from events, by element id,
+  with points as fractions of the element's previous rectangle: `click`,
   `tap`, `drag`, `pinch`, multi-pointer drags, `typeText`, `pressKeys`,
-  `action`, and `frameDelivering(.{ .catalog = .{ .ready = &catalog } })`
-  to set any source's state without threads. A context with sources
-  takes them as `.sources = &app.sources`; in `frameDelivering`, a source
-  not named receives nothing, which is `null` for an optional `Delivery`
-  and `Delivery.empty` otherwise.
+  `action`, and
+  `frameDelivering(.{ .catalog = .{ .ready = &catalog } })` to set any
+  source's state without threads. A context with sources takes them as
+  `.sources = &app.sources`; in `frameDelivering`, a source not named
+  receives nothing, which is `null` for an optional `Delivery` and
+  `Delivery.empty` otherwise.
 - **`Recording(Ui)`** keeps each record a context applies, as its relay
   listener, in memory reserved by `init`; a record that does not fit is
   dropped whole and counted. **`driver.replay(app, declare, record)`**
@@ -2966,67 +3030,70 @@ edit (the message quotes the `.hidden = true` line that fixes it).
   only, defaults omitted, identical in debug and release.
 - **`checkCommands`**: finite bounds, nondecreasing layers, balanced
   clips and transforms, each ending inside what it began inside.
-- **Conformance suites**, which every implementation runs in CI.
-  Each takes a harness that does what only the implementation can: make
-  a drawing target and read it back, make the OS report an event, or
+- **Conformance suites**, which every implementation runs in CI. Each
+  takes a harness that does what only the implementation can: make a
+  drawing target and read it back, make the OS report an event, or
   publish into a source.
   - `expectRendererConforms(Renderer, harness, .{ .gpa, .io })` draws a
     reference scene of every command the renderer's declarations can
     produce (the base commands, and `image`, tinted and rounded, and
     `custom` with their payload types), clips nested 100 deep, commands
-    of no size or out of bounds, an empty frame, and the reference scene again. When the harness
-    reads pixels back, it checks that each clip cuts off what lies
-    outside it and is restored when a clip inside it ends, that nothing
-    an earlier frame set outlives it, and the scene's colors within a
-    tolerance, an image's tint multiplied into it and its corners left
-    undrawn. An optional command joins the scene with the declaration
-    that produces it (§13.3). The scene is declared in `ExtendedColor`,
-    with a box of HDR white: a renderer that declares
+    of no size or out of bounds, an empty frame, and the reference scene
+    again. When the harness reads pixels back, it checks that each clip
+    cuts off what lies outside it and is restored when a clip inside it
+    ends, that nothing an earlier frame set outlives it, and the scene's
+    colors within a tolerance, an image's tint multiplied into it and
+    its corners left undrawn. An optional command joins the scene with
+    the declaration that produces it (§13.3). The scene is declared in
+    `ExtendedColor`, with a box of HDR white: a renderer that declares
     `zui_extended_color` is given each color as declared and must encode
     it for its target, and any other is given it clamped (§13.3). A
     harness that opens a `.scrgb_fp16` target reads it back as
-    `ExtendedColor`, where HDR white must read back as declared, brighter
-    than SDR white, and translucent colors blend in linear light.
+    `ExtendedColor`, where HDR white must read back as declared,
+    brighter than SDR white, and translucent colors blend in linear
+    light.
   - `expectHostConforms(Host, harness, .{ .io })` checks that a poll
     keeps the application's zoom and reports posted events in order,
     that `.immediately` does not wait, that a wake before a wait ends it
     and is then cleared, that a wake from another thread ends an
     `.on_event` wait, and that an `.at` wait ends at its instant. Every
-    wait it starts is bounded: a lost wake fails the suite, never hangs it.
-    For a host with many windows it also opens a second window, checks
-    that it has its own id, viewport and surface, that an event posted to
-    either window is reported by that window alone, that closing it
-    leaves the first polling, and that a window opened after it has a new
-    id; that harness declares `postTo(window, event)`. It is the pulled
-    host's suite. A pushed host's, `expectPushedHostConforms`, runs
-    `zuiRun` with a `zui.Driver` of the suite's own, whose steps ask for
-    the next turn `.immediately`, `.at` an instant and `.on_event`, with
-    a wake from another thread, and checks that the host starts the
-    driver once and before any step, schedules each step as the one
-    before asked, never blocks in a poll, calls `suspendSurfaces` and
-    `resumeSurfaces` when its harness's platform takes the surface away
-    and gives it back, stops the driver, and steps no more once a step
-    has ended the run; that harness declares `takeSurfaceAway`,
-    `giveSurfaceBack` and `quit`, which the suite calls from another
-    thread for a platform that stopped stepping. A stepped host's,
-    `expectSteppedHostConforms`, checks that a poll never blocks, with
-    nothing to report or after a wake from another thread, that the
-    surface is one the host declares, and that posted events arrive in
-    order. Each is a compile error for a host of another loop half.
+    wait it starts is bounded: a lost wake fails the suite, never hangs
+    it. For a host with many windows it also opens a second window,
+    checks that it has its own id, viewport and surface, that an event
+    posted to either window is reported by that window alone, that
+    closing it leaves the first polling, and that a window opened after
+    it has a new id; that harness declares `postTo(window, event)`. It
+    is the pulled host's suite. A pushed host's,
+    `expectPushedHostConforms`, runs `zuiRun` with a `zui.Driver` of the
+    suite's own, whose steps ask for the next turn `.immediately`, `.at`
+    an instant and `.on_event`, with a wake from another thread, and
+    checks that the host starts the driver once and before any step,
+    schedules each step as the one before asked, never blocks in a poll,
+    calls `suspendSurfaces` and `resumeSurfaces` when its harness's
+    platform takes the surface away and gives it back, stops the driver,
+    and steps no more once a step has ended the run; that harness
+    declares `takeSurfaceAway`, `giveSurfaceBack` and `quit`, which the
+    suite calls from another thread for a platform that stopped
+    stepping. A stepped host's, `expectSteppedHostConforms`, checks that
+    a poll never blocks, with nothing to report or after a wake from
+    another thread, that the surface is one the host declares, and that
+    posted events arrive in order. Each is a compile error for a host of
+    another loop half.
   - `expectSourceConforms(Source, harness, .{ .io })` stresses publish,
     swap, inject and refusal under many producers, on any `Io`, with a
-    harness that publishes, since publishing is not part of the contract.
+    harness that publishes, since publishing is not part of the
+    contract.
 
 ### 19.5 `zui_app`
 
 The composition root as a library: `contextConfig(Renderer, overrides)`,
 and `run(App, init, options)`, which runs the loop of §6.1 as the host's
-loop half says, calls the
-application's `zuiDeclare` and optional `zuiObserve` and `zuiLoader`, moves submission to
-a render thread when the renderer allows, applies host requests, paces
-to `nextFrame`, and reports capabilities and fallbacks. An application
-that owns its loop steps a `Session(App)` from it; one that wants
-nothing of `zui_app` writes the lines of §6.1 instead.
+loop half says, calls the application's `zuiDeclare` and optional
+`zuiObserve` and `zuiLoader`, moves submission to a render thread when
+the renderer allows, applies host requests, paces to `nextFrame`, and
+reports capabilities and fallbacks. An application that owns its loop
+steps a `Session(App)` from it; one that wants nothing of `zui_app`
+writes the lines of §6.1 instead.
 
 ```zig
 try zui_app.run(App, init, options);                 // zui or the platform owns the loop
@@ -3060,47 +3127,57 @@ const App = struct {
   payload types, and the renderer itself as `Text` when it declares
   `zuiMeasure`, so `zui_app` hands the context the renderer to measure
   with. `Ui` is read from `zuiDeclare`'s parameter.
-- **A text contract of its own.** When the renderer does not measure, the
-  application builds its `Config` with `.Text = Fonts` and declares
+
+- **A text contract of its own.** When the renderer does not measure,
+  the application builds its `Config` with `.Text = Fonts` and declares
   `pub const Text = Fonts`: `zui_app` makes one (with `init(self) !void`
   and `deinit` if it declares them) and gives the context and the
   renderer a pointer to it. A `Ui` whose `Text` is neither the renderer
   nor `App.Text` is a compile error.
-- **What it opens.** A pulled or stepped host declares `init(self, io, window:
-  zui.WindowOptions) !void` (title, size, visible, resizable, material,
-  title bar; `Options.title_bar = .custom` without
-  `features.chrome_regions` makes `start`, or `run`, return
+
+- **What it opens.** A pulled or stepped host declares
+  `init(self, io, window: zui.WindowOptions) !void` (title, size,
+  visible, resizable, material, title bar; `Options.title_bar = .custom`
+  without `features.chrome_regions` makes `start`, or `run`, return
   `error.CustomTitleBarWithoutChromeRegions`) and `deinit`; a pushed
-  host is given the same options by `zuiRun`. The renderer may declare `init(self, surface) !void`, or
+  host is given the same options by `zuiRun`. The renderer may declare
+  `init(self, surface) !void`, or
   `init(self, surface, text: *const Text) !void` beside `App.Text`, and
   `deinit`. Each field with a default holds it when `init` is called, so
-  a setting made on the type survives. `Start(App)` gives the application
-  the allocator, the `Io`, the process, its host, its renderer, the
-  `App.Text` it made (`void` without one), for the fonts the application
-  adds and the ids they are given, and the host's `Waker`.
+  a setting made on the type survives. `Start(App)` gives the
+  application the allocator, the `Io`, the process, its host, its
+  renderer, the `App.Text` it made (`void` without one), for the fonts
+  the application adds and the ids they are given, and the host's
+  `Waker`.
+
 - **The application's part of the record.** `zuiRecord` runs after the
   host's poll and before `beginFrame`: the application sets its zoom
   there and appends events it makes itself, after the host's. Its
-  `sources` field holds the `Config`'s `Sources` or points to them, so an
-  application that wraps another can use the sources it already has.
+  `sources` field holds the `Config`'s `Sources` or points to them, so
+  an application that wraps another can use the sources it already has.
+
 - **The application's view of the frame.** `zuiObserve` runs on the UI
   thread with each frame `endFrame` returns, before it is submitted or
   handed to the render thread, so an inspector (§19.7) reads the frame
   before the next `beginFrame`; `zuiLoader` sees only the context.
-- **The render thread.** With `zui_render_thread` and more than one frame
-  in flight, frames go through a queue of `frames_in_flight` entries to a
-  task on the application's `Io` that submits and releases them; the UI
-  thread applies host requests before handing a frame over. An error
-  there is returned by a later `step()`.
+
+- **The render thread.** With `zui_render_thread` and more than one
+  frame in flight, frames go through a queue of `frames_in_flight`
+  entries to a task on the application's `Io` that submits and releases
+  them; the UI thread applies host requests before handing a frame over.
+  An error there is returned by a later `step()`.
+
 - **What it reports,** once each, through `Options.notify` (by default
   `std.log`): at start, the host, its capabilities, where frames are
   submitted and why, the optional commands lowered and the services the
   host lacks; then the first time input is dropped by the record
   builder, each limit is exceeded, a source refuses, ids repeat or the
   tree is unbalanced.
+
 - **The host's services** are reached through `ServicesOf(App.Host)`,
-  with the host `init` was given (`start.host`), from `zuiLoader` or other
-  code outside declaration (§16.3).
+  with the host `init` was given (`start.host`), from `zuiLoader` or
+  other code outside declaration (§16.3).
+
 - **Many windows.** An application whose `zuiDeclare` takes a
   `zui.WindowId` declares each of its windows, and every hook takes the
   window too:
@@ -3127,37 +3204,41 @@ const App = struct {
   the user closes is closed; `run` returns once none is open. Frames,
   attaches and detaches share the render thread's queue, so a closed
   window's frames are released before its context is freed.
+
 - **Who turns the loop** follows the host's loop half (§16.3),
   `zui_app.loopOf(Host)`: `.pulled`, `.pushed` or `.stepped`. `run` on a
-  pulled host starts a `Session`, then `while (try session.step())
-  |next| session.wait(next)`, then stops it. On a pushed host it hands
-  `zuiRun` a `zui.Driver` over a `Session` and returns as `zuiRun` does:
-  when `zuiRun` is `noreturn`, `run`'s type is
+  pulled host starts a `Session`, then
+  `while (try session.step()) |next| session.wait(next)`, then stops it.
+  On a pushed host it hands `zuiRun` a `zui.Driver` over a `Session` and
+  returns as `zuiRun` does: when `zuiRun` is `noreturn`, `run`'s type is
   `zui_app.PushedStartError!noreturn`, and nothing after it runs, not
   even a `defer`; Zig does not reject code there, so the caller keeps
   none, and teardown is the application's `deinit`, which
   `driver.stop()` runs. After `zuiRun` returns, `run` stops the driver
   if the host did not. On a stepped host `run` is a compile error:
-  ``"zui_app: demo.Host declares neither `zuiWait` nor `zuiRun`, so only the application's own loop can turn it: step a zui_app.Session(demo.App) from that loop"``.
+  `` "zui_app: demo.Host declares neither `zuiWait` nor `zuiRun`, so only the application's own loop can turn it: step a zui_app.Session(demo.App) from that loop" ``.
   `runWith(App, setup, options)` is `run` without a process.
+
 - **`Session(App)`** is one run's state, turned by any loop. It must not
   move after `start`. `start(setup, options)` opens the host's window
-  and makes the text, the renderer, the contexts and the application;
-  on a pushed host it is a compile error naming `run`. `step()` is one
+  and makes the text, the renderer, the contexts and the application; on
+  a pushed host it is a compile error naming `run`. `step()` is one
   turn, and never blocks: it polls each window, runs `zuiRecord`, and
   declares, ends and submits each window that is due, by the rule of
   *Many windows* below, for one window as for many; it returns when the
   next turn is wanted, or null once every window has closed. An
   application with one window is also due on the turn after `wait`,
-  since a wait may end for a repaint its record does not show. Unless the host is waited on, a window whose frames the render
-  thread holds every one of is not polled, so its input stays with the
-  host, and the turn returns `.immediately`. `wait(next)` blocks in the
-  host's `zuiWait`, and `frame()` is `step` then `wait`; on a host
-  without `zuiWait` both are compile errors:
-  ``"zui_app: demo.Host declares no `zuiWait`, so zui_app cannot wait on it; the loop that calls step waits as the zui.NextFrame it returns says"``.
+  since a wait may end for a repaint its record does not show. Unless
+  the host is waited on, a window whose frames the render thread holds
+  every one of is not polled, so its input stays with the host, and the
+  turn returns `.immediately`. `wait(next)` blocks in the host's
+  `zuiWait`, and `frame()` is `step` then `wait`; on a host without
+  `zuiWait` both are compile errors:
+  `` "zui_app: demo.Host declares no `zuiWait`, so zui_app cannot wait on it; the loop that calls step waits as the zui.NextFrame it returns says" ``.
   `stop()` frees what `start` made, the application first, and closes
   the window. Each mistake in `App` is a compile error naming it:
-  ``"zui_app: demo.App declares unknown `zuiLoder`"``.
+  `` "zui_app: demo.App declares unknown `zuiLoder`" ``.
+
 - **Surface loss.** `suspendSurfaces()` (`Driver.suspendSurfaces`) is
   called when the platform takes the windows' surfaces away, as Android
   does on pause or a GPU on a lost device: each window's surface is
@@ -3193,22 +3274,22 @@ pub fn Decoder(comptime Ui: type) type    // init(gpa, .of(Ui)); next(reader): .
   deliveries) serialize automatically when they are plain data, and
   otherwise must declare `zuiSerialize` and `zuiDeserialize`, checked at
   comptime:
-  ``"zui_wire: delivery of source `catalog` holds a pointer (*const Catalog); declare zuiSerialize on it to send it"``.
-  `zuiSerialize(self, serializer)` writes with `serializer.write(value)`,
-  and `zuiDeserialize(deserializer)` reads with `deserializer.read(T)`;
-  both take the wire's own type as `anytype`, so a source that is not
-  sent never imports `zui_wire`.
+  `` "zui_wire: delivery of source `catalog` holds a pointer (*const Catalog); declare zuiSerialize on it to send it" ``.
+  `zuiSerialize(self, serializer)` writes with
+  `serializer.write(value)`, and `zuiDeserialize(deserializer)` reads
+  with `deserializer.read(T)`; both take the wire's own type as
+  `anytype`, so a source that is not sent never imports `zui_wire`.
 - **The fonts.** A stream's header carries the text contract's
   fingerprint, and a renderer whose fonts differ rejects it rather than
   drawing overflowing text. When either side has no `zuiFingerprint`,
   nothing is checked.
 - **Limits.** Encoding allocates only in `init`; the decoder reserves
   what `Capacity` says (by default what the context's limits allow) and
-  fails a message that does not fit with `error.CapacityExceeded`, since a
-  delta cannot be applied in part. A message cut short fails with
-  `error.EndOfStream` and leaves the decoder as it was, so a reader given
-  the stream in pieces, as a browser is, reads it again when the rest
-  arrives.
+  fails a message that does not fit with `error.CapacityExceeded`, since
+  a delta cannot be applied in part. A message cut short fails with
+  `error.EndOfStream` and leaves the decoder as it was, so a reader
+  given the stream in pieces, as a browser is, reads it again when the
+  rest arrives.
 
 A wire renderer and a wire host make a remote client nothing more than a
 host plus a renderer:
@@ -3234,9 +3315,9 @@ while (try client.frame(&host, &renderer)) {}
   returns false. Host requests go back with the frame, for the client's
   host to apply. It declares no services, so an application behind it
   finds every `has_*` false and falls back as on a host without them.
-- **The wire renderer** writes each frame as changes from the last, after
-  a header with the application's fonts' fingerprint, and declares the
-  commands, colors and payload types `Ui` generates, so `zui_app`
+- **The wire renderer** writes each frame as changes from the last,
+  after a header with the application's fonts' fingerprint, and declares
+  the commands, colors and payload types `Ui` generates, so `zui_app`
   reports what the client's renderer lowers and `zui_app.contextConfig`
   of it gives back `Ui`'s images, custom payloads, materials and fonts.
   It may submit on a render thread.
@@ -3278,9 +3359,9 @@ afterwards. A fade multiplies the alpha of every color they draw by an
 opacity from 1 to 0, linear or cubic as `zui_motion`'s easings; `.none`
 holds them unchanged and asks only for a frame at the instant it ends,
 and a fade asks for the next frame while it lasts. The fade is chosen
-once per ghost per frame, so `.none` runs no alpha code and `.linear`
-no easing, and no set of fades is declared. An element inside another
-that leaves with it is drawn only in the outer one's ghost. A ghost is
+once per ghost per frame, so `.none` runs no alpha code and `.linear` no
+easing, and no set of fades is declared. An element inside another that
+leaves with it is drawn only in the outer one's ghost. A ghost is
 dropped when its element is declared again, and every ghost at once
 under `reduced_motion`. A ghost whose commands or text do not fit is not
 kept, and reported as `exit_ghost_commands`.
@@ -3297,16 +3378,16 @@ nothing until it builds with Tracy.
 ### 19.11 `zui_design`
 
 The default maker of `zui.design.Tokens` (§18): `Preferences.from` the
-environment and the user's choices, and `resolve(design, preferences,
-*Tokens)`, which makes palettes from seeds, solves every declared pair's
-contrast and color vision, applies the density and the type scale, and
-returns what it repaired, without allocating, and
-`checkDistinguished(design, components)`, which checks each component's
-`zuiDistinguish` pairs against a design at comptime. It also holds the audit of
-a finished frame (`audit`), the axes and levels of a component's
-permutations (`Permutations`, `PermutationKey`), and the verdict file and
-report the review writes (§18.8). `zui_design.default` is zui's own
-design, on the bundled fonts.
+environment and the user's choices, and
+`resolve(design, preferences, *Tokens)`, which makes palettes from
+seeds, solves every declared pair's contrast and color vision, applies
+the density and the type scale, and returns what it repaired, without
+allocating, and `checkDistinguished(design, components)`, which checks
+each component's `zuiDistinguish` pairs against a design at comptime. It
+also holds the audit of a finished frame (`audit`), the axes and levels
+of a component's permutations (`Permutations`, `PermutationKey`), and
+the verdict file and report the review writes (§18.8).
+`zui_design.default` is zui's own design, on the bundled fonts.
 
 ---
 
@@ -3318,8 +3399,8 @@ design, on the bundled fonts.
   their parent's content box, on each axis that does not scroll; grow
   siblings proportional to weight except where clamped; overflow only
   once every shrinkable child is at its minimum, and free space only
-  once every growing child is at its max; no negative or NaN size;
-  child lists that agree with the parent links and counts; commands in
+  once every growing child is at its max; no negative or NaN size; child
+  lists that agree with the parent links and counts; commands in
   nondecreasing layer order, with clips balanced in each layer. These
   read only a `Frame`: `frame.sweep()` returns the first one broken, as
   a `SweepFailure` naming the invariant and the element or command, and
@@ -3333,17 +3414,17 @@ design, on the bundled fonts.
 - **Allocation discipline:** every test runs with a failing allocator
   after `init`.
 - **Compile-error tests** for every message in this document.
-- **Sources under ThreadSanitizer,** with many producers against a reader
-  that swaps at random intervals, and on a single-threaded `Io` where
-  every producer runs inline.
+- **Sources under ThreadSanitizer,** with many producers against a
+  reader that swaps at random intervals, and on a single-threaded `Io`
+  where every producer runs inline.
 - **Replay:** a recorded session replays to identical commands without
   starting any work.
 
 ### 20.2 Budgets
 
 On one 2020-era desktop core at its base clock (the reference is an
-i9-10900K at 3.7 GHz, Turbo Boost off and the `performance` governor, the
-mode `bench-compare` measures in), so that a budget is judged on the
+i9-10900K at 3.7 GHz, Turbo Boost off and the `performance` governor,
+the mode `bench-compare` measures in), so that a budget is judged on the
 same clock as every comparison:
 
 | Scenario | Budget |
@@ -3362,61 +3443,62 @@ same clock as every comparison:
   and wide trees, a realistic document view, cold text on one thread and
   in parallel, a render thread against one thread, a renderer reading a
   frame of 1,000 labels' commands, timed as a phase of its own, and
-  startup (`init`, `initBuffer`, first frames). It fails on any allocation after `init`,
-  and reports each phase's fastest, median and 95th-percentile frame,
-  warning when a phase's frames fall into two clusters. `--core <n>` pins
-  it to one core at a raised priority; `--machine-json <path>` records
-  the machine's state; `--capabilities` lists the options it supports.
-  `--list-scenarios` lists the scenarios, `--scenario <name>` (repeated)
-  runs only those, and `--order-seed <n>` shuffles their order; startup
-  scenarios always run last, since their page faults are part of what
-  they time. `--counters` also counts each phase's cycles, instructions,
-  branch misses, L1D read misses and last-level misses through Linux's
-  `perf_event_open`, user mode only, keeping each event's fewest per
-  frame, and refuses counts the kernel had to multiplex. The
-  `ZUI_BENCH_LAYOUT_SEED` environment variable moves the stack by up to
-  4 KiB and each `Context`'s memory within 4 KiB; the
-  `-Dbench-layout-seed` build option moves every function by up to
-  4080 bytes. `--results-dir <dir>` writes the times with the machine
+  startup (`init`, `initBuffer`, first frames). It fails on any
+  allocation after `init`, and reports each phase's fastest, median and
+  95th-percentile frame, warning when a phase's frames fall into two
+  clusters. `--core <n>` pins it to one core at a raised priority;
+  `--machine-json <path>` records the machine's state; `--capabilities`
+  lists the options it supports. `--list-scenarios` lists the scenarios,
+  `--scenario <name>` (repeated) runs only those, and `--order-seed <n>`
+  shuffles their order; startup scenarios always run last, since their
+  page faults are part of what they time. `--counters` also counts each
+  phase's cycles, instructions, branch misses, L1D read misses and
+  last-level misses through Linux's `perf_event_open`, user mode only,
+  keeping each event's fewest per frame, and refuses counts the kernel
+  had to multiplex. The `ZUI_BENCH_LAYOUT_SEED` environment variable
+  moves the stack by up to 4 KiB and each `Context`'s memory within 4
+  KiB; the `-Dbench-layout-seed` build option moves every function by up
+  to 4080 bytes. `--results-dir <dir>` writes the times with the machine
   they came from (OS and version, CPU, cores, caches, the target built
   for, the power settings and the commit) to
   `<dir>/<machine fingerprint>/<commit>.json`.
 - **`zig build bench-report -- <dir> [<commit>]`** sets one commit's
   results from each machine side by side, each divided by that machine's
-  box tree in the same phase, and names the scenarios whose relative cost
-  differs most between machines.
-- **`zig build bench-compare -- <base> [<head>]`** alternates two commits
-  on one machine, pinned to one core after both are built, recording the
-  machine's state before every run. It reports the median of the paired
-  head/base ratios with a bootstrap 95% confidence interval (a fixed
-  seed, 10,000 resamples), and calls a change only when the whole
-  interval lies beyond that time's noise band. `--calibrate` measures
-  the bands by comparing a commit with itself, and saves them for the
-  machine's setup; without them, each band is 2%. Rounds continue until
-  every interval is narrower than its target (`--target-width`, 1%, or
-  the band if wider) or the time budget (`--time-budget`, 420 s) is
-  spent; `--rounds` fixes their number. `--require-quiet` refuses to run
-  while turbo is on. When both sides can, each round runs one scenario at
-  a time, from each side's installed benchmark, in a new random order,
-  alternating which side goes first from one scenario to the next;
-  otherwise each round runs every scenario at once. The rounds take
-  turns with `--layouts` layouts (3), fresh for each comparison: each a
-  seed for the stack, the `Context` memory and, with each side built once
-  per layout and in parallel, the code, plus on Linux a random length of
-  padding in the environment. The interval resamples layouts and then the
-  rounds within them, so a change that only moves code is not called.
+  box tree in the same phase, and names the scenarios whose relative
+  cost differs most between machines.
+- **`zig build bench-compare -- <base> [<head>]`** alternates two
+  commits on one machine, pinned to one core after both are built,
+  recording the machine's state before every run. It reports the median
+  of the paired head/base ratios with a bootstrap 95% confidence
+  interval (a fixed seed, 10,000 resamples), and calls a change only
+  when the whole interval lies beyond that time's noise band.
+  `--calibrate` measures the bands by comparing a commit with itself,
+  and saves them for the machine's setup; without them, each band is 2%.
+  Rounds continue until every interval is narrower than its target
+  (`--target-width`, 1%, or the band if wider) or the time budget
+  (`--time-budget`, 420 s) is spent; `--rounds` fixes their number.
+  `--require-quiet` refuses to run while turbo is on. When both sides
+  can, each round runs one scenario at a time, from each side's
+  installed benchmark, in a new random order, alternating which side
+  goes first from one scenario to the next; otherwise each round runs
+  every scenario at once. The rounds take turns with `--layouts` layouts
+  (3), fresh for each comparison: each a seed for the stack, the
+  `Context` memory and, with each side built once per layout and in
+  parallel, the code, plus on Linux a random length of padding in the
+  environment. The interval resamples layouts and then the rounds within
+  them, so a change that only moves code is not called.
   `--metric cycles` or `instructions` compares hardware counts instead
   of times.
 - **`zig build counts`**, instruction counts under Callgrind for the
   single-threaded scenarios, from an executable always built for one CPU
-  model without libc, over a fixed number of frames, so they are the same
-  on every machine. CI fails on more than 2% growth over the parent
+  model without libc, over a fixed number of frames, so they are the
+  same on every machine. CI fails on more than 2% growth over the parent
   commit. Beside each count, Callgrind's simulated I1, D1 and last-level
   cache misses and branch mispredictions, under a fixed cache geometry;
   they show the direction of a memory change and never fail the check.
   Wall-clock times on shared runners are reported, never compared.
-- **Every feature that claims a speedup ships with its measurement,** and
-  a feature whose win is not measured does not ship.
+- **Every feature that claims a speedup ships with its measurement,**
+  and a feature whose win is not measured does not ship.
 
 ---
 
@@ -3441,11 +3523,12 @@ The order follows the dependencies of the design, not a calendar.
 | Set aside | the macOS host, and macOS's counters, skin and IME; the contracts keep their macOS shapes (the `cocoa` surface, vibrancy) | not built until macOS is taken up |
 
 Two rules hold throughout:
+
 - **One breaking release.** Everything that changes the shape of the
   record, the context's parameters or the contracts lands in stage 2 and
   3, before any host or wire format freezes it.
-- **A module before core.** A feature that can be built on the public API
-  is; the core gains only what a module proves it cannot do without.
+- **A module before core.** A feature that can be built on the public
+  API is; the core gains only what a module proves it cannot do without.
 
 ---
 

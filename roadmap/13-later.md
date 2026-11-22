@@ -11,6 +11,7 @@ queue.
 | `13-later:02-dedicated-benchmark-machine` A dedicated benchmark machine | not planned |
 
 Ideas without an item yet:
+
 - **Docking and tear-off panels,** once `10-reach:05-many-windows` has
   more than one window.
 - **A grid layout,** if wrap is not enough.
@@ -28,16 +29,17 @@ Each measured by `01-measure:03-instruction-counts-in-ci` and
 
 ## 13-later:02-dedicated-benchmark-machine — A dedicated benchmark machine
 
-A self-hosted, bare-metal CI runner set up as `01-measure:05-pinned-runs`
-describes, the only way wall-clock times could gate CI. Until then CI
-reports times and gates on instruction counts. A decision for when the
-hardware exists.
+A self-hosted, bare-metal CI runner set up as
+`01-measure:05-pinned-runs` describes, the only way wall-clock times
+could gate CI. Until then CI reports times and gates on instruction
+counts. A decision for when the hardware exists.
 
 ---
 
 ## Not taken from Clay
 
 Deliberate, and each a reason to choose zui:
+
 - a global current context;
 - `void*` payloads and callbacks in the hot path;
 - 32-bit ids;

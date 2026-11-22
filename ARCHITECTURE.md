@@ -1,8 +1,8 @@
 # Architecture
 
-SPEC.md is the contract. This document is the map: which layer holds each
-part of an application built on zui, how the parts meet at the frame
-boundary, and how today's code becomes what the spec describes.
+SPEC.md is the contract. This document is the map: which layer holds
+each part of an application built on zui, how the parts meet at the
+frame boundary, and how today's code becomes what the spec describes.
 ROADMAP.md says when each part is built.
 
 ## 1. The layers
@@ -34,16 +34,17 @@ ROADMAP.md says when each part is built.
            (engine, vocabulary, contracts and their checks)
 ```
 
-- **Dependencies point one way.** The core depends on nothing. A renderer
-  that imports `zui` only for its vocabulary pays nothing for the engine,
-  because Zig analyzes only what is used, so there is no separate types
-  package.
+- **Dependencies point one way.** The core depends on nothing. A
+  renderer that imports `zui` only for its vocabulary pays nothing for
+  the engine, because Zig analyzes only what is used, so there is no
+  separate types package.
 - **Hosts and renderers meet at one type,** `zui.Surface`.
 - **The composition root** is the application or `zui_app`, the only
   place that names a concrete host and renderer.
-- **Every default is replaceable.** Nothing in the core names a module, so
-  an application can swap `zui_async` for its own sources, `zui_widgets`
-  for its own controls, or `zui_app` for its own loop, and keep the rest.
+- **Every default is replaceable.** Nothing in the core names a module,
+  so an application can swap `zui_async` for its own sources,
+  `zui_widgets` for its own controls, or `zui_app` for its own loop, and
+  keep the rest.
 
 ## 2. The frame boundary
 
@@ -60,9 +61,9 @@ Frame = endFrame(declare(beginFrame(state, FrameRecord, Sources)))
 | | diagnostics: limits, refusals, lowerings |
 | | after the frame: demand (`framesSinceRead`, keys asked) and `nextFrame(sources)` |
 
-Nothing crosses in between. That is what makes relay, replay, testing and
-remote rendering the same mechanism: each is a producer or consumer of
-one of those two values.
+Nothing crosses in between. That is what makes relay, replay, testing
+and remote rendering the same mechanism: each is a producer or consumer
+of one of those two values.
 
 - **A recorder, a network link and a test driver** are all listeners on
   `relayTo` or producers of records.
@@ -95,8 +96,8 @@ host.zuiPoll ──► FrameRecord ──► ui.beginFrame(record, &sources)
            └── producers publish ───┴── Waker.wake (sticky)
 ```
 
-The loader runs after `endFrame`, so it sees the demand of the frame just
-declared, and before the wait, so work it starts can end that wait.
+The loader runs after `endFrame`, so it sees the demand of the frame
+just declared, and before the wait, so work it starts can end that wait.
 Everything above the wait is one turn, `zui_app.Session.step()`, which
 never blocks. Who waits is the host's loop half: `run` waits in
 `zuiWait`; a host that declares `zuiRun` schedules the next turn on the
@@ -123,25 +124,24 @@ only plain names are types the application uses directly: a source's
 | Wire payload | an application type with pointers | `zuiSerialize`, `zuiDeserialize` | | §19.6 |
 
 **Proving a contract takes two implementations.** Each has a conformance
-suite in `zui_testing` that every implementation runs in its package's CI
-job, and
-each is proven by an adapter before a native implementation (the raylib
-adapter, then the Windows host). An implementation's harness keeps only
-what is its own: its window, its renderer or host, and how it reads a
-frame back or makes the OS report an event. What harnesses share is
-`zui_testing`'s: `ReadBack`, a frame read back in either row order, which
-answers the suite's `pixel` and `extendedPixel`, and `PolledRecord`, the
-record a host's own tests poll into. A host runs the suite of its loop
-half: `expectHostConforms` for one zui waits on, `expectPushedHostConforms`
-for one whose platform runs the loop, and `expectSteppedHostConforms` for
-one its application steps.
+suite in `zui_testing` that every implementation runs in its package's
+CI job, and each is proven by an adapter before a native implementation
+(the raylib adapter, then the Windows host). An implementation's harness
+keeps only what is its own: its window, its renderer or host, and how it
+reads a frame back or makes the OS report an event. What harnesses share
+is `zui_testing`'s: `ReadBack`, a frame read back in either row order,
+which answers the suite's `pixel` and `extendedPixel`, and
+`PolledRecord`, the record a host's own tests poll into. A host runs the
+suite of its loop half: `expectHostConforms` for one zui waits on,
+`expectPushedHostConforms` for one whose platform runs the loop, and
+`expectSteppedHostConforms` for one its application steps.
 
-**What happens when something is missing** follows one table
-(SPEC.md §16.6): what zui needs is a compile error; what zui uses quietly
-falls back to a documented default; what the application asks for by name
-is a compile error at the call unless guarded by `has_*`; what only this
-machine lacks is a returned status. `zui_app` and the inspector list every
-fallback in effect.
+**What happens when something is missing** follows one table (SPEC.md
+§16.6): what zui needs is a compile error; what zui uses quietly falls
+back to a documented default; what the application asks for by name is a
+compile error at the call unless guarded by `has_*`; what only this
+machine lacks is a returned status. `zui_app` and the inspector list
+every fallback in effect.
 
 ## 5. Threads
 
@@ -217,9 +217,9 @@ What exists today, by stage:
 - **Stage 2:** `Context(config)` with `Config.limits` and the text
   contract; the frame record with `now`, scale and zoom; input as an
   ordered event log over a pointer table; `endFrame` that always returns
-  a frame; `nextFrame()`; letter spacing through the measurement key; the
-  environment and host requests; sources in the core (the contract and
-  its checks, swap and injection, demand, `Status` and `Waker`); the
+  a frame; `nextFrame()`; letter spacing through the measurement key;
+  the environment and host requests; sources in the core (the contract
+  and its checks, swap and injection, demand, `Status` and `Waker`); the
   default sources in `zui_async`, with `zui_testing`'s conformance suite
   for sources; and `Element` with `decoration` and `clip: Axes`.
   `TaskPool` is deleted, and the three backends and the demo are on this
@@ -227,16 +227,18 @@ What exists today, by stage:
 - **Stage 3:** the renderer contract and the `RenderCommand` union
   generated from `Config.commands` and the payload types, with the three
   backends as renderers; the host contract, with `RecordBuilder` and the
-  check that a host and a renderer share a surface kind, proven by
-  the raylib renderer's adapter host (`03-contracts:06-raylib-adapter-host`); the conformance suites for renderers
-  and hosts in `zui_testing`, whose renderer suite the three backends run
-  in CI and whose host suite raylib's host runs; `Features`, whose fields
-  gate their APIs with compile errors naming them; and `zui_app`, the
-  loop of SPEC.md §6.1 as a library, with a render thread, pacing and its
-  reports, running the demo on raylib's host.
-- **Stage 4:** the Windows host in `hosts/native/`, with dropped files and
-  lifecycle events in the record and the system material reported in the
-  environment; the sokol renderer draws into its `win32` window,
+  check that a host and a renderer share a surface kind, proven by the
+  raylib renderer's adapter host
+  (`03-contracts:06-raylib-adapter-host`); the conformance suites for
+  renderers and hosts in `zui_testing`, whose renderer suite the three
+  backends run in CI and whose host suite raylib's host runs;
+  `Features`, whose fields gate their APIs with compile errors naming
+  them; and `zui_app`, the loop of SPEC.md §6.1 as a library, with a
+  render thread, pacing and its reports, running the demo on raylib's
+  host.
+- **Stage 4:** the Windows host in `hosts/native/`, with dropped files
+  and lifecycle events in the record and the system material reported in
+  the environment; the sokol renderer draws into its `win32` window,
   composed with alpha.
 - **Stage 5:** relay, `relayTo` handing a listener each applied record
   with its deliveries; `zui_wire`, which writes records and frames, each
@@ -253,23 +255,23 @@ What exists today, by stage:
   grow basis, `grow` starting from the content and `grow_from_min` from
   `min`; the `aspect_ratio` rule and images' natural sizes; dividers,
   `Border.between_children`, and images' tint and corner radius in the
-  `image` command, which `zui_raylib` and `zui_sokol` draw and the renderer
-  suite checks; the floating options, targets declared later,
+  `image` command, which `zui_raylib` and `zui_sokol` draw and the
+  renderer suite checks; the floating options, targets declared later,
   `Floating.capture` and `Floating.clip`; right-to-left layout,
   `Layout.mirrored` inherited from the environment's direction and
   `Direction.right_to_left`; and wrapping rows, `ui.wrapChildren()`
   behind `features.flex_wrap`.
-- **Stage 7:** pans, by `Element.gestures`, a pointer past the touch slop
-  going to the innermost element that pans on its axis with room to move;
-  two-pointer zoom of the innermost element that accepts `zoom`, both
-  reported by `manipulation`; long presses and double taps, timed against
-  the record's `now`; momentum after a fling; custom recognizers over
-  `pointerEvents`, `claim` and `decline`, such as `zui_widgets`' lasso;
-  the intents `contextRequested`, `doubleTapped`, `dismissed`, `adjusted`
-  and `navigated`; and drag and drop, a source that declares `drag`
-  taking a pointer on the axes no region around it pans on, `startDrag`
-  keeping its typed payload in the state table, and a target reading it
-  with `dropped` or `draggedOver`.
+- **Stage 7:** pans, by `Element.gestures`, a pointer past the touch
+  slop going to the innermost element that pans on its axis with room to
+  move; two-pointer zoom of the innermost element that accepts `zoom`,
+  both reported by `manipulation`; long presses and double taps, timed
+  against the record's `now`; momentum after a fling; custom recognizers
+  over `pointerEvents`, `claim` and `decline`, such as `zui_widgets`'
+  lasso; the intents `contextRequested`, `doubleTapped`, `dismissed`,
+  `adjusted` and `navigated`; and drag and drop, a source that declares
+  `drag` taking a pointer on the axes no region around it pans on,
+  `startDrag` keeping its typed payload in the state table, and a target
+  reading it with `dropped` or `draggedOver`.
 - **The foundation, after stage 7:** `bench` and `bench-compare` pin to
   one core, record the machine, run each scenario alone in a shuffled
   order over several code and memory layouts, and judge a change by a
@@ -278,28 +280,28 @@ What exists today, by stage:
   `bench-report` sets machines side by side. In the core, the layer sort
   moves only the commands outside layer 0; the id-to-rect results are
   narrow slots indexing dense entries that carry their region's flags; a
-  press hit-tests once; and the string cache keeps a text's wrapped lines
-  beside its entries, and its keys and ages apart from its values.
-- **Stage 9:** `Frame.inspect`, and `zui_debug`'s inspector of
-  the frame's diagnostics and fallbacks, the zone times its
-  `ZoneTimer` tracer takes, the element tree and the hovered element's
-  configs, in a theme reloaded from its file through the host's file
-  watch; `zui_app` hands it each frame through `zuiObserve`, and
-  the raylib renderer's tour opens it with F12. Behind `features.semantics`,
+  press hit-tests once; and the string cache keeps a text's wrapped
+  lines beside its entries, and its keys and ages apart from its values.
+- **Stage 9:** `Frame.inspect`, and `zui_debug`'s inspector of the
+  frame's diagnostics and fallbacks, the zone times its `ZoneTimer`
+  tracer takes, the element tree and the hovered element's configs, in a
+  theme reloaded from its file through the host's file watch; `zui_app`
+  hands it each frame through `zuiObserve`, and the raylib renderer's
+  tour opens it with F12. Behind `features.semantics`,
   `Element.semantics` and `Frame.semantics()`, each node's role, label,
   value, bounds, state and actions in tree order, kept beside its frame;
   `action` events answered by `clicked`, `focused`, `adjusted`,
   `manipulation`, `contextRequested` and `dismissed`; and every
   `zui_widgets` control declaring its own, each scroll container's view
-  and each heading's level; `zui_host`'s Windows host bridges the list to
-  UI Automation through `zuiSemantics`, with every control's pattern,
-  state, changes and actions. `Frame.sweep()` checks the
-  layout and command invariants a frame must keep, and with
+  and each heading's level; `zui_host`'s Windows host bridges the list
+  to UI Automation through `zuiSemantics`, with every control's pattern,
+  state, changes and actions. `Frame.sweep()` checks the layout and
+  command invariants a frame must keep, and with
   `features.safety_sweeps` `endFrame` panics on the first one broken.
-  The web host runs the tour in a browser: the tour in a Web Worker
-  on an `Io` stepped to the page's clock, its frames drawn over
-  `zui_wire` through WebGL 2 with four samples per pixel and the
-  canvas's input sent back as records, published to GitHub Pages.
+  The web host runs the tour in a browser: the tour in a Web Worker on
+  an `Io` stepped to the page's clock, its frames drawn over `zui_wire`
+  through WebGL 2 with four samples per pixel and the canvas's input
+  sent back as records, published to GitHub Pages.
 
 The code and the spec still differ in these places, each closed by the
 roadmap item named:
@@ -318,9 +320,9 @@ roadmap item named:
 | the sokol renderer attaches and detaches only native windows, `.win32` with Direct3D 11 and `.wayland`, so a lost `.library` surface cannot be given back: `zuiAttachSurface` returns `UnsupportedSurface`, and `resumeSurfaces` with it | a renderer that a platform may take surfaces from keeps each surface's resources in `zuiAttachSurface` and `zuiDetachSurface` | `renderers/sokol/` | the first host that loses a surface (Android) |
 | `zui_host`'s Linux host speaks Wayland only, reports no low memory, IME composition or semantics, nor reduced transparency, which no portal setting carries, and leaves the title bar to the application only where the compositor leaves decorations to the client (Hyprland does not); its environment comes from the desktop portal and UPower over D-Bus, and stays at the defaults without them; its services have no menus, which Wayland lacks | a Linux host on Wayland and X11 with every report the Windows host makes | `hosts/native/` | `10-reach:01-linux-host` |
 
-Unchanged in shape: element storage in pre-order structure-of-arrays, the
-layout passes, the segment cache, ids, the state table, the frame arenas,
-parallel measurement and the module boundary.
+Unchanged in shape: element storage in pre-order structure-of-arrays,
+the layout passes, the segment cache, ids, the state table, the frame
+arenas, parallel measurement and the module boundary.
 
 ## 8. Packages
 
@@ -345,7 +347,8 @@ zui is one repository of packages, each with its own `build.zig` and
 | `themes/` | `zui_themes` | skins for OS design languages (`11-polish:08-zui-themes`); a skeleton today |
 | `examples/` | `zui_examples` | samples and the template project (`11-polish:09-template-project`, `11-polish:10-samples`); a skeleton today |
 
-`hosts/web/`, `themes/` and `examples/` were created ahead of their items.
+`hosts/web/`, `themes/` and `examples/` were created ahead of their
+items.
 
 Text is laid out once, in `zui_glyphs`, and read twice: a font system's
 `zuiMeasure` and every renderer's drawing take a run's glyph positions
@@ -355,65 +358,74 @@ additive. A renderer declares the placement it draws as
 `glyph_placement` (the terminal's cells, every glyph one cell wide;
 otherwise the pixel grid), and a font system lays text out for it. A
 renderer is handed the text contract its frames were measured with as
-`anytype`, erases it to `zui_glyphs.Fonts`, rasterizes the glyphs a frame
-needs into a `zui_glyphs.Atlas` reserved at `init`, in the texels its
-texture takes (sokol and raylib RGBA, the browser RG8), and places the
-quads `zui_glyphs.glyphQuads` gives it, each half a texel wider than its
-glyph's coverage, into the blank texels the atlas keeps between glyphs,
-so a pixel on a turned glyph's edge looks the same whichever way a
-rasterizer decides it; so no renderer names a font system's type, and no
-renderer advances a pen of its own. A renderer has no fonts of its own:
-text in a font id the fonts do not have is not drawn. `zui_truetype` compiles
-stb_truetype in from `src/stb_truetype.c` without a C library on every
-target, allocating only from the scratch the atlas reserves.
-Every package has its build and a CI job of its own, and names core by path, so a change to core is built and
-tested against each of them in place; each runs its own steps from its
-own directory, and the root's `test-all` and `check-all` run them all.
-CI runs every package's job on every push, with a leg for each OS the
-package runs on, and core's job from the root, which forwards core's
-steps, with a leg for each optimize mode, Tracy, ThreadSanitizer, 32-bit
-x86 and each cross-compiled target; its benchmarks and instruction counts
-run only when a push changes something under `core/`.
+`anytype`, erases it to `zui_glyphs.Fonts`, rasterizes the glyphs a
+frame needs into a `zui_glyphs.Atlas` reserved at `init`, in the texels
+its texture takes (sokol and raylib RGBA, the browser RG8), and places
+the quads `zui_glyphs.glyphQuads` gives it, each half a texel wider than
+its glyph's coverage, into the blank texels the atlas keeps between
+glyphs, so a pixel on a turned glyph's edge looks the same whichever way
+a rasterizer decides it; so no renderer names a font system's type, and
+no renderer advances a pen of its own. A renderer has no fonts of its
+own: text in a font id the fonts do not have is not drawn.
+`zui_truetype` compiles stb_truetype in from `src/stb_truetype.c`
+without a C library on every target, allocating only from the scratch
+the atlas reserves. Every package has its build and a CI job of its own,
+and names core by path, so a change to core is built and tested against
+each of them in place; each runs its own steps from its own directory,
+and the root's `test-all` and `check-all` run them all. CI runs every
+package's job on every push, with a leg for each OS the package runs on,
+and core's job from the root, which forwards core's steps, with a leg
+for each optimize mode, Tracy, ThreadSanitizer, 32-bit x86 and each
+cross-compiled target; its benchmarks and instruction counts run only
+when a push changes something under `core/`.
 
 A target is a `main` in a renderer's or host's package that names an
 app, a host, a renderer and a font system at one place, as
 `renderers/raylib/examples/tour.zig` names `zui_tour.App` on
 `zui_raylib.Host`, `zui_raylib.Renderer` and `zui_truetype.Text`, adding
 only what its host or its flags need (screenshots, the startup
-measurement, the terminal's `--dump`). Each host builds a `FrameRecord`, from events where its library reports them and through
+measurement, the terminal's `--dump`). Each host builds a `FrameRecord`,
+from events where its library reports them and through
 `zui.InputSampler` where it reports state (raylib), then waits as
-`nextFrame` says. Each is a renderer (`03-contracts:01-renderer-contract`): a `Renderer` type implementing
+`nextFrame` says. Each is a renderer
+(`03-contracts:01-renderer-contract`): a `Renderer` type implementing
 the renderer contract, whose `config()` (`zui_raylib`'s through
-`zui_app.contextConfig`) builds the `Config` from its
-declarations, so its `switch` over the commands names exactly what it
-draws (the terminal's names only the five base commands). `zui_raylib` is
-also a host (`03-contracts:06-raylib-adapter-host`): `zui_raylib.Host` waits in GLFW and samples raylib's
-input, and its targets run through `zui_app`; so is `zui_terminal`:
-`zui_terminal.Host` decodes the terminal's input and waits on it, closes
-at `close`, and its targets run through `zui_app`. The sokol renderer has no host of its own:
-it draws into a native host's `win32` window without
-sokol_app, with D3D11 through a DirectComposition swapchain that keeps
-alpha so a system material shows (`04-native-host:02-system-material`), and `zui_host` runs the tour and
-the showcase that way (`04-native-host:01-windows-host`), through `zui_app` in `zui_truetype`'s text (`04-native-host:03-app-text-contract`);
-on Linux it draws into a native host's `wayland` surface with OpenGL
-through EGL, and `zui_host`'s Linux host runs the same targets (`10-reach:01-linux-host`). Its Windows host runs its message loop on a thread of its own. Its
-`remote` example runs the tour on `zui_wire`'s host and renderer
-in one process, and draws it in another, through a `zui_wire.Client` over
-the Windows host and the sokol renderer (`05-wire:04-rendering-elsewhere`), and its `theme` example
-restyles a window when its theme file changes, through the host's file
-watch (`05-wire:05-watching-files`). The tour imports no renderer, so it builds for
-`wasm32-freestanding`, for the web host to run in a worker declared for
-`zui_webgl.Renderer` (`09-seeing-the-ui:04-demo-in-browser`).
+`zui_app.contextConfig`) builds the `Config` from its declarations, so
+its `switch` over the commands names exactly what it draws (the
+terminal's names only the five base commands). `zui_raylib` is also a
+host (`03-contracts:06-raylib-adapter-host`): `zui_raylib.Host` waits in
+GLFW and samples raylib's input, and its targets run through `zui_app`;
+so is `zui_terminal`: `zui_terminal.Host` decodes the terminal's input
+and waits on it, closes at `close`, and its targets run through
+`zui_app`. The sokol renderer has no host of its own: it draws into a
+native host's `win32` window without sokol_app, with D3D11 through a
+DirectComposition swapchain that keeps alpha so a system material shows
+(`04-native-host:02-system-material`), and `zui_host` runs the tour and
+the showcase that way (`04-native-host:01-windows-host`), through
+`zui_app` in `zui_truetype`'s text
+(`04-native-host:03-app-text-contract`); on Linux it draws into a native
+host's `wayland` surface with OpenGL through EGL, and `zui_host`'s Linux
+host runs the same targets (`10-reach:01-linux-host`). Its Windows host
+runs its message loop on a thread of its own. Its `remote` example runs
+the tour on `zui_wire`'s host and renderer in one process, and draws it
+in another, through a `zui_wire.Client` over the Windows host and the
+sokol renderer (`05-wire:04-rendering-elsewhere`), and its `theme`
+example restyles a window when its theme file changes, through the
+host's file watch (`05-wire:05-watching-files`). The tour imports no
+renderer, so it builds for `wasm32-freestanding`, for the web host to
+run in a worker declared for `zui_webgl.Renderer`
+(`09-seeing-the-ui:04-demo-in-browser`).
 
 The terminal renderer, `zui_terminal`, keeps layout in pixel-like units,
-`Text.cell_size` (8×16) to a cell, and paints a cell when its center lies
-inside a command's bounds. It declares cell placement, and its `Text`
-measures through `zui_glyphs`' cells, as its drawing places each glyph. `src/cells.zig` paints a frame's commands into
-a `CellBuffer`; `src/screen.zig` double-buffers it and writes only the
-cells that changed; `src/input.zig`'s `InputDecoder` turns UTF-8, VT key
-sequences, SGR mouse reports and focus reports into a frame record's
-events; `src/terminal.zig` enters raw mode on the alternate screen, waits
-as `nextFrame` says, and wakes through a console input record on Windows
+`Text.cell_size` (8×16) to a cell, and paints a cell when its center
+lies inside a command's bounds. It declares cell placement, and its
+`Text` measures through `zui_glyphs`' cells, as its drawing places each
+glyph. `src/cells.zig` paints a frame's commands into a `CellBuffer`;
+`src/screen.zig` double-buffers it and writes only the cells that
+changed; `src/input.zig`'s `InputDecoder` turns UTF-8, VT key sequences,
+SGR mouse reports and focus reports into a frame record's events;
+`src/terminal.zig` enters raw mode on the alternate screen, waits as
+`nextFrame` says, and wakes through a console input record on Windows
 and a pipe elsewhere; `src/host.zig`'s `Host` puts them together as
 zui's host contract, handing the `Renderer` its stdout writer in each
 `.terminal` surface. Its conformance harness reads each pixel back as
@@ -421,50 +433,52 @@ the cell covering it, so it passes the renderer suite at a tolerance of
 0, and its `test` step runs the suite too. Its targets are
 `examples/tour.zig`, the whole tour, less the screens whose commands a
 terminal does not draw, and `examples/showcase.zig`, the UI every
-renderer's showcase target draws, both in `zui_truetype`'s text laid out in cells;
-each takes `--dump`, which draws frames into cells without a terminal
-and prints their glyphs (`examples/dump.zig`).
+renderer's showcase target draws, both in `zui_truetype`'s text laid out
+in cells; each takes `--dump`, which draws frames into cells without a
+terminal and prints their glyphs (`examples/dump.zig`).
 
 The raylib renderer, `zui_raylib`, names raylib as a lazy dependency, so
 raylib is fetched only when the package's own `build()` runs, as the
-root's does not. `src/root.zig` holds the `Renderer`, which draws into raylib's own
-window or a render texture (`.library`) and draws the text contract it
-is given from a `zui_glyphs` atlas uploaded as a texture, and the `Host`, which samples raylib's state through
-`zui.InputSampler` and waits in GLFW past raylib, with a timeout for an
-instant. `src/conformance.zig` runs both suites in hidden
-windows: the renderer suite reads each frame back from a render texture,
-and the host suite scripts the sampled state through `Host.script`; its
-text is `zui_truetype.Text`, in its default font.
-`examples/tour.zig` runs the tour through `zui_app`, with screenshots
-drawn offscreen, the startup measurement and the run's report in
-`zui_debug`'s panel, and `examples/showcase.zig` the showcase. On Linux its
-build links through LLVM and LLD, because Zig's own ELF linker rejects
-the `.sframe` relocations in the system's crt1.o, and moves raylib's
-system libraries from its static library onto the module, because LLD
-fails the link on the shared libraries Zig would archive into it.
+root's does not. `src/root.zig` holds the `Renderer`, which draws into
+raylib's own window or a render texture (`.library`) and draws the text
+contract it is given from a `zui_glyphs` atlas uploaded as a texture,
+and the `Host`, which samples raylib's state through `zui.InputSampler`
+and waits in GLFW past raylib, with a timeout for an instant.
+`src/conformance.zig` runs both suites in hidden windows: the renderer
+suite reads each frame back from a render texture, and the host suite
+scripts the sampled state through `Host.script`; its text is
+`zui_truetype.Text`, in its default font. `examples/tour.zig` runs the
+tour through `zui_app`, with screenshots drawn offscreen, the startup
+measurement and the run's report in `zui_debug`'s panel, and
+`examples/showcase.zig` the showcase. On Linux its build links through
+LLVM and LLD, because Zig's own ELF linker rejects the `.sframe`
+relocations in the system's crt1.o, and moves raylib's system libraries
+from its static library onto the module, because LLD fails the link on
+the shared libraries Zig would archive into it.
 
 The sokol renderer, `zui_sokol`, names sokol-zig as a lazy dependency,
 and `text/truetype/` by path for its conformance harness, so sokol-zig
 and stb are fetched only when the package's own `build()` runs, as the
 root's does not; given `-Dtarget=wasm32-freestanding` it makes nothing.
-`src/renderer.zig` draws with sokol_gl and shaders of its own, on D3D11 (Windows), Metal (macOS) or OpenGL (Linux, and with
-`-Dgl=true` anywhere), into sokol_app's swapchain (`.library`), an
-offscreen image in `.sdr` or `.scrgb_fp16` (`.offscreen`), a native
-host's `win32` window, or its `wayland` surface through EGL
-(`src/egl.zig`). The renderer starts a layer whenever the clip changes,
-a backdrop blur must sample what came before, or a material follows
-shapes, and replays the layers in order, each under its own scissor
-rectangle. A context drawn by it is configured with
+`src/renderer.zig` draws with sokol_gl and shaders of its own, on D3D11
+(Windows), Metal (macOS) or OpenGL (Linux, and with `-Dgl=true`
+anywhere), into sokol_app's swapchain (`.library`), an offscreen image
+in `.sdr` or `.scrgb_fp16` (`.offscreen`), a native host's `win32`
+window, or its `wayland` surface through EGL (`src/egl.zig`). The
+renderer starts a layer whenever the clip changes, a backdrop blur must
+sample what came before, or a material follows shapes, and replays the
+layers in order, each under its own scissor rectangle. A context drawn
+by it is configured with
 `zui_app.contextConfig(zui_sokol.Renderer, .{ .Text = … })`; its `Image`
-and `Material` are `src/root.zig`'s and `src/material.zig`'s. The shaders are written in
-`src/*.glsl` and checked in as the `.glsl.zig` sokol-shdc makes of them for
-GLSL 410, HLSL 5 and Metal, so a build never runs sokol-shdc; its
-`shaders` step regenerates them, and formatting skips them.
-`src/conformance.zig` runs the renderer suite in a sokol_app window's
-first frame, into the swapchain and into offscreen images, always with
-OpenGL, since sokol_gfx cannot read a frame back and the harness reads
-it with `glReadPixels` and `glGetTexImage`; its text is
-`zui_truetype.Text`, in its default font. On Linux its build links
+and `Material` are `src/root.zig`'s and `src/material.zig`'s. The
+shaders are written in `src/*.glsl` and checked in as the `.glsl.zig`
+sokol-shdc makes of them for GLSL 410, HLSL 5 and Metal, so a build
+never runs sokol-shdc; its `shaders` step regenerates them, and
+formatting skips them. `src/conformance.zig` runs the renderer suite in
+a sokol_app window's first frame, into the swapchain and into offscreen
+images, always with OpenGL, since sokol_gfx cannot read a frame back and
+the harness reads it with `glReadPixels` and `glGetTexImage`; its text
+is `zui_truetype.Text`, in its default font. On Linux its build links
 through LLVM and LLD, as the raylib renderer's does.
 
 The native hosts, `zui_host`, choose their directory by the target's OS:
@@ -476,12 +490,13 @@ its own (`linux/dbus.zig`). Its `test` step runs the unit tests and
 `windows/conformance.zig` or `linux/conformance.zig`, which run zui's
 host suite and the host's own tests against windows the user never sees,
 reading the Windows host's through a UI Automation client
-(`windows/uia_client.zig`); `check` compiles them and every example.
-The examples in `examples/`, the `tour` and `showcase` targets among
-them, are drawn by the sokol renderer through `examples/sokol_renderer.zig`, which the
-package names by path as a lazy dependency, so sokol-zig and stb are
-fetched only when its own `build()` runs, as the root's does not. On
-Linux its build links through LLVM and LLD, as the renderers' do.
+(`windows/uia_client.zig`); `check` compiles them and every example. The
+examples in `examples/`, the `tour` and `showcase` targets among them,
+are drawn by the sokol renderer through `examples/sokol_renderer.zig`,
+which the package names by path as a lazy dependency, so sokol-zig and
+stb are fetched only when its own `build()` runs, as the root's does
+not. On Linux its build links through LLVM and LLD, as the renderers'
+do.
 
 The WebGL renderer, `zui_webgl`, is the drawing half of the browser's
 client: `src/draw_list.zig` lays a frame's commands out as triangles in
@@ -493,41 +508,41 @@ through two imports, declaring what it draws with the sokol renderer's
 `Image` and `Material` shapes, so an application configures its context
 for it on any target; `RendererOn(Page)` draws onto a page of a test's
 own, as its native conformance harness, `src/conformance.zig`, does.
-`web/frame_drawer.mjs` draws each `DrawnFrame` through WebGL 2. It
-names `text/glyphs/` by path, no third-party library, and never a host or
-a font system; its `check` compiles its tests for `wasm32-freestanding`.
+`web/frame_drawer.mjs` draws each `DrawnFrame` through WebGL 2. It names
+`text/glyphs/` by path, no third-party library, and never a host or a
+font system; its `check` compiles its tests for `wasm32-freestanding`.
 
 The web host, `zui_web`, names `renderers/webgl/` by path for the
-client's drawing, `text/` by path for the client's text, `apps/tour/`
-by path for the tour, and `renderers/sokol/` by path, lazily, for
+client's drawing, `text/` by path for the client's text, `apps/tour/` by
+path for the tour, and `renderers/sokol/` by path, lazily, for
 `test-draw`'s reference. `src/text.zig` is the client's text: the
 TrueType fonts the page hands over, in the order the tour added them,
 into memory reserved at `init`, held by a `zui_truetype.Text` that has
-no default font, so the client embeds none.
-Once the page hands fonts over, the client's stream carries their
-fingerprint, and a stream measured with other fonts is refused.
-`src/browser.zig` is the client's WebAssembly exports, decoding a stream
-with `src/frame_stream.zig` and writing input records with
-`src/record_stream.zig` and `src/browser_input.zig`, for a context of the
-tour's shape (`src/demo_ui.zig`); `src/tour_worker.zig` runs the tour in
-a Web Worker through `src/tour_session.zig`, which steps a
-`zui_app.Session` of `zui_tour.App` on `src/stepped_io.zig`'s `Io`, on a
-stepped host over the page's records and a renderer that declares what
-`zui_webgl.Renderer` declares and writes each frame as wire bytes for the
-page, folding the `Io`'s next wake into the session's with
+no default font, so the client embeds none. Once the page hands fonts
+over, the client's stream carries their fingerprint, and a stream
+measured with other fonts is refused. `src/browser.zig` is the client's
+WebAssembly exports, decoding a stream with `src/frame_stream.zig` and
+writing input records with `src/record_stream.zig` and
+`src/browser_input.zig`, for a context of the tour's shape
+(`src/demo_ui.zig`); `src/tour_worker.zig` runs the tour in a Web Worker
+through `src/tour_session.zig`, which steps a `zui_app.Session` of
+`zui_tour.App` on `src/stepped_io.zig`'s `Io`, on a stepped host over
+the page's records and a renderer that declares what
+`zui_webgl.Renderer` declares and writes each frame as wire bytes for
+the page, folding the `Io`'s next wake into the session's with
 `NextFrame.sooner`. `src/host.zig` is the web host's logic,
 `HostOn(Platform)`, a pushed host over a platform type that gives it the
 page's clock, events and event loop, tested natively on a scripted one;
 `src/browser_host.zig` is `Host`, `HostOn` the imports of the worker it
 runs in, with the exports that worker calls, and `src/worker.zig` the
 shared memory, task threads and `SteppedIo` an application's module runs
-on there, which the tour target, `examples/tour.zig`, names. `web/` holds the page, its service worker, the worker glue and the
-Node scripts the checks run, and `tools/` the native programs they run:
-the tour's stream (`demo_stream.zig`), its frames in a worker's ticks
+on there, which the tour target, `examples/tour.zig`, names. `web/`
+holds the page, its service worker, the worker glue and the Node scripts
+the checks run, and `tools/` the native programs they run: the tour's
+stream (`demo_stream.zig`), its frames in a worker's ticks
 (`tour_frames.zig`), the sokol renderer's drawing of them
-(`draw_reference.zig`), which decodes them for `zui_sokol.Renderer`, field
-for field the same shape, and its replay of the page's records
-(`replay_input.zig`).
-`test-draw` lives here, since it draws through the client and its page.
-Only the reference drawing links sokol; on Linux the tools link through
-LLVM and LLD, as the renderers' do.
+(`draw_reference.zig`), which decodes them for `zui_sokol.Renderer`,
+field for field the same shape, and its replay of the page's records
+(`replay_input.zig`). `test-draw` lives here, since it draws through the
+client and its page. Only the reference drawing links sokol; on Linux
+the tools link through LLVM and LLD, as the renderers' do.

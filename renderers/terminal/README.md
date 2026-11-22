@@ -4,13 +4,12 @@
 events of zui's frame records, measures text in cells through zui's text
 contract, and paints zui's frames as 24-bit-color cells, as a renderer;
 `zui_terminal.Host` is a host on the terminal the process runs in, so
-`zui_app` runs an application there.
-It declares cell placement (`Renderer.glyph_placement`), so its `Text`,
-or any font system laid out for it, measures every glyph one cell wide,
-as it is drawn.
-It needs no library besides zui, and a terminal with VT sequences, 24-bit
-color and SGR mouse reports: Windows Terminal, the Windows 10+ console,
-or any xterm-compatible terminal on Linux and macOS.
+`zui_app` runs an application there. It declares cell placement
+(`Renderer.glyph_placement`), so its `Text`, or any font system laid out
+for it, measures every glyph one cell wide, as it is drawn. It needs no
+library besides zui, and a terminal with VT sequences, 24-bit color and
+SGR mouse reports: Windows Terminal, the Windows 10+ console, or any
+xterm-compatible terminal on Linux and macOS.
 
 ```zig
 // build.zig, with `zui` the dependency from the main README
@@ -43,9 +42,9 @@ The host enters raw mode on the alternate screen, decodes what the
 terminal sends into each record, and hands the renderer, in each
 `.terminal` surface, the size in cells and its writer on stdout. The
 renderer keeps the screen, which `init` sizes to the first surface. A
-line written to stdout or stderr meanwhile stays among the
-cells until they change, so its targets pass `zui_app` a `notify` that
-leaves out the `.started` report. The same parts make a loop of your own:
+line written to stdout or stderr meanwhile stays among the cells until
+they change, so its targets pass `zui_app` a `notify` that leaves out
+the `.started` report. The same parts make a loop of your own:
 
 ```zig
 var terminal = try zui_terminal.Terminal.enter(io);
@@ -71,15 +70,17 @@ while (!decoder.quit_requested) {
 `zui_terminal.config(...)` builds the `Config` from `Renderer`'s
 declarations: it declares no optional commands and no payload types, so
 its `switch` over the commands names only the five base commands. To
-paint into a `CellBuffer` of your own, call `zui_terminal.render` instead.
+paint into a `CellBuffer` of your own, call `zui_terminal.render`
+instead.
 
-`terminal.wait`, and the host's `zuiWait`, sleep as `nextFrame` says: not at all, until a
-requested instant, or until input, a resize or a wake, so an idle UI uses
-no CPU. `terminal.waker()`, and the host's `zuiWaker`, is a `zui.Waker` for sources' producers: on
-Windows it writes a console input record, elsewhere it writes to a pipe,
-and either way a wake that arrives before the wait still ends it. On
-Linux and macOS a resize does not wake `poll`, so an idle wait looks at
-the size every 250 ms and runs a frame only when it changed.
+`terminal.wait`, and the host's `zuiWait`, sleep as `nextFrame` says:
+not at all, until a requested instant, or until input, a resize or a
+wake, so an idle UI uses no CPU. `terminal.waker()`, and the host's
+`zuiWaker`, is a `zui.Waker` for sources' producers: on Windows it
+writes a console input record, elsewhere it writes to a pipe, and either
+way a wake that arrives before the wait still ends it. On Linux and
+macOS a resize does not wake `poll`, so an idle wait looks at the size
+every 250 ms and runs a frame only when it changed.
 
 Layout stays in pixel-like units: a cell is `Text.cell_size` units (8×16
 by default), so a UI written for a pixel renderer still lays out
@@ -98,26 +99,28 @@ bounds.
 | focus | focus reports (`CSI I` / `CSI O`) as the environment's `window_focused` |
 
 What a terminal cannot do:
+
 - **One font, one size.** `Text.zuiMeasure` ignores both: every code
   point is one cell, plus the letter spacing after it, and an invalid
-  byte one cell of U+FFFD. Wide characters
-  (CJK, most emoji) take two cells on screen but are measured as one.
+  byte one cell of U+FFFD. Wide characters (CJK, most emoji) take two
+  cells on screen but are measured as one.
 - **Borders never overwrite glyphs.** zui draws borders after their
   children, so a border cell that already holds text keeps it.
 - **No cursor shapes or IME window.** The frame's host requests are not
   applied.
 
-Its targets name the terminal's host and
-renderer and `zui_truetype.Text`, laid out one glyph per cell: `zig build
-tour` runs the whole [tour](../../apps/tour/README.md), less the screens whose commands a terminal
-does not draw (Transforms and Materials), which `zui_tour` leaves out as
-it does on any renderer, and `zig build showcase` the showcase, its
-controls on whole cells. `--dump` draws either into cells without a
-terminal and prints the glyphs: the tour's a screen at 180×56 cells
-(`--screen <name>`), or every screen it is offered (`--every-screen`),
-failing when one cuts text short, the showcase's three frames at 100×30 with the
-pointer on "Hover me". `--frames <count>` ends a run after that many
-frames, through `Host.close`.
+Its targets name the terminal's host and renderer and
+`zui_truetype.Text`, laid out one glyph per cell: `zig build tour` runs
+the whole [tour](../../apps/tour/README.md), less the screens whose
+commands a terminal does not draw (Transforms and Materials), which
+`zui_tour` leaves out as it does on any renderer, and
+`zig build showcase` the showcase, its controls on whole cells. `--dump`
+draws either into cells without a terminal and prints the glyphs: the
+tour's a screen at 180×56 cells (`--screen <name>`), or every screen it
+is offered (`--every-screen`), failing when one cuts text short, the
+showcase's three frames at 100×30 with the pointer on "Hover me".
+`--frames <count>` ends a run after that many frames, through
+`Host.close`.
 
 ## Development
 

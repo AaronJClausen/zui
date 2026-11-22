@@ -10,11 +10,11 @@ const Tour = zui_tour.App(.{ .Host = zui_raylib.Host, .Renderer = zui_raylib.Ren
 ```
 
 is an application `zui_app.run` runs. It sets its text in the three
-`zui_fonts` typefaces, laid out for the placement the renderer draws, and
-offers a screen only when the renderer draws what it needs. It imports no
-renderer, host or font system, and compiles for `wasm32-freestanding`.
-Each renderer's or host's `tour` target names it with its own host,
-renderer and font system:
+`zui_fonts` typefaces, laid out for the placement the renderer draws,
+and offers a screen only when the renderer draws what it needs. It
+imports no renderer, host or font system, and compiles for
+`wasm32-freestanding`. Each renderer's or host's `tour` target names it
+with its own host, renderer and font system:
 
 | Target | Run from |
 |---|---|
@@ -28,16 +28,16 @@ declared, and in the last second; why each frame was declared (input, a
 resize, `requestFrame`, a `requestFrameAt` deadline, a source); what
 `nextFrame` asked for; the cost of `beginFrame`, declaration, layout and
 emission, and the renderer's drawing; element and command counts; and
-how many texts missed the measurement cache. **Ctrl+I** opens a draggable
-frame inspector with the last 120 frames, the frame's limits and
-diagnostics, and the environment. **F12** opens zui's own inspector,
-`zui_debug`, along the right edge: the frame's diagnostics, the fallbacks
-in effect (what the renderer lowers and the host lacks), each zone's time
-from its `ZoneTimer` tracer, the element tree, and the configs of the
-element under the pointer. `zui_app`'s `zuiObserve` hands it each frame.
-The tour sets the record's zoom and the environment changes it makes up,
-hands each frame to `zui_debug` while its panel is open, and times each
-step for the strip.
+how many texts missed the measurement cache. **Ctrl+I** opens a
+draggable frame inspector with the last 120 frames, the frame's limits
+and diagnostics, and the environment. **F12** opens zui's own inspector,
+`zui_debug`, along the right edge: the frame's diagnostics, the
+fallbacks in effect (what the renderer lowers and the host lacks), each
+zone's time from its `ZoneTimer` tracer, the element tree, and the
+configs of the element under the pointer. `zui_app`'s `zuiObserve` hands
+it each frame. The tour sets the record's zoom and the environment
+changes it makes up, hands each frame to `zui_debug` while its panel is
+open, and times each step for the strip.
 
 Each screen belongs to a lane, which the rail marks beside its title.
 
@@ -60,8 +60,8 @@ Each screen belongs to a lane, which the rail marks beside its title.
 
 Ctrl+1 to Ctrl+0 jump to the first ten screens, Ctrl+PgDn and Ctrl+PgUp
 to the next and previous, Ctrl+= and Ctrl+- zoom (through
-`FrameParams.zoom`), Ctrl+L declares a frame at every refresh to watch the
-costs live, and Tab moves focus.
+`FrameParams.zoom`), Ctrl+L declares a frame at every refresh to watch
+the costs live, and Tab moves focus.
 
 ![Harbor, the flagship console](../../renderers/raylib/docs/harbor.png)
 

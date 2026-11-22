@@ -57,9 +57,9 @@ An application run by `zui_app` calls `zui_tracy.frameMark()` from its
 nothing, so the same code traces nothing and Tracy is never fetched.
 
 Build with `zig build -Dzui-tracy=true`. On a Linux whose own C runtime
-Zig's linker cannot read (`fatal linker error: unhandled relocation type
-R_X86_64_PC64`), add `-Dtarget=x86_64-linux-gnu`, which links against
-the glibc Zig ships.
+Zig's linker cannot read
+(`fatal linker error: unhandled relocation type R_X86_64_PC64`), add
+`-Dtarget=x86_64-linux-gnu`, which links against the glibc Zig ships.
 Then run the application and connect Tracy's profiler. Its version must
 match the client zui links, which is Tracy 0.14.1.
 
@@ -106,10 +106,10 @@ application.
 
 ### The application's own zones
 
-The tracer contract carries only `zui.TraceZone`, and `zui_tracy` has
-no zone of the application's. With `-Dzui-tracy=true`, though, Tracy's
-client is linked into the program, so the application can call Tracy's
-C API itself. Gate it on `zui_tracy.enabled`, and a build without Tracy
+The tracer contract carries only `zui.TraceZone`, and `zui_tracy` has no
+zone of the application's. With `-Dzui-tracy=true`, though, Tracy's
+client is linked into the program, so the application can call Tracy's C
+API itself. Gate it on `zui_tracy.enabled`, and a build without Tracy
 neither references nor links it:
 
 ```zig
@@ -268,26 +268,27 @@ fn reportFrame(ui: *const Ui, frame: *const Ui.Frame) void {
 ```
 
 `.immediately` comes from a `ui.requestFrame()` in the frame just
-declared, or a source holding something not yet taken: an animation
-that asks for every frame, or a producer that publishes faster than it
-needs to. `.at` comes from the earliest `ui.requestFrameAt`, such as a
-caret's blink. `zui_app` logs each limit exceeded, the first time it
-happens in a run, through `Options.notify`.
+declared, or a source holding something not yet taken: an animation that
+asks for every frame, or a producer that publishes faster than it needs
+to. `.at` comes from the earliest `ui.requestFrameAt`, such as a caret's
+blink. `zui_app` logs each limit exceeded, the first time it happens in
+a run, through `Options.notify`.
 
 To measure idling, do what the tour's `--measure-idle` does: after a few
 seconds of warm-up, read the process's CPU time (`getrusage` on Linux
 and macOS, `GetProcessTimes` on Windows) at a frame asked for with
 `ui.requestFrameAt`, again ten seconds later, and count the frames
-between. An idle application declares no frame in that time, and
-zui's budget for it is 0% CPU. Run from `renderers/raylib/` or
+between. An idle application declares no frame in that time, and zui's
+budget for it is 0% CPU. Run from `renderers/raylib/` or
 `hosts/native/`, `zig build tour -- --measure-idle` prints the tour's.
 
 ### Measuring a change
 
 A profile shows where time goes; whether a change made a frame faster
 needs a measurement that the machine's noise cannot fake:
-- pin the process to one core (`taskset -c 2` on Linux, `start /affinity 4`
-  on Windows) and keep other work off it;
+
+- pin the process to one core (`taskset -c 2` on Linux,
+  `start /affinity 4` on Windows) and keep other work off it;
 - fix the CPU frequency, as [the next section](#quieting-the-machine)
   describes;
 - run the two builds alternately, A, B, A, B, many times, never all of
@@ -320,9 +321,9 @@ powercfg /setacvalueindex scheme_current sub_processor PROCTHROTTLEMAX 99
 powercfg /setactive scheme_current
 ```
 
-The first line picks the High Performance plan. A maximum processor state
-of 99% keeps the clock at or below its base frequency, which turns Turbo
-Boost off. `PROCTHROTTLEMAX 100` turns it back on.
+The first line picks the High Performance plan. A maximum processor
+state of 99% keeps the clock at or below its base frequency, which turns
+Turbo Boost off. `PROCTHROTTLEMAX 100` turns it back on.
 
 On Linux:
 
@@ -338,8 +339,8 @@ echo 0 | sudo tee /sys/devices/system/cpu/cpu13/online
 setarch -R zig build bench-compare -- main --core 3 --require-quiet
 ```
 
-Then run `zig build bench-compare -- --calibrate` once, so comparisons on
-this setup are judged against its own noise.
+Then run `zig build bench-compare -- --calibrate` once, so comparisons
+on this setup are judged against its own noise.
 
 ## Comparing machines
 

@@ -2,28 +2,41 @@ AaronJClausen/zui · **main** @ 075fbbd · Zig 0.16
 
 # zui Feature Tour
 
-Everything a zui consumer can build with today, one feature at a time, each shown in the code you would write. The examples follow one running application: **Darkroom**, a photo library with albums, a thumbnail grid, a viewer and a settings panel.
+Everything a zui consumer can build with today, one feature at a time,
+each shown in the code you would write. The examples follow one running
+application: **Darkroom**, a photo library with albums, a thumbnail
+grid, a viewer and a settings panel.
 
 - **7** modules beside core
 - **3** renderers + 1 native host
 - **0** allocations after init
 - 4,096 boxes: ~57 µs declare, ~109 µs layout, at 3.7 GHz
 
-> **How to read the snippets.** Every zui name and signature is checked against the source at this commit. Application names (`App`, `Photo`, `Fonts`, `decodeThumbnail` and so on) are made up for the example, and the snippets were not compiled as a whole program.
+> **How to read the snippets.** Every zui name and signature is checked
+> against the source at this commit. Application names (`App`, `Photo`,
+> `Fonts`, `decodeThumbnail` and so on) are made up for the example, and
+> the snippets were not compiled as a whole program.
 
 <a id="core"></a>
 
 ## 01. Declaring UI
 
-The core: a context sized at compile time, elements declared as nested calls each frame, layout, text, and a flat list of render commands out.
+The core: a context sized at compile time, elements declared as nested
+calls each frame, layout, text, and a flat list of render commands out.
 
 <a id="context"></a>
 
 ### Configuring a context · *shipped*
 
-A `zui.Context` is a type built from a `Config`. Everything that varies between applications goes in the `Config`: the text contract, the payload types the renderer understands, the sources, and every limit. All memory is reserved in `init`, and nothing allocates after it.
+A `zui.Context` is a type built from a `Config`. Everything that varies
+between applications goes in the `Config`: the text contract, the
+payload types the renderer understands, the sources, and every limit.
+All memory is reserved in `init`, and nothing allocates after it.
 
-Payload types that stay `void` remove their API. If `ImageHandle` is `void`, then `ui.image` doesn't exist and the render command union has no `image` variant. `initBuffer` runs the same context in memory you provide, with no allocator.
+Payload types that stay `void` remove their API. If `ImageHandle` is
+`void`, then `ui.image` doesn't exist and the render command union has
+no `image` variant. `initBuffer` runs the same context in memory you
+provide, with no allocator.
 
 - `zui.Context(config)`
 - `Config.limits`
@@ -65,13 +78,22 @@ pub fn main(init: std.process.Init) !void {
 }
 ```
 
-Limits are validated at compile time. For example, `state_slots` must be a power of two, and the message says so (see [compile errors](#compile-errors)).
+Limits are validated at compile time. For example, `state_slots` must be
+a power of two, and the message says so (see
+[compile errors](#compile-errors)).
 
 <a id="elements"></a>
 
 ### Elements, layout and decoration · *shipped*
 
-Each frame you declare a tree. `open` and `close` bracket a container, `box` is a leaf, and `text` is a leaf with content. An element is a struct literal: `layout` sets direction, sizing, padding, gap and alignment, and `decoration` sets background, border and corner radius. A border's `between_children` draws a divider between each two children, centered in the gap, over the children and under the border; with no `widths` it draws the dividers alone. Because `defer ui.close()` keeps the tree balanced, a helper function reads like markup.
+Each frame you declare a tree. `open` and `close` bracket a container,
+`box` is a leaf, and `text` is a leaf with content. An element is a
+struct literal: `layout` sets direction, sizing, padding, gap and
+alignment, and `decoration` sets background, border and corner radius. A
+border's `between_children` draws a divider between each two children,
+centered in the gap, over the children and under the border; with no
+`widths` it draws the dividers alone. Because `defer ui.close()` keeps
+the tree balanced, a helper function reads like markup.
 
 `src/ui/shell.zig`
 
@@ -130,13 +152,17 @@ fn settingsList(app: *App, ui: *Ui) void {
 }
 ```
 
-Elements without an `id` get an internal one. Give an element an id when you want to query it, keep state on it, scroll it, or focus it.
+Elements without an `id` get an internal one. Give an element an id when
+you want to query it, keep state on it, scroll it, or focus it.
 
 <a id="sizing"></a>
 
 ### Sizing rules · *shipped*
 
-Each axis takes one `Sizing` rule, with optional `min` and `max`. The grow basis landed in `06-text-and-layout:07-grow-basis`: `grow` starts from the content and adds a share of the free space, and `grow_equal` shares the whole width, so columns come out equal whatever they hold.
+Each axis takes one `Sizing` rule, with optional `min` and `max`. The
+grow basis landed in `06-text-and-layout:07-grow-basis`: `grow` starts
+from the content and adds a share of the free space, and `grow_equal`
+shares the whole width, so columns come out equal whatever they hold.
 
 | Rule | Behaves like | Use it for |
 |---|---|---|
@@ -183,7 +209,15 @@ fn photoInfoColumns(ui: *Ui, photo: *const Photo) void {
 
 ### Right-to-left layout · *shipped*
 
-When the host reports a right-to-left language, the whole layout mirrors: rows flow from the right, `.start` alignment is the right edge, a padding's `left` is its start side and lands on the right, floating anchors and offsets flip, text lines align to the right, and a horizontal scroller starts at its right edge. You write the layout once, in logical terms. `.mirrored = .yes` or `.no` sets a subtree either way whatever its parent, and `direction = .right_to_left` reverses one row alone, as CSS `row-reverse` does. Positions in the frame are physical, so hit testing and `rectOf` need nothing. Borders stay physical too.
+When the host reports a right-to-left language, the whole layout
+mirrors: rows flow from the right, `.start` alignment is the right edge,
+a padding's `left` is its start side and lands on the right, floating
+anchors and offsets flip, text lines align to the right, and a
+horizontal scroller starts at its right edge. You write the layout once,
+in logical terms. `.mirrored = .yes` or `.no` sets a subtree either way
+whatever its parent, and `direction = .right_to_left` reverses one row
+alone, as CSS `row-reverse` does. Positions in the frame are physical,
+so hit testing and `rectOf` need nothing. Borders stay physical too.
 
 `src/ui/compose.zig`
 
@@ -207,13 +241,26 @@ fn composeHeader(app: *App, ui: *Ui) void {
 }
 ```
 
-In Arabic or Hebrew the label sits on the right, 12 units in, the send button on the left, and the phone number still reads left to right.
+In Arabic or Hebrew the label sits on the right, 12 units in, the send
+button on the left, and the phone number still reads left to right.
 
 <a id="wrap"></a>
 
 ### Wrapping rows · *shipped*
 
-With `.features = .{ .flex_wrap = true }`, calling `ui.wrapChildren()` right after a row's `open` moves each child that would overflow the row onto a new line, as CSS `flex-wrap` does. Each line grows and shrinks its own children, so a `.grow` chip fills the rest of its line, and a child wider than the row gets a line to itself and shrinks to fit. A line is as tall as its tallest child, lines are `child_gap` apart, and `child_alignment.y` places the lines as a group and each child within its line. The row's fit width is one line, but it narrows to its widest child, and its height follows its lines, so it scrolls like any other content. Dividers go between the children of a line and between lines. Breakpoints need nothing more: branch on `ui.viewport()` or `rectOf` in your own code. Without the feature, `wrapChildren` fails to compile, and none of this is in your binary.
+With `.features = .{ .flex_wrap = true }`, calling `ui.wrapChildren()`
+right after a row's `open` moves each child that would overflow the row
+onto a new line, as CSS `flex-wrap` does. Each line grows and shrinks
+its own children, so a `.grow` chip fills the rest of its line, and a
+child wider than the row gets a line to itself and shrinks to fit. A
+line is as tall as its tallest child, lines are `child_gap` apart, and
+`child_alignment.y` places the lines as a group and each child within
+its line. The row's fit width is one line, but it narrows to its widest
+child, and its height follows its lines, so it scrolls like any other
+content. Dividers go between the children of a line and between lines.
+Breakpoints need nothing more: branch on `ui.viewport()` or `rectOf` in
+your own code. Without the feature, `wrapChildren` fails to compile, and
+none of this is in your binary.
 
 `src/ui/tags.zig`
 
@@ -230,13 +277,19 @@ fn tagBar(app: *App, ui: *Ui) void {
 }
 ```
 
-In a wide window the tags sit on one line; narrow it and they flow onto as many lines as they need, each line starting at the left edge (the right, in Arabic).
+In a wide window the tags sit on one line; narrow it and they flow onto
+as many lines as they need, each line starting at the left edge (the
+right, in Arabic).
 
 <a id="static-styles"></a>
 
 ### Static styles · *shipped*
 
-`zui.static` builds a `Style` at comptime and stores it in read-only memory. Elements reference it instead of copying it, so it costs one pointer per element. A `layout` or `decoration` set beside `style` replaces the style's. This is what brought 4,096 styled boxes down to about 28 µs to declare.
+`zui.static` builds a `Style` at comptime and stores it in read-only
+memory. Elements reference it instead of copying it, so it costs one
+pointer per element. A `layout` or `decoration` set beside `style`
+replaces the style's. This is what brought 4,096 styled boxes down to
+about 28 µs to declare.
 
 `src/ui/styles.zig`
 
@@ -274,7 +327,27 @@ fn photoCard(app: *App, ui: *Ui, photo: *const Photo, index: usize) void {
 
 ### Gradients, shadows, glow and backdrop blur · *shipped*
 
-`effects` points at a `zui.Effects`: a linear `gradient`, interpolated in OKLab, and a `shadow`, which with no offset is a glow. They take the shape of the element's decoration and its corner radius, and paint from the bottom up as shadow, background, gradient, then the element's content. A `backdrop_blur` is frosted glass: it blurs what zui drew beneath the element, within its rounded box, and lays its `tint` over it, painted between the shadow and the background. A renderer that does not declare `.backdrop_blur` draws the tint alone, so pick a tint that reads well unblurred. The sokol renderer blurs it; the raylib and terminal renderers draw the tint. The effects are copied when the element is declared, so a pointer to a local works, and an element without effects pays nothing for them, nor does a frame without any. Up to `limits.max_effects` elements a frame keep their effects, 256 by default; past it, an element is drawn without them and the diagnostics name the limit. A renderer that declares `.gradient` and `.shadow` in `zui_commands` gets those commands. For any other renderer, a gradient is lowered to a rectangle in its middle color and a shadow to nothing, and `frame.diagnostics.lowered` names what was lowered. The sokol renderer draws both and the backdrop blur, and its tour shows them on its Light & Depth screen; the raylib and terminal renderers draw the lowered forms.
+`effects` points at a `zui.Effects`: a linear `gradient`, interpolated
+in OKLab, and a `shadow`, which with no offset is a glow. They take the
+shape of the element's decoration and its corner radius, and paint from
+the bottom up as shadow, background, gradient, then the element's
+content. A `backdrop_blur` is frosted glass: it blurs what zui drew
+beneath the element, within its rounded box, and lays its `tint` over
+it, painted between the shadow and the background. A renderer that does
+not declare `.backdrop_blur` draws the tint alone, so pick a tint that
+reads well unblurred. The sokol renderer blurs it; the raylib and
+terminal renderers draw the tint. The effects are copied when the
+element is declared, so a pointer to a local works, and an element
+without effects pays nothing for them, nor does a frame without any. Up
+to `limits.max_effects` elements a frame keep their effects, 256 by
+default; past it, an element is drawn without them and the diagnostics
+name the limit. A renderer that declares `.gradient` and `.shadow` in
+`zui_commands` gets those commands. For any other renderer, a gradient
+is lowered to a rectangle in its middle color and a shadow to nothing,
+and `frame.diagnostics.lowered` names what was lowered. The sokol
+renderer draws both and the backdrop blur, and its tour shows them on
+its Light & Depth screen; the raylib and terminal renderers draw the
+lowered forms.
 
 `src/ui/viewer.zig`
 
@@ -319,7 +392,20 @@ fn photoCard(ui: *Ui, photo: *const Photo) void {
 
 ### Transforms · *shipped*
 
-`effects` can also hold a `transform`: a translation, a scale and a rotation about an `origin` inside the element's box, applied to the element, its other effects and everything inside it as they are painted. Layout ignores it, so `rectOf` is still the box the element was laid out in and its neighbours stay put, which suits animation: a dialog that grows in, a card that tilts while dragged. A pointer hits a transformed element where it is drawn, through nested transforms and the clips around them. A renderer that declares `.transform` gets `transform_begin` and `transform_end` around the element's commands, and `affine(bounds)` maps its units to its parent's; for any other, the element is drawn and hit as laid out, and `frame.diagnostics.lowered` names `.transform`. The sokol renderer draws transforms, on its tour's Transforms screen; the raylib and terminal renderers draw the element as laid out.
+`effects` can also hold a `transform`: a translation, a scale and a
+rotation about an `origin` inside the element's box, applied to the
+element, its other effects and everything inside it as they are painted.
+Layout ignores it, so `rectOf` is still the box the element was laid out
+in and its neighbours stay put, which suits animation: a dialog that
+grows in, a card that tilts while dragged. A pointer hits a transformed
+element where it is drawn, through nested transforms and the clips
+around them. A renderer that declares `.transform` gets
+`transform_begin` and `transform_end` around the element's commands, and
+`affine(bounds)` maps its units to its parent's; for any other, the
+element is drawn and hit as laid out, and `frame.diagnostics.lowered`
+names `.transform`. The sokol renderer draws transforms, on its tour's
+Transforms screen; the raylib and terminal renderers draw the element as
+laid out.
 
 `src/ui/import.zig`
 
@@ -347,7 +433,21 @@ fn draggedCard(ui: *Ui, photo: *const Photo, drag: zui.Drag) void {
 
 ### Materials · *shipped*
 
-A renderer with shaders of its own names them in `MaterialHandle`, an enum or an id, and the context's decoration gains a `material`: drawn over the element's box, in its corners, in place of its `background`. The background is the material's fallback, so a renderer that does not declare `.material` draws the background instead and `frame.diagnostics.lowered` names `.material`. A material sits under the gradient and over the shadow and backdrop blur, and a static style can carry one. Without a `MaterialHandle` the field is `void` and `Ui.Element`, `Ui.Decoration` and `Ui.Style` are `zui.Element`, `zui.Decoration` and `zui.Style`; with one they are the context's own, so a helper that returns an element names `Ui.Element`. The sokol renderer draws its own, `zui_sokol.Material`: a pattern between two colors (`solid`, `sheen`, `aurora`) drawn by its shader and moved by a phase the application turns, on its tour's Materials screen. the raylib and terminal renderers draw the fallback.
+A renderer with shaders of its own names them in `MaterialHandle`, an
+enum or an id, and the context's decoration gains a `material`: drawn
+over the element's box, in its corners, in place of its `background`.
+The background is the material's fallback, so a renderer that does not
+declare `.material` draws the background instead and
+`frame.diagnostics.lowered` names `.material`. A material sits under the
+gradient and over the shadow and backdrop blur, and a static style can
+carry one. Without a `MaterialHandle` the field is `void` and
+`Ui.Element`, `Ui.Decoration` and `Ui.Style` are `zui.Element`,
+`zui.Decoration` and `zui.Style`; with one they are the context's own,
+so a helper that returns an element names `Ui.Element`. The sokol
+renderer draws its own, `zui_sokol.Material`: a pattern between two
+colors (`solid`, `sheen`, `aurora`) drawn by its shader and moved by a
+phase the application turns, on its tour's Materials screen. the raylib
+and terminal renderers draw the fallback.
 
 `src/ui/panels.zig`
 
@@ -374,7 +474,22 @@ fn panelFor(id: zui.Id) Ui.Element {
 
 ### Corner shapes · *shipped*
 
-Every corner is round by default. `Decoration.corner_shape` makes an element's four corners `.continuous`, a superellipse that meets its sides with no break in curvature, or `.chamfer`, a 45° cut; an image takes `corner_shape` beside its `corner_radius`. Emission clamps each radius to half the element's shorter side, so `.all(1000)` makes a pill of any box. A renderer names the shapes it draws in `zui_corner_shapes`, always with `.round`, and `zui_app.contextConfig` carries them into `Config.corner_shapes`; only then do its commands carry `corner_shape`, so a context whose renderer draws round corners alone emits the same commands as before. A shape the renderer does not draw is drawn round, and `frame.diagnostics.lowered_corner_shapes` names it. `zui.cornerShapeOf(payload)` reads a command's shape either way. `Tokens.look` gives each part its shape role's shape with its radius. The sokol and WebGL renderers trace all three, point for point alike; the raylib and terminal renderers draw them round. The renderer suite reads pixels near each shape's corners, where the three differ.
+Every corner is round by default. `Decoration.corner_shape` makes an
+element's four corners `.continuous`, a superellipse that meets its
+sides with no break in curvature, or `.chamfer`, a 45° cut; an image
+takes `corner_shape` beside its `corner_radius`. Emission clamps each
+radius to half the element's shorter side, so `.all(1000)` makes a pill
+of any box. A renderer names the shapes it draws in `zui_corner_shapes`,
+always with `.round`, and `zui_app.contextConfig` carries them into
+`Config.corner_shapes`; only then do its commands carry `corner_shape`,
+so a context whose renderer draws round corners alone emits the same
+commands as before. A shape the renderer does not draw is drawn round,
+and `frame.diagnostics.lowered_corner_shapes` names it.
+`zui.cornerShapeOf(payload)` reads a command's shape either way.
+`Tokens.look` gives each part its shape role's shape with its radius.
+The sokol and WebGL renderers trace all three, point for point alike;
+the raylib and terminal renderers draw them round. The renderer suite
+reads pixels near each shape's corners, where the three differ.
 
 `src/ui/albums.zig`
 
@@ -397,7 +512,27 @@ fn reportShapes(frame: *const Ui.Frame) void {
 
 ### Nested corners · *shipped*
 
-With `features.nested_corners` on, `Decoration.nested_corners` gives an element corners concentric with those of its nearest decorated ancestor, in place of its own `corner_radius`. Each corner follows the ancestor's at the element's inset from that corner, the larger of its distances from the two sides, as laid out: `round` and `continuous` take the ancestor's drawn radius less the inset, so a card of radius 16 with padding 6 gives its filling child 10, and `chamfer` shortens its cut by (2 − √2) × the inset, keeping the cuts parallel. A corner the element does not reach, one farther in than the ancestor's radius, takes `minimum`, as does any radius below it; a child touching only a card's top edge follows only the top corners. A row or column without a decoration is passed over, and nested elements resolve outermost first, so a thumbnail in a panel in a card follows the panel. Emission resolves it, since only it knows both boxes, and every effect and border on the element takes the resolved corners. With the feature off the field holds nothing, a context's `Decoration` keeps its size and its frames cost the same, and declaring the field fails to compile with "zui: Decoration.nested_corners needs Config.features.nested_corners = true". With it on, `Ui.Decoration` is the context's own type, as it is with materials, so a `zui.Decoration` such as a look's is copied in field by field.
+With `features.nested_corners` on, `Decoration.nested_corners` gives an
+element corners concentric with those of its nearest decorated ancestor,
+in place of its own `corner_radius`. Each corner follows the ancestor's
+at the element's inset from that corner, the larger of its distances
+from the two sides, as laid out: `round` and `continuous` take the
+ancestor's drawn radius less the inset, so a card of radius 16 with
+padding 6 gives its filling child 10, and `chamfer` shortens its cut by
+(2 − √2) × the inset, keeping the cuts parallel. A corner the element
+does not reach, one farther in than the ancestor's radius, takes
+`minimum`, as does any radius below it; a child touching only a card's
+top edge follows only the top corners. A row or column without a
+decoration is passed over, and nested elements resolve outermost first,
+so a thumbnail in a panel in a card follows the panel. Emission resolves
+it, since only it knows both boxes, and every effect and border on the
+element takes the resolved corners. With the feature off the field holds
+nothing, a context's `Decoration` keeps its size and its frames cost the
+same, and declaring the field fails to compile with "zui:
+Decoration.nested_corners needs Config.features.nested_corners = true".
+With it on, `Ui.Decoration` is the context's own type, as it is with
+materials, so a `zui.Decoration` such as a look's is copied in field by
+field.
 
 `src/ui/library.zig`
 
@@ -416,7 +551,26 @@ fn albumCard(ui: *Ui, album: *const Album) void {
 
 ### HDR and wide-gamut color · *shipped*
 
-`Config.Color = zui.ExtendedColor` declares colors in linear scRGB, where 1.0 is SDR white: above it for HDR, outside 0 to 1 for wide gamut, written `.linear(4, 4, 4, 1)` or with `Color`'s own `.rgb(0x3366ff)`. Every type that holds a color follows it: `Ui.Decoration`, `Ui.Border`, `Ui.Effects`, `Ui.TextStyle`. For a renderer that draws only `zui.Color`, each is clamped as it is emitted, and `frame.diagnostics.clamped_colors` says when that changed one; `zui_wire` carries them unclamped when its context's renderer draws them. A host and a renderer that both declare `.scrgb_fp16` in `zui_output_formats` open the window with it in `WindowOptions.output_formats`, and the host picks it while its display shows HDR; `surface.outputFormat()` says which it chose. the native Windows host picks it on a monitor in HDR and reports `ui.environment().hdr_headroom`, the monitor's peak over SDR white (1 in SDR), so a theme can tell how bright a highlight may go. The sokol renderer draws that window into a half-float scRGB swapchain, with SDR white where other windows show theirs, and the native hosts'`zig build hdr` shows two and four times SDR white beside it, measured off the desktop at 2.00× and 4.00×. The renderer suite reads an FP16 target back and expects HDR white there at four times SDR white.
+`Config.Color = zui.ExtendedColor` declares colors in linear scRGB,
+where 1.0 is SDR white: above it for HDR, outside 0 to 1 for wide gamut,
+written `.linear(4, 4, 4, 1)` or with `Color`'s own `.rgb(0x3366ff)`.
+Every type that holds a color follows it: `Ui.Decoration`, `Ui.Border`,
+`Ui.Effects`, `Ui.TextStyle`. For a renderer that draws only
+`zui.Color`, each is clamped as it is emitted, and
+`frame.diagnostics.clamped_colors` says when that changed one;
+`zui_wire` carries them unclamped when its context's renderer draws
+them. A host and a renderer that both declare `.scrgb_fp16` in
+`zui_output_formats` open the window with it in
+`WindowOptions.output_formats`, and the host picks it while its display
+shows HDR; `surface.outputFormat()` says which it chose. the native
+Windows host picks it on a monitor in HDR and reports
+`ui.environment().hdr_headroom`, the monitor's peak over SDR white (1 in
+SDR), so a theme can tell how bright a highlight may go. The sokol
+renderer draws that window into a half-float scRGB swapchain, with SDR
+white where other windows show theirs, and the native
+hosts'`zig build hdr` shows two and four times SDR white beside it,
+measured off the desktop at 2.00× and 4.00×. The renderer suite reads an
+FP16 target back and expects HDR white there at four times SDR white.
 
 `src/ui/exposure.zig`
 
@@ -442,7 +596,12 @@ fn highlightSwatch(ui: *Ui, photo: *const Photo) void {
 
 ### Ids · *shipped*
 
-Ids are hashes, built at comptime where they can be. `.of` names one element, `.indexed` names one per list item, `child` and `indexedChild` scope ids under a parent so two dropdowns' options never collide, and `.dynamic` hashes a runtime string. `zui.ids` builds a struct of ids and fails to compile on a repeated name or a hash collision. Build with `-Dzui-debug=true` and duplicate-id panics name the element.
+Ids are hashes, built at comptime where they can be. `.of` names one
+element, `.indexed` names one per list item, `child` and `indexedChild`
+scope ids under a parent so two dropdowns' options never collide, and
+`.dynamic` hashes a runtime string. `zui.ids` builds a struct of ids and
+fails to compile on a repeated name or a hash collision. Build with
+`-Dzui-debug=true` and duplicate-id panics name the element.
 
 `src/ui/ids.zig`
 
@@ -472,7 +631,13 @@ fn tagChip(ui: *Ui, tag: []const u8) void {
 
 ### Text · *shipped*
 
-`ui.text` copies its bytes into the frame, so the caller's buffer can be reused immediately. A `TextStyle` carries font, size, letter spacing, line height, color, wrap mode and alignment. Measurements go through two caches, one per segment and one per whole string, so warm text costs one lookup. Text that fits on one line is laid out without walking its words. With a thread-safe text contract, a cold frame with many misses measures them in parallel, which is 4.3× as fast on 10 cores.
+`ui.text` copies its bytes into the frame, so the caller's buffer can be
+reused immediately. A `TextStyle` carries font, size, letter spacing,
+line height, color, wrap mode and alignment. Measurements go through two
+caches, one per segment and one per whole string, so warm text costs one
+lookup. Text that fits on one line is laid out without walking its
+words. With a thread-safe text contract, a cold frame with many misses
+measures them in parallel, which is 4.3× as fast on 10 cores.
 
 - `ui.text`
 - `Ui.TextStyle`
@@ -509,13 +674,19 @@ fn truncatedWidth(ui: *Ui, name: []const u8) f32 {
 }
 ```
 
-In a test, `ui.measureCalls()` confirms that a steady-state frame never reaches the text contract.
+In a test, `ui.measureCalls()` confirms that a steady-state frame never
+reaches the text contract.
 
 <a id="text-contract"></a>
 
 ### The text contract you implement · *shipped*
 
-zui's core never touches fonts. You give it a type with `zuiMeasure`, and optionally `zui_thread_safe` to allow parallel measurement and `zuiSegment` to report where a paragraph may break. Without `zuiSegment`, text breaks after spaces. With it, CJK and Thai wrap between characters. A misspelled declaration such as `zui_threadsafe` is a compile error rather than silently ignored.
+zui's core never touches fonts. You give it a type with `zuiMeasure`,
+and optionally `zui_thread_safe` to allow parallel measurement and
+`zuiSegment` to report where a paragraph may break. Without
+`zuiSegment`, text breaks after spaces. With it, CJK and Thai wrap
+between characters. A misspelled declaration such as `zui_threadsafe` is
+a compile error rather than silently ignored.
 
 `src/fonts.zig`
 
@@ -547,7 +718,19 @@ pub const Fonts = struct {
 
 ### Fonts out of the box · *shipped*
 
-`zui_truetype.Text` is a text contract you do not write: TrueType fonts on stb_truetype, laid out through `zui_glyphs`, whose one layout both measures a run and tells every renderer where to draw each glyph, so text is drawn where it was measured. Given no fonts it draws in Atkinson Hyperlegible Regular as font 0; `zui_fonts` bundles that, its bold and Liberation Mono, and only the ones you reference are embedded. Each renderer declares how it places glyphs, on the pixel grid or one per terminal cell, and the text lays out for it; a renderer has no fonts of its own, so the same typefaces draw on raylib, sokol, the browser and the terminal, and text in a font the text lacks is not drawn. Its fingerprint covers its fonts and placement, so a remote renderer with other fonts refuses your stream. Reach it through the `zui` dependency: `zui.builder.dependency("zui_truetype", .{})`.
+`zui_truetype.Text` is a text contract you do not write: TrueType fonts
+on stb_truetype, laid out through `zui_glyphs`, whose one layout both
+measures a run and tells every renderer where to draw each glyph, so
+text is drawn where it was measured. Given no fonts it draws in Atkinson
+Hyperlegible Regular as font 0; `zui_fonts` bundles that, its bold and
+Liberation Mono, and only the ones you reference are embedded. Each
+renderer declares how it places glyphs, on the pixel grid or one per
+terminal cell, and the text lays out for it; a renderer has no fonts of
+its own, so the same typefaces draw on raylib, sokol, the browser and
+the terminal, and text in a font the text lacks is not drawn. Its
+fingerprint covers its fonts and placement, so a remote renderer with
+other fonts refuses your stream. Reach it through the `zui` dependency:
+`zui.builder.dependency("zui_truetype", .{})`.
 
 `src/typefaces.zig`
 
@@ -585,7 +768,14 @@ fn snippet(ui: *Ui, typefaces: Typefaces) void {
 
 ### Images and self-drawn elements · *shipped*
 
-`ui.image` places the renderer's own image handle. `ui.custom` places a payload your renderer draws itself, such as a 3D viewport or a histogram. Both are leaves that take an `Element`, so they size, clip and hit-test like any box. Give an image its `natural_size` and a `fit` image takes it, keeping its proportions when its width grows or is squeezed. Its `tint` is multiplied into its pixels and its `corner_radius` rounds each corner; both reach the renderer in the `image` command, and the raylib and sokol renderers draw them.
+`ui.image` places the renderer's own image handle. `ui.custom` places a
+payload your renderer draws itself, such as a 3D viewport or a
+histogram. Both are leaves that take an `Element`, so they size, clip
+and hit-test like any box. Give an image its `natural_size` and a `fit`
+image takes it, keeping its proportions when its width grows or is
+squeezed. Its `tint` is multiplied into its pixels and its
+`corner_radius` rounds each corner; both reach the renderer in the
+`image` command, and the raylib and sokol renderers draw them.
 
 `src/ui/viewer.zig`
 
@@ -618,13 +808,19 @@ fn viewer(app: *App, ui: *Ui, photo: *const Photo, texture: Texture) void {
 
 ## 02. Input, interaction and state
 
-Pointer, keyboard, focus, scrolling, floating layers and per-element memory, all queried by id during declaration.
+Pointer, keyboard, focus, scrolling, floating layers and per-element
+memory, all queried by id during declaration.
 
 <a id="interaction"></a>
 
 ### Hover, press, click, disabled and cursor · *shipped*
 
-An element with `interactive` or `focusable` is hit-tested. Querying by id answers for the frame being declared: `clicked`, `hovered`, `pressed`, `focused`, and `widgetState`, which folds them into one enum for styling. A disabled element still blocks what is beneath it but is never pressed, clicked or focused. `cursor` picks the pointer shape while the element is hot.
+An element with `interactive` or `focusable` is hit-tested. Querying by
+id answers for the frame being declared: `clicked`, `hovered`,
+`pressed`, `focused`, and `widgetState`, which folds them into one enum
+for styling. A disabled element still blocks what is beneath it but is
+never pressed, clicked or focused. `cursor` picks the pointer shape
+while the element is hot.
 
 Without the widgets module, this is the whole recipe for a button:
 
@@ -663,13 +859,16 @@ fn importButton(app: *App, ui: *Ui) void {
 }
 ```
 
-There's no built-in keyboard activation here. [zui_widgets](#widgets) adds Enter and Space activation on top of this.
+There's no built-in keyboard activation here. [zui_widgets](#widgets)
+adds Enter and Space activation on top of this.
 
 <a id="focus"></a>
 
 ### Focus, tab order and focus scopes · *shipped*
 
-`focusable` puts an element in the tab order, which follows declaration order. `focus_scope` keeps Tab cycling inside a subtree, as a dialog needs. `requestFocus` moves focus programmatically.
+`focusable` puts an element in the tab order, which follows declaration
+order. `focus_scope` keeps Tab cycling inside a subtree, as a dialog
+needs. `requestFocus` moves focus programmatically.
 
 `src/ui/rename_dialog.zig`
 
@@ -702,7 +901,10 @@ fn renameDialog(app: *App, ui: *Ui) void {
 
 ### Keyboard and typed text · *shipped*
 
-Input arrives as an ordered event log in each frame record. You can ask about a key, about a chord (a key with exactly those modifiers), for the raw key events with repeat flags and scancodes, or for the committed UTF-8 typed this frame.
+Input arrives as an ordered event log in each frame record. You can ask
+about a key, about a chord (a key with exactly those modifiers), for the
+raw key events with repeat flags and scancodes, or for the committed
+UTF-8 typed this frame.
 
 `src/ui/shortcuts.zig`
 
@@ -727,7 +929,10 @@ fn shortcuts(app: *App, ui: *Ui) void {
 
 ### Clipping, culling and wheel scrolling · *shipped*
 
-`scroll` makes a container scroll with the wheel on the axes it names and clips them. `clip` clips without scrolling. Content outside a clip is culled, so it emits no render commands. The offset lives in the state table under the container's id, so you can read it and set it.
+`scroll` makes a container scroll with the wheel on the axes it names
+and clips them. `clip` clips without scrolling. Content outside a clip
+is culled, so it emits no render commands. The offset lives in the state
+table under the container's id, so you can read it and set it.
 
 `src/ui/library.zig`
 
@@ -763,7 +968,33 @@ fn photoGrid(app: *App, ui: *Ui) void {
 
 ### Gestures and intents · *shipped*
 
-An element declares what it accepts from pointers with `gestures`. Once a pointer moves 8 units from where it pressed (`zui.Gestures.touch_slop`), its axis locks, and it goes to the innermost element under the press that pans on that axis and can still move that way. So a vertical swipe on a horizontal filmstrip scrolls the page around it, a swipe past the strip's end does too, and the button it started on loses the press: no click. Scroll containers pan by touch and pen on their scrolled axes; the mouse keeps the wheel, so a mouse drag in a list stays with what it pressed. `ui.manipulation(id)` reports what pans and the wheel did to an element this frame. Declaring a gesture makes the element interactive, and without `features.gestures` it is ignored, so widgets declare it for every context: `zui_widgets`' slider keeps a horizontal drag. Two pointers pressed inside an element with `.gestures.zoom` zoom the innermost one, even when the pinch starts on a list inside it, and `manipulation` adds their scale, rotation and pivot. An element with `.long_press` turns a press held still for half a second into `contextRequested`, as a right click and the menu key do, and one with `.double_tap` reports `doubleTapped`, delaying only its own single tap until the window passes. `dismissed`, `adjusted` and `navigated` read Escape and the arrows on the focused element. A flick coasts on after the finger lifts, slowing down, through the same `manipulation` and scrolling, with `nextFrame` asking for each frame until it stops. An element with `.custom` runs your own recognizer: `ui.pointerEvents(id)` gives it the pointers pressed on it, and every other gesture waits until it calls `ui.claim(pointer)` or `ui.decline(pointer)`, which apply a frame later, a declined pointer keeping all its motion. `zui_widgets`' `lasso` is one, drawing with a pen over a map that fingers still pan.
+An element declares what it accepts from pointers with `gestures`. Once
+a pointer moves 8 units from where it pressed
+(`zui.Gestures.touch_slop`), its axis locks, and it goes to the
+innermost element under the press that pans on that axis and can still
+move that way. So a vertical swipe on a horizontal filmstrip scrolls the
+page around it, a swipe past the strip's end does too, and the button it
+started on loses the press: no click. Scroll containers pan by touch and
+pen on their scrolled axes; the mouse keeps the wheel, so a mouse drag
+in a list stays with what it pressed. `ui.manipulation(id)` reports what
+pans and the wheel did to an element this frame. Declaring a gesture
+makes the element interactive, and without `features.gestures` it is
+ignored, so widgets declare it for every context: `zui_widgets`' slider
+keeps a horizontal drag. Two pointers pressed inside an element with
+`.gestures.zoom` zoom the innermost one, even when the pinch starts on a
+list inside it, and `manipulation` adds their scale, rotation and pivot.
+An element with `.long_press` turns a press held still for half a second
+into `contextRequested`, as a right click and the menu key do, and one
+with `.double_tap` reports `doubleTapped`, delaying only its own single
+tap until the window passes. `dismissed`, `adjusted` and `navigated`
+read Escape and the arrows on the focused element. A flick coasts on
+after the finger lifts, slowing down, through the same `manipulation`
+and scrolling, with `nextFrame` asking for each frame until it stops. An
+element with `.custom` runs your own recognizer: `ui.pointerEvents(id)`
+gives it the pointers pressed on it, and every other gesture waits until
+it calls `ui.claim(pointer)` or `ui.decline(pointer)`, which apply a
+frame later, a declined pointer keeping all its motion. `zui_widgets`'
+`lasso` is one, drawing with a pen over a map that fingers still pan.
 
 `src/ui/album.zig`
 
@@ -803,7 +1034,23 @@ fn viewer(app: *App, ui: *Ui) void {
 
 ### Drag and drop · *shipped*
 
-A card that declares `.gestures.drag` is arbitrated with every other gesture: once the pointer passes the touch slop, the card takes it on the axes no element around it pans on, so in a list that scrolls vertically a sideways swipe drags the card and a vertical one scrolls the list, while the mouse, which scrolls lists with its wheel, drags on both. `ui.dragging(id)` reports the pointer and how far it has moved, and you draw what follows it, a floating element with `.capture = false` so the hit test sees what lies beneath. `ui.startDrag(id, payload)` gives the drag a payload of your own type, kept in the state table under the card while the drag lasts, even if the card leaves its list meanwhile; called on a card still pressed, after a long press say, it lifts the card itself. A target asks `ui.dropped(id, Payload)` in the frame of the release, and `ui.draggedOver(id, Payload)` while a drag is over it: any element with a hit region, the list and the card under the pointer alike, receives it, and a payload of another type is `null`, never reinterpreted. Files dropped from the OS are `filesDropped`, not this.
+A card that declares `.gestures.drag` is arbitrated with every other
+gesture: once the pointer passes the touch slop, the card takes it on
+the axes no element around it pans on, so in a list that scrolls
+vertically a sideways swipe drags the card and a vertical one scrolls
+the list, while the mouse, which scrolls lists with its wheel, drags on
+both. `ui.dragging(id)` reports the pointer and how far it has moved,
+and you draw what follows it, a floating element with `.capture = false`
+so the hit test sees what lies beneath. `ui.startDrag(id, payload)`
+gives the drag a payload of your own type, kept in the state table under
+the card while the drag lasts, even if the card leaves its list
+meanwhile; called on a card still pressed, after a long press say, it
+lifts the card itself. A target asks `ui.dropped(id, Payload)` in the
+frame of the release, and `ui.draggedOver(id, Payload)` while a drag is
+over it: any element with a hit region, the list and the card under the
+pointer alike, receives it, and a payload of another type is `null`,
+never reinterpreted. Files dropped from the OS are `filesDropped`, not
+this.
 
 `src/ui/board.zig`
 
@@ -839,7 +1086,15 @@ fn board(app: *App, ui: *Ui) void {
 
 ### Floating elements in paint layers · *shipped*
 
-A floating element takes no space in its parent's flow. It attaches to its parent, the viewport, or any element in the frame, declared before or after it, by matching an anchor point on itself to a point on the target, plus an offset. It paints in layer `z`, escaping its ancestors' clips, or with `.clip = .target` cut off where its target's children are, so a badge on a row scrolls out of sight with the row. It takes the pointer from whatever it covers, unless `.capture = false` lets the pointer through, as a tooltip should. Tooltips, popups, menus and dialogs are all built this way.
+A floating element takes no space in its parent's flow. It attaches to
+its parent, the viewport, or any element in the frame, declared before
+or after it, by matching an anchor point on itself to a point on the
+target, plus an offset. It paints in layer `z`, escaping its ancestors'
+clips, or with `.clip = .target` cut off where its target's children
+are, so a badge on a row scrolls out of sight with the row. It takes the
+pointer from whatever it covers, unless `.capture = false` lets the
+pointer through, as a tooltip should. Tooltips, popups, menus and
+dialogs are all built this way.
 
 `src/ui/tooltips.zig`
 
@@ -897,7 +1152,12 @@ fn unsavedBadge(ui: *Ui, index: usize) void {
 
 ### Per-element state across frames · *shipped*
 
-`ui.state(id, T)` returns a zeroed `*T` keyed by id and type that persists while the element keeps being declared. It is evicted a couple of frames after the element stops being declared. A slot holds at most 64 bytes, and a larger type is a compile error that tells you to store an index instead. When the table is full you get scratch memory and a diagnostic. Nothing is corrupted.
+`ui.state(id, T)` returns a zeroed `*T` keyed by id and type that
+persists while the element keeps being declared. It is evicted a couple
+of frames after the element stops being declared. A slot holds at most
+64 bytes, and a larger type is a compile error that tells you to store
+an index instead. When the table is full you get scratch memory and a
+diagnostic. Nothing is corrupted.
 
 `src/ui/album_header.zig`
 
@@ -929,7 +1189,16 @@ fn wasEverOpened(ui: *Ui) bool {
 
 ### The environment · *shipped*
 
-The host reports the user's settings as events, and `ui.environment()` holds the current values: theme, contrast, reduced motion and transparency, text scale, locale, reading direction, HDR headroom, power, window focus, and whether the system material (Mica on Windows, a compositor's blur on Wayland) shows behind the window. the native Windows host reads them from the system, and the native Linux host reads the theme, contrast and reduced motion from the XDG desktop portal and power from UPower and power-profiles-daemon, over D-Bus, and shows the material where the compositor offers `ext_background_effect_v1` or KWin's blur; where no portal answers, they stay at their defaults.
+The host reports the user's settings as events, and `ui.environment()`
+holds the current values: theme, contrast, reduced motion and
+transparency, text scale, locale, reading direction, HDR headroom,
+power, window focus, and whether the system material (Mica on Windows, a
+compositor's blur on Wayland) shows behind the window. the native
+Windows host reads them from the system, and the native Linux host reads
+the theme, contrast and reduced motion from the XDG desktop portal and
+power from UPower and power-profiles-daemon, over D-Bus, and shows the
+material where the compositor offers `ext_background_effect_v1` or
+KWin's blur; where no portal answers, they stay at their defaults.
 
 `src/ui/palette.zig`
 
@@ -958,7 +1227,12 @@ fn shouldAnimate(ui: *const Ui) bool {
 
 ### Dropped files and lifecycle events · *shipped*
 
-Files dropped onto the window arrive with their drop position and paths. Lifecycle events cover suspend, resume, a termination request (Ctrl+C, a closing console, the session ending) and low memory. the native Windows host reports all of them; the native Linux host reports dropped files, SIGINT, SIGTERM and SIGHUP as termination requests, and the system sleeping and waking as suspend and resume.
+Files dropped onto the window arrive with their drop position and paths.
+Lifecycle events cover suspend, resume, a termination request (Ctrl+C, a
+closing console, the session ending) and low memory. the native Windows
+host reports all of them; the native Linux host reports dropped files,
+SIGINT, SIGTERM and SIGHUP as termination requests, and the system
+sleeping and waking as suspend and resume.
 
 `src/ui/system.zig`
 
@@ -982,7 +1256,12 @@ fn handleSystemEvents(app: *App, ui: *Ui) void {
 
 ### Requests to the host: cursor and text input · *shipped*
 
-A frame asks the host for things the renderer doesn't handle. The pointer shape comes from the hot element's `cursor`. The text-input area comes from `requestTextInput`, which an editable calls each frame with the element it draws as its caret, so the host can place the IME window and show an on-screen keyboard. The host reads them with `frame.requests()`.
+A frame asks the host for things the renderer doesn't handle. The
+pointer shape comes from the hot element's `cursor`. The text-input area
+comes from `requestTextInput`, which an editable calls each frame with
+the element it draws as its caret, so the host can place the IME window
+and show an on-screen keyboard. The host reads them with
+`frame.requests()`.
 
 `src/ui/search.zig`
 
@@ -1007,7 +1286,32 @@ host.zuiApply(.main, requests);
 
 ### Semantics and accessibility actions · *shipped*
 
-With `features.semantics`, an element's `semantics` says what it is to an assistive technology: a role, a label, a value (text, or a position in a range), a state (checked, expanded, selected), and the actions it takes beyond those its flags and gestures already report. `frame.semantics()` lists every element that declares it, in tree order, each with its id, its laid-out bounds and the index of the node around it, its labels copied into the frame. A host bridges the list to the platform's accessibility API and reports what the screen reader asks as `action` events; each one is answered by the query of the input it stands in for, so `invoke` is a `clicked`, `adjust` an `adjusted`, `scroll` a `manipulation` and a scroll, `show_menu` a `contextRequested` and `dismiss` a `dismissed`. Every `zui_widgets` control declares its own. Without the feature, `semantics` is ignored and none of it is compiled. A host that declares `zuiSemantics` is handed the list with each frame, on the UI thread, and copies what fits into room it took when the window opened. the native Windows host bridges it to UI Automation, so Narrator reads each control's name, role, bounds and state, hears it change, and acts on it through the control's own pattern: Toggle on a checkbox, Expand and Collapse on a dropdown or disclosure, SetValue on a slider, Select on an option, and Invoke on a button, each arriving as the `action` event that answers it. A scroll container scrolls by a notch, a page or to a place in its content, as `SemanticScroll` says where its view lies; a dialog closes as a `dismiss`; an element's context menu is a `show_menu`; and a heading tells its `level`. A text field's text reads through its Value pattern and is typed with the keyboard.
+With `features.semantics`, an element's `semantics` says what it is to
+an assistive technology: a role, a label, a value (text, or a position
+in a range), a state (checked, expanded, selected), and the actions it
+takes beyond those its flags and gestures already report.
+`frame.semantics()` lists every element that declares it, in tree order,
+each with its id, its laid-out bounds and the index of the node around
+it, its labels copied into the frame. A host bridges the list to the
+platform's accessibility API and reports what the screen reader asks as
+`action` events; each one is answered by the query of the input it
+stands in for, so `invoke` is a `clicked`, `adjust` an `adjusted`,
+`scroll` a `manipulation` and a scroll, `show_menu` a `contextRequested`
+and `dismiss` a `dismissed`. Every `zui_widgets` control declares its
+own. Without the feature, `semantics` is ignored and none of it is
+compiled. A host that declares `zuiSemantics` is handed the list with
+each frame, on the UI thread, and copies what fits into room it took
+when the window opened. the native Windows host bridges it to UI
+Automation, so Narrator reads each control's name, role, bounds and
+state, hears it change, and acts on it through the control's own
+pattern: Toggle on a checkbox, Expand and Collapse on a dropdown or
+disclosure, SetValue on a slider, Select on an option, and Invoke on a
+button, each arriving as the `action` event that answers it. A scroll
+container scrolls by a notch, a page or to a place in its content, as
+`SemanticScroll` says where its view lies; a dialog closes as a
+`dismiss`; an element's context menu is a `show_menu`; and a heading
+tells its `level`. A text field's text reads through its Value pattern
+and is typed with the keyboard.
 
 `src/ui/toolbar.zig`
 
@@ -1052,7 +1356,30 @@ builder.append(.{ .action = .{ .target = node_id, .action = .invoke } });
 
 ### A custom title bar · *shipped*
 
-With `features.chrome_regions`, a window opened with `.title_bar = .custom` leaves its title bar to you, and `ui.environment().custom_title_bar` says whether it did. Mark each part you draw with `chrome`: a `.title_bar`, which the OS drags, maximizes on a double click and opens the window menu on; `.minimize_button`, `.maximize_button` and `.close_button`, which the host works when a press and its release land on them, as the system's own (hovering maximize shows snap layouts); and `.resize_*` edges and grips. `frame.chromeRegions()` lists them in tree order, and every interactive element inside a title bar, a search field or a tab, stays yours as a `.client` region. `zui_app` hands the list to the host's `zuiChromeRegions` each frame. The pointer still reaches the caption buttons, so they show hover and press, but the host ends a press it works as `pointer_cancel`, so `clicked` comes only from the keyboard and Narrator: act on it through the host's `minimize`, `toggleMaximized` and `close`, and each button works once. `ui.environment().window_maximized` picks the restore glyph. The native Windows host does all of it, keeping the system's border, rounded corners and shadow; there `zuiMenus.setBar` is `error.Unavailable`, so draw your menus in the title bar. The Wayland host asks the compositor for client-side decorations and hands presses on the title bar and the edges to it; it draws no border, so declare the `.resize_*` grips you want resized from. A compositor that insists on drawing its own title bar, as Hyprland does, gets it, and `custom_title_bar` is false.
+With `features.chrome_regions`, a window opened with
+`.title_bar = .custom` leaves its title bar to you, and
+`ui.environment().custom_title_bar` says whether it did. Mark each part
+you draw with `chrome`: a `.title_bar`, which the OS drags, maximizes on
+a double click and opens the window menu on; `.minimize_button`,
+`.maximize_button` and `.close_button`, which the host works when a
+press and its release land on them, as the system's own (hovering
+maximize shows snap layouts); and `.resize_*` edges and grips.
+`frame.chromeRegions()` lists them in tree order, and every interactive
+element inside a title bar, a search field or a tab, stays yours as a
+`.client` region. `zui_app` hands the list to the host's
+`zuiChromeRegions` each frame. The pointer still reaches the caption
+buttons, so they show hover and press, but the host ends a press it
+works as `pointer_cancel`, so `clicked` comes only from the keyboard and
+Narrator: act on it through the host's `minimize`, `toggleMaximized` and
+`close`, and each button works once. `ui.environment().window_maximized`
+picks the restore glyph. The native Windows host does all of it, keeping
+the system's border, rounded corners and shadow; there `zuiMenus.setBar`
+is `error.Unavailable`, so draw your menus in the title bar. The Wayland
+host asks the compositor for client-side decorations and hands presses
+on the title bar and the edges to it; it draws no border, so declare the
+`.resize_*` grips you want resized from. A compositor that insists on
+drawing its own title bar, as Hyprland does, gets it, and
+`custom_title_bar` is false.
 
 `src/ui/title_bar.zig`
 
@@ -1081,13 +1408,21 @@ try zui_app.run(App, init, .{ .title = "Notes", .material = .window, .title_bar 
 
 ## 03. The frame loop, timing and diagnostics
 
-How a frame starts and ends, how an idle app sleeps, and how limits and mistakes are reported.
+How a frame starts and ends, how an idle app sleeps, and how limits and
+mistakes are reported.
 
 <a id="loop-by-hand"></a>
 
 ### The loop by hand · *shipped*
 
-The host fills a `RecordBuilder` with the time, viewport, scale and events. `beginFrame` applies the record and swaps in the sources. You declare, `endFrame` lays out and always returns a frame, the renderer draws it, and the host applies its requests. `release` hands the frame back, which lets a render thread hold one while the next is declared. Finally `nextFrame` tells the host whether to draw immediately, at a time, or only on the next event. [zui_app](#zui-app) runs all of this for you.
+The host fills a `RecordBuilder` with the time, viewport, scale and
+events. `beginFrame` applies the record and swaps in the sources. You
+declare, `endFrame` lays out and always returns a frame, the renderer
+draws it, and the host applies its requests. `release` hands the frame
+back, which lets a render thread hold one while the next is declared.
+Finally `nextFrame` tells the host whether to draw immediately, at a
+time, or only on the next event. [zui_app](#zui-app) runs all of this
+for you.
 
 `src/loop.zig`
 
@@ -1118,13 +1453,20 @@ pub fn runLoop(app: *App, ui: *Ui, host: *Host, renderer: *Renderer) !void {
 }
 ```
 
-Without sources, the record is `builder.record()`, and `beginFrame` and `nextFrame` drop the sources argument. A host that can't block uses `tryBeginFrame`.
+Without sources, the record is `builder.record()`, and `beginFrame` and
+`nextFrame` drop the sources argument. A host that can't block uses
+`tryBeginFrame`.
 
 <a id="timing"></a>
 
 ### Timing, animation and idling at 0% CPU · *shipped*
 
-Each record carries a timestamp, so `ui.now()` and `ui.dt()` are deterministic and replay identically. An app animates by asking for frames. `requestFrame` asks for the next one immediately, and `requestFrameAt` schedules a wake-up. When nothing asks, `nextFrame` returns `.on_event` and the host sleeps until input arrives or a source publishes.
+Each record carries a timestamp, so `ui.now()` and `ui.dt()` are
+deterministic and replay identically. An app animates by asking for
+frames. `requestFrame` asks for the next one immediately, and
+`requestFrameAt` schedules a wake-up. When nothing asks, `nextFrame`
+returns `.on_event` and the host sleeps until input arrives or a source
+publishes.
 
 `src/ui/import_progress.zig`
 
@@ -1161,7 +1503,21 @@ fn blinkCaret(ui: *Ui, app: *App) bool {
 
 ### `zui_motion`: tweens and springs · *shipped*
 
-`zui_motion.tween(ui, id, T, target, options)` eases a value toward `target` over `duration` seconds with an `Easing` (`linear`, or cubic `ease_in`, `ease_out` and `ease_in_out`) and returns this frame's value. `zui_motion.spring` follows `target` with a critically damped spring instead, keeping its velocity when the target moves, which suits a value chasing a drag. The value is an `f32`, a `[N]f32`, a `zui.Color` (mixed per sRGB channel, as `Color.mix` and CSS transitions do), a `zui.ExtendedColor`, or a struct of them; anything else is a compile error. Each keeps its state in `ui.state`, so the first target it sees is where it starts, and a target that changes mid-flight starts again from the current value. While it moves it asks for the next frame, a `delay` asks for the instant it starts, and at rest it asks for nothing, so the app still idles. Under the environment's `reduced_motion` it lands on the target in the frame the target changes. When the state table is full it reports `.state_slots` and returns the target.
+`zui_motion.tween(ui, id, T, target, options)` eases a value toward
+`target` over `duration` seconds with an `Easing` (`linear`, or cubic
+`ease_in`, `ease_out` and `ease_in_out`) and returns this frame's value.
+`zui_motion.spring` follows `target` with a critically damped spring
+instead, keeping its velocity when the target moves, which suits a value
+chasing a drag. The value is an `f32`, a `[N]f32`, a `zui.Color` (mixed
+per sRGB channel, as `Color.mix` and CSS transitions do), a
+`zui.ExtendedColor`, or a struct of them; anything else is a compile
+error. Each keeps its state in `ui.state`, so the first target it sees
+is where it starts, and a target that changes mid-flight starts again
+from the current value. While it moves it asks for the next frame, a
+`delay` asks for the instant it starts, and at rest it asks for nothing,
+so the app still idles. Under the environment's `reduced_motion` it
+lands on the target in the frame the target changes. When the state
+table is full it reports `.state_slots` and returns the target.
 
 `src/ui/import_progress.zig`
 
@@ -1190,7 +1546,23 @@ fn importToast(app: *App, ui: *Ui) void {
 
 ### Exit animations · *shipped*
 
-An element declared with `.exit = .{ .seconds = 0.25 }` keeps drawing for a quarter of a second after the frame it was last declared in, so a toast or a closed dialog leaves without the app declaring it any longer. Its ghost is the commands its subtree emitted in that frame, inside the clip and transforms around it, drawn at the end of its layer; it takes no space, so what was below it moves up at once, and it is never hit. `fade` is `.linear` by default, or a cubic `.ease_in`, `.ease_out` or `.ease_in_out`, which multiply the alpha of every color it draws; `.none` holds it unchanged, then drops it, asking only for a frame at that instant. A fade asks for the next frame while it lasts and for nothing after. The ghost is dropped when its element is declared again, and every ghost at once under `reduced_motion`. It needs an id, and `limits.exit_ghost_commands` set to the commands to keep, with up to `max_text_bytes` of their text; at 0, the default, `exit` is ignored and costs nothing, so a widget can declare it for every context. A ghost that does not fit is not drawn, and the frame reports `.exit_ghost_commands`.
+An element declared with `.exit = .{ .seconds = 0.25 }` keeps drawing
+for a quarter of a second after the frame it was last declared in, so a
+toast or a closed dialog leaves without the app declaring it any longer.
+Its ghost is the commands its subtree emitted in that frame, inside the
+clip and transforms around it, drawn at the end of its layer; it takes
+no space, so what was below it moves up at once, and it is never hit.
+`fade` is `.linear` by default, or a cubic `.ease_in`, `.ease_out` or
+`.ease_in_out`, which multiply the alpha of every color it draws;
+`.none` holds it unchanged, then drops it, asking only for a frame at
+that instant. A fade asks for the next frame while it lasts and for
+nothing after. The ghost is dropped when its element is declared again,
+and every ghost at once under `reduced_motion`. It needs an id, and
+`limits.exit_ghost_commands` set to the commands to keep, with up to
+`max_text_bytes` of their text; at 0, the default, `exit` is ignored and
+costs nothing, so a widget can declare it for every context. A ghost
+that does not fit is not drawn, and the frame reports
+`.exit_ghost_commands`.
 
 `src/ui/saved_toast.zig`
 
@@ -1215,7 +1587,22 @@ fn savedToast(app: *App, ui: *Ui) void {
 
 ### `zui_color`: color spaces and palettes · *shipped*
 
-`zui_color` builds palettes from a few colors, at comptime, so a theme's shades are constants. `Oklab`, `Oklch` and `Hsl` convert to and from `zui.Color` (`fromColor`, `toColor`), and `Oklab` and `Oklch` to and from a linear `zui.ExtendedColor` as well, each with a straight `alpha`. OKLab is where equal distances look equally different, so `zui_color.mix(from, to, amount)` mixes in it and its middle is neither muddy nor too dark; `mixOklch` keeps the chroma and takes the shorter way around the hue circle. `ramp(steps, from, to)` gives evenly spaced colors from one to the other, both ends included. `shiftLightness(color, change)` and `withLightness(color, lightness)` move a color's OKLCH lightness for a hovered or pressed shade, and `lightnessScale(steps, color, darkest, lightest)` gives a tonal scale of its hue. A color sRGB cannot show is brought in by reducing its chroma, keeping its lightness and hue, rather than by clipping each channel. `Hsl` follows CSS's `hsl()`. A ramp or scale of fewer than two steps is a compile error.
+`zui_color` builds palettes from a few colors, at comptime, so a theme's
+shades are constants. `Oklab`, `Oklch` and `Hsl` convert to and from
+`zui.Color` (`fromColor`, `toColor`), and `Oklab` and `Oklch` to and
+from a linear `zui.ExtendedColor` as well, each with a straight `alpha`.
+OKLab is where equal distances look equally different, so
+`zui_color.mix(from, to, amount)` mixes in it and its middle is neither
+muddy nor too dark; `mixOklch` keeps the chroma and takes the shorter
+way around the hue circle. `ramp(steps, from, to)` gives evenly spaced
+colors from one to the other, both ends included.
+`shiftLightness(color, change)` and `withLightness(color, lightness)`
+move a color's OKLCH lightness for a hovered or pressed shade, and
+`lightnessScale(steps, color, darkest, lightest)` gives a tonal scale of
+its hue. A color sRGB cannot show is brought in by reducing its chroma,
+keeping its lightness and hue, rather than by clipping each channel.
+`Hsl` follows CSS's `hsl()`. A ramp or scale of fewer than two steps is
+a compile error.
 
 `src/theme/palette.zig`
 
@@ -1235,7 +1622,11 @@ pub const focus_ring = zui_color.mix(accent, .white, 0.35);
 
 ### Limits that fail softly: diagnostics · *shipped*
 
-Every limit fails the same way. zui keeps and draws what fits, and records in `frame.diagnostics` which limit was exceeded, how much the frame needed, and the first element dropped. Duplicate ids, unbalanced trees and publishes refused by full sources are reported here too. Apps that would rather stop call `check()`.
+Every limit fails the same way. zui keeps and draws what fits, and
+records in `frame.diagnostics` which limit was exceeded, how much the
+frame needed, and the first element dropped. Duplicate ids, unbalanced
+trees and publishes refused by full sources are reported here too. Apps
+that would rather stop call `check()`.
 
 `src/loop.zig`
 
@@ -1265,7 +1656,10 @@ fn strictFrame(ui: *Ui) !*const Ui.Frame {
 
 ### Frame queries · *shipped*
 
-Layout results from the previous frame are available while you declare: an element's rectangle, the pointer in an element's local coordinates, the viewport, and the primary pointer. This is how a canvas maps clicks to cells or a widget sizes a popup.
+Layout results from the previous frame are available while you declare:
+an element's rectangle, the pointer in an element's local coordinates,
+the viewport, and the primary pointer. This is how a canvas maps clicks
+to cells or a widget sizes a popup.
 
 `src/ui/viewer.zig`
 
@@ -1281,7 +1675,12 @@ fn cropOverlay(app: *App, ui: *Ui) void {
 }
 ```
 
-After `endFrame`, the frame has its own `rectOf`, `commands()` and `elementCount()`, and `inspect(index)` reports everything it kept of one element, in declaration order from the root at 0: its id and debug name, parent, laid-out rectangle, flags, layout, decoration, effects, floating and its text, image or custom content. That is enough to build your own inspector or a debug overlay.
+After `endFrame`, the frame has its own `rectOf`, `commands()` and
+`elementCount()`, and `inspect(index)` reports everything it kept of one
+element, in declaration order from the root at 0: its id and debug name,
+parent, laid-out rectangle, flags, layout, decoration, effects, floating
+and its text, image or custom content. That is enough to build your own
+inspector or a debug overlay.
 
 `src/debug/outline.zig`
 
@@ -1300,7 +1699,16 @@ fn outlineHovered(frame: *const Ui.Frame, pointer: [2]f32) ?zui.Rect {
 
 ### Safety sweeps · *shipped*
 
-`frame.sweep()` checks what every laid-out frame must keep: sizes and positions finite and not negative, child lists that agree with their parents, free space and overflow shared as the sizing rules say, children starting inside their parent's content box, and commands in nondecreasing layers with balanced clips. It returns the first invariant broken, as a `zui.SweepFailure` naming the invariant and the element or command, or null. With `features.safety_sweeps`, on by default in Debug and ReleaseSafe, `endFrame` sweeps every frame and panics on a failure, naming the frame and the element, so a layout bug stops where it happens instead of drawing wrong.
+`frame.sweep()` checks what every laid-out frame must keep: sizes and
+positions finite and not negative, child lists that agree with their
+parents, free space and overflow shared as the sizing rules say,
+children starting inside their parent's content box, and commands in
+nondecreasing layers with balanced clips. It returns the first invariant
+broken, as a `zui.SweepFailure` naming the invariant and the element or
+command, or null. With `features.safety_sweeps`, on by default in Debug
+and ReleaseSafe, `endFrame` sweeps every frame and panics on a failure,
+naming the frame and the element, so a layout bug stops where it happens
+instead of drawing wrong.
 
 `src/tests/layout_test.zig`
 
@@ -1322,7 +1730,10 @@ test "the album grid keeps every layout invariant at any width" {
 
 ### Features and compile errors · *shipped*
 
-`Config.features` turns capabilities on or off. A feature that is off generates no code and no memory, and calling its API fails to compile with a message naming the field to set. The same discipline runs through every contract. Each message below is pinned by a compile-error test.
+`Config.features` turns capabilities on or off. A feature that is off
+generates no code and no memory, and calling its API fails to compile
+with a message naming the field to set. The same discipline runs through
+every contract. Each message below is pinned by a compile-error test.
 
 `src/main.zig`
 
@@ -1358,13 +1769,21 @@ error: no field named 'volum' in struct 'zui_reflect.FieldOptionsOf(reflect_miss
 
 ## 04. Sources and `zui_async`
 
-Getting data from other threads into an immediate-mode UI without locks in declaration. Producers publish from any thread, `beginFrame` swaps each source once, declaration reads a stable view, and a loader starts work for what the UI asked for. Every source is checked under ThreadSanitizer by `expectSourceConforms`.
+Getting data from other threads into an immediate-mode UI without locks
+in declaration. Producers publish from any thread, `beginFrame` swaps
+each source once, declaration reads a stable view, and a loader starts
+work for what the UI asked for. Every source is checked under
+ThreadSanitizer by `expectSourceConforms`.
 
 <a id="sources"></a>
 
 ### Declaring sources · *shipped*
 
-`Config.Sources` is a struct whose fields are sources. Each is named by field in `ui.source(.field)`, and that field name also appears in diagnostics when a source fills up. `framesSinceRead` tells a loader whether anyone is still watching. It counts frames rather than time, so a sleeping UI never looks abandoned.
+`Config.Sources` is a struct whose fields are sources. Each is named by
+field in `ui.source(.field)`, and that field name also appears in
+diagnostics when a source fills up. `framesSinceRead` tells a loader
+whether anyone is still watching. It counts frames rather than time, so
+a sleeping UI never looks abandoned.
 
 `src/sources.zig`
 
@@ -1391,7 +1810,10 @@ pub const Thumbnails = zui_async.KeyedLoads(u64, DecodeError!Texture, .{
 
 ### `Latest`: the newest value only · *shipped*
 
-A triple buffer for state where only the newest value matters, such as battery level, sync state or a download rate. A publish never waits. `publish` returns whether the host needs waking, so a hundred publishes between frames cost one wake.
+A triple buffer for state where only the newest value matters, such as
+battery level, sync state or a download rate. A publish never waits.
+`publish` returns whether the host needs waking, so a hundred publishes
+between frames cost one wake.
 
 `src/power_monitor.zig`
 
@@ -1420,7 +1842,10 @@ fn batteryIndicator(ui: *Ui) void {
 
 ### `Stream`: every item, in order · *shipped*
 
-A bounded ring for messages and log lines. Each frame sees the items published since the last swap, read in place. When it's full, `publish` refuses with `error.Full` rather than waiting, the item stays with its producer, and the refusal shows up in diagnostics.
+A bounded ring for messages and log lines. Each frame sees the items
+published since the last swap, read in place. When it's full, `publish`
+refuses with `error.Full` rather than waiting, the item stays with its
+producer, and the refusal shows up in diagnostics.
 
 `src/importer.zig`
 
@@ -1445,7 +1870,12 @@ fn importLog(app: *App, ui: *Ui) void {
 
 ### `Task`: one piece of work with a status · *shipped*
 
-One run at a time, with optional progress. The UI switches on a `Status` union: `idle`, `running` (carrying the progress value), `ready`, `failed` and `canceled`. `failed` exists only when the result can fail with something other than `Canceled`, so an infallible task has no prong to handle. `publishing` adapts a plain function into a producer for `Io.Group.async`.
+One run at a time, with optional progress. The UI switches on a `Status`
+union: `idle`, `running` (carrying the progress value), `ready`,
+`failed` and `canceled`. `failed` exists only when the result can fail
+with something other than `Canceled`, so an infallible task has no prong
+to handle. `publishing` adapts a plain function into a producer for
+`Io.Group.async`.
 
 `src/library.zig`
 
@@ -1477,7 +1907,13 @@ fn libraryStatus(app: *App, ui: *Ui) void {
 
 ### `KeyedLoads` and the loader · *shipped*
 
-This source handles many loads driven by what the UI asks for. Declaration calls `get(key)`, which records demand and returns a status, and starts nothing. After `endFrame`, the loader takes the wanted keys from `toStart` and starts their work. Keys that stop being read are abandoned, and with `owns_resources` their results come back through `toRelease` to free. Scroll a grid of 10,000 photos and only the visible thumbnails load. The UI thread never waits.
+This source handles many loads driven by what the UI asks for.
+Declaration calls `get(key)`, which records demand and returns a status,
+and starts nothing. After `endFrame`, the loader takes the wanted keys
+from `toStart` and starts their work. Keys that stop being read are
+abandoned, and with `owns_resources` their results come back through
+`toRelease` to free. Scroll a grid of 10,000 photos and only the visible
+thumbnails load. The UI thread never waits.
 
 `src/thumbnails.zig`
 
@@ -1508,13 +1944,17 @@ pub fn runLoader(app: *App, ui: *const Ui, io: std.Io) void {
 }
 ```
 
-The raylib renderer's tour loads its thumbnail grid this way and idles at 0% CPU.
+The raylib renderer's tour loads its thumbnail grid this way and idles
+at 0% CPU.
 
 <a id="file-watch"></a>
 
 ### Watching files · *shipped*
 
-File watching is a host service. A host that offers it declares `zuiFileWatch`, and you point it at any source that takes `zui.FileChange`. the native hosts'`zig build theme` restyles its window a few milliseconds after the theme file is saved.
+File watching is a host service. A host that offers it declares
+`zuiFileWatch`, and you point it at any source that takes
+`zui.FileChange`. the native hosts'`zig build theme` restyles its window
+a few milliseconds after the theme file is saved.
 
 `src/theme.zig`
 
@@ -1539,7 +1979,23 @@ fn reloadThemeOnSave(app: *App, ui: *Ui) void {
 
 ### Host services · *shipped*
 
-Services are what the system does for an application: the clipboard, notifications, file dialogs, opening a URL, menus. Each is an optional host declaration with a checked shape. They are work, so declaration only notes that you want one, and you call it between frames, from `zuiLoader`, through `zui_app.ServicesOf(Host)`, whose `has_*` guards are known at compile time. Every call returns at once, and its answer is published into a source you choose, so a replay sees what the user chose without opening a dialog. the native Windows host reads and writes the clipboard, opens URLs, refusing paths and `file:` URLs, shows notifications as toasts, shows the shell's file dialogs, answering the paths chosen, and shows Windows' own context menus and menu bars, answering the item chosen. The native Linux host reads and writes the clipboard through the compositor's selection, shows notifications through the desktop's notification daemon, shows the desktop portal's file dialogs and hands URLs to the portal; Wayland has no native menus, so it declares none. the native hosts'`zig build services` calls every one of them from a button and shows each answer beside it.
+Services are what the system does for an application: the clipboard,
+notifications, file dialogs, opening a URL, menus. Each is an optional
+host declaration with a checked shape. They are work, so declaration
+only notes that you want one, and you call it between frames, from
+`zuiLoader`, through `zui_app.ServicesOf(Host)`, whose `has_*` guards
+are known at compile time. Every call returns at once, and its answer is
+published into a source you choose, so a replay sees what the user chose
+without opening a dialog. the native Windows host reads and writes the
+clipboard, opens URLs, refusing paths and `file:` URLs, shows
+notifications as toasts, shows the shell's file dialogs, answering the
+paths chosen, and shows Windows' own context menus and menu bars,
+answering the item chosen. The native Linux host reads and writes the
+clipboard through the compositor's selection, shows notifications
+through the desktop's notification daemon, shows the desktop portal's
+file dialogs and hands URLs to the portal; Wayland has no native menus,
+so it declares none. the native hosts'`zig build services` calls every
+one of them from a button and shows each answer beside it.
 
 `src/app.zig`
 
@@ -1579,13 +2035,18 @@ pub fn zuiLoader(app: *App, _: *const Ui, _: std.Io) void {
 
 ## 05. Widgets, the inspector and `zui_app`
 
-Optional modules built only on the public API. Each one is a separate import.
+Optional modules built only on the public API. Each one is a separate
+import.
 
 <a id="widgets"></a>
 
 ### `zui_widgets` · *shipped*
 
-Button, checkbox, slider (for any integer or float, with step snapping and keyboard control), single-line text field with caret and IME support, dropdown (from a list of labels or straight from an enum), disclosure, labeled row and labels. Each takes the context and an id and returns what changed this frame.
+Button, checkbox, slider (for any integer or float, with step snapping
+and keyboard control), single-line text field with caret and IME
+support, dropdown (from a list of labels or straight from an enum),
+disclosure, labeled row and labels. Each takes the context and an id and
+returns what changed this frame.
 
 `src/ui/settings.zig`
 
@@ -1636,13 +2097,23 @@ fn settingsPanel(app: *App, ui: *Ui) void {
 }
 ```
 
-`labeledRow` opens a row that you close yourself after declaring the control. That's flexible, but it's an easy thing to forget, and an unbalanced tree is caught only at the end of the frame.
+`labeledRow` opens a row that you close yourself after declaring the
+control. That's flexible, but it's an easy thing to forget, and an
+unbalanced tree is caught only at the end of the frame.
 
 <a id="widget-theme"></a>
 
 ### Theming widgets · *shipped*
 
-A widget set is styled by a skin: any struct that declares `zuiStyle(part, state, environment)` and returns a `zui_widgets.Style(Ui)` for each element a widget draws, so a theme pack restyles every widget without forking it. The skin reads the environment, so it follows dark mode, contrast and text size, and the style's `focus_ring` is drawn while a control has focus. A mistake in a skin fails to compile with a message naming it. `zui_widgets.DefaultSkin(Ui)` is zui's own skin: a `Theme` and an optional `dark_theme`, chosen from the environment each frame.
+A widget set is styled by a skin: any struct that declares
+`zuiStyle(part, state, environment)` and returns a
+`zui_widgets.Style(Ui)` for each element a widget draws, so a theme pack
+restyles every widget without forking it. The skin reads the
+environment, so it follows dark mode, contrast and text size, and the
+style's `focus_ring` is drawn while a control has focus. A mistake in a
+skin fails to compile with a message naming it.
+`zui_widgets.DefaultSkin(Ui)` is zui's own skin: a `Theme` and an
+optional `dark_theme`, chosen from the environment each frame.
 
 `src/ui/settings.zig`
 
@@ -1712,7 +2183,20 @@ pub const widgets: zui_widgets.Widgets(Ui, FlatSkin) = .{ .skin = .{} };
 
 ### Looks in roles: the appearance contract · *shipped*
 
-A component of your own declares its look in roles, not colors: each part names a `zui.design.ColorRole` for its surface, its text or icon and its outline, a `ShapeRole`, padding and gap in `Space` tiers, a `TypeRole` and a hit `Target`. Text and icons name the part they are drawn `.on`, so every pair the component can draw is known before it is drawn, and a part that forgets fails to compile with a message naming it. `zuiDistinguish` lists the parts, or one part in two states, that must not look alike. A raw color is allowed only as `.unchecked(color, reason)`, and the appearance lists each one with its reason. `tokens.look(Component, part, state)` answers a part's decoration, padding, gap, text style and least size from a `zui.design.Tokens`, checking the contract the first time it reads a component. `zui_design` resolves the tokens from a `Design`'s seeds and the user's preferences (below), or they can be filled by hand.
+A component of your own declares its look in roles, not colors: each
+part names a `zui.design.ColorRole` for its surface, its text or icon
+and its outline, a `ShapeRole`, padding and gap in `Space` tiers, a
+`TypeRole` and a hit `Target`. Text and icons name the part they are
+drawn `.on`, so every pair the component can draw is known before it is
+drawn, and a part that forgets fails to compile with a message naming
+it. `zuiDistinguish` lists the parts, or one part in two states, that
+must not look alike. A raw color is allowed only as
+`.unchecked(color, reason)`, and the appearance lists each one with its
+reason. `tokens.look(Component, part, state)` answers a part's
+decoration, padding, gap, text style and least size from a
+`zui.design.Tokens`, checking the contract the first time it reads a
+component. `zui_design` resolves the tokens from a `Design`'s seeds and
+the user's preferences (below), or they can be filled by hand.
 
 `src/ui/album_chip.zig`
 
@@ -1741,7 +2225,8 @@ pub fn albumChip(ui: *Ui, tokens: *const zui.design.Tokens(Ui, void), album: Alb
 }
 ```
 
-An application adds roles of its own as an enum that says which role each pairs with, and names them in a part with `.extra`:
+An application adds roles of its own as an enum that says which role
+each pairs with, and names them in a part with `.extra`:
 
 `src/ui/frame_counter.zig`
 
@@ -1769,7 +2254,31 @@ pub var tokens: zui.design.Tokens(Ui, DarkroomRoles) = .{};
 
 ### `zui_design`: tokens from seeds and preferences · *shipped*
 
-`zui_design` makes the `zui.design.Tokens` that `look` reads, from a `Design` and the user's `Preferences`. Each seed becomes a tonal ramp in OKLCH, and every role is a lightness on one in light, dark and high contrast; a hovered, focused or pressed fill moves toward the role drawn on it, and a disabled one greys and fades. Spacing comes from the density the user chose, corners from the design's shape table moved a size sharper or rounder at the user's word, and target floors stay at 24 units, 44 for touch. Your own roles take the colors of the roles their pairs name. `resolve` allocates nothing, and runs at comptime as well as at run time, so a design's dark high-contrast tokens can be a constant. Every pair of a role on its partner is held to APCA's lightness contrast and WCAG 2's ratio at once: Lc 75 and 4.5:1 for text, Lc 45 and 3:1 for outlines and the focus ring, more under high contrast, in every state's layer. A design whose own seeds miss a target fails to compile with a message naming the pair, the scheme and the lightness that would pass; a color that arrives at run time, such as the user's accent, keeps its own lightness and is moved until it passes, and `resolve` returns each repair. Under simulated protanopia, deuteranopia, tritanopia and achromatopsia, the danger, warning and success fills stay at least 0.15 apart in lightness, so they can be told apart without their hue; a user who chose a color vision gets status hues moved off the axis they confuse, or the fills held further apart. Pairs your components list in `zuiDistinguish` are checked against your design with `zui_design.checkDistinguished`, and one that would look alike without color fails to compile unless a part names its `.cue`.
+`zui_design` makes the `zui.design.Tokens` that `look` reads, from a
+`Design` and the user's `Preferences`. Each seed becomes a tonal ramp in
+OKLCH, and every role is a lightness on one in light, dark and high
+contrast; a hovered, focused or pressed fill moves toward the role drawn
+on it, and a disabled one greys and fades. Spacing comes from the
+density the user chose, corners from the design's shape table moved a
+size sharper or rounder at the user's word, and target floors stay at 24
+units, 44 for touch. Your own roles take the colors of the roles their
+pairs name. `resolve` allocates nothing, and runs at comptime as well as
+at run time, so a design's dark high-contrast tokens can be a constant.
+Every pair of a role on its partner is held to APCA's lightness contrast
+and WCAG 2's ratio at once: Lc 75 and 4.5:1 for text, Lc 45 and 3:1 for
+outlines and the focus ring, more under high contrast, in every state's
+layer. A design whose own seeds miss a target fails to compile with a
+message naming the pair, the scheme and the lightness that would pass; a
+color that arrives at run time, such as the user's accent, keeps its own
+lightness and is moved until it passes, and `resolve` returns each
+repair. Under simulated protanopia, deuteranopia, tritanopia and
+achromatopsia, the danger, warning and success fills stay at least 0.15
+apart in lightness, so they can be told apart without their hue; a user
+who chose a color vision gets status hues moved off the axis they
+confuse, or the fills held further apart. Pairs your components list in
+`zuiDistinguish` are checked against your design with
+`zui_design.checkDistinguished`, and one that would look alike without
+color fails to compile unless a part names its `.cue`.
 
 `src/appearance.zig`
 
@@ -1810,7 +2319,12 @@ comptime {
 
 ### `zui_reflect`: an editor from any struct · *shipped*
 
-`inspector` walks a struct with `@typeInfo` and declares an editor per field. A `bool` gets a checkbox, a number with min and max gets a slider, other numbers get − and + buttons, an enum gets a dropdown, `EditableText` gets a text field, a string is shown read-only, and a nested struct gets a collapsible section. Options live beside the type in `zui_inspector`, and a misspelled field name there fails to compile.
+`inspector` walks a struct with `@typeInfo` and declares an editor per
+field. A `bool` gets a checkbox, a number with min and max gets a
+slider, other numbers get − and + buttons, an enum gets a dropdown,
+`EditableText` gets a text field, a string is shown read-only, and a
+nested struct gets a collapsible section. Options live beside the type
+in `zui_inspector`, and a misspelled field name there fails to compile.
 
 `src/debug_panel.zig`
 
@@ -1850,7 +2364,34 @@ fn debugPanel(app: *App, ui: *Ui) void {
 
 ### `zui_debug`: the element tree and what's under the pointer · *shipped*
 
-`zui_debug.Inspector(Ui)` is a panel over `Frame.inspect`, floating at the right edge of the window. It opens with the frame's diagnostics: each limit exceeded, named by its `limits` field with what the frame needed, the first element past it, repeated ids, an unbalanced tree and refused publishes. Then come the fallbacks in effect: each optional command the renderer does not draw and what was drawn instead, colors clamped for a renderer without `zui_extended_color`, and whatever you hand `reportRun`, such as `zui_app`'s `Report` of what the host and renderer lack. Below them it lists the element tree, one row per element, indented by depth, with its name (its id in a build without `-Dzui-debug`), kind and size, and above it the element under the pointer: its rectangle, flags, and each field of its layout, decoration, effects, floating and text style that differs from the default. `observe` copies what it shows out of a frame after `endFrame`, so the frame is released as usual, and `declare` declares the panel in the next frame. Its own rows never appear in the tree, and while the pointer is over the panel, the element it showed stays. It sits in your application's state, sized by `limits.max_elements`, and allocates nothing. Make `zui_debug.ZoneTimer(Inner)` the context's tracer and hand it a clock with `useClock(io)`, and the panel adds a *Performance* section: each zone that ran, the steps of `beginFrame` and `endFrame` indented under them, with its time in the last frame and its mean and peak over the last 60, in milliseconds. The timer passes every zone on to `Inner`, so `zui_tracy.Tracer` still sees them, or to nothing for `void`; with any other tracer the inspector keeps no times. On `zui_app`, the `zuiObserve` hook hands you each frame on the UI thread before it is submitted; in a loop of your own, call `observe` after `endFrame`.
+`zui_debug.Inspector(Ui)` is a panel over `Frame.inspect`, floating at
+the right edge of the window. It opens with the frame's diagnostics:
+each limit exceeded, named by its `limits` field with what the frame
+needed, the first element past it, repeated ids, an unbalanced tree and
+refused publishes. Then come the fallbacks in effect: each optional
+command the renderer does not draw and what was drawn instead, colors
+clamped for a renderer without `zui_extended_color`, and whatever you
+hand `reportRun`, such as `zui_app`'s `Report` of what the host and
+renderer lack. Below them it lists the element tree, one row per
+element, indented by depth, with its name (its id in a build without
+`-Dzui-debug`), kind and size, and above it the element under the
+pointer: its rectangle, flags, and each field of its layout, decoration,
+effects, floating and text style that differs from the default.
+`observe` copies what it shows out of a frame after `endFrame`, so the
+frame is released as usual, and `declare` declares the panel in the next
+frame. Its own rows never appear in the tree, and while the pointer is
+over the panel, the element it showed stays. It sits in your
+application's state, sized by `limits.max_elements`, and allocates
+nothing. Make `zui_debug.ZoneTimer(Inner)` the context's tracer and hand
+it a clock with `useClock(io)`, and the panel adds a *Performance*
+section: each zone that ran, the steps of `beginFrame` and `endFrame`
+indented under them, with its time in the last frame and its mean and
+peak over the last 60, in milliseconds. The timer passes every zone on
+to `Inner`, so `zui_tracy.Tracer` still sees them, or to nothing for
+`void`; with any other tracer the inspector keeps no times. On
+`zui_app`, the `zuiObserve` hook hands you each frame on the UI thread
+before it is submitted; in a loop of your own, call `observe` after
+`endFrame`.
 
 `src/app.zig`
 
@@ -1885,7 +2426,20 @@ const App = struct {
 };
 ```
 
-The panel's theme is a `zui_debug.PanelTheme(FontId, Color)`, and it reloads from a ZON file while the application runs. Set the inspector's `theme_file` to a directory and a file name within it, have the host's file watch publish that directory's changes into a `zui_async.Stream(zui.FileChange, ...)` among your sources, and keep a `zui_async.Latest` of the theme beside it. `declareWithThemeFrom` takes their field names: it notes a change to the file, or a `.rescan`, and draws the panel in the theme the `Latest` last delivered. Between frames, `loadTheme(io)` reads and parses the file when it changed and hands you the theme to publish, with no allocation; a file that does not parse, as one caught half written, is an error you can log, and the panel keeps its theme until the file changes again. In the file each color is a `0xrrggbbaa` and every field is optional. A replay restyles from the delivered theme without reading a file.
+The panel's theme is a `zui_debug.PanelTheme(FontId, Color)`, and it
+reloads from a ZON file while the application runs. Set the inspector's
+`theme_file` to a directory and a file name within it, have the host's
+file watch publish that directory's changes into a
+`zui_async.Stream(zui.FileChange, ...)` among your sources, and keep a
+`zui_async.Latest` of the theme beside it. `declareWithThemeFrom` takes
+their field names: it notes a change to the file, or a `.rescan`, and
+draws the panel in the theme the `Latest` last delivered. Between
+frames, `loadTheme(io)` reads and parses the file when it changed and
+hands you the theme to publish, with no allocation; a file that does not
+parse, as one caught half written, is an error you can log, and the
+panel keeps its theme until the file changes again. In the file each
+color is a `0xrrggbbaa` and every field is optional. A replay restyles
+from the delivered theme without reading a file.
 
 `src/debug_theme.zig`
 
@@ -1923,7 +2477,14 @@ fn loadBetweenFrames(app: *App, io: std.Io, waker: zui.Waker) void {
 
 ### `zui_app`: the whole loop from one call · *shipped*
 
-You name a host and a renderer and write `zuiDeclare`, and `zui_app.run` does the rest. It opens the window, builds records, submits on a render thread when the renderer allows it, paces frames, sleeps when idle, and reports once what it's running with and each limit exceeded. The optional hooks are `init`, `deinit`, `zuiLoader` after each frame, `zuiObserve` with each frame before it is submitted, for an inspector, and `zuiRecord` for your own zoom and synthetic events. `contextConfig` derives the `Config` from the renderer's declarations.
+You name a host and a renderer and write `zuiDeclare`, and `zui_app.run`
+does the rest. It opens the window, builds records, submits on a render
+thread when the renderer allows it, paces frames, sleeps when idle, and
+reports once what it's running with and each limit exceeded. The
+optional hooks are `init`, `deinit`, `zuiLoader` after each frame,
+`zuiObserve` with each frame before it is submitted, for an inspector,
+and `zuiRecord` for your own zoom and synthetic events. `contextConfig`
+derives the `Config` from the renderer's declarations.
 
 `src/app.zig`
 
@@ -1977,13 +2538,25 @@ pub fn main(init: std.process.Init) !void {
 }
 ```
 
-Some of the notices it logs: *"limits.max_elements is 4096, but a frame needed 5210; what fit was drawn"*, and *"the full source `import_log` refused 12 publishes; raise its capacity"*. On raylib, the first frame appears about 290 ms after the process starts, and all but 5 ms of that is raylib opening its window.
+Some of the notices it logs: *"limits.max_elements is 4096, but a frame
+needed 5210; what fit was drawn"*, and *"the full source `import_log`
+refused 12 publishes; raise its capacity"*. On raylib, the first frame
+appears about 290 ms after the process starts, and all but 5 ms of that
+is raylib opening its window.
 
 <a id="many-windows"></a>
 
 ### Many windows · *shipped*
 
-Declare `zuiDeclare(app, ui, window)` and every window gets a context of its own: each hook takes the window, `zuiSources(app, window)` gives each window its sources, and data shared between windows is published into each. `Start(App).windows` opens and closes windows between frames, never in declaration, and on a host with one window `open` is a compile error unless guarded by `has_many_windows`. Each turn declares only the windows with input or a frame due, then waits once for all; the run ends with the last window. A renderer that keeps a swapchain per window declares `zuiAttachSurface` and `zuiDetachSurface`.
+Declare `zuiDeclare(app, ui, window)` and every window gets a context of
+its own: each hook takes the window, `zuiSources(app, window)` gives
+each window its sources, and data shared between windows is published
+into each. `Start(App).windows` opens and closes windows between frames,
+never in declaration, and on a host with one window `open` is a compile
+error unless guarded by `has_many_windows`. Each turn declares only the
+windows with input or a frame due, then waits once for all; the run ends
+with the last window. A renderer that keeps a swapchain per window
+declares `zuiAttachSurface` and `zuiDetachSurface`.
 
 `src/app.zig`
 
@@ -2043,13 +2616,26 @@ pub const App = struct {
 };
 ```
 
-On the native Windows and Linux hosts, up to four windows open at once, and the sokol renderer draws each through its own swapchain on one Direct3D 11 device, or its own EGL surface on one OpenGL context: two windows animating at once each draw at the rate one alone does, a 144 Hz display's on Windows, and two idle windows use next to no CPU.
+On the native Windows and Linux hosts, up to four windows open at once,
+and the sokol renderer draws each through its own swapchain on one
+Direct3D 11 device, or its own EGL surface on one OpenGL context: two
+windows animating at once each draw at the rate one alone does, a 144 Hz
+display's on Windows, and two idle windows use next to no CPU.
 
 <a id="own-loop"></a>
 
 ### Your own loop: stepping a `Session` · *shipped*
 
-When an editor, a game engine or an existing app already owns the loop and the window, step a `zui_app.Session(App)` from its frame instead of calling `run`. Each `step` polls the host, declares and submits only the windows that are due, and returns when it next wants to run, or null once the window has closed. It never blocks, so you get `zui_app`'s render thread, host requests and notices without handing it your loop. The host is a small one over the window you already have: it declares the window half (`zuiPoll`, `zuiWaker`, `zuiSurface`, `zuiApply`) and neither `zuiWait` nor `zuiRun`. Calling `run` with it, or `wait`, is a compile error that tells you to step a `Session`.
+When an editor, a game engine or an existing app already owns the loop
+and the window, step a `zui_app.Session(App)` from its frame instead of
+calling `run`. Each `step` polls the host, declares and submits only the
+windows that are due, and returns when it next wants to run, or null
+once the window has closed. It never blocks, so you get `zui_app`'s
+render thread, host requests and notices without handing it your loop.
+The host is a small one over the window you already have: it declares
+the window half (`zuiPoll`, `zuiWaker`, `zuiSurface`, `zuiApply`) and
+neither `zuiWait` nor `zuiRun`. Calling `run` with it, or `wait`, is a
+compile error that tells you to step a `Session`.
 
 `src/panel.zig`
 
@@ -2069,19 +2655,41 @@ pub fn runPanel(editor: *Editor, gpa: std.mem.Allocator, io: std.Io) !void {
 }
 ```
 
-A host whose platform owns the loop, as AppKit's or a browser page's does, declares `zuiRun` instead, and `run` hands it a `zui.Driver` to call from the platform's callbacks.
+A host whose platform owns the loop, as AppKit's or a browser page's
+does, declares `zuiRun` instead, and `run` hands it a `zui.Driver` to
+call from the platform's callbacks.
 
 <a id="contracts"></a>
 
 ## 06. The backend contracts
 
-zui draws nothing and opens no windows itself. Renderers and hosts are plain types checked at compile time, with conformance suites each runs in its package's CI job. Today there are the raylib renderer and adapter host in `renderers/raylib/`, the sokol renderer in `renderers/sokol/`, the terminal renderer and host in `renderers/terminal/`, and, in `hosts/native/`, the native Windows host (message loop on its own thread, per-monitor DPI, Mica, IME, clipboard, opening URLs, dropped files, file watching), and the native Linux host, on Wayland so far (many windows, fractional and buffer scale, pointer, wheel, keys through the compositor's keymap with their repeats, typed text, focus, cursor shapes, clipboard, dropped files, file watching through inotify, notifications, the portal's file dialogs and opening URLs, the environment from the desktop portal and UPower over D-Bus, and signals, sleep and waking as lifecycle events); and, in `hosts/web/`, the web host, which runs an application in a Web Worker and draws its frames over `zui_wire` through the WebGL renderer in `renderers/webgl/`.
+zui draws nothing and opens no windows itself. Renderers and hosts are
+plain types checked at compile time, with conformance suites each runs
+in its package's CI job. Today there are the raylib renderer and adapter
+host in `renderers/raylib/`, the sokol renderer in `renderers/sokol/`,
+the terminal renderer and host in `renderers/terminal/`, and, in
+`hosts/native/`, the native Windows host (message loop on its own
+thread, per-monitor DPI, Mica, IME, clipboard, opening URLs, dropped
+files, file watching), and the native Linux host, on Wayland so far
+(many windows, fractional and buffer scale, pointer, wheel, keys through
+the compositor's keymap with their repeats, typed text, focus, cursor
+shapes, clipboard, dropped files, file watching through inotify,
+notifications, the portal's file dialogs and opening URLs, the
+environment from the desktop portal and UPower over D-Bus, and signals,
+sleep and waking as lifecycle events); and, in `hosts/web/`, the web
+host, which runs an application in a Web Worker and draws its frames
+over `zui_wire` through the WebGL renderer in `renderers/webgl/`.
 
 <a id="renderer"></a>
 
 ### Writing a renderer · *shipped*
 
-A renderer declares `zuiSubmit`, the surface kinds it draws into, and optionally the extra commands it supports and its payload types. `RenderCommand` is generated from exactly those declarations, so an exhaustive `switch` names only what this renderer draws. A terminal renderer handles five variants. A renderer declaring `zui_render_thread` is submitted from a thread of its own by zui_app.
+A renderer declares `zuiSubmit`, the surface kinds it draws into, and
+optionally the extra commands it supports and its payload types.
+`RenderCommand` is generated from exactly those declarations, so an
+exhaustive `switch` names only what this renderer draws. A terminal
+renderer handles five variants. A renderer declaring `zui_render_thread`
+is submitted from a thread of its own by zui_app.
 
 `zui-d3d11/src/renderer.zig`
 
@@ -2124,13 +2732,31 @@ pub fn config(overrides: zui.Config) zui.Config {
 }
 ```
 
-Declaring `pub const zui_commands: zui.CommandSet = .initMany(&.{ .gradient, .shadow, .backdrop_blur })` adds `gradient`, `shadow` and `backdrop_blur` arms to that switch, for the [effects](#effects) elements declare. A backdrop blur averages the pixels as the target stores them, sampling only inside its bounds. A gradient's `colorAt` gives its color at any point, in OKLab, for a renderer that draws it in strips. A renderer with shaders of its own sets `pub const MaterialHandle` and declares `.material`; its `material` arm gets the handle, the fallback color and the corner radius, for the [materials](#materials) elements declare.
+Declaring
+`pub const zui_commands: zui.CommandSet = .initMany(&.{ .gradient, .shadow, .backdrop_blur })`
+adds `gradient`, `shadow` and `backdrop_blur` arms to that switch, for
+the [effects](#effects) elements declare. A backdrop blur averages the
+pixels as the target stores them, sampling only inside its bounds. A
+gradient's `colorAt` gives its color at any point, in OKLab, for a
+renderer that draws it in strips. A renderer with shaders of its own
+sets `pub const MaterialHandle` and declares `.material`; its `material`
+arm gets the handle, the fallback color and the corner radius, for the
+[materials](#materials) elements declare.
 
 <a id="host"></a>
 
 ### Writing a host · *shipped*
 
-A host polls the OS into a `RecordBuilder` without blocking, gives a waker that producers call from any thread, hands out a surface, and applies a frame's requests. Then it says who turns the loop: `zuiWait`, to sleep as `NextFrame` says while `zui_app.run` loops; `zuiRun`, when the platform owns the loop and the host calls the `zui.Driver` it is handed from its callbacks; or neither, for a window whose application steps a `Session` itself. A library that reports input as state rather than events, as raylib does, uses `InputSampler` to turn snapshots into the event log. `checkHostAndRenderer` fails to compile when a host and renderer share no surface kind.
+A host polls the OS into a `RecordBuilder` without blocking, gives a
+waker that producers call from any thread, hands out a surface, and
+applies a frame's requests. Then it says who turns the loop: `zuiWait`,
+to sleep as `NextFrame` says while `zui_app.run` loops; `zuiRun`, when
+the platform owns the loop and the host calls the `zui.Driver` it is
+handed from its callbacks; or neither, for a window whose application
+steps a `Session` itself. A library that reports input as state rather
+than events, as raylib does, uses `InputSampler` to turn snapshots into
+the event log. `checkHostAndRenderer` fails to compile when a host and
+renderer share no surface kind.
 
 `zui-glfw/src/host.zig`
 
@@ -2203,7 +2829,17 @@ pub const Host = struct {
 
 ### Conformance suites · *shipped*
 
-A backend proves its contract by running zui's suite in its package's CI job, through a harness that does what only the backend knows how to do. The renderer suite draws a reference scene, deep clips and out-of-bounds commands, then reads the pixels back. The host suite checks event order, sticky and cross-thread wakes, and waits. A host whose platform owns the loop runs the pushed suite, which hands its `zuiRun` a scripted `zui.Driver` and checks that each step is scheduled as the one before asked and that a lost surface is reported and given back; a host its application steps runs the stepped suite, which checks that a poll never blocks. All three renderers pass. `findRendererViolation` and `findHostViolation` return the first violation instead of failing.
+A backend proves its contract by running zui's suite in its package's CI
+job, through a harness that does what only the backend knows how to do.
+The renderer suite draws a reference scene, deep clips and out-of-bounds
+commands, then reads the pixels back. The host suite checks event order,
+sticky and cross-thread wakes, and waits. A host whose platform owns the
+loop runs the pushed suite, which hands its `zuiRun` a scripted
+`zui.Driver` and checks that each step is scheduled as the one before
+asked and that a lost surface is reported and given back; a host its
+application steps runs the stepped suite, which checks that a poll never
+blocks. All three renderers pass. `findRendererViolation` and
+`findHostViolation` return the first violation instead of failing.
 
 `zui-d3d11/src/conformance.zig`
 
@@ -2230,19 +2866,30 @@ test "the D3D11 renderer passes zui's renderer suite" {
 }
 ```
 
-The harness method signatures above are simplified. The exact set of declarations a harness needs is listed in the doc comments of `expectRendererConforms` and `expectHostConforms`. `renderers/raylib/`, `renderers/sokol/` and `renderers/terminal/` each have a `src/conformance.zig` you can copy.
+The harness method signatures above are simplified. The exact set of
+declarations a harness needs is listed in the doc comments of
+`expectRendererConforms` and `expectHostConforms`. `renderers/raylib/`,
+`renderers/sokol/` and `renderers/terminal/` each have a
+`src/conformance.zig` you can copy.
 
 <a id="tooling"></a>
 
 ## 07. Testing, remote rendering and profiling
 
-The strongest part of the developer experience today. UIs are tested by id and independent of fonts, sessions record and replay, frames travel over a socket, and every step of a frame shows up in Tracy.
+The strongest part of the developer experience today. UIs are tested by
+id and independent of fonts, sessions record and replay, frames travel
+over a socket, and every step of a frame shows up in Tracy.
 
 <a id="driver"></a>
 
 ### Driver tests by element id · *shipped*
 
-`FixedMetricsText` makes every character 8×16 at size 16, so layout assertions hold on any machine. `Driver` runs frames of your declare function and synthesizes input aimed at elements by id: `click`, `clickAt`, `tap`, `hover`, `drag`, multi-finger `dragFingers` and `pinch`, `pressKeys`, `typeText`, `focus`, and `frameDelivering` to inject source deliveries.
+`FixedMetricsText` makes every character 8×16 at size 16, so layout
+assertions hold on any machine. `Driver` runs frames of your declare
+function and synthesizes input aimed at elements by id: `click`,
+`clickAt`, `tap`, `hover`, `drag`, multi-finger `dragFingers` and
+`pinch`, `pressKeys`, `typeText`, `focus`, and `frameDelivering` to
+inject source deliveries.
 
 `tests/rename.zig`
 
@@ -2289,7 +2936,10 @@ test "the column slider snaps to whole columns" {
 
 ### Golden snapshots and command checks · *shipped*
 
-`expectSnapshot` renders a frame's commands to one line each, naming only the elements in the id set you pass, so unrelated internal ids never break the golden output. `checkCommands` asserts structural invariants: bounds are valid, z never decreases, and clips are balanced.
+`expectSnapshot` renders a frame's commands to one line each, naming
+only the elements in the id set you pass, so unrelated internal ids
+never break the golden output. `checkCommands` asserts structural
+invariants: bounds are valid, z never decreases, and clips are balanced.
 
 `tests/toolbar.zig`
 
@@ -2315,13 +2965,18 @@ test "the toolbar's layout" {
 }
 ```
 
-The golden text above is illustrative. The format, one line per command in paint order, matches what `snapshot` writes.
+The golden text above is illustrative. The format, one line per command
+in paint order, matches what `snapshot` writes.
 
 <a id="replay"></a>
 
 ### Record and replay · *shipped*
 
-`ui.relayTo(listener)` hands a listener each record as it is applied, together with what each source delivered. `Recording` keeps them, and `driver.replay` runs them again with no loader. A recorded session of the sokol renderer's tour replays to identical commands without starting any work. This makes a bug report a file you can step through.
+`ui.relayTo(listener)` hands a listener each record as it is applied,
+together with what each source delivered. `Recording` keeps them, and
+`driver.replay` runs them again with no loader. A recorded session of
+the sokol renderer's tour replays to identical commands without starting
+any work. This makes a bug report a file you can step through.
 
 `tests/replay.zig`
 
@@ -2356,7 +3011,11 @@ test "a recorded import session replays to the same frames" {
 
 ### `zui_wire`: sessions as bytes · *shipped*
 
-`zui_wire` writes records in and frames out as bytes, with each frame encoded as the changes from the one before. The sokol renderer's tour averages 240 bytes a frame against 24 KB for full frames. The header carries a fingerprint of the fonts, so a reader that measures with other fonts refuses the stream instead of drawing misplaced text.
+`zui_wire` writes records in and frames out as bytes, with each frame
+encoded as the changes from the one before. The sokol renderer's tour
+averages 240 bytes a frame against 24 KB for full frames. The header
+carries a fingerprint of the fonts, so a reader that measures with other
+fonts refuses the stream instead of drawing misplaced text.
 
 `src/session_recorder.zig`
 
@@ -2396,7 +3055,14 @@ fn playBack(gpa: std.mem.Allocator, reader: *std.Io.Reader, renderer: *Renderer,
 
 ### Running in one process, drawing in another · *shipped*
 
-`zui_wire.Host(Ui)` is a host whose surface is a socket, and `zui_wire.Renderer(Ui)` writes frames into it. On the other end, `zui_wire.Client(Ui)` joins any real host and renderer to the socket, sending input one way and drawing frames that come back. the native hosts'`zig build remote` runs the sokol renderer's tour this way. The wire renderer declares `Ui`'s commands, colors and payload types, so an application with images, custom payloads or materials runs over the wire unchanged. The wire host passes the host conformance suite.
+`zui_wire.Host(Ui)` is a host whose surface is a socket, and
+`zui_wire.Renderer(Ui)` writes frames into it. On the other end,
+`zui_wire.Client(Ui)` joins any real host and renderer to the socket,
+sending input one way and drawing frames that come back. the native
+hosts'`zig build remote` runs the sokol renderer's tour this way. The
+wire renderer declares `Ui`'s commands, colors and payload types, so an
+application with images, custom payloads or materials runs over the wire
+unchanged. The wire host passes the host conformance suite.
 
 `tools/remote_viewer.zig`
 
@@ -2432,7 +3098,23 @@ const RemoteApp = struct {
 
 ### Running in a browser · *shipped*
 
-The web host, in `hosts/web/`, runs an application in a browser over `zui_wire`, as the tour runs on the published page. The application is built for `wasm32-freestanding` and runs in a Web Worker on an `Io` that steps to the page's clock. The page sleeps between frames as a native host does: it steps the application when its `ui.nextFrame()` says, at once or at a deadline, or when the canvas's input, a resize or a change of `devicePixelRatio` arrives, sending it that instant and the records its canvas's input wrote, and draws the frame bytes it answers with through WebGL 2, with four samples per pixel, as a native window with `sample_count = 4` smooths its edges, and with the cursor the frame asks for. A worker shares its memory with its threads only on a cross-origin isolated page, so the published page isolates itself with a service worker. Durations inside a frame are timed on the worker's `performance.now()`, imported by the module, since the stepped `Io` holds one instant for the whole frame. Its tasks run only while a frame waits for them, so the page also wakes when the earliest of their sleeps ends, where a native host is woken by a task's thread.
+The web host, in `hosts/web/`, runs an application in a browser over
+`zui_wire`, as the tour runs on the published page. The application is
+built for `wasm32-freestanding` and runs in a Web Worker on an `Io` that
+steps to the page's clock. The page sleeps between frames as a native
+host does: it steps the application when its `ui.nextFrame()` says, at
+once or at a deadline, or when the canvas's input, a resize or a change
+of `devicePixelRatio` arrives, sending it that instant and the records
+its canvas's input wrote, and draws the frame bytes it answers with
+through WebGL 2, with four samples per pixel, as a native window with
+`sample_count = 4` smooths its edges, and with the cursor the frame asks
+for. A worker shares its memory with its threads only on a cross-origin
+isolated page, so the published page isolates itself with a service
+worker. Durations inside a frame are timed on the worker's
+`performance.now()`, imported by the module, since the stepped `Io`
+holds one instant for the whole frame. Its tasks run only while a frame
+waits for them, so the page also wakes when the earliest of their sleeps
+ends, where a native host is woken by a task's thread.
 
 `src/browser_worker.zig`
 
@@ -2485,7 +3167,11 @@ export fn darkroomNextWake() f64 {
 }
 ```
 
-A module of your own can also draw its frames in the same WebAssembly instance, with no wire between: `zui_webgl.Renderer` draws into a `.web` surface, laying each frame out and handing it to the page's `FrameDrawer` for that canvas id, through the imports `frameDrawerImports` gives the module.
+A module of your own can also draw its frames in the same WebAssembly
+instance, with no wire between: `zui_webgl.Renderer` draws into a `.web`
+surface, laying each frame out and handing it to the page's
+`FrameDrawer` for that canvas id, through the imports
+`frameDrawerImports` gives the module.
 
 `src/sketchpad.zig`
 
@@ -2516,7 +3202,11 @@ export fn sketchpadDraw() void {
 
 ### Profiling with Tracy · *shipped*
 
-A tracer is a type with `zuiBegin` and `zuiEnd` that sees every step of `beginFrame` and `endFrame` as a zone. `zui_tracy.Tracer` sends them to Tracy. Without a tracer, zones are zero-sized and compile to nothing. Behind it, CI counts instructions per benchmark under Callgrind and fails on more than 2% growth over the parent commit.
+A tracer is a type with `zuiBegin` and `zuiEnd` that sees every step of
+`beginFrame` and `endFrame` as a zone. `zui_tracy.Tracer` sends them to
+Tracy. Without a tracer, zones are zero-sized and compile to nothing.
+Behind it, CI counts instructions per benchmark under Callgrind and
+fails on more than 2% growth over the parent commit.
 
 `src/main.zig`
 
@@ -2534,16 +3224,25 @@ fn present(renderer: *Renderer, surface: zui.Surface, frame: *const Ui.Frame) !v
 }
 ```
 
-Build with `-Dzui-tracy=true` to link Tracy's client, then connect profiler 0.14.1.
+Build with `-Dzui-tracy=true` to link Tracy's client, then connect
+profiler 0.14.1.
 
 <a id="gaps"></a>
 
 ## 08. Declared but not working yet
 
-These names compile, but they don't do anything yet. This list is from `ARCHITECTURE.md` §7 and the roadmap.
+These names compile, but they don't do anything yet. This list is from
+`ARCHITECTURE.md` §7 and the roadmap.
 
-- **A host that runs its own loop**: `zuiRun` and the `zui.Driver` it is handed, with `suspendSurfaces` and `resumeSurfaces` for a surface the platform takes away, compile and pass `zui_app`'s tests against a scripted host, but no shipped host declares `zuiRun` yet; macOS, iOS and Android's are to come.
-- **Still to come**: Multi-line text editing, the rest of the design system (density's coupling to text size, a type scale, and a review of every permutation), theme packs, the inspector over the wire, and more hosts (Linux and web; macOS later).
+- **A host that runs its own loop**: `zuiRun` and the `zui.Driver` it is
+  handed, with `suspendSurfaces` and `resumeSurfaces` for a surface the
+  platform takes away, compile and pass `zui_app`'s tests against a
+  scripted host, but no shipped host declares `zuiRun` yet; macOS, iOS
+  and Android's are to come.
+- **Still to come**: Multi-line text editing, the rest of the design
+  system (density's coupling to text size, a type scale, and a review of
+  every permutation), theme packs, the inspector over the wire, and more
+  hosts (Linux and web; macOS later).
 
 <a id="dx"></a>
 
@@ -2551,16 +3250,34 @@ These names compile, but they don't do anything yet. This list is from `ARCHITEC
 
 ### Working well
 
-- The declaration API is small: four calls and struct literals cover most layouts, and `defer ui.close()` keeps helpers tidy.
-- Mistakes surface at compile time with exact, actionable messages, down to a misspelled inspector option.
-- No surprises at run time: no allocation after init, limits that draw what fits and say which number to raise, and zui_app reports each one once.
-- Sources are a clean answer to async data in immediate mode. Reading records demand, the loader starts work, and nobody blocks.
-- Testing is unusually strong: tests by id that don't depend on fonts, golden snapshots, record and replay, and conformance suites for backends.
+- The declaration API is small: four calls and struct literals cover
+  most layouts, and `defer ui.close()` keeps helpers tidy.
+- Mistakes surface at compile time with exact, actionable messages, down
+  to a misspelled inspector option.
+- No surprises at run time: no allocation after init, limits that draw
+  what fits and say which number to raise, and zui_app reports each one
+  once.
+- Sources are a clean answer to async data in immediate mode. Reading
+  records demand, the loader starts work, and nobody blocks.
+- Testing is unusually strong: tests by id that don't depend on fonts,
+  golden snapshots, record and replay, and conformance suites for
+  backends.
 
 ### Rough edges
 
-- Writing UI by hand in core is verbose. Nested `.layout = .{ .sizing = .{ .width = ... } }` literals pile up, and static styles are the main relief today.
-- Interactive elements take three steps: declare, query by id, then pick colors from the state yourself. Widgets hide it, but there is nothing in between.
-- `labeledRow` leaves you to close the row, an asymmetry that's easy to get wrong.
-- Only the sokol renderer draws gradients and shadows so far; the raylib and terminal renderers show a gradient as one flat color and no shadow. Only the sokol renderer blurs a backdrop; the others draw its tint. Only the sokol renderer draws a transform; the others draw the element as laid out. Only the sokol renderer draws a material; the others draw its fallback background.
-- There's no template project or samples yet. The best reference is the tour, in `apps/tour/`, which every renderer and host runs.
+- Writing UI by hand in core is verbose. Nested
+  `.layout = .{ .sizing = .{ .width = ... } }` literals pile up, and
+  static styles are the main relief today.
+- Interactive elements take three steps: declare, query by id, then pick
+  colors from the state yourself. Widgets hide it, but there is nothing
+  in between.
+- `labeledRow` leaves you to close the row, an asymmetry that's easy to
+  get wrong.
+- Only the sokol renderer draws gradients and shadows so far; the raylib
+  and terminal renderers show a gradient as one flat color and no
+  shadow. Only the sokol renderer blurs a backdrop; the others draw its
+  tint. Only the sokol renderer draws a transform; the others draw the
+  element as laid out. Only the sokol renderer draws a material; the
+  others draw its fallback background.
+- There's no template project or samples yet. The best reference is the
+  tour, in `apps/tour/`, which every renderer and host runs.

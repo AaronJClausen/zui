@@ -11,8 +11,8 @@ Three packages hold zui's text:
 zui measures text through the text contract the application names, and
 `zui_truetype.Text` is the default one: TrueType fonts on stb_truetype,
 which given no fonts measures and draws in Atkinson Hyperlegible Regular
-as font 0, the only font it then embeds. Fonts are added before the first
-frame, each `addFont` returning its `FontId`; `zui_fonts` bundles
+as font 0, the only font it then embeds. Fonts are added before the
+first frame, each `addFont` returning its `FontId`; `zui_fonts` bundles
 Atkinson Hyperlegible Regular and Bold and Liberation Mono, and only the
 ones an application references are embedded. A font's bytes may also
 arrive at run time, into memory the application reserves.
@@ -25,8 +25,8 @@ var ui: Ui = try .init(gpa, io, &text);
 ui.text("let x = 1;", .{ .font = code, .size = 14 });
 ```
 
-A run is laid out once, in `zui_glyphs`, and that layout is both what the
-text measures and where the renderer draws each glyph: every glyph
+A run is laid out once, in `zui_glyphs`, and that layout is both what
+the text measures and where the renderer draws each glyph: every glyph
 advances the pen by its font's advance and the letter spacing, without
 kerning, so a run measures as its words do. A renderer declares how it
 places glyphs, on the pixel grid or one per terminal cell
@@ -41,6 +41,6 @@ with other fonts.
 
 ## Development
 
-Run from each package's directory, `zig build test` and `zig build
-check`; `check` also compiles the package's tests for
+Run from each package's directory, `zig build test` and
+`zig build check`; `check` also compiles the package's tests for
 `wasm32-freestanding`.

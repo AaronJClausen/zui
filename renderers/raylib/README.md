@@ -1,11 +1,11 @@
 # The raylib renderer
 
 `zui_raylib` is a [raylib](https://www.raylib.com) renderer (zui's
-renderer contract, drawing any text's fonts) and an adapter host
-(zui's host contract on raylib's window), so an application runs on it
-through `zui_app` in one call. It needs raylib **6.0**, the newest raylib
-release whose build supports Zig 0.16, which is fetched the first time it
-is built; on Linux, raylib's X11 and OpenGL development packages:
+renderer contract, drawing any text's fonts) and an adapter host (zui's
+host contract on raylib's window), so an application runs on it through
+`zui_app` in one call. It needs raylib **6.0**, the newest raylib
+release whose build supports Zig 0.16, which is fetched the first time
+it is built; on Linux, raylib's X11 and OpenGL development packages:
 `libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev`.
 
 ![The tour's overview](docs/demo.png)
@@ -16,8 +16,8 @@ const zui_raylib = zui.builder.dependency("zui_raylib", .{ .target = target, .op
 exe.root_module.addImport("zui_raylib", zui_raylib.module("zui_raylib"));
 ```
 
-Give `zui_raylib` the same `.@"zui-tracy"` you give `zui`, if any, so the
-two build one `zui` module and their types match.
+Give `zui_raylib` the same `.@"zui-tracy"` you give `zui`, if any, so
+the two build one `zui` module and their types match.
 
 ```zig
 const zui = @import("zui");
@@ -55,33 +55,34 @@ with `drawOffscreen()` draws into a render texture that
 window asks raylib for four samples per pixel, which smooths the edges
 of shapes; the render texture is drawn through a framebuffer with as
 many and resolved after each frame, when the driver can multisample one.
-With
-`.presentation = .draws_into_current_target` it only draws, into the
-target its caller began, as its conformance harness does. raylib is
+With `.presentation = .draws_into_current_target` it only draws, into
+the target its caller began, as its conformance harness does. raylib is
 built with `SUPPORT_CUSTOM_FRAME_CONTROL`, so `EndDrawing` neither
-presents nor polls input. It
-draws each frame scaled by the record's zoom, and the host divides the
-viewport and the pointer by it. `zui_app` hands its `init` the
-application's `Text`, whose glyphs it rasterizes on first use into a
-`zui_glyphs` atlas reserved there and uploaded as one texture, and draws
-where `zui_glyphs` laid them out; text in a font id that text has no
-face for is not drawn. `zui_app.contextConfig` builds the `Config` from its
-declarations: `ImageHandle` is raylib's `Texture2D`, so `ui.image(.{ .handle = texture
-}, ...)` draws directly, and there are no optional commands and no
-`CustomData`. The renderer's `switch` over the commands therefore names
-exactly the base commands and `image`. raylib's OpenGL context belongs to
-the thread that opened the window, so it does not declare
-`zui_render_thread`, and `zui_app` submits on the UI thread.
+presents nor polls input. It draws each frame scaled by the record's
+zoom, and the host divides the viewport and the pointer by it. `zui_app`
+hands its `init` the application's `Text`, whose glyphs it rasterizes on
+first use into a `zui_glyphs` atlas reserved there and uploaded as one
+texture, and draws where `zui_glyphs` laid them out; text in a font id
+that text has no face for is not drawn. `zui_app.contextConfig` builds
+the `Config` from its declarations: `ImageHandle` is raylib's
+`Texture2D`, so `ui.image(.{ .handle = texture }, ...)` draws directly,
+and there are no optional commands and no `CustomData`. The renderer's
+`switch` over the commands therefore names exactly the base commands and
+`image`. raylib's OpenGL context belongs to the thread that opened the
+window, so it does not declare `zui_render_thread`, and `zui_app`
+submits on the UI thread.
 
 `zui_raylib.Host` implements zui's host contract with one window and no
 system material. `zuiPoll` samples raylib's input and draws nothing;
-`zuiWait` polls raylib's input once a turn, then sleeps in GLFW (compiled into raylib's default
-desktop platform) until input arrives, the host is woken, or the instant
-`nextFrame` names, and `.immediately` waits out the monitor's refresh
-interval. Its `zuiWaker` sets a flag and posts an empty GLFW event, which
-any thread may do; the flag is cleared only after a wait, so a wake
-between `nextFrame` and the wait is not lost. Escape does not close the
-window, since the application may want it. Beyond the contract:
+`zuiWait` polls raylib's input once a turn, then sleeps in GLFW
+(compiled into raylib's default desktop platform) until input arrives,
+the host is woken, or the instant `nextFrame` names, and `.immediately`
+waits out the monitor's refresh interval. Its `zuiWaker` sets a flag and
+posts an empty GLFW event, which any thread may do; the flag is cleared
+only after a wait, so a wake between `nextFrame` and the wait is not
+lost. Escape does not close the window, since the application may want
+it. Beyond the contract:
+
 - `script(sample)` replaces raylib's input for one poll, as the host
   suite and the tour's screenshots do;
 - `close()` closes the window as its close button would.
@@ -103,6 +104,7 @@ window, since the application may want it. Beyond the contract:
 | waits and wakes | GLFW's `glfwWaitEvents`, `glfwWaitEventsTimeout` and `glfwPostEmptyEvent` |
 
 What raylib cannot do:
+
 - **Sampled input.** raylib reports state once per frame, so a press and
   release between two frames is lost, as it is to raylib itself.
 - **Corner radii.** raylib rounds all four corners of a rectangle or a
@@ -113,13 +115,13 @@ What raylib cannot do:
   not applied.
 - **One window.** `zui_capabilities.windows` is `.one`.
 
-`zig build conformance` runs zui's two
-suites in hidden windows: the renderer suite draws each frame into a
-render texture and reads it back with `LoadImageFromTexture`, so it
-checks every clip and fill, and the image's tint and rounded corners, by
-their pixels; the host suite scripts the state `zui.InputSampler` reads
-(`Host.script`), since raylib reports state, not events, and checks the
-events' order, the waits and the wakes against the real window.
+`zig build conformance` runs zui's two suites in hidden windows: the
+renderer suite draws each frame into a render texture and reads it back
+with `LoadImageFromTexture`, so it checks every clip and fill, and the
+image's tint and rounded corners, by their pixels; the host suite
+scripts the state `zui.InputSampler` reads (`Host.script`), since raylib
+reports state, not events, and checks the events' order, the waits and
+the wakes against the real window.
 
 ## Development
 
@@ -156,16 +158,16 @@ const Tour = zui_tour.App(.{ .Host = zui_raylib.Host, .Renderer = zui_raylib.Ren
 
 and adds what raylib's window gives: screenshots drawn offscreen, the
 startup measurement, and the run's report in `zui_debug`'s panel. The
-Light Lab's gradients, shadows, frost and materials are lowered here, and
-Clickable Chaos, which needs transforms, is not offered. The `zui_debug` panel's
-theme does not reload from a file, since this host has no file watch.
-`examples/showcase.zig` runs `zui_showcase` the same way.
+Light Lab's gradients, shadows, frost and materials are lowered here,
+and Clickable Chaos, which needs transforms, is not offered. The
+`zui_debug` panel's theme does not reload from a file, since this host
+has no file watch. `examples/showcase.zig` runs `zui_showcase` the same
+way.
 
 `--measure-idle` runs the tour in a hidden window and reads its own CPU
 time at two frames it asks for with `requestFrameAt`, 10 seconds apart,
 after 5 seconds of warm-up, with the strip's once-a-second refresh off.
 The overview asks for no frame, so it declares 1, and on Linux it used
-0.055% of one core over 10 s.
-`--measure-startup` reports how long after the OS created the process the
-first frame was presented (Windows only: it reads the process's creation
-time).
+0.055% of one core over 10 s. `--measure-startup` reports how long after
+the OS created the process the first frame was presented (Windows only:
+it reads the process's creation time).

@@ -1,7 +1,7 @@
 # Decisions
 
-What the owner settled, and what is still open. A decision names the item
-that raised it.
+What the owner settled, and what is still open. A decision names the
+item that raised it.
 
 ## Made
 

@@ -3,9 +3,10 @@
 The engine and its modules are the package in `core/`; the repository's
 root is the package `zui` that users fetch, which re-exports core's
 modules and runs core's steps under the same names. Every other package
-is a directory of its own, listed in the [README](../README.md#packages),
-naming `core/` and any other package it uses by path, so a change is
-built and tested against all of them in place.
+is a directory of its own, listed in the
+[README](../README.md#packages), naming `core/` and any other package it
+uses by path, so a change is built and tested against all of them in
+place.
 
 Each package has its own `test` and `check`, run from its directory, and
 the root's `test-all` and `check-all` run them all. A package's own
@@ -57,13 +58,14 @@ Run these from the root:
   rejects. It also fails when a change leaves out a file that must come
   with it: a new case in `core/tests/compile_errors/` or
   `apps/tour/tests/compile_errors/` without that package's `build.zig`;
-  a changed `.glsl` in `renderers/sokol/src/` without its `.glsl.zig`;
-  a new `core/zui_<name>/zui_<name>.zig` without `core/build.zig`,
-  `core/build.zig.zon` and the root's `build.zig`. When `core/`, `tests/`
-  or the root's build files are staged, it runs `zig build check` on the
-  working tree, 2 to 4 s. It warns, without failing, when a `pub`
-  declaration in `core/src/` changes with no Markdown staged, and when
-  `ROADMAP.md` changes with nothing in `roadmap/`.
+  a changed `.glsl` in `renderers/sokol/src/` without its `.glsl.zig`; a
+  new `core/zui_<name>/zui_<name>.zig` without `core/build.zig`,
+  `core/build.zig.zon` and the root's `build.zig`. When `core/`,
+  `tests/` or the root's build files are staged, it runs
+  `zig build check` on the working tree, 2 to 4 s. It warns, without
+  failing, when a `pub` declaration in `core/src/` changes with no
+  Markdown staged, and when `ROADMAP.md` changes with nothing in
+  `roadmap/`.
 - **`commit-msg`**: fails on a Conventional Commits prefix (`feat:`), a
   subject over 72 characters or ending in a period, and a body that does
   not start after a blank line; it warns on a subject that starts with a
@@ -71,82 +73,87 @@ Run these from the root:
   `fixup!` commits pass. A refused message is kept in
   `.git/zui-rejected-commit-msg`.
 - **`pre-push`**: runs `fmt-check` and `check` at the root, then `test`
-  and `check` in every package that `.github/scripts/affected_packages.py`
-  finds the pushed commits reach, as CI's `changes` job does; about a
-  minute for a change to core, with a warm cache. It tests the working
-  tree, so it warns when that holds uncommitted changes or the pushed
-  commit is not `HEAD`. Display-bound steps, benchmarks, instruction
-  counts, ThreadSanitizer and Tracy are left to CI and to deliberate runs.
+  and `check` in every package that
+  `.github/scripts/affected_packages.py` finds the pushed commits reach,
+  as CI's `changes` job does; about a minute for a change to core, with
+  a warm cache. It tests the working tree, so it warns when that holds
+  uncommitted changes or the pushed commit is not `HEAD`. Display-bound
+  steps, benchmarks, instruction counts, ThreadSanitizer and Tracy are
+  left to CI and to deliberate runs.
 
 ## CI
 
 CI runs on every push that changes something a build reads (a push of
 only Markdown, `docs/`, `assets/`, `LICENSE`, `.editorconfig`,
-Dependabot's settings or the Pages workflow runs nothing). Its first job,
-`changes`, runs `.github/scripts/affected_packages.py`, which reads each
-package's `build.zig.zon` and names the packages the change reaches: a
-package's jobs run when a file under it, or under a package it names by
-`.path`, directly or not, changed. A change to `ci.yml`, `.github/actions/`
-or `.github/scripts/`, a new branch or a manual run reaches every package.
-Each job, from its package's directory, fits within 10 minutes:
+Dependabot's settings or the Pages workflow runs nothing). Its first
+job, `changes`, runs `.github/scripts/affected_packages.py`, which reads
+each package's `build.zig.zon` and names the packages the change
+reaches: a package's jobs run when a file under it, or under a package
+it names by `.path`, directly or not, changed. A change to `ci.yml`,
+`.github/actions/` or `.github/scripts/`, a new branch or a manual run
+reaches every package. Each job, from its package's directory, fits
+within 10 minutes:
+
 - the root, on every run: the format check, the documentation, and
-  `check`, which compiles core and the apps through the root's re-exports;
+  `check`, which compiles core and the apps through the root's
+  re-exports;
 - core, from the root, when `core/` or the root's build changes:
   `test-unit` in three optimize modes on Linux, Windows and macOS, as a
   32-bit x86 Linux program in Debug and ReleaseFast, under
-  ThreadSanitizer, which stresses every `zui_async` source with producers
-  on other threads, and with Tracy's client on Linux, Windows and macOS;
-  `test-compile-errors` and `check-bench-tools`, which no optimize mode
-  changes, once on each OS; the whole `test` with `-Dzui-debug=true`; and
-  `check` for six targets: 32- and 64-bit, big-endian, freestanding and
-  WebAssembly;
+  ThreadSanitizer, which stresses every `zui_async` source with
+  producers on other threads, and with Tracy's client on Linux, Windows
+  and macOS; `test-compile-errors` and `check-bench-tools`, which no
+  optimize mode changes, once on each OS; the whole `test` with
+  `-Dzui-debug=true`; and `check` for six targets: 32- and 64-bit,
+  big-endian, freestanding and WebAssembly;
 - with core's jobs, the benchmarks, failing on any allocation after
   `init` (times and the SPEC.md §20.2 budgets are reported in the job
-  summary but not compared: runners vary too much, so check for slowdowns
-  on your own machine with `zig build bench-compare`), and instruction
-  counts of this commit and of the commit the push or pull request is
-  based on, failing on more than 2% growth, with simulated cache and
-  branch misses reported beside them;
+  summary but not compared: runners vary too much, so check for
+  slowdowns on your own machine with `zig build bench-compare`), and
+  instruction counts of this commit and of the commit the push or pull
+  request is based on, failing on more than 2% growth, with simulated
+  cache and branch misses reported beside them;
 - `text/glyphs/`, `text/fonts/`, `text/truetype/`, `apps/showcase/`,
   `apps/tour/`, `themes/`, `examples/` and `renderers/webgl/`, which are
   pure Zig and compile for `wasm32-freestanding`: each optimize mode's
   tests in a job of its own on Linux, and `check` there and for x86-64
   Windows and ARM64 macOS; `text/truetype/`, which compiles
   stb_truetype's C, is also tested on Windows;
-- `renderers/raylib/`: its tests and `check` on Linux, Windows and macOS,
-  and `check -Dzui-tracy=true` on Linux; and in a job of its own on
-  Linux, under `xvfb-run`, its conformance, the `tour` target's visit of
-  every screen, five screenshots, the CPU the tour uses while idle, shown
-  in the job summary, and the `showcase` target's frames. Only Linux
-  runners give it OpenGL 3.3, through Mesa;
+- `renderers/raylib/`: its tests and `check` on Linux, Windows and
+  macOS, and `check -Dzui-tracy=true` on Linux; and in a job of its own
+  on Linux, under `xvfb-run`, its conformance, the `tour` target's visit
+  of every screen, five screenshots, the CPU the tour uses while idle,
+  shown in the job summary, and the `showcase` target's frames. Only
+  Linux runners give it OpenGL 3.3, through Mesa;
 - `renderers/sokol/`: its tests and `check` on Linux, Windows and macOS,
   its `check` for `wasm32-freestanding` on Linux and with `-Dgl=true` on
-  Windows; and its conformance, which reads back through OpenGL, in a job
-  of its own on Linux under `xvfb-run`;
+  Windows; and its conformance, which reads back through OpenGL, in a
+  job of its own on Linux under `xvfb-run`;
 - `renderers/terminal/`: its tests, its conformance, its `check`, the
   `showcase` target's `--dump`, and the `tour` target's
   `--dump --every-screen`, which fails when a screen cuts a line of text
   short at the side of its clip, on Linux, Windows and macOS;
-- `hosts/native/`: its tests in Debug and ReleaseSafe and its `check`, on
-  Windows, and on Linux under a headless Weston with a D-Bus daemon of
-  its own (`.github/actions/wayland-session`); `check` for ARM64 Windows
-  from Linux; and in a job of its own under Weston, the `theme` example's
-  `--check`, the `tour` target's visit of every screen,
-  which must report no layer or glyph atlas overflow and clean
-  diagnostics, its CPU while idle, shown in the job summary, and the
-  `showcase` target's frames. A headless Weston has no seat, so no
-  clipboard, and the `services` example's `--check` runs on a desktop, as
-  the Windows examples do;
+- `hosts/native/`: its tests in Debug and ReleaseSafe and its `check`,
+  on Windows, and on Linux under a headless Weston with a D-Bus daemon
+  of its own (`.github/actions/wayland-session`); `check` for ARM64
+  Windows from Linux; and in a job of its own under Weston, the `theme`
+  example's `--check`, the `tour` target's visit of every screen, which
+  must report no layer or glyph atlas overflow and clean diagnostics,
+  its CPU while idle, shown in the job summary, and the `showcase`
+  target's frames. A headless Weston has no seat, so no clipboard, and
+  the `services` example's `--check` runs on a desktop, as the Windows
+  examples do;
 - `hosts/web/`: on Linux, each optimize mode's tests, `check` there and
   for x86-64 Windows and ARM64 macOS, `test-demo` in Debug and in
-  ReleaseSafe, and `test-input`, each in a job of its own; `test-site` in
-  headless Google Chrome; and `test-draw` under `xvfb-run`, keeping the
-  frames that do not match as the run's artifacts. `test-host`, the tour
-  on the web host in headless Chromium, has no job yet and runs locally.
+  ReleaseSafe, and `test-input`, each in a job of its own; `test-site`
+  in headless Google Chrome; and `test-draw` under `xvfb-run`, keeping
+  the frames that do not match as the run's artifacts. `test-host`, the
+  tour on the web host in headless Chromium, has no job yet and runs
+  locally.
 
-When CI passes on a push to `main` and its `test-site` job ran, the Pages
-workflow builds the site in ReleaseSmall, runs `test-site` on it, and
-publishes it; `workflow_dispatch` publishes without asking CI.
+When CI passes on a push to `main` and its `test-site` job ran, the
+Pages workflow builds the site in ReleaseSmall, runs `test-site` on it,
+and publishes it; `workflow_dispatch` publishes without asking CI.
 
 Those targets exist to catch assumptions about the host machine early:
 the first 32-bit build found two places that used a 64-bit hash as an
@@ -159,8 +166,9 @@ and compare machines, is in [benchmarking.md](benchmarking.md).
 
 A renderer or host proves its contract by running zui's suite in its
 package's CI job. Each suite takes a harness: a value that gives the
-suite what only the implementation knows how to do, such as making a drawing target and
-reading its pixels back, or making the OS report an event.
+suite what only the implementation knows how to do, such as making a
+drawing target and reading its pixels back, or making the OS report an
+event.
 
 ```zig
 // src/conformance.zig, a test root importing the backend and zui_testing
@@ -173,6 +181,7 @@ test "the renderer passes zui's renderer suite" {
 ```
 
 The recipe the backends follow:
+
 - `src/conformance.zig` holds the harness and the test, built by a
   `conformance` step in `build.zig`. The harness keeps only what is the
   backend's own: its window, its renderer and how it reads a frame back.

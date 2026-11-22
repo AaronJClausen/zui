@@ -7,18 +7,19 @@ systems and renderers share is `zui_glyphs` (`text/glyphs/`), the
 default font system is `zui_truetype` (`text/truetype/`), and the
 bundled typefaces are `zui_fonts` (`text/fonts/`), so the font system
 moves nothing. Measuring and drawing already take their glyphs from one
-layout, so it inherits no two loops that must agree. It is not a stage of SPEC.md §21 and has no items yet; they are
-numbered here, and given their Grounding, Plan and Done when, as the
-owner orders them into the queue.
+layout, so it inherits no two loops that must agree. It is not a stage
+of SPEC.md §21 and has no items yet; they are numbered here, and given
+their Grounding, Plan and Done when, as the owner orders them into the
+queue.
 
 **The layers.** Every mature text stack splits text into the same parts:
 Skia (typeface, font, shaper, text blob), cosmic-text (fontdb for
-discovery, rustybuzz for shaping, swash for rasterization, its own layout
-and glyph cache), egui (fonts laid out into a galley of positioned glyphs,
-rasterized on demand into one atlas, drawn as textured triangles), and
-Dear ImGui 1.92 (a font loader interface with stb_truetype and FreeType
-behind it, glyphs loaded on demand into an atlas that grows, which the
-renderer backend uploads):
+discovery, rustybuzz for shaping, swash for rasterization, its own
+layout and glyph cache), egui (fonts laid out into a galley of
+positioned glyphs, rasterized on demand into one atlas, drawn as
+textured triangles), and Dear ImGui 1.92 (a font loader interface with
+stb_truetype and FreeType behind it, glyphs loaded on demand into an
+atlas that grows, which the renderer backend uploads):
 
 | Layer | Turns | into | Implementations, now or later |
 |---|---|---|---|
@@ -30,8 +31,9 @@ renderer backend uploads):
 | draw | positioned glyphs and an atlas | pixels or cells | each renderer |
 
 **The rules it keeps:**
-- **One layout, two readers.** A text's `zuiMeasure` and its drawing take
-  their glyph positions from the same function, in `zui_glyphs`. A
+
+- **One layout, two readers.** A text's `zuiMeasure` and its drawing
+  take their glyph positions from the same function, in `zui_glyphs`. A
   renderer places what the layout gives it and advances no pen of its
   own. Commands carry the text and its style, not glyphs, so frames and
   the wire stay as they are; a remote renderer runs the same layout,
@@ -49,8 +51,8 @@ renderer backend uploads):
   `MeasureKey`) does not import `zui_glyphs`. What font systems and
   renderers agree on lives in `zui_glyphs`, as does its conformance
   suite, since `zui_testing` is part of core.
-- **Text looks its best with no setup.** Out of the box, text is drawn in
-  `zui_fonts`' typefaces through `zui_truetype`: an application that
+- **Text looks its best with no setup.** Out of the box, text is drawn
+  in `zui_fonts`' typefaces through `zui_truetype`: an application that
   names no fonts gets Atkinson Hyperlegible as font 0. A renderer's or
   library's built-in fonts (sokol's 8×8 bitmap fonts, raylib's default
   font) are never a default and are not part of zui.
@@ -62,6 +64,7 @@ renderer backend uploads):
 **What `zui_glyphs` holds today** is what today's renderers need, and
 the font system's items design the contract properly and may change all
 of it:
+
 - `Codepoints`, a run's codepoints;
 - `Fonts`, the type-erased fonts a renderer draws through, with
   `FontMetrics` and `GlyphBox`, made from any text contract that
