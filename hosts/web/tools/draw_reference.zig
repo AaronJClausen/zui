@@ -3,8 +3,8 @@
 //! ```
 //! Draws each frame named with the sokol renderer, keeping only the
 //! commands the browser's client draws, and its text only `with-text`, in
-//! the fonts the tour added, and
-//! writes for each, little-endian,
+//! the fonts the tour added. It writes, little-endian, the length (u32) and
+//! bytes of the OpenGL renderer's name that drew them, then for each frame
 //! its number (u64), its width and height in pixels (u32 each), and its
 //! RGBA pixels, bottom row first, as OpenGL and WebGL read them back.
 
@@ -26,8 +26,10 @@ const Command = Ui.RenderCommand;
 
 extern fn glBindTexture(target: c_uint, texture: c_uint) callconv(.c) void;
 extern fn glGetTexImage(target: c_uint, level: c_int, format: c_uint, pixel_type: c_uint, pixels: ?*anyopaque) callconv(.c) void;
+extern fn glGetString(name: c_uint) callconv(.c) ?[*:0]const u8;
 const gl_rgba = 0x1908;
 const gl_unsigned_byte = 0x1401;
+const gl_renderer = 0x1F01;
 
 /// What the browser's client draws so far.
 fn isDrawnInBrowser(command: Command, draws_text: bool) bool {
@@ -71,6 +73,9 @@ const Harness = struct {
         var reference_buffer: [64 * 1024]u8 = undefined;
         var reference_writer = reference_file.writer(self.io, &reference_buffer);
         const out = &reference_writer.interface;
+        const renderer_name = std.mem.span(glGetString(gl_renderer) orelse return error.NoOpenGlRenderer);
+        try out.writeInt(u32, @intCast(renderer_name.len), .little);
+        try out.writeAll(renderer_name);
 
         var decoder: zui_wire.Decoder(Ui) = try .init(self.gpa, .of(Ui));
         defer decoder.deinit(self.gpa);

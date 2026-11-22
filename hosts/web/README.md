@@ -77,6 +77,12 @@ decided differently; a frame drawn unsmoothed has hundreds that match
 nothing. Text is left out there, since where a glyph's quad covers part
 of a pixel a GPU may sample the glyph anywhere in the pixel. It fails,
 rather than compare them, if either side cannot sum blurs in RGBA32F.
+The reference names the OpenGL renderer that drew it. Where there is no
+GPU, as in CI, that is Mesa's llvmpipe, which rounds both halves of each
+8-bit blend: a translucent layer can leave a color a step below a GPU's.
+Against llvmpipe a color may differ by 5 instead of 2, which covers the
+tour's labels under a fade at alpha 1/255 (3 steps) and its text stacked
+dozens of lines deep (5).
 
 **Input** goes back the other way. `web/input_recorder.mjs` turns a
 canvas's pointer, wheel, key and text events, its size and

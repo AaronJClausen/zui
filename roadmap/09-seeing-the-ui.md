@@ -395,6 +395,18 @@ Typography, Light and Depth, Transforms and Materials animate and still
 ask for every frame, as natively, where the native tour declares all 300
 of 300 display frames on each, against 4 on Welcome.
 
+Later, CI's `test-draw` failed frames 156 (49 unmatched pixels) and 228
+(2) once the tour's screens put a fade at alpha 1/255 over muted labels
+and stacked text dozens of lines deep. Mesa's llvmpipe, which draws the
+reference where CI has no GPU, rounds `src * alpha` and
+`dst * (1 - alpha)` separately in each 8-bit blend, a step below a GPU
+for each translucent layer: on llvmpipe here, the label "Email" came out
+`7f8391` where NVIDIA and Chromium drew `7f8694`, digit for digit the
+two roundings' sum. The reference now names the renderer that drew it,
+and against llvmpipe `test-draw` lets a color differ by 5 instead of 2
+(`roadmap/decisions.md`). Frame 156 needs 4 and frame 228 5; on NVIDIA
+the tolerance stays 2 and every frame passes.
+
 It landed in five slices, in `hosts/web/` unless one says otherwise:
 
 1. **The client's decoder in WebAssembly.** The web host's

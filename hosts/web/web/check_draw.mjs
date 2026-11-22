@@ -15,7 +15,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { openHeadlessPage } from "./headless_page.mjs";
 
-// A pixel matches when each of its colors is within `tolerance` of the
+// A pixel matches when each of its colors is within the tolerance of the
 // other image's, or of a neighbor's there within `edgeReach` pixels, since
 // two rasterizers may place an edge a pixel apart. With four samples, each
 // reference pixel must also match the drawing that way: an edge smoothed
@@ -27,7 +27,13 @@ import { openHeadlessPage } from "./headless_page.mjs";
 // SwiftShader snaps vertices to a sixteenth of a pixel, so a sample that
 // close to an edge is decided differently. An edge left unsmoothed still
 // differs by half that range where the edge halves a pixel.
-const tolerance = 2;
+const gpuTolerance = 2;
+// Mesa's llvmpipe, which draws the reference where there is no GPU, as in
+// CI, blends into 8 bits rounding `src * alpha` and `dst * (1 - alpha)`
+// each, so each translucent layer may leave a color a step below a GPU's,
+// which rounds their sum. A label under a fade at alpha 1/255 is 3 steps
+// off, and text stacked dozens of lines deep 5.
+const llvmpipeTolerance = 5;
 const edgeReach = 1;
 const sampleShareReach = 2;
 // With one sample, a glyph's partial coverage at its edge is a color no
@@ -72,8 +78,10 @@ const watchdog = setTimeout(() => fail(`not done after ${watchdogMilliseconds / 
 
 function readReference(bytes) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const rendererNameLength = view.getUint32(0, true);
+  const rendererName = Buffer.from(bytes.subarray(4, 4 + rendererNameLength)).toString("utf8");
   const frames = [];
-  for (let at = 0; at < bytes.length;) {
+  for (let at = 4 + rendererNameLength; at < bytes.length;) {
     const number = Number(view.getBigUint64(at, true));
     const width = view.getUint32(at + 8, true);
     const height = view.getUint32(at + 12, true);
@@ -81,10 +89,14 @@ function readReference(bytes) {
     frames.push({ number, width, height, pixels: bytes.subarray(at, at + width * height * 4) });
     at += width * height * 4;
   }
-  return frames;
+  return { rendererName, frames };
 }
 
-function within(drawn, reference, drawnAt, referenceAt) {
+function toleranceOfRenderer(rendererName) {
+  return rendererName.includes("llvmpipe") ? llvmpipeTolerance : gpuTolerance;
+}
+
+function within(drawn, reference, drawnAt, referenceAt, tolerance) {
   for (let channel = 0; channel < 3; channel += 1) {
     if (Math.abs(drawn[drawnAt + channel] - reference[referenceAt + channel]) > tolerance) return false;
   }
@@ -104,7 +116,7 @@ function colorRangeAround(pixels, x, y, width, height, channel) {
   return most - least;
 }
 
-function withinOneSample(drawn, reference, x, y, width, height, samplesPerPixel) {
+function withinOneSample(drawn, reference, x, y, width, height, samplesPerPixel, tolerance) {
   const at = (y * width + x) * 4;
   for (let channel = 0; channel < 3; channel += 1) {
     const range = Math.max(colorRangeAround(drawn, x, y, width, height, channel), colorRangeAround(reference, x, y, width, height, channel));
@@ -113,20 +125,20 @@ function withinOneSample(drawn, reference, x, y, width, height, samplesPerPixel)
   return true;
 }
 
-function matchesNearby(pixels, other, x, y, width, height) {
+function matchesNearby(pixels, other, x, y, width, height, tolerance) {
   const at = (y * width + x) * 4;
   for (let dy = -edgeReach; dy <= edgeReach; dy += 1) {
     for (let dx = -edgeReach; dx <= edgeReach; dx += 1) {
       const nx = x + dx;
       const ny = y + dy;
       if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
-      if (within(pixels, other, at, (ny * width + nx) * 4)) return true;
+      if (within(pixels, other, at, (ny * width + nx) * 4, tolerance)) return true;
     }
   }
   return false;
 }
 
-function compare(drawn, reference, width, height, samplesPerPixel) {
+function compare(drawn, reference, width, height, samplesPerPixel, tolerance) {
   let differing = 0;
   let beyondTolerance = 0;
   let unmatched = 0;
@@ -142,8 +154,8 @@ function compare(drawn, reference, width, height, samplesPerPixel) {
       if (difference <= tolerance) continue;
       beyondTolerance += 1;
       const smoothed = samplesPerPixel > 1;
-      const matched = matchesNearby(drawn, reference, x, y, width, height) && (!smoothed || matchesNearby(reference, drawn, x, y, width, height));
-      if (matched || (smoothed && withinOneSample(drawn, reference, x, y, width, height, samplesPerPixel))) continue;
+      const matched = matchesNearby(drawn, reference, x, y, width, height, tolerance) && (!smoothed || matchesNearby(reference, drawn, x, y, width, height, tolerance));
+      if (matched || (smoothed && withinOneSample(drawn, reference, x, y, width, height, samplesPerPixel, tolerance))) continue;
       unmatched += 1;
     }
   }
@@ -191,7 +203,9 @@ const failedFrameLines = [];
 let failedImages = null;
 let framesCompared = 0;
 for (const drawing of drawings) {
-  for (const expected of readReference(await readFile(drawing.referencePath))) {
+  const { rendererName, frames } = readReference(await readFile(drawing.referencePath));
+  const tolerance = toleranceOfRenderer(rendererName);
+  for (const expected of frames) {
     const frame = `frame ${expected.number} ${drawing.description}`;
     const drawn = await evaluate(`drawFrame("${drawing.name}", ${expected.number})`).catch((error) => fail(`${frame}: ${error.message}`));
     if (drawn.width !== expected.width || drawn.height !== expected.height) {
@@ -200,9 +214,9 @@ for (const drawing of drawings) {
     if (drawn.overflows !== 0) await fail(`${frame}: the draw list was full ${drawn.overflows} times`);
     if (drawn.glyphOverflows !== 0) await fail(`${frame}: glyphs were left out ${drawn.glyphOverflows} times`);
     const pixels = Buffer.from(drawn.pixels, "base64");
-    const result = compare(pixels, expected.pixels, expected.width, expected.height, drawing.samplesPerPixel);
+    const result = compare(pixels, expected.pixels, expected.width, expected.height, drawing.samplesPerPixel, tolerance);
     const total = expected.width * expected.height;
-    const line = `check_draw: ${frame}: ${result.differing} of ${total} pixels differ, by at most ${result.largestDifference}; ${result.beyondTolerance} by more than ${tolerance}, ${result.unmatched} of them matching no pixel of the other image within ${edgeReach} (at most ${maxUnmatchedPixelsPerFrame[drawing.samplesPerPixel]} allowed)`;
+    const line = `check_draw: ${frame}: ${result.differing} of ${total} pixels differ, by at most ${result.largestDifference}; ${result.beyondTolerance} by more than ${tolerance}, as ${rendererName} drew it, ${result.unmatched} of them matching no pixel of the other image within ${edgeReach} (at most ${maxUnmatchedPixelsPerFrame[drawing.samplesPerPixel]} allowed)`;
     console.log(line);
     framesCompared += 1;
     if (result.unmatched > maxUnmatchedPixelsPerFrame[drawing.samplesPerPixel]) {
