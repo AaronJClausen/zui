@@ -117,11 +117,10 @@ is in the file its group names.
 | `10-reach:02-web-host` | `hosts/web/`, `renderers/webgl/` | | |
 | `10-reach:04-window-decorations` | `core/src/chrome.zig`, `core/src/context.zig`, `core/zui_app/`, `hosts/native/` | | waiting on a person: the checklist under its *Status*, on `zig build title-bar` in `hosts/native/` |
 | `11-polish:02-exit-animations` | `core/src/`, `core/zui_motion/` | | |
-| `11-polish:04-skin-contract` | `core/zui_widgets/` | | |
-| `11-polish:05-default-skin` | `core/zui_widgets/` | `11-polish:04-skin-contract` | |
-| `11-polish:06-text-editing` | `core/src/`, `core/zui_widgets/`, `hosts/native/` | `11-polish:04-skin-contract` | |
+| `11-polish:05-default-skin` | `core/zui_widgets/` | | |
+| `11-polish:06-text-editing` | `core/src/`, `core/zui_widgets/`, `hosts/native/` | | |
 | `11-polish:07-zui-icons` | `core/zui_icons/` | | |
-| `11-polish:08-zui-themes` | `themes/` | `11-polish:04-skin-contract`, `11-polish:05-default-skin` | |
+| `11-polish:08-zui-themes` | `themes/` | `11-polish:05-default-skin` | |
 | `11-polish:09-template-project` | `examples/` | | |
 | `11-polish:10-samples` | `examples/` | `11-polish:09-template-project` | |
 | `11-polish:12-developer-experience-audit` | `examples/`, `README.md`, `docs/` | `11-polish:09-template-project`, `11-polish:10-samples` | |

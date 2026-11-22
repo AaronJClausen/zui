@@ -2240,6 +2240,57 @@ its guard on such a host fails naming the guard:
 `zui_app.Windows(App).has_many_windows` guards opening a window:
 ``"zui_app: zui_raylib.Host opens one window (its zui_capabilities.windows is .one), so demo.App cannot open another"``.
 
+### 16.7 Skin
+
+```zig
+const QuietSkin = struct {
+    accent: zui.Color = .rgb(0x5b8cff),
+
+    pub fn zuiStyle(skin: *const QuietSkin, part: zui_widgets.Part, state: zui.WidgetState, environment: *const zui.Environment) zui_widgets.Style(Ui) { ... }
+};
+
+const widgets: zui_widgets.Widgets(Ui, QuietSkin) = .{ .skin = .{} };
+```
+
+`zui_widgets` checks the skin once, when `Widgets(Ui, Skin)` is
+instantiated. A skin is a struct that declares `zuiStyle` and no other
+`zui`-prefixed declaration.
+
+- **`part`** is one element a widget draws: `button`, `checkbox_box`,
+  `checkbox_mark`, `slider_thumb`, `text_field_caret`, `dropdown_option`
+  and the rest of `zui_widgets.Part`. A checked box
+  (`checkbox_box_checked`) and the selected option
+  (`dropdown_option_selected`) are parts of their own, so `state` stays
+  `WidgetState`.
+- **`state`** is the element's `widgetState`, or `.disabled` from the
+  frame a control is declared disabled. A skin that indexes
+  `std.EnumArray(WidgetState, T)` fails to compile when a state is
+  added.
+- **`environment`** is the context's (§7.2). A skin follows the theme,
+  the contrast and `text_scale` by reading it, so no widget reads them.
+- **`Style(Ui)`** holds the background, the border, the focus ring, the
+  corner radius, the text style, a fixed size, the padding, the gap, an
+  indicator glyph and a popup's layer, in the context's color and font
+  types. Each `Part` reads only the fields its doc comment lists.
+- **The focus ring is `Style.focus_ring`.** It is drawn in place of the
+  border while the element has keyboard focus, which it keeps while
+  hovered or pressed, so it is a field and not a state.
+- **A skin of data** holds its tables and returns from them:
+  `parts: std.EnumArray(Part, std.EnumArray(WidgetState, Style(Ui)))`
+  answers `return skin.parts.get(part).get(state);`. A theme pack
+  (`zui_themes`) is such a type, generic over `Ui` so the application
+  gives it its fonts.
+- **No cost beyond the call.** `Skin` is a comptime type and `zuiStyle` a
+  direct call, so `Widgets` is exactly as large as its skin and has no
+  vtable.
+- **`zui_widgets.DefaultSkin(Ui)`** is zui's own skin (§19.2).
+
+The messages:
+``"zui_widgets: a skin must be a struct type, got u32"``;
+``"zui_widgets: demo.Skin does not implement the skin contract: missing `zuiStyle`"``;
+``"zui_widgets: demo.Skin.zuiStyle must be fn (*const demo.Skin, zui_widgets.Part, zui.WidgetState, *const zui.Environment) zui_widgets.Style(Ui), found …"``;
+``"zui_widgets: demo.Skin declares unknown `zuiStlye`"``.
+
 ---
 
 ## 17. Errors and diagnostics
@@ -2400,9 +2451,12 @@ ready.
 ### 19.2 `zui_widgets`
 
 `Widgets(Ui, Skin)` declares controls into a `*Ui`, styled by any type
-that implements the skin contract (`zuiStyle(widget, state) Style`), so
-theme packs and applications bring their own look without forking the
-widgets. The default skin follows the environment's theme and contrast.
+that implements the skin contract
+(`zuiStyle(part, state, environment) Style`, §16.7), so theme packs and
+applications bring their own look without forking the widgets.
+`widgets.style(ui, part, state)` asks the skin for an element that should
+match a widget. The default skin, `zui_widgets.DefaultSkin(Ui)`, follows
+the environment's theme and contrast.
 
 | Widget | Edits | Returns |
 |---|---|---|

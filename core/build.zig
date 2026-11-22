@@ -123,6 +123,10 @@ const compile_error_cases = [_]struct { name: []const u8, expected_error: []cons
     .{ .name = "text_segment_wrong_signature", .expected_error = "zui: text_segment_wrong_signature.Text.zuiSegment must be fn (*text_segment_wrong_signature.Text, []const u8, *text.BreakSink) void, found fn (*text_segment_wrong_signature.Text, []const u8, []u32) void" },
     .{ .name = "color_ramp_too_few_steps", .expected_error = "zui_color: ramp needs at least 2 steps, one for each end; got 0" },
     .{ .name = "color_lightness_scale_too_few_steps", .expected_error = "zui_color: lightnessScale needs at least 2 steps, one for each end; got 1" },
+    .{ .name = "skin_not_a_struct", .expected_error = "zui_widgets: a skin must be a struct type, got u32" },
+    .{ .name = "skin_unknown_declaration", .expected_error = "zui_widgets: skin_unknown_declaration.Skin declares unknown `zuiStlye`" },
+    .{ .name = "skin_missing_style", .expected_error = "zui_widgets: skin_missing_style.Skin does not implement the skin contract: missing `zuiStyle`" },
+    .{ .name = "skin_wrong_style_signature", .expected_error = "zui_widgets: skin_wrong_style_signature.Skin.zuiStyle must be fn (*const skin_wrong_style_signature.Skin, zui_widgets.Part, zui.WidgetState, *const zui.Environment) zui_widgets.Style(Ui), found fn (*const skin_wrong_style_signature.Skin, zui_widgets.Part, interaction.WidgetState) zui_widgets.Style(context.Context(.{ .limits = .{ ... }, .Text = skin_wrong_style_signature.Text, .Sources = void, .commands = .{ ... }, .ImageHandle = void, .CustomData = void, .MaterialHandle = void, .FontId = u16, .Color = style.Color, .extended_color = false, .features = .{ ... }, .frames_in_flight = 2 }))" },
 };
 
 pub fn build(b: *std.Build) void {

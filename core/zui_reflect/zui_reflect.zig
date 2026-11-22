@@ -135,10 +135,11 @@ fn inspectField(
             var expanded = !section.collapsed;
             if (widgets.disclosure(ui, id, label, &expanded)) section.collapsed = !expanded;
             if (!expanded) return false;
+            const button = widgets.style(ui, .button, .idle);
             ui.open(.{ .layout = .{
                 .direction = .top_to_bottom,
                 .sizing = .{ .width = .grow },
-                .padding = .{ .left = widgets.activeTheme(ui).horizontal_padding + widgets.activeTheme(ui).gap },
+                .padding = .{ .left = button.padding.left + button.gap },
                 .child_gap = 4,
             } });
             defer ui.close();
@@ -150,7 +151,7 @@ fn inspectField(
 
 fn stepper(widgets: anytype, ui: *@TypeOf(widgets).Ui, id: zui.Id, comptime Number: type, number: *Number, comptime options: FieldOptions) bool {
     const previous = number.*;
-    const square: zui.Sizing = .fixed(widgets.activeTheme(ui).control_height);
+    const square: zui.Sizing = .fixed(widgets.style(ui, .button, .idle).size[1]);
     if (widgets.button(ui, id.child("decrement"), "-", .{ .width = square })) number.* = stepped(Number, number.*, options, .down);
     ui.open(.{ .layout = .{ .sizing = .{ .width = .fixed(72) }, .child_alignment = .{ .x = .center } } });
     numberText(widgets, ui, number.*);

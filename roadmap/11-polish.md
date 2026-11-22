@@ -16,7 +16,7 @@ is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:01-zui-motion` `zui_motion` | done |
 | `11-polish:02-exit-animations` Exit animations | not started |
 | `11-polish:03-zui-color` `zui_color` | done |
-| `11-polish:04-skin-contract` The skin contract | not started |
+| `11-polish:04-skin-contract` The skin contract | done |
 | `11-polish:05-default-skin` The default skin | not started |
 | `11-polish:06-text-editing` Text editing | not started |
 | `11-polish:07-zui-icons` `zui_icons` | not started |
@@ -186,6 +186,126 @@ counts were not taken. `core/tests/instantiate.zig` does not yet name
 
 `Widgets(Ui, Skin)` and `zuiStyle`, so a theme pack restyles every widget
 without forking it.
+
+**Grounding** (at `f77934b`). `zui_widgets` is `Widgets(UiType)`
+(`core/zui_widgets/zui_widgets.zig:99`), a struct of two values,
+`theme: Theme` and `dark_theme: ?Theme` (`:105-109`). `Theme` (`:111-147`)
+is one flat struct of a text style, fifteen colors, a
+`std.EnumArray(zui.WidgetState, zui.Color)` for control backgrounds, ten
+metrics, the popup's layer and three indicator strings, shared by every
+widget. `activeTheme` (`:159-162`) picks `dark_theme` while
+`ui.environment().theme` is dark. Each widget reads the fields it wants
+and decides per state in its own code: the checkbox's outline turns
+`accent` while hovered or pressed (`:268`), the slider's thumb `accent`
+while pressed and `disabled_text_color` while disabled (`:412-416`), the
+disclosure draws a background only while hovered or pressed (`:198`), a
+dropdown's option `option_highlight` or `selected_option` (`:699-702`).
+The focus ring is `focusRingOr` (`:763-766`), a 2-unit border of
+`theme.focus_ring` drawn in place of the element's border while
+`ui.focused(id)`, which is also true while the element is hovered or
+pressed, so it is not one of `widgetState`'s states (`core/src/context.zig:2619-2625`
+checks disabled, pressed, hovered, focused, in that order). Some metrics
+are fixed in the widgets: the check mark's radius 2 and size
+`0.45 * checkbox_size` (`:281-286`), the popup's padding and offset of 4
+(`:678`, `:686`) and its options' padding `horizontal_padding - 4`
+(`:708`). Text is styled by `textStyle` (`:741-750`) in three tones,
+normal, muted and disabled; `environment().text_scale` is read by no
+widget.
+
+The callers: the tour builds a `Widgets.Theme` each frame from its
+palette and the clamped `text_scale` (`apps/tour/src/kit.zig:141-169`) and
+sets it as both themes (`:195`); its classic screen gets a theme of one
+text style (`apps/tour/src/tour.zig:101`). The showcase holds
+`zui_widgets.Widgets(Ui)` (`apps/showcase/zui_showcase.zig:68`), restyles
+metrics for cells (`:302-311`), and reads `widgets.theme.control` directly
+for a hover target (`:162`). `zui_reflect` reads
+`widgets.activeTheme(ui).horizontal_padding`, `.gap` and
+`.control_height` (`core/zui_reflect/zui_reflect.zig:141`, `:153`). The
+rest name `Widgets(Ui)` and take its defaults:
+`core/tests/instantiate.zig:136` (with `.dark_theme = .{}`),
+`core/zui_reflect/tests.zig:20`, `core/zui_widgets/tests.zig:19`, `:437`
+(which also read `widgets.theme.slider_thumb_size` and `.gap` at `:129`,
+`:150`, `:159`, `:250`, `:293`, and test `dark_theme` at `:370-377`),
+`hosts/native/examples/accessible.zig:18`, `title_bar.zig:23`,
+`many_windows.zig:27`, `services.zig:29`,
+`hosts/native/windows/conformance.zig:1011`, and the compile-error cases
+`core/tests/compile_errors/widgets_slider_on_bool.zig:11` and
+`reflect_*.zig:12`. `core/bench/` does not use `zui_widgets`
+(`core/bench/scenes.zig:441` declares its documents view by hand), so no
+instruction count moves.
+
+SPEC.md §19.2 (`:2402-2405`) names the contract
+`zuiStyle(widget, state) Style` and says every control "draws the skin's
+focus ring"; §11.1 (`:1267-1269`) says skins index `WidgetState` with
+`std.EnumArray`; §7.2 (`:638`) says `text_scale` is applied by skins; §16
+has no section for the skin. `ARCHITECTURE.md:122` lists the role and
+`:304` the difference this item closes.
+
+**Plan.** One commit.
+
+1. **The contract, in `zui_widgets`.** `zui_widgets.Part`, an enum of
+   every element a widget styles; `zui_widgets.Style(Ui)`, what a skin
+   returns for one part in one state; and the check: a skin is a struct
+   type declaring `zuiStyle(*const Skin, Part, zui.WidgetState, *const zui.Environment) Style(Ui)`
+   and no other `zui`-prefixed declaration. `Widgets(Ui, Skin)` checks it
+   once and holds `skin: Skin`; `widgets.style(ui, part, state)` asks the
+   skin, for callers that match a widget's look.
+2. **Every widget styled through the skin**, including the focus ring,
+   which is the style's `focus_ring`, drawn while focused. The metrics
+   fixed in the widgets today become the skin's.
+3. **`DefaultSkin(Ui)`**: today's `Theme` and `dark_theme`, answering
+   `zuiStyle` from them, so every caller keeps its look;
+   `11-polish:05-default-skin` replaces its data.
+4. **Callers** move to `Widgets(Ui, zui_widgets.DefaultSkin(Ui))`, and the
+   three that read the theme to `widgets.style` or `widgets.skin`.
+5. **Tests:** a second skin of data only, in `core/zui_widgets/tests.zig`,
+   restyles every widget; a recording skin shows every part and every
+   state reaches `zuiStyle`; `Widgets` over a skin of no fields is as
+   large as the skin. Compile-error cases `skin_*` for each mistake;
+   `core/tests/instantiate.zig` instantiates `Widgets` with both skins.
+6. **Documents:** SPEC.md §16.7 (the skin contract) and §19.2;
+   `ARCHITECTURE.md` §7's row removed.
+
+**Done when.** Core's tests in Debug, ReleaseFast and ReleaseSafe, and
+`check` natively, for `wasm32-freestanding` and for `powerpc-linux`;
+`test-all` and `check-all`; each `skin_*` case fails with its message; the
+tour's and the showcase's tests in all three modes and their `check` for
+`x86_64-windows`; the raylib tour's cycle prints `diagnostics ok: true`
+and its `gallery` screenshot is the same before and after; the terminal
+tour's `--dump --every-screen` passes; the data-only skin's test restyles
+every widget without a change to `zui_widgets`.
+
+**Spec.** §7.2, §11.1, §16.1, §16.7, §18, §19.2.
+
+**Status.** Done in one commit. `zui_widgets` has the contract:
+`Part`, 23 elements a widget draws (a checked box and the selected option
+are parts of their own), `Style(Ui)`, and `expectSkin`, which
+`Widgets(Ui, Skin)` runs once: a skin is a struct declaring
+`zuiStyle(*const Skin, Part, zui.WidgetState, *const zui.Environment) Style(Ui)`
+and no other `zui`-prefixed declaration. Every widget, and its focus
+ring (`Style.focus_ring`, drawn in place of the border while focused),
+is styled through the skin; the metrics the widgets fixed (the check
+mark's size and radius, the popup's padding and offset, the options'
+padding) are the skin's. `Widgets` holds `skin: Skin` and no default,
+since Zig cannot give a field a default that only some skins can build,
+so a caller writes `.{ .skin = .{} }`; `widgets.style(ui, part, state)`
+serves `zui_reflect` and the showcase's hover target.
+`DefaultSkin(Ui)` is the former `Theme` and `dark_theme`, answering
+`zuiStyle` from them, for `11-polish:05-default-skin` to grow. Every
+caller names `Widgets(Ui, zui_widgets.DefaultSkin(Ui))`. A control
+declared disabled is styled disabled from that frame, where
+`widgetState` reports it a frame later. Measured: core's tests pass in
+all three modes with four new `skin_*` compile-error cases; a skin of
+data alone restyles every widget (every rectangle, border and text
+command takes its colors, every control its height), a recording skin
+is asked for all 23 parts and all five states, and `Widgets` over a skin
+of no fields is 0 bytes and over `DefaultSkin` exactly its size. The
+raylib tour's `gallery` screenshot differs from one taken before the
+change only in the frame-time strip at the bottom (rows 836-875), as two
+screenshots before the change also differ, so the widgets draw the same
+pixels; its 600-frame cycle prints `diagnostics ok: true`; the terminal
+tour's `--dump --every-screen` passes. `core/bench/` does not use
+`zui_widgets`, so instruction counts do not move.
 
 ## 11-polish:05-default-skin — The default skin
 

@@ -20,7 +20,7 @@ const zui = @import("zui");
 const win32 = zui_host.windows.win32;
 
 const Ui = zui.Context(zui_app.contextConfig(zui_sokol.Renderer, .{ .Text = zui_truetype.Text, .features = .{ .semantics = true, .chrome_regions = true } }));
-const Widgets = zui_widgets.Widgets(Ui);
+const Widgets = zui_widgets.Widgets(Ui, zui_widgets.DefaultSkin(Ui));
 
 const ids = zui.ids(.{ "root", "title_bar", "title", "search", "minimize", "maximize", "close", "content" });
 const title_bar_height = 32;
@@ -77,7 +77,7 @@ const TitleBarApp = struct {
     pub const Text = zui_truetype.Text;
 
     host: *Host = undefined,
-    widgets: Widgets = .{},
+    widgets: Widgets = .{ .skin = .{} },
     search_bytes: [64]u8 = undefined,
     search: zui_widgets.EditableText = undefined,
     check: ?Check = null,

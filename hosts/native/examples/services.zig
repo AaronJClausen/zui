@@ -26,7 +26,7 @@ const ServiceSources = struct {
     replies: zui_async.Stream(ServiceReply, .{ .capacity = 4 }) = .{},
 };
 const Ui = zui.Context(zui_app.contextConfig(zui_sokol.Renderer, .{ .Text = zui_truetype.Text, .Sources = ServiceSources }));
-const Widgets = zui_widgets.Widgets(Ui);
+const Widgets = zui_widgets.Widgets(Ui, zui_widgets.DefaultSkin(Ui));
 const services = zui_app.ServicesOf(zui_host.Host);
 
 const Action = enum {
@@ -174,7 +174,7 @@ const ServicesApp = struct {
 
     sources: ServiceSources = .{},
     host: *Host = undefined,
-    widgets: Widgets = .{},
+    widgets: Widgets = .{ .skin = .{} },
     /// Asked for by declaration; the loader makes the calls.
     wanted: std.EnumSet(Action) = .initEmpty(),
     answers: std.EnumArray(Action, AnswerLine) = .initFill(.{}),

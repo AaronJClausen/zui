@@ -15,7 +15,7 @@ const zui_widgets = @import("zui_widgets");
 const zui = @import("zui");
 
 const Ui = zui.Context(zui_app.contextConfig(zui_sokol.Renderer, .{ .Text = zui_truetype.Text, .features = .{ .semantics = true } }));
-const Widgets = zui_widgets.Widgets(Ui);
+const Widgets = zui_widgets.Widgets(Ui, zui_widgets.DefaultSkin(Ui));
 const qualities = [_][]const u8{ "Low", "Medium", "High" };
 const log_lines = [_][]const u8{ "Opened settings", "Loaded the theme", "Found 3 displays", "Autosave is on", "Volume at half", "Ready" };
 
@@ -29,7 +29,7 @@ const AccessibleApp = struct {
     pub const Text = zui_truetype.Text;
 
     host: *Host = undefined,
-    widgets: Widgets = .{},
+    widgets: Widgets = .{ .skin = .{} },
     saves: u32 = 0,
     autosave: bool = true,
     volume: f32 = 0.5,

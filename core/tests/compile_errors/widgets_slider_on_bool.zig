@@ -8,7 +8,7 @@ const Text = struct {
 };
 
 const Ui = zui.Context(.{ .Text = Text });
-const widgets: zui_widgets.Widgets(Ui) = .{};
+const widgets: zui_widgets.Widgets(Ui, zui_widgets.DefaultSkin(Ui)) = .{ .skin = .{} };
 
 export fn entry(ui: *Ui, enabled: *bool) void {
     _ = widgets.slider(ui, .of("enabled"), enabled, .{});

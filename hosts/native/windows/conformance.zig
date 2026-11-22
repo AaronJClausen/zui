@@ -1008,7 +1008,7 @@ const ControlsWindow = struct {
     events: [64]zui.Event = undefined,
     text_buffer: [ControlsUi.limits.max_text_input_bytes + ControlsUi.limits.max_dropped_path_bytes]u8 = undefined,
     builder: zui.RecordBuilder = undefined,
-    widgets: zui_widgets.Widgets(ControlsUi) = .{},
+    widgets: zui_widgets.Widgets(ControlsUi, zui_widgets.DefaultSkin(ControlsUi)) = .{ .skin = .{} },
     saves: u32 = 0,
     autosave: bool = true,
     volume: f32 = 0.5,

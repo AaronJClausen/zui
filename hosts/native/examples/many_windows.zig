@@ -24,7 +24,7 @@ const win32 = zui_host.windows.win32;
 
 const WindowSources = struct { shared_count: zui_async.Latest(u32) = .{} };
 const Ui = zui.Context(zui_app.contextConfig(zui_sokol.Renderer, .{ .Text = zui_truetype.Text, .Sources = WindowSources }));
-const Widgets = zui_widgets.Widgets(Ui);
+const Widgets = zui_widgets.Widgets(Ui, zui_widgets.DefaultSkin(Ui));
 const ids = zui.ids(.{ "root", "add_here", "add_everywhere", "open", "close" });
 
 pub fn main(init: std.process.Init) !void {
@@ -73,7 +73,7 @@ const ManyWindowsApp = struct {
     host: *Host = undefined,
     windows: zui_app.Windows(ManyWindowsApp) = undefined,
     waker: zui.Waker = undefined,
-    widgets: Widgets = .{},
+    widgets: Widgets = .{ .skin = .{} },
     slots: [Host.max_windows]Slot = @splat(.{}),
     shared_count: u32 = 0,
     publish_shared: bool = false,

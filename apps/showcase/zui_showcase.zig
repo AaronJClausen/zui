@@ -15,7 +15,7 @@
 //!
 //! ```zig
 //! const Showcase = zui_showcase.Showcase(Ui);
-//! var showcase: Showcase = .{ .title = "zui + raylib", .widgets = .{} };
+//! var showcase: Showcase = .{ .title = "zui + raylib", .widgets = .{ .skin = .{} } };
 //! showcase.declare(&ui);
 //! ```
 
@@ -65,7 +65,7 @@ pub fn Showcase(comptime Ui: type) type {
         title: []const u8,
         palette: Palette = .{},
         metrics: Metrics = .{},
-        widgets: zui_widgets.Widgets(Ui),
+        widgets: zui_widgets.Widgets(Ui, zui_widgets.DefaultSkin(Ui)),
 
         clicks: u32 = 0,
         last_action: []const u8 = "nothing yet",
@@ -159,7 +159,7 @@ pub fn Showcase(comptime Ui: type) type {
             ui.close();
 
             {
-                ui.open(.{ .id = ids.hover_me, .interactive = true, .layout = .{ .padding = .symmetric(self.metrics.padding, self.metrics.padding / 2) }, .decoration = .{ .background = self.widgets.theme.control.get(ui.widgetState(ids.hover_me)), .corner_radius = .all(self.metrics.corner_radius) } });
+                ui.open(.{ .id = ids.hover_me, .interactive = true, .layout = .{ .padding = .symmetric(self.metrics.padding, self.metrics.padding / 2) }, .decoration = .{ .background = self.widgets.style(ui, .button, ui.widgetState(ids.hover_me)).background, .corner_radius = .all(self.metrics.corner_radius) } });
                 defer ui.close();
                 self.body(ui, "Hover me", self.palette.text);
                 if (ui.hovered(ids.hover_me) and self.show_tooltips) {
@@ -295,11 +295,11 @@ pub fn App(comptime config: Config) type {
 
         /// The showcase as it starts, titled and sized for the renderer.
         pub fn newShowcase() ShowcaseOnUi {
-            if (!draws_in_cells) return .{ .title = config.title, .widgets = .{} };
+            if (!draws_in_cells) return .{ .title = config.title, .widgets = .{ .skin = .{} } };
             return .{
                 .title = config.title,
                 .metrics = cell_metrics,
-                .widgets = .{ .theme = .{
+                .widgets = .{ .skin = .{ .theme = .{
                     .corner_radius = 0,
                     .control_height = 16,
                     .horizontal_padding = 8,
@@ -308,7 +308,7 @@ pub fn App(comptime config: Config) type {
                     .slider_thumb_size = .{ 8, 16 },
                     .track_thickness = 16,
                     .label_width = 112,
-                } },
+                } } },
             };
         }
 
@@ -344,7 +344,7 @@ test "the showcase declares within its limits, with and without its dialog" {
     const io = if (@import("builtin").os.tag == .freestanding) std.Io.failing else std.testing.io;
     var ui: Ui = try .init(std.testing.allocator, io, &text);
     defer ui.deinit(std.testing.allocator);
-    var showcase: Showcase(Ui) = .{ .title = "zui + test", .widgets = .{} };
+    var showcase: Showcase(Ui) = .{ .title = "zui + test", .widgets = .{ .skin = .{} } };
     for ([_]bool{ false, true }) |about_open| {
         showcase.about_open = about_open;
         ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 1280, 720 } } });

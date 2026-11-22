@@ -16,10 +16,10 @@ const Ui = zui.Context(.{
     },
     .Text = Text,
 });
-const Widgets = zui_widgets.Widgets(Ui);
+const Widgets = zui_widgets.Widgets(Ui, zui_widgets.DefaultSkin(Ui));
 const Driver = zui_testing.Driver(Ui);
 
-const widgets: Widgets = .{};
+const widgets: Widgets = .{ .skin = .{} };
 
 const Fixture = struct {
     text: Text = .{},
@@ -126,7 +126,7 @@ test "a slider follows a drag and clamps at its ends" {
     const driver = &fixture.driver;
 
     const rect = fixture.ui.rectOf(Form.ids.volume).?;
-    const thumb_width = widgets.theme.slider_thumb_size[0];
+    const thumb_width = widgets.skin.theme.slider_thumb_size[0];
     const quarter = (thumb_width / 2 + (rect.width - thumb_width) * 0.25) / rect.width;
     _ = try driver.drag(&form, Form.declare, Form.ids.volume, .{ 0.5, 0.5 }, .{ quarter, 0.5 });
     try testing.expectApproxEqAbs(@as(f32, 0.25), form.volume, 1e-4);
@@ -147,7 +147,7 @@ test "the slider thumb is drawn at the value" {
     const frame = try fixture.driver.frame(&form, Form.declare, &.{});
     const track = frame.rectOf(Form.ids.volume).?;
     const thumb = thumbOf(frame.commands(), track) orelse return error.ThumbNotFound;
-    const travel = track.width - widgets.theme.slider_thumb_size[0];
+    const travel = track.width - widgets.skin.theme.slider_thumb_size[0];
     try testing.expectApproxEqAbs(track.x + travel * 0.25, thumb.x, 0.5);
 }
 
@@ -156,7 +156,7 @@ fn thumbOf(commands: []const Ui.RenderCommand, track: zui.Rect) ?zui.Rect {
         if (command.payload != .rectangle) continue;
         const bounds = command.bounds;
         const inside = bounds.x >= track.x and bounds.x + bounds.width <= track.x + track.width and bounds.y >= track.y and bounds.y + bounds.height <= track.y + track.height;
-        if (inside and bounds.width == widgets.theme.slider_thumb_size[0] and bounds.height == widgets.theme.slider_thumb_size[1]) return bounds;
+        if (inside and bounds.width == widgets.skin.theme.slider_thumb_size[0] and bounds.height == widgets.skin.theme.slider_thumb_size[1]) return bounds;
     }
     return null;
 }
@@ -247,7 +247,7 @@ test "clicking a text field places the caret at the nearest boundary" {
     // Characters are 8 wide: 3 * 8 + 2 is nearest the boundary after "c",
     // 3 * 8 + 6 nearest the one after "d".
     const field = fixture.ui.rectOf(Form.ids.name).?;
-    const text_start = field.x + widgets.theme.gap;
+    const text_start = field.x + widgets.skin.theme.gap;
     _ = try driver.clickAt(&form, Form.declare, Form.ids.name, .{ (text_start + 3 * 8 + 2 - field.x) / field.width, 0.5 });
     _ = try driver.typeText(&form, Form.declare, "|");
     try testing.expectEqualStrings("abc|def", form.name.slice());
@@ -290,7 +290,7 @@ test "a long text field scrolls to keep the caret visible" {
     _ = try driver.pressKeys(&form, Narrow.declare, &.{.home});
     frame = try driver.frame(&form, Narrow.declare, &.{});
     caret = frame.rectOf(Form.ids.name.child("caret")).?;
-    try testing.expectEqual(field.x + widgets.theme.gap, caret.x);
+    try testing.expectEqual(field.x + widgets.skin.theme.gap, caret.x);
 }
 
 test "a dropdown opens, chooses, and closes" {
@@ -371,10 +371,10 @@ const ThemedButton = struct {
     const save: zui.Id = .of("save");
     const light_idle: zui.Color = .rgb(0xdddddd);
     const dark_idle: zui.Color = .rgb(0x222222);
-    const themed: Widgets = .{
+    const themed: Widgets = .{ .skin = .{
         .theme = .{ .control = .initFill(light_idle) },
         .dark_theme = .{ .control = .initFill(dark_idle) },
-    };
+    } };
 
     fn declare(_: *ThemedButton, ui: *Ui) void {
         _ = themed.button(ui, save, "Save", .{});
@@ -434,7 +434,7 @@ const AccessibleUi = zui.Context(.{
     .Text = Text,
     .features = .{ .semantics = true },
 });
-const accessible_widgets: zui_widgets.Widgets(AccessibleUi) = .{};
+const accessible_widgets: zui_widgets.Widgets(AccessibleUi, zui_widgets.DefaultSkin(AccessibleUi)) = .{ .skin = .{} };
 
 const AccessibleForm = struct {
     const ids = zui.ids(.{ "save", "autosave", "advanced", "volume", "name", "quality" });
@@ -643,4 +643,171 @@ test "a lasso written as a module function draws with a pen and leaves fingers t
     _ = try driver.frame(&map, LassoMap.declare, &.{.{ .pointer_up = .{ .pointer = pointerAt(driver, .touch, .{ 250, 190 }) } }});
     try testing.expectEqual([2]f32{ 50, -10 }, map.panned);
     try testing.expectEqual(@as(u32, 1), map.lassos);
+}
+
+/// Declares every part a skin styles: both disclosure indicators, a
+/// checked and an unchecked box, an empty field's placeholder and a
+/// focused one's caret, and an open dropdown's selected and other options.
+fn EveryWidget(comptime SkinnedWidgets: type) type {
+    return struct {
+        const Self = @This();
+        const ids = zui.ids(.{ "expanded", "collapsed", "button", "disabled_button", "checked", "unchecked", "slider", "field", "empty_field", "dropdown" });
+
+        widgets: SkinnedWidgets,
+        expanded: bool = true,
+        collapsed: bool = false,
+        checked: bool = true,
+        unchecked: bool = false,
+        level: f32 = 0.5,
+        field_bytes: [16]u8 = undefined,
+        field: zui_widgets.EditableText = undefined,
+        empty_field_bytes: [16]u8 = undefined,
+        empty_field: zui_widgets.EditableText = undefined,
+        choice: usize = 1,
+
+        fn init(form: *Self, skinned: SkinnedWidgets) void {
+            form.* = .{ .widgets = skinned };
+            form.field = .init(&form.field_bytes, "Ada");
+            form.empty_field = .init(&form.empty_field_bytes, "");
+        }
+
+        fn declare(form: *Self, ui: *Ui) void {
+            const widgets_in_use = form.widgets;
+            ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(400) }, .padding = .all(10), .child_gap = 10 } });
+            widgets_in_use.label(ui, "label");
+            widgets_in_use.mutedLabel(ui, "muted");
+            widgets_in_use.labeledRow(ui, "row");
+            _ = widgets_in_use.disclosure(ui, ids.expanded, "expanded", &form.expanded);
+            ui.close();
+            _ = widgets_in_use.disclosure(ui, ids.collapsed, "collapsed", &form.collapsed);
+            _ = widgets_in_use.button(ui, ids.button, "button", .{});
+            _ = widgets_in_use.button(ui, ids.disabled_button, "disabled", .{ .disabled = true });
+            _ = widgets_in_use.checkbox(ui, ids.checked, "checked", &form.checked, .{});
+            _ = widgets_in_use.checkbox(ui, ids.unchecked, "unchecked", &form.unchecked, .{});
+            _ = widgets_in_use.slider(ui, ids.slider, &form.level, .{});
+            _ = widgets_in_use.textField(ui, ids.field, &form.field, .{});
+            _ = widgets_in_use.textField(ui, ids.empty_field, &form.empty_field, .{ .placeholder = "empty" });
+            _ = widgets_in_use.dropdown(ui, ids.dropdown, &form.choice, &.{ "one", "two", "three" }, .{});
+            ui.close();
+        }
+    };
+}
+
+/// Plain data: one style for every part, whatever the state or the
+/// environment.
+const UniformSkin = struct {
+    look: zui_widgets.Style(Ui),
+
+    pub fn zuiStyle(skin: *const UniformSkin, _: zui_widgets.Part, _: zui.WidgetState, _: *const zui.Environment) zui_widgets.Style(Ui) {
+        return skin.look;
+    }
+};
+
+test "a skin of data alone restyles every widget" {
+    const fill: zui.Color = .rgb(0x102030);
+    const outline: zui.Color = .rgb(0x405060);
+    const ring: zui.Color = .rgb(0x708090);
+    const ink: zui.Color = .rgb(0xa0b0c0);
+    const uniform: UniformSkin = .{ .look = .{
+        .background = fill,
+        .border = .{ .color = outline, .widths = .all(1) },
+        .focus_ring = .{ .color = ring, .widths = .all(3) },
+        .text = .{ .color = ink, .size = 10 },
+        .size = .{ 14, 22 },
+        .glyph = "*",
+    } };
+    const SkinnedForm = EveryWidget(zui_widgets.Widgets(Ui, UniformSkin));
+
+    var fixture: Fixture = .{};
+    try fixture.init();
+    defer fixture.deinit();
+    var form: SkinnedForm = undefined;
+    form.init(.{ .skin = uniform });
+    _ = try fixture.driver.frame(&form, SkinnedForm.declare, &.{});
+    _ = try fixture.driver.click(&form, SkinnedForm.declare, SkinnedForm.ids.dropdown);
+    const frame = try fixture.driver.focus(&form, SkinnedForm.declare, SkinnedForm.ids.field);
+
+    var rectangles: usize = 0;
+    var rings: usize = 0;
+    var texts: usize = 0;
+    for (frame.commands()) |command| switch (command.payload) {
+        .rectangle => |rectangle| {
+            try testing.expectEqual(fill, rectangle.color);
+            rectangles += 1;
+        },
+        .border => |border| {
+            if (std.meta.eql(border.color, ring)) rings += 1 else try testing.expectEqual(outline, border.color);
+        },
+        .text => |text| {
+            try testing.expectEqual(ink, text.style.color);
+            try testing.expectEqual(@as(f32, 10), text.style.size);
+            texts += 1;
+        },
+        else => {},
+    };
+    try testing.expectEqual(@as(usize, 1), rings);
+    try testing.expect(frame.rectOf(SkinnedForm.ids.dropdown.child("popup")) != null);
+    try testing.expectEqual(@as(usize, 18), rectangles);
+    try testing.expectEqual(@as(usize, 18), texts);
+    for ([_]zui.Id{ SkinnedForm.ids.expanded, SkinnedForm.ids.button, SkinnedForm.ids.checked, SkinnedForm.ids.slider, SkinnedForm.ids.field, SkinnedForm.ids.dropdown }) |id| {
+        try testing.expectEqual(@as(f32, 22), frame.rectOf(id).?.height);
+    }
+    try testing.expect(frame.diagnostics.ok());
+}
+
+const AskedOfSkin = struct {
+    parts: std.EnumArray(zui_widgets.Part, bool) = .initFill(false),
+    states: std.EnumArray(zui.WidgetState, bool) = .initFill(false),
+};
+
+const RecordingSkin = struct {
+    asked: *AskedOfSkin,
+
+    pub fn zuiStyle(skin: *const RecordingSkin, part: zui_widgets.Part, state: zui.WidgetState, _: *const zui.Environment) zui_widgets.Style(Ui) {
+        skin.asked.parts.set(part, true);
+        skin.asked.states.set(state, true);
+        return .{ .size = .{ 12, 24 } };
+    }
+};
+
+test "every part and every state reach the skin" {
+    var asked: AskedOfSkin = .{};
+    const SkinnedForm = EveryWidget(zui_widgets.Widgets(Ui, RecordingSkin));
+
+    var fixture: Fixture = .{};
+    try fixture.init();
+    defer fixture.deinit();
+    const driver = &fixture.driver;
+    var form: SkinnedForm = undefined;
+    form.init(.{ .skin = .{ .asked = &asked } });
+    _ = try driver.frame(&form, SkinnedForm.declare, &.{});
+    _ = try driver.hover(&form, SkinnedForm.declare, SkinnedForm.ids.button);
+    _ = try driver.drag(&form, SkinnedForm.declare, SkinnedForm.ids.slider, .{ 0.5, 0.5 }, .{ 0.6, 0.5 });
+    _ = try driver.focus(&form, SkinnedForm.declare, SkinnedForm.ids.field);
+    _ = try driver.click(&form, SkinnedForm.declare, SkinnedForm.ids.dropdown);
+    _ = try driver.frame(&form, SkinnedForm.declare, &.{});
+
+    for (std.enums.values(zui_widgets.Part)) |part| {
+        if (!asked.parts.get(part)) {
+            std.debug.print("never asked for {t}\n", .{part});
+            return error.PartNeverStyled;
+        }
+    }
+    for (std.enums.values(zui.WidgetState)) |state| {
+        if (!asked.states.get(state)) {
+            std.debug.print("never asked in {t}\n", .{state});
+            return error.StateNeverStyled;
+        }
+    }
+}
+
+test "widgets add nothing to a skin known at compile time" {
+    const EmptySkin = struct {
+        pub fn zuiStyle(_: *const @This(), _: zui_widgets.Part, _: zui.WidgetState, _: *const zui.Environment) zui_widgets.Style(Ui) {
+            return .{};
+        }
+    };
+    try testing.expectEqual(0, @sizeOf(zui_widgets.Widgets(Ui, EmptySkin)));
+    try testing.expectEqual(@sizeOf(zui_widgets.DefaultSkin(Ui)), @sizeOf(Widgets));
+    try testing.expectEqual(@sizeOf(UniformSkin), @sizeOf(zui_widgets.Widgets(Ui, UniformSkin)));
 }

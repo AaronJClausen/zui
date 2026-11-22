@@ -98,7 +98,7 @@ pub fn Tour(comptime kit: type) type {
             inline for (@typeInfo(Screens).@"struct".fields) |field| {
                 if (field.type != void) @field(tour.screens, field.name) = if (comptime std.mem.eql(u8, field.name, "classic")) .{
                     .title = "zui + " ++ kit.renderer_name,
-                    .widgets = .{ .theme = .{ .text = .{ .size = 16, .color = .rgb(0xe8e8f0) } } },
+                    .widgets = .{ .skin = .{ .theme = .{ .text = .{ .size = 16, .color = .rgb(0xe8e8f0) } } } },
                 } else .{};
                 if (comptime hasHook(field.type, "init")) @field(tour.screens, field.name).init();
             }

@@ -119,7 +119,7 @@ only plain names are types the application uses directly: a source's
 | Host | a host | the window half: `zuiPoll`, which never blocks or presents, `zuiWaker`, `zuiSurface`, `zuiApply`, `zui_surfaces` | at most one call of the loop half, `zuiWait` (pulled) or `zuiRun` (pushed, handed a `zui.Driver`), neither for a host the application steps; `zui_capabilities`, `zuiOpenWindow` and `zuiCloseWindow` (exactly when `.many`), `zuiSemantics`, `zuiChromeRegions`, services (`zuiClipboard`, `zuiNotifications`, `zuiFileDialogs`, `zuiOpenUrl`, `zuiMenus`, `zuiFileWatch`), each a struct of functions whose types are checked | §16.3 |
 | Tracer | a profiler binding | `zuiBegin`, `zuiEnd` | | §16.5 |
 | Application | the application, run by `zui_app.run` or stepped as a `zui_app.Session` | `Host`, `Renderer`, `zuiDeclare` | `Text`, `zuiRecord`, `zuiObserve`, `zuiLoader`, `init`, `deinit`; with many windows, `zuiDeclare` and each hook take the window, and `zuiSources`, `zuiWindowClosed` | §19.5 |
-| Skin | a theme pack or the application | `zuiStyle` | | §19.2 |
+| Skin | a theme pack or the application | `zuiStyle` | | §16.7 |
 | Wire payload | an application type with pointers | `zuiSerialize`, `zuiDeserialize` | | §19.6 |
 
 **Proving a contract takes two implementations.** Each has a conformance
@@ -301,7 +301,7 @@ roadmap item named:
 
 | Today | The spec | Where today | Item |
 |---|---|---|---|
-| `Widgets(Ui)` with a `Theme` struct | `Widgets(Ui, Skin)` | `core/zui_widgets/` | `11-polish:04-skin-contract` |
+| `zui_widgets.DefaultSkin` follows the environment's theme, with a `Theme` for light and one for dark, and leaves `contrast` and `text_scale` unread | the default skin follows the theme and the contrast, and applies `text_scale` | `core/zui_widgets/` | `11-polish:05-default-skin` |
 | `zui_debug`'s inspector runs in the application's process; a frame on the wire carries no elements for it | over the wire, the inspector runs in another process (SPEC.md §19.7) | `core/zui_debug/`, `core/zui_wire/` | not yet queued |
 | a frame on the wire carries no chrome regions, and the wire host declares no `zuiChromeRegions`, so a remote window keeps the system's title bar | chrome over the wire | `core/zui_wire/` | not yet queued |
 | the sokol renderer attaches and detaches only `.win32` windows, so a lost `.wayland` or `.library` surface cannot be given back: `zuiAttachSurface` returns `UnsupportedSurface`, and `resumeSurfaces` with it | a renderer that a platform may take surfaces from keeps each surface's resources in `zuiAttachSurface` and `zuiDetachSurface` | `renderers/sokol/` | the first host that loses a surface (Android) |

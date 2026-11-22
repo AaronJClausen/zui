@@ -143,19 +143,31 @@ const Settings = struct {
 var name_bytes: [16]u8 = undefined;
 var settings: Settings = .{};
 
+const FlatSkin = struct {
+    color: zui.Color = .rgb(0x808080),
+
+    pub fn zuiStyle(skin: *const FlatSkin, _: zui_widgets.Part, _: zui.WidgetState, _: *const zui.Environment) zui_widgets.Style(Ui) {
+        return .{ .background = skin.color, .size = .{ 16, 24 } };
+    }
+};
+
 fn declareWidgets(ui: *Ui) void {
-    const widgets: zui_widgets.Widgets(Ui) = .{ .dark_theme = .{} };
+    declareWidgetsWith(zui_widgets.Widgets(Ui, zui_widgets.DefaultSkin(Ui)){ .skin = .{ .dark_theme = .{} } }, ui, .of("default_skin"));
+    declareWidgetsWith(zui_widgets.Widgets(Ui, FlatSkin){ .skin = .{} }, ui, .of("flat_skin"));
+}
+
+fn declareWidgetsWith(widgets: anytype, ui: *Ui, scope: zui.Id) void {
     var expanded = true;
     var choice: usize = 0;
     widgets.labeledRow(ui, "row");
-    _ = widgets.button(ui, .of("button"), "button", .{});
+    _ = widgets.button(ui, scope.child("button"), "button", .{});
     ui.close();
-    _ = widgets.disclosure(ui, .of("disclosure"), "disclosure", &expanded);
-    _ = widgets.dropdown(ui, .of("dropdown"), &choice, &.{ "a", "b" }, .{});
-    _ = widgets.slider(ui, .of("slider"), &settings.retries, .{ .max = 10 });
+    _ = widgets.disclosure(ui, scope.child("disclosure"), "disclosure", &expanded);
+    _ = widgets.dropdown(ui, scope.child("dropdown"), &choice, &.{ "a", "b" }, .{});
+    _ = widgets.slider(ui, scope.child("slider"), &settings.retries, .{ .max = 10 });
     var selection: zui_widgets.Lasso = .{};
-    _ = widgets.lasso(ui, .of("settings"), &selection);
-    _ = zui_reflect.inspector(widgets, ui, .of("settings"), &settings);
+    _ = widgets.lasso(ui, scope.child("settings"), &selection);
+    _ = zui_reflect.inspector(widgets, ui, scope.child("settings"), &settings);
 }
 
 const ThreadSafeText = struct {

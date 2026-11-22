@@ -148,14 +148,14 @@ exe.root_module.addImport("zui_truetype", zui_truetype.module("zui_truetype"));
 ```
 
 ```zig
-const widgets: zui_widgets.Widgets(Ui) = .{};
+const widgets: zui_widgets.Widgets(Ui, zui_widgets.DefaultSkin(Ui)) = .{ .skin = .{} };
 
 if (widgets.button(ui, .of("save"), "Save", .{})) save();
 _ = widgets.slider(ui, .of("volume"), &settings.volume, .{ .max = 100 });
 _ = zui_reflect.inspector(widgets, ui, .of("settings"), &settings);
 ```
 
-SPEC.md §19.2 lists the widgets, and §19.3 covers the inspector's typed
+SPEC.md §19.2 lists the widgets, §16.7 the skin that styles them, and §19.3 covers the inspector's typed
 options. [text/](text/README.md) covers fonts.
 
 ## Packages

@@ -1525,7 +1525,7 @@ Button, checkbox, slider (for any integer or float, with step snapping and keybo
 ```zig
 const zui_widgets = @import("zui_widgets");
 
-pub const widgets: zui_widgets.Widgets(Ui) = .{};
+pub const widgets: zui_widgets.Widgets(Ui, zui_widgets.DefaultSkin(Ui)) = .{ .skin = .{} };
 
 pub const Settings = struct {
     grid_columns: u8 = 5,
@@ -1575,14 +1575,14 @@ fn settingsPanel(app: *App, ui: *Ui) void {
 
 ### Theming widgets · *shipped*
 
-A widget set carries a `Theme` and an optional `dark_theme`, chosen from the environment each frame. The theme sets colors per `WidgetState`, metrics, popup layer and indicator glyphs.
+A widget set is styled by a skin: any struct that declares `zuiStyle(part, state, environment)` and returns a `zui_widgets.Style(Ui)` for each element a widget draws, so a theme pack restyles every widget without forking it. The skin reads the environment, so it follows dark mode, contrast and text size, and the style's `focus_ring` is drawn while a control has focus. A mistake in a skin fails to compile with a message naming it. `zui_widgets.DefaultSkin(Ui)` is zui's own skin: a `Theme` and an optional `dark_theme`, chosen from the environment each frame.
 
 `src/ui/settings.zig`
 
 ```zig
-const Widgets = zui_widgets.Widgets(Ui);
+const Widgets = zui_widgets.Widgets(Ui, zui_widgets.DefaultSkin(Ui));
 
-const light: Widgets.Theme = .{
+const light: Widgets.Skin.Theme = .{
     .text = .{ .color = .rgb(0x23232b) },
     .muted_text_color = .rgb(0x6a6a7a),
     .control = .init(.{
@@ -1600,10 +1600,46 @@ const light: Widgets.Theme = .{
     .label_width = 120,
 };
 
-pub const widgets: Widgets = .{ .theme = light, .dark_theme = .{} };
+pub const widgets: Widgets = .{ .skin = .{ .theme = light, .dark_theme = .{} } };
 ```
 
-Skins (`Widgets(Ui, Skin)`) are planned to replace this struct (item `11-polish:04-skin-contract`).
+Or bring your own look:
+
+`src/ui/flat_skin.zig`
+
+```zig
+const FlatSkin = struct {
+    accent: zui.Color = .rgb(0x2f6fed),
+
+    pub fn zuiStyle(skin: *const FlatSkin, part: zui_widgets.Part, state: zui.WidgetState, environment: *const zui.Environment) zui_widgets.Style(Ui) {
+        const dark = environment.theme == .dark;
+        const ink: zui.Color = if (state == .disabled) .rgb(0x808080) else if (dark) .rgb(0xf0f0f0) else .rgb(0x202020);
+        const scale = environment.text_scale;
+        const base: zui_widgets.Style(Ui) = .{
+            .text = .{ .size = 15 * scale, .color = ink },
+            .focus_ring = .{ .color = skin.accent, .widths = .all(2) },
+            .size = .{ 16, 28 * scale },
+            .padding = .symmetric(10, 0),
+            .gap = 6,
+        };
+        return switch (part) {
+            .button, .dropdown => style: {
+                var control = base;
+                control.background = if (state == .pressed) skin.accent else if (dark) .rgb(0x303030) else .rgb(0xe6e6e6);
+                break :style control;
+            },
+            .slider_filled, .checkbox_box_checked => style: {
+                var filled = base;
+                filled.background = skin.accent;
+                break :style filled;
+            },
+            else => base,
+        };
+    }
+};
+
+pub const widgets: zui_widgets.Widgets(Ui, FlatSkin) = .{ .skin = .{} };
+```
 
 <a id="reflect"></a>
 
@@ -2315,7 +2351,7 @@ Build with `-Dzui-tracy=true` to link Tracy's client, then connect profiler 0.14
 These names compile, but they don't do anything yet. This list is from `ARCHITECTURE.md` §7 and the roadmap.
 
 - **A host that runs its own loop**: `zuiRun` and the `zui.Driver` it is handed, with `suspendSurfaces` and `resumeSurfaces` for a surface the platform takes away, compile and pass `zui_app`'s tests against a scripted host, but no shipped host declares `zuiRun` yet; macOS, iOS and Android's are to come.
-- **Still to come**: Exit animations, multi-line text editing, skins, the inspector over the wire, and more hosts (Linux and web; macOS later).
+- **Still to come**: Exit animations, multi-line text editing, theme packs, the inspector over the wire, and more hosts (Linux and web; macOS later).
 
 <a id="dx"></a>
 

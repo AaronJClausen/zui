@@ -60,7 +60,7 @@ pub fn Kit(comptime spec: Spec) type {
         });
         pub const Ui = zui.Context(config);
         pub const Inspector = if (spec.inspector) zui_debug.Inspector(Ui) else void;
-        pub const Widgets = zui_widgets.Widgets(Ui);
+        pub const Widgets = zui_widgets.Widgets(Ui, zui_widgets.DefaultSkin(Ui));
         pub const TextStyle = Ui.TextStyle;
 
         pub const draws_frost = config.commands.contains(.backdrop_blur);
@@ -138,7 +138,7 @@ pub fn Kit(comptime spec: Spec) type {
             return true;
         }
 
-        fn widgetTheme(palette: Palette, text_scale: f32, fonts: Fonts) Widgets.Theme {
+        fn widgetTheme(palette: Palette, text_scale: f32, fonts: Fonts) Widgets.Skin.Theme {
             return .{
                 .text = .{ .size = 16 * text_scale, .color = palette.text, .font = fonts.body },
                 .muted_text_color = palette.muted,
@@ -192,7 +192,7 @@ pub fn Kit(comptime spec: Spec) type {
                 return .{
                     .io = io,
                     .palette = palette,
-                    .widgets = .{ .theme = theme, .dark_theme = theme },
+                    .widgets = .{ .skin = .{ .theme = theme, .dark_theme = theme } },
                     .fonts = fonts,
                     .text_scale = text_scale,
                     .reduced_motion = environment.reduced_motion,

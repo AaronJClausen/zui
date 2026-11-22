@@ -9,7 +9,7 @@ const Text = struct {
 };
 
 const Ui = zui.Context(.{ .Text = Text });
-const widgets: zui_widgets.Widgets(Ui) = .{};
+const widgets: zui_widgets.Widgets(Ui, zui_widgets.DefaultSkin(Ui)) = .{ .skin = .{} };
 
 const Settings = struct {
     volume: f32 = 0.8,
