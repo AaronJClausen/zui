@@ -1,0 +1,6 @@
+wrap = 72
+end_of_line = "lf"
+exclude = ["**/zig-out/**", "**/zig-pkg/**", "**/.zig-cache/**", "**/node_modules/**", ".claude/**"]
+
+[plugin.tables]
+compact_tables = true

@@ -68,6 +68,7 @@ Stop and ask the user instead of guessing when:
 | a conformance suite (`expect*Conforms`) | `core/zui_testing/zui_testing.zig`, or `core/zui_testing/<contract>_conformance.zig` exported from it |
 | a conformance harness | `src/conformance.zig` in a renderer's package, `<os>/conformance.zig` in `hosts/native/`, run by the package's `conformance` step. It keeps only its window, its renderer or host, and its read-back; a part two harnesses would repeat goes in `core/zui_testing/harness.zig` (`ReadBack`, `PolledRecord`), generic over the renderer and its text, with its tests in `core/zui_testing/tests.zig` |
 | a benchmark scenario | `core/bench/bench.zig`; its budget, if any, comes from SPEC.md §20.2 |
+| the Markdown formatter | `.mdformat.toml`, and `tools/mdformat/`: mdformat's pinned versions and the plugin that keeps the documents' style, run by `zig build fmt-md` through uv |
 | a git hook | `.githooks/<hook>`, a POSIX `sh` script, which `zig build hooks` turns on; what it checks is listed in `docs/development.md` |
 | CI | `.github/workflows/ci.yml`: jobs per package, run from its directory, with a leg for each OS it needs; a package's jobs run only when `changes` (`.github/scripts/affected_packages.py`, which reads every `build.zig.zon`) finds a change under it or a package it names by `.path`. Core's legs (optimize modes, compile errors, Tracy, ThreadSanitizer, `zui-debug`, 32-bit x86, cross-targets), `bench` and `counts` run from the root. A pure-Zig package is tested on Linux and cross-checked for Windows and macOS. A job that needs a display or a compositor is its own job; steps two jobs share go in `.github/actions/`. Every job and leg fits `timeout-minutes: 10`. Publishing the web host's page, `.github/workflows/pages.yml`, after CI passes and runs `hosts/web: test-site` |
 | what font systems and renderers share: the layout of a run into positioned glyphs, the placement a renderer declares, the type-erased fonts a renderer draws through, the glyph atlas, the font systems' conformance suite | `text/glyphs/src/<topic>.zig`, exported from `text/glyphs/src/root.zig` (the `zui_glyphs` module, which the root re-exports); pure Zig, importing nothing but `std` |
@@ -243,7 +244,7 @@ natively print the same LLD noise.
 | `zig build test -Dzui-sanitize-thread=true` | any change to a source, an atomic or the conformance suite; on Linux only, so here in a container run with `--security-opt seccomp=unconfined` |
 | `zig build test -Dzui-tracy=true` | any change to `zui_tracy` or the trace zones; fetches Tracy |
 | `zig build test-all` and `zig build check-all` | any change a package other than core could feel; each runs the step in every package's directory |
-| `zig build fmt` | before committing; CI runs `fmt-check` |
+| `zig build fmt` and `zig build fmt-md` | before committing; CI runs `fmt-check`, and the `pre-commit` hook checks staged Markdown |
 | `zig build bench -- --check-targets` | any change to a hot path; in benchmarking mode, as SPEC.md §20.2's budgets are set |
 | `zig build bench-compare -- <base>` | any change claiming a speedup or risking a slowdown |
 | `zig build counts -- --compare <file>` | any change to a hot path; CI compares with the parent commit and fails on more than 2% growth |

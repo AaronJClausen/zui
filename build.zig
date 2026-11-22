@@ -98,9 +98,12 @@ pub fn build(b: *std.Build) void {
     addStepInEveryPackage(b, "test-all", "test", "Run every package's tests, each in its own directory");
     addStepInEveryPackage(b, "check-all", "check", "Type-check every package for the selected target, each in its own directory");
 
-    const use_checked_in_hooks = b.addSystemCommand(&.{ "git", "config", "core.hooksPath", ".githooks" });
-    use_checked_in_hooks.setCwd(b.path("."));
-    b.step("hooks", "Have git run the hooks in .githooks: format and syntax checks before a commit, tests before a push").dependOn(&use_checked_in_hooks.step);
+    const hooks = b.step("hooks", "Have git run the hooks in .githooks: format and syntax checks before a commit, tests before a push; and blame skip the commits in .git-blame-ignore-revs");
+    for ([_][2][]const u8{ .{ "core.hooksPath", ".githooks" }, .{ "blame.ignoreRevsFile", ".git-blame-ignore-revs" } }) |setting| {
+        const set_git_config = b.addSystemCommand(&.{ "git", "config", setting[0], setting[1] });
+        set_git_config.setCwd(b.path("."));
+        hooks.dependOn(&set_git_config.step);
+    }
 
     const formatted_paths = [_][]const u8{ "build.zig", "build.zig.zon", "tests" } ++ packages;
     var excluded_paths: [2 * packages.len + generated_sources.len][]const u8 = undefined;
@@ -111,6 +114,21 @@ pub fn build(b: *std.Build) void {
     @memcpy(excluded_paths[2 * packages.len ..], &generated_sources);
     b.step("fmt", "Format all Zig sources").dependOn(&b.addFmt(.{ .paths = &formatted_paths, .exclude_paths = &excluded_paths }).step);
     b.step("fmt-check", "Fail if any Zig source is not formatted").dependOn(&b.addFmt(.{ .paths = &formatted_paths, .exclude_paths = &excluded_paths, .check = true }).step);
+    b.step("fmt-md", "Format every Markdown file with mdformat, through uv").dependOn(&markdownFormatter(b, .format).step);
+    b.step("fmt-md-check", "Fail if any Markdown file is not formatted").dependOn(&markdownFormatter(b, .check).step);
+}
+
+/// Runs mdformat with the plugin and pinned versions in `tools/mdformat/`,
+/// over every Markdown file `.mdformat.toml` does not exclude.
+fn markdownFormatter(b: *std.Build, mode: enum { format, check }) *std.Build.Step.Run {
+    const run = b.addSystemCommand(&.{ "uvx", "--quiet", "--from" });
+    run.addDirectoryArg(b.path("tools/mdformat"));
+    run.addArg("mdformat-zui");
+    if (mode == .check) run.addArg("--check");
+    run.addArg(".");
+    run.setCwd(b.path("."));
+    run.has_side_effects = true;
+    return run;
 }
 
 /// Compiles one module that imports core's `zui` and the apps through the

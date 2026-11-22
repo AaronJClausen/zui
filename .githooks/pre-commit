@@ -73,6 +73,28 @@ printf '%s\n' "$added_or_modified" | grep -E '\.zig(\.zon)?$' | while IFS= read 
     esac
 done | grep failed >/dev/null && failures=$((failures + 1))
 
+if any_staged_matching '^\.mdformat\.toml$|^tools/mdformat/'; then
+    markdown_to_check=$(git ls-files -- '*.md')
+else
+    markdown_to_check=$(printf '%s\n' "$added_or_modified" | grep -E '\.md$' || true)
+fi
+# A tree from before the formatter has no settings to check against.
+git cat-file -e :.mdformat.toml 2>/dev/null || markdown_to_check=""
+if [ -n "$markdown_to_check" ]; then
+    if ! command -v uvx >/dev/null 2>&1; then
+        fail "Markdown is staged, and checking its formatting needs uv (https://docs.astral.sh/uv/)"
+    else
+        repository=$(pwd)
+        staged_copy=$(mktemp -d)
+        # The formatter reads its settings from beside the files, so the staged ones come along.
+        printf '%s\n' .mdformat.toml $markdown_to_check | git checkout-index --prefix="$staged_copy/" --stdin
+        if ! (cd "$staged_copy" && uvx --quiet --from "$repository/tools/mdformat" mdformat-zui --check $markdown_to_check) >&2; then
+            fail "Markdown is not formatted (above); run \`zig build fmt-md\` and stage it"
+        fi
+        rm -rf "$staged_copy"
+    fi
+fi
+
 for package in core apps/tour; do
     if printf '%s\n' "$added" | grep -qE "^$package/tests/compile_errors/[^/]+\.zig$" && ! is_staged "$package/build.zig"; then
         fail "a new compile-error case in $package/tests/compile_errors/ needs its row in compile_error_cases in $package/build.zig"

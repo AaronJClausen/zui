@@ -199,6 +199,7 @@ Run from the root:
 | `zig build check-all` | run `zig build check` in every package's directory |
 | `zig build bench` | run the benchmarks |
 | `zig build fmt` | format every Zig source file |
+| `zig build fmt-md` | format every Markdown file with mdformat; needs [uv](https://docs.astral.sh/uv/) |
 | `zig build hooks` | turn on the checked-in git hooks: format and syntax checks before a commit, tests before a push |
 
 [docs/development.md](docs/development.md) lists every step and what CI

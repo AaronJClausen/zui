@@ -43,7 +43,32 @@ Run these from the root:
 | `zig build check-all` | run `zig build check` in every package's directory; `-Dtarget` and `-Doptimize` are passed on |
 | `zig build fmt` | format every Zig source file |
 | `zig build fmt-check` | fail if any file is not formatted, as CI does |
-| `zig build hooks` | have git run the hooks in `.githooks/` (sets `core.hooksPath`); run it once per clone |
+| `zig build fmt-md` | format every Markdown file with mdformat, run through [uv](https://docs.astral.sh/uv/) (see *Markdown*, below) |
+| `zig build fmt-md-check` | fail if any Markdown file is not formatted, as the `pre-commit` hook does for what is staged |
+| `zig build hooks` | have git run the hooks in `.githooks/` (sets `core.hooksPath`), and `git blame` skip the commits in `.git-blame-ignore-revs`; run it once per clone |
+
+## Markdown
+
+`zig build fmt-md` runs mdformat over every Markdown file, with the
+settings in `.mdformat.toml`, the plugin in `tools/mdformat/` and every
+Python package pinned there; uv fetches them the first time. It wraps
+paragraphs at 72 columns, fitting as many words on each line as will
+fit, and writes tables without padding, so a long cell does not widen
+every row. The plugin keeps the documents' own style where mdformat's
+differs: an ordered list numbered from its first item, each item's text
+indented to its own marker, a thematic break as `---`, and a table's
+delimiter row as `|---|---|`. mdformat refuses to write a file that
+would render differently, so formatting never changes what a document
+says.
+
+Two things it shows rather than hides:
+
+- A sub-list or paragraph inside a numbered item must be indented to the
+  item's text, 3 spaces under `1.` and 4 under `10.`. Indented less, it
+  ends the list, and the next item starts a new list, which keeps its
+  number.
+- A line break inside a paragraph is lost when it is rewrapped; one that
+  must stay ends its line with `\`.
 
 ## Git hooks
 
@@ -55,8 +80,10 @@ Run these from the root:
   markers (`git diff --cached --check`), on anything under `zig-out/`,
   `.zig-cache/` or `zig-pkg/`, on a file over 1 MiB, and on a `.zig` or
   `.zon` file that `zig fmt` would change or that `zig ast-check`
-  rejects. It also fails when a change leaves out a file that must come
-  with it: a new case in `core/tests/compile_errors/` or
+  rejects, and on staged Markdown that `zig build fmt-md` would change
+  (all of it when `.mdformat.toml` or `tools/mdformat/` is staged),
+  which needs uv. It also fails when a change leaves out a file that
+  must come with it: a new case in `core/tests/compile_errors/` or
   `apps/tour/tests/compile_errors/` without that package's `build.zig`;
   a changed `.glsl` in `renderers/sokol/src/` without its `.glsl.zig`; a
   new `core/zui_<name>/zui_<name>.zig` without `core/build.zig`,

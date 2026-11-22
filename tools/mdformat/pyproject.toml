@@ -1,0 +1,31 @@
+[project]
+name = "mdformat-zui"
+version = "1.0.0"
+description = "mdformat with zui's Markdown style: tables, ordered lists and thematic breaks as the documents write them"
+requires-python = ">=3.13"
+# Every package is pinned, since a new parser can format the same file differently.
+dependencies = [
+    "mdformat==1.0.0",
+    "mdformat-gfm==1.0.0",
+    "markdown-it-py==4.3.0",
+    "mdit-py-plugins==0.7.0",
+    "mdurl==0.1.2",
+    "wcwidth==0.9.5",
+]
+
+[project.scripts]
+mdformat-zui = "mdformat.__main__:run"
+
+[project.entry-points."mdformat.parser_extension"]
+zui = "mdformat_zui"
+
+[build-system]
+requires = ["uv_build>=0.9,<0.14"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = ""
+
+[tool.uv]
+# uv rebuilds a local package only when one of these changes.
+cache-keys = [{ file = "pyproject.toml" }, { file = "mdformat_zui/*.py" }]
