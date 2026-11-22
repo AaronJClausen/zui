@@ -177,7 +177,7 @@ it draws or reports, its limits, and its build steps.
 | `zui_webgl` | [renderers/webgl/](renderers/webgl/README.md) | the browser's drawing of a frame through WebGL 2 |
 | `zui_host` | [hosts/native/](hosts/native/README.md) | the native hosts, for Windows and for Linux on Wayland |
 | `zui_web` | [hosts/web/](hosts/web/README.md) | the browser's client, the tour in a Web Worker, and the published page |
-| `zui_tour` | [apps/tour/](apps/tour/README.md) | every feature of zui on a screen of its own, for any host and renderer |
+| `zui_tour` | [apps/tour/](apps/tour/README.md) | zui shown four ways: an operations console, the same console with its features pointed out, field cases and spectacles, for any host and renderer |
 | `zui_showcase` | [apps/showcase/](apps/showcase/) | one small application every renderer draws, so their frames can be compared |
 | `zui_themes` | [themes/](themes/) | skins in the design languages of Windows, macOS, GNOME and KDE; a skeleton today |
 | — | [examples/](examples/) | a template project and samples; a skeleton today |

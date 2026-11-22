@@ -8,7 +8,7 @@ release whose build supports Zig 0.16, which is fetched the first time it
 is built; on Linux, raylib's X11 and OpenGL development packages:
 `libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev`.
 
-![The tour's welcome screen](docs/demo.png)
+![The tour's overview](docs/demo.png)
 
 ```zig
 // build.zig, with `zui` the dependency from the main README
@@ -151,15 +151,16 @@ const Tour = zui_tour.App(.{ .Host = zui_raylib.Host, .Renderer = zui_raylib.Ren
 
 and adds what raylib's window gives: screenshots drawn offscreen, the
 startup measurement, and the run's report in `zui_debug`'s panel. The
-Light & Depth screen's gradients and shadows are lowered here, and the
-Transforms and Materials screens are not offered. The `zui_debug` panel's
+Light Lab's gradients, shadows, frost and materials are lowered here, and
+Clickable Chaos, which needs transforms, is not offered. The `zui_debug` panel's
 theme does not reload from a file, since this host has no file watch.
 `examples/showcase.zig` runs `zui_showcase` the same way.
 
 `--measure-idle` runs the tour in a hidden window and reads its own CPU
 time at two frames it asks for with `requestFrameAt`, 10 seconds apart,
 after 5 seconds of warm-up, with the strip's once-a-second refresh off.
-The Welcome screen's clock still ticks, so it declares about 10 frames.
+The overview asks for no frame, so it declares 1, and on Linux it used
+0.055% of one core over 10 s.
 `--measure-startup` reports how long after the OS created the process the
 first frame was presented (Windows only: it reads the process's creation
 time).

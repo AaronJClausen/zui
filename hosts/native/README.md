@@ -564,11 +564,11 @@ zig build tour -- --screenshot tour.bmp      # save the window after a few frame
 zig build showcase -- --frames 60            # draw the showcase for 60 frames, then quit
 ```
 
-Idle, it uses no CPU: on an i9-10900K in ReleaseSafe, the Layout Lab
-screen used 0.0 ms of CPU over 10 s with no frames and no wakes in three
-runs of four (Windows counts CPU time in 15.6 ms ticks). On Linux, under
-Hyprland with an NVIDIA RTX 2060 SUPER, it used 1.2 to 4.4 ms over 10 s,
-with 0 or 1 frames and no wakes, in five runs of six. `--screenshot` saves
+Idle, it uses no CPU: on an i9-10900K in ReleaseSafe, the old tour's
+Layout Lab screen used 0.0 ms of CPU over 10 s with no frames and no
+wakes in three runs of four (Windows counts CPU time in 15.6 ms ticks).
+On Linux, under Hyprland with an NVIDIA RTX 2060 SUPER, the overview used
+4.6 ms over 10 s in Debug, with 1 frame and no wakes. `--screenshot` saves
 the window on Windows only so far. With `--frames`, it prints the frames
 drawn, the sokol renderer's layer and glyph atlas overflows, and whether
 every frame's diagnostics were clean (`diagnostics ok: true`), which CI

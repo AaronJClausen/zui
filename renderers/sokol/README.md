@@ -205,6 +205,6 @@ Its links on Linux print `warning(link): unexpected LLD stderr` and a
 ## The tour on sokol
 
 [The tour](../../apps/tour/README.md) on the sokol renderer draws every
-screen: Light & Depth's gradients, shadows and frosted pane, and the
-Transforms and Materials screens, which are offered only to a renderer
-that draws what they need.
+screen: the Light Lab's gradients, shadows, frosted pane and materials,
+and Clickable Chaos, which is offered only to a renderer that draws
+transforms.

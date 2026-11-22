@@ -159,9 +159,9 @@ tasks run only while a frame waits for them. The page then asks for an
 animation frame at once, sets a timer for the deadline, or waits for the
 canvas's input, a resize or a change of `devicePixelRatio`, and a step
 that finds no frame due declares none. Idle, the tour draws only its
-heartbeat, once a second; the Box Storm, Typography, Light and Depth,
-Transforms and Materials screens animate, and ask for every frame, as
-they do natively. GitHub Pages cannot send the headers that make a page
+heartbeat, once a second; the spectacles that move, such as the Light
+Lab and Clickable Chaos, ask for every frame while they move, as they do
+natively. GitHub Pages cannot send the headers that make a page
 cross-origin isolated, so the page registers a service worker of its own,
 `web/isolation_service_worker.js`, which serves the page and everything
 it loads again with them, and reloads once. `zig build site` writes the

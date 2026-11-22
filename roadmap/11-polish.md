@@ -36,6 +36,7 @@ is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:21-permutations` Every permutation of a component | not started |
 | `11-polish:22-appearance-review` The appearance review | not started |
 | `11-polish:23-design-workbench` The design workbench | not started |
+| `11-polish:24-the-tour` The tour, redone | done |
 
 ### The design system
 
@@ -986,3 +987,35 @@ check shows its badge in the same frame.
 **Waits for** `11-polish:22-appearance-review`.
 
 **Spec.** §18.8.
+
+## 11-polish:24-the-tour — The tour, redone
+
+Taken out of the queue at the owner's request.
+
+**Grounding.** The tour had twelve screens, one per feature
+(`apps/tour/src/screens/` at f6051f4), which the owner found too wacky
+to show zui in its best light, and a Classic screen that declared
+`zui_showcase`.
+
+**Plan.** Replace every screen with four lanes: an overview; Harbor, an
+operations console that uses every feature with restraint, and its
+X-ray, the same console with nodes that explain each feature with live
+proof; field cases, each a real problem solved plainly; and spectacles,
+each one claim proved live. Use what zui does today, and leave what it
+cannot do yet to later items.
+
+**Done when:** every screen declares within its limits and fits the
+default window in pixels and in cells; the tour's cycle, the terminal's
+`--every-screen` dump, `test-demo`, `test-draw`, `test-input` and
+`test-site` pass; and the tour idles on its first screen.
+
+**Spec.** §6.6, §6.8, §8, §11, §13.5, §14, §17.2, §18, §19.
+
+**Status.** Done: fourteen screens in four lanes, described in
+`apps/tour/README.md`. On raylib the overview idles at 0.055% of one
+core with 1 frame in 10 s, and on the Linux host at 0.046%. Not shown
+yet: HDR white in the Light Lab, since the tour's `Ui` declares
+`zui.Color`; wheel zoom in the Gesture Arena, since `Manipulation` does
+not say a wheel moved it; custom semantic actions on Kanban's cards,
+which zui lacks. Break It keeps its render-command load below the limit
+until the emitter keeps room for open clips (ARCHITECTURE.md §7).
