@@ -704,6 +704,25 @@ fn panelFor(id: zui.Id) Ui.Element {
 </script>
       </article>
 
+      <article class="feature" id="corner-shapes" data-title="Corner shapes">
+        <div class="feature-head"><h3>Corner shapes</h3><span class="pill shipped">Shipped</span></div>
+        <p>Every corner is round by default. <code class="z">Decoration.corner_shape</code> makes an element's four corners <code class="z">.continuous</code>, a superellipse that meets its sides with no break in curvature, or <code class="z">.chamfer</code>, a 45° cut; an image takes <code class="z">corner_shape</code> beside its <code class="z">corner_radius</code>. Emission clamps each radius to half the element's shorter side, so <code class="z">.all(1000)</code> makes a pill of any box. A renderer names the shapes it draws in <code class="z">zui_corner_shapes</code>, always with <code class="z">.round</code>, and <code class="z">zui_app.contextConfig</code> carries them into <code class="z">Config.corner_shapes</code>; only then do its commands carry <code class="z">corner_shape</code>, so a context whose renderer draws round corners alone emits the same commands as before. A shape the renderer does not draw is drawn round, and <code class="z">frame.diagnostics.lowered_corner_shapes</code> names it. <code class="z">zui.cornerShapeOf(payload)</code> reads a command's shape either way. <code class="z">Tokens.look</code> gives each part its shape role's shape with its radius. The sokol and WebGL renderers trace all three, point for point alike; the raylib and terminal renderers draw them round. The renderer suite reads pixels near each shape's corners, where the three differ.</p>
+<script type="text/x-zig" data-file="src/ui/albums.zig">
+const Ui = zui.Context(zui_app.contextConfig(Renderer, .{}));
+
+fn albumCover(ui: *Ui, album: *const Album) void {
+    ui.open(.{ .id = .of(album.name), .decoration = .{ .background = .rgb(0x23232d), .corner_radius = .all(14), .corner_shape = .continuous } });
+    defer ui.close();
+    ui.image(.{ .handle = album.cover, .corner_radius = .all(10), .corner_shape = .continuous }, .{ .layout = .{ .sizing = .{ .width = .fixed(160), .height = .fixed(160) } } });
+    ui.box(.{ .decoration = .{ .background = .rgb(0xe0a030), .corner_radius = .all(6), .corner_shape = .chamfer }, .layout = .{ .sizing = .{ .width = .fixed(40), .height = .fixed(16) } } });
+}
+
+fn reportShapes(frame: *const Ui.Frame) void {
+    if (frame.diagnostics.lowered_corner_shapes.count() != 0) std.log.info("this renderer draws some corners round", .{});
+}
+</script>
+      </article>
+
       <article class="feature" id="extended-color" data-title="HDR and wide-gamut color">
         <div class="feature-head"><h3>HDR and wide-gamut color</h3><span class="pill shipped">Shipped</span></div>
         <p><code class="z">Config.Color = zui.ExtendedColor</code> declares colors in linear scRGB, where 1.0 is SDR white: above it for HDR, outside 0 to 1 for wide gamut, written <code class="z">.linear(4, 4, 4, 1)</code> or with <code class="z">Color</code>'s own <code class="z">.rgb(0x3366ff)</code>. Every type that holds a color follows it: <code class="z">Ui.Decoration</code>, <code class="z">Ui.Border</code>, <code class="z">Ui.Effects</code>, <code class="z">Ui.TextStyle</code>. For a renderer that draws only <code class="z">zui.Color</code>, each is clamped as it is emitted, and <code class="z">frame.diagnostics.clamped_colors</code> says when that changed one; <code class="z">zui_wire</code> carries them unclamped when its context's renderer draws them. A host and a renderer that both declare <code class="z">.scrgb_fp16</code> in <code class="z">zui_output_formats</code> open the window with it in <code class="z">WindowOptions.output_formats</code>, and the host picks it while its display shows HDR; <code class="z">surface.outputFormat()</code> says which it chose. the native Windows host picks it on a monitor in HDR and reports <code class="z">ui.environment().hdr_headroom</code>, the monitor's peak over SDR white (1 in SDR), so a theme can tell how bright a highlight may go. The sokol renderer draws that window into a half-float scRGB swapchain, with SDR white where other windows show theirs, and the native hosts'<code class="z">zig build hdr</code> shows two and four times SDR white beside it, measured off the desktop at 2.00× and 4.00×. The renderer suite reads an FP16 target back and expects HDR white there at four times SDR white.</p>

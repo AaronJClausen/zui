@@ -19,10 +19,10 @@
 const std = @import("std");
 const zui = @import("zui");
 
-/// A `zui.Config` for `Renderer`: its optional commands, whether it draws
-/// `zui.ExtendedColor`, its payload types, and the renderer itself as the
-/// text contract when it declares `zuiMeasure` and `overrides` names no
-/// `Text`. Every other field comes from `overrides`, `Color` among them.
+/// A `zui.Config` for `Renderer`: its optional commands and corner shapes,
+/// whether it draws `zui.ExtendedColor`, its payload types, and the
+/// renderer itself as the text contract when it declares `zuiMeasure` and
+/// `overrides` names no `Text`. Every other field comes from `overrides`, `Color` among them.
 ///
 /// ```zig
 /// const Ui = zui.Context(zui_app.contextConfig(zui_raylib.Renderer, .{ .Sources = AppSources }));
@@ -34,6 +34,7 @@ pub fn contextConfig(comptime Renderer: type, comptime overrides: zui.Config) zu
     var result = overrides;
     result.commands = if (@hasDecl(Renderer, "zui_commands")) Renderer.zui_commands else .initEmpty();
     result.extended_color = @hasDecl(Renderer, "zui_extended_color") and Renderer.zui_extended_color;
+    result.corner_shapes = if (@hasDecl(Renderer, "zui_corner_shapes")) Renderer.zui_corner_shapes else .initOne(.round);
     result.ImageHandle = rendererType(Renderer, "ImageHandle", void);
     result.CustomData = rendererType(Renderer, "CustomData", void);
     result.MaterialHandle = rendererType(Renderer, "MaterialHandle", void);

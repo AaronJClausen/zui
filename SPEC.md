@@ -269,6 +269,7 @@ compile-error test:
 - `"zui: frames_in_flight must be at least 1"`;
 - `"zui: Color must be zui.Color or zui.ExtendedColor, got [4]u8"`;
 - `"zui: commands includes .material but MaterialHandle is void"`;
+- `"zui: corner_shapes does not include .round, which every other shape is drawn as"`;
 - each API whose feature is off, naming the field to set:
   `"zui: semantics() needs Config.features.semantics = true"`,
   `"zui: manipulation() needs Config.features.gestures = true"`,
@@ -1009,6 +1010,7 @@ pub const Image = struct {
     natural_size: ?[2]f32 = null,       // layout units: a `fit` image takes this size
     tint: config.Color = .white,        // multiplied into the pixels; white leaves them unchanged
     corner_radius: CornerRadius = .{},
+    corner_shape: CornerShape = .round, // as a decoration's (§18.7)
 };
 ```
 
@@ -1504,7 +1506,7 @@ never sees it:
 | backdrop blur | a rectangle in its tint |
 | transform | the untransformed element; its hit region stays untransformed |
 | material | the element's fallback background |
-| a corner shape outside `Config.corner_shapes` | the same corners, round |
+| a corner shape outside `Config.corner_shapes` | the same corners, round, listed in `Diagnostics.lowered_corner_shapes` |
 | `ExtendedColor` without `zui_extended_color` | the color clamped to `Color`, and `Diagnostics.clamped_colors` set when that changed it |
 
 Capabilities are comptime-known, so lowering costs nothing when the
@@ -1868,6 +1870,7 @@ payload types, `u16` for `FontId`).
 ```zig
 const SokolRenderer = struct {
     pub const zui_commands: zui.CommandSet = .initMany(&.{ .gradient, .shadow });              // optional commands it draws
+    pub const zui_corner_shapes: zui.CornerShapeSet = .initFull();                             // corner shapes it draws; always .round
     pub const zui_surfaces: zui.SurfaceKinds = .initMany(&.{ .win32, .cocoa, .wayland, .x11 }); // native windows it can draw into
     pub const zui_extended_color = false;                                                      // accepts HDR colors
     pub const zui_output_formats: zui.OutputFormats = .initOne(.sdr);                          // targets it draws into; .scrgb_fp16 needs zui_extended_color
@@ -2639,10 +2642,20 @@ if (!std.meta.eql(preferences, app.preferences)) {
 
 - **Emission clamps** each corner to half the element's shorter side, so
   `bubble` is any radius that large.
+- **The families' curves.** Within a corner's radius along both sides,
+  `round` is the quarter circle, `continuous` the quarter superellipse
+  |x|⁴ + |y|⁴ = radius⁴, which meets each side with no curvature, as the
+  side has none, and `chamfer` the straight cut between the two sides'
+  points. A border's inner edge, or a shadow's spread, moves a chamfer's
+  cut parallel to itself.
 - **Renderers declare their shapes.** `Config.corner_shapes` is the set
-  the renderer draws, `round` alone by default. A command carries its
-  shape only when that set holds more than `round`. A shape a renderer
-  does not draw is drawn round, and lowered (§13.3).
+  the renderer draws, its `zui_corner_shapes`, `round` alone by default
+  and always with `round`. A command carries its shape, `corner_shape`,
+  only when that set holds more than `round`; otherwise the field is
+  `void`, and `zui.cornerShapeOf(payload)` reads either as a
+  `CornerShape`. A shape a renderer does not draw is drawn round, and
+  lowered (§13.3). Square corners, of radius 0, have no shape to draw, so
+  they are never lowered.
 - **Nested corners.** `Decoration.nested_corners = .{ .minimum = 2 }`
   (behind `Features.nested_corners`) gives each corner the radius that is
   concentric with its parent's. Its inset is the child's distance from

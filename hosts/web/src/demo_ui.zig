@@ -2,9 +2,9 @@ const zui = @import("zui");
 const Renderer = @import("zui_webgl").Renderer;
 
 /// A context whose frames have the shape of the tour's as the browser draws
-/// them: the commands, colors and payload types `zui_webgl.Renderer`
-/// declares, so the browser decodes the tour's stream, and whose records
-/// the tour reads, since it has sources. `zig build test-demo` checks that
+/// them: the commands, colors, corner shapes and payload types
+/// `zui_webgl.Renderer` declares, so the browser decodes the tour's
+/// stream, and whose records the tour reads, since it has sources. `zig build test-demo` checks that
 /// every frame of the tour decodes to what it drew, and `zig build
 /// test-input` that the tour takes the records the browser writes.
 pub const DemoUi = zui.Context(.{
@@ -14,6 +14,7 @@ pub const DemoUi = zui.Context(.{
     .extended_color = Renderer.zui_extended_color,
     .ImageHandle = Renderer.ImageHandle,
     .MaterialHandle = Renderer.MaterialHandle,
+    .corner_shapes = Renderer.zui_corner_shapes,
 });
 
 /// A record from the browser is live, and a live record writes no

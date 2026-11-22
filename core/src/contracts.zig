@@ -20,7 +20,7 @@ const known_declarations = text_declarations ++ source_declarations ++ renderer_
 
 const text_declarations = [_][]const u8{ "zuiMeasure", "zuiSegment", "zui_thread_safe", "zuiFingerprint" };
 const source_declarations = [_][]const u8{ "zuiSwap", "zuiView", "zuiDelivery", "zuiInject", "zuiPending", "zuiEndFrame", "zuiRefusedCount" };
-const renderer_declarations = [_][]const u8{ "zuiSubmit", "zui_surfaces", "zui_commands", "zui_extended_color", "zui_render_thread", "zui_output_formats" } ++ renderer_surface_calls;
+const renderer_declarations = [_][]const u8{ "zuiSubmit", "zui_surfaces", "zui_commands", "zui_corner_shapes", "zui_extended_color", "zui_render_thread", "zui_output_formats" } ++ renderer_surface_calls;
 /// Called as each window after the first opens, and as each window closes.
 const renderer_surface_calls = [_][]const u8{ "zuiAttachSurface", "zuiDetachSurface" };
 const host_declarations = [_][]const u8{ "zuiPoll", "zuiWaker", "zuiSurface", "zuiApply", "zui_capabilities", "zui_output_formats" } ++ host_loop_calls ++ host_window_calls ++ host_frame_calls ++ host_services;
@@ -74,6 +74,10 @@ pub fn checkRenderer(comptime Renderer: type) void {
     expectDeclarationType(Renderer, "zui_surfaces", surface.SurfaceKinds, "zui.SurfaceKinds");
     if (Renderer.zui_surfaces.count() == 0) @compileError("zui: " ++ name ++ ".zui_surfaces names no surface kind, so no host can give it one");
     if (@hasDecl(Renderer, "zui_commands")) expectDeclarationType(Renderer, "zui_commands", commands.CommandSet, "zui.CommandSet");
+    if (@hasDecl(Renderer, "zui_corner_shapes")) {
+        expectDeclarationType(Renderer, "zui_corner_shapes", style.CornerShapeSet, "zui.CornerShapeSet");
+        if (!Renderer.zui_corner_shapes.contains(.round)) @compileError("zui: " ++ name ++ ".zui_corner_shapes does not include .round, which every other shape is drawn as");
+    }
     if (@hasDecl(Renderer, "zui_extended_color")) expectDeclarationType(Renderer, "zui_extended_color", bool, "bool");
     if (@hasDecl(Renderer, "zui_render_thread")) expectDeclarationType(Renderer, "zui_render_thread", bool, "bool");
     checkOutputFormats(Renderer);

@@ -28,7 +28,7 @@ is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:13-design-vocabulary` The design vocabulary and the appearance contract | done |
 | `11-polish:14-zui-design` `zui_design`: tokens from seeds and preferences | in progress |
 | `11-polish:15-type-scale` The type scale | not started |
-| `11-polish:16-corner-shapes` Corner shapes | not started |
+| `11-polish:16-corner-shapes` Corner shapes | done |
 | `11-polish:17-nested-corners` Nested corners | not started |
 | `11-polish:18-system-accent` The system's accent color | not started |
 | `11-polish:19-default-design` The default design | not started |
@@ -840,16 +840,68 @@ does not clamp. Lowering reports what it replaced in
    none are unchanged.
 2. Emission clamps each corner to half the shorter side, and draws a
    shape the renderer does not declare as round, reporting it lowered.
-3. The sokol and WebGL renderers draw all three, as signed distances;
-   the raylib and terminal renderers declare only `round`.
+3. The sokol and WebGL renderers draw all three, traced into the
+   outlines they already draw every rounded shape and effect with
+   (`corner_segments` per corner, the WebGL one triangle for triangle as
+   the sokol one), not as signed distances: neither renderer has a
+   distance shader to give them; the raylib and terminal renderers
+   declare only `round`.
 4. The renderer suite draws each declared shape and reads a pixel inside
    the chamfer's cut and outside a round corner's arc.
 
-**Done when.** Core's tests and counts (unchanged with no shapes
-declared); `test-all`; the sokol and WebGL renderers pass the suite with
+**Done when.** Core's tests and counts (within CI's 2% gate with no
+shapes declared); `test-all`; the sokol and WebGL renderers pass the suite with
 every shape; `test-draw` in `hosts/web/` passes.
 
 **Spec.** §4, §10.1, §13.1, §13.3, §18.7.
+
+**Status.** Done:
+- `Decoration.corner_shape` and `Image.corner_shape`;
+  `zui.CornerShapeSet`, a renderer's `zui_corner_shapes`, checked and
+  always with `round`, carried by `zui_app.contextConfig` into
+  `Config.corner_shapes`. Each payload with corners has a
+  `corner_shape`, `void` unless the set holds more than `round`;
+  `zui.cornerShapeOf` reads either. Two compile errors pin a set without
+  `round`.
+- Emission clamps each radius to half the snapped bounds' shorter side,
+  and draws a shape the renderer lacks round, listing it in
+  `Diagnostics.lowered_corner_shapes`, a field of its own (a set of
+  shapes, not `CommandSet`, which holds commands); `Diagnostics` stays 96
+  bytes. Square corners skip both, by one test of the radii's bits.
+- `Tokens.look` sets the part's shape role's shape with its radius.
+- The sokol and WebGL renderers declare every shape and trace them in
+  one `Outline`: a continuous corner is the superellipse
+  |x|⁴ + |y|⁴ = r⁴, the circle's points with each coordinate's square
+  root; a chamfer is its cut's two ends, moved by (2 − √2) × an inset so
+  a border's inner edge stays at 45°. No shader rounds a corner itself.
+- The renderer suite draws a box of each shape in a scene of its own and
+  reads pixels near each's top-left and bottom-right corners that tell
+  the three apart, a shape the renderer lacks checked as round; a
+  renderer that draws every corner round fails it. sokol passes it in
+  every target; WebGL's laid-out fans are checked by test. Six scenes
+  overflowed the suite's frame time on `x86-linux`, now in `u64`.
+- `hosts/web`'s `DemoUi` and `PageRenderer` carry the WebGL renderer's
+  shapes, as they carry its commands; `test-draw` and `test-demo` pass.
+- Instruction counts against `f6051f4`, with no shapes declared, each
+  growth the clamp and shape test on corners, or the new byte a
+  declared decoration stores:
+
+  | Row | Growth |
+  |---|---|
+  | 3000 cells, tooltip first / last, endFrame | +0.76% / +0.78% |
+  | documents view, endFrame | +0.38% |
+  | 4096 boxes, depth 8, declare | +0.35% |
+  | 4000 children of one parent, endFrame | +0.12% |
+  | 4096 interactive boxes, declare / pressed / clicked | +0.12% to +0.14% |
+  | 4096 boxes, depth 8, endFrame; static-styled, endFrame | +0.08% |
+  | 4096 interactive boxes, endFrame (all three) | +0.05% |
+  | 1000 labels, rendered, endFrame | +0.01% |
+
+  Without the square-corner test the cells rows grew 4.1% and 4.2%.
+  The owner accepted this growth over compiling the clamp and the
+  report out of a context that declares only `round`
+  (`roadmap/decisions.md`), and the *Done when* now asks for counts
+  within CI's 2% gate.
 
 ## 11-polish:17-nested-corners — Nested corners
 

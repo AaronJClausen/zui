@@ -67,6 +67,12 @@ pub const shadow_offset: f32 = 16;
 /// inside its bounding corner lies outside the curve.
 pub const image_corner_radius: f32 = 12;
 
+/// The corner-shape scene's boxes are this large and their corners this
+/// round: wide enough apart that a pixel near a corner tells a round,
+/// a continuous and a chamfered corner from each other.
+pub const shaped_box_size: f32 = 64;
+pub const shaped_corner_radius: f32 = 24;
+
 /// Each stripe beneath the backdrop blur is this wide, and the blur's
 /// radius is the same, enough to average them.
 pub const stripe_width: f32 = 8;
@@ -89,6 +95,7 @@ pub const turned_size: [2]f32 = .{ 48, 16 };
 /// - clips nested 100 deep, then a fill drawn after all of them ended;
 /// - commands of no size, and far outside the viewport;
 /// - an empty frame;
+/// - a box with each corner shape;
 /// - the reference scene again, which shows that nothing an earlier frame
 ///   set, such as a clip, outlived it.
 ///
@@ -105,7 +112,9 @@ pub const turned_size: [2]f32 = .{ 48, 16 };
 /// leaves it as laid out; a declared material is drawn in place of its
 /// fallback background and a lowered one is that background; HDR white is
 /// at least SDR white in an SDR target, and `hdr_white` in a `.scrgb_fp16`
-/// one. Without a way to read the target back, the suite checks only that
+/// one; and, for a renderer that declares more corner shapes than `round`,
+/// each declared shape cuts its corners as its family does, and each it
+/// does not declare is drawn round. Without a way to read the target back, the suite checks only that
 /// each frame is drawn without an error.
 ///
 /// The target is in the format of the surface `beginDraw` returns. A
@@ -122,7 +131,7 @@ pub const turned_size: [2]f32 = .{ 48, 16 };
 /// `harness` is a pointer to a value that declares:
 /// - `pub const config: zui.Config`, the backend's own (its `Text`,
 ///   commands and payload types); the suite sets the limits, `Sources`,
-///   `Color` and `extended_color`;
+///   `Color`, `extended_color` and `corner_shapes`;
 /// - `fn renderer(self) *Renderer`;
 /// - `fn text(self) *config.Text`, when `config.Text` is not `void`;
 /// - `fn beginDraw(self, size: [2]u32) zui.Surface`: prepare a target of
@@ -158,6 +167,7 @@ const Scene = enum {
     deep_clips,
     out_of_bounds,
     empty,
+    corner_shapes,
 
     fn description(scene: Scene) []const u8 {
         return switch (scene) {
@@ -165,19 +175,21 @@ const Scene = enum {
             .deep_clips => "clips nested 100 deep",
             .out_of_bounds => "commands of no size or out of bounds",
             .empty => "an empty frame",
+            .corner_shapes => "the corner shapes",
         };
     }
 };
 
-const scenes = [_]Scene{ .reference, .deep_clips, .out_of_bounds, .empty, .reference };
+const scenes = [_]Scene{ .reference, .deep_clips, .out_of_bounds, .empty, .corner_shapes, .reference };
 const deep_clip_count = 100;
 
-const ids = zui.ids(.{ "panel", "fill", "frame", "outer", "inner", "picture", "custom", "gradient", "raised", "stripes", "turned", "material", "hdr", "nest", "after_nest" });
+const ids = zui.ids(.{ "panel", "fill", "frame", "outer", "inner", "picture", "custom", "gradient", "raised", "stripes", "turned", "material", "hdr", "nest", "after_nest", "round_corners", "continuous_corners", "chamfered_corners" });
 
 fn suiteConfig(comptime Renderer: type, comptime backend: zui.Config) zui.Config {
     var config = backend;
     config.Color = zui.ExtendedColor;
     config.extended_color = @hasDecl(Renderer, "zui_extended_color") and Renderer.zui_extended_color;
+    config.corner_shapes = if (@hasDecl(Renderer, "zui_corner_shapes")) Renderer.zui_corner_shapes else .initOne(.round);
     config.limits = .{
         .max_elements = 256,
         .max_depth = deep_clip_count + 16,
@@ -210,7 +222,7 @@ pub fn findRendererViolation(comptime Renderer: type, harness: anytype, conforma
 
     for (scenes, 0..) |scene, frame_number| {
         ui.beginFrame(&.{ .params = .{
-            .now = .fromNanoseconds(frame_number * std.time.ns_per_s / 60),
+            .now = .fromNanoseconds(@as(u64, frame_number) * std.time.ns_per_s / 60),
             .viewport = .{ @floatFromInt(renderer_viewport[0]), @floatFromInt(renderer_viewport[1]) },
         } });
         switch (scene) {
@@ -218,6 +230,7 @@ pub fn findRendererViolation(comptime Renderer: type, harness: anytype, conforma
             .deep_clips => declareDeepClips(&ui),
             .out_of_bounds => declareOutOfBounds(&ui),
             .empty => {},
+            .corner_shapes => declareCornerShapes(&ui),
         }
         const frame = ui.endFrame();
         defer ui.release(frame);
@@ -235,6 +248,7 @@ pub fn findRendererViolation(comptime Renderer: type, harness: anytype, conforma
         const found = switch (scene) {
             .reference => pixels.reference(frame, config),
             .deep_clips => pixels.deepClips(frame),
+            .corner_shapes => if (comptime config.corner_shapes.count() > 1) pixels.cornerShapes(frame, config.corner_shapes) else null,
             .out_of_bounds, .empty => null,
         };
         if (found) |violation| return violation;
@@ -342,6 +356,20 @@ fn declareOutOfBounds(ui: anytype) void {
     ui.close();
     ui.box(.{ .decoration = .{ .background = declared(scene_colors.fill), .border = .{ .color = declared(scene_colors.border), .widths = .all(2) } }, .layout = .{ .sizing = fixedSize(100_000, 24) } });
     ui.box(.{ .decoration = .{ .background = declared(scene_colors.fill) }, .layout = .{ .sizing = fixedSize(48, 48) } });
+    ui.close();
+}
+
+fn declareCornerShapes(ui: anytype) void {
+    ui.open(.{ .id = ids.panel, .decoration = .{ .background = declared(scene_colors.background) }, .layout = .{
+        .sizing = fixedSize(renderer_viewport[0], renderer_viewport[1]),
+        .padding = .all(16),
+        .child_gap = 16,
+    } });
+    for ([_]zui.Id{ ids.round_corners, ids.continuous_corners, ids.chamfered_corners }, [_]zui.CornerShape{ .round, .continuous, .chamfer }) |id, shape| ui.box(.{
+        .id = id,
+        .layout = .{ .sizing = fixedSize(shaped_box_size, shaped_box_size) },
+        .decoration = .{ .background = declared(scene_colors.fill), .corner_radius = .all(shaped_corner_radius), .corner_shape = shape },
+    });
     ui.close();
 }
 
@@ -524,6 +552,46 @@ fn PixelCheck(comptime Harness: type) type {
                 .{ .at = center(box), .color = scene_colors.material_fallback, .what = "a lowered material, its fallback background," });
         }
 
+        /// Pixels this far in from a corner, along its diagonal, tell the
+        /// shapes apart at `shaped_corner_radius`: outside every shape but
+        /// continuous, inside round and continuous but not chamfer, and
+        /// inside every shape. A shape the renderer does not declare is
+        /// checked as round. Each box is checked at its top-left and
+        /// bottom-right corners.
+        fn cornerShapes(self: Self, frame: anytype, comptime drawn: zui.CornerShapeSet) ?RendererViolation {
+            const only_continuous = 5;
+            const outside_chamfer = 9;
+            const inside_every = 14;
+            const boxes = [_]struct { zui.Id, zui.CornerShape }{ .{ ids.round_corners, .round }, .{ ids.continuous_corners, .continuous }, .{ ids.chamfered_corners, .chamfer } };
+            for (boxes) |box_and_shape| {
+                const id, const declared_shape = box_and_shape;
+                const box = frame.rectOf(id).?;
+                const shape: zui.CornerShape = if (drawn.contains(declared_shape)) declared_shape else .round;
+                const expectations: [2]struct { pixels_in: f32, color: zui.Color, what: []const u8 } = switch (shape) {
+                    .round => .{
+                        .{ .pixels_in = only_continuous, .color = scene_colors.background, .what = "just outside a round corner's arc" },
+                        .{ .pixels_in = outside_chamfer, .color = scene_colors.fill, .what = "just inside a round corner's arc" },
+                    },
+                    .continuous => .{
+                        .{ .pixels_in = 1, .color = scene_colors.background, .what = "outside a continuous corner's curve" },
+                        .{ .pixels_in = only_continuous, .color = scene_colors.fill, .what = "inside a continuous corner, where a round one leaves the background," },
+                    },
+                    .chamfer => .{
+                        .{ .pixels_in = outside_chamfer, .color = scene_colors.background, .what = "inside a chamfer's cut, where a round corner is filled," },
+                        .{ .pixels_in = inside_every, .color = scene_colors.fill, .what = "just inside a chamfer's cut" },
+                    },
+                };
+                for (expectations) |expectation| {
+                    const last_pixel = shaped_box_size - 1;
+                    const top_left: Expectation = .{ .at = .{ box.x + expectation.pixels_in, box.y + expectation.pixels_in }, .color = expectation.color, .what = expectation.what };
+                    const bottom_right: Expectation = .{ .at = .{ box.x + last_pixel - expectation.pixels_in, box.y + last_pixel - expectation.pixels_in }, .color = expectation.color, .what = expectation.what };
+                    if (self.expect(top_left)) |violation| return violation;
+                    if (self.expect(bottom_right)) |violation| return violation;
+                }
+            }
+            return null;
+        }
+
         fn deepClips(self: Self, frame: anytype) ?RendererViolation {
             const nest = frame.rectOf(ids.nest).?;
             const after = frame.rectOf(ids.after_nest).?;
@@ -589,10 +657,10 @@ fn hex(color: zui.Color) u24 {
     return @as(u24, color.r) << 16 | @as(u24, color.g) << 8 | color.b;
 }
 
-const Flaw = enum { none, forgets_enclosing_clip, ignores_image_decoration, interpolates_gradient_in_srgb, tints_without_blurring, turns_the_wrong_way, draws_material_fallback, skips_srgb_encoding, clamps_hdr_target };
+const Flaw = enum { none, forgets_enclosing_clip, ignores_image_decoration, interpolates_gradient_in_srgb, tints_without_blurring, turns_the_wrong_way, draws_material_fallback, skips_srgb_encoding, clamps_hdr_target, draws_every_corner_round };
 
 /// A software renderer into its own pixels, the plainest that conforms:
-/// fills ignore corner radii, text fills its bounds, an image is its
+/// text fills its bounds, an image is its
 /// handle's color times its tint, inside its rounded corners, a gradient
 /// is each pixel's `colorAt`, a shadow is unblurred, a backdrop blur is a
 /// box average as wide as its radius each way, and each pixel is drawn
@@ -601,7 +669,7 @@ const Flaw = enum { none, forgets_enclosing_clip, ignores_image_decoration, inte
 /// with `extended_color` it also draws into a `.scrgb_fp16` target, which
 /// holds each color as linear `ExtendedColor`. Each `Flaw` is a mistake
 /// the suite must catch.
-fn PixelRenderer(comptime flaw: Flaw, comptime commands: zui.CommandSet, comptime extended_color: bool) type {
+fn PixelRenderer(comptime flaw: Flaw, comptime commands: zui.CommandSet, comptime corner_shapes: zui.CornerShapeSet, comptime extended_color: bool) type {
     return struct {
         const Self = @This();
         const width = renderer_viewport[0];
@@ -611,6 +679,7 @@ fn PixelRenderer(comptime flaw: Flaw, comptime commands: zui.CommandSet, comptim
 
         pub const zui_surfaces: zui.SurfaceKinds = .initOne(.offscreen);
         pub const zui_commands = commands;
+        pub const zui_corner_shapes = corner_shapes;
         pub const zui_extended_color = extended_color;
         pub const zui_output_formats: zui.OutputFormats = if (extended_color) .initMany(&.{ .sdr, .scrgb_fp16 }) else .initOne(.sdr);
         pub const ImageHandle = zui.Color;
@@ -659,7 +728,7 @@ fn PixelRenderer(comptime flaw: Flaw, comptime commands: zui.CommandSet, comptim
             for (frame.commands()) |command| {
                 const bounds = command.bounds;
                 switch (command.payload) {
-                    .rectangle => |rectangle| self.fill(canvas, bounds, inTarget(Pixel, rectangle.color)),
+                    .rectangle => |rectangle| self.fillShaped(canvas, bounds, inTarget(Pixel, rectangle.color), .of(rectangle)),
                     .border => |border| {
                         const widths = border.widths;
                         const color = inTarget(Pixel, border.color);
@@ -688,7 +757,7 @@ fn PixelRenderer(comptime flaw: Flaw, comptime commands: zui.CommandSet, comptim
                         if (flaw == .ignores_image_decoration)
                             self.fill(canvas, bounds, inTarget(Pixel, payload.handle))
                         else
-                            self.fillRounded(canvas, bounds, multiply(inTarget(Pixel, payload.handle), inTarget(Pixel, payload.tint)), payload.corner_radius);
+                            self.fillShaped(canvas, bounds, multiply(inTarget(Pixel, payload.handle), inTarget(Pixel, payload.tint)), .of(payload));
                     } else if (comptime std.mem.eql(u8, @tagName(kind), "gradient")) {
                         self.fillGradient(canvas, bounds, payload);
                     } else if (comptime std.mem.eql(u8, @tagName(kind), "shadow")) {
@@ -698,13 +767,13 @@ fn PixelRenderer(comptime flaw: Flaw, comptime commands: zui.CommandSet, comptim
                             .width = bounds.width + 2 * payload.spread,
                             .height = bounds.height + 2 * payload.spread,
                         };
-                        self.fillRounded(canvas, shape, inTarget(Pixel, payload.color), payload.corner_radius);
+                        self.fillShaped(canvas, shape, inTarget(Pixel, payload.color), .of(payload));
                     } else if (comptime std.mem.eql(u8, @tagName(kind), "backdrop_blur")) {
-                        if (flaw != .tints_without_blurring) self.blurBeneath(canvas, bounds, payload.radius, payload.corner_radius);
-                        self.fillRounded(canvas, bounds, inTarget(Pixel, payload.tint), payload.corner_radius);
+                        if (flaw != .tints_without_blurring) self.blurBeneath(canvas, bounds, payload.radius, .of(payload));
+                        self.fillShaped(canvas, bounds, inTarget(Pixel, payload.tint), .of(payload));
                     } else if (comptime std.mem.eql(u8, @tagName(kind), "material")) {
                         const color = if (flaw == .draws_material_fallback) inTarget(Pixel, payload.fallback) else inTarget(Pixel, payload.handle);
-                        self.fillRounded(canvas, bounds, color, payload.corner_radius);
+                        self.fillShaped(canvas, bounds, color, .of(payload));
                     } else comptime unreachable,
                 }
             }
@@ -779,18 +848,19 @@ fn PixelRenderer(comptime flaw: Flaw, comptime commands: zui.CommandSet, comptim
         }
 
         fn fill(self: *Self, canvas: anytype, rect: zui.Rect, color: @TypeOf(canvas.*).Pixel) void {
-            self.fillRounded(canvas, rect, color, .zero);
+            self.fillShaped(canvas, rect, color, .square);
         }
 
-        fn fillRounded(self: *Self, canvas: anytype, rect: zui.Rect, color: @TypeOf(canvas.*).Pixel, radius: zui.CornerRadius) void {
+        fn fillShaped(self: *Self, canvas: anytype, rect: zui.Rect, color: @TypeOf(canvas.*).Pixel, corners: Corners) void {
+            const drawn = if (flaw == .draws_every_corner_round) Corners{ .radius = corners.radius, .shape = .round } else corners;
             var pixels = self.covered(rect);
             while (pixels.next()) |pixel| {
-                if (insideRounded(rect, radius, pixel.at)) canvas.pixels[pixel.index] = blendOver(canvas.pixels[pixel.index], color);
+                if (drawn.contain(rect, pixel.at)) canvas.pixels[pixel.index] = blendOver(canvas.pixels[pixel.index], color);
             }
         }
 
         /// Untransformed, as the reference scene draws it.
-        fn blurBeneath(self: *Self, canvas: anytype, rect: zui.Rect, radius: f32, corner_radius: zui.CornerRadius) void {
+        fn blurBeneath(self: *Self, canvas: anytype, rect: zui.Rect, radius: f32, corners: Corners) void {
             const Pixel = @TypeOf(canvas.*).Pixel;
             const left: usize = @intFromFloat(std.math.clamp(rect.x, 0, width_units));
             const top: usize = @intFromFloat(std.math.clamp(rect.y, 0, height_units));
@@ -801,7 +871,7 @@ fn PixelRenderer(comptime flaw: Flaw, comptime commands: zui.CommandSet, comptim
             canvas.beneath_blur = canvas.pixels;
             for (top..bottom) |y| for (left..right) |x| {
                 const at: [2]f32 = .{ @as(f32, @floatFromInt(x)) + 0.5, @as(f32, @floatFromInt(y)) + 0.5 };
-                if (!self.insideClips(at) or !insideRounded(rect, corner_radius, at)) continue;
+                if (!self.insideClips(at) or !corners.contain(rect, at)) continue;
                 var sum: @Vector(3, f32) = @splat(0);
                 var count: f32 = 0;
                 var dy: isize = -reach;
@@ -822,7 +892,7 @@ fn PixelRenderer(comptime flaw: Flaw, comptime commands: zui.CommandSet, comptim
             const Pixel = @TypeOf(canvas.*).Pixel;
             var pixels = self.covered(rect);
             while (pixels.next()) |pixel| {
-                if (!insideRounded(rect, gradient.corner_radius, pixel.at)) continue;
+                if (!Corners.of(gradient).contain(rect, pixel.at)) continue;
                 canvas.pixels[pixel.index] = if (flaw == .interpolates_gradient_in_srgb)
                     inTarget(Pixel, encoded(gradient.from).mix(encoded(gradient.to), (zui.Gradient{ .from = encoded(gradient.from), .to = encoded(gradient.to), .angle = gradient.angle }).amountAt(rect, pixel.at)))
                 else
@@ -846,22 +916,42 @@ fn contains(rect: zui.Rect, at: [2]f32) bool {
     return at[0] >= rect.x and at[0] < rect.x + rect.width and at[1] >= rect.y and at[1] < rect.y + rect.height;
 }
 
-fn insideRounded(rect: zui.Rect, radius: zui.CornerRadius, at: [2]f32) bool {
-    if (!contains(rect, at)) return false;
-    const is_left = at[0] < rect.x + rect.width / 2;
-    const is_top = at[1] < rect.y + rect.height / 2;
-    const declared_radius = if (is_top)
-        (if (is_left) radius.top_left else radius.top_right)
-    else
-        (if (is_left) radius.bottom_left else radius.bottom_right);
-    const corner_radius = @min(declared_radius, @min(rect.width, rect.height) / 2);
-    const arc_x = if (is_left) rect.x + corner_radius else rect.x + rect.width - corner_radius;
-    const arc_y = if (is_top) rect.y + corner_radius else rect.y + rect.height - corner_radius;
-    const beyond_x = if (is_left) arc_x - at[0] else at[0] - arc_x;
-    const beyond_y = if (is_top) arc_y - at[1] else at[1] - arc_y;
-    if (beyond_x <= 0 or beyond_y <= 0) return true;
-    return beyond_x * beyond_x + beyond_y * beyond_y <= corner_radius * corner_radius;
-}
+const Corners = struct {
+    radius: zui.CornerRadius,
+    shape: zui.CornerShape,
+
+    const square: Corners = .{ .radius = .zero, .shape = .round };
+
+    fn of(payload: anytype) Corners {
+        return .{ .radius = payload.corner_radius, .shape = zui.cornerShapeOf(payload) };
+    }
+
+    /// Within `radius` of a corner, along both sides, a round corner is a
+    /// quarter circle, a continuous one the quarter superellipse
+    /// |x|⁴ + |y|⁴ = radius⁴, and a chamfer the straight cut between the
+    /// two sides' points.
+    fn contain(self: Corners, rect: zui.Rect, at: [2]f32) bool {
+        if (!contains(rect, at)) return false;
+        const is_left = at[0] < rect.x + rect.width / 2;
+        const is_top = at[1] < rect.y + rect.height / 2;
+        const radius = self.radius;
+        const declared_radius = if (is_top)
+            (if (is_left) radius.top_left else radius.top_right)
+        else
+            (if (is_left) radius.bottom_left else radius.bottom_right);
+        const corner_radius = @min(declared_radius, @min(rect.width, rect.height) / 2);
+        const arc_x = if (is_left) rect.x + corner_radius else rect.x + rect.width - corner_radius;
+        const arc_y = if (is_top) rect.y + corner_radius else rect.y + rect.height - corner_radius;
+        const beyond_x = if (is_left) arc_x - at[0] else at[0] - arc_x;
+        const beyond_y = if (is_top) arc_y - at[1] else at[1] - arc_y;
+        if (beyond_x <= 0 or beyond_y <= 0) return true;
+        return switch (self.shape) {
+            .round => beyond_x * beyond_x + beyond_y * beyond_y <= corner_radius * corner_radius,
+            .continuous => std.math.pow(f32, beyond_x / corner_radius, 4) + std.math.pow(f32, beyond_y / corner_radius, 4) <= 1,
+            .chamfer => beyond_x + beyond_y <= corner_radius,
+        };
+    }
+};
 
 fn multiply(color: anytype, tint: @TypeOf(color)) @TypeOf(color) {
     if (@TypeOf(color) == zui.ExtendedColor) return .linear(color.r * tint.r, color.g * tint.g, color.b * tint.b, color.a * tint.a);
@@ -927,6 +1017,7 @@ const FixedText = struct {
 };
 
 const draws_effects: zui.CommandSet = .initMany(&.{ .gradient, .shadow, .backdrop_blur, .transform, .material });
+const round_only: zui.CornerShapeSet = .initOne(.round);
 
 /// On the heap, since its targets are too large for a test's stack.
 fn violationIn(comptime Renderer: type, format: zui.OutputFormat) !?RendererViolation {
@@ -945,7 +1036,7 @@ fn expectViolation(comptime Renderer: type, format: zui.OutputFormat, expected_d
 test "a renderer that draws every frame right passes the suite, with gradients, shadows, backdrop blurs, transforms and materials drawn or lowered, and HDR colors drawn or clamped, into an SDR or an scRGB target" {
     inline for (comptime .{ draws_effects, zui.CommandSet.initEmpty() }) |commands| {
         inline for (.{ false, true }) |extended_color| {
-            const Renderer = PixelRenderer(.none, commands, extended_color);
+            const Renderer = PixelRenderer(.none, commands, round_only, extended_color);
             const formats: []const zui.OutputFormat = if (extended_color) &.{ .sdr, .scrgb_fp16 } else &.{.sdr};
             for (formats) |format| {
                 if (try violationIn(Renderer, format)) |violation| {
@@ -958,33 +1049,46 @@ test "a renderer that draws every frame right passes the suite, with gradients, 
 }
 
 test "a renderer that forgets the enclosing clip when a clip ends fails the suite" {
-    try expectViolation(PixelRenderer(.forgets_enclosing_clip, draws_effects, false), .sdr, "drew #0040ff at (248, 64) in the reference scene, where what the outer clip cut off should be #203040");
+    try expectViolation(PixelRenderer(.forgets_enclosing_clip, draws_effects, round_only, false), .sdr, "drew #0040ff at (248, 64) in the reference scene, where what the outer clip cut off should be #203040");
 }
 
 test "a renderer that draws an image untinted and square fails the suite" {
-    try expectViolation(PixelRenderer(.ignores_image_decoration, draws_effects, false), .sdr, "drew #00ffff at (32, 112) in the reference scene, where a tinted image of one color should be #00ff80");
+    try expectViolation(PixelRenderer(.ignores_image_decoration, draws_effects, round_only, false), .sdr, "drew #00ffff at (32, 112) in the reference scene, where a tinted image of one color should be #00ff80");
 }
 
 test "a renderer that interpolates a gradient in sRGB fails the suite" {
-    try expectViolation(PixelRenderer(.interpolates_gradient_in_srgb, draws_effects, false), .sdr, "drew #7e0081 at (144, 112) in the reference scene, where the middle of a gradient, in OKLab, should be #8c53a2");
+    try expectViolation(PixelRenderer(.interpolates_gradient_in_srgb, draws_effects, round_only, false), .sdr, "drew #7e0081 at (144, 112) in the reference scene, where the middle of a gradient, in OKLab, should be #8c53a2");
 }
 
 test "a renderer that draws a backdrop blur's tint without blurring fails the suite" {
-    try expectViolation(PixelRenderer(.tints_without_blurring, draws_effects, false), .sdr, "drew #ff80ff at (44, 160) in the reference scene, where a backdrop blur, the stripes beneath it averaged under its tint, should be #c0c0c0");
+    try expectViolation(PixelRenderer(.tints_without_blurring, draws_effects, round_only, false), .sdr, "drew #ff80ff at (44, 160) in the reference scene, where a backdrop blur, the stripes beneath it averaged under its tint, should be #c0c0c0");
 }
 
 test "a renderer that turns a transform the wrong way fails the suite" {
-    try expectViolation(PixelRenderer(.turns_the_wrong_way, draws_effects, false), .sdr, "drew #8080ff at (120, 140) in the reference scene, where the start of a box turned a quarter clockwise, now at its top, should be #ff8080");
+    try expectViolation(PixelRenderer(.turns_the_wrong_way, draws_effects, round_only, false), .sdr, "drew #8080ff at (120, 140) in the reference scene, where the start of a box turned a quarter clockwise, now at its top, should be #ff8080");
 }
 
 test "a renderer that draws a material's fallback in its place fails the suite" {
-    try expectViolation(PixelRenderer(.draws_material_fallback, draws_effects, false), .sdr, "drew #008080 at (176, 160) in the reference scene, where a material, drawn in place of its fallback background, should be #c08000");
+    try expectViolation(PixelRenderer(.draws_material_fallback, draws_effects, round_only, false), .sdr, "drew #008080 at (176, 160) in the reference scene, where a material, drawn in place of its fallback background, should be #c08000");
 }
 
 test "a renderer that draws ExtendedColor's linear channels without encoding them fails the suite" {
-    try expectViolation(PixelRenderer(.skips_srgb_encoding, draws_effects, true), .sdr, "drew #ff3700 at (98, 48) in the reference scene, where a border's left edge should be #ff8000");
+    try expectViolation(PixelRenderer(.skips_srgb_encoding, draws_effects, round_only, true), .sdr, "drew #ff3700 at (98, 48) in the reference scene, where a border's left edge should be #ff8000");
 }
 
 test "a renderer that clamps HDR white into an scRGB target fails the suite" {
-    try expectViolation(PixelRenderer(.clamps_hdr_target, draws_effects, true), .scrgb_fp16, "drew (1.00, 1.00, 1.00) at (224, 160) in the reference scene, where HDR white, brighter than SDR white, should be (4, 4, 4)");
+    try expectViolation(PixelRenderer(.clamps_hdr_target, draws_effects, round_only, true), .scrgb_fp16, "drew (1.00, 1.00, 1.00) at (224, 160) in the reference scene, where HDR white, brighter than SDR white, should be (4, 4, 4)");
+}
+
+test "a renderer that draws every corner shape it declares passes the suite, the shapes it does not declare drawn round" {
+    inline for (comptime .{ zui.CornerShapeSet.initFull(), zui.CornerShapeSet.initMany(&.{ .round, .chamfer }), zui.CornerShapeSet.initMany(&.{ .round, .continuous }) }) |corner_shapes| {
+        if (try violationIn(PixelRenderer(.none, draws_effects, corner_shapes, false), .sdr)) |violation| {
+            std.debug.print("{s}\n", .{violation.description()});
+            return violation.kind;
+        }
+    }
+}
+
+test "a renderer that declares corner shapes but draws every corner round fails the suite" {
+    try expectViolation(PixelRenderer(.draws_every_corner_round, draws_effects, .initFull(), false), .sdr, "drew #203040 at (101, 21) in the corner shapes, where inside a continuous corner, where a round one leaves the background, should be #ff0000");
 }

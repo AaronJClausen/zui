@@ -58,6 +58,10 @@ pub const Config = struct {
     /// Without it, an `ExtendedColor` is clamped to a `Color` as it is
     /// emitted, and the commands carry `Color`.
     extended_color: bool = false,
+    /// The corner shapes the renderer draws, its `zui_corner_shapes`;
+    /// always with `round`, which the rest are drawn as. With more than
+    /// `round`, the commands carry each element's shape.
+    corner_shapes: style.CornerShapeSet = .initOne(.round),
 
     features: Features = .{},
     /// Frames alive at once: one being declared plus those a renderer holds.
@@ -156,6 +160,9 @@ pub const Diagnostics = struct {
     /// draw, so emission replaced them: a gradient by a rectangle in its
     /// mean color, a shadow by nothing. Not a failure, so `ok` ignores it.
     lowered: command_types.CommandSet = .initEmpty(),
+    /// Corner shapes this frame declared but the renderer does not draw, so
+    /// emission drew them round. Not a failure.
+    lowered_corner_shapes: style.CornerShapeSet = .initEmpty(),
     /// A declared `ExtendedColor` lay outside SDR or sRGB's gamut, and the
     /// renderer draws only `Color`, so emission clamped it. Not a failure.
     clamped_colors: bool = false,
@@ -370,6 +377,7 @@ pub fn Context(comptime config: Config) type {
             .CustomData = config.CustomData,
             .MaterialHandle = config.MaterialHandle,
             .commands = config.commands,
+            .corner_shapes = config.corner_shapes,
         });
         pub const has_image = config.ImageHandle != void;
         /// What `image` declares.
@@ -382,7 +390,11 @@ pub fn Context(comptime config: Config) type {
             natural_size: ?[2]f32 = null,
             /// Multiplied into the image's pixels; white leaves them unchanged.
             tint: Color = .white,
+            /// Each at most half the shorter side, however large declared.
             corner_radius: style.CornerRadius = .zero,
+            /// Drawn as `round` by a renderer whose `zui_corner_shapes`
+            /// lacks it.
+            corner_shape: style.CornerShape = .round,
         };
         /// Rounded up to a whole number of bytes: a `u13` is stored in 16
         /// bits anyway, and every load of one would be masked.
@@ -2793,4 +2805,5 @@ fn validateConfig(comptime config: Config) void {
         else => @compileError("zui: FontId must be an integer or enum type, got " ++ @typeName(config.FontId)),
     }
     if (config.commands.contains(.material) and config.MaterialHandle == void) @compileError("zui: commands includes .material but MaterialHandle is void");
+    if (!config.corner_shapes.contains(.round)) @compileError("zui: corner_shapes does not include .round, which every other shape is drawn as");
 }

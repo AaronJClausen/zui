@@ -51,7 +51,8 @@ else
 /// `.offscreen` surface, which may be `.scrgb_fp16`, or, into a native
 /// host's window: `.win32` on Windows, `.wayland` on Linux. It records
 /// into numbered layers that are replayed in order, each drawn under its
-/// own scissor rectangle. A frame with a backdrop blur is drawn offscreen and
+/// own scissor rectangle. Corners are traced as outlines, round,
+/// continuous or chamfered. A frame with a backdrop blur is drawn offscreen and
 /// copied to the surface, so that the blur can sample what is beneath it.
 /// A transform is sokol_gl's modelview matrix; a clip inside one is
 /// scissored to the box around it in the window, which is larger than a
@@ -65,6 +66,7 @@ else
 pub const Renderer = struct {
     pub const zui_surfaces: zui.SurfaceKinds = if (native_surface) |kind| .initMany(&.{ .library, .offscreen, kind }) else .initMany(&.{ .library, .offscreen });
     pub const zui_commands: zui.CommandSet = .initMany(&.{ .gradient, .shadow, .backdrop_blur, .transform, .material });
+    pub const zui_corner_shapes: zui.CornerShapeSet = .initFull();
     pub const zui_extended_color = true;
     pub const zui_output_formats: zui.OutputFormats = if (presents_scrgb) .initMany(&.{ .sdr, .scrgb_fp16 }) else .initOne(.sdr);
     pub const ImageHandle = Image;
@@ -354,11 +356,11 @@ pub const Renderer = struct {
             switch (command.payload) {
                 .rectangle => |rectangle| {
                     recorder.beginShapes();
-                    fillRectangle(bounds, rectangle.corner_radius, .of(rectangle.color, format), self.corner_segments);
+                    fillRectangle(bounds, .of(rectangle), .of(rectangle.color, format), self.corner_segments);
                 },
                 .border => |border| {
                     recorder.beginShapes();
-                    strokeBorder(bounds, border.widths, border.corner_radius, .of(border.color, format), self.corner_segments);
+                    strokeBorder(bounds, border.widths, .of(border), .of(border.color, format), self.corner_segments);
                 },
                 .text => |line| if (self.glyphs) |atlas| {
                     recorder.beginShapes();
@@ -366,7 +368,7 @@ pub const Renderer = struct {
                 },
                 .image => |image| {
                     recorder.beginShapes();
-                    drawImage(image.handle, bounds, .of(image.tint, format), image.corner_radius, self.corner_segments);
+                    drawImage(image.handle, bounds, .of(image.tint, format), .of(image), self.corner_segments);
                 },
                 .gradient => |gradient| {
                     recorder.beginShapes();
@@ -381,16 +383,16 @@ pub const Renderer = struct {
                         const to_window = transforms.current();
                         if (self.backdrop_blurs.record(to_window.boundsOf(bounds), blur.radius, viewport, layer)) {
                             var outline: Outline = .{};
-                            outline.trace(bounds, blur.corner_radius, .{}, self.corner_segments);
+                            outline.trace(bounds, .of(blur), .{}, self.corner_segments);
                             self.backdrop_blurs.drawBlurred(outline.points[0..outline.count], centerOf(bounds), to_window, viewport);
                         }
                     };
                     recorder.beginShapes();
-                    fillRectangle(bounds, blur.corner_radius, .of(blur.tint, format), self.corner_segments);
+                    fillRectangle(bounds, .of(blur), .of(blur.tint, format), self.corner_segments);
                 },
                 .material => |material| if (!self.recordMaterial(&recorder, material, bounds, transforms.current(), viewport)) {
                     recorder.beginShapes();
-                    fillRectangle(bounds, material.corner_radius, .of(material.fallback, format), self.corner_segments);
+                    fillRectangle(bounds, .of(material), .of(material.fallback, format), self.corner_segments);
                 },
                 .clip_begin => |clip| {
                     clips.push(if (transforms.isActive()) transforms.current().boundsOf(clip).intersect(clips.current() orelse wholeViewport(viewport)) else clip);
@@ -427,7 +429,7 @@ pub const Renderer = struct {
             return false;
         };
         var outline: Outline = .{};
-        outline.trace(bounds, material.corner_radius, .{}, self.corner_segments);
+        outline.trace(bounds, .of(material), .{}, self.corner_segments);
         return self.materials.record(material.handle, outline.points[0..outline.count], bounds, to_window, viewport, layer, self.format);
     }
 
@@ -666,9 +668,9 @@ fn hasRoundedCorners(radius: zui.CornerRadius) bool {
     return radius.top_left > 0 or radius.top_right > 0 or radius.bottom_left > 0 or radius.bottom_right > 0;
 }
 
-fn fillRectangle(bounds: zui.Rect, radius: zui.CornerRadius, color: VertexColor, corner_segments: u8) void {
+fn fillRectangle(bounds: zui.Rect, corners: Corners, color: VertexColor, corner_segments: u8) void {
     color.apply();
-    if (!hasRoundedCorners(radius)) {
+    if (!hasRoundedCorners(corners.radius)) {
         sgl.beginQuads();
         sgl.v2f(bounds.x, bounds.y);
         sgl.v2f(bounds.x + bounds.width, bounds.y);
@@ -678,7 +680,7 @@ fn fillRectangle(bounds: zui.Rect, radius: zui.CornerRadius, color: VertexColor,
         return;
     }
     var outline: Outline = .{};
-    outline.trace(bounds, radius, .{}, corner_segments);
+    outline.trace(bounds, corners, .{}, corner_segments);
     fillOutline(&outline, centerOf(bounds));
 }
 
@@ -686,8 +688,8 @@ fn centerOf(bounds: zui.Rect) [2]f32 {
     return .{ bounds.x + bounds.width / 2, bounds.y + bounds.height / 2 };
 }
 
-/// In the current color, as a fan from `center`, which an outline of a
-/// rounded rectangle always surrounds.
+/// In the current color, as a fan from `center`, which the outline of a
+/// rectangle with corners of any shape always surrounds.
 fn fillOutline(outline: *const Outline, center: [2]f32) void {
     sgl.beginTriangles();
     for (0..outline.count) |index| {
@@ -706,11 +708,11 @@ fn fillOutline(outline: *const Outline, center: [2]f32) void {
 const gradient_band_length = 4;
 const max_gradient_bands = 64;
 
-/// A rounded rectangle is convex, so each band of it is a convex polygon:
-/// the outline cut by the two lines that bound the band.
+/// A rectangle with corners of any shape is convex, so each band of it is
+/// a convex polygon: the outline cut by the two lines that bound the band.
 fn fillGradient(bounds: zui.Rect, gradient: anytype, format: zui.OutputFormat, corner_segments: u8) void {
     var outline: Outline = .{};
-    outline.trace(bounds, gradient.corner_radius, .{}, corner_segments);
+    outline.trace(bounds, .of(gradient), .{}, corner_segments);
     const direction: [2]f32 = .{ @cos(gradient.angle), @sin(gradient.angle) };
     const length = @abs(bounds.width * direction[0]) + @abs(bounds.height * direction[1]);
     const band_count: usize = @intFromFloat(std.math.clamp(@ceil(length / gradient_band_length), 1, max_gradient_bands));
@@ -774,7 +776,8 @@ fn drawShadow(bounds: zui.Rect, shadow: anytype, format: zui.OutputFormat, corne
     const caster: zui.Rect = .{ .x = bounds.x + shadow.offset[0], .y = bounds.y + shadow.offset[1], .width = bounds.width, .height = bounds.height };
     const spread = @max(shadow.spread, -@min(caster.width, caster.height) / 2);
     var inner: Outline = .{};
-    inner.trace(caster, shadow.corner_radius, .all(-spread), corner_segments);
+    const corners: Corners = .of(shadow);
+    inner.trace(caster, corners, .all(-spread), corner_segments);
     const shadow_color: VertexColor = .of(shadow.color, format);
     shadow_color.apply();
     fillOutline(&inner, centerOf(caster));
@@ -785,7 +788,7 @@ fn drawShadow(bounds: zui.Rect, shadow: anytype, format: zui.OutputFormat, corne
     for (1..shadow_fade_rings + 1) |ring| {
         const reached = @as(f32, @floatFromInt(ring)) / shadow_fade_rings;
         var outer: Outline = .{};
-        outer.trace(caster, shadow.corner_radius, .all(-(spread + shadow.blur * reached)), corner_segments);
+        outer.trace(caster, corners, .all(-(spread + shadow.blur * reached)), corner_segments);
         const outer_alpha: u8 = @intFromFloat(@round(@as(f32, @floatFromInt(shadow_color.rgba.a)) * (1 - smoothstep(reached))));
         const inner_color = shadow_color.withAlpha(inner_alpha);
         const outer_color = shadow_color.withAlpha(outer_alpha);
@@ -816,11 +819,11 @@ fn smoothstep(amount: f32) f32 {
 
 /// Borders are drawn inside the bounds, as CSS draws them: a ring between
 /// the outer outline and one inset by each edge's width.
-fn strokeBorder(bounds: zui.Rect, widths: zui.Edges, radius: zui.CornerRadius, color: VertexColor, corner_segments: u8) void {
+fn strokeBorder(bounds: zui.Rect, widths: zui.Edges, corners: Corners, color: VertexColor, corner_segments: u8) void {
     var outer: Outline = .{};
     var inner: Outline = .{};
-    outer.trace(bounds, radius, .{}, corner_segments);
-    inner.trace(bounds, radius, widths, corner_segments);
+    outer.trace(bounds, corners, .{}, corner_segments);
+    inner.trace(bounds, corners, widths, corner_segments);
     color.apply();
     sgl.beginTriangles();
     for (0..outer.count) |index| {
@@ -839,42 +842,75 @@ fn strokeBorder(bounds: zui.Rect, widths: zui.Edges, radius: zui.CornerRadius, c
     sgl.end();
 }
 
-/// The points around a rounded rectangle, clockwise from the top-left
-/// corner, with the same number of points for any radius so that two
-/// outlines of one rectangle can be joined point by point.
+/// A command's corners, round for one that carries no shape.
+const Corners = struct {
+    radius: zui.CornerRadius,
+    shape: zui.CornerShape,
+
+    fn of(payload: anytype) Corners {
+        return .{ .radius = payload.corner_radius, .shape = zui.cornerShapeOf(payload) };
+    }
+};
+
+/// The points around a rectangle with shaped corners, clockwise from the
+/// top-left corner, with the same number of points for any radius of one
+/// shape, so that two outlines of one rectangle can be joined point by
+/// point: `corner_segments + 1` points along each round or continuous
+/// corner, and the two ends of each chamfer's cut.
 const Outline = struct {
     const max_segments = 32;
     const max_points = 4 * (max_segments + 1);
+    /// A chamfer's cut, moved in by an inset, keeps its 45° when its two
+    /// ends move toward the corner by this much of the inset.
+    const chamfer_inset_shortening = 2 - std.math.sqrt2;
 
     points: [max_points][2]f32 = undefined,
     count: usize = 0,
 
-    fn trace(self: *Outline, bounds: zui.Rect, radius: zui.CornerRadius, inset: zui.Edges, corner_segments: u8) void {
+    fn trace(self: *Outline, bounds: zui.Rect, corners: Corners, inset: zui.Edges, corner_segments: u8) void {
         const segments = std.math.clamp(corner_segments, 1, max_segments);
+        const radius = corners.radius;
         const left = bounds.x + inset.left;
         const top = bounds.y + inset.top;
         const right = bounds.x + bounds.width - inset.right;
         const bottom = bounds.y + bounds.height - inset.bottom;
         const limit = @max(0, @min(right - left, bottom - top) / 2);
-        const corners = [4]struct { center_x: f32, center_y: f32, radius: f32, start_angle: f32 }{
-            .{ .center_x = left, .center_y = top, .radius = radius.top_left - @max(inset.left, inset.top), .start_angle = std.math.pi },
-            .{ .center_x = right, .center_y = top, .radius = radius.top_right - @max(inset.right, inset.top), .start_angle = 1.5 * std.math.pi },
-            .{ .center_x = right, .center_y = bottom, .radius = radius.bottom_right - @max(inset.right, inset.bottom), .start_angle = 0 },
-            .{ .center_x = left, .center_y = bottom, .radius = radius.bottom_left - @max(inset.left, inset.bottom), .start_angle = 0.5 * std.math.pi },
+        const inset_shortening: f32 = if (corners.shape == .chamfer) chamfer_inset_shortening else 1;
+        const shape_corners = [4]struct { center_x: f32, center_y: f32, radius: f32, inset: f32, start_angle: f32 }{
+            .{ .center_x = left, .center_y = top, .radius = radius.top_left, .inset = @max(inset.left, inset.top), .start_angle = std.math.pi },
+            .{ .center_x = right, .center_y = top, .radius = radius.top_right, .inset = @max(inset.right, inset.top), .start_angle = 1.5 * std.math.pi },
+            .{ .center_x = right, .center_y = bottom, .radius = radius.bottom_right, .inset = @max(inset.right, inset.bottom), .start_angle = 0 },
+            .{ .center_x = left, .center_y = bottom, .radius = radius.bottom_left, .inset = @max(inset.left, inset.bottom), .start_angle = 0.5 * std.math.pi },
         };
+        const step_count: f32 = if (corners.shape == .chamfer) 1 else @floatFromInt(segments);
+        const point_count: usize = if (corners.shape == .chamfer) 2 else segments + 1;
         self.count = 0;
-        for (corners, 0..) |corner, corner_index| {
-            const corner_radius = std.math.clamp(corner.radius, 0, limit);
+        for (shape_corners, 0..) |corner, corner_index| {
+            const corner_radius = std.math.clamp(corner.radius - corner.inset * inset_shortening, 0, limit);
             const is_left = corner_index == 0 or corner_index == 3;
             const is_top = corner_index < 2;
             const arc_center_x = if (is_left) corner.center_x + corner_radius else corner.center_x - corner_radius;
             const arc_center_y = if (is_top) corner.center_y + corner_radius else corner.center_y - corner_radius;
-            for (0..segments + 1) |step| {
-                const angle = corner.start_angle + 0.5 * std.math.pi * @as(f32, @floatFromInt(step)) / @as(f32, @floatFromInt(segments));
-                self.points[self.count] = .{ arc_center_x + @cos(angle) * corner_radius, arc_center_y + @sin(angle) * corner_radius };
+            for (0..point_count) |step| {
+                const angle = corner.start_angle + 0.5 * std.math.pi * @as(f32, @floatFromInt(step)) / step_count;
+                const toward = towardCurve(corners.shape, angle);
+                self.points[self.count] = .{ arc_center_x + toward[0] * corner_radius, arc_center_y + toward[1] * corner_radius };
                 self.count += 1;
             }
         }
+    }
+
+    /// From a corner's center, the point of its curve at `angle`, for a
+    /// radius of 1. A continuous corner is the superellipse
+    /// |x|⁴ + |y|⁴ = 1, whose curvature falls to the side's, none, where
+    /// it meets it: the circle's point with each coordinate's square root.
+    fn towardCurve(shape: zui.CornerShape, angle: f32) [2]f32 {
+        const on_circle: [2]f32 = .{ @cos(angle), @sin(angle) };
+        if (shape != .continuous) return on_circle;
+        return .{
+            std.math.copysign(@sqrt(@abs(on_circle[0])), on_circle[0]),
+            std.math.copysign(@sqrt(@abs(on_circle[1])), on_circle[1]),
+        };
     }
 };
 
@@ -898,11 +934,11 @@ fn drawText(fonts: zui_glyphs.Fonts, atlas: *const GlyphAtlas, view: sg.View, sa
 
 /// sokol_gl multiplies each texel by the vertex color, which is the tint.
 /// A rounded image is a fan of textured triangles from its center.
-fn drawImage(image: Image, bounds: zui.Rect, tint: VertexColor, radius: zui.CornerRadius, corner_segments: u8) void {
+fn drawImage(image: Image, bounds: zui.Rect, tint: VertexColor, corners: Corners, corner_segments: u8) void {
     sgl.enableTexture();
     sgl.texture(.{ .id = image.view.id }, .{ .id = image.sampler.id });
     tint.apply();
-    if (!hasRoundedCorners(radius) or bounds.width <= 0 or bounds.height <= 0) {
+    if (!hasRoundedCorners(corners.radius) or bounds.width <= 0 or bounds.height <= 0) {
         sgl.beginQuads();
         sgl.v2fT2f(bounds.x, bounds.y, 0, 0);
         sgl.v2fT2f(bounds.x + bounds.width, bounds.y, 1, 0);
@@ -910,7 +946,7 @@ fn drawImage(image: Image, bounds: zui.Rect, tint: VertexColor, radius: zui.Corn
         sgl.v2fT2f(bounds.x, bounds.y + bounds.height, 0, 1);
     } else {
         var outline: Outline = .{};
-        outline.trace(bounds, radius, .{}, corner_segments);
+        outline.trace(bounds, corners, .{}, corner_segments);
         const center: [2]f32 = .{ bounds.x + bounds.width / 2, bounds.y + bounds.height / 2 };
         sgl.beginTriangles();
         for (0..outline.count) |index| {
@@ -972,9 +1008,44 @@ test "a column-major matrix carries the offset in its last column" {
 test "outlines keep the same point count for any radius" {
     var square: Outline = .{};
     var rounded: Outline = .{};
-    square.trace(.{ .width = 100, .height = 40 }, .zero, .{}, 8);
-    rounded.trace(.{ .width = 100, .height = 40 }, .all(500), .{}, 8);
+    square.trace(.{ .width = 100, .height = 40 }, .{ .radius = .zero, .shape = .round }, .{}, 8);
+    rounded.trace(.{ .width = 100, .height = 40 }, .{ .radius = .all(500), .shape = .round }, .{}, 8);
     try std.testing.expectEqual(square.count, rounded.count);
     try std.testing.expectEqual([2]f32{ 0, 0 }, square.points[0]);
     try std.testing.expectApproxEqAbs(@as(f32, 20), rounded.points[0][1], 0.001);
+}
+
+test "a chamfer is one cut per corner, which an inset moves in at 45 degrees" {
+    const bounds: zui.Rect = .{ .width = 100, .height = 40 };
+    const chamfer: Corners = .{ .radius = .all(10), .shape = .chamfer };
+    var outer: Outline = .{};
+    var inner: Outline = .{};
+    outer.trace(bounds, chamfer, .{}, 8);
+    inner.trace(bounds, chamfer, .all(2), 8);
+    try std.testing.expectEqual(8, outer.count);
+    try std.testing.expectEqual(outer.count, inner.count);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), outer.points[0][0], 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 10), outer.points[0][1], 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 10), outer.points[1][0], 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), outer.points[1][1], 0.001);
+    const outer_cut = outer.points[0][0] + outer.points[0][1];
+    const inner_cut = inner.points[0][0] + inner.points[0][1];
+    try std.testing.expectApproxEqAbs(@as(f32, 2 * std.math.sqrt2), inner_cut - outer_cut, 0.001);
+    try std.testing.expectApproxEqAbs(inner_cut, inner.points[1][0] + inner.points[1][1], 0.001);
+}
+
+test "a continuous corner fills more of its corner than a round one, and meets the sides where it does" {
+    const bounds: zui.Rect = .{ .width = 100, .height = 100 };
+    var round: Outline = .{};
+    var continuous: Outline = .{};
+    round.trace(bounds, .{ .radius = .all(24), .shape = .round }, .{}, 8);
+    continuous.trace(bounds, .{ .radius = .all(24), .shape = .continuous }, .{}, 8);
+    try std.testing.expectEqual(round.count, continuous.count);
+    for ([_]usize{ 0, 8 }) |end| {
+        try std.testing.expectApproxEqAbs(round.points[end][0], continuous.points[end][0], 0.01);
+        try std.testing.expectApproxEqAbs(round.points[end][1], continuous.points[end][1], 0.01);
+    }
+    const diagonal_reach = 24 * (1 - 1 / std.math.pow(f32, 2, 0.25));
+    try std.testing.expectApproxEqAbs(diagonal_reach, continuous.points[4][0], 0.001);
+    try std.testing.expect(continuous.points[4][0] < round.points[4][0]);
 }

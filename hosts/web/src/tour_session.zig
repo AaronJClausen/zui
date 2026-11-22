@@ -291,6 +291,7 @@ pub const PageHost = struct {
 pub const PageRenderer = struct {
     pub const zui_surfaces: zui.SurfaceKinds = .initOne(.wire);
     pub const zui_commands = zui_webgl.Renderer.zui_commands;
+    pub const zui_corner_shapes = zui_webgl.Renderer.zui_corner_shapes;
     pub const zui_extended_color = zui_webgl.Renderer.zui_extended_color;
     pub const ImageHandle = zui_webgl.Renderer.ImageHandle;
     pub const MaterialHandle = zui_webgl.Renderer.MaterialHandle;

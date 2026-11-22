@@ -89,7 +89,7 @@ bounds.
 | zui | terminal |
 |---|---|
 | `rectangle` | cell backgrounds; translucent colors blend over what is below |
-| `border` | box drawing (`┌─┐`, or `╭─╮` with a corner radius); `[` `]` on a one-row box |
+| `border` | box drawing (`┌─┐`, or `╭─╮` with a corner radius, of any corner shape, since zui draws the others round here); `[` `]` on a one-row box |
 | `text` | one glyph per code point, one line per command, in the cell where `zui_glyphs`' cell placement puts it; letter spacing moves each glyph to the nearest cell |
 | `clip_begin` / `clip_end` | a stack of cell rectangles |
 | pointer | SGR mouse reports as `pointer_move`, `pointer_down` and `pointer_up`, in the order they arrived |

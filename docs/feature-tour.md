@@ -370,6 +370,29 @@ fn panelFor(id: zui.Id) Ui.Element {
 }
 ```
 
+<a id="corner-shapes"></a>
+
+### Corner shapes · *shipped*
+
+Every corner is round by default. `Decoration.corner_shape` makes an element's four corners `.continuous`, a superellipse that meets its sides with no break in curvature, or `.chamfer`, a 45° cut; an image takes `corner_shape` beside its `corner_radius`. Emission clamps each radius to half the element's shorter side, so `.all(1000)` makes a pill of any box. A renderer names the shapes it draws in `zui_corner_shapes`, always with `.round`, and `zui_app.contextConfig` carries them into `Config.corner_shapes`; only then do its commands carry `corner_shape`, so a context whose renderer draws round corners alone emits the same commands as before. A shape the renderer does not draw is drawn round, and `frame.diagnostics.lowered_corner_shapes` names it. `zui.cornerShapeOf(payload)` reads a command's shape either way. `Tokens.look` gives each part its shape role's shape with its radius. The sokol and WebGL renderers trace all three, point for point alike; the raylib and terminal renderers draw them round. The renderer suite reads pixels near each shape's corners, where the three differ.
+
+`src/ui/albums.zig`
+
+```zig
+const Ui = zui.Context(zui_app.contextConfig(Renderer, .{}));
+
+fn albumCover(ui: *Ui, album: *const Album) void {
+    ui.open(.{ .id = .of(album.name), .decoration = .{ .background = .rgb(0x23232d), .corner_radius = .all(14), .corner_shape = .continuous } });
+    defer ui.close();
+    ui.image(.{ .handle = album.cover, .corner_radius = .all(10), .corner_shape = .continuous }, .{ .layout = .{ .sizing = .{ .width = .fixed(160), .height = .fixed(160) } } });
+    ui.box(.{ .decoration = .{ .background = .rgb(0xe0a030), .corner_radius = .all(6), .corner_shape = .chamfer }, .layout = .{ .sizing = .{ .width = .fixed(40), .height = .fixed(16) } } });
+}
+
+fn reportShapes(frame: *const Ui.Frame) void {
+    if (frame.diagnostics.lowered_corner_shapes.count() != 0) std.log.info("this renderer draws some corners round", .{});
+}
+```
+
 <a id="extended-color"></a>
 
 ### HDR and wide-gamut color · *shipped*

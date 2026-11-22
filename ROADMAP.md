@@ -118,10 +118,9 @@ is in the file its group names.
 | `10-reach:04-window-decorations` | `core/src/chrome.zig`, `core/src/context.zig`, `core/zui_app/`, `hosts/native/` | | waiting on a person: the checklist under its *Status*, on `zig build title-bar` in `hosts/native/` |
 | `11-polish:14-zui-design` | `core/zui_design/` | | in progress; slice 3, contrast, is next |
 | `11-polish:15-type-scale` | `core/zui_design/`, `text/glyphs/`, `text/truetype/` | `11-polish:14-zui-design` | |
-| `11-polish:16-corner-shapes` | `core/src/`, `renderers/` | | |
-| `11-polish:17-nested-corners` | `core/src/emission.zig` | `11-polish:16-corner-shapes` | |
+| `11-polish:17-nested-corners` | `core/src/emission.zig` | | |
 | `11-polish:18-system-accent` | `core/src/input.zig`, `hosts/` | | |
-| `11-polish:19-default-design` | `core/zui_design/`, `core/zui_widgets/`, `apps/` | `11-polish:14-zui-design`, `11-polish:15-type-scale`, `11-polish:16-corner-shapes` | |
+| `11-polish:19-default-design` | `core/zui_design/`, `core/zui_widgets/`, `apps/` | `11-polish:14-zui-design`, `11-polish:15-type-scale` | |
 | `11-polish:20-appearance-audit` | `core/zui_design/` | `11-polish:14-zui-design` | |
 | `11-polish:21-permutations` | `core/zui_design/` | | |
 | `11-polish:22-appearance-review` | `apps/review/` | `11-polish:20-appearance-audit`, `11-polish:21-permutations` | |

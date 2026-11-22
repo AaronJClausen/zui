@@ -15,6 +15,16 @@ pub const OptionalCommand = enum {
 /// `.initMany(&.{ .gradient, .shadow })`
 pub const CommandSet = std.EnumSet(OptionalCommand);
 
+/// The shape of a payload's corners: its `corner_shape`, or `round` for a
+/// command that carries none, so one renderer draws frames of either.
+///
+/// ```zig
+/// .rectangle => |rectangle| fillRectangle(bounds, rectangle.corner_radius, zui.cornerShapeOf(rectangle), rectangle.color),
+/// ```
+pub fn cornerShapeOf(payload: anytype) style.CornerShape {
+    return if (@TypeOf(payload.corner_shape) == style.CornerShape) payload.corner_shape else .round;
+}
+
 /// What a `RenderCommand`'s payload union is generated from.
 pub const CommandOptions = struct {
     TextStyle: type,
@@ -26,6 +36,9 @@ pub const CommandOptions = struct {
     CustomData: type = void,
     MaterialHandle: type = void,
     commands: CommandSet = .initEmpty(),
+    /// With more than `round`, every payload with corners carries a
+    /// `corner_shape`.
+    corner_shapes: style.CornerShapeSet = .initOne(.round),
 };
 
 pub fn RenderCommand(comptime options: CommandOptions) type {
@@ -71,16 +84,24 @@ pub fn RenderCommand(comptime options: CommandOptions) type {
         pub const has_image = options.ImageHandle != void;
         pub const has_custom = options.CustomData != void;
         pub const commands = options.commands;
+        pub const corner_shapes = options.corner_shapes;
+        pub const carries_corner_shape = !corner_shapes.eql(.initOne(.round));
+        /// `zui.CornerShape` for a renderer that draws more than `round`;
+        /// otherwise `void`, and every corner is round.
+        pub const CornerShape = if (carries_corner_shape) style.CornerShape else void;
+        const round_corners: CornerShape = if (carries_corner_shape) .round else {};
 
         pub const Rectangle = struct {
             color: options.Color,
             corner_radius: style.CornerRadius,
+            corner_shape: CornerShape = round_corners,
         };
 
         pub const Border = struct {
             color: options.Color,
             widths: style.Edges,
             corner_radius: style.CornerRadius,
+            corner_shape: CornerShape = round_corners,
         };
 
         /// One wrapped line. Renderers never wrap text themselves.
@@ -95,6 +116,7 @@ pub fn RenderCommand(comptime options: CommandOptions) type {
             /// Multiplied into the image's pixels; white leaves them unchanged.
             tint: options.Color = .white,
             corner_radius: style.CornerRadius = .zero,
+            corner_shape: CornerShape = round_corners,
         };
 
         /// A linear gradient across the bounds, as `zui.Gradient` describes
@@ -107,6 +129,7 @@ pub fn RenderCommand(comptime options: CommandOptions) type {
             /// Radians clockwise from left to right.
             angle: f32 = 0,
             corner_radius: style.CornerRadius = .zero,
+            corner_shape: CornerShape = round_corners,
 
             pub fn colorAt(self: Gradient, bounds: style.Rect, point: [2]f32) options.Color {
                 const gradient: style.GradientWith(options.Color) = .{ .from = self.from, .to = self.to, .angle = self.angle };
@@ -123,6 +146,7 @@ pub fn RenderCommand(comptime options: CommandOptions) type {
             blur: f32 = 0,
             spread: f32 = 0,
             corner_radius: style.CornerRadius = .zero,
+            corner_shape: CornerShape = round_corners,
         };
 
         /// Blurs what zui drew below within the rounded bounds, as
@@ -132,6 +156,7 @@ pub fn RenderCommand(comptime options: CommandOptions) type {
             radius: f32,
             tint: options.Color,
             corner_radius: style.CornerRadius = .zero,
+            corner_shape: CornerShape = round_corners,
         };
 
         /// Applies `affine(bounds)` to every command up to the matching
@@ -145,6 +170,7 @@ pub fn RenderCommand(comptime options: CommandOptions) type {
             handle: options.MaterialHandle,
             fallback: options.Color,
             corner_radius: style.CornerRadius = .zero,
+            corner_shape: CornerShape = round_corners,
         };
     };
 }

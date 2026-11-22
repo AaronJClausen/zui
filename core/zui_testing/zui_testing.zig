@@ -462,12 +462,12 @@ pub fn snapshot(writer: *std.Io.Writer, commands: anytype, names: anytype) std.I
         switch (command.payload) {
             .rectangle => |rectangle| {
                 try writeColor(writer, rectangle.color);
-                try writeCorners(writer, rectangle.corner_radius);
+                try writeCorners(writer, rectangle);
             },
             .border => |border| {
                 try writeColor(writer, border.color);
                 try writeEdges(writer, border.widths);
-                try writeCorners(writer, border.corner_radius);
+                try writeCorners(writer, border);
             },
             .text => |text| {
                 if (text.line != 0) try writer.print(" line={d}", .{text.line});
@@ -480,26 +480,26 @@ pub fn snapshot(writer: *std.Io.Writer, commands: anytype, names: anytype) std.I
             inline else => |payload, kind| if (comptime std.mem.eql(u8, @tagName(kind), "image")) {
                 try writeHandle(writer, payload.handle);
                 if (!payload.tint.eql(.white)) try writer.print(" tint=#{x:0>2}{x:0>2}{x:0>2}{x:0>2}", .{ payload.tint.r, payload.tint.g, payload.tint.b, payload.tint.a });
-                try writeCorners(writer, payload.corner_radius);
+                try writeCorners(writer, payload);
             } else if (comptime std.mem.eql(u8, @tagName(kind), "gradient")) {
                 try writeNamedColor(writer, "from", payload.from);
                 try writeNamedColor(writer, "to", payload.to);
                 if (payload.angle != 0) try writer.print(" angle={d}", .{payload.angle});
-                try writeCorners(writer, payload.corner_radius);
+                try writeCorners(writer, payload);
             } else if (comptime std.mem.eql(u8, @tagName(kind), "shadow")) {
                 try writeColor(writer, payload.color);
                 if (payload.offset[0] != 0 or payload.offset[1] != 0) try writer.print(" offset={d},{d}", .{ payload.offset[0], payload.offset[1] });
                 if (payload.blur != 0) try writer.print(" blur={d}", .{payload.blur});
                 if (payload.spread != 0) try writer.print(" spread={d}", .{payload.spread});
-                try writeCorners(writer, payload.corner_radius);
+                try writeCorners(writer, payload);
             } else if (comptime std.mem.eql(u8, @tagName(kind), "backdrop_blur")) {
                 try writer.print(" blur={d}", .{payload.radius});
                 try writeNamedColor(writer, "tint", payload.tint);
-                try writeCorners(writer, payload.corner_radius);
+                try writeCorners(writer, payload);
             } else if (comptime std.mem.eql(u8, @tagName(kind), "material")) {
                 try writeHandle(writer, payload.handle);
                 try writeNamedColor(writer, "fallback", payload.fallback);
-                try writeCorners(writer, payload.corner_radius);
+                try writeCorners(writer, payload);
             } else if (comptime std.mem.eql(u8, @tagName(kind), "transform_begin")) {
                 if (payload.translation[0] != 0 or payload.translation[1] != 0) try writer.print(" translate={d},{d}", .{ payload.translation[0], payload.translation[1] });
                 if (payload.scale[0] != 1 or payload.scale[1] != 1) try writer.print(" scale={d},{d}", .{ payload.scale[0], payload.scale[1] });
@@ -541,7 +541,10 @@ fn writeNamedColor(writer: *std.Io.Writer, name: []const u8, color: zui.Color) !
     if (color.a != 255) try writer.print("{x:0>2}", .{color.a});
 }
 
-fn writeCorners(writer: *std.Io.Writer, corners: zui.CornerRadius) !void {
+fn writeCorners(writer: *std.Io.Writer, payload: anytype) !void {
+    const shape = zui.cornerShapeOf(payload);
+    if (shape != .round) try writer.print(" shape={t}", .{shape});
+    const corners = payload.corner_radius;
     if (std.meta.eql(corners, zui.CornerRadius.zero)) return;
     if (std.meta.eql(corners, zui.CornerRadius.all(corners.top_left))) return writer.print(" radius={d}", .{corners.top_left});
     try writer.print(" radius={d},{d},{d},{d}", .{ corners.top_left, corners.top_right, corners.bottom_left, corners.bottom_right });
