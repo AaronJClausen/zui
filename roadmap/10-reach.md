@@ -700,6 +700,83 @@ task's worker wakes the host's, and whether the page's events cross as
 one export each, as the client's do, or as batches. Slice 3, the browser
 and the tour on it, is next.
 
+Slice 3 is done: `zui_web.Host` (`hosts/web/src/browser_host.zig`) is
+`HostOn` the imports of a dedicated worker, `web/host_worker.mjs`:
+`zuiWebHostNow`, `zuiWebHostSchedule` (an animation frame, a timer at an
+instant, nothing until input, or the end), `zuiWebHostWake`,
+`zuiWebHostShowCursor` and `zuiWebHostYield`, which throws, so `zuiRun`
+unwinds to the worker's event loop without running the epilogues of
+`zui_app.runWith`'s frames. The worker then takes each turn through
+`zuiWebHostTurn`, from `requestAnimationFrame` or a timer, attaches the
+canvas the page transferred as an `OffscreenCanvas`, and hands over its
+size, its lost and restored WebGL context (whose `FrameDrawer` it makes
+again) and the page's events through the module's exports, which carry
+the client's names (`zuiWebPointerDown`, `zuiWebKey`, …), so
+`input_recorder.mjs`'s `exportsSink` calls either. `input_recorder.mjs`
+now reads a canvas's events into a sink: the client's exports by
+default, as before, or `messageSink`, which `web/host_page.mjs` posts to
+the worker as one message per event the page hears, its times moved to
+the worker's clock there; the page measures the canvas on the animation
+frame after a resize or a change of `devicePixelRatio`, and sets the
+cursor the worker posts back. `src/worker.zig` reserves the task
+threads' stacks and the `SteppedIo` (`setup`), and the module's
+`std.heap.page_allocator` is `src/shared_memory.zig`'s growing
+allocator, the one the tour's worker already used, now shared with it, so
+`zui_webgl.Renderer`'s draw list and the application take memory from
+one allocator. `zui_webgl.Renderer` declares `zuiAttachSurface`, so a
+canvas given back hands the page the whole glyph atlas with the next
+frame. The tour target, `hosts/web/examples/tour.zig`, names
+`zui_tour.App` on `zui_web.Host`, `zui_webgl.Renderer` and
+`zui_truetype.Text` in one line and runs it through `zui_app.runWith`;
+`zig build tour` writes its page (`web/tour.html`), its scripts and
+`zui-tour.wasm` (11.3 MB in Debug, 7.2 MB in ReleaseSafe, 2.7 MB in
+ReleaseSmall, the fonts embedded) to `zig-out/tour`, which `check`
+compiles for `wasm32-freestanding` in place of
+`src/browser_host_check.zig`, removed. `zig build test-host` serves it
+cross-origin isolated to headless Chromium, without a display, and reads
+the worker through the DevTools protocol: the tour drew 2,709 colors on
+the canvas at 1600×1000 after a resize to 1280×800 CSS pixels at a ratio
+of 1.25; idle, the worker took 1.0 turns a second of the display's 59 on
+the Overview and on Settings; the mouse over the rail showed the pointer
+cursor on the page's canvas, and Ctrl+PageDown changed 47% of it; and
+after `WEBGL_lose_context` lost and restored the context on Settings,
+0.14% to 0.26% of the canvas differed from before, the strip's
+heartbeat, in Debug, ReleaseSafe and ReleaseSmall. It takes about 20 s.
+`headless_page.mjs` now kills Chromium's whole process group, also when
+a check exits early, since `/usr/bin/chromium` on Arch is a launcher
+whose browser outlived it, bounds each evaluation to 20 s, and reports
+console errors and the workers' exceptions. `test` in Debug, ReleaseFast
+and ReleaseSafe and under ThreadSanitizer, `check`, `test-demo` in Debug
+and ReleaseSafe, `test-input`, `test-draw`, and `test-site` in Debug and
+ReleaseSmall (`zui-web.wasm` 80 KB, `zui-web-tour.wasm` 1.7 MB) pass, as
+do `renderers/webgl/`'s `test` in three modes and `check`. Not run:
+`test-host` in CI, which has no job for it yet. The tour's strip times
+its frames on the `SteppedIo`'s clock here, which stands still within a
+turn, so it shows 0 µs until slice 5 gives it the worker's
+`performance.now()`. Slice 4, the environment, is next.
+
+Decided here:
+- **A task's worker wakes the host's by message.** Tasks run only inside
+  a turn, while the host's worker waits on their futex, so the host's
+  atomic wake flag, which the turn reads as it ends, already makes the
+  next turn due; the wake import also posts `{ type: "call" }` from a
+  task's worker (`tour_thread.mjs` forwards the imports it is told to),
+  or queues a microtask on the host's own, and either answers with
+  `zuiWebHostAnswerWake`, which asks for a turn only when one is not due.
+  No `Atomics.waitAsync`: the message costs nothing when the turn has
+  already taken the wake.
+- **One message per event the page hears,** carrying the sink calls it
+  made, so a pointer move's coalesced moves cross together and in order;
+  every call names a sink method, so slice 4's environment and
+  lifecycle reports cross the same way as new calls.
+- **The worker owns the clock:** the page's event times are moved by the
+  difference of the two `performance.timeOrigin`s, and the host's
+  record, its timers and the `SteppedIo` all read the worker's
+  `performance.now()`.
+- **Exports, not a ring of shared memory,** carry the page's events
+  into the module: the worker is the only caller, between turns, and
+  the module's inbox already bounds them.
+
 ## 10-reach:03-services — Services
 
 **Grounding** (at `62d0813`, with `hosts/native/` at `0dd3be1`, before the

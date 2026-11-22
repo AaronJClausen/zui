@@ -106,7 +106,8 @@ Each job, from its package's directory, fits within 10 minutes:
   for x86-64 Windows and ARM64 macOS, `test-demo` in Debug and in
   ReleaseSafe, and `test-input`, each in a job of its own; `test-site` in
   headless Google Chrome; and `test-draw` under `xvfb-run`, keeping the
-  frames that do not match as the run's artifacts.
+  frames that do not match as the run's artifacts. `test-host`, the tour
+  on the web host in headless Chromium, has no job yet and runs locally.
 
 When CI passes on a push to `main` and its `test-site` job ran, the Pages
 workflow builds the site in ReleaseSmall, runs `test-site` on it, and

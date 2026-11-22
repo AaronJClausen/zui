@@ -10,7 +10,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const core_options: CoreOptions = .declare(b);
 
-    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "tests", "tools" };
+    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "tests", "tools", "examples" };
     b.step("fmt", "Format all Zig sources").dependOn(&b.addFmt(.{ .paths = formatted_paths }).step);
     b.step("fmt-check", "Fail if any Zig source is not formatted").dependOn(&b.addFmt(.{ .paths = formatted_paths, .check = true }).step);
 
@@ -42,15 +42,16 @@ pub fn build(b: *std.Build) void {
     const browser_target = b.resolveTargetQuery(.{ .cpu_arch = .wasm32, .os_tag = .freestanding });
     const client = browserModule(b, "zui-web", "src/browser.zig", browser_target, optimize, core_options);
     b.getInstallStep().dependOn(&b.addInstallArtifact(client, .{ .dest_dir = .{ .override = .{ .custom = "web" } } }).step);
-    const check_step = b.step("check", "Compile the unit tests, the client, the web host and the tour's worker for the browser, and the native tools that run the tour, without running them");
+    const check_step = b.step("check", "Compile the unit tests, the client, the tour on the web host and the tour's worker for the browser, and the native tools that run the tour, without running them");
     check_step.dependOn(&unit_tests.step);
     check_step.dependOn(&client.step);
-    check_step.dependOn(&browserModule(b, "zui-web-host-check", "src/browser_host_check.zig", browser_target, optimize, core_options).step);
 
     const test_demo = b.step("test-demo", "Stream the tour, headless, to the browser's client under Node, and check every frame decodes to what was drawn; run the tour in a worker under Node, and check every frame is the one it draws natively");
     const test_draw = b.step("test-draw", "Draw frames of the tour in headless Chromium, with one sample per pixel and with four, and check each against the sokol renderer drawing it alike; needs a display");
     const test_input = b.step("test-input", "Give the client input in headless Chromium, run the tour on the records it writes, and check the tour took them and the page shows its cursor");
     const site_step = b.step("site", "Write the published page, the client, the tour's worker and the tour's fonts to zig-out/site");
+    const tour_step = b.step("tour", "Write the tour on the web host, its page, its worker's scripts and its module, to zig-out/tour");
+    const test_host = b.step("test-host", "Open the tour on the web host in headless Chromium, and check it draws the tour, sleeps while idle, its input reaches the tour, it shows the cursor the tour asks for, and a lost WebGL context comes back with the tour's screen kept");
     const test_site = b.step("test-site", "Serve the published page without isolation headers, open it in headless Chromium, and check its service worker isolates it, it draws the tour's frames, sleeps while idle, and its input wakes it and reaches the tour");
     const browser = b.option([]const u8, "browser", "The Chromium that `test-draw` runs headless (default: chromium)") orelse "chromium";
     const worker_target = b.resolveTargetQuery(.{
@@ -62,6 +63,18 @@ pub fn build(b: *std.Build) void {
     const tour_worker = tourWorker(b, worker_truetype_dependency, worker_target, optimize, core_options);
     b.getInstallStep().dependOn(&b.addInstallArtifact(tour_worker, .{ .dest_dir = .{ .override = .{ .custom = "web" } } }).step);
     check_step.dependOn(&tour_worker.step);
+
+    const tour_on_host = tourOnHost(b, worker_truetype_dependency, worker_target, optimize, core_options);
+    check_step.dependOn(&tour_on_host.step);
+    const tour_page = tourPageFiles(b, tour_on_host, webglDependency(b, worker_target, optimize, core_options));
+    tour_step.dependOn(&b.addInstallDirectory(.{ .source_dir = tour_page.getDirectory(), .install_dir = .prefix, .install_subdir = "tour" }).step);
+    const open_tour = b.addSystemCommand(&.{"node"});
+    open_tour.addFileArg(b.path("web/check_host.mjs"));
+    open_tour.addArg(browser);
+    open_tour.addDirectoryArg(tour_page.getDirectory());
+    open_tour.addFileInput(b.path("web/headless_page.mjs"));
+    open_tour.expectExitCode(0);
+    test_host.dependOn(&open_tour.step);
 
     const core_dependency = b.dependency("zui_core", core_options.on(target, optimize));
     const tour_session = b.createModule(.{ .root_source_file = b.path("src/tour_session.zig"), .target = target, .optimize = optimize, .imports = tourSessionImports(b, truetypeDeclaring(b, core_options.on(target, optimize)).?, target, optimize, core_options) });
@@ -93,7 +106,7 @@ pub fn build(b: *std.Build) void {
     run_in_worker.addArtifactArg(client);
     run_in_worker.addArtifactArg(tour_worker);
     run_in_worker.addArtifactArg(tour_frames);
-    for ([_][]const u8{ "web/tour_worker.mjs", "web/tour_thread.mjs", "web/worker_port.mjs" }) |worker_file| run_in_worker.addFileInput(b.path(worker_file));
+    for ([_][]const u8{ "web/tour_worker.mjs", "web/tour_thread.mjs", "web/worker_port.mjs", "web/shared_module.mjs" }) |worker_file| run_in_worker.addFileInput(b.path(worker_file));
     run_in_worker.expectExitCode(0);
     test_demo.dependOn(&run_in_worker.step);
 
@@ -152,6 +165,7 @@ fn webModule(b: *std.Build, root_source_file: []const u8, target: std.Build.Reso
         .optimize = optimize,
         .imports = b.allocator.dupe(std.Build.Module.Import, &.{
             .{ .name = "zui", .module = core_dependency.module("zui") },
+            .{ .name = "zui_app", .module = core_dependency.module("zui_app") },
             .{ .name = "zui_wire", .module = core_dependency.module("zui_wire") },
             .{ .name = "zui_webgl", .module = webglDependency(b, target, optimize, core_options).module("zui_webgl") },
             .{ .name = "zui_glyphs", .module = b.dependency("zui_glyphs", .{ .target = target, .optimize = optimize }).module("zui_glyphs") },
@@ -219,6 +233,7 @@ const site_scripts = [_][]const u8{
     "worker_port.mjs",
     "tour_worker.mjs",
     "tour_thread.mjs",
+    "shared_module.mjs",
 };
 
 /// The published site: the page, the client, the frame drawer, the tour's
@@ -254,19 +269,63 @@ fn tourSessionImports(b: *std.Build, truetype_dependency: *std.Build.Dependency,
     }) catch @panic("out of memory");
 }
 
-/// The tour for a Web Worker: WebAssembly on memory the page shares with
-/// the workers the tour's tasks run on, each of which sets its own stack
-/// pointer and thread-local storage.
+/// The tour for a Web Worker, stepped by the page.
 fn tourWorker(b: *std.Build, truetype_dependency: *std.Build.Dependency, worker_target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, core_options: CoreOptions) *std.Build.Step.Compile {
+    return workerModule(b, "zui-web-tour", "src/tour_worker.zig", tourSessionImports(b, truetype_dependency, worker_target, optimize, core_options), worker_target, optimize);
+}
+
+/// The tour target: `zui_tour.App` on `zui_web.Host`, `zui_webgl.Renderer`
+/// and `zui_truetype.Text`, in the worker the page starts.
+fn tourOnHost(b: *std.Build, truetype_dependency: *std.Build.Dependency, worker_target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, core_options: CoreOptions) *std.Build.Step.Compile {
+    const core_dependency = b.dependency("zui_core", core_options.on(worker_target, optimize));
+    const imports = b.allocator.dupe(std.Build.Module.Import, &.{
+        .{ .name = "zui_app", .module = core_dependency.module("zui_app") },
+        .{ .name = "zui_web", .module = webModule(b, "src/root.zig", worker_target, optimize, core_options) },
+        .{ .name = "zui_webgl", .module = webglDependency(b, worker_target, optimize, core_options).module("zui_webgl") },
+        .{ .name = "zui_truetype", .module = truetype_dependency.module("zui_truetype") },
+        .{ .name = "zui_tour", .module = b.dependency("zui_tour", core_options.on(worker_target, optimize)).module("zui_tour") },
+    }) catch @panic("out of memory");
+    return workerModule(b, "zui-tour", "examples/tour.zig", imports, worker_target, optimize);
+}
+
+/// What the tour target's page loads from `web/`, besides its page,
+/// `tour.html`, the frame drawer and the module.
+const tour_page_scripts = [_][]const u8{
+    "cross_origin_isolation.mjs",
+    "isolation_service_worker.js",
+    "host_page.mjs",
+    "host_worker.mjs",
+    "input_recorder.mjs",
+    "worker_port.mjs",
+    "shared_module.mjs",
+    "tour_thread.mjs",
+};
+
+/// What `zig build tour` writes: the tour target's page, the scripts its
+/// page and worker load, its module, and its fonts' licences.
+fn tourPageFiles(b: *std.Build, tour_on_host: *std.Build.Step.Compile, webgl_dependency: *std.Build.Dependency) *std.Build.Step.WriteFile {
+    const page = b.addWriteFiles();
+    _ = page.addCopyFile(b.path("web/tour.html"), "index.html");
+    for (tour_page_scripts) |script| _ = page.addCopyFile(b.path(b.fmt("web/{s}", .{script})), script);
+    _ = page.addCopyFile(webgl_dependency.path("web/frame_drawer.mjs"), "frame_drawer.mjs");
+    _ = page.addCopyFile(tour_on_host.getEmittedBin(), "zui-tour.wasm");
+    for (tour_font_licences) |licence| _ = page.addCopyFile(fontsDependency(b).path(licence), b.fmt("fonts/{s}", .{licence}));
+    return page;
+}
+
+/// A module for a Web Worker: WebAssembly on memory the worker shares
+/// with the workers its tasks run on, each of which sets its own stack
+/// pointer and thread-local storage.
+fn workerModule(b: *std.Build, name: []const u8, root_source_file: []const u8, imports: []const std.Build.Module.Import, worker_target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Step.Compile {
     const module = b.createModule(.{
-        .root_source_file = b.path("src/tour_worker.zig"),
+        .root_source_file = b.path(root_source_file),
         .target = worker_target,
         .optimize = optimize,
         .single_threaded = false,
-        .imports = tourSessionImports(b, truetype_dependency, worker_target, optimize, core_options),
+        .imports = imports,
     });
     module.export_symbol_names = &.{ "__stack_pointer", "__wasm_init_tls" };
-    const worker = b.addExecutable(.{ .name = "zui-web-tour", .root_module = module });
+    const worker = b.addExecutable(.{ .name = name, .root_module = module });
     worker.entry = .disabled;
     worker.rdynamic = true;
     worker.import_memory = true;

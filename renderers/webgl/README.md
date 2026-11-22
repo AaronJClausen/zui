@@ -27,6 +27,9 @@ their tint alone. Images are not drawn yet.
 in the same WebAssembly instance and handing the laid-out frame, a
 `zui_webgl.DrawnFrame`, to the `FrameDrawer` the page keeps for that
 canvas id, through the two imports `frameDrawerImports` gives the module.
+A canvas given back after its WebGL context was lost is
+`zuiAttachSurface`, and the next frame hands the page the whole glyph
+atlas, since the page's copy went with the context.
 Its `init(surface, text)` takes the text the frames were measured with,
 or anything `zui_glyphs.Fonts.of` erases, and reserves its memory; it
 declares the commands and the corner shapes it draws, with the sokol

@@ -12,5 +12,5 @@
         .zui_tour = .{ .path = "../../apps/tour" },
         .zui_sokol = .{ .path = "../../renderers/sokol", .lazy = true },
     },
-    .paths = .{ "build.zig", "build.zig.zon", "src", "tools", "web" },
+    .paths = .{ "build.zig", "build.zig.zon", "src", "tools", "web", "examples" },
 }

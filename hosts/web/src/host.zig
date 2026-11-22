@@ -388,6 +388,13 @@ pub fn HostOn(comptime Platform: type) type {
             self.platform.wake();
         }
 
+        /// On the thread that takes the turns, after the platform's `wake`
+        /// reached it: a turn on the next animation frame, unless the wake
+        /// came inside a turn, which already made the next one due.
+        pub fn answerWake(self: *Self) void {
+            if (self.woken.load(.acquire)) self.needTurn();
+        }
+
         /// The canvas the page attached, by its id.
         pub fn zuiSurface(self: *Self, window: zui.WindowId) zui.Surface {
             std.debug.assert(window == .main);
@@ -705,6 +712,23 @@ test "a wake while a step runs makes the next turn due at once" {
     try testing.expectEqual(Schedule.animation_frame, host.platform.scheduled);
     driver.wake_while_stepping = false;
     try host.turns().take();
+    try testing.expectEqual(Schedule.input, host.platform.scheduled);
+}
+
+test "a wake answered between turns asks for a turn, and one a turn already took asks for none" {
+    var host = scriptedHost();
+    var driver: ScriptedDriver = .{ .host = &host };
+    host.attachCanvas(1, .{ 800, 600 }, 1);
+    host.begin(testing.io, driver.driver());
+    try host.turns().take();
+    host.answerWake();
+    try testing.expectEqual(Schedule.input, host.platform.scheduled);
+
+    host.zuiWaker().wake();
+    host.answerWake();
+    try testing.expectEqual(Schedule.animation_frame, host.platform.scheduled);
+    try host.turns().take();
+    host.answerWake();
     try testing.expectEqual(Schedule.input, host.platform.scheduled);
 }
 

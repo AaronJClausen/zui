@@ -9,6 +9,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const SteppedIo = @import("stepped_io.zig").SteppedIo;
+const shared_memory = @import("shared_memory.zig");
 const tour_session = @import("tour_session.zig");
 const TourSession = tour_session.TourSession;
 
@@ -22,12 +23,11 @@ comptime {
 }
 
 const thread_count = TourSession.thread_count;
-const thread_stack_bytes = 256 * 1024;
-const thread_local_bytes_most = 4096;
+const growing_allocator = shared_memory.growing_allocator;
 
 var stepped: SteppedIo = undefined;
 var session: TourSession = undefined;
-var thread_memory: []align(16) u8 = &.{};
+var thread_memory: shared_memory.ThreadMemory = .{};
 var error_name: [*:0]const u8 = "";
 
 extern "env" fn performanceNow() f64;
@@ -45,9 +45,8 @@ export fn zuiTourInit(steady_timings: bool) bool {
 }
 
 fn initialize(stopwatch: tour_session.Stopwatch) !void {
-    if (threadLocalBytes() > thread_local_bytes_most) return error.ThreadLocalStorageTooLarge;
-    thread_memory = try growing_allocator.alignedAlloc(u8, .@"16", thread_count * (thread_stack_bytes + thread_local_bytes_most));
-    stepped = try .init(growing_allocator, futex_io, .{ .thread_count = thread_count });
+    thread_memory = try .init(growing_allocator, thread_count);
+    stepped = try .init(growing_allocator, shared_memory.futex_io, .{ .thread_count = thread_count });
     try session.init(growing_allocator, &stepped, .{ .stopwatch = stopwatch });
 }
 
@@ -58,17 +57,13 @@ export fn zuiTourThreadCount() u32 {
 /// Where thread `index`'s stack starts, for its worker to set
 /// `__stack_pointer` to before calling into this module.
 export fn zuiTourThreadStackTop(index: u32) usize {
-    return @intFromPtr(threadMemory(index).ptr) + thread_stack_bytes;
+    return thread_memory.stackTop(index);
 }
 
 /// The thread-local storage for thread `index`'s worker to pass to
 /// `__wasm_init_tls`.
 export fn zuiTourThreadLocalStorage(index: u32) usize {
-    return @intFromPtr(threadMemory(index).ptr) + thread_stack_bytes;
-}
-
-fn threadMemory(index: u32) []u8 {
-    return thread_memory[index * (thread_stack_bytes + thread_local_bytes_most) ..][0 .. thread_stack_bytes + thread_local_bytes_most];
+    return thread_memory.threadLocalStorage(index);
 }
 
 /// Runs the tour's tasks given to thread `index`; never returns while the
@@ -138,71 +133,4 @@ export fn zuiTourTasksFinished() f64 {
 
 export fn zuiTourTasksRefused() f64 {
     return @floatFromInt(stepped.counts.refused);
-}
-
-fn threadLocalBytes() usize {
-    return asm (
-        \\ .globaltype __tls_size, i32, immutable
-        \\ global.get __tls_size
-        \\ local.set %[ret]
-        : [ret] "=r" (-> usize),
-    );
-}
-
-/// The futex the threads take turns by, which only a worker may wait on.
-const futex_io: std.Io = .{ .userdata = null, .vtable = &futex_vtable };
-
-const futex_vtable: std.Io.VTable = vtable: {
-    var table = std.Io.failing.vtable.*;
-    table.futexWaitUncancelable = futexWaitUncancelable;
-    table.futexWake = futexWake;
-    break :vtable table;
-};
-
-fn futexWaitUncancelable(_: ?*anyopaque, futex: *const u32, expected: u32) void {
-    _ = asm volatile (
-        \\local.get %[futex]
-        \\local.get %[expected]
-        \\i64.const -1
-        \\memory.atomic.wait32 0
-        \\local.set %[ret]
-        : [ret] "=r" (-> u32),
-        : [futex] "r" (futex),
-          [expected] "r" (expected),
-    );
-}
-
-fn futexWake(_: ?*anyopaque, futex: *const u32, max_waiters: u32) void {
-    _ = asm volatile (
-        \\local.get %[futex]
-        \\local.get %[max_waiters]
-        \\memory.atomic.notify 0
-        \\local.set %[ret]
-        : [ret] "=r" (-> u32),
-        : [futex] "r" (futex),
-          [max_waiters] "r" (max_waiters),
-    );
-}
-
-/// Takes memory from the end of the module's, growing it, and frees none:
-/// only `zuiTourInit` allocates, on the worker the tour runs on.
-const growing_allocator: std.mem.Allocator = .{ .ptr = undefined, .vtable = &.{
-    .alloc = growingAlloc,
-    .resize = std.mem.Allocator.noResize,
-    .remap = std.mem.Allocator.noRemap,
-    .free = std.mem.Allocator.noFree,
-} };
-
-var growing_end: usize = 0;
-
-fn growingAlloc(_: *anyopaque, len: usize, alignment: std.mem.Alignment, _: usize) ?[*]u8 {
-    const page_bytes = std.wasm.page_size;
-    if (growing_end == 0) growing_end = @wasmMemorySize(0) * page_bytes;
-    const start = alignment.forward(growing_end);
-    const end = start + len;
-    const pages_held = @wasmMemorySize(0);
-    const pages_needed = std.math.divCeil(usize, end, page_bytes) catch unreachable;
-    if (pages_needed > pages_held and @wasmMemoryGrow(0, pages_needed - pages_held) < 0) return null;
-    growing_end = end;
-    return @ptrFromInt(start);
 }

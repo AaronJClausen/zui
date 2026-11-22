@@ -218,7 +218,13 @@ Chromium, run headless, and no display. `zig build test-site`, and
 after any change to the published page, its service worker,
 `hosts/web/web/tour_page.mjs` or what it loads, or `site_scripts`; it
 needs Node and Chromium, run headless, and no display, and the Pages
-workflow runs it before publishing. Chromium runs headless here, under
+workflow runs it before publishing. `zig build test-host` after any
+change to the web host (`hosts/web/src/host.zig`, `browser_host.zig`,
+`worker.zig`, `shared_memory.zig`), its worker and page
+(`hosts/web/web/host_*.mjs`, `tour.html`, `input_recorder.mjs`,
+`tour_thread.mjs`, `shared_module.mjs`), `hosts/web/examples/`,
+`renderers/webgl/`, core or `apps/tour/`; it needs Node and Chromium,
+run headless, and no display. Chromium runs headless here, under
 `timeout`, and must leave no Chromium process behind (`pgrep -af --
 --headless`). Its tools that run the tour natively print the same LLD
 noise.

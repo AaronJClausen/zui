@@ -11,6 +11,12 @@ pub const HostOn = host.HostOn;
 pub const Schedule = host.Schedule;
 pub const Turns = host.Turns;
 pub const BrowserPointer = host.BrowserPointer;
+const browser_host = @import("browser_host.zig");
+pub const Host = browser_host.Host;
+pub const ScheduleKind = browser_host.ScheduleKind;
+/// The memory, threads and `Io` an application's module runs on in the
+/// browser's worker.
+pub const worker = @import("worker.zig");
 const browser_input = @import("browser_input.zig");
 const DrawList = @import("zui_webgl").DrawList;
 const Text = @import("text.zig").Text;
@@ -586,6 +592,7 @@ test "a material is a batch of its own, its vertices at their place in the eleme
 
 test {
     _ = host;
+    _ = browser_host;
     _ = @import("stepped_io.zig");
     _ = @import("text.zig");
 }

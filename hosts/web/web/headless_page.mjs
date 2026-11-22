@@ -3,6 +3,11 @@
 //
 //   const page = await openHeadlessPage(chromiumPath, { "/": { path, type: "text/html" } });
 //   try { await page.evaluate("1 + 1"); } finally { await page.close(); }
+//
+// With `attachWorkers`, the page's dedicated workers can be evaluated in too:
+//
+//   const page = await openHeadlessPage(chromiumPath, served, { headers: isolationHeaders, attachWorkers: true });
+//   await page.evaluateInWorker("host_worker.mjs", "zuiHost.turns");
 
 import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
@@ -11,10 +16,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const loadMilliseconds = 30_000;
+const evaluateMilliseconds = 20_000;
 
-// `served` maps each path to `{ path, type }`, a file, or `{ body, type }`.
-// The page sets `window.ready = true` once it has loaded what it needs.
-export async function openHeadlessPage(chromiumPath, served) {
+// `served` maps each path to `{ path, type }`, a file, or `{ body, type }`,
+// each served with `headers`. The page sets `window.ready = true` once it
+// has loaded what it needs.
+export async function openHeadlessPage(chromiumPath, served, { headers = {}, attachWorkers = false } = {}) {
   let chromium = null;
   let profileDirectory = null;
   let socket = null;
@@ -26,14 +33,25 @@ export async function openHeadlessPage(chromiumPath, served) {
       return;
     }
     const body = file.path ? await readFile(file.path) : file.body;
-    response.writeHead(200, { "content-type": file.type }).end(body);
+    response.writeHead(200, { ...headers, "content-type": file.type }).end(body);
   });
+
+  // A launcher, such as Arch's /usr/bin/chromium, runs the browser as its
+  // child, which outlives the launcher killed alone; the browser and its
+  // processes share the launcher's process group, which is killed whole,
+  // also when the check exits without closing the page.
+  function killChromium() {
+    try {
+      process.kill(-chromium.pid, "SIGKILL");
+    } catch {}
+  }
 
   async function close() {
     socket?.close();
-    if (chromium && chromium.exitCode === null && chromium.signalCode === null) {
-      const exited = new Promise((resolve) => chromium.once("exit", resolve));
-      chromium.kill("SIGKILL");
+    if (chromium) {
+      const running = chromium.exitCode === null && chromium.signalCode === null;
+      const exited = running ? new Promise((resolve) => chromium.once("exit", resolve)) : Promise.resolve();
+      killChromium();
       await exited;
     }
     server.close();
@@ -58,7 +76,9 @@ export async function openHeadlessPage(chromiumPath, served) {
       "--no-default-browser-check",
       "--disable-extensions",
       "about:blank",
-    ], { stdio: ["ignore", "ignore", "pipe"] });
+    ], { stdio: ["ignore", "ignore", "pipe"], detached: true });
+    process.once("exit", killChromium);
+    for (const signal of ["SIGINT", "SIGTERM"]) process.once(signal, () => process.exit(1));
 
     const debuggerUrl = await new Promise((resolve, reject) => {
       let output = "";
@@ -83,6 +103,7 @@ export async function openHeadlessPage(chromiumPath, served) {
     let nextRequestId = 1;
     const pending = new Map();
     const pageErrors = [];
+    const workers = [];
     socket.onmessage = ({ data }) => {
       const message = JSON.parse(data);
       if (message.id && pending.has(message.id)) {
@@ -92,6 +113,13 @@ export async function openHeadlessPage(chromiumPath, served) {
         else resolve(message.result);
       } else if (message.method === "Runtime.exceptionThrown") {
         pageErrors.push(message.params.exceptionDetails.exception?.description ?? message.params.exceptionDetails.text);
+      } else if (message.method === "Target.attachedToTarget" && message.params.targetInfo.type === "worker") {
+        const worker = { url: message.params.targetInfo.url, sessionId: message.params.sessionId };
+        workers.push(worker);
+        sendToBrowser("Runtime.enable", {}, worker.sessionId).catch(() => {});
+        sendToBrowser("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true }, worker.sessionId).catch(() => {});
+      } else if (message.method === "Runtime.consoleAPICalled" && message.params.type === "error") {
+        pageErrors.push(message.params.args.map((argument) => argument.value ?? argument.description).join(" "));
       }
     };
 
@@ -106,12 +134,27 @@ export async function openHeadlessPage(chromiumPath, served) {
     const { sessionId } = await sendToBrowser("Target.attachToTarget", { targetId, flatten: true });
     const send = (method, params = {}) => sendToBrowser(method, params, sessionId);
     await send("Runtime.enable");
+    if (attachWorkers) await send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
     await send("Page.navigate", { url: pageUrl });
 
-    async function evaluate(expression) {
-      const { result, exceptionDetails } = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
+    // A worker blocked in a wait never answers.
+    async function evaluateIn(sessionId, expression) {
+      let timer = null;
+      const unanswered = new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`no answer to ${expression.slice(0, 80)} within ${evaluateMilliseconds / 1000} s`)), evaluateMilliseconds);
+      });
+      const evaluated = sendToBrowser("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, sessionId);
+      const { result, exceptionDetails } = await Promise.race([evaluated, unanswered]).finally(() => clearTimeout(timer));
       if (exceptionDetails) throw new Error(exceptionDetails.exception?.description ?? exceptionDetails.text);
       return result.value;
+    }
+    const evaluate = (expression) => evaluateIn(sessionId, expression);
+
+    // In the newest worker whose script's URL ends with `scriptName`.
+    function evaluateInWorker(scriptName, expression) {
+      const worker = workers.findLast(({ url }) => url.endsWith(scriptName));
+      if (!worker) return Promise.reject(new Error(`no worker runs ${scriptName}`));
+      return evaluateIn(worker.sessionId, expression);
     }
 
     const pollMilliseconds = 50;
@@ -120,7 +163,7 @@ export async function openHeadlessPage(chromiumPath, served) {
       if (waited >= loadMilliseconds) throw new Error(`the page did not load within ${loadMilliseconds / 1000} s`);
       await new Promise((resolve) => setTimeout(resolve, pollMilliseconds));
     }
-    return { evaluate, send, pageErrors, close };
+    return { evaluate, evaluateInWorker, send, pageErrors, close };
   } catch (error) {
     await close();
     throw error;

@@ -61,6 +61,17 @@ pub fn RendererOn(comptime Page: type) type {
             self.page.draw(canvas, &self.drawn);
         }
 
+        /// A canvas given back, as after a lost WebGL context, whose page
+        /// starts again without the glyph atlas: the next frame hands over
+        /// all of its texels.
+        pub fn zuiAttachSurface(self: *Self, surface: zui.Surface) error{UnsupportedSurface}!void {
+            _ = try canvasOf(surface);
+            self.draw_list.glyph_atlas.changed = true;
+        }
+
+        /// The page keeps nothing of a canvas taken away.
+        pub fn zuiDetachSurface(_: *Self, _: zui.Surface) void {}
+
         /// Since `init`, how often a frame left a shape out, drew a clip or
         /// transform as its parent, or a blur or material as what it lowers
         /// to, because the draw list was full.
@@ -250,7 +261,7 @@ test "a context configured for the renderer declares exactly the commands it dra
     comptime zui.checkRenderer(TestRenderer);
 }
 
-test "a frame is laid out and handed to the canvas its surface names, the atlas only when it changed" {
+test "a frame is laid out and handed to the canvas its surface names, the atlas only when it changed or the canvas came back" {
     const boxes: zui_glyphs.testing.BoxFonts = .{};
     var renderer: TestRenderer = .{};
     try renderer.init(.{ .web = .{ .canvas = 3 } }, &boxes);
@@ -276,6 +287,12 @@ test "a frame is laid out and handed to the canvas its surface names, the atlas 
     try std.testing.expectEqual(null, renderer.page.frame.changed_glyph_atlas);
     try std.testing.expectEqual(0, renderer.drawListOverflows());
     try std.testing.expectEqual(0, renderer.glyphOverflows());
+
+    renderer.zuiDetachSurface(.{ .web = .{ .canvas = 3 } });
+    try renderer.zuiAttachSurface(.{ .web = .{ .canvas = 3 } });
+    try renderer.zuiSubmit(.{ .web = .{ .canvas = 3 } }, &frame);
+    try std.testing.expect(renderer.page.frame.changed_glyph_atlas != null);
+    try std.testing.expectError(error.UnsupportedSurface, renderer.zuiAttachSurface(.{ .offscreen = .{ .size = .{ 1, 1 } } }));
 }
 
 test "a chamfered rectangle is a fan to one cut per corner, a continuous one to as many points as a round one" {
