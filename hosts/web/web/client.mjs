@@ -1,13 +1,19 @@
 // The client, `zui-web.wasm`, started and handed the tour's fonts: each
 // TrueType font that `truetype-fonts.json` lists, in the order the tour
-// added them. Without them, it draws no text.
+// added them. Without them, it draws no text. It draws on the FrameDrawer
+// `drawers` holds by the canvas id `zuiWebDrawNewestFrame` is given.
 //
-//   const { wasm, errorName } = await startClient();
+//   const drawers = new Map();
+//   const { wasm, errorName } = await startClient({ drawers });
+//   drawers.set(0, new FrameDrawer(canvas));
 //   const withoutText = await startClient({ fonts: false });
 
-export async function startClient({ fonts = true } = {}) {
-  const { instance } = await WebAssembly.instantiateStreaming(fetch("zui-web.wasm"), {});
-  const wasm = instance.exports;
+import { frameDrawerImports } from "./frame_drawer.mjs";
+
+export async function startClient({ fonts = true, drawers = new Map() } = {}) {
+  let wasm = null;
+  const imports = frameDrawerImports(drawers, () => wasm.memory);
+  ({ exports: wasm } = (await WebAssembly.instantiateStreaming(fetch("zui-web.wasm"), imports)).instance);
   const errorName = () => {
     const memory = new Uint8Array(wasm.memory.buffer);
     const start = wasm.zuiWebErrorName() >>> 0;

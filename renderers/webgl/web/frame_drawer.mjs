@@ -5,6 +5,7 @@ const blurTapBytes = 8;
 const materialFloats = 16;
 const noMaterial = 0xffffffff;
 const glyphAtlasSide = 1024;
+const drawnFrameBytes = 56;
 
 const vertexShaderSource = `#version 300 es
 in vec2 position;
@@ -257,37 +258,79 @@ class BlurTargets {
 }
 
 /**
- * Draws the client's newest frame on a canvas through WebGL 2: the
- * triangles `zuiWebLayOutNewestFrame` lays out, one draw call per batch,
- * each under its scissor rectangle and with its material, after the
- * backdrop blurs that run before it, with the glyph atlas uploaded again
- * whenever the client added glyphs to it.
+ * The imports through which `zui_webgl.Renderer` draws: each frame it lays
+ * out is handed to the `FrameDrawer` of the canvas its `.web` surface
+ * names, by its id in `drawers`, in the instance's memory, which
+ * `memory()` answers once the instance exists.
+ *
+ *   const drawers = new Map();
+ *   const { instance } = await WebAssembly.instantiate(bytes, frameDrawerImports(drawers, () => instance.exports.memory));
+ *   drawers.set(0, new FrameDrawer(canvas));
+ */
+export function frameDrawerImports(drawers, memory) {
+  const drawerOf = (canvas) => {
+    const drawer = drawers.get(canvas);
+    if (!drawer) throw new Error(`no FrameDrawer draws canvas ${canvas}`);
+    return drawer;
+  };
+  return {
+    zui_webgl: {
+      zuiWebglBlursBackdrops: (canvas) => drawerOf(canvas).blursBackdrops,
+      zuiWebglDraw: (canvas, frame) => drawerOf(canvas).draw(memory().buffer, frame >>> 0),
+    },
+  };
+}
+
+/** What a `zui_webgl.DrawnFrame` holds, read from `memory` at `address`. */
+function drawnFrameAt(memory, address) {
+  const words = new Uint32Array(memory, address, drawnFrameBytes / 4);
+  const floats = new Float32Array(memory, address, drawnFrameBytes / 4);
+  return {
+    vertices: words[0],
+    vertexCount: words[1],
+    batches: words[2],
+    batchCount: words[3],
+    backdropBlurs: words[4],
+    backdropBlurCount: words[5],
+    blurTaps: words[6],
+    blurTapCount: words[7],
+    materials: words[8],
+    materialCount: words[9],
+    changedGlyphAtlas: words[10],
+    viewport: [floats[11], floats[12]],
+    pixelsPerUnit: floats[13],
+  };
+}
+
+/**
+ * Draws the frames `zui_webgl.Renderer` lays out on a canvas through
+ * WebGL 2: one draw call per batch, each under its scissor rectangle and
+ * with its material, after the backdrop blurs that run before it, with the
+ * glyph atlas uploaded again whenever the renderer added glyphs to it.
  */
 export class FrameDrawer {
   /**
-   * @param {HTMLCanvasElement} canvas sized to each frame as it is drawn
-   * @param {WebAssembly.Exports} wasm the client's exports, after
-   *   `zuiWebInit`. Without float render targets, backdrop blurs are drawn
-   *   as their tint alone, and `blurAccumulationFormat` is null.
+   * @param {HTMLCanvasElement | OffscreenCanvas} canvas sized to each frame
+   *   as it is drawn
    * @param {{ samplesPerPixel?: number }} options 4 by default, as
    *   a window drawn with `sample_count = 4` has, smoothing every edge; 1 draws as an
    *   image with one sample per pixel does
    */
-  constructor(canvas, wasm, { samplesPerPixel = 4 } = {}) {
+  constructor(canvas, { samplesPerPixel = 4 } = {}) {
     // Nothing is composed with the page's background, and the canvas is
     // given each frame already resolved from the scene's samples.
     const gl = canvas.getContext("webgl2", { alpha: false, antialias: false, depth: false, stencil: false, preserveDrawingBuffer: true });
     if (!gl) throw new Error("this browser has no WebGL 2");
     this.canvas = canvas;
     this.gl = gl;
-    this.wasm = wasm;
     this.samplesPerPixel = Math.min(samplesPerPixel, gl.getParameter(gl.MAX_SAMPLES));
     this.sceneTargets = null;
 
+    // Without float render targets, backdrop blurs are laid out as their
+    // tint alone.
     this.blurAccumulationFormat = blurAccumulationFormat(gl);
-    if (!this.blurAccumulationFormat) wasm.zuiWebDrawBackdropBlursAsTints();
+    this.blursBackdrops = this.blurAccumulationFormat !== null;
     this.blurTargets = null;
-
     const blurProgram = link(gl, blurVertexShaderSource, blurFragmentShaderSource);
     gl.useProgram(blurProgram);
     this.blurProgram = blurProgram;
@@ -380,11 +423,10 @@ export class FrameDrawer {
     gl.enable(gl.SCISSOR_TEST);
   }
 
-  backdropBlursOf(memory) {
-    const count = this.wasm.zuiWebBackdropBlurCount();
-    const start = this.wasm.zuiWebBackdropBlurs() >>> 0;
-    const words = new Uint32Array(memory, start, count * backdropBlurBytes / 4);
-    const floats = new Float32Array(memory, start, count * backdropBlurBytes / 4);
+  backdropBlursOf(memory, frame) {
+    const count = frame.backdropBlurCount;
+    const words = new Uint32Array(memory, frame.backdropBlurs, count * backdropBlurBytes / 4);
+    const floats = new Float32Array(memory, frame.backdropBlurs, count * backdropBlurBytes / 4);
     return Array.from({ length: count }, (_, index) => {
       const at = index * backdropBlurBytes / 4;
       return { beforeBatch: words[at], firstTap: words[at + 1], tapCount: words[at + 2], region: floats.subarray(at + 3, at + 7) };
@@ -392,16 +434,14 @@ export class FrameDrawer {
   }
 
   /**
-   * Draws the newest frame the client decoded, cleared to black, with
-   * `samplesPerPixel` samples a pixel.
+   * Draws the `zui_webgl.DrawnFrame` at `address` in `memory`, an
+   * `ArrayBuffer`, cleared to black, with `samplesPerPixel` samples a pixel.
    */
-  draw() {
-    const { gl, wasm } = this;
-    const batchCount = wasm.zuiWebLayOutNewestFrame();
-    const viewport = [wasm.zuiWebViewportWidth(), wasm.zuiWebViewportHeight()];
-    const pixelsPerUnit = wasm.zuiWebPixelsPerUnit();
-    const width = Math.round(viewport[0] * pixelsPerUnit);
-    const height = Math.round(viewport[1] * pixelsPerUnit);
+  draw(memory, address) {
+    const { gl } = this;
+    const frame = drawnFrameAt(memory, address);
+    const width = Math.round(frame.viewport[0] * frame.pixelsPerUnit);
+    const height = Math.round(frame.viewport[1] * frame.pixelsPerUnit);
     if (this.canvas.width !== width || this.canvas.height !== height) {
       this.canvas.width = width;
       this.canvas.height = height;
@@ -416,37 +456,34 @@ export class FrameDrawer {
     gl.disable(gl.SCISSOR_TEST);
     gl.clearColor(0, 0, 0, 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
-    if (batchCount > 0) this.drawBatches(batchCount, viewport, pixelsPerUnit, width, height);
+    if (frame.changedGlyphAtlas !== 0) {
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, this.glyphAtlas);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, glyphAtlasSide, glyphAtlasSide, gl.RG, gl.UNSIGNED_BYTE, new Uint8Array(memory, frame.changedGlyphAtlas, glyphAtlasSide * glyphAtlasSide * 2));
+    }
+    if (frame.batchCount > 0) this.drawBatches(memory, frame, width, height);
     gl.disable(gl.SCISSOR_TEST);
     this.sceneTargets.present();
   }
 
-  drawBatches(batchCount, viewport, pixelsPerUnit, width, height) {
-    const { gl, wasm } = this;
-
-    const memory = wasm.memory.buffer;
-    const changedGlyphAtlas = wasm.zuiWebGlyphAtlasTexelsIfChanged() >>> 0;
-    if (changedGlyphAtlas !== 0) {
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, this.glyphAtlas);
-      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, glyphAtlasSide, glyphAtlasSide, gl.RG, gl.UNSIGNED_BYTE, new Uint8Array(memory, changedGlyphAtlas, glyphAtlasSide * glyphAtlasSide * 2));
-    }
+  drawBatches(memory, frame, width, height) {
+    const { gl } = this;
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, new Uint8Array(memory, wasm.zuiWebVertices() >>> 0, wasm.zuiWebVertexCount() * vertexBytes), gl.STREAM_DRAW);
-    gl.uniform2f(this.uniforms.viewport, viewport[0], viewport[1]);
-    gl.uniform1f(this.uniforms.pixelsPerUnit, pixelsPerUnit);
+    gl.bufferData(gl.ARRAY_BUFFER, new Uint8Array(memory, frame.vertices, frame.vertexCount * vertexBytes), gl.STREAM_DRAW);
+    gl.uniform2f(this.uniforms.viewport, frame.viewport[0], frame.viewport[1]);
+    gl.uniform1f(this.uniforms.pixelsPerUnit, frame.pixelsPerUnit);
     gl.uniform1f(this.uniforms.targetHeight, height);
 
-    const blurs = this.backdropBlursOf(memory);
+    const blurs = this.backdropBlursOf(memory, frame);
     if (blurs.length > 0) {
-      const tapCount = blurs.reduce((count, blur) => Math.max(count, blur.firstTap + blur.tapCount), 0);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.blurTapBuffer);
-      gl.bufferData(gl.ARRAY_BUFFER, new Uint8Array(memory, wasm.zuiWebBlurTaps() >>> 0, tapCount * blurTapBytes), gl.STREAM_DRAW);
+      gl.bufferData(gl.ARRAY_BUFFER, new Uint8Array(memory, frame.blurTaps, frame.blurTapCount * blurTapBytes), gl.STREAM_DRAW);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
     }
-    const materials = new Float32Array(memory, wasm.zuiWebMaterials() >>> 0);
+    const materials = new Float32Array(memory, frame.materials, frame.materialCount * materialFloats);
     gl.enable(gl.SCISSOR_TEST);
-    const batches = new Uint32Array(memory, wasm.zuiWebBatches() >>> 0, batchCount * batchBytes / 4);
+    const batchCount = frame.batchCount;
+    const batches = new Uint32Array(memory, frame.batches, batchCount * batchBytes / 4);
     const scissors = new Int32Array(batches.buffer, batches.byteOffset, batches.length);
     let nextBlur = 0;
     for (let batch = 0, at = 0; batch < batchCount; batch += 1, at += batchBytes / 4) {

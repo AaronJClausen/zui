@@ -2,7 +2,7 @@ const std = @import("std");
 const zui = @import("zui");
 const zui_wire = @import("zui_wire");
 const DemoUi = @import("demo_ui.zig").DemoUi;
-const DrawList = @import("zui_webgl").DrawList;
+const Renderer = @import("zui_webgl").Renderer;
 const Text = @import("text.zig").Text;
 const browser_input = @import("browser_input.zig");
 
@@ -13,9 +13,10 @@ pub var stream: DemoStream = undefined;
 /// The frame decoded last, which is the one to draw.
 pub var newest: ?*const DemoStream.Frame = null;
 pub var records: DemoRecords = undefined;
-var draw_list: DrawList = undefined;
+var renderer: Renderer = .{};
 var text: Text = undefined;
 var last_error: ?anyerror = null;
+const canvas_surface: zui.Surface = .{ .web = .{ .canvas = 0 } };
 const key_name_bytes_most = 64;
 var key_names: [2 * key_name_bytes_most]u8 = undefined;
 var typed_text: [DemoUi.limits.max_text_input_bytes]u8 = undefined;
@@ -23,10 +24,15 @@ var taken_record: []const u8 = &.{};
 
 /// Reserves the client's memory. False when the browser has too little.
 /// The fonts the stream's text uses are handed over before its first
-/// frame, with `zuiWebAddTrueTypeFont`.
+/// frame, with `zuiWebAddTrueTypeFont`. The module draws through
+/// `frameDrawerImports`, from web/frame_drawer.mjs.
 ///
 /// ```js
+/// const drawers = new Map();
+/// const { instance } = await WebAssembly.instantiate(bytes, frameDrawerImports(drawers, () => instance.exports.memory));
+/// const wasm = instance.exports;
 /// wasm.zuiWebInit();
+/// drawers.set(0, new FrameDrawer(canvas));
 /// for (const font of [regularTtf, boldTtf, monoTtf]) {
 ///   new Uint8Array(wasm.memory.buffer, wasm.zuiWebRoomForFont(font.length), font.length).set(font);
 ///   wasm.zuiWebAddTrueTypeFont(font.length);
@@ -37,7 +43,7 @@ var taken_record: []const u8 = &.{};
 ///   new Uint8Array(wasm.memory.buffer, room, bytes.length).set(bytes);
 ///   wasm.zuiWebReceived(bytes.length);
 ///   while (wasm.zuiWebNextFrame() > 0) {}
-///   drawer.draw(); // FrameDrawer, from web/frame_drawer.mjs
+///   wasm.zuiWebDrawNewestFrame(0);
 ///   recorder.applyHostRequests(); // InputRecorder, from web/input_recorder.mjs
 /// };
 /// requestAnimationFrame(function send() {
@@ -51,11 +57,11 @@ export fn zuiWebInit() bool {
         last_error = err;
         return false;
     };
-    draw_list = DrawList.init(std.heap.wasm_allocator) catch |err| {
+    text = Text.init(std.heap.wasm_allocator) catch |err| {
         last_error = err;
         return false;
     };
-    text = Text.init(std.heap.wasm_allocator) catch |err| {
+    renderer.init(canvas_surface, &text) catch |err| {
         last_error = err;
         return false;
     };
@@ -86,20 +92,10 @@ export fn zuiWebAddTrueTypeFont(count: usize) i32 {
     return font;
 }
 
-/// The glyph atlas's texels, `GlyphAtlas.side` squared pairs of bytes for
-/// an RG8 texture sampled linearly, when they changed since this was last
-/// asked, or else 0.
-export fn zuiWebGlyphAtlasTexelsIfChanged() usize {
-    const atlas = draw_list.glyph_atlas;
-    if (!atlas.changed) return 0;
-    atlas.changed = false;
-    return @intFromPtr(&atlas.texels);
-}
-
 /// Since `zuiWebInit`, how often a frame left glyphs out because the atlas
 /// was full, or stb_truetype ran out of memory rasterizing one.
 export fn zuiWebGlyphOverflows() u32 {
-    return draw_list.glyph_atlas.overflows + draw_list.glyph_atlas.raster_refusals;
+    return renderer.glyphOverflows();
 }
 
 /// Where to write the next `count` bytes of the stream, or 0 when they do
@@ -139,79 +135,19 @@ export fn zuiWebErrorName() [*:0]const u8 {
     return if (last_error) |err| @errorName(err) else "";
 }
 
-/// Lays the newest frame out for drawing, returning how many batches it
-/// takes: `zuiWebBatches` holds them, each a `DrawList.Batch`, and
-/// `zuiWebVertices` the vertices they draw, each a `DrawList.Vertex`. Its
-/// glyphs are added to the atlas first.
-export fn zuiWebLayOutNewestFrame() u32 {
-    const frame = newest orelse {
-        draw_list.vertex_count = 0;
-        draw_list.batch_count = 0;
-        return 0;
-    };
-    draw_list.layOut(frame.commands(), frame.params, &text);
-    return draw_list.batch_count;
-}
-
-export fn zuiWebBatches() usize {
-    return @intFromPtr(draw_list.batch_storage.ptr);
-}
-
-export fn zuiWebVertices() usize {
-    return @intFromPtr(draw_list.vertex_storage.ptr);
-}
-
-export fn zuiWebVertexCount() u32 {
-    return draw_list.vertex_count;
-}
-
-/// The newest frame's viewport, in layout units.
-export fn zuiWebViewportWidth() f32 {
-    return if (newest) |frame| frame.params.viewport[0] else 0;
-}
-
-export fn zuiWebViewportHeight() f32 {
-    return if (newest) |frame| frame.params.viewport[1] else 0;
-}
-
-/// Physical pixels per layout unit in the newest frame, its scale times
-/// its zoom.
-export fn zuiWebPixelsPerUnit() f32 {
-    return if (newest) |frame| frame.params.scale * frame.params.zoom else 1;
-}
-
-/// The newest frame's backdrop blurs, `zuiWebBackdropBlurCount` of them,
-/// each a `DrawList.BackdropBlur` whose taps are in `zuiWebBlurTaps`, each
-/// a `DrawList.BlurTap`.
-export fn zuiWebBackdropBlurs() usize {
-    return @intFromPtr(draw_list.backdrop_blur_storage.ptr);
-}
-
-export fn zuiWebBackdropBlurCount() u32 {
-    return draw_list.backdrop_blur_count;
-}
-
-export fn zuiWebBlurTaps() usize {
-    return @intFromPtr(draw_list.blur_tap_storage.ptr);
-}
-
-/// The newest frame's materials, each a `DrawList.Material`, indexed by
-/// the batches that draw them.
-export fn zuiWebMaterials() usize {
-    return @intFromPtr(draw_list.material_storage.ptr);
-}
-
-/// From the next frame laid out, backdrop blurs are drawn as their tint
-/// alone, for a browser that cannot render into float textures.
-export fn zuiWebDrawBackdropBlursAsTints() void {
-    draw_list.blurs_backdrops = false;
+/// Draws the newest frame on the canvas `canvas` names in the page's
+/// `frameDrawerImports`: false, drawing nothing, before the first frame.
+export fn zuiWebDrawNewestFrame(canvas: u32) bool {
+    const frame = newest orelse return false;
+    renderer.zuiSubmit(.{ .web = .{ .canvas = canvas } }, frame) catch unreachable;
+    return true;
 }
 
 /// Since `zuiWebInit`, how often a frame left a shape out, drew a clip
 /// or transform as its parent, or a blur or material as what it lowers
 /// to, because the draw list was full.
 export fn zuiWebDrawListOverflows() u32 {
-    return draw_list.vertex_overflows + draw_list.batch_overflows + draw_list.transform_overflows + draw_list.effect_overflows;
+    return renderer.drawListOverflows();
 }
 
 /// The canvas's size in CSS pixels, which are layout units, and

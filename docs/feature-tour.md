@@ -2320,6 +2320,33 @@ export fn darkroomNextWake() f64 {
 }
 ```
 
+A module of your own can also draw its frames in the same WebAssembly instance, with no wire between: `zui_webgl.Renderer` draws into a `.web` surface, laying each frame out and handing it to the page's `FrameDrawer` for that canvas id, through the imports `frameDrawerImports` gives the module.
+
+`src/sketchpad.zig`
+
+```zig
+const Ui = zui.Context(zui_app.contextConfig(zui_webgl.Renderer, .{ .Text = zui_truetype.Text }));
+var renderer: zui_webgl.Renderer = .{};
+
+export fn sketchpadInit() bool {
+    renderer.init(.{ .web = .{ .canvas = 0 } }, &text) catch return false;
+    return true;
+}
+
+export fn sketchpadDraw() void {
+    ui.beginFrame(&.{ .params = params }, &app.sources);
+    app.declare(&ui);
+    const frame = ui.endFrame();
+    defer ui.release(frame);
+    renderer.zuiSubmit(.{ .web = .{ .canvas = 0 } }, frame) catch {};
+}
+
+// On the page:
+//   const drawers = new Map();
+//   const { instance } = await WebAssembly.instantiateStreaming(fetch("sketchpad.wasm"), frameDrawerImports(drawers, () => instance.exports.memory));
+//   drawers.set(0, new FrameDrawer(canvas));
+```
+
 <a id="tracy"></a>
 
 ### Profiling with Tracy · *shipped*

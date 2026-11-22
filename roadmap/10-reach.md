@@ -28,7 +28,7 @@ and the demo runs on it unchanged.
 | Item | Status |
 |---|---|
 | `10-reach:01-linux-host` Linux | in progress |
-| `10-reach:02-web-host` Web | not started |
+| `10-reach:02-web-host` Web | in progress |
 | `10-reach:03-services` Services | done |
 | `10-reach:04-window-decorations` Window decorations | waiting on a person |
 | `10-reach:05-many-windows` Many windows | done |
@@ -356,8 +356,161 @@ Decided here:
 ## 10-reach:02-web-host — Web
 
 A canvas surface, on the loop `10-reach:06-platform-owned-loop` gives a
-host that cannot block. Its Grounding, Plan and Done when are written as
-it is taken.
+host that cannot block.
+
+**Grounding** (at `dfe65ed`).
+- The browser runs the tour as a thin client over `zui_wire`
+  (`09-seeing-the-ui:04-demo-in-browser`). A Web Worker steps a
+  `zui_app.Session` of `zui_tour.App` (`hosts/web/src/tour_session.zig:22`)
+  on a stepped host, `PageHost` (`:256`), whose surface is `.wire`, and a
+  renderer, `PageRenderer` (`:291`), that writes each frame as wire bytes.
+  The page's second WebAssembly instance, the client
+  (`hosts/web/src/browser.zig:49`), decodes them, lays each out in a
+  `zui_webgl.DrawList` (`zuiWebLayOutNewestFrame`, `:146`), and
+  `FrameDrawer.draw` (`renderers/webgl/web/frame_drawer.mjs:398`) reads the
+  list back through the client's `zuiWeb*` exports and draws it with WebGL 2.
+  Every frame crosses `postMessage` twice, and the page's loop
+  (`hosts/web/web/tour_page.mjs:126-145`) decides when to step the worker.
+- `zui_webgl.Drawing` (`renderers/webgl/src/drawing.zig:14`) only declares
+  what the page draws; its `zuiSubmit` returns `error.UnsupportedSurface`
+  (`:23`). Nothing submits to a `.web` surface, which is
+  `struct { canvas: u32, format }` (`core/src/surface.zig:51`), and no host
+  gives one.
+- The tour's tasks run on `SteppedIo`, whose stepper waits on a futex for
+  each task's turn (`hosts/web/src/stepped_io.zig:166`). A browser lets a
+  worker wait on shared memory and never the page's main thread, so the
+  tour, with the tasks of the Gallery and Mission Control, can be stepped
+  only from a worker.
+- `10-reach:06-platform-owned-loop` gave the pushed loop half:
+  `zuiRun(self, io, window, driver)`, `!void` or `noreturn`
+  (`core/src/contracts.zig:237-249`), and `zui_app.runWith`, which makes the
+  `Session` behind the `zui.Driver` on the heap
+  (`core/zui_app/zui_app.zig:432-441`), so a `zuiRun` that never returns
+  leaves it alive. `expectPushedHostConforms` runs `zuiRun` in the test's
+  process with a watchdog thread, and is a compile error for a `noreturn`
+  one (`core/zui_testing/loop_conformance.zig:59-65`).
+- Input already maps from the browser's events to zui's in
+  `hosts/web/src/browser_input.zig`, and `web/input_recorder.mjs` reads the
+  canvas's events, size and `devicePixelRatio`, calling the client's
+  exports; nothing reports the environment, lifecycle or a lost WebGL
+  context.
+
+**Plan.** `zui_web.Host` is a pushed host in a dedicated Web Worker that
+draws on an `OffscreenCanvas` the page transferred to it, so the
+application, its renderer and its tasks share one WebAssembly instance,
+and the page keeps only what a worker cannot touch: the canvas's events,
+its media queries, and the cursor.
+- **The loop.** The worker's own event loop pushes it. `zuiRun` registers
+  the driver, schedules the first turn and is `noreturn`: it yields to the
+  worker's event loop through an import that throws, which unwinds the
+  WebAssembly stack without running its epilogues, so the frames below,
+  `runWith`'s included, are never reused, as Emscripten's main loop does.
+  The worker's script then calls the host's exports from
+  `requestAnimationFrame`, a timer, or a message from the page, and each
+  steps the `Io` if it is a `SteppedIo` (known by its vtable), polls, and
+  calls `driver.step()`, scheduling the next as the returned
+  `NextFrame`, folded with the `Io`'s next wake by `sooner`: `.immediately`
+  as an animation frame, `.at` as a timer, `.on_event` as nothing until
+  input arrives. A wake from a task, which runs only inside a step, ends
+  that step with the next turn due at once.
+- **The surface.** The page gives each canvas it transfers an id, and
+  `zuiSurface` names it as `.web = .{ .canvas = id }`. A lost WebGL context
+  (`webglcontextlost`) is `driver.suspendSurfaces()`, and its return
+  `resumeSurfaces()`.
+- **The drawing.** `zui_webgl.Renderer` takes the place of `Drawing`: its
+  `zuiSubmit` lays the frame out in its `DrawList` in the same instance and
+  hands the page's `FrameDrawer` one `zui_webgl.DrawnFrame`, an extern
+  struct of the list's pointers and counts, through one import, which only
+  the WebAssembly build declares. The wire leaves the drawing path; the
+  client draws the frames it decodes through the same renderer.
+- **The platform is a type.** `HostOn(Platform)` holds the host's logic;
+  `zui_web.Host` is `HostOn` the browser's imports, and the tests run it
+  on a scripted platform whose `zuiRun` returns, through
+  `expectPushedHostConforms`, natively.
+
+In slices, each a commit with every check green:
+1. **The renderer.** `zui_webgl.Renderer`, a `.web` renderer drawing any
+   text's fonts, whose `zuiSubmit` lays the frame out and hands a
+   `DrawnFrame` to the page; `FrameDrawer.draw(memory, drawnFrame)` reads
+   that alone, so the client's layout exports go. The client submits each
+   frame it decodes through the renderer, so `test-draw` checks the
+   renderer's drawing against the sokol renderer's. `Drawing` is removed,
+   and the tour's worker, its context and `demo_ui.zig` name `Renderer`.
+   `expectRendererConforms` runs on it natively, its frames handed to a
+   page that keeps them, without reading pixels back.
+2. **The host.** `zui_web.HostOn(Platform)` in `hosts/web/src/host.zig`:
+   the window half over the page's events, which `browser_input` maps,
+   into a record of its own; the canvas's size and `devicePixelRatio`; the
+   cursor applied through the platform; `.web` surfaces by id; the
+   `Waker`; the loop of the plan, with a lost context. It passes
+   `expectPushedHostConforms` on a scripted platform, ThreadSanitizer
+   included.
+3. **The browser and the tour on it.** `web/host_worker.mjs` (the
+   module, its threads, animation frames, timers and messages) and
+   `web/host_page.mjs` (the canvas transferred, its events sent as
+   messages, `input_recorder.mjs` reading them through a sink in place of
+   the client's exports, the cursor posted back); the tour target,
+   `hosts/web/examples/tour.zig`, naming `zui_tour.App` on `zui_web.Host`,
+   `zui_webgl.Renderer` and `zui_truetype.Text`, and `zig build tour`
+   writing its page. `zig build test-host` opens it in headless Chromium,
+   without a display, and checks that it draws the tour, sleeps while
+   idle, its input reaches the tour, it shows the cursor the tour asks
+   for, and a context lost through `WEBGL_lose_context` comes back with
+   the tour's screen kept.
+4. **The environment.** `prefers-color-scheme`, `prefers-contrast`,
+   `prefers-reduced-motion` and `prefers-reduced-transparency` from the
+   page's media queries, `navigator.language` and the document's
+   direction, the window's focus, and the page's visibility as lifecycle
+   (`suspend` hidden, `resume` shown), each an `EnvironmentChange` or
+   `lifecycle` event in the next record; `test-host` emulates each media
+   query and checks the tour restyles.
+5. **The published page on the host.** `index.html` runs the tour target;
+   `site_scripts`, `test-site` and its service worker follow it. The thin
+   client, `TourSession` and the wire stay for `test-demo` and
+   `test-draw`, which check that the worker's frames are the native ones
+   and that the WebGL drawing is the sokol renderer's.
+6. **Text input and services.** The caret's `TextInputArea` places a
+   hidden text field on the page, so the browser's IME composes there and
+   its text reaches the record; `zuiClipboard` over
+   `navigator.clipboard`, answered into its sink later, and `zuiOpenUrl`
+   through the page.
+
+**Done when:**
+- `zui_web.Host` passes `expectPushedHostConforms`, its logic on a
+  scripted platform natively, and `test-host` runs it on the browser's in
+  headless Chromium;
+- `zui_webgl.Renderer` passes `expectRendererConforms`, and `test-draw`
+  checks its drawing against the sokol renderer's;
+- the tour runs unchanged on `zui_web.Host`, `zui_webgl.Renderer` and
+  `zui_truetype.Text`, named at one place, and the published page runs
+  it: `test-host` and `test-site` (also in ReleaseSmall) pass, with its
+  environment, lifecycle, lost context, cursor, text input and clipboard
+  reaching the tour;
+- `test-demo`, `test-draw` and `test-input` still pass, everything the
+  browser runs compiles for `wasm32-freestanding`, and each check fits
+  10 minutes.
+
+**Spec.** §6.1, §7.2, §7.3, §16.2, §16.3, §16.4, §19.4, §19.5.
+
+**Status.** Slice 1 is done: `zui_webgl.Renderer` (`RendererOn(Page)`
+over the browser's page) takes the place of `Drawing`, which is removed.
+It draws into a `.web` surface: `zuiSubmit` asks the canvas whether it can
+blur, lays the frame out in its `DrawList` and hands the page a
+`DrawnFrame`, an extern struct of 56 bytes on `wasm32` whose offsets a
+comptime check pins, through the imports `frameDrawerImports`
+(`renderers/webgl/web/frame_drawer.mjs`) gives the module; the atlas's
+texels go with a frame only when they changed. `FrameDrawer.draw(memory,
+address)` reads that alone, for an `HTMLCanvasElement` or an
+`OffscreenCanvas`. Called off WebAssembly the renderer is a compile
+error, pinned in `renderers/webgl/tests/compile_errors/`, and
+`expectRendererConforms` passes on it natively over a page that draws
+nothing. The client submits each frame it decodes through the renderer
+(`zuiWebDrawNewestFrame`), so its layout exports are gone and `test-draw`
+checks the renderer's drawing against the sokol renderer's: `test-demo`
+in Debug and ReleaseSafe, `test-draw`, `test-input` and `test-site` (also
+in ReleaseSmall, where `zui-web.wasm` is 80 KB, from 82) pass. The
+decision on where the host runs is recorded under *Made*. Slice 2, the
+host's Zig half, is next.
 
 ## 10-reach:03-services — Services
 

@@ -19,35 +19,54 @@ render, blend and filter it (`EXT_color_buffer_float`, `EXT_float_blend`,
 `OES_texture_float_linear`), as the sokol renderer sums it where its GPU
 can, and otherwise in RGBA16F, whose rounding differs between drivers by
 several color steps; without `EXT_color_buffer_float`, blurs are drawn as
-their tint alone. Images are not drawn yet. `zui_webgl.Drawing` declares
-what it draws as a renderer declares it, with the sokol renderer's image
-and material shapes, so an application whose frames a page draws
-configures its context for it, as the web host's tour does:
+their tint alone. Images are not drawn yet.
+
+`zui_webgl.Renderer` is the renderer: it draws into a `.web` surface,
+`.{ .web = .{ .canvas = id } }`, laying each frame out in its `DrawList`
+in the same WebAssembly instance and handing the laid-out frame, a
+`zui_webgl.DrawnFrame`, to the `FrameDrawer` the page keeps for that
+canvas id, through the two imports `frameDrawerImports` gives the module.
+Its `init(surface, text)` takes the text the frames were measured with,
+or anything `zui_glyphs.Fonts.of` erases, and reserves its memory; it
+declares the commands it draws, with the sokol renderer's image and
+material shapes, so a context configured for it carries what it draws:
 
 ```zig
-const Ui = zui.Context(zui_app.contextConfig(zui_webgl.Drawing, .{ .Text = zui_truetype.Text }));
+const Ui = zui.Context(zui_app.contextConfig(zui_webgl.Renderer, .{ .Text = zui_truetype.Text }));
+var renderer: zui_webgl.Renderer = .{};
+try renderer.init(.{ .web = .{ .canvas = 0 } }, &text);
+defer renderer.deinit();
+try renderer.zuiSubmit(.{ .web = .{ .canvas = 0 } }, ui.endFrame());
 ```
 
-Everything in it compiles for `wasm32-freestanding`; it reserves its
-memory in `init`.
+```js
+// the page: the module draws canvas 0 on this drawer
+import { FrameDrawer, frameDrawerImports } from "./frame_drawer.mjs";
+const drawers = new Map();
+const { instance } = await WebAssembly.instantiateStreaming(fetch("app.wasm"), frameDrawerImports(drawers, () => instance.exports.memory));
+drawers.set(0, new FrameDrawer(canvas)); // or an OffscreenCanvas
+```
+
+A canvas whose WebGL cannot render into float textures answers so before
+each frame, and its blurs are laid out as their tint alone. The renderer
+runs only in WebAssembly: called elsewhere it is a compile error, and a
+test draws onto a page of its own with `zui_webgl.RendererOn(Page)`, whose
+`Page` declares `blursBackdrops(self, canvas) bool` and `draw(self,
+canvas, frame: *const DrawnFrame) void`.
+
+Everything in it compiles for `wasm32-freestanding`.
 
 ```zig
 // build.zig, with `zui` the dependency from the main README, for a module the browser runs
 const browser = b.resolveTargetQuery(.{ .cpu_arch = .wasm32, .os_tag = .freestanding });
 const zui_webgl = zui.builder.dependency("zui_webgl", .{ .target = browser, .optimize = optimize });
-client.root_module.addImport("zui_webgl", zui_webgl.module("zui_webgl"));
+app.root_module.addImport("zui_webgl", zui_webgl.module("zui_webgl"));
 ```
 
-```zig
-var text: zui_truetype.Text = .{}; // or any text contract `zui_glyphs.Fonts.of` erases
-var draw_list: zui_webgl.DrawList = try .init(gpa);
-draw_list.layOut(frame.commands(), frame.params, &text);
-// hand draw_list.batches(), .vertices(), .backdropBlurs(), .blurTaps(),
-// .materials() and, when it changed, draw_list.glyph_atlas.texels to the
-// page's FrameDrawer, as hosts/web's client does
-```
-
-The web host's `test-draw` checks it against the sokol renderer (see
+`zig build test` runs zui's renderer conformance suite on it natively, its
+frames handed to a page that draws none, so it checks what the renderer
+accepts without reading pixels back. The web host's `test-draw` checks
+its drawing against the sokol renderer's, pixel by pixel (see
 [hosts/web/](../../hosts/web/README.md)).
 
 ## Development
@@ -56,5 +75,5 @@ Run from `renderers/webgl/`:
 
 | Command | What it does |
 |---|---|
-| `zig build test` | run the draw list's and blur's unit tests |
+| `zig build test` | run the unit tests, the renderer suite on a page that draws nothing, and the compile errors |
 | `zig build check` | compile the unit tests natively and for `wasm32-freestanding` without running them |

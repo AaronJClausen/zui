@@ -24,6 +24,8 @@ const canvas = [1440, 900];
 const mouse = { id: 1, kind: 0 };
 const control = 2;
 
+// Node has no canvas, and the check draws nothing.
+const nothingDrawn = { zui_webgl: { zuiWebglBlursBackdrops: () => false, zuiWebglDraw: () => {} } };
 const [clientPath, tourPath, tourFramesPath] = process.argv.slice(2);
 let worker = null;
 let workDirectory = null;
@@ -37,7 +39,7 @@ async function fail(message) {
 
 const watchdog = setTimeout(() => fail(`not done after ${watchdogMilliseconds / 1000} s`), watchdogMilliseconds);
 
-const { instance } = await WebAssembly.instantiate(await readFile(clientPath), {});
+const { instance } = await WebAssembly.instantiate(await readFile(clientPath), nothingDrawn);
 const client = instance.exports;
 const textDecoder = new TextDecoder();
 const textEncoder = new TextEncoder();

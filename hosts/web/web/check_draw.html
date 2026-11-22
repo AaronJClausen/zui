@@ -14,8 +14,10 @@
   // stream up to frame `number`, draws it, and returns its pixels as WebGL
   // reads them, bottom row first, in base64.
   async function startDrawing(canvasId, clientOptions, drawerOptions) {
-    const { wasm, errorName } = await startClient(clientOptions);
-    const drawer = new FrameDrawer(document.getElementById(canvasId), wasm, drawerOptions);
+    const drawers = new Map();
+    const { wasm, errorName } = await startClient({ ...clientOptions, drawers });
+    const drawer = new FrameDrawer(document.getElementById(canvasId), drawerOptions);
+    drawers.set(0, drawer);
     let streamed = 0;
 
     function receiveNextPiece() {
@@ -39,7 +41,7 @@
         const decoded = Number(wasm.zuiWebFrameNumber());
         if (decoded > number) throw new Error(`frame ${number} was not in the stream`);
         if (decoded < number) continue;
-        drawer.draw();
+        wasm.zuiWebDrawNewestFrame(0);
         const { gl } = drawer;
         const pixels = new Uint8Array(gl.drawingBufferWidth * gl.drawingBufferHeight * 4);
         gl.readPixels(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight, gl.RGBA, gl.UNSIGNED_BYTE, pixels);

@@ -1,8 +1,8 @@
 const zui = @import("zui");
-const Drawing = @import("zui_webgl").Drawing;
+const Renderer = @import("zui_webgl").Renderer;
 
 /// A context whose frames have the shape of the tour's as the browser draws
-/// them: the commands, colors and payload types `zui_webgl.Drawing`
+/// them: the commands, colors and payload types `zui_webgl.Renderer`
 /// declares, so the browser decodes the tour's stream, and whose records
 /// the tour reads, since it has sources. `zig build test-demo` checks that
 /// every frame of the tour decodes to what it drew, and `zig build
@@ -10,10 +10,10 @@ const Drawing = @import("zui_webgl").Drawing;
 pub const DemoUi = zui.Context(.{
     .Sources = DemoSources,
     .limits = .{ .max_render_commands = 32768, .max_text_bytes = 256 * 1024 },
-    .commands = Drawing.zui_commands,
-    .extended_color = Drawing.zui_extended_color,
-    .ImageHandle = Drawing.ImageHandle,
-    .MaterialHandle = Drawing.MaterialHandle,
+    .commands = Renderer.zui_commands,
+    .extended_color = Renderer.zui_extended_color,
+    .ImageHandle = Renderer.ImageHandle,
+    .MaterialHandle = Renderer.MaterialHandle,
 });
 
 /// A record from the browser is live, and a live record writes no

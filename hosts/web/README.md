@@ -41,8 +41,10 @@ the `draw-failures` artifact.
 **The client.** `zig build` writes `zig-out/web/zui-web.wasm` (35 MiB of
 memory once `zuiWebInit` reserves it), which takes
 a `zui_wire` stream in pieces of any size, as a socket delivers it,
-decodes each frame once all of it has arrived, and lays it out with the
-WebGL renderer for `frame_drawer.mjs` to draw. Its text is the TrueType
+decodes each frame once all of it has arrived, and draws it through
+`zui_webgl.Renderer`, which lays it out in the client's memory and hands
+it to the page's `FrameDrawer` (`frame_drawer.mjs`) for canvas 0:
+`web/client.mjs` instantiates the client with `frameDrawerImports`. Its text is the TrueType
 fonts the page hands over, in the order the tour added them, laid out
 through a `zui_truetype.Text` with no default font, so the client embeds
 none; once the page hands fonts over, a stream whose header
@@ -90,7 +92,7 @@ the rail.
 **The tour in a worker.** `zig build` also writes
 `zig-out/web/zui-web-tour.wasm`, the tour built for
 `wasm32-freestanding` with shared memory, declared for
-`zui_webgl.Drawing` (about 49 MiB of memory once
+`zui_webgl.Renderer` (about 49 MiB of memory once
 `zuiTourInit` reserves it). It is the tour's `zui_tour.App` stepped as a
 `zui_app.Session`, as any application whose loop is another's: its host
 hands the session the page's records and declares no loop of its own, and
@@ -134,7 +136,7 @@ cross-origin isolated, so the page registers a service worker of its own,
 `web/isolation_service_worker.js`, which serves the page and everything
 it loads again with them, and reloads once. `zig build site` writes the
 page, the client, the frame drawer, the tour's worker and the tour's fonts
-to `zig-out/site` (in ReleaseSmall, `zui-web.wasm` is 82 KB and
+to `zig-out/site` (in ReleaseSmall, `zui-web.wasm` is 80 KB and
 `zui-web-tour.wasm` 845 KB), and the Pages workflow
 (`.github/workflows/pages.yml`) builds it in ReleaseSmall, checks it, and
 publishes it from `main`. `zig build test-site` serves that site without

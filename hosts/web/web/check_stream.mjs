@@ -10,10 +10,12 @@ import { readFile } from "node:fs/promises";
 
 const expectedRecordBytes = 8 + 4 + 8;
 
+// Node has no canvas, and the check draws nothing.
+const nothingDrawn = { zui_webgl: { zuiWebglBlursBackdrops: () => false, zuiWebglDraw: () => {} } };
 const [wasmPath, streamPath, expectedPath, ...fontPaths] = process.argv.slice(2);
 const wasmBytes = await readFile(wasmPath);
 const fonts = await Promise.all(fontPaths.map((path) => readFile(path)));
-const wasm = (await WebAssembly.instantiate(wasmBytes, {})).instance.exports;
+const wasm = (await WebAssembly.instantiate(wasmBytes, nothingDrawn)).instance.exports;
 const stream = await readFile(streamPath);
 const expected = await readFile(expectedPath);
 const expectedView = new DataView(expected.buffer, expected.byteOffset, expected.byteLength);
@@ -41,7 +43,7 @@ function handOver(client, handed) {
 }
 
 if (fonts.length > 1) {
-  const other = (await WebAssembly.instantiate(wasmBytes, {})).instance.exports;
+  const other = (await WebAssembly.instantiate(wasmBytes, nothingDrawn)).instance.exports;
   if (!other.zuiWebInit()) fail(`the client could not reserve its memory: ${errorName(other)}`);
   handOver(other, [...fonts].reverse());
   const header = stream.subarray(0, 64);

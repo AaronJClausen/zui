@@ -19,8 +19,10 @@ import { Inbox, startWorker } from "./worker_port.mjs";
 // called with the error. Resolves once the first frame is drawn.
 export async function runTour(canvas, stopped) {
   if (!globalThis.crossOriginIsolated) throw new Error("the page is not cross-origin isolated, so its worker cannot share the tour's memory");
-  const { wasm, errorName } = await startClient();
-  const drawer = new FrameDrawer(canvas, wasm);
+  const drawers = new Map();
+  const { wasm, errorName } = await startClient({ drawers });
+  const drawer = new FrameDrawer(canvas);
+  drawers.set(0, drawer);
   const recorder = new InputRecorder(canvas, wasm, () => wake());
   canvas.focus();
 
@@ -97,7 +99,7 @@ export async function runTour(canvas, stopped) {
     tour.onStep?.({ now, wakeAt, tasks });
     if (receive(bytes)) {
       const drawStarted = performance.now();
-      drawer.draw();
+      wasm.zuiWebDrawNewestFrame(0);
       previousDraw = performance.now() - drawStarted;
       recorder.applyHostRequests();
       tour.framesDrawn += 1;

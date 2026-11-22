@@ -302,6 +302,7 @@ roadmap item named:
 | Today | The spec | Where today | Item |
 |---|---|---|---|
 | `zui_widgets.DefaultSkin` follows the environment's theme, with a `Theme` for light and one for dark, and leaves `contrast` and `text_scale` unread | the default skin follows the theme and the contrast, and applies `text_scale` | `core/zui_widgets/` | `11-polish:05-default-skin` |
+| no host gives a `.web` surface: `zui_webgl.Renderer` draws on the canvases the client's page names, and the tour runs in a worker on a stepped host whose frames reach the page over `zui_wire` | a web host whose platform pushes its loop, drawing on a `.web` canvas (SPEC.md §16.3, §16.4) | `hosts/web/` | `10-reach:02-web-host` |
 | `zui_debug`'s inspector runs in the application's process; a frame on the wire carries no elements for it | over the wire, the inspector runs in another process (SPEC.md §19.7) | `core/zui_debug/`, `core/zui_wire/` | not yet queued |
 | a frame on the wire carries no chrome regions, and the wire host declares no `zuiChromeRegions`, so a remote window keeps the system's title bar | chrome over the wire | `core/zui_wire/` | not yet queued |
 | the sokol renderer attaches and detaches only `.win32` windows, so a lost `.wayland` or `.library` surface cannot be given back: `zuiAttachSurface` returns `UnsupportedSurface`, and `resumeSurfaces` with it | a renderer that a platform may take surfaces from keeps each surface's resources in `zuiAttachSurface` and `zuiDetachSurface` | `renderers/sokol/` | the first host that loses a surface (Android) |
@@ -328,9 +329,9 @@ zui is one repository of packages, each with its own `build.zig` and
 | `renderers/raylib/` | `zui_raylib` | the raylib renderer and the raylib adapter host, their conformance harness, and the `tour` and `showcase` targets on them, in `zui_truetype`'s text; raylib, fetched lazily |
 | `renderers/sokol/` | `zui_sokol` | the sokol renderer, on sokol_gfx through sokol-zig, its conformance harness and its shaders; sokol, fetched lazily. Its targets are `hosts/native/`'s |
 | `renderers/terminal/` | `zui_terminal` | the terminal renderer, the terminal host, its input decoder and raw-mode terminal, its conformance harness, and the `tour` and `showcase` targets on them, in `zui_truetype`'s text laid out in cells; stb, fetched lazily for the targets alone |
-| `renderers/webgl/` | `zui_webgl` | the browser's drawing of a frame, laid out in WebAssembly as triangles, as the sokol renderer lays it out, and drawn through WebGL 2 with four samples per pixel: shapes, text from a `zui_glyphs` atlas, backdrop blurs and materials; and `Drawing`, what it draws, declared as a renderer declares it; no third-party library |
+| `renderers/webgl/` | `zui_webgl` | the browser's drawing of a frame, laid out in WebAssembly as triangles, as the sokol renderer lays it out, and drawn through WebGL 2 with four samples per pixel: shapes, text from a `zui_glyphs` atlas, backdrop blurs and materials; and `Renderer`, which lays a frame out in the instance that declares it and hands it to the page's drawing of its `.web` canvas; no third-party library |
 | `hosts/native/` | `zui_host` | native hosts, one directory per OS, chosen by target: `windows/` (`04-native-host:01-windows-host`) and `linux/`, on Wayland (`10-reach:01-linux-host`), their conformance harnesses, and their examples, drawn by the sokol renderer: the `tour` and `showcase` targets among them; sokol and stb, fetched lazily through `renderers/sokol/` and `text/truetype/` for the examples alone |
-| `hosts/web/` | `zui_web` | the browser, as a thin client over `zui_wire` (`09-seeing-the-ui:04-demo-in-browser`), then a web host (`10-reach:02-web-host`); today the client's decoder, in WebAssembly, which draws through `renderers/webgl/` and is checked against the sokol renderer drawing the tour's frames, and the page's input written back as records the tour takes, with the cursor its frames ask for shown on the canvas; and the tour in a Web Worker on an `Io` of its own, declared for `zui_webgl.Drawing`, whose tasks take turns on workers sharing its memory, drawing the frames it draws natively and timing them on the worker's clock; and the page that puts them together, published to GitHub Pages from CI and made cross-origin isolated by a service worker of its own; the sokol renderer, reached lazily by path for `test-draw`'s reference alone |
+| `hosts/web/` | `zui_web` | the browser, as a thin client over `zui_wire` (`09-seeing-the-ui:04-demo-in-browser`), then a web host (`10-reach:02-web-host`); today the client's decoder, in WebAssembly, which draws through `renderers/webgl/` and is checked against the sokol renderer drawing the tour's frames, and the page's input written back as records the tour takes, with the cursor its frames ask for shown on the canvas; and the tour in a Web Worker on an `Io` of its own, declared for `zui_webgl.Renderer`, whose tasks take turns on workers sharing its memory, drawing the frames it draws natively and timing them on the worker's clock; and the page that puts them together, published to GitHub Pages from CI and made cross-origin isolated by a service worker of its own; the sokol renderer, reached lazily by path for `test-draw`'s reference alone |
 | `themes/` | `zui_themes` | skins for OS design languages (`11-polish:08-zui-themes`); a skeleton today |
 | `examples/` | `zui_examples` | samples and the template project (`11-polish:09-template-project`, `11-polish:10-samples`); a skeleton today |
 
@@ -392,7 +393,7 @@ the Windows host and the sokol renderer (`05-wire:04-rendering-elsewhere`), and 
 restyles a window when its theme file changes, through the host's file
 watch (`05-wire:05-watching-files`). The tour imports no renderer, so it builds for
 `wasm32-freestanding`, for the web host to run in a worker declared for
-`zui_webgl.Drawing` (`09-seeing-the-ui:04-demo-in-browser`).
+`zui_webgl.Renderer` (`09-seeing-the-ui:04-demo-in-browser`).
 
 The terminal renderer, `zui_terminal`, keeps layout in pixel-like units,
 `Text.cell_size` (8×16) to a cell, and paints a cell when its center lies
@@ -475,11 +476,14 @@ Linux its build links through LLVM and LLD, as the renderers' do.
 The WebGL renderer, `zui_webgl`, is the drawing half of the browser's
 client: `src/draw_list.zig` lays a frame's commands out as triangles in
 batches, with `src/backdrop_blur.zig`'s taps for each blur and its
-glyphs from a `zui_glyphs` RG8 atlas. `src/drawing.zig`'s `Drawing`
-declares what it draws as a renderer declares it, with the sokol
-renderer's `Image` and `Material` shapes, so an application whose frames a
-page draws configures its context for it on any target.
-`web/frame_drawer.mjs` draws what the draw list holds through WebGL 2. It
+glyphs from a `zui_glyphs` RG8 atlas. `src/renderer.zig`'s `Renderer`
+draws into a `.web` surface: it lays each frame out in the same
+WebAssembly instance and hands the list, as a `DrawnFrame`, to the page
+through two imports, declaring what it draws with the sokol renderer's
+`Image` and `Material` shapes, so an application configures its context
+for it on any target; `RendererOn(Page)` draws onto a page of a test's
+own, as its native conformance harness, `src/conformance.zig`, does.
+`web/frame_drawer.mjs` draws each `DrawnFrame` through WebGL 2. It
 names `text/glyphs/` by path, no third-party library, and never a host or
 a font system; its `check` compiles its tests for `wasm32-freestanding`.
 
@@ -499,7 +503,7 @@ tour's shape (`src/demo_ui.zig`); `src/tour_worker.zig` runs the tour in
 a Web Worker through `src/tour_session.zig`, which steps a
 `zui_app.Session` of `zui_tour.App` on `src/stepped_io.zig`'s `Io`, on a
 stepped host over the page's records and a renderer that declares what
-`zui_webgl.Drawing` declares and writes each frame as wire bytes for the
+`zui_webgl.Renderer` declares and writes each frame as wire bytes for the
 page, folding the `Io`'s next wake into the session's with
 `NextFrame.sooner`. `web/` holds the page, its service worker, the worker glue and the
 Node scripts the checks run, and `tools/` the native programs they run:

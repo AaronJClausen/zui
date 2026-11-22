@@ -7,5 +7,5 @@
         .zui_core = .{ .path = "../../core" },
         .zui_glyphs = .{ .path = "../../text/glyphs" },
     },
-    .paths = .{ "build.zig", "build.zig.zon", "src", "web" },
+    .paths = .{ "build.zig", "build.zig.zon", "src", "tests", "web" },
 }

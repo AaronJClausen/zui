@@ -9,10 +9,10 @@ const zui_webgl = @import("zui_webgl");
 pub const SteppedIo = @import("stepped_io.zig").SteppedIo;
 pub const Stopwatch = zui_tour.Stopwatch;
 
-/// The tour as the browser draws it: declared for `zui_webgl.Drawing`, in
+/// The tour as the browser draws it: declared for `zui_webgl.Renderer`, in
 /// `zui_truetype`'s layout of the three fonts it adds, which the page hands
 /// the client in the same order.
-pub const kit = zui_tour.Kit(.{ .Renderer = zui_webgl.Drawing, .FontSystem = zui_truetype.Text, .inspector = false, .renderer_name = "the browser" });
+pub const kit = zui_tour.Kit(.{ .Renderer = zui_webgl.Renderer, .FontSystem = zui_truetype.Text, .inspector = false, .renderer_name = "the browser" });
 pub const Ui = kit.Ui;
 pub const Tour = zui_tour.Tour(kit);
 
@@ -283,17 +283,17 @@ pub const PageHost = struct {
     fn ignoreWake(_: *anyopaque) void {}
 };
 
-/// What the page draws, declared as `zui_webgl.Drawing` declares it, so the
+/// What the page draws, declared as `zui_webgl.Renderer` declares it, so the
 /// tour's frames carry exactly the commands and payloads the page's WebGL
 /// drawing draws. It draws nothing itself: each frame is written as wire
 /// bytes for the page, which draws it after the step returns and reports
 /// how long that took.
 pub const PageRenderer = struct {
     pub const zui_surfaces: zui.SurfaceKinds = .initOne(.wire);
-    pub const zui_commands = zui_webgl.Drawing.zui_commands;
-    pub const zui_extended_color = zui_webgl.Drawing.zui_extended_color;
-    pub const ImageHandle = zui_webgl.Drawing.ImageHandle;
-    pub const MaterialHandle = zui_webgl.Drawing.MaterialHandle;
+    pub const zui_commands = zui_webgl.Renderer.zui_commands;
+    pub const zui_extended_color = zui_webgl.Renderer.zui_extended_color;
+    pub const ImageHandle = zui_webgl.Renderer.ImageHandle;
+    pub const MaterialHandle = zui_webgl.Renderer.MaterialHandle;
 
     /// The page's draw times, smoothed; null before the first.
     smoothed_draw_microseconds: ?f32 = null,
