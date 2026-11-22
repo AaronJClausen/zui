@@ -723,6 +723,21 @@ fn reportShapes(frame: *const Ui.Frame) void {
 </script>
       </article>
 
+      <article class="feature" id="nested-corners" data-title="Nested corners">
+        <div class="feature-head"><h3>Nested corners</h3><span class="pill shipped">Shipped</span></div>
+        <p>With <code class="z">features.nested_corners</code> on, <code class="z">Decoration.nested_corners</code> gives an element corners concentric with those of its nearest decorated ancestor, in place of its own <code class="z">corner_radius</code>. Each corner follows the ancestor's at the element's inset from that corner, the larger of its distances from the two sides, as laid out: <code class="z">round</code> and <code class="z">continuous</code> take the ancestor's drawn radius less the inset, so a card of radius 16 with padding 6 gives its filling child 10, and <code class="z">chamfer</code> shortens its cut by (2 − √2) × the inset, keeping the cuts parallel. A corner the element does not reach, one farther in than the ancestor's radius, takes <code class="z">minimum</code>, as does any radius below it; a child touching only a card's top edge follows only the top corners. A row or column without a decoration is passed over, and nested elements resolve outermost first, so a thumbnail in a panel in a card follows the panel. Emission resolves it, since only it knows both boxes, and every effect and border on the element takes the resolved corners. With the feature off the field holds nothing, a context's <code class="z">Decoration</code> keeps its size and its frames cost the same, and declaring the field fails to compile with "zui: Decoration.nested_corners needs Config.features.nested_corners = true". With it on, <code class="z">Ui.Decoration</code> is the context's own type, as it is with materials, so a <code class="z">zui.Decoration</code> such as a look's is copied in field by field.</p>
+<script type="text/x-zig" data-file="src/ui/library.zig">
+const Ui = zui.Context(zui_app.contextConfig(Renderer, .{ .features = .{ .nested_corners = true } }));
+
+fn albumCard(ui: *Ui, album: *const Album) void {
+    ui.open(.{ .id = .of(album.name), .decoration = .{ .background = .rgb(0x23232d), .corner_radius = .all(16) }, .layout = .{ .direction = .top_to_bottom, .padding = .all(6), .gap = 6 } });
+    defer ui.close();
+    ui.box(.{ .decoration = .{ .background = album.tint, .nested_corners = .{} }, .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(120) } } });
+    ui.box(.{ .decoration = .{ .background = .rgb(0x2e2e3a), .nested_corners = .{ .minimum = 4 } }, .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(28) } } });
+}
+</script>
+      </article>
+
       <article class="feature" id="extended-color" data-title="HDR and wide-gamut color">
         <div class="feature-head"><h3>HDR and wide-gamut color</h3><span class="pill shipped">Shipped</span></div>
         <p><code class="z">Config.Color = zui.ExtendedColor</code> declares colors in linear scRGB, where 1.0 is SDR white: above it for HDR, outside 0 to 1 for wide gamut, written <code class="z">.linear(4, 4, 4, 1)</code> or with <code class="z">Color</code>'s own <code class="z">.rgb(0x3366ff)</code>. Every type that holds a color follows it: <code class="z">Ui.Decoration</code>, <code class="z">Ui.Border</code>, <code class="z">Ui.Effects</code>, <code class="z">Ui.TextStyle</code>. For a renderer that draws only <code class="z">zui.Color</code>, each is clamped as it is emitted, and <code class="z">frame.diagnostics.clamped_colors</code> says when that changed one; <code class="z">zui_wire</code> carries them unclamped when its context's renderer draws them. A host and a renderer that both declare <code class="z">.scrgb_fp16</code> in <code class="z">zui_output_formats</code> open the window with it in <code class="z">WindowOptions.output_formats</code>, and the host picks it while its display shows HDR; <code class="z">surface.outputFormat()</code> says which it chose. the native Windows host picks it on a monitor in HDR and reports <code class="z">ui.environment().hdr_headroom</code>, the monitor's peak over SDR white (1 in SDR), so a theme can tell how bright a highlight may go. The sokol renderer draws that window into a half-float scRGB swapchain, with SDR white where other windows show theirs, and the native hosts'<code class="z">zig build hdr</code> shows two and four times SDR white beside it, measured off the desktop at 2.00× and 4.00×. The renderer suite reads an FP16 target back and expects HDR white there at four times SDR white.</p>
@@ -2579,7 +2594,7 @@ fn present(renderer: *Renderer, surface: zui.Surface, frame: *const Ui.Frame) !v
       <p class="group-intro">These names compile, but they don't do anything yet. This list is from <code>ARCHITECTURE.md</code> §7 and the roadmap.</p>
       <ul class="gap-list">
         <li><b>A host that runs its own loop</b><span><code class="z">zuiRun</code> and the <code class="z">zui.Driver</code> it is handed, with <code class="z">suspendSurfaces</code> and <code class="z">resumeSurfaces</code> for a surface the platform takes away, compile and pass <code class="z">zui_app</code>'s tests against a scripted host, but no shipped host declares <code class="z">zuiRun</code> yet; macOS, iOS and Android's are to come.</span></li>
-        <li><b>Still to come</b><span>Multi-line text editing, the rest of the design system (contrast solving and color vision in <code class="z">zui_design</code>, density's coupling to text size, a type scale, corner shapes and nested corners, and a review of every permutation), theme packs, the inspector over the wire, and more hosts (Linux and web; macOS later).</span></li>
+        <li><b>Still to come</b><span>Multi-line text editing, the rest of the design system (contrast solving and color vision in <code class="z">zui_design</code>, density's coupling to text size, a type scale, and a review of every permutation), theme packs, the inspector over the wire, and more hosts (Linux and web; macOS later).</span></li>
       </ul>
     </section>
 

@@ -100,6 +100,7 @@ fn emit(comptime Ui: type, ui: *Ui, frame: *Ui.Frame, comptime walk: Walk) void 
         .units_per_pixel = 1 / frame.pixels_per_unit,
         .ghosts = if (Ui.keeps_exit_ghosts) &ui.memory.exit_ghosts else {},
         .now = if (Ui.keeps_exit_ghosts) ui.now() else {},
+        .drawn_corner_radii = if (Ui.nests_corners) &ui.memory.drawn_corner_radii else {},
     };
 
     const viewport: style.Rect = .{ .width = frame.params.viewport[0], .height = frame.params.viewport[1] };
@@ -251,6 +252,7 @@ fn Emitter(comptime Ui: type) type {
         now: if (Ui.keeps_exit_ghosts) Instant else void,
         /// Reported as `needed.exit_ghost_commands` once emission ends.
         ghost_commands_needed: if (Ui.keeps_exit_ghosts) u32 else void = if (Ui.keeps_exit_ghosts) 0 else {},
+        drawn_corner_radii: if (Ui.nests_corners) *[Ui.max_elements]style.CornerRadius else void,
 
         const max_layered_runs = 64;
         const LayeredRun = struct { start: u32, end: u32, z: i16 };
@@ -381,6 +383,7 @@ fn Emitter(comptime Ui: type) type {
             const floating = flags.floating;
             const element_id = frame.element_id[element];
             const bounds = self.rectOf(element);
+            if (comptime Ui.nests_corners) if (frame.decorationOf(element)) |decoration| self.keepDrawnCorners(element, bounds, decoration);
             const first_command = if (Ui.keeps_exit_ghosts) frame.command_count else {};
             const attempted_before = if (Ui.keeps_exit_ghosts) self.attempted_commands else {};
             var layer: Layer = .{ .clip = parent.clip, .z = parent.z };
@@ -414,7 +417,7 @@ fn Emitter(comptime Ui: type) type {
 
             if (effects) |declared| if (declared.shadow) |*shadow| self.emitShadow(element, bounds, outer_clip, level.z, shadow);
             if (drawn) if (effects) |declared| if (declared.backdrop_blur) |*blur| self.emitBackdropBlur(element, bounds, level.z, blur);
-            if (drawn) if (frame.decorationOf(element)) |decoration| self.emitBackground(element_id, bounds, level.z, decoration);
+            if (drawn) if (frame.decorationOf(element)) |decoration| self.emitBackground(element, element_id, bounds, level.z, decoration);
             if (drawn) if (effects) |declared| if (declared.gradient) |*gradient| self.emitGradient(element, bounds, level.z, gradient);
 
             switch (frame.kindOf(element)) {
@@ -597,7 +600,47 @@ fn Emitter(comptime Ui: type) type {
 
         fn decorationCornersIn(self: *Self, snapped: style.Rect, element: Ui.Index) Corners {
             const decoration = self.frame.decorationOf(element) orelse return .square;
-            return self.cornersIn(snapped, decoration.corner_radius, decoration.corner_shape);
+            return self.cornersIn(snapped, self.cornerRadiusOf(element, decoration), decoration.corner_shape);
+        }
+
+        /// The radius declared, or for a context with nested corners, the
+        /// one `keepDrawnCorners` resolved as emission entered the element.
+        inline fn cornerRadiusOf(self: *const Self, element: Ui.Index, decoration: *const Ui.Decoration) style.CornerRadius {
+            if (comptime !Ui.nests_corners) return decoration.corner_radius;
+            return self.drawn_corner_radii[element];
+        }
+
+        /// Emission is in pre-order, so every decorated ancestor's corners
+        /// are kept before its descendants look them up.
+        fn keepDrawnCorners(self: *Self, element: Ui.Index, bounds: style.Rect, decoration: *const Ui.Decoration) void {
+            const declared = if (decoration.nestedCornersOf()) |nested| self.nestedCornerRadius(element, bounds, nested, decoration.corner_shape) else decoration.corner_radius;
+            self.drawn_corner_radii[element] = declared.clampedTo(self.snap(bounds));
+        }
+
+        fn nestedCornerRadius(self: *const Self, element: Ui.Index, bounds: style.Rect, nested: style.NestedCorners, shape: style.CornerShape) style.CornerRadius {
+            const frame = self.frame;
+            var ancestor = frame.parent[element];
+            while (ancestor != Ui.root_index and frame.decorationOf(ancestor) == null) ancestor = frame.parent[ancestor];
+            if (ancestor == Ui.root_index) return .all(nested.minimum);
+            const outer = self.rectOf(ancestor);
+            const outer_radius = self.drawn_corner_radii[ancestor];
+            const left = bounds.x - outer.x;
+            const top = bounds.y - outer.y;
+            const right = (outer.x + outer.width) - (bounds.x + bounds.width);
+            const bottom = (outer.y + outer.height) - (bounds.y + bounds.height);
+            const radius_lost_per_inset: f32 = if (shape == .chamfer) 2 - std.math.sqrt2 else 1;
+            return .{
+                .top_left = concentricRadius(outer_radius.top_left, @max(left, top), radius_lost_per_inset, nested.minimum),
+                .top_right = concentricRadius(outer_radius.top_right, @max(right, top), radius_lost_per_inset, nested.minimum),
+                .bottom_left = concentricRadius(outer_radius.bottom_left, @max(left, bottom), radius_lost_per_inset, nested.minimum),
+                .bottom_right = concentricRadius(outer_radius.bottom_right, @max(right, bottom), radius_lost_per_inset, nested.minimum),
+            };
+        }
+
+        fn concentricRadius(outer_radius: f32, inset: f32, radius_lost_per_inset: f32, minimum: f32) f32 {
+            const inside_inset = @max(inset, 0);
+            if (inside_inset > outer_radius) return minimum;
+            return @max(outer_radius - inside_inset * radius_lost_per_inset, minimum);
         }
 
         /// Each radius at most half the shorter side of `snapped`, and the
@@ -665,11 +708,11 @@ fn Emitter(comptime Ui: type) type {
             } } });
         }
 
-        inline fn emitBackground(self: *Self, element_id: u64, bounds: style.Rect, z: i16, decoration: *const Ui.Decoration) void {
+        inline fn emitBackground(self: *Self, element: Ui.Index, element_id: u64, bounds: style.Rect, z: i16, decoration: *const Ui.Decoration) void {
             if (decoration.materialOf()) |material| {
                 if (comptime Ui.RenderCommand.commands.contains(.material)) {
                     const snapped = self.snap(bounds);
-                    const corners = self.cornersIn(snapped, decoration.corner_radius, decoration.corner_shape);
+                    const corners = self.cornersIn(snapped, self.cornerRadiusOf(element, decoration), decoration.corner_shape);
                     self.push(.{ .bounds = snapped, .id = element_id, .z = z, .payload = .{ .material = .{
                         .handle = material,
                         .fallback = self.commandColor(decoration.background orelse .transparent),
@@ -682,7 +725,7 @@ fn Emitter(comptime Ui: type) type {
             }
             if (decoration.background) |color| {
                 const snapped = self.snap(bounds);
-                const corners = self.cornersIn(snapped, decoration.corner_radius, decoration.corner_shape);
+                const corners = self.cornersIn(snapped, self.cornerRadiusOf(element, decoration), decoration.corner_shape);
                 self.push(.{ .bounds = snapped, .id = element_id, .z = z, .payload = .{ .rectangle = .{
                     .color = self.commandColor(color),
                     .corner_radius = corners.radius,
@@ -823,7 +866,7 @@ fn Emitter(comptime Ui: type) type {
             const bounds = self.rectOf(element);
             if (bounds.intersect(level.outer_clip).isEmpty()) return;
             const snapped = self.snap(bounds);
-            const corners = self.cornersIn(snapped, found.corner_radius, found.corner_shape);
+            const corners = self.cornersIn(snapped, self.cornerRadiusOf(element, found), found.corner_shape);
             self.push(.{ .bounds = snapped, .id = frame.element_id[element], .z = level.z, .payload = .{ .border = .{
                 .color = self.commandColor(border.color),
                 .widths = widths,

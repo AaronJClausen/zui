@@ -393,6 +393,25 @@ fn reportShapes(frame: *const Ui.Frame) void {
 }
 ```
 
+<a id="nested-corners"></a>
+
+### Nested corners · *shipped*
+
+With `features.nested_corners` on, `Decoration.nested_corners` gives an element corners concentric with those of its nearest decorated ancestor, in place of its own `corner_radius`. Each corner follows the ancestor's at the element's inset from that corner, the larger of its distances from the two sides, as laid out: `round` and `continuous` take the ancestor's drawn radius less the inset, so a card of radius 16 with padding 6 gives its filling child 10, and `chamfer` shortens its cut by (2 − √2) × the inset, keeping the cuts parallel. A corner the element does not reach, one farther in than the ancestor's radius, takes `minimum`, as does any radius below it; a child touching only a card's top edge follows only the top corners. A row or column without a decoration is passed over, and nested elements resolve outermost first, so a thumbnail in a panel in a card follows the panel. Emission resolves it, since only it knows both boxes, and every effect and border on the element takes the resolved corners. With the feature off the field holds nothing, a context's `Decoration` keeps its size and its frames cost the same, and declaring the field fails to compile with "zui: Decoration.nested_corners needs Config.features.nested_corners = true". With it on, `Ui.Decoration` is the context's own type, as it is with materials, so a `zui.Decoration` such as a look's is copied in field by field.
+
+`src/ui/library.zig`
+
+```zig
+const Ui = zui.Context(zui_app.contextConfig(Renderer, .{ .features = .{ .nested_corners = true } }));
+
+fn albumCard(ui: *Ui, album: *const Album) void {
+    ui.open(.{ .id = .of(album.name), .decoration = .{ .background = .rgb(0x23232d), .corner_radius = .all(16) }, .layout = .{ .direction = .top_to_bottom, .padding = .all(6), .gap = 6 } });
+    defer ui.close();
+    ui.box(.{ .decoration = .{ .background = album.tint, .nested_corners = .{} }, .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(120) } } });
+    ui.box(.{ .decoration = .{ .background = .rgb(0x2e2e3a), .nested_corners = .{ .minimum = 4 } }, .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(28) } } });
+}
+```
+
 <a id="extended-color"></a>
 
 ### HDR and wide-gamut color · *shipped*
@@ -2518,7 +2537,7 @@ Build with `-Dzui-tracy=true` to link Tracy's client, then connect profiler 0.14
 These names compile, but they don't do anything yet. This list is from `ARCHITECTURE.md` §7 and the roadmap.
 
 - **A host that runs its own loop**: `zuiRun` and the `zui.Driver` it is handed, with `suspendSurfaces` and `resumeSurfaces` for a surface the platform takes away, compile and pass `zui_app`'s tests against a scripted host, but no shipped host declares `zuiRun` yet; macOS, iOS and Android's are to come.
-- **Still to come**: Multi-line text editing, the rest of the design system (contrast solving and color vision in `zui_design`, density's coupling to text size, a type scale, corner shapes and nested corners, and a review of every permutation), theme packs, the inspector over the wire, and more hosts (Linux and web; macOS later).
+- **Still to come**: Multi-line text editing, the rest of the design system (contrast solving and color vision in `zui_design`, density's coupling to text size, a type scale, and a review of every permutation), theme packs, the inspector over the wire, and more hosts (Linux and web; macOS later).
 
 <a id="dx"></a>
 

@@ -86,6 +86,9 @@ pub const Features = struct {
     /// `Frame.sweep()` at the end of every `endFrame`, in any build,
     /// panicking on the first invariant the frame breaks.
     safety_sweeps: bool = std.debug.runtime_safety,
+    /// `Decoration.nested_corners`: corners concentric with the nearest
+    /// decorated ancestor's, resolved at emission.
+    nested_corners: bool = false,
     /// The tracer contract: a type with `zuiBegin` and `zuiEnd`, which
     /// sees each step of `beginFrame` and `endFrame` as a zone. `void`
     /// compiles tracing out.
@@ -445,11 +448,13 @@ pub fn Context(comptime config: Config) type {
         const keeps_text_bytes = has_text or features.semantics;
         /// Elements that declare `exit` keep drawing after they leave.
         pub const keeps_exit_ghosts = limits.exit_ghost_commands != 0;
+        /// Decorations may declare `nested_corners`.
+        pub const nests_corners = features.nested_corners;
         /// The snapshots and ghosts kept between frames, in the context's
         /// one reservation; empty while `keeps_exit_ghosts` is false.
         pub const ExitGhosts = if (keeps_exit_ghosts) exit_module.Ghosts(RenderCommand, limits.exit_ghost_commands, if (has_text) limits.max_text_bytes else 0) else struct {};
 
-        pub const Decoration = style.DecorationWith(Color, config.MaterialHandle);
+        pub const Decoration = style.DecorationWith(Color, config.MaterialHandle, features.nested_corners);
         pub const Border = style.BorderWith(Color);
         pub const Gradient = style.GradientWith(Color);
         pub const Shadow = style.ShadowWith(Color);
@@ -850,6 +855,10 @@ pub fn Context(comptime config: Config) type {
             /// relay listener.
             relayed_deliveries: Deliveries,
             exit_ghosts: ExitGhosts,
+            /// Scratch for emission: the corners each element with a
+            /// decoration was drawn with, which nested children follow.
+            /// Written only as emission enters the element.
+            drawn_corner_radii: [if (features.nested_corners) max_elements else 0]style.CornerRadius,
         };
 
         /// The bytes `initBuffer` needs; `init` makes one allocation of this size.

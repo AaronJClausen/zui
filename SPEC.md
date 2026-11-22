@@ -270,6 +270,8 @@ compile-error test:
 - `"zui: Color must be zui.Color or zui.ExtendedColor, got [4]u8"`;
 - `"zui: commands includes .material but MaterialHandle is void"`;
 - `"zui: corner_shapes does not include .round, which every other shape is drawn as"`;
+- `"zui: Decoration.nested_corners needs Config.features.nested_corners = true"`,
+  inside Zig's error for the struct initialization (§18.7);
 - each API whose feature is off, naming the field to set:
   `"zui: semantics() needs Config.features.semantics = true"`,
   `"zui: manipulation() needs Config.features.gestures = true"`,
@@ -1069,8 +1071,10 @@ pub const Border = struct {
 `Element`, `Decoration` and `Style` are each context's own,
 `Ui.Element`, `Ui.Decoration` and `Ui.Style`, and are the same types as
 `zui.Element`, `zui.Decoration` and `zui.Style` unless the config's
-`MaterialHandle` or `Color` is set. Without a handle `material` is `void`, so every
-context without materials shares one set of types and stores nothing more.
+`MaterialHandle` or `Color` is set or `features.nested_corners` is on.
+Without a handle `material` is `void`, and without the feature
+`nested_corners` is zero-sized, so every context without them shares one
+set of types and stores nothing more.
 So are the types that hold a color, `Ui.Border`, `Ui.Effects`,
 `Ui.Gradient`, `Ui.Shadow`, `Ui.BackdropBlur` and `Ui.TextStyle`, each
 `zui`'s own unless `Color` is `ExtendedColor`.
@@ -2663,19 +2667,30 @@ if (!std.meta.eql(preferences, app.preferences)) {
   they are never lowered.
 - **Nested corners.** `Decoration.nested_corners = .{ .minimum = 2 }`
   (behind `Features.nested_corners`) gives each corner the radius that is
-  concentric with its parent's. Its inset is the child's distance from
+  concentric with its parent's, in place of its own `corner_radius`. The
+  parent is the nearest ancestor with a decoration, so a row or column
+  that only lays children out is passed over; an element with none sits
+  in the window's square corners. Its inset is the child's distance from
   that corner of the parent, along the farther axis, as laid out, so a
-  child that does not reach a corner does not follow it. By the family:
-  `round` and `continuous` take the parent's radius less the inset, and
-  `chamfer` shortens its cut by (2 − √2) × the inset. Below `minimum`,
-  or past the parent's radius, a corner takes `minimum`. Emission
-  resolves it, since only it knows both boxes; a parent that is nested
-  itself resolves first.
+  child that does not reach a corner does not follow it. By the child's
+  family: `round` and `continuous` take the parent's drawn radius less
+  the inset, and `chamfer` shortens its cut by (2 − √2) × the inset.
+  Below `minimum` (0 by default), or past the parent's radius, a corner
+  takes `minimum`. Emission resolves it, since only it knows both boxes;
+  a parent that is nested itself resolves first. With the feature off the
+  field holds nothing and `Decoration` keeps its size; declaring it is a
+  compile error, `"zui: Decoration.nested_corners needs
+  Config.features.nested_corners = true"`. A field's coercion can raise no
+  custom error, so the message is the name of the field's type, which
+  appears inside Zig's own error for the struct initialization. With the
+  feature on, `Ui.Decoration` is the context's own type (§10.1), so a
+  `zui.Decoration`, such as a look's, is copied into it field by field.
 
   ```zig
-  ui.open(.{ .id = .of("card"), .decoration = tokens.look(Card, .container, .idle).decoration, .layout = .{ .padding = .all(tokens.space(.m)) } });
+  const look = tokens.look(Card, .container, .idle).decoration;
+  ui.open(.{ .id = .of("card"), .decoration = .{ .background = look.background, .border = look.border, .corner_radius = look.corner_radius, .corner_shape = look.corner_shape }, .layout = .{ .padding = .all(tokens.space(.m)) } });
   defer ui.close();
-  ui.open(.{ .id = .of("thumbnail"), .decoration = .{ .nested_corners = .{} } });
+  ui.box(.{ .id = .of("thumbnail"), .decoration = .{ .background = thumbnail_color, .nested_corners = .{} } });
   ```
 
 ### 18.8 Seeing every permutation

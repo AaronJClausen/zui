@@ -285,6 +285,34 @@ pub const CornerShape = enum(u8) { round, continuous, chamfer };
 /// ```
 pub const CornerShapeSet = std.EnumSet(CornerShape);
 
+/// Corners concentric with those of the nearest ancestor that has a
+/// decoration, in place of the element's own `corner_radius`. Each corner
+/// follows the ancestor's at the element's inset from that corner, the
+/// larger of its distances from the two sides, as laid out: `round` and
+/// `continuous` take the ancestor's radius less the inset, and `chamfer`
+/// shortens its cut by (2 − √2) × the inset, which keeps the two cuts
+/// parallel. A corner whose inset is past the ancestor's radius, or whose
+/// radius would fall below `minimum`, takes `minimum`. An element with no
+/// decorated ancestor sits in the window's square corners.
+///
+/// ```zig
+/// ui.open(.{ .id = .of("card"), .decoration = .{ .background = .rgb(0x202830), .corner_radius = .all(16) }, .layout = .{ .padding = .all(6) } });
+/// defer ui.close();
+/// ui.box(.{ .id = .of("thumbnail"), .decoration = .{ .background = .rgb(0x405060), .nested_corners = .{ .minimum = 2 } } }); // radius 10
+/// ```
+pub const NestedCorners = struct {
+    /// The least radius any corner takes; 0 leaves square the corners
+    /// that do not follow the ancestor's.
+    minimum: f32 = 0,
+};
+
+/// `Decoration.nested_corners` in a context without the feature: it holds
+/// nothing. A field's coercion can raise no `@compileError`, so the type is
+/// named by the message, which Zig's error for any value declared there
+/// quotes.
+const @"zui: Decoration.nested_corners needs Config.features.nested_corners = true" = enum { off };
+const NestedCornersOff = @"zui: Decoration.nested_corners needs Config.features.nested_corners = true";
+
 pub const Rect = struct {
     x: f32 = 0,
     y: f32 = 0,
@@ -698,17 +726,18 @@ pub const Transform = struct {
 
 /// Background, border, corner radius and shape: what an element draws
 /// behind and around its children.
-pub const Decoration = DecorationWith(Color, void);
+pub const Decoration = DecorationWith(Color, void, false);
 
-/// `Decoration` in a context's own color type, and with a `material`, the
+/// `Decoration` in a context's own color type, with a `material`, the
 /// renderer's own shader drawn in place of the background, for a context
-/// whose `MaterialHandle` is not `void`. A context names it
+/// whose `MaterialHandle` is not `void`, and with `nested_corners` for one
+/// whose `features.nested_corners` is on. A context names it
 /// `Ui.Decoration`.
 ///
 /// ```zig
 /// ui.open(.{ .decoration = .{ .background = .rgb(0x202830), .material = .frosted_glass, .corner_radius = .all(8) } });
 /// ```
-pub fn DecorationWith(comptime ColorType: type, comptime MaterialHandle: type) type {
+pub fn DecorationWith(comptime ColorType: type, comptime MaterialHandle: type, comptime has_nested_corners: bool) type {
     return struct {
         background: ?ColorType = null,
         border: ?BorderWith(ColorType) = null,
@@ -716,6 +745,9 @@ pub fn DecorationWith(comptime ColorType: type, comptime MaterialHandle: type) t
         corner_radius: CornerRadius = .zero,
         /// Drawn as `round` by a renderer whose `zui_corner_shapes` lacks it.
         corner_shape: CornerShape = .round,
+        /// Replaces `corner_radius` with corners concentric with the
+        /// nearest decorated ancestor's.
+        nested_corners: if (has_nested_corners) ?NestedCorners else NestedCornersOff = if (has_nested_corners) null else .off,
         /// Drawn over the bounds, in the corners, by a renderer that
         /// declares `.material`. Any other draws `background` instead, so
         /// the background is the material's fallback.
@@ -725,6 +757,11 @@ pub fn DecorationWith(comptime ColorType: type, comptime MaterialHandle: type) t
 
         pub inline fn materialOf(self: *const @This()) ?MaterialHandle {
             return if (comptime has_material) self.material else null;
+        }
+
+        /// Null in a context without `features.nested_corners`.
+        pub inline fn nestedCornersOf(self: *const @This()) ?NestedCorners {
+            return if (comptime has_nested_corners) self.nested_corners else null;
         }
     };
 }

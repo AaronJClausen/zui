@@ -244,6 +244,7 @@ const every_command_config: zui.Config = config: {
         .ImageHandle = EveryCommandRenderer.ImageHandle,
         .MaterialHandle = EveryCommandRenderer.MaterialHandle,
         .CustomData = EveryCommandRenderer.CustomData,
+        .features = .{ .nested_corners = true },
     };
 };
 const RendererUi = zui.Context(every_command_config);
@@ -256,8 +257,9 @@ export fn zuiCheckRenderer() usize {
     ui.image(.{ .handle = 7 }, .{ .decoration = .{ .background = .black } });
     ui.custom(3, .{});
     ui.box(.{ .decoration = .{ .background = .black, .material = 2 } });
-    ui.open(.{ .id = .of("card"), .layout = .{ .sizing = .grow_both }, .effects = &check_effects, .exit = .{ .seconds = 0.2, .fade = .ease_in_out } });
+    ui.open(.{ .id = .of("card"), .layout = .{ .sizing = .grow_both }, .decoration = .{ .corner_radius = .all(8) }, .effects = &check_effects, .exit = .{ .seconds = 0.2, .fade = .ease_in_out } });
     ui.box(.{ .floating = .{ .z = 1 }, .interactive = true, .decoration = .{ .background = .white } });
+    ui.box(.{ .decoration = .{ .background = .white, .material = 1, .nested_corners = .{ .minimum = 2 } } });
     ui.close();
     const frame = ui.endFrame();
     defer ui.release(frame);

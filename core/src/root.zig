@@ -194,6 +194,7 @@ pub const Edges = style.Edges;
 pub const CornerRadius = style.CornerRadius;
 pub const CornerShape = style.CornerShape;
 pub const CornerShapeSet = style.CornerShapeSet;
+pub const NestedCorners = style.NestedCorners;
 pub const Rect = style.Rect;
 pub const Border = style.Border;
 pub const BorderWith = style.BorderWith;

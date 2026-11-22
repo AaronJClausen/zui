@@ -29,7 +29,7 @@ is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:14-zui-design` `zui_design`: tokens from seeds and preferences | in progress |
 | `11-polish:15-type-scale` The type scale | not started |
 | `11-polish:16-corner-shapes` Corner shapes | done |
-| `11-polish:17-nested-corners` Nested corners | not started |
+| `11-polish:17-nested-corners` Nested corners | done |
 | `11-polish:18-system-accent` The system's accent color | not started |
 | `11-polish:19-default-design` The default design | not started |
 | `11-polish:20-appearance-audit` The appearance audit | not started |
@@ -934,6 +934,50 @@ follows only the top corners; a chamfer nests by `(2 − √2)·d`; a
 three-deep nesting resolves; counts are unchanged with the feature off.
 
 **Spec.** §4, §10.1, §18.7.
+
+**Status.** Done:
+- `zui.NestedCorners { minimum = 0 }` and `Features.nested_corners`.
+  `Decoration.nested_corners` is `?NestedCorners` with the feature on.
+  Off, it is a one-tag enum of no bytes, so `zui.Decoration` stays 52
+  bytes, which a test asserts, and `Ui.Decoration` is `zui.Decoration`.
+  `DecorationWith` takes the feature as its third parameter.
+- The parent is the nearest ancestor with a decoration, so a row or
+  column that only lays children out is passed over. An element with no
+  decorated ancestor sits in the window's square corners and takes
+  `minimum`. The family is the child's own `corner_shape`.
+- Emission keeps the drawn radius of each decorated element as it enters
+  it, already clamped to the snapped bounds, in `drawn_corner_radii`. That
+  array is in the context's one reservation and has `max_elements` entries
+  with the feature on and none with it off. A nested element walks up
+  `Frame.parent` to its decorated ancestor and reads that radius, which
+  the pre-order walk has already written. The background, material,
+  shadow, gradient, blur and border all read the resolved radius, and the
+  existing clamp and lowering then apply.
+- A declaration in a context without the feature fails with
+  `"zui: Decoration.nested_corners needs Config.features.nested_corners = true"`.
+  A field's coercion can raise no `@compileError`, so the message is the
+  name of the field's zero-size type, and it appears inside Zig's own
+  "does not support struct initialization syntax" error. Its case,
+  `nested_corners_without_feature`, matches it with the `/?/` wildcard,
+  since the matcher compares line endings.
+- Core's tests (`core/src/tests/corners.zig`) cover:
+  - radius 16 and padding 6 give 10;
+  - a child touching only the top edge gets 10 at the top and its
+    `minimum` 2 at the bottom;
+  - a chamfer gets 16 − (2 − √2)·6;
+  - three levels with an undecorated wrapper give 16, 12, 8;
+  - `minimum` applies below it, past the parent's radius, and with no
+    decorated ancestor;
+  - a border and a shadow follow too.
+  `core/tests/instantiate.zig` nests one in a context with every command
+  and materials.
+- Instruction counts against `6accded`, with the feature off: every one
+  of the 175 rows, misses included, +0.00%.
+- Known issue for `11-polish:19-default-design`: with the feature on,
+  `Ui.Decoration` is the context's own type, as it is with materials, so
+  a `zui.Decoration` such as `tokens.look(...).decoration` cannot be
+  assigned to it without being copied field by field (SPEC.md §18.7's
+  example shows the copy).
 
 ## 11-polish:18-system-accent — The system's accent color
 

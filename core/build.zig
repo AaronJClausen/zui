@@ -23,6 +23,7 @@ const compile_error_cases = [_]struct { name: []const u8, expected_error: []cons
     .{ .name = "dropped_without_gestures", .expected_error = "zui: dropped() needs Config.features.gestures = true" },
     .{ .name = "drag_payload_too_large", .expected_error = "zui: state type drag_payload_too_large.Document is 72 bytes, but a state slot holds at most 64; store an index into your own storage instead" },
     .{ .name = "wrap_without_feature", .expected_error = "zui: wrapChildren() needs Config.features.flex_wrap = true" },
+    .{ .name = "nested_corners_without_feature", .expected_error = "/?/zui: Decoration.nested_corners needs Config.features.nested_corners = true' does not support struct initialization syntax" },
     .{ .name = "custom_without_custom_data", .expected_error = "zui: custom() needs Config.CustomData set to your payload type" },
     .{ .name = "state_type_too_large", .expected_error = "zui: state type state_type_too_large.History is 80 bytes, but a state slot holds at most 64; store an index into your own storage instead" },
     .{ .name = "config_material_without_handle", .expected_error = "zui: commands includes .material but MaterialHandle is void" },
