@@ -232,7 +232,7 @@ pub const Limits = struct {
     max_dropped_path_bytes: u32 = 4096,     // paths of dropped files kept from one record; 0 keeps none
     parallel_measure_threshold: u32 = 256,  // cache misses in one frame before measuring in parallel
     parallel_measure_capacity: u32 = 4096,  // distinct misses one cold frame can batch
-    exit_ghost_commands: u32 = 0,           // commands kept for exit animations; 0 compiles them out
+    exit_ghost_commands: u32 = 0,           // commands kept for exit animations, with up to max_text_bytes of their text; 0 compiles them out
 };
 
 pub const Features = struct {
@@ -1032,8 +1032,15 @@ pub const Element = struct {
     cursor: ?Cursor = null,             // the pointer's shape while this element is hot
     chrome: ?ChromeKind = null,         // features.chrome_regions: a title bar, caption button or resize edge (§13.4)
     semantics: ?Semantics = null,       // features.semantics (§13.5)
-    exit_seconds: f32 = 0,              // limits.exit_ghost_commands (§19.9)
+    exit: ?Exit = null,                 // limits.exit_ghost_commands, ignored without it; needs an id (§19.9)
 };
+
+pub const Exit = struct {
+    seconds: f32,
+    fade: ExitFade = .linear,
+};
+
+pub const ExitFade = enum(u8) { none, linear, ease_in, ease_out, ease_in_out }; // `none` holds, then vanishes
 ```
 
 ```zig
@@ -2306,6 +2313,7 @@ frame, with full context.
 | `close` without `open` | panic | ignored; reported |
 | duplicate id in a frame | panic naming both declarations | the second is non-interactive; reported |
 | `scroll` or `focusable` without an id | panic | clips without scrolling / not focusable; reported |
+| `exit` without an id | panic | no exit animation |
 | `ui.source` outside a frame | panic | panic: zui holds no sources between frames (§14.3) |
 
 With `-Dzui-debug`, ids keep their names, so messages read
@@ -2816,9 +2824,22 @@ Tweens and springs over `state(id, T)` and `dt()`, which ask for the
 next frame while they move, for a frame at the instant a delayed one
 starts, and for none at rest, and finish instantly under
 `reduced_motion`. Exit animations use the core's ghost buffer: an
-element with `exit_seconds` keeps emitting its last commands, taking no
-space and receiving no hits, from `limits.exit_ghost_commands` (0
-compiles it out).
+element with an `exit` keeps emitting its last commands for
+`exit.seconds` after it is last declared, taking no space and receiving
+no hits, from `limits.exit_ghost_commands` (0 compiles it out). The
+commands are those its subtree emitted in that frame, inside the clip
+and transforms around it, drawn at the end of their layers, a newer
+ghost over an older one; they do not follow a container that scrolls
+afterwards. A fade multiplies the alpha of every color they draw by an
+opacity from 1 to 0, linear or cubic as `zui_motion`'s easings; `.none`
+holds them unchanged and asks only for a frame at the instant it ends,
+and a fade asks for the next frame while it lasts. The fade is chosen
+once per ghost per frame, so `.none` runs no alpha code and `.linear`
+no easing, and no set of fades is declared. An element inside another
+that leaves with it is drawn only in the outer one's ghost. A ghost is
+dropped when its element is declared again, and every ghost at once
+under `reduced_motion`. A ghost whose commands or text do not fit is not
+kept, and reported as `exit_ghost_commands`.
 
 ### 19.10 `zui_tracy`
 

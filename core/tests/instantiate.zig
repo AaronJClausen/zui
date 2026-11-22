@@ -238,7 +238,7 @@ const EveryCommandRenderer = struct {
 const every_command_config: zui.Config = config: {
     zui.checkRenderer(EveryCommandRenderer);
     break :config .{
-        .limits = .{ .max_elements = 16 },
+        .limits = .{ .max_elements = 16, .exit_ghost_commands = 32 },
         .commands = EveryCommandRenderer.zui_commands,
         .ImageHandle = EveryCommandRenderer.ImageHandle,
         .MaterialHandle = EveryCommandRenderer.MaterialHandle,
@@ -255,7 +255,7 @@ export fn zuiCheckRenderer() usize {
     ui.image(.{ .handle = 7 }, .{ .decoration = .{ .background = .black } });
     ui.custom(3, .{});
     ui.box(.{ .decoration = .{ .background = .black, .material = 2 } });
-    ui.open(.{ .layout = .{ .sizing = .grow_both }, .effects = &check_effects });
+    ui.open(.{ .id = .of("card"), .layout = .{ .sizing = .grow_both }, .effects = &check_effects, .exit = .{ .seconds = 0.2, .fade = .ease_in_out } });
     ui.box(.{ .floating = .{ .z = 1 }, .interactive = true, .decoration = .{ .background = .white } });
     ui.close();
     const frame = ui.endFrame();
@@ -267,7 +267,7 @@ export fn zuiCheckRenderer() usize {
 
 fn ExtendedColorUi(comptime renderer_draws_extended_color: bool) type {
     return zui.Context(.{
-        .limits = .{ .max_elements = 16 },
+        .limits = .{ .max_elements = 16, .exit_ghost_commands = 16 },
         .commands = .initFull(),
         .ImageHandle = u32,
         .MaterialHandle = u8,
@@ -291,7 +291,7 @@ fn declareExtendedColors(comptime ColorUi: type, buffer: *[ColorUi.required_byte
     var ui = ColorUi.initBuffer(@alignCast(buffer), undefined) catch return 0;
     ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 100, 100 } } });
     ui.image(.{ .handle = 7, .tint = hdr_white }, .{});
-    ui.box(.{ .decoration = .{ .background = hdr_white, .material = 2, .border = .{ .color = .linear(1.2, -0.1, 0, 1), .widths = .all(1) } }, .effects = &effects });
+    ui.box(.{ .id = .of("hdr"), .decoration = .{ .background = hdr_white, .material = 2, .border = .{ .color = .linear(1.2, -0.1, 0, 1), .widths = .all(1) } }, .effects = &effects, .exit = .{ .seconds = 0.2 } });
     const frame = ui.endFrame();
     defer ui.release(frame);
     return frame.commands().len + @intFromBool(frame.diagnostics.clamped_colors);

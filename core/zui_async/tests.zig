@@ -258,7 +258,7 @@ test "a full Stream refuses the newest item and reports it to the frame" {
     try testing.expectError(error.Full, sources.quotes.publish(4));
     const frame = ui.endFrame();
     try testing.expectEqual(@as(u32, 1), frame.diagnostics.refused_publishes);
-    try testing.expectEqualStrings("quotes", frame.diagnostics.first_refusing_source);
+    try testing.expectEqualStrings("quotes", std.mem.span(frame.diagnostics.first_refusing_source));
     ui.release(frame);
     try testing.expectEqual(zui.NextFrame.on_event, ui.nextFrame(&sources));
 
@@ -466,7 +466,7 @@ test "a full KeyedLoads refuses new keys, and a forgotten release shows as a ful
     ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 10, 10 } } }, &sources);
     const frame = ui.endFrame();
     try testing.expectEqual(@as(u32, 1), frame.diagnostics.refused_publishes);
-    try testing.expectEqualStrings("thumbnails", frame.diagnostics.first_refusing_source);
+    try testing.expectEqualStrings("thumbnails", std.mem.span(frame.diagnostics.first_refusing_source));
     ui.release(frame);
 }
 

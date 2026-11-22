@@ -16,6 +16,7 @@ const trace = @import("trace.zig");
 const sources_module = @import("sources.zig");
 const semantics_module = @import("semantics.zig");
 const chrome_module = @import("chrome.zig");
+const exit_module = @import("exit.zig");
 const sweeps = @import("sweeps.zig");
 
 const Id = id_module.Id;
@@ -122,6 +123,11 @@ pub const Limits = struct {
     parallel_measure_threshold: u32 = 256,
     /// Distinct misses one cold frame can batch; the rest are measured inline.
     parallel_measure_capacity: u32 = 4096,
+    /// Commands kept for exit animations: those of every element that
+    /// declares `exit` and of every ghost still leaving, with up to
+    /// `max_text_bytes` of the text they draw. 0 compiles exit animations
+    /// out.
+    exit_ghost_commands: u32 = 0,
 };
 
 /// Names a limit by its `Limits` field, so a diagnostic can never name a
@@ -143,8 +149,9 @@ pub const Diagnostics = struct {
     /// summed over every source. Each refused item stayed its producer's.
     refused_publishes: u32 = 0,
     /// The `Sources` field that refused first, e.g. "quotes": the one
-    /// whose capacity to raise. Empty when none refused.
-    first_refusing_source: []const u8 = "",
+    /// whose capacity to raise. Empty when none refused. A pointer rather
+    /// than a slice keeps `Diagnostics` within 96 bytes.
+    first_refusing_source: [*:0]const u8 = "",
     /// Optional commands this frame declared but the renderer does not
     /// draw, so emission replaced them: a gradient by a rectangle in its
     /// mean color, a shadow by nothing. Not a failure, so `ok` ignores it.
@@ -168,7 +175,7 @@ pub const Diagnostics = struct {
         if (self.unbalanced) return error.UnbalancedTree;
     }
 
-    fn addRefusals(self: *Diagnostics, source_name: []const u8, refused: u32) void {
+    fn addRefusals(self: *Diagnostics, source_name: [*:0]const u8, refused: u32) void {
         if (self.refused_publishes == 0) self.first_refusing_source = source_name;
         self.refused_publishes +|= refused;
     }
@@ -237,6 +244,11 @@ pub fn ElementWith(comptime ContextDecoration: type) type {
         gestures: interaction.Gestures = .{},
         /// What it is to an assistive technology, listed by `Frame.semantics()`.
         semantics: ?semantics_module.Semantics = null,
+        /// Keeps its last commands drawing, fading as it says, once it is no
+        /// longer declared. Needs an id. Ignored while
+        /// `Config.limits.exit_ghost_commands` is 0, so a widget can declare
+        /// it for every context.
+        exit: ?exit_module.Exit = null,
     };
 }
 
@@ -419,6 +431,11 @@ pub fn Context(comptime config: Config) type {
         const InputState = interaction.State(limits.max_input_contacts, limits.max_depth + 1, limits.max_events_per_frame, limits.max_text_input_bytes, limits.max_dropped_path_bytes, features.gestures, features.semantics);
         /// Semantic labels and text values share the text bytes.
         const keeps_text_bytes = has_text or features.semantics;
+        /// Elements that declare `exit` keep drawing after they leave.
+        pub const keeps_exit_ghosts = limits.exit_ghost_commands != 0;
+        /// The snapshots and ghosts kept between frames, in the context's
+        /// one reservation; empty while `keeps_exit_ghosts` is false.
+        pub const ExitGhosts = if (keeps_exit_ghosts) exit_module.Ghosts(RenderCommand, limits.exit_ghost_commands, if (has_text) limits.max_text_bytes else 0) else struct {};
 
         pub const Decoration = style.DecorationWith(Color, config.MaterialHandle);
         pub const Border = style.BorderWith(Color);
@@ -758,6 +775,7 @@ pub fn Context(comptime config: Config) type {
                     chrome_list.declared_count = 0;
                     chrome_list.region_count = 0;
                 }
+                if (keeps_exit_ghosts) self.mutableFrameSlot().exit_list.count = 0;
                 self.diagnostics = .{};
                 self.host_requests = .{};
                 self.pixels_per_unit = params.scale * params.zoom;
@@ -772,7 +790,20 @@ pub fn Context(comptime config: Config) type {
             frame: Frame,
             semantic_list: SemanticList,
             chrome_list: ChromeList,
+            exit_list: ExitList,
         };
+
+        const ExitList = if (keeps_exit_ghosts) struct {
+            elements: [max_elements]Index,
+            exits: [max_elements]exit_module.Exit,
+            count: u32,
+        } else struct {};
+
+        /// The elements `frame` declared with an `exit`, in declaration
+        /// order, for emission to keep their commands.
+        pub fn exitListOf(frame: *const Frame) *const ExitList {
+            return &frame.frameSlot().exit_list;
+        }
 
         /// Each element adds at most one region, as itself or as a
         /// `.client` inside a title bar, so the list never overflows.
@@ -806,6 +837,7 @@ pub fn Context(comptime config: Config) type {
             /// What each source delivered, filled from `zuiDelivery` for a
             /// relay listener.
             relayed_deliveries: Deliveries,
+            exit_ghosts: ExitGhosts,
         };
 
         /// The bytes `initBuffer` needs; `init` makes one allocation of this size.
@@ -834,7 +866,7 @@ pub fn Context(comptime config: Config) type {
         dropped_depth: u32 = 0,
 
         /// Scratch for the emission pass, kept here so frames stay plain data.
-        emit_levels: [max_depth + 1]emission.EmitLevel(Index, draws_transforms) = undefined,
+        emit_levels: [max_depth + 1]emission.EmitLevel(Index, draws_transforms, keeps_exit_ghosts) = undefined,
         /// The effects whose transform made each space, so a floating
         /// element on another layer can begin its ancestors' transforms
         /// again there.
@@ -900,6 +932,7 @@ pub fn Context(comptime config: Config) type {
             self.memory.states.reset();
             self.memory.results.reset();
             self.memory.input.reset();
+            if (keeps_exit_ghosts) self.memory.exit_ghosts.reset();
             for (&self.memory.frames) |*frame_slot| {
                 const frame = &frame_slot.frame;
                 frame.held = .init(false);
@@ -1505,7 +1538,20 @@ pub fn Context(comptime config: Config) type {
             }
             if (features.semantics) if (element.semantics) |*declared| self.describe(frame, index, declared, element.gestures);
             if (features.chrome_regions) if (element.chrome) |chrome_kind| declareChrome(frame, index, chrome_kind);
+            if (keeps_exit_ghosts) if (element.exit) |exit| declareExit(frame, index, element_id, exit);
             return index;
+        }
+
+        fn declareExit(frame: *Frame, index: Index, element_id: Id, exit: exit_module.Exit) void {
+            if (element_id.isNone()) {
+                if (std.debug.runtime_safety) @panic("zui: an element with an exit animation needs an id, because its ghost is found by id");
+                return;
+            }
+            if (!(exit.seconds > 0)) return;
+            const list = &frame.mutableFrameSlot().exit_list;
+            list.elements[list.count] = index;
+            list.exits[list.count] = exit;
+            list.count += 1;
         }
 
         fn declareChrome(frame: *Frame, index: Index, kind: chrome_module.ChromeKind) void {

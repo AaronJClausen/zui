@@ -2,11 +2,14 @@ const std = @import("std");
 const style = @import("style.zig");
 const interaction = @import("interaction.zig");
 const layout = @import("layout.zig");
+const exit_module = @import("exit.zig");
+const Instant = @import("record.zig").Instant;
 
 /// An open element whose subtree is drawn differently from its parent's:
 /// it clips, has a border to draw after its children, floats, is a hit
-/// region, is a focus scope, or transforms. Other elements open no level.
-pub fn EmitLevel(comptime Index: type, comptime draws_transforms: bool) type {
+/// region, is a focus scope, transforms, or keeps its commands for an exit
+/// animation. Other elements open no level.
+pub fn EmitLevel(comptime Index: type, comptime draws_transforms: bool, comptime keeps_exit_ghosts: bool) type {
     return struct {
         element: Index,
         /// One past the last element of the subtree.
@@ -24,8 +27,33 @@ pub fn EmitLevel(comptime Index: type, comptime draws_transforms: bool) type {
         /// The space its subtree is hit-tested in.
         space: if (draws_transforms) u32 else void,
         transform_ends: if (draws_transforms) TransformEnds else void,
+        exit: if (keeps_exit_ghosts) ExitTrack else void,
     };
 }
+
+/// What a level needs to keep its element's commands as a snapshot when its
+/// subtree ends.
+pub const ExitTrack = struct {
+    /// Into the frame's exit list, or `no_candidate`.
+    candidate: u32,
+    /// The nearest element at or above this level that declares `exit`,
+    /// for its children's `enclosing_id`; 0 for none.
+    nearest_id: u64,
+    enclosing_id: u64,
+    first_command: u32,
+    /// Commands pushed before the element's own, counting those dropped
+    /// past `max_render_commands`.
+    attempted_before: u32,
+    /// The clip around the element, in which its ghost is drawn; none for a
+    /// floating element, whose own commands hold its clip.
+    outer_clip: ?style.Rect,
+    /// The innermost space around the element whose transforms its ghost
+    /// begins again, or `interaction.no_space`.
+    outer_space: u32,
+
+    pub const no_candidate = std.math.maxInt(u32);
+    pub const none: ExitTrack = .{ .candidate = no_candidate, .nearest_id = 0, .enclosing_id = 0, .first_command = 0, .attempted_before = 0, .outer_clip = null, .outer_space = interaction.no_space };
+};
 
 /// The `transform_end`s a level pushes when its subtree ends.
 pub const TransformEnds = struct {
@@ -70,6 +98,8 @@ fn emit(comptime Ui: type, ui: *Ui, frame: *Ui.Frame, comptime walk: Walk) void 
         .space_effects = &ui.emit_space_effects,
         .pixels_per_unit = frame.pixels_per_unit,
         .units_per_pixel = 1 / frame.pixels_per_unit,
+        .ghosts = if (Ui.keeps_exit_ghosts) &ui.memory.exit_ghosts else {},
+        .now = if (Ui.keeps_exit_ghosts) ui.now() else {},
     };
 
     const viewport: style.Rect = .{ .width = frame.params.viewport[0], .height = frame.params.viewport[1] };
@@ -85,12 +115,20 @@ fn emit(comptime Ui: type, ui: *Ui, frame: *Ui.Frame, comptime walk: Walk) void 
         .focus_scope = 0,
         .space = if (Ui.draws_transforms) interaction.no_space else {},
         .transform_ends = if (Ui.draws_transforms) .{} else {},
+        .exit = if (Ui.keeps_exit_ghosts) .none else {},
     };
     results.insert(frame.element_id[Ui.root_index], emitter.rectOf(Ui.root_index), interaction.no_region);
 
     var depth: usize = 0;
     var next_effect: u32 = 0;
     var next_effect_element: Ui.Index = if (walk == .with_effects) frame.effect_elements[0] else Ui.none_index;
+    const exit_list = if (Ui.keeps_exit_ghosts) Ui.exitListOf(frame) else {};
+    var next_exit: u32 = 0;
+    var next_exit_element: Ui.Index = Ui.none_index;
+    if (Ui.keeps_exit_ghosts) {
+        ui.memory.exit_ghosts.next().reset();
+        if (!ui.current_environment.reduced_motion and exit_list.count != 0) next_exit_element = exit_list.elements[0];
+    }
     for (1..frame.element_count) |index| {
         const element: Ui.Index = @intCast(index);
         while (levels[depth].subtree_end <= element) : (depth -= 1) emitter.leave(&levels[depth], levels[depth - 1].z);
@@ -101,8 +139,14 @@ fn emit(comptime Ui: type, ui: *Ui, frame: *Ui.Frame, comptime walk: Walk) void 
             next_effect_element = if (next_effect < frame.effect_count) frame.effect_elements[next_effect] else Ui.none_index;
             break :taken effects;
         } else null;
-        if (!frame.flags[element].emits() and frame.decorationOf(element) == null and frame.kindOf(element) == .none and effects == null) continue;
-        if (emitter.enter(element, levels[depth], viewport, effects, effect_index)) |level| {
+        const exit_candidate: ?u32 = if (Ui.keeps_exit_ghosts and element == next_exit_element) taken: {
+            const candidate = next_exit;
+            next_exit += 1;
+            next_exit_element = if (next_exit < exit_list.count) exit_list.elements[next_exit] else Ui.none_index;
+            break :taken candidate;
+        } else null;
+        if (!frame.flags[element].emits() and frame.decorationOf(element) == null and frame.kindOf(element) == .none and effects == null and exit_candidate == null) continue;
+        if (emitter.enter(element, levels[depth], viewport, effects, effect_index, exit_candidate)) |level| {
             depth += 1;
             levels[depth] = level;
         }
@@ -111,6 +155,7 @@ fn emit(comptime Ui: type, ui: *Ui, frame: *Ui.Frame, comptime walk: Walk) void 
         emitter.leave(&levels[depth], if (depth == 0) 0 else levels[depth - 1].z);
         if (depth == 0) break;
     }
+    if (Ui.keeps_exit_ghosts) emitGhosts(Ui, ui, &emitter);
     frame.diagnostics.needed.set(.max_render_commands, emitter.attempted_commands);
     emitting.end();
 
@@ -119,6 +164,56 @@ fn emit(comptime Ui: type, ui: *Ui, frame: *Ui.Frame, comptime walk: Walk) void 
         defer sorting.end();
         emitter.sortLayers();
     }
+}
+
+/// Draws each ghost still leaving at the end of its layer, older ghosts
+/// first, and keeps it for the next frame. A snapshot of the last frame
+/// becomes a ghost when its element is no longer declared, unless the
+/// element around it that also declares `exit` left with it, since that
+/// one's ghost holds its commands. A ghost is dropped once its seconds are
+/// up or its element is declared again.
+fn emitGhosts(comptime Ui: type, ui: *Ui, emitter: *Emitter(Ui)) void {
+    const ghosts = &ui.memory.exit_ghosts;
+    defer ghosts.advance();
+    const frame = emitter.frame;
+    defer frame.diagnostics.needed.set(.exit_ghost_commands, emitter.ghost_commands_needed);
+    if (ui.current_environment.reduced_motion) return;
+    const previous = ghosts.previous();
+    const next = ghosts.next();
+    const now = emitter.now;
+    var fading = false;
+    inline for (.{ true, false }) |exited| {
+        for (previous.keptGhosts()) |*ghost| {
+            if (ghost.exited != exited) continue;
+            if (frame.lookup(ghost.id) != null) continue;
+            if (!exited and ghost.enclosing_id != 0 and frame.lookup(ghost.enclosing_id) == null) continue;
+            const progress = ghost.progressAt(now);
+            if (!(progress < 1)) continue;
+            const commands = previous.commandsOf(ghost);
+            emitter.ghost_commands_needed += @intCast(commands.len);
+            next.begin();
+            for (commands) |command| next.append(command);
+            var kept = ghost.*;
+            kept.exited = true;
+            if (!next.finish(kept)) {
+                emitter.reportGhostOverflow(ghost.id);
+                continue;
+            }
+            const copied = next.commandsOf(&next.keptGhosts()[next.ghost_count - 1]);
+            switch (ghost.exit.fade) {
+                .none => {
+                    emitter.pushGhost(copied, false, 1);
+                    ui.requestFrameAt(ghost.since.addSeconds(ghost.exit.seconds));
+                },
+                else => |curve| {
+                    emitter.pushGhost(copied, true, curve.opacityAt(progress));
+                    fading = true;
+                },
+            }
+        }
+    }
+    emitter.switchLayer(0);
+    if (fading) ui.requestFrame();
 }
 
 fn lowerLayer(comptime Ui: type) fn (void, Ui.RenderCommand, Ui.RenderCommand) bool {
@@ -132,7 +227,7 @@ fn lowerLayer(comptime Ui: type) fn (void, Ui.RenderCommand, Ui.RenderCommand) b
 fn Emitter(comptime Ui: type) type {
     return struct {
         const Self = @This();
-        const Level = EmitLevel(Ui.Index, Ui.draws_transforms);
+        const Level = EmitLevel(Ui.Index, Ui.draws_transforms, Ui.keeps_exit_ghosts);
         const no_space = interaction.no_space;
 
         frame: *Ui.Frame,
@@ -152,6 +247,10 @@ fn Emitter(comptime Ui: type) type {
         current_z: i16 = 0,
         layered_out_of_order: bool = false,
         layered_runs_overflowed: bool = false,
+        ghosts: if (Ui.keeps_exit_ghosts) *Ui.ExitGhosts else void,
+        now: if (Ui.keeps_exit_ghosts) Instant else void,
+        /// Reported as `needed.exit_ghost_commands` once emission ends.
+        ghost_commands_needed: if (Ui.keeps_exit_ghosts) u32 else void = if (Ui.keeps_exit_ghosts) 0 else {},
 
         const max_layered_runs = 64;
         const LayeredRun = struct { start: u32, end: u32, z: i16 };
@@ -276,12 +375,14 @@ fn Emitter(comptime Ui: type) type {
 
         /// Returns the level the element's subtree is drawn in, or null if
         /// that is the parent's level unchanged.
-        inline fn enter(self: *Self, element: Ui.Index, parent: Level, viewport: style.Rect, effects: ?*const Ui.Effects, effect_index: u32) ?Level {
+        inline fn enter(self: *Self, element: Ui.Index, parent: Level, viewport: style.Rect, effects: ?*const Ui.Effects, effect_index: u32, exit_candidate: ?u32) ?Level {
             const frame = self.frame;
             const flags = frame.flags[element];
             const floating = flags.floating;
             const element_id = frame.element_id[element];
             const bounds = self.rectOf(element);
+            const first_command = if (Ui.keeps_exit_ghosts) frame.command_count else {};
+            const attempted_before = if (Ui.keeps_exit_ghosts) self.attempted_commands else {};
             var layer: Layer = .{ .clip = parent.clip, .z = parent.z };
             if (floating) layer = self.floatingLayer(element, parent, viewport);
             var outer_clip = layer.clip;
@@ -306,6 +407,7 @@ fn Emitter(comptime Ui: type) type {
                 .focus_scope = if (flags.focus_scope) element_id else parent.focus_scope,
                 .space = space,
                 .transform_ends = transform_ends,
+                .exit = if (Ui.keeps_exit_ghosts) exitTrack(parent, element_id, exit_candidate, first_command, attempted_before, floating, layer) else {},
             };
             const visible = bounds.intersect(outer_clip);
             const drawn = !visible.isEmpty();
@@ -343,8 +445,102 @@ fn Emitter(comptime Ui: type) type {
             }
             const has_border = if (frame.decorationOf(element)) |decoration| decoration.border != null else false;
             const transforms = if (comptime Ui.draws_transforms) transform_ends.own != .none else false;
-            if (!level.pushed_clip and !has_border and !floating and level.region == parent.region and !flags.focus_scope and !transforms) return null;
+            if (!level.pushed_clip and !has_border and !floating and level.region == parent.region and !flags.focus_scope and !transforms and exit_candidate == null) return null;
             return level;
+        }
+
+        fn exitTrack(parent: Level, element_id: u64, exit_candidate: ?u32, first_command: u32, attempted_before: u32, floating: bool, layer: Layer) ExitTrack {
+            const reopened = if (Ui.draws_transforms) layer.reopened != 0 else false;
+            return .{
+                .candidate = exit_candidate orelse ExitTrack.no_candidate,
+                .nearest_id = if (exit_candidate != null) element_id else parent.exit.nearest_id,
+                .enclosing_id = parent.exit.nearest_id,
+                .first_command = first_command,
+                .attempted_before = attempted_before,
+                .outer_clip = if (floating) null else parent.clip,
+                .outer_space = if (Ui.draws_transforms and !reopened) parent.space else no_space,
+            };
+        }
+
+        /// Copies the commands the level's subtree pushed, inside the clip
+        /// and transforms around it, into the store being written. A subtree
+        /// that lost commands to `max_render_commands` is not kept, since
+        /// its clips might not end.
+        fn keepSnapshot(self: *Self, level: *const Level) void {
+            const frame = self.frame;
+            const track = &level.exit;
+            const pushed = frame.command_count - track.first_command;
+            if (pushed == 0 or self.attempted_commands - track.attempted_before != pushed) return;
+            const element_id = frame.element_id[level.element];
+            const store = self.ghosts.next();
+            store.begin();
+            const transforms = if (Ui.draws_transforms) self.keepTransformBegins(store, track.outer_space, level.z) else 0;
+            if (track.outer_clip) |clip| store.append(.{ .bounds = self.snap(clip), .id = element_id, .z = level.z, .payload = .{ .clip_begin = self.snap(clip) } });
+            for (frame.render_commands[track.first_command..frame.command_count]) |command| store.append(command);
+            if (track.outer_clip) |clip| store.append(.{ .bounds = self.snap(clip), .id = element_id, .z = level.z, .payload = .clip_end });
+            if (Ui.draws_transforms) for (0..transforms) |_| store.append(.{ .bounds = self.snap(self.rectOf(level.element)), .id = element_id, .z = level.z, .payload = .transform_end });
+            self.ghost_commands_needed += pushed + 2 * (transforms + @as(u32, @intFromBool(track.outer_clip != null)));
+            const kept = store.finish(.{
+                .id = element_id,
+                .enclosing_id = track.enclosing_id,
+                .exit = Ui.exitListOf(frame).exits[track.candidate],
+                .since = self.now,
+                .first_command = 0,
+                .command_count = 0,
+                .exited = false,
+            });
+            if (!kept) self.reportGhostOverflow(element_id);
+        }
+
+        /// Begins the transforms of `innermost` and every space around it
+        /// in `store`, the outermost first, as `reopenTransforms` does in
+        /// the frame.
+        fn keepTransformBegins(self: *Self, store: *Ui.ExitGhosts.Store, innermost: u32, z: i16) u32 {
+            const spaces = &self.results.spaces;
+            var count: u32 = 0;
+            var space = innermost;
+            while (space != no_space) : (space = spaces[space].parent) count += 1;
+            var still_to_begin = count;
+            while (still_to_begin != 0) : (still_to_begin -= 1) {
+                var outermost_left = innermost;
+                for (1..still_to_begin) |_| outermost_left = spaces[outermost_left].parent;
+                const effect_index = self.space_effects[outermost_left];
+                const element = self.frame.effect_elements[effect_index];
+                store.append(.{ .bounds = self.snap(self.rectOf(element)), .id = self.frame.element_id[element], .z = z, .payload = .{ .transform_begin = self.frame.effects[effect_index].transform.? } });
+            }
+            return count;
+        }
+
+        /// A ghost's text is copied into the frame, which a renderer may
+        /// hold after the store it came from is written again.
+        fn pushGhost(self: *Self, commands: []const Ui.RenderCommand, comptime fades: bool, opacity: f32) void {
+            const frame = self.frame;
+            for (commands) |command| {
+                var drawn = command;
+                if (fades) exit_module.fadeCommand(Ui.RenderCommand, &drawn, opacity);
+                if (Ui.has_text and drawn.payload == .text) {
+                    const content = drawn.payload.text.content;
+                    const needed = &frame.diagnostics.needed;
+                    needed.set(.max_text_bytes, needed.get(.max_text_bytes) + @as(u32, @intCast(content.len)));
+                    if (frame.text_bytes.len - frame.text_bytes_used < content.len) {
+                        frame.diagnostics.exceeded.insert(.max_text_bytes);
+                        if (frame.diagnostics.first_dropped_id == 0) frame.diagnostics.first_dropped_id = drawn.id;
+                        continue;
+                    }
+                    const copy = frame.text_bytes[frame.text_bytes_used..][0..content.len];
+                    @memcpy(copy, content);
+                    frame.text_bytes_used += @intCast(content.len);
+                    drawn.payload.text.content = copy;
+                }
+                self.switchLayer(drawn.z);
+                self.push(drawn);
+            }
+        }
+
+        fn reportGhostOverflow(self: *Self, element_id: u64) void {
+            const diagnostics = &self.frame.diagnostics;
+            diagnostics.exceeded.insert(.exit_ghost_commands);
+            if (diagnostics.first_dropped_id == 0) diagnostics.first_dropped_id = element_id;
         }
 
         const TransformBegun = struct { clip: style.Rect, space: u32 };
@@ -544,6 +740,7 @@ fn Emitter(comptime Ui: type) type {
                 if (level.transform_ends.own == .around_clip) self.pushTransformEnd(level);
                 for (0..level.transform_ends.reopened) |_| self.pushTransformEnd(level);
             }
+            if (comptime Ui.keeps_exit_ghosts) if (level.exit.candidate != ExitTrack.no_candidate) self.keepSnapshot(level);
             if (level.z != outer_z) self.switchLayer(outer_z);
         }
 

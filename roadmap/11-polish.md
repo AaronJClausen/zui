@@ -14,7 +14,7 @@ is given its Grounding, Plan and Done when as it is taken.
 | Item | Status |
 |---|---|
 | `11-polish:01-zui-motion` `zui_motion` | done |
-| `11-polish:02-exit-animations` Exit animations | not started |
+| `11-polish:02-exit-animations` Exit animations | done |
 | `11-polish:03-zui-color` `zui_color` | done |
 | `11-polish:04-skin-contract` The skin contract | done |
 | `11-polish:05-default-skin` The default skin | not started |
@@ -105,7 +105,198 @@ rate, which only the host knows. Exit animations are
 
 ## 11-polish:02-exit-animations — Exit animations
 
-`exit_seconds` and the ghost buffer.
+`Element.exit` and the ghost buffer.
+
+**Grounding.**
+- SPEC.md declares the feature and the code has none of it: §5 lists
+  `exit_ghost_commands: u32 = 0`, §10.1 `Element.exit_seconds: f32 = 0`,
+  §19.9 says an element with `exit_seconds` "keeps emitting its last
+  commands, taking no space and receiving no hits", and §17.2 names ghost
+  commands among the limits. `grep -rn 'exit_ghost\|exit_seconds'
+  core/src` is empty.
+- `Limits` is `core/src/context.zig:90`, and `Limit` is
+  `std.meta.FieldEnum(Limits)` (`:129`), so a new limit is a new
+  `Diagnostics.needed` entry by itself. `Diagnostics` (`:131`) is held at
+  96 bytes: one byte more moved every array of `Frame` after it (`:137`,
+  `:486`), and its fields already sum to 96, so a limit of 4 bytes makes
+  it 104.
+- `Element` is `ElementWith` (`:186`); `chrome` (`:232`) is ignored
+  without its feature so that a widget can declare it for every context.
+  `ElementFlags` (`:253`) is a `packed struct(u16)` whose 16 bits are all
+  taken, so an exiting element cannot be marked by a flag.
+- `appendElement` is `inline` (`:1431`), so a field left at its default
+  costs nothing; `chrome` and `semantics` are gathered there into lists
+  beside the frame, in `FrameSlot` (`:771`), not in `Frame`, since a field
+  added to `Frame` reorders its arrays. A scroll container without an id
+  panics in safe builds and does not scroll (`:1665`), since its offset
+  is stored by id.
+- Emission (`core/src/emission.zig:52`) has one copy of its walk per
+  frame kind (`:56-61`, `:63`), because any change to the walk moved
+  `endFrame` by up to 5%. The walk visits each element in declaration
+  order (`:94`), skips one that draws nothing (`:104`), opens a level for
+  one that clips, has a border, floats, is a region or transforms
+  (`enter`, `:279`), and pushes its border and `clip_end` on `leave`
+  (`:539`), so before the layers are sorted (`:120`) an element's subtree
+  is one contiguous run of commands. Hit regions and `rectOf`'s results
+  are written only in `enter` (`:328`, `:331`). `reopenTransforms`
+  (`:372`) begins the transforms around an element again on another layer.
+- A text command's `content` points into its frame's `text_bytes`, which
+  the next `beginFrame` on that slot overwrites; with `frames_in_flight
+  = 1` that is the very next frame.
+- `beginFrame` clears `frame_requested` and `requested_deadline`
+  (`core/src/context.zig:981`), and `nextFrame` (`:1173`) reads them after
+  `endFrame`, so `endFrame` can ask for the next frame itself.
+  `Environment.reduced_motion` is `core/src/input.zig:314`.
+- `zui_motion` (`core/zui_motion/zui_motion.zig`) animates an element
+  only while it is declared; nothing keeps drawing one that is not.
+
+**Plan.** One slice, in the core, all of it behind `comptime
+limits.exit_ghost_commands != 0`:
+- **The API** is `Element.exit: ?Exit`, in place of SPEC.md's
+  `exit_seconds`, so that an element also chooses how its ghost leaves:
+  `Exit = struct { seconds: f32, fade: ExitFade = .linear }`, and
+  `ExitFade = enum { none, linear, ease_in, ease_out, ease_in_out }`,
+  the eased ones cubic and exact at 0 and 1 as `zui_motion.Easing`'s are.
+  `.none` holds the ghost unchanged for its seconds and then drops it.
+  `exit` is ignored when `exit_ghost_commands` is 0, as `chrome` is
+  without its feature, so a widget declares it for every context; no
+  compile error. It needs an id, as a scroll container does: without one
+  it panics in safe builds and is ignored in release, since an internal
+  id changes when a sibling before it is added and the element would
+  seem to exit. A `seconds` of 0, a negative or a NaN keeps no ghost.
+- **What a ghost holds:** every command its element's subtree emitted in
+  the last frame it was declared, in emission order (backgrounds,
+  borders, dividers, text lines, images, customs, effects, its own clips
+  and transforms), with each command's `z`. They are preceded by the
+  transforms around it, begun again as `reopenTransforms` does, and by a
+  `clip_begin` of the clip in effect around it, and followed by their
+  ends, so the ghost is cut off and placed as it was. Text bytes are
+  copied with it. An element inside another that exits in the same frame
+  is drawn only as part of the outer ghost.
+- **How it changes:** as its `fade` says. Over `seconds` from the `now`
+  of the last frame its element was declared, a fading ghost multiplies
+  the alpha of every color in its commands (fills, borders, text, tints,
+  gradient stops, shadow colors, a material's fallback) by `1 - curve(t)`;
+  customs, a material's handle, clips and transforms are unchanged. A
+  `.none` ghost is copied into the frame as it is, with no alpha pass; a
+  `.linear` one computes `1 - t` once per frame and runs no easing; an
+  eased one evaluates its cubic once per frame. The fade is chosen by a
+  switch per ghost per frame, not per command, so a context that never
+  eases pays one branch per ghost and no comptime set of curves is
+  declared. Overlapping commands of one ghost fade separately, so its
+  text shows its background through it as both fade. SPEC.md §19.9
+  gains these sentences.
+- **Knowing an element exited:** each candidate (an element declared with an
+  `exit` of positive seconds and an id) is listed in `FrameSlot` as it is
+  declared, in declaration order, beside its `Exit`, as chrome is. The
+  walk compares each element's index with the next candidate's, as it
+  does the next effect's (`emission.zig:98-102`), and a candidate opens a
+  level, so its `leave` copies the run of commands its subtree emitted
+  into the context's snapshot store. At the end of the next frame, each
+  snapshot whose id that frame's `lookup` does not find becomes a ghost.
+  Cost when on: one index comparison per element in the walk, a copy of
+  each candidate's commands per frame, one `lookup` per snapshot and per
+  ghost. Cost when off: none; the comparison, the level and the store are
+  `comptime`-removed.
+- **The stores:** two of `exit_ghost_commands` commands each, in
+  `Memory`, alternating by frame: one is written with this frame's
+  snapshots and then the live ghosts (carried and newly exited, oldest
+  first), while the other holds the last frame's. Each keeps its text in
+  `max_text_bytes` of its own. Nothing is allocated; with the limit at 0
+  they are zero-sized.
+- **Where ghosts are drawn:** after the walk and before the layers are
+  sorted, each live ghost's commands are pushed into the frame at their
+  own `z`, through `switchLayer`, so each lands in its last layer, over
+  everything declared in that layer this frame, a newer ghost over an
+  older one. They take no space, since layout never sees them, and no
+  hits, since no region or result is written for them: `rectOf` of their
+  id is null. They count against `max_render_commands`, and their text
+  is copied into the frame's `text_bytes` and counts against
+  `max_text_bytes`, so a frame a renderer holds never points into a store
+  that is rewritten. A ghost does not follow a container that scrolls or
+  moves after it exited, and is unaffected when its ancestors also exit:
+  it keeps the clip and transforms it had, as the box around the clip in
+  the innermost transform's units.
+- **Frames:** while a fading ghost lives `endFrame` calls `requestFrame`,
+  since it changes every frame; a `.none` ghost asks only for a frame at
+  the instant it ends, with `requestFrameAt`. A ghost whose time is up, or
+  whose id is declared again, is dropped before it is drawn; the frame
+  after the last one is dropped asks for nothing. Under `reduced_motion`
+  no snapshot is kept and every ghost is dropped at once.
+- **Limits:** a snapshot or ghost whose commands or text do not fit its
+  store is not kept, and the frame records `.exit_ghost_commands` in
+  `diagnostics.exceeded`, the commands it needed in `needed`, and its id
+  in `first_dropped_id`, as §17.2 says. The rest are kept. A subtree that
+  lost commands to `max_render_commands` keeps no snapshot, since its
+  clips might not end.
+- **Kept free when off:** `Diagnostics` grows with a new limit whatever
+  its value, so before anything else the `Limits` field was added alone
+  and counts were compared with `dfe65ed`. The rest is gated on the
+  limit, so the walk and `appendElement` compile as before, and every
+  instruction count of `zig build counts -- --compare` must be identical.
+- Tests in `core/src/tests/exit_animations.zig`, the API in
+  `core/tests/instantiate.zig` with ghosts on, the feature tour, and
+  SPEC.md §5, §10.1, §17.1 and §19.9.
+
+**Decisions.** Made by the owner when `11-polish:02-exit-animations` was
+taken:
+- An element chooses how its ghost leaves, and pays only for that
+  choice: `.none` runs no alpha code, `.linear` no easing. A runtime
+  switch per ghost was kept over a comptime set of fades, since it costs
+  one branch per ghost per frame.
+- Ghost text has no limit of its own: each store keeps it in
+  `max_text_bytes`, and text that does not fit is reported as
+  `.exit_ghost_commands`. A second limit would have made `Diagnostics`
+  97 bytes.
+- `exit` without an id panics in safe builds and is ignored in release.
+- `Diagnostics.first_refusing_source` became a `[*:0]const u8`, so
+  `Diagnostics` stays at 96 bytes with the new limit. With the field
+  added and `Diagnostics` at 104 bytes, every declaration executed 2 to 4
+  instructions more (4096 boxes declare 436,605 → 436,607), the 3000
+  cells' 53 more and 1000 new strings' 101 fewer, from the frame's reset
+  of a larger `Diagnostics`.
+
+**Done when.** Core's tests pass in Debug, ReleaseFast, ReleaseSafe and on
+`x86-linux`, with the exit animations' own: an element that stops being
+declared keeps drawing for its `seconds` and then not, unchanged with
+`.none` and at each curve's alpha with a fade; it takes no space and no
+hits and `rectOf` does not find it; its text survives the frame it came
+from being reused, with `frames_in_flight = 1`; it keeps its layer and
+the clip and transforms around it; a nested candidate is drawn once; it
+is dropped when declared again; every frame is asked for while a ghost
+fades and none after; `reduced_motion` drops it at once; a full store
+keeps what fits and reports the limit; `exit` is ignored with the limit
+at 0. `check` passes natively, for `wasm32-freestanding` and
+`powerpc-linux`; `test-all` and `check-all` pass; and every instruction
+count of `zig build counts -- --compare` against `dfe65ed` is identical.
+
+**Spec.** §5, §10.1, §17.1, §17.2, §19.9.
+
+**Status.** Done:
+- `Element.exit`, `zui.Exit` and `zui.ExitFade` (`core/src/exit.zig`),
+  behind `limits.exit_ghost_commands`. Candidates are listed beside the
+  frame; emission keeps each one's commands as a snapshot when its
+  subtree ends, and after the walk draws every ghost still leaving at the
+  end of its layer. 13 tests in `core/src/tests/exit_animations.zig`, in
+  Debug, ReleaseFast, ReleaseSafe and `x86-linux`; `check` natively, for
+  `wasm32-freestanding` and `powerpc-linux`; `test-all` and `check-all`.
+- `Diagnostics.first_refusing_source` is a `[*:0]const u8`, so
+  `Diagnostics` stays at 96 bytes with the new limit.
+- `01-measure:03-instruction-counts-in-ci`, measured here against
+  `dfe65ed` with the limit at 0: all 35 instruction counts are identical
+  (4096 boxes declare 436,605 and `endFrame` 1,264,648). Simulated misses
+  moved in 20 rows, every one within 2% but four: 4096 interactive boxes'
+  `endFrame` branch misses 19,844 → 20,868 (+5.2%), the documents view's
+  declaration I1 misses 25 → 27 and its `endFrame`'s 32 → 31, and the
+  3000 cells' `endFrame` I1 misses 0 → 5. The same rows moved by the same
+  amounts with only the limit and the smaller `Diagnostics` in place, so
+  they come from the reservation's new layout, not from the ghosts'
+  code. Timings were not taken; with counts identical none were needed.
+- SPEC.md §10.1 names the field `exit: ?Exit` in place of `exit_seconds`,
+  since an element also chooses its fade; §19.9 says what a ghost holds,
+  where it is drawn, how it fades and which frames it asks for; §17.1
+  lists `exit` without an id; §5 says the ghosts' text is kept in
+  `max_text_bytes`.
 
 ## 11-polish:03-zui-color — `zui_color`
 

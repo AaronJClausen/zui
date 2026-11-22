@@ -1144,6 +1144,31 @@ fn importToast(app: *App, ui: *Ui) void {
 }
 ```
 
+<a id="exit-animations"></a>
+
+### Exit animations · *shipped*
+
+An element declared with `.exit = .{ .seconds = 0.25 }` keeps drawing for a quarter of a second after the frame it was last declared in, so a toast or a closed dialog leaves without the app declaring it any longer. Its ghost is the commands its subtree emitted in that frame, inside the clip and transforms around it, drawn at the end of its layer; it takes no space, so what was below it moves up at once, and it is never hit. `fade` is `.linear` by default, or a cubic `.ease_in`, `.ease_out` or `.ease_in_out`, which multiply the alpha of every color it draws; `.none` holds it unchanged, then drops it, asking only for a frame at that instant. A fade asks for the next frame while it lasts and for nothing after. The ghost is dropped when its element is declared again, and every ghost at once under `reduced_motion`. It needs an id, and `limits.exit_ghost_commands` set to the commands to keep, with up to `max_text_bytes` of their text; at 0, the default, `exit` is ignored and costs nothing, so a widget can declare it for every context. A ghost that does not fit is not drawn, and the frame reports `.exit_ghost_commands`.
+
+`src/ui/saved_toast.zig`
+
+```zig
+pub const Ui = zui.Context(.{ .limits = .{ .exit_ghost_commands = 64 }, .Text = Text });
+
+fn savedToast(app: *App, ui: *Ui) void {
+    if (!app.just_saved) return;
+    ui.open(.{
+        .id = .of("saved_toast"),
+        .floating = .{ .attach_to = .root, .anchor = .bottom_right, .attach_point = .bottom_right, .offset = .{ -16, -16 }, .z = 80 },
+        .layout = .{ .padding = .all(10) },
+        .decoration = .{ .background = .rgb(0x262634), .corner_radius = .all(6) },
+        .exit = .{ .seconds = 0.3, .fade = .ease_out },
+    });
+    defer ui.close();
+    ui.text("Saved", .{ .size = 13, .color = .white });
+}
+```
+
 <a id="zui-color"></a>
 
 ### `zui_color`: color spaces and palettes · *shipped*
@@ -2378,7 +2403,7 @@ Build with `-Dzui-tracy=true` to link Tracy's client, then connect profiler 0.14
 These names compile, but they don't do anything yet. This list is from `ARCHITECTURE.md` §7 and the roadmap.
 
 - **A host that runs its own loop**: `zuiRun` and the `zui.Driver` it is handed, with `suspendSurfaces` and `resumeSurfaces` for a surface the platform takes away, compile and pass `zui_app`'s tests against a scripted host, but no shipped host declares `zuiRun` yet; macOS, iOS and Android's are to come.
-- **Still to come**: Exit animations, multi-line text editing, theme packs, the inspector over the wire, and more hosts (Linux and web; macOS later).
+- **Still to come**: Multi-line text editing, theme packs, the inspector over the wire, and more hosts (Linux and web; macOS later).
 
 <a id="dx"></a>
 

@@ -230,7 +230,7 @@ test "refused publishes are reported with the name of the source that refused" {
     _ = fixture.begin();
     const frame = fixture.end();
     try testing.expectEqual(@as(u32, 3), frame.diagnostics.refused_publishes);
-    try testing.expectEqualStrings("first", frame.diagnostics.first_refusing_source);
+    try testing.expectEqualStrings("first", std.mem.span(frame.diagnostics.first_refusing_source));
     try testing.expectError(error.CapacityExceeded, frame.diagnostics.check());
 
     _ = fixture.begin();

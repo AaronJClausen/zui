@@ -1377,6 +1377,27 @@ fn importToast(app: *App, ui: *Ui) void {
 </script>
       </article>
 
+      <article class="feature" id="exit-animations" data-title="Exit animations">
+        <div class="feature-head"><h3>Exit animations</h3><span class="pill shipped">Shipped</span></div>
+        <p>An element declared with <code class="z">.exit = .{ .seconds = 0.25 }</code> keeps drawing for a quarter of a second after the frame it was last declared in, so a toast or a closed dialog leaves without the app declaring it any longer. Its ghost is the commands its subtree emitted in that frame, inside the clip and transforms around it, drawn at the end of its layer; it takes no space, so what was below it moves up at once, and it is never hit. <code class="z">fade</code> is <code class="z">.linear</code> by default, or a cubic <code class="z">.ease_in</code>, <code class="z">.ease_out</code> or <code class="z">.ease_in_out</code>, which multiply the alpha of every color it draws; <code class="z">.none</code> holds it unchanged, then drops it, asking only for a frame at that instant. A fade asks for the next frame while it lasts and for nothing after. The ghost is dropped when its element is declared again, and every ghost at once under <code class="z">reduced_motion</code>. It needs an id, and <code class="z">limits.exit_ghost_commands</code> set to the commands to keep, with up to <code class="z">max_text_bytes</code> of their text; at 0, the default, <code class="z">exit</code> is ignored and costs nothing, so a widget can declare it for every context. A ghost that does not fit is not drawn, and the frame reports <code class="z">.exit_ghost_commands</code>.</p>
+<script type="text/x-zig" data-file="src/ui/saved_toast.zig">
+pub const Ui = zui.Context(.{ .limits = .{ .exit_ghost_commands = 64 }, .Text = Text });
+
+fn savedToast(app: *App, ui: *Ui) void {
+    if (!app.just_saved) return;
+    ui.open(.{
+        .id = .of("saved_toast"),
+        .floating = .{ .attach_to = .root, .anchor = .bottom_right, .attach_point = .bottom_right, .offset = .{ -16, -16 }, .z = 80 },
+        .layout = .{ .padding = .all(10) },
+        .decoration = .{ .background = .rgb(0x262634), .corner_radius = .all(6) },
+        .exit = .{ .seconds = 0.3, .fade = .ease_out },
+    });
+    defer ui.close();
+    ui.text("Saved", .{ .size = 13, .color = .white });
+}
+</script>
+      </article>
+
       <article class="feature" id="zui-color" data-title="zui_color">
         <div class="feature-head"><h3><code>zui_color</code>: color spaces and palettes</h3><span class="pill shipped">Shipped</span></div>
         <p><code class="z">zui_color</code> builds palettes from a few colors, at comptime, so a theme's shades are constants. <code class="z">Oklab</code>, <code class="z">Oklch</code> and <code class="z">Hsl</code> convert to and from <code class="z">zui.Color</code> (<code class="z">fromColor</code>, <code class="z">toColor</code>), and <code class="z">Oklab</code> and <code class="z">Oklch</code> to and from a linear <code class="z">zui.ExtendedColor</code> as well, each with a straight <code class="z">alpha</code>. OKLab is where equal distances look equally different, so <code class="z">zui_color.mix(from, to, amount)</code> mixes in it and its middle is neither muddy nor too dark; <code class="z">mixOklch</code> keeps the chroma and takes the shorter way around the hue circle. <code class="z">ramp(steps, from, to)</code> gives evenly spaced colors from one to the other, both ends included. <code class="z">shiftLightness(color, change)</code> and <code class="z">withLightness(color, lightness)</code> move a color's OKLCH lightness for a hovered or pressed shade, and <code class="z">lightnessScale(steps, color, darkest, lightest)</code> gives a tonal scale of its hue. A color sRGB cannot show is brought in by reducing its chroma, keeping its lightness and hue, rather than by clipping each channel. <code class="z">Hsl</code> follows CSS's <code class="z">hsl()</code>. A ramp or scale of fewer than two steps is a compile error.</p>
@@ -2459,7 +2480,7 @@ fn present(renderer: *Renderer, surface: zui.Surface, frame: *const Ui.Frame) !v
       <p class="group-intro">These names compile, but they don't do anything yet. This list is from <code>ARCHITECTURE.md</code> §7 and the roadmap.</p>
       <ul class="gap-list">
         <li><b>A host that runs its own loop</b><span><code class="z">zuiRun</code> and the <code class="z">zui.Driver</code> it is handed, with <code class="z">suspendSurfaces</code> and <code class="z">resumeSurfaces</code> for a surface the platform takes away, compile and pass <code class="z">zui_app</code>'s tests against a scripted host, but no shipped host declares <code class="z">zuiRun</code> yet; macOS, iOS and Android's are to come.</span></li>
-        <li><b>Still to come</b><span>Exit animations, multi-line text editing, theme packs, the inspector over the wire, and more hosts (Linux and web; macOS later).</span></li>
+        <li><b>Still to come</b><span>Multi-line text editing, theme packs, the inspector over the wire, and more hosts (Linux and web; macOS later).</span></li>
       </ul>
     </section>
 

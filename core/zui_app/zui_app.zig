@@ -1071,7 +1071,7 @@ pub fn Session(comptime App: type) type {
             }
             if (diagnostics.refused_publishes != 0 and !self.noticed.publishes_refused) {
                 self.noticed.publishes_refused = true;
-                self.notify(.{ .publishes_refused = .{ .source = diagnostics.first_refusing_source, .count = diagnostics.refused_publishes } });
+                self.notify(.{ .publishes_refused = .{ .source = std.mem.span(diagnostics.first_refusing_source), .count = diagnostics.refused_publishes } });
             }
             if (diagnostics.duplicate_ids != 0 and !self.noticed.duplicate_ids) {
                 self.noticed.duplicate_ids = true;

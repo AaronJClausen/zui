@@ -15,6 +15,7 @@ const services = @import("services.zig");
 const contracts = @import("contracts.zig");
 const semantics = @import("semantics.zig");
 const chrome = @import("chrome.zig");
+const exit = @import("exit.zig");
 const sweeps = @import("sweeps.zig");
 
 pub const Context = context.Context;
@@ -143,6 +144,9 @@ pub const SemanticsDropped = semantics.SemanticsDropped;
 pub const ChromeKind = chrome.ChromeKind;
 pub const ChromeRegion = chrome.ChromeRegion;
 
+pub const Exit = exit.Exit;
+pub const ExitFade = exit.ExitFade;
+
 pub const Event = input.Event;
 pub const Pointer = input.Pointer;
 pub const PointerId = input.PointerId;
@@ -250,4 +254,5 @@ test {
     _ = @import("tests/inspection.zig");
     _ = @import("tests/semantics.zig");
     _ = @import("tests/chrome.zig");
+    _ = @import("tests/exit_animations.zig");
 }
