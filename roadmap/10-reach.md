@@ -89,7 +89,7 @@ The tour on the host (`hosts/native/examples/tour.zig:171`, `:114`, `:217`) name
 5. **The IME:** `zwp_text_input_v3`, enabled while a frame asks for text
    input, its cursor rectangle at the caret, committed text as `text`.
 6. **A custom title bar,** `10-reach:04-window-decorations`'s on Linux: `xdg-decoration` asked for
-   client-side, presses on `.caption` and the edges handed to
+   client-side, presses on `.title_bar` and the edges handed to
    `xdg_toplevel.move` and `resize`, the caption buttons worked by the
    host, `window_maximized` from the toplevel's states; `zig build
    title-bar` on Linux.
@@ -240,7 +240,64 @@ to 12 frames, no wakes, against 25.3 to 26.6 ms and 10 or 11 frames for
 the commit before it measured in the same hour on a busier machine than
 slice 4's runs. Not run: typing through fcitx5 into a text field, since
 nothing here can focus one without a pointer; Tab presses from `wtype`
-reached the tour as keys, but did not focus a field. Slice 6 is next.
+reached the tour as keys, but did not focus a field.
+
+Slice 6 is done in `hosts/native/` alone (`hosts/native/linux/chrome.zig`,
+`hosts/native/linux/host.zig`, `hosts/native/linux/wayland.zig`, `hosts/native/examples/title_bar.zig`):
+`10-reach:04-window-decorations`'s title bar on Wayland. The host declares `custom_title_bar` and
+`zuiChromeRegions`, which copies up to 256 regions into a
+`WindowChrome` in surface coordinates, the rest counted as dropped; that
+one struct holds the window's chrome state, for slice 7 to move into
+each window's. `zxdg_decoration_manager_v1` is written in Zig as the
+other interfaces are: a `.custom` toplevel asks for `client_side`, a
+native one for `server_side`, and without the manager a window is
+client-side already. A primary press on the title bar is
+`xdg_toplevel.move` with the press's serial, a second within
+`zui.Gestures.double_tap_seconds` of the first toggles
+`set_maximized`/`unset_maximized`, measured press to press since a moved
+window's release never comes back, and a secondary press is
+`show_window_menu` at the pointer; a press on a `resize_*` region is
+`resize` from its edge, or zui's on a window that is not resizable.
+Neither such a press nor its release reaches zui. A caption button's
+press does, and its release on the same button arrives as
+`pointer_cancel` while the host minimizes, toggles maximized or closes,
+as on Windows; released on another, or after the pointer leaves, it
+works nothing. `Host.minimize`, `Host.toggleMaximized` and `Host.close`
+serve the keyboard. The first record reports `custom_title_bar`, and
+`window_maximized` follows the `maximized` state of
+`xdg_toplevel.configure`, applied at the `xdg_surface.configure` that
+ends it and reported only when it changes. No border band is made: a
+Wayland window resizes only from the regions the application declares,
+and `zig build title-bar` now declares a grip in its bottom-right corner.
+Hyprland answers `server_side` to every request, so there the window
+reports `custom_title_bar` false, the example draws no title bar, and
+presses on chrome stay zui's; the tests play a compositor that forces it
+and one that allows client-side mode. 87 of 88 tests pass in Debug and
+ReleaseSafe, the opt-in one skipped: the host suite on a `.custom`
+window, and tests that drive presses on the title bar (the move's
+serial), each of the eight edges (`xdg_toplevel.resize_edge`'s numbers),
+a double click before and after the compositor maximizes, a secondary
+click, each caption button's press and release, one released on another
+and one left by the pointer, the search field and the content reaching
+zui, the regions at a forced scale of 2 and at a fractional 1.5 with a
+zoom of 1.25 from a buffer overwritten after the call, configures
+toggling `window_maximized`, a forced server-side mode, a native window
+keeping no chrome, and a real toplevel's handshake. `zig build title-bar
+-- --check` builds on Linux too, from `addTitleBarExample` in
+`hosts/native/build.zig`, and hit-tests each part through
+`Host.chromeKindAt` in a window the compositor never shows, submitting
+no frame, as `zig build services -- --check` does, since a swap there
+waits for a frame callback that never comes; it exits 0. Tour idle:
+24.1 to 26.1 ms of CPU over 10 s, 10 or 11 frames, no wakes, as slice 5
+measured. Not run, and waiting on a person at `zig build title-bar` on a
+compositor that leaves decorations to the client, such as GNOME or KDE
+Plasma, since Hyprland does not: dragging the title bar moves the
+window, double-clicking it maximizes and restores it, right-clicking it
+opens the window menu, the grip resizes it, the caption buttons show
+hover and press and each works once, the maximize button shows restore
+while maximized, and a monitor at a fractional scale keeps the parts
+where they are drawn. The Windows check now also expects the grip as
+`HTBOTTOMRIGHT`, compiled here and not run. Slice 7 is next.
 
 Decided here:
 - **libwayland-client, linked,** as sokol-zig links it, since the surface
@@ -285,6 +342,16 @@ Decided here:
   record carries. Its cursor rectangle is the caret's covering in surface
   coordinates, and the state follows the harness's events without the
   manager, so the tests run under compositors that lack it.
+- **The compositor's decoration mode wins:** a `.custom` window the
+  compositor configures `server_side` reports `custom_title_bar` false
+  and hands it no press, as the protocol asks a client to follow the mode.
+- **A title bar's double click is measured press to press,** within
+  `zui.Gestures.double_tap_seconds`, since the move the first press
+  starts takes its release.
+- **No resize band of the host's:** a client-side Wayland window has no
+  compositor border, and the Windows host's top band stands in for a
+  border the caption took, which Wayland never had; the application
+  declares the edges and grips it resizes from.
 
 ## 10-reach:02-web-host — Web
 

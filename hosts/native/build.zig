@@ -54,6 +54,7 @@ pub fn build(b: *std.Build) void {
     if (has_host) addTourAndShowcase(b, target, optimize, host_module, core, check_step, core_options);
     if (has_host) addTheme(b, target, optimize, host_module, core, check_step, core_options);
     if (has_host) addServicesExample(b, target, optimize, host_module, core, check_step, core_options);
+    if (has_host) addTitleBarExample(b, target, optimize, host_module, core, check_step, core_options);
     if (windows) addWindowsExamples(b, target, optimize, host_module, core, check_step, core_options);
 
     const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "zui_host.zig", "windows", "linux", "examples" };
@@ -162,7 +163,36 @@ fn addServicesExample(b: *std.Build, target: std.Build.ResolvedTarget, optimize:
     check_step.dependOn(&services.step);
 }
 
-/// The remote, material, HDR, accessibility, title bar and many-windows examples, which run
+/// A title bar the application draws, which the OS still drags, maximizes
+/// and resizes the window by, on Windows and on Linux.
+fn addTitleBarExample(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, host_module: *std.Build.Module, core: *std.Build.Dependency, check_step: *std.Build.Step, core_options: CoreOptions) void {
+    const zui_sokol_dependency = sokolDeclaring(b, core_options.on(target, optimize), "zui_sokol") orelse return;
+    const truetype_dependency = truetypeDeclaring(b, core_options.on(target, optimize)) orelse return;
+    const title_bar = b.addExecutable(.{
+        .name = "zui-host-title-bar",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/title_bar.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zui_host", .module = host_module },
+                .{ .name = "zui", .module = core.module("zui") },
+                .{ .name = "zui_app", .module = core.module("zui_app") },
+                .{ .name = "zui_widgets", .module = core.module("zui_widgets") },
+                .{ .name = "zui_sokol", .module = zui_sokol_dependency.module("zui_sokol") },
+                .{ .name = "zui_truetype", .module = truetype_dependency.module("zui_truetype") },
+            },
+        }),
+    });
+    linkThroughLlvmOnLinux(title_bar);
+    b.installArtifact(title_bar);
+    const run_title_bar = b.addRunArtifact(title_bar);
+    if (b.args) |arguments| run_title_bar.addArgs(arguments);
+    b.step("title-bar", "Draw the title bar in the window, which the OS still drags, maximizes and resizes (`-- --check` hit-tests it hidden and quits)").dependOn(&run_title_bar.step);
+    check_step.dependOn(&title_bar.step);
+}
+
+/// The remote, material, HDR, accessibility and many-windows examples, which run
 /// only on the Windows host so far.
 fn addWindowsExamples(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, host_module: *std.Build.Module, core: *std.Build.Dependency, check_step: *std.Build.Step, core_options: CoreOptions) void {
     const app_module = core.module("zui_app");
@@ -255,28 +285,6 @@ fn addWindowsExamples(b: *std.Build, target: std.Build.ResolvedTarget, optimize:
     if (b.args) |arguments| run_accessible.addArgs(arguments);
     b.step("accessible", "Show zui_widgets controls to UI Automation, for Narrator and Accessibility Insights (`-- --frames 30` quits)").dependOn(&run_accessible.step);
     check_step.dependOn(&accessible.step);
-
-    const title_bar = b.addExecutable(.{
-        .name = "zui-host-title-bar",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("examples/title_bar.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "zui_host", .module = host_module },
-                .{ .name = "zui", .module = core.module("zui") },
-                .{ .name = "zui_app", .module = app_module },
-                .{ .name = "zui_widgets", .module = core.module("zui_widgets") },
-                .{ .name = "zui_sokol", .module = zui_sokol_dependency.module("zui_sokol") },
-                .{ .name = "zui_truetype", .module = truetype_dependency.module("zui_truetype") },
-            },
-        }),
-    });
-    b.installArtifact(title_bar);
-    const run_title_bar = b.addRunArtifact(title_bar);
-    if (b.args) |arguments| run_title_bar.addArgs(arguments);
-    b.step("title-bar", "Draw the title bar in the window, which Windows still drags, snaps and resizes (`-- --check` hit-tests it hidden and quits)").dependOn(&run_title_bar.step);
-    check_step.dependOn(&title_bar.step);
 
     const many_windows = b.addExecutable(.{
         .name = "zui-host-many-windows",

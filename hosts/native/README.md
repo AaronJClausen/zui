@@ -57,7 +57,7 @@ for the examples sokol's
 | `zig build theme` | a window styled by a theme file, restyled when it changes; `-- --check` scripts it |
 | `zig build accessible` | `zui_widgets` controls for Narrator and Accessibility Insights (Windows) |
 | `zig build services` | every host service from buttons, each answer shown; `-- --check` runs it against the fake |
-| `zig build title-bar` | a title bar the application draws, which Windows still drags, snaps and resizes; `-- --check` hit-tests it hidden (Windows) |
+| `zig build title-bar` | a title bar the application draws, which the OS still drags, maximizes and resizes (Windows also snaps it); `-- --check` hit-tests it hidden |
 | `zig build many-windows` | one application in two windows, each with its own UI; `-- --check` clicks and closes them hidden (Windows) |
 
 The tests and examples need a Wayland compositor on Linux (CI runs a
@@ -194,6 +194,12 @@ So far it:
   `text/uri-list` accepted for copying), each `file://` URI on this
   machine percent-decoded to its path, at the drop's position;
 - closes when its close button or the compositor asks;
+- leaves the title bar to the application for a window opened with
+  `WindowOptions.title_bar = .custom`, asking the compositor for
+  client-side decorations (xdg-decoration), and reports
+  `Environment.custom_title_bar` and `.window_maximized`; presses on the
+  frame's chrome regions go to the compositor; see *A custom title bar*
+  below;
 - sets the cursor a frame asks for, where the compositor offers
   `wp_cursor_shape_v1`;
 - enables the input method where the compositor offers
@@ -416,8 +422,9 @@ which a renderer's swap waits for.
 
 ## A custom title bar
 
-`zig build title-bar` draws its own title bar over Mica: a title, a
-search field and minimize, maximize and close buttons. The application
+`zig build title-bar` draws its own title bar, over Mica on Windows: a
+title, a search field and minimize, maximize and close buttons, and a
+resize grip in the bottom-right corner. The application
 marks each part with `Element.chrome`, behind `features.chrome_regions`,
 and opens the window with `.title_bar = .custom`:
 
@@ -457,8 +464,35 @@ zig build title-bar -- --check               # hit-test each part in a hidden wi
 
 `--check` hides the window, draws it twice, sends `WM_NCHITTEST` at each
 part as laid out, and exits 0 only when the title is `HTCAPTION`, the
-search field and the content `HTCLIENT`, and the buttons `HTMINBUTTON`,
-`HTMAXBUTTON` and `HTCLOSE`.
+search field and the content `HTCLIENT`, the buttons `HTMINBUTTON`,
+`HTMAXBUTTON` and `HTCLOSE`, and the grip in the bottom-right corner
+`HTBOTTOMRIGHT`.
+
+On Linux the window asks the compositor, through
+`zxdg_decoration_manager_v1` where it is offered, to leave the
+decorations to the client; where it is not, a window is already
+client-side. The host keeps a copy of up to 256 regions in surface
+coordinates and hit-tests each press against it, the last region on top:
+a primary press on the title bar is `xdg_toplevel.move`, a second within
+`zui.Gestures.double_tap_seconds` of the first maximizes or restores the
+window, and a secondary press opens the compositor's window menu
+(`show_window_menu`); a press on a resize edge or grip is
+`xdg_toplevel.resize` from that edge. Each goes with the press's serial,
+and neither the press nor its release reaches zui. The caption buttons
+work as on Windows: the press reaches zui, its release on the same button
+arrives as `pointer_cancel`, and the host minimizes, maximizes or
+restores, or closes the window. `window_maximized` follows the
+`maximized` state of the toplevel's configures. A Wayland window has no
+border of the compositor's, so it resizes only from the edges and grips
+the application declares; the example declares a grip. A compositor that
+insists on drawing the decorations itself, as Hyprland does, gets them:
+`custom_title_bar` is then false, the example draws no title bar, and
+the host hands no press to the compositor. Its `--check` hit-tests each
+part through `Host.chromeKindAt` in a window the compositor never shows,
+expecting the title bar, the three buttons and the grip and nothing over
+the search field and the content, and submits no frame, since a swap on
+a surface the compositor never shows waits for a frame callback that
+never comes.
 
 ## Many windows
 

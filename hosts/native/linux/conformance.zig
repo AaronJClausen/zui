@@ -21,6 +21,10 @@ const UnshownWindow = struct {
     /// False hands services to the session bus, which the window reads
     /// only through `openReading`.
     fakes_services: bool = true,
+    title_bar: zui.TitleBar = .native,
+    /// True gives the surface a toplevel's role, which the compositor
+    /// configures but, without a buffer, still never shows.
+    has_toplevel: bool = false,
 
     /// With `forced_scale` set, a surface coordinate is that many layout
     /// units at a zoom of 1 and a buffer scale of 1. The window reads no
@@ -34,7 +38,7 @@ const UnshownWindow = struct {
         self.window_host.forced_scale = forced_scale;
         self.window_host.bus_addresses = bus_addresses;
         self.window_host.service_fake = if (self.fakes_services) &self.service_fake else null;
-        self.window_host.init(testing.io, .{ .title = "zui host suite", .size = .{ 320, 240 }, .visible = false }) catch |err| switch (err) {
+        self.window_host.init(testing.io, .{ .title = "zui host suite", .size = .{ 320, 240 }, .visible = self.has_toplevel, .title_bar = self.title_bar }) catch |err| switch (err) {
             error.NoWaylandDisplay => {
                 std.debug.print("skipped: no Wayland compositor to connect to (WAYLAND_DISPLAY and XDG_RUNTIME_DIR)\n", .{});
                 return error.SkipZigTest;
@@ -115,6 +119,14 @@ test "the host passes zui's host suite" {
     try zui_testing.expectHostConforms(Host, &harness, .{ .io = testing.io });
 }
 
+test "the host passes zui's host suite on a window with a custom title bar" {
+    var harness: CompositorHarness = .{};
+    harness.window.title_bar = .custom;
+    try harness.window.open(1);
+    defer harness.window.close();
+    try zui_testing.expectHostConforms(Host, &harness, .{ .io = testing.io });
+}
+
 fn typedText(polled: *const zui_testing.PolledRecord, buffer: []u8) []const u8 {
     var len: usize = 0;
     for (polled.builder.events()) |event| if (event == .text) {
@@ -158,7 +170,7 @@ test "a configured size is the window's size once the configure is done" {
     defer window.close();
     var polled: zui_testing.PolledRecord = .{};
     polled.init();
-    window.host().onToplevelConfigure(500, 400);
+    window.host().onToplevelConfigure(500, 400, &.{});
     _ = polled.poll(window.host());
     try testing.expectEqual([2]f32{ 320, 240 }, polled.builder.params.viewport);
     window.host().onConfigure(1);
@@ -240,7 +252,7 @@ test "without a bus to read, the first poll reports the environment at zui's def
     polled.init();
     _ = polled.poll(window.host());
     const reported = environmentOf(&polled);
-    try testing.expectEqual(@as(usize, 4), reported.changes);
+    try testing.expectEqual(@as(usize, 6), reported.changes);
     try testing.expectEqual(zui.Environment{ .window_focused = true }, reported.environment);
     try testing.expectEqual(desktop_bus.Sources{}, window.host().environmentSources());
 }
@@ -255,7 +267,7 @@ test "the desktop's own buses, where they run, report the whole environment with
     var polled: zui_testing.PolledRecord = .{};
     polled.init();
     _ = polled.poll(window.host());
-    try testing.expectEqual(@as(usize, 4), environmentOf(&polled).changes);
+    try testing.expectEqual(@as(usize, 6), environmentOf(&polled).changes);
 }
 
 test "a setting the desktop changes is reported, and only what changed" {
@@ -1007,4 +1019,392 @@ test "text-input focus on another surface leaves the input method alone" {
     window_host.zuiApply(.main, askingForTextInputAt(.{ .x = 4, .y = 4, .width = 1, .height = 12 }));
     window_host.onTextInputEnter(null);
     try testing.expectEqual(@as(u32, 0), window_host.text_input.requests_sent);
+}
+
+const chrome = zui_host.linux.chrome;
+const WindowManagerRequest = chrome.WindowManagerRequest;
+
+fn reportedEnvironment(polled: *const zui_testing.PolledRecord) zui.Environment {
+    var environment: zui.Environment = .{};
+    for (polled.builder.events()) |event| if (event == .environment) environment.apply(event.environment);
+    return environment;
+}
+
+fn queued(window_host: *const Host, comptime tag: std.meta.Tag(zui.Event)) bool {
+    const inbox = &window_host.inbox;
+    for (inbox.events[0..inbox.event_count]) |event| if (event == tag) return true;
+    return false;
+}
+
+const title_bar_height = 20;
+
+/// A title bar across the top, a search field in it, three caption buttons
+/// at its right and a resize grip in the bottom-right corner, in layout
+/// units for a viewport of `width` by `height`.
+fn titleBarRegions(width: f32, height: f32) [6]zui.ChromeRegion {
+    return .{
+        .{ .id = 1, .bounds = .{ .width = width, .height = title_bar_height }, .kind = .title_bar },
+        .{ .id = 2, .bounds = .{ .x = 20, .y = 2, .width = 40, .height = 16 }, .kind = .client },
+        .{ .id = 3, .bounds = .{ .x = width - 69, .width = 23, .height = title_bar_height }, .kind = .minimize_button },
+        .{ .id = 4, .bounds = .{ .x = width - 46, .width = 23, .height = title_bar_height }, .kind = .maximize_button },
+        .{ .id = 5, .bounds = .{ .x = width - 23, .width = 23, .height = title_bar_height }, .kind = .close_button },
+        .{ .id = 6, .bounds = .{ .x = width - 8, .y = height - 8, .width = 8, .height = 8 }, .kind = .resize_bottom_right },
+    };
+}
+
+const Part = enum(usize) { title_bar, search, minimize, maximize, close, grip };
+
+/// A window with a custom title bar, polled once at `zoom` and handed
+/// `titleBarRegions` for its viewport from a buffer overwritten after the
+/// call.
+const TitleBarWindow = struct {
+    window: UnshownWindow = .{ .title_bar = .custom },
+    polled: zui_testing.PolledRecord = .{},
+    regions: [6]zui.ChromeRegion = undefined,
+
+    fn open(self: *TitleBarWindow, forced_scale: ?f32) !void {
+        try self.window.open(forced_scale);
+        self.polled.init();
+        _ = self.polled.poll(self.host());
+        self.handRegions();
+    }
+
+    fn handRegions(self: *TitleBarWindow) void {
+        const viewport = self.polled.builder.params.viewport;
+        self.regions = titleBarRegions(viewport[0], viewport[1]);
+        var handed = self.regions;
+        self.host().zuiChromeRegions(.main, &handed);
+        @memset(std.mem.sliceAsBytes(&handed), 0xaa);
+    }
+
+    fn close(self: *TitleBarWindow) void {
+        self.window.close();
+    }
+
+    fn host(self: *TitleBarWindow) *Host {
+        return self.window.host();
+    }
+
+    /// The middle of `part`, in surface coordinates.
+    fn pointIn(self: *TitleBarWindow, part: Part) [2]f32 {
+        const bounds = self.regions[@intFromEnum(part)].bounds;
+        return surfaceCoordinates(self.host(), .{ bounds.x + bounds.width / 2, bounds.y + bounds.height / 2 });
+    }
+
+    fn press(self: *TitleBarWindow, point: [2]f32, evdev_button: u32, serial: u32) void {
+        const window_host = self.host();
+        window_host.onInputSerial(serial);
+        window_host.onPointerMotion(point);
+        window_host.onPointerButton(evdev_button, true);
+    }
+
+    fn release(self: *TitleBarWindow, point: [2]f32, evdev_button: u32) void {
+        const window_host = self.host();
+        window_host.onPointerMotion(point);
+        window_host.onPointerButton(evdev_button, false);
+    }
+
+    fn click(self: *TitleBarWindow, point: [2]f32, serial: u32) void {
+        self.press(point, keys.evdev_button_left, serial);
+        self.release(point, keys.evdev_button_left);
+    }
+
+    fn lastRequest(self: *TitleBarWindow) ?WindowManagerRequest {
+        return self.host().window_chrome.last_request;
+    }
+
+    fn requestsSent(self: *TitleBarWindow) u32 {
+        return self.host().window_chrome.requests_sent;
+    }
+
+    fn configureMaximized(self: *TitleBarWindow, maximized: bool, serial: u32) void {
+        const maximized_state: u32 = 1;
+        const activated_state: u32 = 4;
+        self.host().onToplevelConfigure(0, 0, if (maximized) &.{ activated_state, maximized_state } else &.{activated_state});
+        self.host().onConfigure(serial);
+    }
+};
+
+test "a custom title bar is reported, and a native one is not and keeps no chrome" {
+    var titled: TitleBarWindow = .{};
+    try titled.open(1);
+    defer titled.close();
+    const environment = reportedEnvironment(&titled.polled);
+    try testing.expect(environment.custom_title_bar);
+    try testing.expect(!environment.window_maximized);
+
+    var window: UnshownWindow = .{};
+    try window.open(1);
+    defer window.close();
+    var polled: zui_testing.PolledRecord = .{};
+    polled.init();
+    _ = polled.poll(window.host());
+    try testing.expect(!reportedEnvironment(&polled).custom_title_bar);
+    var regions = titleBarRegions(320, 240);
+    window.host().zuiChromeRegions(.main, &regions);
+    try testing.expectEqual(@as(usize, 0), window.host().window_chrome.snapshot.count);
+
+    window.host().onInputSerial(5);
+    window.host().onPointerMotion(.{ 100, 10 });
+    window.host().onPointerButton(keys.evdev_button_left, true);
+    _ = polled.poll(window.host());
+    try testing.expect(polled.find(.pointer_down) != null);
+    try testing.expectEqual(@as(u32, 0), window.host().window_chrome.requests_sent);
+}
+
+test "a press on the title bar moves the window with the press's serial, and neither it nor its release reaches zui" {
+    var titled: TitleBarWindow = .{};
+    try titled.open(1);
+    defer titled.close();
+    _ = titled.polled.poll(titled.host());
+
+    titled.click(.{ 100, 10 }, 42);
+    try testing.expectEqual(WindowManagerRequest{ .move = 42 }, titled.lastRequest().?);
+    _ = titled.polled.poll(titled.host());
+    try testing.expect(titled.polled.find(.pointer_move) != null);
+    try testing.expectEqual(@as(?zui.PointerButton, null), titled.polled.find(.pointer_down));
+    try testing.expectEqual(@as(?zui.PointerButton, null), titled.polled.find(.pointer_up));
+}
+
+test "a press on each edge and corner resizes the window from that edge" {
+    var window: UnshownWindow = .{ .title_bar = .custom };
+    try window.open(1);
+    defer window.close();
+    const window_host = window.host();
+    const edges = [_]struct { zui.ChromeKind, chrome.ResizeEdge, u32 }{
+        .{ .resize_top, .top, 1 },
+        .{ .resize_bottom, .bottom, 2 },
+        .{ .resize_left, .left, 4 },
+        .{ .resize_top_left, .top_left, 5 },
+        .{ .resize_bottom_left, .bottom_left, 6 },
+        .{ .resize_right, .right, 8 },
+        .{ .resize_top_right, .top_right, 9 },
+        .{ .resize_bottom_right, .bottom_right, 10 },
+    };
+    var regions: [edges.len]zui.ChromeRegion = undefined;
+    for (edges, &regions, 0..) |edge, *region, index| {
+        region.* = .{ .id = index + 1, .bounds = .{ .x = @floatFromInt(index * 20), .y = 100, .width = 10, .height = 10 }, .kind = edge[0] };
+    }
+    window_host.zuiChromeRegions(.main, &regions);
+    for (edges, 0..) |edge, index| {
+        const serial: u32 = @intCast(100 + index);
+        window_host.onInputSerial(serial);
+        window_host.onPointerMotion(.{ @as(f32, @floatFromInt(index * 20)) + 5, 105 });
+        window_host.onPointerButton(keys.evdev_button_left, true);
+        window_host.onPointerButton(keys.evdev_button_left, false);
+        const request = window_host.window_chrome.last_request.?;
+        try testing.expectEqual(WindowManagerRequest{ .resize = .{ .serial = serial, .edge = edge[1] } }, request);
+        try testing.expectEqual(edge[2], @intFromEnum(request.resize.edge));
+    }
+}
+
+test "a window that is not resizable takes presses on its grips as zui's" {
+    var window: UnshownWindow = .{ .title_bar = .custom };
+    try window.open(1);
+    defer window.close();
+    window.host().window_chrome.resizable = false;
+    var regions = titleBarRegions(320, 240);
+    window.host().zuiChromeRegions(.main, &regions);
+    window.host().onPointerMotion(.{ 316, 236 });
+    window.host().onPointerButton(keys.evdev_button_left, true);
+    try testing.expectEqual(@as(u32, 0), window.host().window_chrome.requests_sent);
+    try testing.expect(queued(window.host(), .pointer_down));
+}
+
+test "a double click on the title bar maximizes the window, and once the compositor has maximized it, restores it" {
+    var titled: TitleBarWindow = .{};
+    try titled.open(1);
+    defer titled.close();
+    const point = titled.pointIn(.title_bar);
+
+    titled.click(point, 1);
+    titled.click(point, 2);
+    try testing.expectEqual(WindowManagerRequest.set_maximized, titled.lastRequest().?);
+    try testing.expectEqual(@as(u32, 2), titled.requestsSent());
+
+    titled.configureMaximized(true, 3);
+    _ = titled.polled.poll(titled.host());
+    try testing.expect(titled.polled.find(.environment).?.window_maximized);
+
+    titled.click(point, 4);
+    try testing.expectEqual(WindowManagerRequest{ .move = 4 }, titled.lastRequest().?);
+    titled.click(point, 5);
+    try testing.expectEqual(WindowManagerRequest.unset_maximized, titled.lastRequest().?);
+}
+
+test "a secondary click on the title bar opens the window menu at the pointer, and elsewhere reaches zui" {
+    var titled: TitleBarWindow = .{};
+    try titled.open(2);
+    defer titled.close();
+    _ = titled.polled.poll(titled.host());
+
+    titled.press(.{ 150.5, 12.75 }, keys.evdev_button_right, 9);
+    titled.release(.{ 150.5, 12.75 }, keys.evdev_button_right);
+    try testing.expectEqual(WindowManagerRequest{ .show_window_menu = .{ .serial = 9, .position = .{ 150, 12 } } }, titled.lastRequest().?);
+    _ = titled.polled.poll(titled.host());
+    try testing.expectEqual(@as(?zui.PointerButton, null), titled.polled.find(.pointer_down));
+
+    titled.press(titled.pointIn(.maximize), keys.evdev_button_right, 10);
+    titled.press(titled.pointIn(.search), keys.evdev_button_right, 11);
+    try testing.expectEqual(@as(u32, 1), titled.requestsSent());
+    _ = titled.polled.poll(titled.host());
+    try testing.expectEqual(zui.Button.secondary, titled.polled.find(.pointer_down).?.button);
+}
+
+test "a press and its release on a caption button reach zui as a press and a cancel, and the host minimizes or maximizes" {
+    var titled: TitleBarWindow = .{};
+    try titled.open(1);
+    defer titled.close();
+    _ = titled.polled.poll(titled.host());
+
+    const expected = [_]struct { Part, WindowManagerRequest }{ .{ .minimize, .set_minimized }, .{ .maximize, .set_maximized } };
+    for (expected, 0..) |step, index| {
+        const sent = titled.requestsSent();
+        titled.click(titled.pointIn(step[0]), @intCast(20 + index));
+        try testing.expectEqual(sent + 1, titled.requestsSent());
+        try testing.expectEqual(step[1], titled.lastRequest().?);
+        _ = titled.polled.poll(titled.host());
+        try testing.expect(titled.polled.find(.pointer_down) != null);
+        try testing.expect(titled.polled.find(.pointer_cancel) != null);
+        try testing.expectEqual(@as(?zui.PointerButton, null), titled.polled.find(.pointer_up));
+    }
+}
+
+test "a press and its release on the close button close the window, as the compositor's close button does" {
+    var titled: TitleBarWindow = .{};
+    try titled.open(1);
+    defer titled.close();
+    _ = titled.polled.poll(titled.host());
+
+    titled.click(titled.pointIn(.close), 30);
+    try testing.expect(queued(titled.host(), .pointer_down));
+    try testing.expect(queued(titled.host(), .pointer_cancel));
+    try testing.expect(!queued(titled.host(), .pointer_up));
+    try testing.expect(!titled.polled.poll(titled.host()));
+}
+
+test "a press on one caption button released on another, or the pointer leaving, works neither" {
+    var titled: TitleBarWindow = .{};
+    try titled.open(1);
+    defer titled.close();
+    _ = titled.polled.poll(titled.host());
+
+    titled.press(titled.pointIn(.close), keys.evdev_button_left, 40);
+    titled.release(titled.pointIn(.minimize), keys.evdev_button_left);
+    titled.press(titled.pointIn(.maximize), keys.evdev_button_left, 41);
+    titled.host().onPointerLeave();
+    titled.host().onPointerButton(keys.evdev_button_left, false);
+    try testing.expectEqual(@as(u32, 0), titled.requestsSent());
+    try testing.expect(titled.polled.poll(titled.host()));
+    var cancels: usize = 0;
+    for (titled.polled.builder.events()) |event| cancels += @intFromBool(event == .pointer_cancel);
+    try testing.expectEqual(@as(usize, 2), cancels);
+}
+
+test "the application's own parts inside the title bar, and the content, reach zui" {
+    var titled: TitleBarWindow = .{};
+    try titled.open(1);
+    defer titled.close();
+    _ = titled.polled.poll(titled.host());
+
+    titled.click(titled.pointIn(.search), 50);
+    try testing.expectEqual(@as(u32, 0), titled.requestsSent());
+    _ = titled.polled.poll(titled.host());
+    try testing.expect(titled.polled.find(.pointer_down) != null);
+    try testing.expect(titled.polled.find(.pointer_up) != null);
+
+    titled.click(.{ 100, 100 }, 51);
+    try testing.expectEqual(@as(u32, 0), titled.requestsSent());
+    _ = titled.polled.poll(titled.host());
+    try testing.expect(titled.polled.find(.pointer_up) != null);
+}
+
+test "the regions are kept in surface coordinates at a scale of 2, and at a fractional scale with a zoom" {
+    var doubled: TitleBarWindow = .{};
+    try doubled.open(2);
+    defer doubled.close();
+    try testing.expectEqual(zui.ChromeKind.close_button, doubled.host().chromeKindAt(.{ 2 * (320.0 / 2.0 - 10), 2 * 10 }).?);
+    try testing.expectEqual(zui.ChromeKind.resize_bottom_right, doubled.host().chromeKindAt(.{ 317, 237 }).?);
+    try testing.expectEqual(@as(?zui.ChromeKind, null), doubled.host().chromeKindAt(.{ 2 * 40, 2 * 10 }));
+
+    var fractional: TitleBarWindow = .{};
+    try fractional.window.open(null);
+    defer fractional.close();
+    fractional.polled.init();
+    fractional.host().onPreferredFractionalScale(180);
+    fractional.polled.builder.params.zoom = 1.25;
+    _ = fractional.polled.poll(fractional.host());
+    try testing.expectEqual(@as(f32, 1.5), fractional.polled.builder.params.scale);
+    fractional.handRegions();
+    try testing.expectEqual(@as(f32, 1.25), fractional.host().surface_coordinates_per_unit);
+    const close_point = fractional.pointIn(.close);
+    try testing.expectApproxEqAbs(@as(f32, 320 - 23.0 * 1.25 / 2.0), close_point[0], 1e-3);
+    try testing.expectEqual(zui.ChromeKind.close_button, fractional.host().chromeKindAt(close_point).?);
+    fractional.click(close_point, 60);
+    try testing.expect(!fractional.polled.poll(fractional.host()));
+}
+
+test "the maximized state follows the compositor's configures, reported only when it changes" {
+    var titled: TitleBarWindow = .{};
+    try titled.open(1);
+    defer titled.close();
+
+    titled.configureMaximized(false, 1);
+    _ = titled.polled.poll(titled.host());
+    try testing.expectEqual(@as(?zui.EnvironmentChange, null), titled.polled.find(.environment));
+
+    titled.host().onToplevelConfigure(0, 0, &.{1});
+    _ = titled.polled.poll(titled.host());
+    try testing.expectEqual(@as(?zui.EnvironmentChange, null), titled.polled.find(.environment));
+    titled.host().onConfigure(2);
+    _ = titled.polled.poll(titled.host());
+    try testing.expectEqual(zui.EnvironmentChange{ .window_maximized = true }, titled.polled.find(.environment).?);
+
+    titled.configureMaximized(true, 3);
+    _ = titled.polled.poll(titled.host());
+    try testing.expectEqual(@as(?zui.EnvironmentChange, null), titled.polled.find(.environment));
+
+    titled.configureMaximized(false, 4);
+    _ = titled.polled.poll(titled.host());
+    try testing.expectEqual(zui.EnvironmentChange{ .window_maximized = false }, titled.polled.find(.environment).?);
+}
+
+test "a compositor that insists on drawing its own title bar gets it: the window reports none, and presses on the chrome reach zui" {
+    var titled: TitleBarWindow = .{};
+    try titled.open(1);
+    defer titled.close();
+    _ = titled.polled.poll(titled.host());
+
+    titled.host().onDecorationConfigure(.server_side);
+    _ = titled.polled.poll(titled.host());
+    try testing.expectEqual(zui.EnvironmentChange{ .custom_title_bar = false }, titled.polled.find(.environment).?);
+    titled.handRegions();
+    try testing.expectEqual(@as(usize, 0), titled.host().window_chrome.snapshot.count);
+    titled.click(titled.pointIn(.title_bar), 70);
+    try testing.expectEqual(@as(u32, 0), titled.requestsSent());
+    _ = titled.polled.poll(titled.host());
+    try testing.expect(titled.polled.find(.pointer_down) != null);
+
+    titled.host().onDecorationConfigure(.client_side);
+    _ = titled.polled.poll(titled.host());
+    try testing.expectEqual(zui.EnvironmentChange{ .custom_title_bar = true }, titled.polled.find(.environment).?);
+}
+
+test "a toplevel asks the compositor for the decorations its title bar needs, and reports what it was given" {
+    for ([_]zui.TitleBar{ .custom, .native }) |title_bar| {
+        var window: UnshownWindow = .{ .title_bar = title_bar, .has_toplevel = true };
+        try window.open(1);
+        defer window.close();
+        const window_host = window.host();
+        var polled: zui_testing.PolledRecord = .{};
+        polled.init();
+        _ = polled.poll(window_host);
+        const window_chrome = &window_host.window_chrome;
+        if (window_host.globals.decoration_manager != null) {
+            try testing.expect(window_chrome.decoration != null);
+            try testing.expect(window_chrome.decoration_mode != null);
+        }
+        const client_side = window_chrome.decoration_mode != .server_side;
+        try testing.expectEqual(title_bar == .custom and client_side, reportedEnvironment(&polled).custom_title_bar);
+    }
 }

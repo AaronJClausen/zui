@@ -1,8 +1,10 @@
 //! A window whose title bar the application draws: a search field, and
-//! minimize, maximize and close buttons, over Mica. Its parts are chrome
-//! regions, so Windows still drags the window by its title bar, maximizes it
-//! on a double click, snaps it with Win+arrows and shows snap layouts over
-//! the maximize button, and resizes it from every edge.
+//! minimize, maximize and close buttons, over Mica on Windows. Its parts
+//! are chrome regions, so the OS still drags the window by its title bar,
+//! maximizes it on a double click and opens its window menu on a secondary
+//! click. Windows also snaps it with Win+arrows, shows snap layouts over the
+//! maximize button, and resizes it from every edge; a Wayland compositor
+//! resizes it from the grips the application declares.
 //!
 //! ```sh
 //! zig build title-bar                          # interactive window
@@ -11,20 +13,26 @@
 //! ```
 
 const std = @import("std");
+const builtin = @import("builtin");
 const zui_host = @import("zui_host");
 const zui_sokol = @import("zui_sokol");
 const zui_truetype = @import("zui_truetype");
 const zui_app = @import("zui_app");
 const zui_widgets = @import("zui_widgets");
 const zui = @import("zui");
-const win32 = zui_host.windows.win32;
+const win32 = if (builtin.os.tag == .windows) zui_host.windows.win32 else struct {};
 
 const Ui = zui.Context(zui_app.contextConfig(zui_sokol.Renderer, .{ .Text = zui_truetype.Text, .features = .{ .semantics = true, .chrome_regions = true } }));
 const Widgets = zui_widgets.Widgets(Ui, zui_widgets.DefaultSkin(Ui));
 
-const ids = zui.ids(.{ "root", "title_bar", "title", "search", "minimize", "maximize", "close", "content" });
+const ids = zui.ids(.{ "root", "title_bar", "title", "search", "minimize", "maximize", "close", "content", "grip" });
 const title_bar_height = 32;
 const caption_button_width = 46;
+const grip_size = 16;
+const instructions = if (builtin.os.tag == .windows)
+    "Drag the title bar, double-click it, snap with Win+arrows, hover maximize for snap layouts, and resize from any edge."
+else
+    "Drag the title bar, double-click it, right-click it for the window menu, and resize from the grip in the corner.";
 
 const Palette = struct {
     background: zui.Color,
@@ -66,7 +74,12 @@ pub fn main(init: std.process.Init) !void {
         .title_bar = .custom,
     });
     defer session.stop();
-    if (checking) session.app.check = .{};
+    if (checking) {
+        // A Wayland surface the compositor never shows gets no frame
+        // callbacks, and a swap waits for the last frame's.
+        if (builtin.os.tag == .linux) session.renderer.draws = false;
+        session.app.check = .{};
+    }
     while (try session.frame()) {}
     if (session.app.check) |check| return check.result();
 }
@@ -98,8 +111,13 @@ const TitleBarApp = struct {
         defer ui.close();
         if (environment.custom_title_bar) app.titleBar(ui, palette);
         ui.open(.{ .id = ids.content, .layout = .{ .direction = .top_to_bottom, .sizing = .grow_both, .padding = .all(24), .child_gap = 8 } });
-        defer ui.close();
-        ui.text("Drag the title bar, double-click it, snap with Win+arrows, hover maximize for snap layouts, and resize from any edge.", .{ .size = 15, .color = palette.text, .wrap = .words });
+        ui.text(instructions, .{ .size = 15, .color = palette.text, .wrap = .words });
+        ui.close();
+        if (environment.custom_title_bar and !environment.window_maximized) {
+            ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_alignment = .{ .x = .end } } });
+            defer ui.close();
+            ui.box(.{ .id = ids.grip, .chrome = .resize_bottom_right, .layout = .{ .sizing = .{ .width = .fixed(grip_size), .height = .fixed(grip_size) } }, .decoration = .{ .background = palette.hovered } });
+        }
     }
 
     fn titleBar(app: *TitleBarApp, ui: *Ui, palette: Palette) void {
@@ -162,15 +180,21 @@ const TitleBarApp = struct {
 /// asks the window what each part is, as Windows does when the pointer is
 /// over it, and quits.
 const Check = struct {
-    const Expectation = struct { id: zui.Id, code: win32.LRESULT, name: []const u8 };
+    /// Null for a part that is the application's.
+    const Expectation = struct { id: zui.Id, kind: ?zui.ChromeKind, name: []const u8 };
     const expectations = [_]Expectation{
-        .{ .id = ids.title, .code = win32.HTCAPTION, .name = "the title" },
-        .{ .id = ids.search, .code = win32.HTCLIENT, .name = "the search field" },
-        .{ .id = ids.minimize, .code = win32.HTMINBUTTON, .name = "minimize" },
-        .{ .id = ids.maximize, .code = win32.HTMAXBUTTON, .name = "maximize" },
-        .{ .id = ids.close, .code = win32.HTCLOSE, .name = "close" },
-        .{ .id = ids.content, .code = win32.HTCLIENT, .name = "the content" },
+        .{ .id = ids.title, .kind = .title_bar, .name = "the title" },
+        .{ .id = ids.search, .kind = null, .name = "the search field" },
+        .{ .id = ids.minimize, .kind = .minimize_button, .name = "minimize" },
+        .{ .id = ids.maximize, .kind = .maximize_button, .name = "maximize" },
+        .{ .id = ids.close, .kind = .close_button, .name = "close" },
+        .{ .id = ids.content, .kind = null, .name = "the content" },
+        .{ .id = ids.grip, .kind = .resize_bottom_right, .name = "the grip" },
     };
+
+    /// `WM_NCHITTEST`'s code on Windows; on Linux the chrome the host
+    /// hands a press at the point to the compositor for.
+    const Answer = if (builtin.os.tag == .windows) win32.LRESULT else ?zui.ChromeKind;
 
     frames: u32 = 0,
     centres: [expectations.len]?[2]f32 = @splat(null),
@@ -194,20 +218,37 @@ const Check = struct {
                 check.failures += 1;
                 continue;
             };
+            const answered = answerAt(host, at);
+            const expected = expectedAnswer(expectation.kind);
+            if (answered != expected) {
+                std.debug.print("title-bar check: {s} hit-tests as {any}, expected {any}\n", .{ expectation.name, answered, expected });
+                check.failures += 1;
+            }
+        }
+        check.done = true;
+        host.close();
+    }
+
+    fn expectedAnswer(kind: ?zui.ChromeKind) Answer {
+        if (builtin.os.tag == .windows) {
+            return if (kind) |chrome_kind| zui_host.windows.chrome.hitTestCode(chrome_kind) else win32.HTCLIENT;
+        } else return kind;
+    }
+
+    /// What the OS makes of a point, in layout units.
+    fn answerAt(host: *zui_host.Host, at: [2]f32) Answer {
+        if (builtin.os.tag == .windows) {
             const pixels_per_unit = host.pixelsPerUnit(.main);
             var point: win32.POINT = .{
                 .x = @intFromFloat(at[0] * pixels_per_unit),
                 .y = @intFromFloat(at[1] * pixels_per_unit),
             };
             _ = win32.ClientToScreen(host.hwnd, &point);
-            const answered = win32.SendMessageW(host.hwnd, win32.WM_NCHITTEST, 0, win32.lparamFromPoint(@intCast(point.x), @intCast(point.y)));
-            if (answered != expectation.code) {
-                std.debug.print("title-bar check: {s} hit-tests as {d}, expected {d}\n", .{ expectation.name, answered, expectation.code });
-                check.failures += 1;
-            }
+            return win32.SendMessageW(host.hwnd, win32.WM_NCHITTEST, 0, win32.lparamFromPoint(@intCast(point.x), @intCast(point.y)));
+        } else {
+            const surface_coordinates_per_unit = host.surface_coordinates_per_unit;
+            return host.chromeKindAt(.{ at[0] * surface_coordinates_per_unit, at[1] * surface_coordinates_per_unit });
         }
-        check.done = true;
-        host.close();
     }
 
     fn result(check: Check) !void {
@@ -222,9 +263,11 @@ const SokolRenderer = struct {
     pub const ImageHandle = zui_sokol.Renderer.ImageHandle;
 
     sokol: zui_sokol.Renderer,
+    /// False submits nothing, for a window that is never shown.
+    draws: bool = true,
 
     pub fn init(self: *SokolRenderer, surface: zui.Surface, text: anytype) !void {
-        self.sokol = try .initForSurface(text, surface);
+        self.* = .{ .sokol = try .initForSurface(text, surface) };
     }
 
     pub fn deinit(self: *SokolRenderer) void {
@@ -232,6 +275,6 @@ const SokolRenderer = struct {
     }
 
     pub fn zuiSubmit(self: *SokolRenderer, surface: zui.Surface, frame: anytype) !void {
-        try self.sokol.zuiSubmit(surface, frame);
+        if (self.draws) try self.sokol.zuiSubmit(surface, frame);
     }
 };

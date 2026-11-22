@@ -10,6 +10,7 @@ pub const data_device = @import("data_device.zig");
 pub const text_input = @import("text_input.zig");
 pub const file_watch = @import("file_watch.zig");
 pub const services = @import("services.zig");
+pub const chrome = @import("chrome.zig");
 
 const Proxy = wayland.Proxy;
 
@@ -33,6 +34,15 @@ const Proxy = wayland.Proxy;
 /// display, the desktop's buses, its transfers and watches, a wake and a
 /// deadline.
 ///
+/// A window opened with `title_bar = .custom` asks the compositor, through
+/// xdg-decoration where it is offered, to leave the decorations to the
+/// window. Presses on the frame's chrome regions go to the compositor: the
+/// title bar moves the window, maximizes it on a double click and opens
+/// the window menu on a secondary click, and the edges resize it. The host
+/// works the caption buttons itself, and reports `custom_title_bar` and
+/// `window_maximized`. A compositor that insists on drawing its own title
+/// bar gets it, and `custom_title_bar` is then false.
+///
 /// `init` opens the window and `deinit` closes it; the host must not move
 /// in between, since the compositor's listeners and the signal handler
 /// hold pointers to it. A window opened with `visible = false` is a
@@ -47,7 +57,7 @@ const Proxy = wayland.Proxy;
 /// ```
 pub const Host = struct {
     pub const zui_surfaces: zui.SurfaceKinds = .initOne(.wayland);
-    pub const zui_capabilities: zui.HostCapabilities = .{ .windows = .one };
+    pub const zui_capabilities: zui.HostCapabilities = .{ .windows = .one, .custom_title_bar = true };
 
     /// The clipboard's selection, as text. `write` offers it as UTF-8 to
     /// any reader, up to `data_device.DataDevice.clipboard_text_capacity`
@@ -183,6 +193,7 @@ pub const Host = struct {
 
     data_device: data_device.DataDevice,
     text_input: text_input.TextInput,
+    window_chrome: chrome.WindowChrome,
     file_watches: file_watch.Watches,
     desktop: desktop_bus.DesktopBus,
     desktop_settings: DesktopSettings,
@@ -232,12 +243,15 @@ pub const Host = struct {
         power_saver: bool = false,
     };
 
-    /// The fields of `zui.Environment` the desktop's settings decide.
+    /// The fields of `zui.Environment` the desktop's settings and the
+    /// compositor's configures decide.
     const ReportedEnvironment = struct {
         theme: zui.Environment.Theme,
         contrast: zui.Environment.Contrast,
         reduced_motion: bool,
         power: zui.Environment.Power,
+        custom_title_bar: bool,
+        window_maximized: bool,
     };
 
     const Globals = struct {
@@ -249,6 +263,7 @@ pub const Host = struct {
         viewporter: ?*Proxy = null,
         fractional_scale_manager: ?*Proxy = null,
         text_input_manager: ?*Proxy = null,
+        decoration_manager: ?*Proxy = null,
     };
 
     const Inbox = struct {
@@ -353,6 +368,7 @@ pub const Host = struct {
             .key_repeat = .{},
             .data_device = .{ .io = io },
             .text_input = .{},
+            .window_chrome = .{ .asked_for_custom = options.title_bar == .custom, .resizable = options.resizable },
             .file_watches = .{},
             .desktop = .{},
             .desktop_settings = .{},
@@ -410,6 +426,9 @@ pub const Host = struct {
         const toplevel = wayland.create(xdg_surface, wayland.xdg_surface_get_toplevel, &wayland.xdg_toplevel_interface, 1, .{wayland.no_id}) orelse return error.NoToplevel;
         self.toplevel = toplevel;
         wayland.addListener(toplevel, &toplevel_listener, self);
+        if (self.globals.decoration_manager) |manager| {
+            if (self.window_chrome.decorate(manager, toplevel)) |decoration| wayland.addListener(decoration, &toplevel_decoration_listener, self);
+        }
         var title: [256:0]u8 = @splat(0);
         const title_len = @min(options.title.len, title.len);
         @memcpy(title[0..title_len], options.title[0..title_len]);
@@ -467,6 +486,8 @@ pub const Host = struct {
         if (self.globals.fractional_scale_manager) |manager| wayland.destroy(manager, wayland.fractional_scale_manager_destroy);
         if (self.globals.viewporter) |viewporter| wayland.destroy(viewporter, wayland.viewporter_destroy);
         self.releaseDevices(.{});
+        self.window_chrome.deinit();
+        if (self.globals.decoration_manager) |manager| wayland.destroy(manager, wayland.decoration_manager_destroy);
         if (self.toplevel) |toplevel| wayland.destroy(toplevel, wayland.xdg_toplevel_destroy);
         if (self.xdg_surface) |xdg_surface| wayland.destroy(xdg_surface, wayland.xdg_surface_destroy);
         wayland.destroy(self.surface, wayland.surface_destroy);
@@ -692,10 +713,54 @@ pub const Host = struct {
         self.services.fake = fake;
     }
 
+    /// Keeps up to `chrome.ChromeSnapshot.capacity` of `regions`, in
+    /// surface coordinates, to hit-test presses against; the rest are cut
+    /// from the end and counted in `window_chrome.snapshot.dropped`. A
+    /// window without a custom title bar keeps none.
+    pub fn zuiChromeRegions(self: *Host, window: zui.WindowId, regions: []const zui.ChromeRegion) void {
+        std.debug.assert(window == .main);
+        self.window_chrome.publish(regions, self.surface_coordinates_per_unit);
+    }
+
+    /// What a press at `position`, in surface coordinates, would be to the
+    /// window manager, from the last frame's chrome regions: null where it
+    /// reaches zui.
+    pub fn chromeKindAt(self: *const Host, position: [2]f32) ?zui.ChromeKind {
+        return self.window_chrome.kindAt(position);
+    }
+
     /// Closes the window as its close button does: the next poll returns
     /// false.
     pub fn close(self: *Host) void {
         self.onClose();
+    }
+
+    /// Asks the compositor to minimize the window, as its minimize button
+    /// does, for an application that works its drawn caption buttons from
+    /// `clicked`, as the keyboard and a screen reader press them.
+    pub fn minimize(self: *Host) void {
+        self.window_chrome.minimize(self.windowManager());
+        _ = wayland.wl_display_flush(self.display);
+    }
+
+    /// Asks the compositor to maximize the window, or to restore it when
+    /// it is maximized.
+    pub fn toggleMaximized(self: *Host) void {
+        self.window_chrome.toggleMaximized(self.windowManager());
+        _ = wayland.wl_display_flush(self.display);
+    }
+
+    fn windowManager(self: *const Host) chrome.WindowManager {
+        return .{ .toplevel = self.toplevel, .seat = self.globals.seat };
+    }
+
+    fn workCaptionButton(self: *Host, kind: zui.ChromeKind) void {
+        switch (kind) {
+            .minimize_button => self.minimize(),
+            .maximize_button => self.toggleMaximized(),
+            .close_button => self.onClose(),
+            else => {},
+        }
     }
 
     fn deliver(self: *Host, event: zui.Event) void {
@@ -718,11 +783,22 @@ pub const Host = struct {
         if (self.configured_size) |size| self.surface_size = size;
         self.configured = true;
         self.input_arrived = true;
+        if (self.window_chrome.applyConfigure()) self.reportEnvironmentOnceReported();
     }
 
-    /// A size of zero leaves the window's size to the client.
-    pub fn onToplevelConfigure(self: *Host, width: i32, height: i32) void {
+    /// A size of zero leaves the window's size to the client. `states` are
+    /// `xdg_toplevel.state`s, of which the host reads `maximized`.
+    pub fn onToplevelConfigure(self: *Host, width: i32, height: i32, states: []const u32) void {
         self.configured_size = if (width > 0 and height > 0) .{ @intCast(width), @intCast(height) } else null;
+        self.window_chrome.configured_maximized = chrome.statesHoldMaximized(states);
+    }
+
+    /// The compositor says who draws the decorations. Drawing its own, it
+    /// takes the title bar back from a custom window.
+    pub fn onDecorationConfigure(self: *Host, mode: chrome.DecorationMode) void {
+        const was_custom = self.window_chrome.isCustom();
+        self.window_chrome.onDecorationMode(mode);
+        if (was_custom != self.window_chrome.isCustom()) self.reportEnvironmentOnceReported();
     }
 
     pub fn onClose(self: *Host) void {
@@ -818,11 +894,13 @@ pub const Host = struct {
         self.pointer_enter_serial = serial;
         self.applied_cursor = null;
         self.applyCursor();
+        self.window_chrome.onPointerEnter();
         self.onPointerMotion(position);
     }
 
     pub fn onPointerLeave(self: *Host) void {
         self.pointer_enter_serial = null;
+        if (self.window_chrome.onPointerLeave()) self.deliver(.{ .pointer_cancel = .mouse });
         self.deliver(.{ .pointer_leave = .mouse });
     }
 
@@ -831,9 +909,29 @@ pub const Host = struct {
         self.deliver(.{ .pointer_move = .{ .pointer = self.mouseAt(self.now()) } });
     }
 
+    /// A press on the title bar or an edge goes to the compositor, with
+    /// the serial `onInputSerial` gave last, and neither it nor its release
+    /// reaches zui. A caption button's press does, and its release arrives
+    /// as `pointer_cancel`: the host works the button, so zui shows the
+    /// press and reports no click.
     pub fn onPointerButton(self: *Host, evdev_button: u32, pressed: bool) void {
         const button = keys.buttonFromEvdev(evdev_button) orelse return;
         const press: zui.PointerButton = .{ .pointer = self.mouseAt(self.now()), .button = button };
+        if (pressed) {
+            const handled = self.window_chrome.press(button, self.pointer_position, self.latest_input_serial, press.pointer.at, self.windowManager());
+            if (handled == .handed_to_window_manager) {
+                _ = wayland.wl_display_flush(self.display);
+                return;
+            }
+        } else switch (self.window_chrome.release(button, self.pointer_position)) {
+            .reaches_zui => {},
+            .swallowed => return,
+            .cancels_press => |worked| {
+                self.deliver(.{ .pointer_cancel = .mouse });
+                if (worked) |kind| self.workCaptionButton(kind);
+                return;
+            },
+        }
         self.deliver(if (pressed) .{ .pointer_down = press } else .{ .pointer_up = press });
     }
 
@@ -994,7 +1092,7 @@ pub const Host = struct {
             .power_saver => |power_saver| settings.power_saver = power_saver,
             .preparing_for_sleep => |sleeping| return self.deliver(.{ .lifecycle = if (sleeping) .@"suspend" else .@"resume" }),
         }
-        if (self.reported_environment != null) self.reportEnvironment();
+        self.reportEnvironmentOnceReported();
     }
 
     /// Which of the desktop's services answered. The settings of one that
@@ -1025,6 +1123,11 @@ pub const Host = struct {
         self.reportEnvironment();
     }
 
+    /// Until `init` reports the whole environment, a change waits for it.
+    fn reportEnvironmentOnceReported(self: *Host) void {
+        if (self.reported_environment != null) self.reportEnvironment();
+    }
+
     /// Reports each setting that differs from what was last reported, or
     /// every one the first time.
     fn reportEnvironment(self: *Host) void {
@@ -1034,6 +1137,8 @@ pub const Host = struct {
             .contrast = settings.contrast,
             .reduced_motion = settings.reduced_motion,
             .power = if (settings.power_saver) .saver else if (settings.on_battery) .battery else .plugged,
+            .custom_title_bar = self.window_chrome.isCustom(),
+            .window_maximized = self.window_chrome.maximized,
         };
         const reported = self.reported_environment;
         inline for (std.meta.fields(ReportedEnvironment)) |field| {
@@ -1175,6 +1280,7 @@ pub const Host = struct {
             .{ .interface = &wayland.viewporter_interface, .slot = &self.globals.viewporter, .highest_version = 1 },
             .{ .interface = &wayland.fractional_scale_manager_interface, .slot = &self.globals.fractional_scale_manager, .highest_version = 1 },
             .{ .interface = &wayland.text_input_manager_interface, .slot = &self.globals.text_input_manager, .highest_version = 1 },
+            .{ .interface = &wayland.decoration_manager_interface, .slot = &self.globals.decoration_manager, .highest_version = 1 },
         };
         for (wanted) |global| {
             if (global.slot.* != null or !std.mem.eql(u8, interface_name, std.mem.span(global.interface.name))) continue;
@@ -1215,8 +1321,8 @@ pub const Host = struct {
 
     const toplevel_listener: wayland.XdgToplevelListener = .{
         .configure = struct {
-            fn configure(data: ?*anyopaque, _: ?*Proxy, width: i32, height: i32, _: ?*wayland.Array) callconv(.c) void {
-                hostFrom(data).onToplevelConfigure(width, height);
+            fn configure(data: ?*anyopaque, _: ?*Proxy, width: i32, height: i32, states: ?*wayland.Array) callconv(.c) void {
+                hostFrom(data).onToplevelConfigure(width, height, wayland.Array.slice(states, u32));
             }
         }.configure,
         .close = struct {
@@ -1224,6 +1330,14 @@ pub const Host = struct {
                 hostFrom(data).onClose();
             }
         }.close,
+    };
+
+    const toplevel_decoration_listener: wayland.ToplevelDecorationListener = .{
+        .configure = struct {
+            fn configure(data: ?*anyopaque, _: ?*Proxy, mode: u32) callconv(.c) void {
+                hostFrom(data).onDecorationConfigure(@enumFromInt(mode));
+            }
+        }.configure,
     };
 
     const surface_listener: wayland.SurfaceListener = .{
@@ -1422,4 +1536,5 @@ test {
     _ = text_input;
     _ = file_watch;
     _ = services;
+    _ = chrome;
 }

@@ -12,6 +12,15 @@ pub const Array = extern struct {
     size: usize,
     alloc: usize,
     data: ?*anyopaque,
+
+    /// The array's contents as `T`s, valid until the event's listener
+    /// returns.
+    pub fn slice(array: ?*const Array, comptime T: type) []const T {
+        const self = array orelse return &.{};
+        const data = self.data orelse return &.{};
+        const items: [*]const T = @ptrCast(@alignCast(data));
+        return items[0 .. self.size / @sizeOf(T)];
+    }
 };
 
 pub const Message = extern struct {
@@ -161,8 +170,14 @@ pub const xdg_surface_interface: Interface = .{
 pub const xdg_toplevel_destroy = 0;
 pub const xdg_toplevel_set_title = 2;
 pub const xdg_toplevel_set_app_id = 3;
+pub const xdg_toplevel_show_window_menu = 4;
+pub const xdg_toplevel_move = 5;
+pub const xdg_toplevel_resize = 6;
 pub const xdg_toplevel_set_max_size = 7;
 pub const xdg_toplevel_set_min_size = 8;
+pub const xdg_toplevel_set_maximized = 9;
+pub const xdg_toplevel_unset_maximized = 10;
+pub const xdg_toplevel_set_minimized = 13;
 pub const xdg_toplevel_interface: Interface = .{
     .name = "xdg_toplevel",
     .version = 1,
@@ -188,6 +203,35 @@ pub const xdg_toplevel_interface: Interface = .{
         message("configure", "iia", &untyped),
         message("close", "", &untyped),
     },
+};
+
+pub const decoration_manager_destroy = 0;
+pub const decoration_manager_get_toplevel_decoration = 1;
+pub const decoration_manager_interface: Interface = .{
+    .name = "zxdg_decoration_manager_v1",
+    .version = 1,
+    .method_count = 2,
+    .methods = &[_]Message{
+        message("destroy", "", &untyped),
+        message("get_toplevel_decoration", "no", &.{ &toplevel_decoration_interface, &xdg_toplevel_interface }),
+    },
+    .event_count = 0,
+    .events = null,
+};
+
+pub const toplevel_decoration_destroy = 0;
+pub const toplevel_decoration_set_mode = 1;
+pub const toplevel_decoration_interface: Interface = .{
+    .name = "zxdg_toplevel_decoration_v1",
+    .version = 1,
+    .method_count = 3,
+    .methods = &[_]Message{
+        message("destroy", "", &untyped),
+        message("set_mode", "u", &untyped),
+        message("unset_mode", "", &untyped),
+    },
+    .event_count = 1,
+    .events = &[_]Message{message("configure", "u", &untyped)},
 };
 
 pub const cursor_shape_manager_destroy = 0;
@@ -374,6 +418,10 @@ pub const KeyboardListener = extern struct {
     key: *const fn (?*anyopaque, ?*Proxy, u32, u32, u32, u32) callconv(.c) void,
     modifiers: *const fn (?*anyopaque, ?*Proxy, u32, u32, u32, u32, u32) callconv(.c) void,
     repeat_info: *const fn (?*anyopaque, ?*Proxy, i32, i32) callconv(.c) void,
+};
+
+pub const ToplevelDecorationListener = extern struct {
+    configure: *const fn (?*anyopaque, ?*Proxy, u32) callconv(.c) void,
 };
 
 pub const FractionalScaleListener = extern struct {

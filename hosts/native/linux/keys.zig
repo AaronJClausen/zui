@@ -127,6 +127,7 @@ pub fn buttonFromEvdev(code: u32) ?zui.Button {
 }
 
 pub const evdev_button_left = 0x110;
+pub const evdev_button_right = 0x111;
 
 test "keysyms map letters case-blind, digits and function keys in order" {
     try std.testing.expectEqual(zui.Key.a, keyFromKeysym('a'));
