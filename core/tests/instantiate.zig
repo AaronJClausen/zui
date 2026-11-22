@@ -13,6 +13,7 @@ const zui_app = @import("zui_app");
 const zui_wire = @import("zui_wire");
 const zui_debug = @import("zui_debug");
 const zui_motion = @import("zui_motion");
+const zui_color = @import("zui_color");
 
 /// A freestanding target has no default log output, so an application there
 /// brings its own, as this one does.
@@ -726,6 +727,16 @@ export fn zuiCheckZoneTimer() u32 {
         ui.release(frame);
     }
     return @intCast(CheckZoneTimer.frameTimes().ran.count() + timed_inspector.zones.count);
+}
+
+const color_tones = zui_color.lightnessScale(4, .rgb(0x3366ff), 0.3, 0.9);
+
+export fn zuiCheckColor(red: u8, amount: f32) u8 {
+    const color: zui.Color = .{ .r = red, .g = 40, .b = 200 };
+    const mixed = zui_color.mixOklch(color, zui_color.mix(color, .white, amount), amount);
+    const hsl: zui_color.Hsl = .fromColor(zui_color.ramp(3, color, mixed)[1]);
+    const extended = zui_color.Oklch.fromExtendedColor(.fromColor(hsl.toColor())).toExtendedColor();
+    return zui_color.shiftLightness(zui_color.withLightness(extended.toColor(), amount), amount).r +% color_tones[1].g;
 }
 
 const CheckPanelTheme = zui_debug.PanelTheme(u16, zui.Color);

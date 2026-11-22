@@ -1377,6 +1377,22 @@ fn importToast(app: *App, ui: *Ui) void {
 </script>
       </article>
 
+      <article class="feature" id="zui-color" data-title="zui_color">
+        <div class="feature-head"><h3><code>zui_color</code>: color spaces and palettes</h3><span class="pill shipped">Shipped</span></div>
+        <p><code class="z">zui_color</code> builds palettes from a few colors, at comptime, so a theme's shades are constants. <code class="z">Oklab</code>, <code class="z">Oklch</code> and <code class="z">Hsl</code> convert to and from <code class="z">zui.Color</code> (<code class="z">fromColor</code>, <code class="z">toColor</code>), and <code class="z">Oklab</code> and <code class="z">Oklch</code> to and from a linear <code class="z">zui.ExtendedColor</code> as well, each with a straight <code class="z">alpha</code>. OKLab is where equal distances look equally different, so <code class="z">zui_color.mix(from, to, amount)</code> mixes in it and its middle is neither muddy nor too dark; <code class="z">mixOklch</code> keeps the chroma and takes the shorter way around the hue circle. <code class="z">ramp(steps, from, to)</code> gives evenly spaced colors from one to the other, both ends included. <code class="z">shiftLightness(color, change)</code> and <code class="z">withLightness(color, lightness)</code> move a color's OKLCH lightness for a hovered or pressed shade, and <code class="z">lightnessScale(steps, color, darkest, lightest)</code> gives a tonal scale of its hue. A color sRGB cannot show is brought in by reducing its chroma, keeping its lightness and hue, rather than by clipping each channel. <code class="z">Hsl</code> follows CSS's <code class="z">hsl()</code>. A ramp or scale of fewer than two steps is a compile error.</p>
+<script type="text/x-zig" data-file="src/theme/palette.zig">
+const zui_color = @import("zui_color");
+
+pub const accent: zui.Color = .rgb(0x3366ff);
+pub const accent_hovered = zui_color.shiftLightness(accent, 0.06);
+pub const accent_pressed = zui_color.shiftLightness(accent, -0.08);
+pub const surfaces = zui_color.ramp(5, .rgb(0x15151c), .rgb(0x3a3a48));
+pub const accent_tones = zui_color.lightnessScale(10, accent, 0.25, 0.97);
+pub const warning: zui.Color = (zui_color.Oklch{ .lightness = 0.8, .chroma = 0.16, .hue_degrees = 85 }).toColor();
+pub const focus_ring = zui_color.mix(accent, .white, 0.35);
+</script>
+      </article>
+
       <article class="feature" id="diagnostics" data-title="Diagnostics">
         <div class="feature-head"><h3>Limits that fail softly: diagnostics</h3><span class="pill shipped">Shipped</span></div>
         <p>Every limit fails the same way. zui keeps and draws what fits, and records in <code class="z">frame.diagnostics</code> which limit was exceeded, how much the frame needed, and the first element dropped. Duplicate ids, unbalanced trees and publishes refused by full sources are reported here too. Apps that would rather stop call <code class="z">check()</code>.</p>

@@ -1144,6 +1144,26 @@ fn importToast(app: *App, ui: *Ui) void {
 }
 ```
 
+<a id="zui-color"></a>
+
+### `zui_color`: color spaces and palettes · *shipped*
+
+`zui_color` builds palettes from a few colors, at comptime, so a theme's shades are constants. `Oklab`, `Oklch` and `Hsl` convert to and from `zui.Color` (`fromColor`, `toColor`), and `Oklab` and `Oklch` to and from a linear `zui.ExtendedColor` as well, each with a straight `alpha`. OKLab is where equal distances look equally different, so `zui_color.mix(from, to, amount)` mixes in it and its middle is neither muddy nor too dark; `mixOklch` keeps the chroma and takes the shorter way around the hue circle. `ramp(steps, from, to)` gives evenly spaced colors from one to the other, both ends included. `shiftLightness(color, change)` and `withLightness(color, lightness)` move a color's OKLCH lightness for a hovered or pressed shade, and `lightnessScale(steps, color, darkest, lightest)` gives a tonal scale of its hue. A color sRGB cannot show is brought in by reducing its chroma, keeping its lightness and hue, rather than by clipping each channel. `Hsl` follows CSS's `hsl()`. A ramp or scale of fewer than two steps is a compile error.
+
+`src/theme/palette.zig`
+
+```zig
+const zui_color = @import("zui_color");
+
+pub const accent: zui.Color = .rgb(0x3366ff);
+pub const accent_hovered = zui_color.shiftLightness(accent, 0.06);
+pub const accent_pressed = zui_color.shiftLightness(accent, -0.08);
+pub const surfaces = zui_color.ramp(5, .rgb(0x15151c), .rgb(0x3a3a48));
+pub const accent_tones = zui_color.lightnessScale(10, accent, 0.25, 0.97);
+pub const warning: zui.Color = (zui_color.Oklch{ .lightness = 0.8, .chroma = 0.16, .hue_degrees = 85 }).toColor();
+pub const focus_ring = zui_color.mix(accent, .white, 0.35);
+```
+
 <a id="diagnostics"></a>
 
 ### Limits that fail softly: diagnostics · *shipped*

@@ -121,6 +121,8 @@ const compile_error_cases = [_]struct { name: []const u8, expected_error: []cons
     .{ .name = "motion_value_not_animatable", .expected_error = "zui_motion: cannot animate u32; animate f32, [N]f32, zui.Color, zui.ExtendedColor or a struct of them" },
     .{ .name = "text_fingerprint_wrong_signature", .expected_error = "zui: text_fingerprint_wrong_signature.Text.zuiFingerprint must be fn (*const text_fingerprint_wrong_signature.Text) u64, found fn (*text_fingerprint_wrong_signature.Text) u32" },
     .{ .name = "text_segment_wrong_signature", .expected_error = "zui: text_segment_wrong_signature.Text.zuiSegment must be fn (*text_segment_wrong_signature.Text, []const u8, *text.BreakSink) void, found fn (*text_segment_wrong_signature.Text, []const u8, []u32) void" },
+    .{ .name = "color_ramp_too_few_steps", .expected_error = "zui_color: ramp needs at least 2 steps, one for each end; got 0" },
+    .{ .name = "color_lightness_scale_too_few_steps", .expected_error = "zui_color: lightnessScale needs at least 2 steps, one for each end; got 1" },
 };
 
 pub fn build(b: *std.Build) void {
@@ -219,12 +221,20 @@ pub fn build(b: *std.Build) void {
         .imports = &.{.{ .name = "zui", .module = zui_module }},
     });
 
+    const color_module = b.addModule("zui_color", .{
+        .root_source_file = b.path("zui_color/zui_color.zig"),
+        .target = target,
+        .optimize = optimize,
+        .sanitize_thread = if (sanitize_thread) true else null,
+        .imports = &.{.{ .name = "zui", .module = zui_module }},
+    });
+
     const test_step = b.step("test", "Run the unit tests and the compile-error tests, and compile the benchmark tools");
     const unit_test_step = b.step("test-unit", "Run the unit tests, in the selected optimize mode");
     const compile_error_test_step = b.step("test-compile-errors", "Check every compile error's message, which no optimize mode changes");
     const bench_tools_step = b.step("check-bench-tools", "Compile counts, bench-compare and bench-report, each in its own fixed optimize mode");
     for ([_]*std.Build.Step{ unit_test_step, compile_error_test_step, bench_tools_step }) |part| test_step.dependOn(part);
-    const tested_modules = [_]*std.Build.Module{ zui_module, testing_module, async_module, widgets_module, reflect_module, tracy_module, app_module, wire_module, debug_module, motion_module };
+    const tested_modules = [_]*std.Build.Module{ zui_module, testing_module, async_module, widgets_module, reflect_module, tracy_module, app_module, wire_module, debug_module, motion_module, color_module };
     for (tested_modules) |tested_module| {
         const module_tests = b.addTest(.{ .root_module = tested_module, .use_llvm = if (sanitize_thread) true else null });
         unit_test_step.dependOn(&b.addRunArtifact(module_tests).step);
@@ -259,6 +269,7 @@ pub fn build(b: *std.Build) void {
                     .{ .name = "zui_wire", .module = wire_module },
                     .{ .name = "zui_debug", .module = debug_module },
                     .{ .name = "zui_motion", .module = motion_module },
+                    .{ .name = "zui_color", .module = color_module },
                 },
             }),
         });
@@ -298,6 +309,7 @@ pub fn build(b: *std.Build) void {
                 .{ .name = "zui_wire", .module = wire_module },
                 .{ .name = "zui_debug", .module = debug_module },
                 .{ .name = "zui_motion", .module = motion_module },
+                .{ .name = "zui_color", .module = color_module },
             },
         }),
     });
@@ -390,7 +402,7 @@ pub fn build(b: *std.Build) void {
     }) });
     unit_test_step.dependOn(&b.addRunArtifact(bench_tests).step);
 
-    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "tests", "bench", "zui_testing", "zui_async", "zui_widgets", "zui_reflect", "zui_tracy", "zui_app", "zui_wire", "zui_debug", "zui_motion" };
+    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "tests", "bench", "zui_testing", "zui_async", "zui_widgets", "zui_reflect", "zui_tracy", "zui_app", "zui_wire", "zui_debug", "zui_motion", "zui_color" };
     b.step("fmt", "Format all Zig sources").dependOn(&b.addFmt(.{ .paths = formatted_paths }).step);
     b.step("fmt-check", "Fail if any Zig source is not formatted").dependOn(&b.addFmt(.{ .paths = formatted_paths, .check = true }).step);
 }

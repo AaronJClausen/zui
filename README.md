@@ -132,6 +132,7 @@ exe.root_module.addImport("zui_app", zui.module("zui_app"));
 exe.root_module.addImport("zui_wire", zui.module("zui_wire"));
 exe.root_module.addImport("zui_debug", zui.module("zui_debug"));
 exe.root_module.addImport("zui_motion", zui.module("zui_motion"));
+exe.root_module.addImport("zui_color", zui.module("zui_color"));
 tests.root_module.addImport("zui_testing", zui.module("zui_testing"));
 // Tracing into Tracy; `.@"zui-tracy" = true` in the options above links it.
 exe.root_module.addImport("zui_tracy", zui.module("zui_tracy"));
@@ -168,7 +169,7 @@ it draws or reports, its limits, and its build steps.
 
 | Package | Directory | What it is |
 |---|---|---|
-| `zui` and its modules | `core/`, re-exported by the root | the engine, `zui_async`, `zui_widgets`, `zui_reflect`, `zui_app`, `zui_wire`, `zui_debug`, `zui_motion`, `zui_testing` and `zui_tracy` |
+| `zui` and its modules | `core/`, re-exported by the root | the engine, `zui_async`, `zui_widgets`, `zui_reflect`, `zui_app`, `zui_wire`, `zui_debug`, `zui_motion`, `zui_color`, `zui_testing` and `zui_tracy` |
 | `zui_glyphs`, `zui_truetype`, `zui_fonts` | [text/](text/README.md) | the layout that font systems and renderers share, the default font system on stb_truetype, and the bundled typefaces |
 | `zui_raylib` | [renderers/raylib/](renderers/raylib/README.md) | a raylib renderer and adapter host, the reference backend |
 | `zui_sokol` | [renderers/sokol/](renderers/sokol/README.md) | a sokol renderer on D3D11, Metal or OpenGL, drawing every optional command and extended colors |
