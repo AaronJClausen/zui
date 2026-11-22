@@ -28,6 +28,7 @@ pub fn Kit(comptime spec: Spec) type {
         pub const zui_widgets = @import("zui_widgets");
         pub const zui_reflect = @import("zui_reflect");
         pub const zui_async = @import("zui_async");
+        pub const zui_motion = @import("zui_motion");
         pub const Perf = shared.Perf;
         pub const Sources = shared.Sources;
         pub const Screen = shared.Screen;
@@ -58,6 +59,7 @@ pub fn Kit(comptime spec: Spec) type {
                 .state_slots = 4096,
                 .measure_cache_entries = 8192,
                 .string_cache_entries = 4096,
+                .exit_ghost_commands = 1024,
             },
         });
         pub const Ui = zui.Context(config);
