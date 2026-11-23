@@ -49,6 +49,7 @@ and each is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:34-zui-widgets-views` `zui_widgets_views` | not started |
 | `11-polish:35-italics` Italics | done |
 | `11-polish:36-motion-in-core` Motion in the core | done |
+| `11-polish:37-tour-preferences-menu` The tour's preferences in a menu on the top bar | not started |
 
 ### The design system
 
@@ -2575,3 +2576,26 @@ ReleaseSafe and `x86-linux`, `check` for `wasm32-freestanding` and
 against `2ba7904`: all 175 events +0.00% (4096 boxes at depth 8: declare
 438141, endFrame 1265648 instructions, unchanged), since nothing that
 does not animate calls the moved code.
+
+## 11-polish:37-tour-preferences-menu — The tour's preferences in a menu on the top bar
+
+The owner's request of 2026-11-23: the Preferences screen becomes a menu
+that drops down from the tour's top bar and can be pinned open, holding
+every setting the tour offers in one place: the preferences
+(`apps/tour/src/screens/preferences.zig`: density, color vision and the
+rest), the header's controls (zoom, the light and dark switch, live
+mode, the 1 Hz tick, the inspector), and the toggles each screen keeps
+of its own. What the tokens resolved to stays on a screen of its own and
+does not go in the menu.
+
+**Plan.** Given when the item is taken, on `11-polish:29-overlays`'
+`menu` and `popover`: the menu opened from a button on the top bar,
+pinning it keeps it open beside the screen while its settings change,
+each screen's own toggles in a section of their own shown while that
+screen is open, and the keyboard reaching every setting.
+
+**Waits for** `11-polish:29-overlays`.
+
+**Spec.** §18, §19.2.
+
+**Status.** Not started.
