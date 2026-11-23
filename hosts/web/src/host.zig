@@ -42,16 +42,19 @@ pub const BrowserPointer = struct {
 };
 
 /// The settings the page reads from its media queries, `navigator.language`,
-/// the document's direction and the window's focus, each field named as the
+/// the document's direction, the window's focus and the `AccentColor`
+/// system color, each field named as the
 /// `zui.EnvironmentChange` it becomes. Until the page says otherwise, each
 /// is `zui.Environment`'s default; the first record reports every field.
 ///
 /// The page sends each as text: a `bool` as `"true"` or `"false"`, an enum
-/// by its tag name, a locale as its BCP 47 tag.
+/// by its tag name, a locale as its BCP 47 tag, a color as `#rrggbb` or
+/// `"none"`.
 ///
 /// ```zig
 /// host.changeSetting("theme", "dark");
 /// host.changeSetting("locale", "fr-CA");
+/// host.changeSetting("accent", "#0075ff");
 /// ```
 pub const PageEnvironment = struct {
     theme: zui.Environment.Theme = .light,
@@ -61,6 +64,7 @@ pub const PageEnvironment = struct {
     locale: zui.Locale = .default,
     direction: zui.ReadingDirection = .left_to_right,
     window_focused: bool = true,
+    accent: ?zui.Color = null,
 
     const Setting = std.meta.FieldEnum(PageEnvironment);
 
@@ -84,7 +88,17 @@ pub const PageEnvironment = struct {
             return null;
         }
         if (Value == zui.Locale) return localeKeepingWholeSubtags(text);
+        if (Value == ?zui.Color) return colorOrNone(text);
         return std.meta.stringToEnum(Value, text);
+    }
+
+    /// The accent `#rrggbb` or `"none"` names; null when `text` is neither.
+    fn colorOrNone(text: []const u8) ??zui.Color {
+        if (std.mem.eql(u8, text, "none")) return @as(?zui.Color, null);
+        if (text.len != 7 or text[0] != '#') return null;
+        for (text[1..]) |digit| if (!std.ascii.isHex(digit)) return null;
+        const hex = std.fmt.parseInt(u24, text[1..], 16) catch unreachable;
+        return zui.Color.rgb(hex);
     }
 
     /// A tag longer than `zui.Locale` holds keeps the subtags that fit,
@@ -1108,6 +1122,7 @@ test "each setting the page changes reaches the next record once, and an unchang
         .{ .name = "locale", .text = "ar-EG", .expected = .{ .locale = try .parse("ar-EG") } },
         .{ .name = "direction", .text = "right_to_left", .expected = .{ .direction = .right_to_left } },
         .{ .name = "window_focused", .text = "false", .expected = .{ .window_focused = false } },
+        .{ .name = "accent", .text = "#0075ff", .expected = .{ .accent = .rgb(0x0075ff) } },
     };
     comptime std.debug.assert(changes.len == std.meta.fields(PageEnvironment).len);
     for (changes) |change| {
@@ -1123,6 +1138,17 @@ test "each setting the page changes reaches the next record once, and an unchang
         try host.turns().take();
         try testing.expectEqual(0, driver.events().len);
     }
+}
+
+test "an accent the page no longer has is reported as null" {
+    var host = scriptedHost();
+    var driver: ScriptedDriver = .{ .host = &host };
+    host.changeSetting("accent", "#0075ff");
+    try startedHost(&driver);
+    host.changeSetting("accent", "none");
+    try host.turns().take();
+    try testing.expectEqual(1, driver.events().len);
+    try testing.expectEqual(zui.EnvironmentChange{ .accent = null }, driver.events()[0].environment);
 }
 
 test "a setting changed and changed back between two polls sends nothing" {
@@ -1144,6 +1170,7 @@ test "a setting or a value the host does not know is left out" {
     host.changeSetting("theme", "sepia");
     host.changeSetting("reduced_motion", "yes");
     host.changeSetting("locale", "");
+    for ([_][]const u8{ "blue", "#0075f", "#+075ff", "#00_5ff", "rgb(0, 117, 255)" }) |text| host.changeSetting("accent", text);
     try testing.expectEqual(schedules, host.platform.schedules);
     try testing.expectEqual(PageEnvironment{}, host.page_environment);
 }

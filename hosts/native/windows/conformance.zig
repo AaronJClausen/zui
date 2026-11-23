@@ -19,6 +19,9 @@ const testing = std.testing;
 const HiddenWindow = struct {
     window_host: Host = undefined,
     service_fake: zui_host.windows.services.ServiceFake = .{},
+    /// The accent the host reads in place of the user's, so a test's
+    /// record does not depend on the desktop.
+    forced_accent: ?zui.Color = null,
 
     /// With `forced_scale` set, a pixel is that many layout units at a zoom of 1.
     fn open(self: *HiddenWindow, forced_scale: ?f32) !void {
@@ -31,6 +34,7 @@ const HiddenWindow = struct {
 
     fn openWith(self: *HiddenWindow, forced_scale: ?f32, options: zui.WindowOptions) !void {
         self.window_host.forced_scale = forced_scale;
+        self.window_host.forced_accent = self.forced_accent;
         self.window_host.service_fake = &self.service_fake;
         try self.window_host.init(testing.io, options);
     }
@@ -87,6 +91,13 @@ const MessageHarness = struct {
             .key_down => |key| sendTo(hwnd, win32.WM_KEYDOWN, keys.virtualKeyFromKey(key.key).?, 1),
             .key_up => |key| sendTo(hwnd, win32.WM_KEYUP, keys.virtualKeyFromKey(key.key).?, @bitCast(@as(usize, 0xC0000001))),
             .text => |text| for (text) |byte| sendTo(hwnd, win32.WM_CHAR, byte, 1),
+            .environment => |change| switch (change) {
+                .accent => |accent| {
+                    self.window.window_host.forced_accent = accent orelse return false;
+                    sendTo(hwnd, win32.WM_DWMCOLORIZATIONCOLORCHANGED, 0, 0);
+                },
+                else => return false,
+            },
             else => return false,
         }
         return true;
@@ -154,6 +165,25 @@ test "the first poll reports the environment, and a viewport in layout units" {
     _ = win32.GetClientRect(window.window_host.hwnd, &client);
     try testing.expectEqual([2]f32{ @as(f32, @floatFromInt(client.right)) / 2.5, @as(f32, @floatFromInt(client.bottom)) / 2.5 }, polled.builder.params.viewport);
     try testing.expect(polled.find(.environment) != null);
+}
+
+test "the accent is reported at the first poll, and again when the colorization changes" {
+    var window: HiddenWindow = .{ .forced_accent = .rgb(0x0078d4) };
+    try window.open(1);
+    defer window.close();
+    var polled: zui_testing.PolledRecord = .{};
+    polled.init();
+    _ = polled.poll(&window.window_host);
+    try testing.expectEqual(zui.Color.rgb(0x0078d4), reportedEnvironment(&polled).accent.?);
+
+    window.window_host.forced_accent = .rgb(0xc30052);
+    _ = win32.SendMessageW(window.window_host.hwnd, win32.WM_DWMCOLORIZATIONCOLORCHANGED, 0, 0);
+    _ = polled.poll(&window.window_host);
+    try testing.expectEqual(zui.EnvironmentChange{ .accent = .rgb(0xc30052) }, polled.find(.environment).?);
+
+    _ = win32.SendMessageW(window.window_host.hwnd, win32.WM_DWMCOLORIZATIONCOLORCHANGED, 0, 0);
+    _ = polled.poll(&window.window_host);
+    try testing.expectEqual(null, polled.find(.environment));
 }
 
 test "a DPI change moves the scale, and the window keeps its size in layout units" {

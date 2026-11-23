@@ -9,10 +9,10 @@
 // the rail shows the pointer the tour asks for on the page's canvas, and
 // Ctrl+PageDown draws the next screen; when its WebGL context is lost
 // through `WEBGL_lose_context` and restored, draw that screen again; hear
-// the page's settings first, then each change: an emulated dark scheme
-// darkens the canvas and a light one lightens it, more contrast and a
-// right-to-left document change it, and reduced motion stills Clickable
-// Chaos's wall; while another tab hides the page, draw nothing; place the
+// the page's settings first, its system accent color among them, then
+// each change: an emulated dark scheme darkens the canvas and a light one
+// lightens it, more contrast and a right-to-left document change it, and
+// reduced motion stills Clickable Chaos's wall; while another tab hides the page, draw nothing; place the
 // page's hidden text field at the caret of Settings' Port field, through
 // which a typed key and an IME's composition reach the tour once each; and
 // copy to and read from the page's clipboard, with the permission granted.
@@ -82,7 +82,15 @@ async function waitUntil(condition, what) {
 
 await waitUntil(() => inWorkerOrNot("zuiHost.framesDrawn > 0").catch(() => false), "the worker drew no frame");
 
-const pageMeasured = await evaluate(`({ locale: navigator.language, window_focused: String(document.hasFocus()) })`);
+const pageMeasured = await evaluate(`(() => {
+  const probe = document.createElement("span");
+  probe.style.cssText = "display: none; color: AccentColor";
+  document.documentElement.append(probe);
+  const [red, green, blue] = getComputedStyle(probe).color.match(/\\d+/g).map((channel) => Number(channel).toString(16).padStart(2, "0"));
+  probe.remove();
+  return { locale: navigator.language, window_focused: String(document.hasFocus()), accent: \`#\${red}\${green}\${blue}\` };
+})()`);
+if (!/^#[0-9a-f]{6}$/.test(pageMeasured.accent)) await fail(`the page's AccentColor read as ${JSON.stringify(pageMeasured.accent)}, not a color`);
 const firstSettings = { theme: "light", contrast: "normal", reduced_motion: "false", reduced_transparency: "false", direction: "left_to_right", ...pageMeasured };
 const deliveredFirst = await inWorker("zuiHost.settings");
 for (const [name, value] of Object.entries(firstSettings)) {

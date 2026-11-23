@@ -917,3 +917,14 @@ const Logo = struct {
     pub const Part = enum { mark };
     pub const zuiAppearance = design.Appearance(Part, .{ .mark = .{ .surface = .unchecked(.rgb(0xff00ff), "the brand's logo") } });
 };
+
+test "Preferences.from seeds the accent from the system's when the user chose none" {
+    const environment: zui.Environment = .{ .accent = .rgb(0x0078d4) };
+    try testing.expectEqual(zui.Color.rgb(0x0078d4), zui_design.Preferences.from(&environment, .{}).accent.?);
+    try testing.expectEqual(null, zui_design.Preferences.from(&.{}, .{}).accent);
+}
+
+test "Preferences.from keeps the user's accent over the system's" {
+    const environment: zui.Environment = .{ .accent = .rgb(0x0078d4) };
+    try testing.expectEqual(zui.Color.rgb(0xff8800), zui_design.Preferences.from(&environment, .{ .accent = .rgb(0xff8800) }).accent.?);
+}

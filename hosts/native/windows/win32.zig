@@ -121,6 +121,7 @@ pub const WM_SETCURSOR = 0x0020;
 pub const WM_GETOBJECT = 0x003D;
 pub const WM_DISPLAYCHANGE = 0x007E;
 pub const WM_THEMECHANGED = 0x031A;
+pub const WM_DWMCOLORIZATIONCOLORCHANGED = 0x0320;
 pub const WM_KEYDOWN = 0x0100;
 pub const WM_KEYUP = 0x0101;
 pub const WM_CHAR = 0x0102;
@@ -462,6 +463,7 @@ pub extern "user32" fn QueryDisplayConfig(flags: u32, path_count: *u32, paths: [
 pub extern "user32" fn DisplayConfigGetDeviceInfo(packet: *DISPLAYCONFIG_DEVICE_INFO_HEADER) callconv(.winapi) LONG;
 
 pub extern "dwmapi" fn DwmExtendFrameIntoClientArea(hwnd: HWND, margins: *const MARGINS) callconv(.winapi) i32;
+pub extern "dwmapi" fn DwmGetColorizationColor(colorization: *DWORD, opaque_blend: *BOOL) callconv(.winapi) HRESULT;
 pub extern "dwmapi" fn DwmSetWindowAttribute(hwnd: HWND, attribute: DWORD, value: *const anyopaque, size: DWORD) callconv(.winapi) i32;
 
 pub extern "advapi32" fn RegGetValueW(key: HKEY, sub_key: [*:0]const u16, value: [*:0]const u16, flags: DWORD, kind: ?*DWORD, data: ?*anyopaque, size: ?*DWORD) callconv(.winapi) LONG;

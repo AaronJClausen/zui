@@ -61,6 +61,7 @@ const every_event = [_]zui.Event{
     .{ .environment = .{ .system_material = true } },
     .{ .environment = .{ .custom_title_bar = true } },
     .{ .environment = .{ .window_maximized = true } },
+    .{ .environment = .{ .accent = .rgb(0x3366ff) } },
     .{ .files_dropped = .{ .position = .{ 30, 40 }, .path_list = "C:\\a.png\x00/b/c.txt\x00", .at = at(11) } },
     .{ .lifecycle = .terminate_requested },
     .{ .action = .{ .target = 0x5a5a_0000_1234_abcd, .action = .{ .scroll = .{ 0, -40 } } } },

@@ -42,7 +42,8 @@ pub const Choices = struct {
     color_vision: ColorVision = .typical,
     corners: CornerPreference = .as_designed,
     pointer: Target = .pointer,
-    /// Replaces the design's accent seed's hue and chroma.
+    /// Replaces the design's accent seed's hue and chroma, and overrides
+    /// the system's accent.
     accent: ?zui.Color = null,
 };
 
@@ -62,9 +63,9 @@ pub const Preferences = struct {
     /// `.touch` raises every target floor to a finger's.
     pointer: Target = .pointer,
 
-    /// The environment's theme, contrast, text scale and transparency,
-    /// with the user's `choices`. The accent is the user's choice alone
-    /// until the environment reports the system's.
+    /// The environment's theme, contrast, text scale, transparency and
+    /// accent, with the user's `choices`. An accent in `choices` wins over
+    /// the system's.
     ///
     /// ```zig
     /// const preferences: zui_design.Preferences = .from(ui.environment(), .{ .density = .compact });
@@ -75,7 +76,7 @@ pub const Preferences = struct {
             .contrast = environment.contrast,
             .text_scale = environment.text_scale,
             .reduced_transparency = environment.reduced_transparency,
-            .accent = choices.accent,
+            .accent = choices.accent orelse environment.accent,
             .density = choices.density,
             .color_vision = choices.color_vision,
             .corners = choices.corners,

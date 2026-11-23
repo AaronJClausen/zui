@@ -7,7 +7,8 @@
 //
 // A setting is `sink.setting(name, value)`, `name` a field of
 // `zui_web.PageEnvironment` and `value` the text it parses: a boolean as
-// "true" or "false", an enum by its tag name, a locale as its BCP 47 tag.
+// "true" or "false", an enum by its tag name, a locale as its BCP 47 tag,
+// a color as `#rrggbb` or "none".
 
 function fromMedia(name, queries, valueOf) {
   const lists = queries.map((query) => matchMedia(query));
@@ -50,6 +51,22 @@ function readingDirection() {
   };
 }
 
+// The system's accent as `#rrggbb`, or "none" where the browser has no
+// `AccentColor`.
+function readAccent() {
+  if (!CSS.supports("color", "AccentColor")) return "none";
+  const probe = document.createElement("span");
+  probe.style.cssText = "display: none; color: AccentColor";
+  document.documentElement.append(probe);
+  const channels = getComputedStyle(probe).color.match(/^rgba?\((\d+), (\d+), (\d+)/);
+  probe.remove();
+  if (!channels) return "none";
+  return `#${channels
+    .slice(1)
+    .map((channel) => Number(channel).toString(16).padStart(2, "0"))
+    .join("")}`;
+}
+
 const pageSettings = [
   fromMedia("theme", ["(prefers-color-scheme: dark)"], (dark) => (dark ? "dark" : "light")),
   fromMedia("contrast", ["(prefers-contrast: more)", "(forced-colors: active)"], (more, forced) => (more || forced ? "high" : "normal")),
@@ -58,6 +75,9 @@ const pageSettings = [
   fromEvents("locale", () => navigator.language, globalThis, ["languagechange"]),
   readingDirection(),
   fromEvents("window_focused", () => String(document.hasFocus()), globalThis, ["focus", "blur"]),
+  // No event tells of the accent alone, so it is read again when the color
+  // scheme or forced colors change.
+  fromMedia("accent", ["(prefers-color-scheme: dark)", "(forced-colors: active)"], readAccent),
 ];
 
 export function followPageEnvironment(sink, onChanged = () => {}) {

@@ -58,6 +58,10 @@ const ServerHarness = struct {
             .pointer_move => |move| window_host.onPointerMotion(physicalPixels(window_host, move.pointer.position)),
             .pointer_down, .pointer_up => |press| window_host.onButton(1, event == .pointer_down, physicalPixels(window_host, press.pointer.position)),
             .key_down, .key_up => |key| window_host.onKey(keycodeOf(window_host, key.key) orelse return false, event == .key_down),
+            .environment => |change| switch (change) {
+                .accent => |accent| window_host.onDesktopReport(.{ .accent = accent }),
+                else => return false,
+            },
             else => return false,
         }
         return true;
@@ -130,7 +134,7 @@ test "on X11 the first poll reports focus and the environment, and a viewport in
     try testing.expectEqual(@as(f32, 2), polled.builder.params.scale);
     try testing.expectEqual([2]f32{ 320 / 1.25, 240 / 1.25 }, polled.builder.params.viewport);
     try testing.expectEqual(false, polled.find(.environment).?.window_focused);
-    try testing.expectEqual(@as(usize, 9), countOf(&polled, .environment));
+    try testing.expectEqual(@as(usize, 10), countOf(&polled, .environment));
     try testing.expectEqual(zui.Surface{ .x11 = .{ .display = window.host().display, .window = window.host().window.id } }, window.host().zuiSurface(.main));
 }
 
@@ -413,6 +417,22 @@ test "on X11 a desktop setting that changes is reported" {
     _ = polled.poll(window_host);
     try testing.expectEqual(zui.Environment.Theme.dark, polled.find(.environment).?.theme);
     try testing.expectEqual(zui.Lifecycle.@"suspend", polled.find(.lifecycle).?);
+}
+
+test "on X11 the desktop's accent is reported, and as null once unset" {
+    var window: UnmappedWindow = .{};
+    try window.open(1);
+    defer window.close();
+    const window_host = window.host();
+    var polled: zui_testing.PolledRecord = .{};
+    polled.init();
+    _ = polled.poll(window_host);
+    window_host.onDesktopReport(.{ .accent = .rgb(0x3584e4) });
+    _ = polled.poll(window_host);
+    try testing.expectEqual(zui.EnvironmentChange{ .accent = .rgb(0x3584e4) }, polled.find(.environment).?);
+    window_host.onDesktopReport(.{ .accent = null });
+    _ = polled.poll(window_host);
+    try testing.expectEqual(zui.EnvironmentChange{ .accent = null }, polled.find(.environment).?);
 }
 
 test "zui_host.Host connects to the backend forced, or follows ZUI_HOST_BACKEND, its surface naming the backend" {

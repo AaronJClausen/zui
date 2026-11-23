@@ -14,6 +14,7 @@ pub const DesktopSettings = struct {
     reduced_transparency: bool = false,
     on_battery: bool = false,
     power_saver: bool = false,
+    accent: ?zui.Color = null,
 
     pub fn power(self: DesktopSettings) zui.Environment.Power {
         return if (self.power_saver) .saver else if (self.on_battery) .battery else .plugged;
@@ -31,6 +32,7 @@ pub const ReportedEnvironment = struct {
     system_material: bool,
     custom_title_bar: bool,
     window_maximized: bool,
+    accent: ?zui.Color,
 
     /// The desktop's part of it, beside the window's.
     pub fn of(settings: DesktopSettings, window: WindowFacts) ReportedEnvironment {
@@ -43,6 +45,7 @@ pub const ReportedEnvironment = struct {
             .system_material = window.shows_material and !settings.reduced_transparency,
             .custom_title_bar = window.custom_title_bar,
             .window_maximized = window.maximized,
+            .accent = settings.accent,
         };
     }
 
@@ -55,7 +58,7 @@ pub const ReportedEnvironment = struct {
         var changed = false;
         inline for (std.meta.fields(ReportedEnvironment)) |field| {
             const value = @field(current, field.name);
-            if (reported == null or @field(reported.?, field.name) != value) {
+            if (reported == null or !std.meta.eql(@field(reported.?, field.name), value)) {
                 inbox.push(.{ .environment = @unionInit(zui.EnvironmentChange, field.name, value) });
                 changed = true;
             }
@@ -162,6 +165,7 @@ pub const Session = struct {
             .reduced_transparency => |reduced_transparency| settings.reduced_transparency = reduced_transparency,
             .on_battery => |on_battery| settings.on_battery = on_battery,
             .power_saver => |power_saver| settings.power_saver = power_saver,
+            .accent => |accent| settings.accent = accent,
             .preparing_for_sleep => |sleeping| return if (sleeping) .@"suspend" else .@"resume",
         }
         return null;

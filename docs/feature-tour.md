@@ -1192,16 +1192,21 @@ fn wasEverOpened(ui: *Ui) bool {
 The host reports the user's settings as events, and `ui.environment()`
 holds the current values: theme, contrast, reduced motion and
 transparency, text scale, locale, reading direction, HDR headroom,
-power, window focus, and whether the system material (Mica on Windows, a
+power, window focus, the user's accent color (`null` where the system
+has none), and whether the system material (Mica on Windows, a
 compositor's blur on Wayland) shows behind the window. the native
-Windows host reads them from the system, and the native Linux host reads
-the theme, contrast and reduced motion from the XDG desktop portal and
+Windows host reads them from the system, the accent from
+`DwmGetColorizationColor`, and the native Linux host reads the theme,
+contrast, reduced motion and accent from the XDG desktop portal and
 power from UPower and power-profiles-daemon, over D-Bus, and shows the
 material where the compositor offers `ext_background_effect_v1` or
 KWin's blur; where no portal answers, they stay at their defaults. The
 web host reads the theme, contrast, reduced motion and transparency from
 the page's media queries, the locale from `navigator.language`, the
-direction from the document's, and the window's focus.
+direction from the document's, the window's focus, and the accent from
+the CSS `AccentColor`. `zui_design.Preferences.from` takes the
+environment's accent as the design's accent unless the application's
+choices name one.
 
 `src/ui/palette.zig`
 
@@ -1216,7 +1221,7 @@ fn paletteFor(ui: *const Ui) Palette {
         .window = if (environment.system_material) null else if (dark) .rgb(0x15161b) else .rgb(0xf4f4f7),
         .panel = if (dark) .rgba(0x20202880) else .rgba(0xffffffcc),
         .text = if (high_contrast) (if (dark) .white else .black) else if (dark) .rgb(0xe0e0ea) else .rgb(0x23232b),
-        .accent = .rgb(0x5b8cff),
+        .accent = environment.accent orelse .rgb(0x5b8cff),
     };
 }
 

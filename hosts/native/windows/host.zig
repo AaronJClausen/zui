@@ -196,6 +196,9 @@ pub const Host = struct {
     /// Every monitor shows color this way, for tests that must not depend
     /// on the display.
     forced_display_color: ?display.DisplayColor = null,
+    /// The system's accent in place of the user's, for tests that must not
+    /// depend on the desktop.
+    forced_accent: ?zui.Color = null,
     /// Answers services as a test says instead of handing them to the
     /// system, so nothing opens or shows.
     service_fake: ?*services.ServiceFake = null,
@@ -574,7 +577,7 @@ pub const Host = struct {
                     win32.PBT_APMPOWERSTATUSCHANGE => self.reportEnvironment(hwnd, false),
                     else => {},
                 },
-                win32.WM_SETTINGCHANGE, win32.WM_THEMECHANGED => self.reportEnvironment(hwnd, false),
+                win32.WM_SETTINGCHANGE, win32.WM_THEMECHANGED, win32.WM_DWMCOLORIZATIONCOLORCHANGED => self.reportEnvironment(hwnd, false),
                 else => {},
             }
             return win32.DefWindowProcW(hwnd, message, wparam, lparam);
@@ -749,6 +752,11 @@ pub const Host = struct {
                 reported.system_material = system_material;
                 self.deliver(.{ .environment = .{ .system_material = system_material } });
             }
+            const accent = self.host.forced_accent orelse readAccent();
+            if (first or !std.meta.eql(accent, reported.accent)) {
+                reported.accent = accent;
+                self.deliver(.{ .environment = .{ .accent = accent } });
+            }
             if (first) {
                 reported.custom_title_bar = self.custom_title_bar;
                 self.deliver(.{ .environment = .{ .custom_title_bar = self.custom_title_bar } });
@@ -788,12 +796,14 @@ pub const Host = struct {
         const forced_scale = self.forced_scale;
         const system_material_unavailable = self.system_material_unavailable;
         const forced_display_color = self.forced_display_color;
+        const forced_accent = self.forced_accent;
         const service_fake = self.service_fake;
         self.* = .{
             .io = io,
             .forced_scale = forced_scale,
             .system_material_unavailable = system_material_unavailable,
             .forced_display_color = forced_display_color,
+            .forced_accent = forced_accent,
             .service_fake = service_fake,
             .hwnd = undefined,
             .anchor = undefined,
@@ -1338,6 +1348,16 @@ pub const Host = struct {
     /// Settings > Personalization > Colors > Transparency effects.
     fn readTransparencyEnabled() bool {
         return readPersonalization(W("EnableTransparency"), 1) != 0;
+    }
+
+    /// The window frames' colorization, `0xAARRGGBB`, which follows the
+    /// accent the user chose or Windows picked from the wallpaper; its alpha
+    /// is the frames' blend, not the accent's.
+    fn readAccent() ?zui.Color {
+        var colorization: win32.DWORD = 0;
+        var opaque_blend: win32.BOOL = 0;
+        if (win32.DwmGetColorizationColor(&colorization, &opaque_blend) < 0) return null;
+        return .rgb(@truncate(colorization));
     }
 
     fn readTheme() zui.Environment.Theme {

@@ -85,6 +85,13 @@ pub const Writer = struct {
         self.uint32(@intFromBool(value));
     }
 
+    pub fn double(self: *Writer, value: f64) void {
+        self.alignTo(8);
+        var encoded: [8]u8 = undefined;
+        std.mem.writeInt(u64, &encoded, @bitCast(value), .little);
+        self.bytes(&encoded);
+    }
+
     /// Also an object path, which is written as a string is.
     pub fn string(self: *Writer, text: []const u8) void {
         self.stringOfParts(&.{text});
@@ -220,6 +227,11 @@ pub const Reader = struct {
 
     pub fn boolean(self: *Reader) Error!bool {
         return try self.uint32() != 0;
+    }
+
+    pub fn double(self: *Reader) Error!f64 {
+        try self.alignTo(8);
+        return @bitCast(std.mem.readInt(u64, (try self.take(8))[0..8], self.endian));
     }
 
     /// Also an object path.

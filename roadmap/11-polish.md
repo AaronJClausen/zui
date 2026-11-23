@@ -30,7 +30,7 @@ and each is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:15-type-scale` The type scale | done |
 | `11-polish:16-corner-shapes` Corner shapes | done |
 | `11-polish:17-nested-corners` Nested corners | done |
-| `11-polish:18-system-accent` The system's accent color | not started |
+| `11-polish:18-system-accent` The system's accent color | done; the Windows host's part waiting on CI |
 | `11-polish:19-default-design` The default design | not started |
 | `11-polish:20-appearance-audit` The appearance audit | done |
 | `11-polish:21-permutations` Every permutation of a component | done |
@@ -1264,11 +1264,12 @@ three-deep nesting resolves; counts are unchanged with the feature off.
 `Environment.accent`, reported by each host, so a design follows the
 user's accent.
 
-**Grounding** (at `3f4ff58`). The Linux host's portal settings carry
-`accent-color` as `(ddd)`, and the host passes it over
-(`hosts/native/linux/desktop_bus.zig:364-385`, its test). Windows
-reports its accent through `UISettings` and `DwmGetColorizationColor`;
-the web host can read the page's `AccentColor` system color.
+**Grounding** (at `f31e1ef`). The Linux host's portal settings carry
+`accent-color` as `(ddd)`, and the host passes it over: its reader takes
+only `u` values (`hosts/native/linux/desktop_bus.zig:299-313`), as its
+test shows (`:366-399`). Windows reports its accent through `UISettings`
+and `DwmGetColorizationColor`; the web host can read the page's
+`AccentColor` system color.
 
 **Plan.** `Environment.accent: ?Color` and its `EnvironmentChange`; the
 Windows, Linux and web hosts report it; the host suite checks that a
@@ -1280,6 +1281,56 @@ reports the portal's accent; the Windows host's is waiting on CI if it
 cannot be run here.
 
 **Spec.** §7.2, §18.3.
+
+**Status.** Done, with the Windows host's part waiting on CI:
+
+- `zui.Environment.accent: ?zui.Color`, null where the system has none,
+  and `EnvironmentChange.accent`, which `Context` applies as every other
+  field (`core/src/input.zig`); `core/zui_wire/tests.zig` round-trips
+  it. SPEC.md §7.2 and §18.3 already named it.
+- The host suite: `expectPostedEvents`, which `expectHostConforms` and
+  `expectSteppedHostConforms` run, posts an accent change of `#1f7a5c`
+  after the move and expects it in order. A harness that cannot deliver
+  one returns false from `post`, as the raylib harness does.
+  `expectPushedHostConforms` posts no events, so the web host's accent
+  is held by its own tests and `test-host`.
+- Linux: the portal's `accent-color` `(ddd)` is read (`dbus.Reader`
+  gained `double`) into `DesktopSettings.accent`, an out-of-range
+  channel as null, and reported through `ReportedEnvironment` on Wayland
+  and X11 alike, so the first record carries 9 environment changes
+  beside focus. Tests: the portal's answer and a change, unset
+  `(-1, -1, -1)` and a channel of 2 as null (`desktop_bus.zig`); set,
+  repeated (nothing sent), changed and unset on Wayland, set and unset
+  on X11; both harnesses post the suite's accent through
+  `onDesktopReport`. 88 of 89 conformance tests pass on each backend
+  (the opt-in shown window skips), in Debug and ReleaseSafe.
+- Windows: `DwmGetColorizationColor`'s color, opaque, at the first
+  record and again on `WM_DWMCOLORIZATIONCOLORCHANGED`, null when it
+  fails; `Host.forced_accent` stands in for the user's in tests. The
+  harness posts the suite's accent by setting it and sending the
+  message, and a test checks the first record, a change and a repeat
+  that sends nothing. Compiled with `check` for `x86_64-windows` and
+  `aarch64-windows`, not run. **Waiting on CI:** the Windows leg of
+  `hosts/native/`'s conformance, the host suite on both windows and the
+  test "the accent is reported at the first poll, and again when the
+  colorization changes".
+- Web: `page_environment.mjs` reads the `AccentColor` system color from
+  a hidden element's computed `color` as `#rrggbb` (`"none"` where
+  `CSS.supports` does not know it) at the start, and again when the
+  color scheme or forced colors change, since no event tells of the
+  accent alone. `PageEnvironment.accent` parses it; native tests cover a
+  change, an unset accent and five malformed values. `test-host` checks
+  the page read a color (headless Chromium gives `#0075ff`) and that it
+  reached the worker in its first settings.
+- `zui_design.Preferences.from` takes `choices.accent` orelse
+  `environment.accent`; two tests at the end of
+  `core/zui_design/tests.zig`.
+- Instruction counts against `f31e1ef`: every one of the 35 instruction
+  rows +0.00%.
+- Known flake, not this item's: `x11_conformance`'s INCR clipboard test
+  failed 1 of 7 ReleaseSafe runs here while other builds loaded the
+  machine (the text read back wrong), and passed 3 of 3 on `f31e1ef`;
+  the change touches no clipboard code.
 
 ## 11-polish:19-default-design — The default design
 

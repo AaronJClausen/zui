@@ -1,6 +1,6 @@
-//! What the desktop says over D-Bus: the theme, contrast and reduced
-//! motion from the XDG desktop portal's settings on the session bus, and
-//! from the system bus whether the machine runs on battery (UPower), saves
+//! What the desktop says over D-Bus: the theme, contrast, reduced motion
+//! and accent color from the XDG desktop portal's settings on the session
+//! bus, and from the system bus whether the machine runs on battery (UPower), saves
 //! power (power-profiles-daemon) and is about to sleep (logind).
 
 const std = @import("std");
@@ -12,6 +12,8 @@ pub const Report = union(enum) {
     theme: zui.Environment.Theme,
     contrast: zui.Environment.Contrast,
     reduced_motion: bool,
+    /// Null when the user set none.
+    accent: ?zui.Color,
     /// No portal key carries it yet, so only a harness reports it.
     reduced_transparency: bool,
     on_battery: bool,
@@ -296,9 +298,15 @@ fn readSettingChanged(body: *dbus.Reader, listener: anytype) dbus.Reader.Error!v
     try readAppearanceSetting(body, key, listener);
 }
 
-/// A key's variant: each setting the host reads is a `u`.
+/// A key's variant: the accent is a `(ddd)`, each other setting the host
+/// reads a `u`.
 fn readAppearanceSetting(body: *dbus.Reader, key: []const u8, listener: anytype) dbus.Reader.Error!void {
     const value_signature = try body.variantSignature();
+    if (std.mem.eql(u8, key, "accent-color") and std.mem.eql(u8, value_signature, "(ddd)")) {
+        try body.beginStruct();
+        const channels: [3]f64 = .{ try body.double(), try body.double(), try body.double() };
+        return listener.onDesktopReport(.{ .accent = accentOf(channels) });
+    }
     if (!std.mem.eql(u8, value_signature, "u")) return body.skip(value_signature);
     const value = try body.uint32();
     if (std.mem.eql(u8, key, "color-scheme")) {
@@ -309,6 +317,17 @@ fn readAppearanceSetting(body: *dbus.Reader, key: []const u8, listener: anytype)
     } else if (std.mem.eql(u8, key, "reduced-motion")) {
         listener.onDesktopReport(.{ .reduced_motion = value == 1 });
     }
+}
+
+/// The portal's red, green and blue from 0 to 1; a channel outside that
+/// range means the user set no accent.
+fn accentOf(channels: [3]f64) ?zui.Color {
+    var channel_bytes: [3]u8 = undefined;
+    for (channels, &channel_bytes) |channel, *channel_byte| {
+        if (!(channel >= 0 and channel <= 1)) return null;
+        channel_byte.* = @intFromFloat(@round(channel * 255));
+    }
+    return .{ .r = channel_bytes[0], .g = channel_bytes[1], .b = channel_bytes[2] };
 }
 
 /// `PropertiesChanged`'s arguments, `sa{sv}as`, from UPower or
@@ -363,7 +382,13 @@ fn decodeMessage(buffer: []u8, header: dbus.Header, body: []const u8) !dbus.Mess
     return dbus.decode(try dbus.encode(buffer, header, body));
 }
 
-test "the portal's settings are the theme, contrast and reduced motion, and other keys are passed over" {
+fn writeAccent(body: *dbus.Writer, channels: [3]f64) void {
+    body.signature("(ddd)");
+    body.beginStruct();
+    for (channels) |channel| body.double(channel);
+}
+
+test "the portal's settings are the accent, theme, contrast and reduced motion, and other namespaces are passed over" {
     var body_buffer: [512]u8 = undefined;
     var body: dbus.Writer = .{ .buffer = &body_buffer };
     const namespaces = body.beginArray(8);
@@ -373,12 +398,7 @@ test "the portal's settings are the theme, contrast and reduced motion, and othe
         const settings = body.beginArray(8);
         body.beginStruct();
         body.string("accent-color");
-        body.signature("(ddd)");
-        body.beginStruct();
-        for (0..3) |_| {
-            body.alignTo(8);
-            body.bytes(&@as([8]u8, @splat(0)));
-        }
+        writeAccent(&body, .{ 0.2, 0.4, 1 });
         for ([_][]const u8{ "color-scheme", "contrast", "reduced-motion" }) |key| {
             body.beginStruct();
             body.string(key);
@@ -393,9 +413,25 @@ test "the portal's settings are the theme, contrast and reduced motion, and othe
     var reports: Reports = .{};
     var buffer: [1024]u8 = undefined;
     desktop.readSessionMessage(try decodeMessage(&buffer, .{ .type = .method_return, .reply_serial = 4, .signature = "a{sa{sv}}" }, body_buffer[0..body.len]), &reports);
-    try testing.expectEqualSlices(Report, &.{ .{ .theme = .dark }, .{ .contrast = .high }, .{ .reduced_motion = true } }, reports.all());
+    try testing.expectEqualSlices(Report, &.{ .{ .accent = .rgb(0x3366ff) }, .{ .theme = .dark }, .{ .contrast = .high }, .{ .reduced_motion = true } }, reports.all());
     try testing.expect(desktop.sources.settings_portal);
     try testing.expect(!desktop.awaitingReplies());
+}
+
+test "a changed accent is reported, and one out of range is reported as unset" {
+    var desktop: DesktopBus = .{};
+    var reports: Reports = .{};
+    var buffer: [512]u8 = undefined;
+    for ([_][3]f64{ .{ 1, 0.5, 0 }, .{ -1, -1, -1 }, .{ 0, 0, 2 } }) |channels| {
+        var body_buffer: [128]u8 = undefined;
+        var body: dbus.Writer = .{ .buffer = &body_buffer };
+        body.string(portal.appearance);
+        body.string("accent-color");
+        body.signature("v");
+        writeAccent(&body, channels);
+        desktop.readSessionMessage(try decodeMessage(&buffer, .{ .type = .signal, .path = portal.path, .interface = portal.interface, .member = "SettingChanged", .signature = "ssv" }, body_buffer[0..body.len]), &reports);
+    }
+    try testing.expectEqualSlices(Report, &.{ .{ .accent = .rgb(0xff8000) }, .{ .accent = null }, .{ .accent = null } }, reports.all());
 }
 
 test "a changed setting is reported, and the portal's error leaves the settings unanswered" {

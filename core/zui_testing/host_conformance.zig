@@ -65,13 +65,16 @@ pub const ServiceScript = struct {
 pub const HostViolation = DescribedViolation(HostError);
 
 const kept_zoom = 1.5;
+/// Unlike any system's default, so a host's first report cannot match it.
+const posted_accent: zui.Color = .rgb(0x1f7a5c);
 const at_wait_ns = 30 * std.time.ns_per_ms;
 const other_thread_wake_ns = 20 * std.time.ns_per_ms;
 
 /// Runs a host through the loop's calls on its own, without a `Context`,
 /// and fails on the first thing it did differently from the host contract:
 /// - `zuiPoll` keeps the application's zoom, reports a viewport, and gives
-///   back what the harness posted in the order it was posted;
+///   back what the harness posted in the order it was posted, a change of
+///   the system's accent color among them;
 /// - `zuiSurface` gives a kind its `zui_surfaces` names, in an output format
 ///   its `zui_output_formats` names;
 /// - `zuiWait` returns at once for `.immediately`;
@@ -228,8 +231,9 @@ pub fn milliseconds(nanoseconds: u64) u64 {
     return nanoseconds / std.time.ns_per_ms;
 }
 
-/// Posts a click, a key, typed text and a move, then polls until each
-/// event the harness could post has arrived after the one before it.
+/// Posts a click, a key, typed text, a move and an accent change, then
+/// polls until each event the harness could post has arrived after the one
+/// before it.
 pub fn expectPostedEvents(host: anytype, harness: anytype, builder: *zui.RecordBuilder, conformance: HostConformance) !?HostViolation {
     const at = builder.params.now;
     const press: zui.Pointer = .{ .id = .mouse, .kind = .mouse, .position = .{ 10, 10 }, .at = at };
@@ -242,6 +246,7 @@ pub fn expectPostedEvents(host: anytype, harness: anytype, builder: *zui.RecordB
         .{ .key_up = .{ .key = .s, .at = at } },
         .{ .text = "ok" },
         .{ .pointer_move = .{ .pointer = moved } },
+        .{ .environment = .{ .accent = posted_accent } },
     };
     var posted: [candidates.len]zui.Event = undefined;
     var posted_count: usize = 0;
@@ -473,6 +478,7 @@ fn sameEvent(event: zui.Event, posted: zui.Event) bool {
         .key_down => |key| key.key == event.key_down.key,
         .key_up => |key| key.key == event.key_up.key,
         .text => |text| std.mem.eql(u8, text, event.text),
+        .environment => |change| std.meta.eql(change, event.environment),
         else => unreachable,
     };
 }

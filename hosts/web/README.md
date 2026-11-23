@@ -154,20 +154,20 @@ id, a lost context suspends the surfaces on the next turn and its return
 resumes them, and the cursor goes to the platform only when it changes.
 The page's settings arrive as text, `changeSetting(name, value)`, each
 named as the field of `PageEnvironment` (theme, contrast, reduced motion
-and transparency, locale, direction and window focus) and the
-`zui.EnvironmentChange` it becomes; until the page says otherwise each
-is `zui.Environment`'s default, the first record reports them all, and a
-record after reports only those that changed. A locale longer than
-`zui.Locale` holds keeps the whole subtags that fit. `showPage(false)`,
-the page hidden, is `suspend` in the next record, after which the
-surfaces are suspended and nothing is drawn; `showPage(true)` is
-`resume`, and the surfaces resume unless the context is lost. Input
-waits in an inbox of 256 events and 1,024 bytes of text, in CSS pixels
-until a poll converts them to layout units over the application's zoom;
-what does not fit is dropped and counted in the record. `zig build test`
-runs `zui_testing.expectPushedHostConforms` on it over a scripted
-platform whose loop waits on the real clock, and `check` compiles it for
-the browser as the tour target's host.
+and transparency, locale, direction, window focus and accent, a color as
+`#rrggbb` or `"none"`) and the `zui.EnvironmentChange` it becomes; until
+the page says otherwise each is `zui.Environment`'s default, the first
+record reports them all, and a record after reports only those that
+changed. A locale longer than `zui.Locale` holds keeps the whole subtags
+that fit. `showPage(false)`, the page hidden, is `suspend` in the next
+record, after which the surfaces are suspended and nothing is drawn;
+`showPage(true)` is `resume`, and the surfaces resume unless the context
+is lost. Input waits in an inbox of 256 events and 1,024 bytes of text,
+in CSS pixels until a poll converts them to layout units over the
+application's zoom; what does not fit is dropped and counted in the
+record. `zig build test` runs `zui_testing.expectPushedHostConforms` on
+it over a scripted platform whose loop waits on the real clock, and
+`check` compiles it for the browser as the tour target's host.
 
 **The browser's host** is `Host` (`src/browser_host.zig`), `HostOn` the
 imports of the dedicated worker it runs in, `web/host_worker.mjs`. The
@@ -184,17 +184,20 @@ settings into the same sink, once at the start and again on each change:
 `forced-colors: active` as high contrast, `prefers-reduced-motion`,
 `prefers-reduced-transparency`, `navigator.language` and
 `languagechange`, the document's computed `direction`, watched for
-changes of the root's `dir` and `lang`, `focus` and `blur`, and
-`visibilitychange`. The worker delivers the first settings before it
-attaches the canvas, so the first record carries them. The worker
-instantiates the module on shared memory and calls its `zuiWebRun`,
-which runs the application through `zui_app.runWith`; the host's
-`zuiRun` keeps its turns and calls `zuiWebHostYield`, which throws,
-unwinding to the worker's event loop without running the epilogues of
-the frames below, as Emscripten's main loop does. The worker then starts
-the task threads, each a worker on the same memory
-(`web/tour_thread.mjs`), attaches the canvas, drawn by a `FrameDrawer`,
-and from then on takes each turn, `zuiWebHostTurn`, from
+changes of the root's `dir` and `lang`, `focus` and `blur`, the
+`AccentColor` system color, read from a hidden element's computed
+`color` ("none" where `CSS.supports` does not know it), and
+`visibilitychange`. No event tells of a new accent alone, so the page
+reads it again when the color scheme or forced colors change. The worker
+delivers the first settings before it attaches the canvas, so the first
+record carries them. The worker instantiates the module on shared memory
+and calls its `zuiWebRun`, which runs the application through
+`zui_app.runWith`; the host's `zuiRun` keeps its turns and calls
+`zuiWebHostYield`, which throws, unwinding to the worker's event loop
+without running the epilogues of the frames below, as Emscripten's main
+loop does. The worker then starts the task threads, each a worker on the
+same memory (`web/tour_thread.mjs`), attaches the canvas, drawn by a
+`FrameDrawer`, and from then on takes each turn, `zuiWebHostTurn`, from
 `requestAnimationFrame` or a timer as the host schedules it
 (`zuiWebHostSchedule`), and hands the page's events to the module's
 `zuiWeb*` exports, which take them as the client's do, with their times

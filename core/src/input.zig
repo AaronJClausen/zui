@@ -1,6 +1,7 @@
 const std = @import("std");
 const Instant = @import("record.zig").Instant;
 const ActionEvent = @import("semantics.zig").ActionEvent;
+const Color = @import("style.zig").Color;
 
 /// Identifies one contact across its events: the mouse, one finger, one pen.
 pub const PointerId = enum(u32) {
@@ -335,6 +336,9 @@ pub const Environment = struct {
     /// The window fills its monitor's work area: a custom title bar shows
     /// restore in place of maximize.
     window_maximized: bool = false,
+    /// The user's accent color, opaque, in sRGB. Null where the system has
+    /// none, the user set none, or the host cannot read it.
+    accent: ?Color = null,
 
     pub const Theme = enum(u8) { light, dark };
     pub const Contrast = enum(u8) { normal, high };
@@ -367,6 +371,7 @@ pub const EnvironmentChange = union(enum) {
     system_material: bool,
     custom_title_bar: bool,
     window_maximized: bool,
+    accent: ?Color,
 };
 
 /// Turns the state a library reports once per frame (where the mouse is,
@@ -464,9 +469,13 @@ test "an environment change sets one setting and keeps the others" {
     var environment: Environment = .{ .reduced_motion = true };
     environment.apply(.{ .theme = .dark });
     environment.apply(.{ .locale = try .parse("fr-CA") });
+    environment.apply(.{ .accent = .rgb(0x3366ff) });
     try std.testing.expectEqual(Environment.Theme.dark, environment.theme);
     try std.testing.expectEqualStrings("fr-CA", environment.locale.tag());
     try std.testing.expect(environment.reduced_motion);
+    try std.testing.expectEqual(Color.rgb(0x3366ff), environment.accent.?);
+    environment.apply(.{ .accent = null });
+    try std.testing.expectEqual(null, environment.accent);
     try std.testing.expectError(error.TagTooLong, Locale.parse("x" ** (Locale.capacity + 1)));
 }
 

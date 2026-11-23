@@ -1188,7 +1188,7 @@ fn wasEverOpened(ui: *Ui) bool {
 
       <article class="feature" id="environment" data-title="Environment">
         <div class="feature-head"><h3>The environment</h3><span class="pill shipped">Shipped</span></div>
-        <p>The host reports the user's settings as events, and <code class="z">ui.environment()</code> holds the current values: theme, contrast, reduced motion and transparency, text scale, locale, reading direction, HDR headroom, power, window focus, and whether the system material (Mica on Windows, a compositor's blur on Wayland) shows behind the window. the native Windows host reads them from the system, and the native Linux host reads the theme, contrast and reduced motion from the XDG desktop portal and power from UPower and power-profiles-daemon, over D-Bus, and shows the material where the compositor offers <code class="z">ext_background_effect_v1</code> or KWin's blur; where no portal answers, they stay at their defaults. The web host reads the theme, contrast, reduced motion and transparency from the page's media queries, the locale from <code class="z">navigator.language</code>, the direction from the document's, and the window's focus.</p>
+        <p>The host reports the user's settings as events, and <code class="z">ui.environment()</code> holds the current values: theme, contrast, reduced motion and transparency, text scale, locale, reading direction, HDR headroom, power, window focus, the user's accent color (<code class="z">null</code> where the system has none), and whether the system material (Mica on Windows, a compositor's blur on Wayland) shows behind the window. the native Windows host reads them from the system, the accent from <code class="z">DwmGetColorizationColor</code>, and the native Linux host reads the theme, contrast, reduced motion and accent from the XDG desktop portal and power from UPower and power-profiles-daemon, over D-Bus, and shows the material where the compositor offers <code class="z">ext_background_effect_v1</code> or KWin's blur; where no portal answers, they stay at their defaults. The web host reads the theme, contrast, reduced motion and transparency from the page's media queries, the locale from <code class="z">navigator.language</code>, the direction from the document's, the window's focus, and the accent from the CSS <code class="z">AccentColor</code>. <code class="z">zui_design.Preferences.from</code> takes the environment's accent as the design's accent unless the application's choices name one.</p>
 <script type="text/x-zig" data-file="src/ui/palette.zig">
 const Palette = struct { window: ?zui.Color, panel: zui.Color, text: zui.Color, accent: zui.Color };
 
@@ -1200,7 +1200,7 @@ fn paletteFor(ui: *const Ui) Palette {
         .window = if (environment.system_material) null else if (dark) .rgb(0x15161b) else .rgb(0xf4f4f7),
         .panel = if (dark) .rgba(0x20202880) else .rgba(0xffffffcc),
         .text = if (high_contrast) (if (dark) .white else .black) else if (dark) .rgb(0xe0e0ea) else .rgb(0x23232b),
-        .accent = .rgb(0x5b8cff),
+        .accent = environment.accent orelse .rgb(0x5b8cff),
     };
 }
 

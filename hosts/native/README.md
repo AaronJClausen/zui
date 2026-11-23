@@ -96,7 +96,9 @@ it. It:
   characters in one event;
 - reports the environment: dark mode (also darkening the title bar),
   high contrast, animations turned off (`reduced_motion`), power
-  (plugged, on battery, battery saver) and whether the window has focus;
+  (plugged, on battery, battery saver), whether the window has focus,
+  and the accent color, `DwmGetColorizationColor`'s, read again on
+  `WM_DWMCOLORIZATIONCOLORCHANGED`;
 - reports lifecycle events: Ctrl+C, Ctrl+Break, the console closing,
   logging off, shutting down and the session ending are
   `.terminate_requested`, after which the next poll reports the window
@@ -215,12 +217,14 @@ Wayland client has no modal loop to escape. So far it:
   `repeat` set and its text typed again; a modifier pressed meanwhile
   leaves it repeating;
 - reports the environment the desktop gives over D-Bus: the theme, high
-  contrast and reduced motion from the XDG desktop portal's settings
-  (`org.freedesktop.appearance`), and power from UPower (on battery) and
-  power-profiles-daemon (`power-saver` is the saver), each change as it
-  is signalled. Without a session bus, a portal or either daemon, as in
-  a container or under a bare compositor, those settings stay at zui's
-  defaults, and `host.environmentSources()` says which answered;
+  contrast, reduced motion and the accent color from the XDG desktop
+  portal's settings (`org.freedesktop.appearance`; an `accent-color` out
+  of 0 to 1 is no accent, `null`), on Wayland and X11 alike, and power
+  from UPower (on battery) and power-profiles-daemon (`power-saver` is
+  the saver), each change as it is signalled. Without a session bus, a
+  portal or either daemon, as in a container or under a bare compositor,
+  those settings stay at zui's defaults, and `host.environmentSources()`
+  says which answered;
 - reports lifecycle events: SIGINT, SIGTERM and SIGHUP are
   `.terminate_requested`, after which the next poll reports the window
   closed, unless the application handles or ignores the signal itself (a

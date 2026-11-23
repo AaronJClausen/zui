@@ -110,6 +110,10 @@ const CompositorHarness = struct {
                 }
                 window_host.onKey(evdev_code, event == .key_down);
             },
+            .environment => |change| switch (change) {
+                .accent => |accent| window_host.onDesktopReport(.{ .accent = accent }),
+                else => return false,
+            },
             else => return false,
         }
         return true;
@@ -293,7 +297,7 @@ test "without a bus to read, the first poll reports the environment at zui's def
     polled.init();
     _ = polled.poll(window.host());
     const reported = environmentOf(&polled);
-    try testing.expectEqual(@as(usize, 8), reported.changes);
+    try testing.expectEqual(@as(usize, 9), reported.changes);
     try testing.expectEqual(zui.Environment{ .window_focused = true }, reported.environment);
     try testing.expectEqual(desktop_bus.Sources{}, window.host().environmentSources());
 }
@@ -308,7 +312,7 @@ test "the desktop's own buses, where they run, report the whole environment with
     var polled: zui_testing.PolledRecord = .{};
     polled.init();
     _ = polled.poll(window.host());
-    try testing.expectEqual(@as(usize, 8), environmentOf(&polled).changes);
+    try testing.expectEqual(@as(usize, 9), environmentOf(&polled).changes);
 }
 
 test "a setting the desktop changes is reported, and only what changed" {
@@ -336,6 +340,29 @@ test "a setting the desktop changes is reported, and only what changed" {
         window_host.onDesktopReport(step[0]);
         _ = polled.poll(window_host);
         try testing.expectEqual(step[1], polled.find(.environment).?.power);
+    }
+}
+
+test "the desktop's accent is reported when set, as null when unset, and again when it changes" {
+    var window: UnshownWindow = .{};
+    try window.open(1);
+    defer window.close();
+    const window_host = window.host();
+    var polled: zui_testing.PolledRecord = .{};
+    polled.init();
+    _ = polled.poll(window_host);
+    try testing.expectEqual(null, environmentOf(&polled).environment.accent);
+
+    const steps = [_]struct { reported: ?zui.Color, polled: ?zui.EnvironmentChange }{
+        .{ .reported = .rgb(0x3584e4), .polled = .{ .accent = .rgb(0x3584e4) } },
+        .{ .reported = .rgb(0x3584e4), .polled = null },
+        .{ .reported = .rgb(0xe66100), .polled = .{ .accent = .rgb(0xe66100) } },
+        .{ .reported = null, .polled = .{ .accent = null } },
+    };
+    for (steps) |step| {
+        window_host.onDesktopReport(.{ .accent = step.reported });
+        _ = polled.poll(window_host);
+        try testing.expectEqual(step.polled, polled.find(.environment));
     }
 }
 
