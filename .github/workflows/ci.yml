@@ -129,8 +129,8 @@ jobs:
           # default ASLR entropy, and exits before any test runs.
           - { leg: ThreadSanitizer, os: ubuntu-latest, run: sudo sysctl vm.mmap_rnd_bits=28 && zig build test-unit -Dzui-sanitize-thread=true }
           - { leg: unit tests x86-linux, os: ubuntu-latest, run: zig build test-unit -Dtarget=x86-linux }
-          - { leg: "unit tests x86-linux ReleaseFast, shard 1 of 2", os: ubuntu-latest, run: zig build test-unit-1 -Dtarget=x86-linux -Doptimize=ReleaseFast }
-          - { leg: "unit tests x86-linux ReleaseFast, shard 2 of 2", os: ubuntu-latest, run: zig build test-unit-2 -Dtarget=x86-linux -Doptimize=ReleaseFast }
+          - { leg: "unit tests x86-linux ReleaseFast, shard 1 of 2", cache-key: x86-linux ReleaseFast, os: ubuntu-latest, run: zig build test-unit-1 -Dtarget=x86-linux -Doptimize=ReleaseFast }
+          - { leg: "unit tests x86-linux ReleaseFast, shard 2 of 2", cache-key: x86-linux ReleaseFast, os: ubuntu-latest, run: zig build test-unit-2 -Dtarget=x86-linux -Doptimize=ReleaseFast }
           - leg: checks for six targets
             os: ubuntu-latest
             run: >-
@@ -142,7 +142,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-zig
         with:
-          cache-key: ${{ matrix.leg }}
+          cache-key: ${{ matrix.cache-key || matrix.leg }}
           use-cache: ${{ !matrix.without-cache }}
       - run: ${{ matrix.run }}
 
