@@ -483,6 +483,7 @@ jobs:
           - { leg: test-demo (Node), run: node --version && zig build test-demo }
           - { leg: test-demo ReleaseSafe (Node), run: node --version && zig build test-demo -Doptimize=ReleaseSafe }
           - { leg: test-input (headless Chrome), run: google-chrome --version && zig build test-input -Dbrowser=google-chrome }
+          - { leg: test-host (headless Chrome), run: google-chrome --version && zig build test-host -Dbrowser=google-chrome }
     defaults:
       run:
         working-directory: hosts/web

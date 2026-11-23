@@ -177,12 +177,12 @@ within 10 minutes:
   as the Windows examples do;
 - `hosts/web/`: on Linux, its tests in Debug with `check` there and for
   x86-64 Windows and ARM64 macOS, its tests in each release mode,
-  `test-demo` in Debug and in ReleaseSafe, and `test-input`, each in a
-  job of its own; `test-site` in headless Google Chrome; and `test-draw`
-  under `xvfb-run`, its reference drawn by llvmpipe and compared with
-  its allowance, keeping the frames that do not match as the run's
-  artifacts. `test-host`, the tour on the web host in headless Chromium,
-  has no job yet and runs locally.
+  `test-demo` in Debug and in ReleaseSafe, `test-input`, and
+  `test-host`, the tour on the web host in headless Google Chrome, each
+  in a job of its own; `test-site`, the published page, in headless
+  Google Chrome; and `test-draw` under `xvfb-run`, its reference drawn
+  by llvmpipe and compared with its allowance, keeping the frames that
+  do not match as the run's artifacts.
 
 Every job sets Zig up through `.github/actions/setup-zig`, which turns
 off Windows Defender's real-time scanning on Windows, where it slows

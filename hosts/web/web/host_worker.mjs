@@ -22,8 +22,11 @@
 // host yields to this event loop by throwing from an import; from then
 // on, each turn is `zuiWebHostTurn`, from an animation frame or a timer as
 // the host schedules it. `globalThis.zuiHost` counts the turns and the
-// frames drawn, holds the drawers, and keeps the page's settings and
-// visibility as last delivered, for a check to read.
+// frames drawn, holds the drawers and the module's exports, keeps the
+// page's settings and visibility as last delivered, and calls its
+// `onSchedule`, if set, with each turn the host schedules, for a check:
+//
+//   zuiHost.onSchedule = ({ now, kind, atMilliseconds }) => log.push(atMilliseconds - now);
 
 import { FrameDrawer, frameDrawerImports } from "./frame_drawer.mjs";
 import { exportsSink, sinkCalls, timedSinkCalls } from "./input_recorder.mjs";
@@ -36,7 +39,7 @@ const scheduleKinds = { animationFrame: 0, timer: 1, input: 2, ended: 3 };
 const textDecoder = new TextDecoder();
 
 const drawers = new Map();
-const progress = { turns: 0, framesDrawn: 0, contextsLost: 0, contextsRestored: 0, measured: null, settings: {}, pageShown: true, drawers };
+const progress = { turns: 0, framesDrawn: 0, contextsLost: 0, contextsRestored: 0, measured: null, settings: {}, pageShown: true, drawers, module: null, onSchedule: null };
 globalThis.zuiHost = progress;
 
 let wasm = null;
@@ -71,6 +74,7 @@ function cancelScheduled() {
 }
 
 function schedule(kind, atMilliseconds) {
+  progress.onSchedule?.({ now: performance.now(), kind: Object.keys(scheduleKinds).find((name) => scheduleKinds[name] === kind), atMilliseconds });
   cancelScheduled();
   if (failed) return;
   if (kind === scheduleKinds.animationFrame) scheduled = { animationFrame: requestAnimationFrame(takeTurn) };
@@ -152,6 +156,7 @@ async function start({ moduleUrl, canvas, canvasId, cssSize, devicePixelRatio, e
   memory = new WebAssembly.Memory(importedMemoryLimits(bytes));
   const instance = await WebAssembly.instantiate(module, { env: { memory }, zui_web_host: hostImports(), ...drawingImports() });
   wasm = instance.exports;
+  progress.module = wasm;
   sink = exportsSink(wasm, () => memory);
   pageToWorkerClock = pageTimeOrigin - performance.timeOrigin;
 

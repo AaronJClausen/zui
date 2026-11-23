@@ -43,6 +43,11 @@ pub fn setup(options: Options) !zui_app.Setup {
 /// rather than yielding.
 pub const fail = browser_host.fail;
 
+/// The worker's `performance.now()`, in milliseconds, which moves on within
+/// a turn while the `SteppedIo`'s clock stands still: for timing what a
+/// turn does, as a `zui_tour.Stopwatch` does.
+pub const millisecondsNow = browser_host.BrowserPlatform.zuiWebHostNow;
+
 /// A worker has no stderr; what the application and `zui_app` log is
 /// dropped.
 pub const std_options: std.Options = .{ .logFn = dropLog };
@@ -84,5 +89,15 @@ const exports = struct {
     /// application runs.
     export fn zuiWebRunThread(index: u32) void {
         stepped.runThread(index);
+    }
+
+    /// The application's tasks started so far, for a check to read.
+    export fn zuiWebTasksStarted() f64 {
+        return @floatFromInt(stepped.counts.started);
+    }
+
+    /// The application's tasks finished so far, for a check to read.
+    export fn zuiWebTasksFinished() f64 {
+        return @floatFromInt(stepped.counts.finished);
     }
 };

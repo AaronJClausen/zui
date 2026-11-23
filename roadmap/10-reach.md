@@ -921,6 +921,49 @@ loaded the machine (a load average of 6 to 10). Not run: `test-host` in
 CI, which has no job for it yet. Slice 5, the published page on the
 host, is next.
 
+Slice 5 is done: the published page is the tour on the host. One page,
+`web/index.html`, is the tour target's (`web/tour.html` became it, and
+the thin client's page is gone): `zig build site` and `zig build tour`
+write the same files, `site_scripts` with the frame drawer,
+`zui-tour.wasm` and the fonts' licences (`sitePageFiles`), to
+`zig-out/site` and `zig-out/tour`. The site no longer carries
+`zui-web.wasm`, `client.mjs`, `tour_page.mjs`, `tour_worker.mjs`,
+`zui-web-tour.wasm`, the fonts or `truetype-fonts.json`: the module
+embeds its fonts. `zig build` still writes the client and the tour's
+worker for `test-demo` and `test-draw`, and `tour_page.mjs` stays,
+though no page loads it now. The service worker caches nothing, so a
+returning visitor gets what the site serves now; it is unchanged. The
+tour target wraps `zui_tour.App` to time its frames on the worker's
+`performance.now()` (`zui_web.worker.millisecondsNow`, the host's clock
+import), since the `SteppedIo`'s clock stands still for all of a turn,
+so the strip no longer shows 0 µs, and exports what the strip shows
+(`zuiTourNewestFrameMicroseconds`); `zui_web.worker` exports the tasks
+started and finished, and the worker's `zuiHost` holds the module's
+exports and calls an `onSchedule` hook, for the checks. `test-site`
+(`check_site.mjs`) now reads the host's worker through the DevTools
+protocol and keeps every check it had: isolated by the service worker
+after one reload; 2,726 colors at 1600×1000; the newest frame timed at
+1,220 µs in Debug and 380 µs in ReleaseSmall; idle, 1 frame a second on
+the Overview and on Photo Culling while the display ran at 57 to 60; the
+pointer over the rail and Ctrl+PageDown; a click on Log Tail started 2
+to 4 tasks, which drew 20 to 24 frames a second without input, the host
+never scheduling a turn later than their next publication; and 40 tasks
+finished without input on Photo Culling, the host never waiting for
+input while one was left. It passes in Debug and ReleaseSmall, where the
+site is 2.76 MB, `zui-tour.wasm` 2.69 MB (513 KB gzipped), from
+`zui-web.wasm`'s 80 KB, `zui-web-tour.wasm`'s 1.7 MB and the fonts.
+`test` in Debug, ReleaseFast and ReleaseSafe (55 tests), `check`,
+`test-input`, `test-demo` in Debug and ReleaseSafe, and `test-draw`
+pass. `test-host`, which now serves the same page, passed in 4 of 5
+runs; the one failure printed no message the build kept, and the known
+idle check on Settings is the likely cause. CI's web matrix gains a
+`test-host` leg in headless Google Chrome, which passed in 37 s, as
+`test-site`'s job did in 15 s, in `zig build ci`'s container here; it
+has not run on a runner yet, whose software GPU may draw Clickable
+Chaos's wall more slowly than its check allows. `pages.yml` still builds
+the site in ReleaseSmall and runs `test-site` on it before publishing.
+Slice 6, text input and services, is next.
+
 Decided here:
 
 - **A task's worker wakes the host's by message.** Tasks run only inside

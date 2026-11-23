@@ -49,10 +49,10 @@ pub fn build(b: *std.Build) void {
     const test_demo = b.step("test-demo", "Stream the tour, headless, to the browser's client under Node, and check every frame decodes to what was drawn; run the tour in a worker under Node, and check every frame is the one it draws natively");
     const test_draw = b.step("test-draw", "Draw frames of the tour in headless Chromium, with one sample per pixel and with four, and check each against the sokol renderer drawing it alike; needs a display");
     const test_input = b.step("test-input", "Give the client input in headless Chromium, run the tour on the records it writes, and check the tour took them and the page shows its cursor");
-    const site_step = b.step("site", "Write the published page, the client, the tour's worker and the tour's fonts to zig-out/site");
+    const site_step = b.step("site", "Write the published page, the tour on the web host with its scripts, its module and its fonts' licences, to zig-out/site");
     const tour_step = b.step("tour", "Write the tour on the web host, its page, its worker's scripts and its module, to zig-out/tour");
     const test_host = b.step("test-host", "Open the tour on the web host in headless Chromium, and check it draws the tour, sleeps while idle, its input reaches the tour, it shows the cursor the tour asks for, a lost WebGL context comes back with the tour's screen kept, the page's settings restyle it, and a hidden page draws nothing");
-    const test_site = b.step("test-site", "Serve the published page without isolation headers, open it in headless Chromium, and check its service worker isolates it, it draws the tour's frames, sleeps while idle, and its input wakes it and reaches the tour");
+    const test_site = b.step("test-site", "Serve the published page without isolation headers, open it in headless Chromium, and check its service worker isolates it, the tour on the web host draws and times its frames, sleeps while idle, and its input wakes it and reaches the tour, whose tasks run without input");
     const browser = b.option([]const u8, "browser", "The Chromium that `test-draw` runs headless (default: chromium)") orelse "chromium";
     const worker_target = b.resolveTargetQuery(.{
         .cpu_arch = .wasm32,
@@ -66,8 +66,16 @@ pub fn build(b: *std.Build) void {
 
     const tour_on_host = tourOnHost(b, worker_truetype_dependency, worker_target, optimize, core_options);
     check_step.dependOn(&tour_on_host.step);
-    const tour_page = tourPageFiles(b, tour_on_host, webglDependency(b, worker_target, optimize, core_options));
+    const tour_page = sitePageFiles(b, tour_on_host, webglDependency(b, worker_target, optimize, core_options));
     tour_step.dependOn(&b.addInstallDirectory(.{ .source_dir = tour_page.getDirectory(), .install_dir = .prefix, .install_subdir = "tour" }).step);
+    site_step.dependOn(&b.addInstallDirectory(.{ .source_dir = tour_page.getDirectory(), .install_dir = .prefix, .install_subdir = "site" }).step);
+    const open_site = b.addSystemCommand(&.{"node"});
+    open_site.addFileArg(b.path("web/check_site.mjs"));
+    open_site.addArg(browser);
+    open_site.addDirectoryArg(tour_page.getDirectory());
+    open_site.addFileInput(b.path("web/headless_page.mjs"));
+    open_site.expectExitCode(0);
+    test_site.dependOn(&open_site.step);
     const open_tour = b.addSystemCommand(&.{"node"});
     open_tour.addFileArg(b.path("web/check_host.mjs"));
     open_tour.addArg(browser);
@@ -120,16 +128,6 @@ pub fn build(b: *std.Build) void {
     for ([_][]const u8{ "web/check_input.html", "web/input_recorder.mjs", "web/headless_page.mjs" }) |page_file| input_in_browser.addFileInput(b.path(page_file));
     input_in_browser.expectExitCode(0);
     test_input.dependOn(&input_in_browser.step);
-
-    const site = siteFiles(b, client, tour_worker, webglDependency(b, target, optimize, core_options));
-    site_step.dependOn(&b.addInstallDirectory(.{ .source_dir = site.getDirectory(), .install_dir = .prefix, .install_subdir = "site" }).step);
-    const open_site = b.addSystemCommand(&.{"node"});
-    open_site.addFileArg(b.path("web/check_site.mjs"));
-    open_site.addArg(browser);
-    open_site.addDirectoryArg(site.getDirectory());
-    open_site.addFileInput(b.path("web/headless_page.mjs"));
-    open_site.expectExitCode(0);
-    test_site.dependOn(&open_site.step);
 
     // Only the reference `test-draw` compares with needs the sokol renderer.
     const zui_sokol_dependency = sokolDeclaring(b, core_options.on(target, optimize), "zui_sokol") orelse return;
@@ -218,44 +216,9 @@ const tour_fonts = [_][]const u8{
     "LiberationMono-Regular.ttf",
 };
 
-/// The licences of `tour_fonts`, published beside them.
+/// The licences of `tour_fonts`, which the tour target embeds, published
+/// with it.
 const tour_font_licences = [_][]const u8{ "OFL.txt", "LiberationMono-LICENSE.txt" };
-
-/// What the published page loads from `web/`, besides the client, the frame
-/// drawer, the tour's worker and the fonts.
-const site_scripts = [_][]const u8{
-    "index.html",
-    "cross_origin_isolation.mjs",
-    "isolation_service_worker.js",
-    "tour_page.mjs",
-    "client.mjs",
-    "input_recorder.mjs",
-    "worker_port.mjs",
-    "tour_worker.mjs",
-    "tour_thread.mjs",
-    "shared_module.mjs",
-};
-
-/// The published site: the page, the client, the frame drawer, the tour's
-/// worker, and the tour's fonts with their licences.
-fn siteFiles(b: *std.Build, client: *std.Build.Step.Compile, worker: *std.Build.Step.Compile, webgl_dependency: *std.Build.Dependency) *std.Build.Step.WriteFile {
-    const site = b.addWriteFiles();
-    for (site_scripts) |script| _ = site.addCopyFile(b.path(b.fmt("web/{s}", .{script})), script);
-    _ = site.addCopyFile(webgl_dependency.path("web/frame_drawer.mjs"), "frame_drawer.mjs");
-    _ = site.addCopyFile(client.getEmittedBin(), "zui-web.wasm");
-    _ = site.addCopyFile(worker.getEmittedBin(), "zui-web-tour.wasm");
-    var font_urls: std.ArrayList(u8) = .empty;
-    font_urls.append(b.allocator, '[') catch @panic("out of memory");
-    for (tour_fonts, 0..) |font, index| {
-        const url = b.fmt("fonts/{s}", .{font});
-        _ = site.addCopyFile(fontsDependency(b).path(font), url);
-        font_urls.print(b.allocator, "{s}\"{s}\"", .{ if (index == 0) "" else ",", url }) catch @panic("out of memory");
-    }
-    font_urls.append(b.allocator, ']') catch @panic("out of memory");
-    _ = site.add("truetype-fonts.json", font_urls.items);
-    for (tour_font_licences) |licence| _ = site.addCopyFile(fontsDependency(b).path(licence), b.fmt("fonts/{s}", .{licence}));
-    return site;
-}
 
 fn tourSessionImports(b: *std.Build, truetype_dependency: *std.Build.Dependency, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, core_options: CoreOptions) []const std.Build.Module.Import {
     const core_dependency = b.dependency("zui_core", core_options.on(target, optimize));
@@ -279,6 +242,7 @@ fn tourWorker(b: *std.Build, truetype_dependency: *std.Build.Dependency, worker_
 fn tourOnHost(b: *std.Build, truetype_dependency: *std.Build.Dependency, worker_target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, core_options: CoreOptions) *std.Build.Step.Compile {
     const core_dependency = b.dependency("zui_core", core_options.on(worker_target, optimize));
     const imports = b.allocator.dupe(std.Build.Module.Import, &.{
+        .{ .name = "zui", .module = core_dependency.module("zui") },
         .{ .name = "zui_app", .module = core_dependency.module("zui_app") },
         .{ .name = "zui_web", .module = webModule(b, "src/root.zig", worker_target, optimize, core_options) },
         .{ .name = "zui_webgl", .module = webglDependency(b, worker_target, optimize, core_options).module("zui_webgl") },
@@ -288,9 +252,10 @@ fn tourOnHost(b: *std.Build, truetype_dependency: *std.Build.Dependency, worker_
     return workerModule(b, "zui-tour", "examples/tour.zig", imports, worker_target, optimize);
 }
 
-/// What the tour target's page loads from `web/`, besides its page,
-/// `tour.html`, the frame drawer and the module.
-const tour_page_scripts = [_][]const u8{
+/// What the published page, the tour target's, loads from `web/`, besides
+/// the frame drawer and the module.
+const site_scripts = [_][]const u8{
+    "index.html",
     "cross_origin_isolation.mjs",
     "isolation_service_worker.js",
     "host_page.mjs",
@@ -302,12 +267,12 @@ const tour_page_scripts = [_][]const u8{
     "tour_thread.mjs",
 };
 
-/// What `zig build tour` writes: the tour target's page, the scripts its
-/// page and worker load, its module, and its fonts' licences.
-fn tourPageFiles(b: *std.Build, tour_on_host: *std.Build.Step.Compile, webgl_dependency: *std.Build.Dependency) *std.Build.Step.WriteFile {
+/// What `zig build site` publishes and `zig build tour` writes: the tour
+/// target's page, the scripts its page and worker load, its module, whose
+/// fonts are embedded, and their licences.
+fn sitePageFiles(b: *std.Build, tour_on_host: *std.Build.Step.Compile, webgl_dependency: *std.Build.Dependency) *std.Build.Step.WriteFile {
     const page = b.addWriteFiles();
-    _ = page.addCopyFile(b.path("web/tour.html"), "index.html");
-    for (tour_page_scripts) |script| _ = page.addCopyFile(b.path(b.fmt("web/{s}", .{script})), script);
+    for (site_scripts) |script| _ = page.addCopyFile(b.path(b.fmt("web/{s}", .{script})), script);
     _ = page.addCopyFile(webgl_dependency.path("web/frame_drawer.mjs"), "frame_drawer.mjs");
     _ = page.addCopyFile(tour_on_host.getEmittedBin(), "zui-tour.wasm");
     for (tour_font_licences) |licence| _ = page.addCopyFile(fontsDependency(b).path(licence), b.fmt("fonts/{s}", .{licence}));

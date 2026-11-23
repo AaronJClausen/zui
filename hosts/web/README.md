@@ -1,15 +1,16 @@
 # The web host
 
-`zui_web` is zui in the browser: today a thin client that draws an
-application streamed over `zui_wire`
-(`09-seeing-the-ui:04-demo-in-browser`), the
-[tour](../../apps/tour/README.md) in a Web Worker, and the page that
-puts them together, published to GitHub Pages by the Pages workflow; and
-the web host, `Host`, which runs an application in a dedicated worker
-drawing on the canvas its page transferred, with the tour on it
-(`10-reach:02-web-host`). It exports no module yet: its steps run from
-`hosts/web/` (see *Development*). Everything under its `src/` that the
-browser runs compiles for `wasm32-freestanding`.
+`zui_web` is zui in the browser: the web host, `Host`, which runs an
+application in a dedicated worker drawing on the canvas its page
+transferred (`10-reach:02-web-host`), and the
+[tour](../../apps/tour/README.md) on it, the page GitHub Pages publishes
+by the Pages workflow; and a thin client that draws an application
+streamed over `zui_wire` (`09-seeing-the-ui:04-demo-in-browser`), with
+the tour in a Web Worker writing its frames to it, which the checks use
+to compare the browser's frames and drawing with the native ones. It
+exports no module yet: its steps run from `hosts/web/` (see
+*Development*). Everything under its `src/` that the browser runs
+compiles for `wasm32-freestanding`.
 
 ## Development
 
@@ -31,9 +32,9 @@ the sokol renderer's OpenGL window (CI runs it under `xvfb-run`):
 | `zig build test-demo` | stream the tour to the client under Node, and check every frame decodes to what was drawn; run the tour in a worker under Node, and check every frame is the one the tour draws natively |
 | `zig build test-draw` | draw a frame of each of the tour's screens in headless Chromium, with one sample per pixel and with four, and check each against the sokol renderer drawing it alike |
 | `zig build test-input` | give the page input in headless Chromium, run the tour on the records the client wrote of it, and check the tour took them and the page shows the cursor it asks for |
-| `zig build site` | write the published page, the client, the frame drawer, the tour's worker and its fonts to `zig-out/site`; serve that directory over HTTP (or HTTPS, off `localhost`) to run the tour in a browser |
-| `zig build test-site` | serve the site without isolation headers, open it in headless Chromium, and check its service worker isolates it, it draws the tour's frames, sleeps while idle, and its input wakes it and reaches the tour |
-| `zig build tour` | write the tour on the web host to `zig-out/tour`: its page, the scripts of its page and worker, and `zui-tour.wasm`; serve that directory cross-origin isolated (`Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`), or over HTTPS, where its service worker isolates it, to run the tour |
+| `zig build site` | write the published page, the tour on the web host, to `zig-out/site`: its page, the scripts of its page and worker, the frame drawer, `zui-tour.wasm` and its fonts' licences; serve that directory over HTTP (or HTTPS, off `localhost`) to run the tour in a browser |
+| `zig build test-site` | serve the site without isolation headers, open it in headless Chromium, and check its service worker isolates it, the tour draws and times its frames, sleeps while idle, and its input wakes it and reaches the tour, whose tasks run without input |
+| `zig build tour` | write the same page to `zig-out/tour`; serve that directory cross-origin isolated (`Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`), or over HTTPS, where its service worker isolates it, to run the tour |
 | `zig build test-host` | serve the tour on the web host cross-origin isolated, open it in headless Chromium without a display, and check its worker draws the tour, sleeps while idle, takes the page's input, shows the cursor the tour asks for on the page's canvas, draws the same screen again after its WebGL context is lost and restored, hears the page's settings, the tour restyled as the emulated media queries and the document's direction change, and draws nothing while another tab hides the page |
 
 When `test-draw` fails, it prints each failing frame's numbers and
@@ -218,17 +219,18 @@ export fn zuiWebRun() void {
 }
 ```
 
-That is the tour target, `examples/tour.zig`. `zig build tour` writes
-its page, `web/tour.html`, with its scripts and `zui-tour.wasm` (2.7 MB
-in ReleaseSmall, the fonts embedded), to `zig-out/tour`.
-`zig build test-host` serves it cross-origin isolated to headless
-Chromium, which needs no display, and reads the worker through the
-DevTools protocol: the tour must draw at least 64 colors at the canvas's
-size after a resize to 1280×800 CSS pixels at a ratio of 1.25; take at
-most 3 turns in 2 s idle on the Overview and on Settings, the heartbeat
-alone, while the page sees at least 30 animation frames; show the
-pointer cursor on the page's canvas with the mouse over the rail, and
-change the canvas on Ctrl+PageDown; and, after `WEBGL_lose_context`
+The tour target, `examples/tour.zig`, does this around the tour, whose
+frames it times on the worker's clock. `zig build tour` writes its page,
+`web/index.html`, the published page, with its scripts and
+`zui-tour.wasm` (2.7 MB in ReleaseSmall, the fonts embedded), to
+`zig-out/tour`. `zig build test-host` serves it cross-origin isolated to
+headless Chromium, which needs no display, and reads the worker through
+the DevTools protocol: the tour must draw at least 64 colors at the
+canvas's size after a resize to 1280×800 CSS pixels at a ratio of 1.25;
+take at most 3 turns in 2 s idle on the Overview and on Settings, the
+heartbeat alone, while the page sees at least 30 animation frames; show
+the pointer cursor on the page's canvas with the mouse over the rail,
+and change the canvas on Ctrl+PageDown; and, after `WEBGL_lose_context`
 loses and restores its context on Settings, draw Settings again, at most
 2% of its pixels changed. Then, through `Emulation.setEmulatedMedia`,
 the worker must hear the page's first settings; an emulated dark scheme
@@ -240,39 +242,37 @@ which the tour does not show, must reach the worker; another tab in
 front must hide the page and take its focus, and the worker draw no
 frame in 1.5 s, and the page brought to the front again draw Settings as
 before; and on Clickable Chaos, whose wall moves, reduced motion must
-leave the worker at most 3 turns in 2 s. Limits: there is no text input,
-clipboard or opened URL, `navigator.language` is read but not mapped to
-a direction when the document gives none, and the tour's strip times its
-frames on the `SteppedIo`'s clock, so it shows 0 µs.
+leave the worker at most 3 turns in 2 s. The tour target times the
+tour's frames on the worker's `performance.now()`
+(`zui_web.worker.millisecondsNow`), since the `SteppedIo`'s clock stands
+still for all of a turn, and exports what its strip shows
+(`zuiTourNewestFrameMicroseconds`); `zui_web.worker` exports the tasks
+started and finished (`zuiWebTasksStarted`, `zuiWebTasksFinished`), for
+the checks. Limits: there is no text input, clipboard or opened URL, and
+`navigator.language` is read but not mapped to a direction when the
+document gives none.
 
-**The published page** puts it all together: `web/index.html` starts the
-tour's worker, draws each frame it sends on the canvas, and sends it the
-canvas's input as records. It sleeps between frames as a native host
-does: each answer from the worker carries when to step the tour again,
-which is the tour's `ui.nextFrame()`, at once, at a deadline or on
-input, or sooner, when one of its tasks' sleeps ends, since under
-`SteppedIo` tasks run only while a frame waits for them. The page then
-asks for an animation frame at once, sets a timer for the deadline, or
-waits for the canvas's input, a resize or a change of
-`devicePixelRatio`, and a step that finds no frame due declares none.
-Idle, the tour draws only its heartbeat, once a second; the spectacles
-that move, such as the Light Lab and Clickable Chaos, ask for every
-frame while they move, as they do natively. GitHub Pages cannot send the
-headers that make a page cross-origin isolated, so the page registers a
-service worker of its own, `web/isolation_service_worker.js`, which
-serves the page and everything it loads again with them, and reloads
-once. `zig build site` writes the page, the client, the frame drawer,
-the tour's worker and the tour's fonts to `zig-out/site` (in
-ReleaseSmall, `zui-web.wasm` is 80 KB and `zui-web-tour.wasm` 845 KB),
-and the Pages workflow (`.github/workflows/pages.yml`) builds it in
-ReleaseSmall, checks it, and publishes it from `main`.
+**The published page** is the tour target's, `web/index.html`, the tour
+on the web host. GitHub Pages cannot send the headers that make a page
+cross-origin isolated, so the page registers a service worker of its
+own, `web/isolation_service_worker.js`, which serves the page and
+everything it loads again with them, and reloads once; it caches
+nothing, so a returning visitor gets what the site serves now.
+`zig build site` writes it to `zig-out/site`: the page, the scripts its
+page and worker load, the frame drawer, `zui-tour.wasm`, which embeds
+the tour's fonts (2.7 MB in ReleaseSmall, 513 KB gzipped), and the
+fonts' licences. The Pages workflow (`.github/workflows/pages.yml`)
+builds it in ReleaseSmall, checks it, and publishes it from `main`.
 `zig build test-site` serves that site without the isolation headers, as
-GitHub Pages does, opens it in headless Chromium, and checks that the
-service worker isolated it after one reload, that the page draws the
-worker's frames, timed above 0 µs, that it sleeps while idle, drawing 1
-frame a second on the Overview while the display runs at 60, and that
-input wakes it and reaches the tour: the mouse over the rail shows the
-pointer cursor the tour asks for, Ctrl+PageDown draws the next screen,
-and a click on Log Tail starts its producers' tasks, whose frames keep
-coming without input. Then, on Photo Culling, every photo's load must
-finish without input, and the page sleep again.
+GitHub Pages does, opens it in headless Chromium, and reads the worker
+through the DevTools protocol: the service worker must isolate it after
+one reload; the tour must draw at least 64 colors at the canvas's size,
+its frames timed above 0 µs; idle, it must draw at most 3 frames and
+take at most 3 turns in 2 s on the Overview, the heartbeat alone, while
+the display runs on; the mouse over the rail must show the pointer
+cursor the tour asks for, and Ctrl+PageDown draw the next screen; a
+click on Log Tail must start its producers' tasks, whose frames keep
+coming without input, the host never scheduling a turn later than their
+next publication; and on Photo Culling every photo's load must finish
+without input, the host never waiting for input while a task is left,
+and the worker sleep again.

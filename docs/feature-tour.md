@@ -3116,72 +3116,45 @@ const RemoteApp = struct {
 
 ### Running in a browser · *shipped*
 
-The web host, in `hosts/web/`, runs an application in a browser over
-`zui_wire`, as the tour runs on the published page. The application is
-built for `wasm32-freestanding` and runs in a Web Worker on an `Io` that
-steps to the page's clock. The page sleeps between frames as a native
-host does: it steps the application when its `ui.nextFrame()` says, at
-once or at a deadline, or when the canvas's input, a resize or a change
-of `devicePixelRatio` arrives, sending it that instant and the records
-its canvas's input wrote, and draws the frame bytes it answers with
-through WebGL 2, with four samples per pixel, as a native window with
-`sample_count = 4` smooths its edges, and with the cursor the frame asks
-for. A worker shares its memory with its threads only on a cross-origin
-isolated page, so the published page isolates itself with a service
-worker. Durations inside a frame are timed on the worker's
-`performance.now()`, imported by the module, since the stepped `Io`
-holds one instant for the whole frame. Its tasks run only while a frame
-waits for them, so the page also wakes when the earliest of their sleeps
-ends, where a native host is woken by a task's thread.
+The web host, `zui_web.Host` in `hosts/web/`, runs an application in a
+browser, as the tour runs on the published page. The application is
+built for `wasm32-freestanding` with shared memory and runs in a
+dedicated Web Worker, drawing through `zui_webgl.Renderer` on the canvas
+its page transferred, with WebGL 2 and four samples per pixel, as a
+native window with `sample_count = 4` smooths its edges. The host's loop
+is the worker's event loop: `zuiRun` yields to it, and the worker takes
+each turn on an animation frame, at a timer or on the page's input as
+the application's `ui.nextFrame()` says, so the page sleeps between
+frames as a native host does. The page sends the canvas's input, its
+size and `devicePixelRatio`, its media queries, language, direction,
+focus and visibility, and shows the cursor the frame asks for. Tasks
+take turns on threads that are workers sharing the module's memory,
+which a browser allows only on a cross-origin isolated page, so the
+published page isolates itself with a service worker. Its tasks run only
+while a turn waits for them, on an `Io` that steps to the worker's
+clock, so the host also wakes when the earliest of their sleeps ends.
 
-`src/browser_worker.zig`
+`src/darkroom_worker.zig`
 
 ```zig
-// Built for wasm32-freestanding and run in a Web Worker: the web host's page
-// passes the instant it woke at and its canvas's records, draws the bytes
-// this writes, and sleeps until `darkroomNextWake`.
-var ui: Ui = undefined;
-var app: App = undefined;
-var fonts: Fonts = .{};
-var decoder: zui_wire.Decoder(Ui) = undefined;
-var encoder: zui_wire.Encoder(Ui) = undefined;
-var builder: zui.RecordBuilder = undefined;
-var canvas: zui.RecordBuilder.HostParams = .{ .now = .zero, .viewport = .{ 0, 0 } };
-var header_written = false;
+// Built for wasm32-freestanding with shared memory, and run in the worker
+// the page starts with `runOnHost(canvas, new URL("darkroom.wasm", location.href), show)`.
+const Darkroom = struct {
+    pub const Host = zui_web.Host;
+    pub const Renderer = zui_webgl.Renderer;
+    pub const Text = zui_truetype.Text;
 
-export fn darkroomFrame(now_milliseconds: f64, records: [*]const u8, record_count: usize, frame_bytes: [*]u8, frame_room: usize) usize {
-    const now: zui.Instant = .fromNanoseconds(@intFromFloat(now_milliseconds * std.time.ns_per_ms));
-    builder.begin(.{ .now = now, .viewport = canvas.viewport, .scale = canvas.scale });
-    var reader: std.Io.Reader = .fixed(records[0..record_count]);
-    while (decoder.next(&reader) catch null) |message| switch (message) {
-        .record => |record| {
-            canvas = .{ .now = now, .viewport = record.params.viewport, .scale = record.params.scale };
-            builder.params.viewport = canvas.viewport;
-            builder.params.scale = canvas.scale;
-            for (record.events) |event| builder.append(event);
-        },
-        .frame => {},
-    };
+    pub fn zuiDeclare(app: *Darkroom, ui: *Ui) void {
+        app.declare(ui);
+    }
+};
 
-    ui.beginFrame(&.{ .params = builder.params, .events = builder.events() }, &app.sources);
-    app.declare(&ui);
-    const frame = ui.endFrame();
-    defer ui.release(frame);
+pub const std_options = zui_web.worker.std_options;
+pub const os = zui_web.worker.os;
 
-    var writer: std.Io.Writer = .fixed(frame_bytes[0..frame_room]);
-    if (!header_written) zui_wire.writeHeader(&writer, zui_wire.fingerprintOf(&fonts)) catch return 0;
-    encoder.writeFrame(&writer, frame) catch return 0;
-    header_written = true;
-    return writer.end;
-}
-
-/// On the page's clock, in milliseconds: 0 for at once, infinity for on input.
-export fn darkroomNextWake() f64 {
-    return switch (ui.nextFrame(&app.sources)) {
-        .immediately => 0,
-        .at => |deadline| @as(f64, @floatFromInt(deadline.nanoseconds)) / std.time.ns_per_ms,
-        .on_event => std.math.inf(f64),
-    };
+export fn zuiWebRun() void {
+    const setup = zui_web.worker.setup(.{ .task_threads = 4 }) catch |err| return zui_web.worker.fail(err);
+    zui_app.runWith(Darkroom, setup, .{ .title = "darkroom" }) catch |err| zui_web.worker.fail(err);
 }
 ```
 

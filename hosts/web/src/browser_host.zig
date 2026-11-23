@@ -19,7 +19,8 @@ pub const ScheduleKind = enum(u32) { animation_frame = 0, timer = 1, input = 2, 
 /// The worker's side of the host, through the module's imports from
 /// `zui_web_host`.
 pub const BrowserPlatform = struct {
-    extern "zui_web_host" fn zuiWebHostNow() f64;
+    /// The worker's `performance.now()`, in milliseconds.
+    pub extern "zui_web_host" fn zuiWebHostNow() f64;
     extern "zui_web_host" fn zuiWebHostSchedule(kind: u32, at_milliseconds: f64) void;
     extern "zui_web_host" fn zuiWebHostWake() void;
     extern "zui_web_host" fn zuiWebHostShowCursor(name: [*]const u8, length: usize) void;
