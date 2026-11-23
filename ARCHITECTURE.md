@@ -15,7 +15,7 @@ ROADMAP.md says when each part is built.
 | **Renderers** | drawing, images, materials, and text where `zui_glyphs` lays it out | implement the renderer contract; never import a host or a font system |
 | **Hosts** | windows, the event loop, OS events and services, frame pacing | implement the host contract; never import a renderer |
 | **Theme packs** | OS design languages | skins: data only |
-| **Apps** (`apps/`) | the tour (`zui_tour`) and the showcase (`zui_showcase`), which every renderer's and host's `tour` and `showcase` targets run | zui, its modules, `zui_glyphs` and `zui_fonts` only; never a renderer, host or font system, which a target names |
+| **Apps** (`apps/`) | the tour (`zui_tour`), which every renderer's and host's `tour` target runs | zui, its modules, `zui_glyphs` and `zui_fonts` only; never a renderer, host or font system, which a target names |
 
 ```
                           application
@@ -204,7 +204,7 @@ The stage is the one in SPEC.md §21 that builds it.
 | one layout for measuring and drawing, the placement a renderer declares, the glyph atlas | `zui_glyphs` in `text/glyphs/` | — |
 | fonts, shaping, bidirectional text | behind the text contract: `zui_truetype` in `text/truetype/` on stb_truetype, `zui_fonts`' typefaces in `text/fonts/`; shaping and fallback later, beside them | — |
 | number, date and plural formatting | out of scope: a localization library | — |
-| the tour and the showcase, on any host, renderer and font system; the screens a renderer is offered by the commands it draws | `zui_tour` in `apps/tour/`, `zui_showcase` in `apps/showcase/` | — |
+| the tour, on any host, renderer and font system; the screens a renderer is offered by the commands it draws | `zui_tour` in `apps/tour/` | — |
 
 ## 7. From today's code to the spec
 
@@ -329,18 +329,17 @@ zui is one repository of packages, each with its own `build.zig` and
 
 | Directory | Package | Holds |
 |---|---|---|
-| the root | `zui` | the package users fetch, which re-exports core's modules, `zui_glyphs`, `zui_fonts`, `zui_tour` and `zui_showcase`, forwards core's steps, and runs every package's steps in `test-all` and `check-all` |
+| the root | `zui` | the package users fetch, which re-exports core's modules, `zui_glyphs`, `zui_fonts` and `zui_tour`, forwards core's steps, and runs every package's steps in `test-all` and `check-all` |
 | `core/` | `zui_core` | the core, the contracts, and the modules: `zui_app`, `zui_async`, `zui_color`, `zui_debug`, `zui_design`, `zui_motion`, `zui_reflect`, `zui_testing`, `zui_tracy`, `zui_widgets` and `zui_wire`, and later `zui_icons`; Tracy, fetched lazily |
 | `text/glyphs/` | `zui_glyphs` | what font systems and renderers share: the codepoints of a run, the type-erased `Fonts` a renderer draws through, the `Placement` a renderer declares, the one `layOut` that places a run's glyphs for measuring and for drawing, the pixel grid's glyph quads, the `Atlas` that rasterized glyphs are drawn from, and the font systems' conformance suite; no third-party library, so the root re-exports it |
 | `text/truetype/` | `zui_truetype` | `Text`, the text contract on stb_truetype, its fonts added from embedded bytes or memory reserved for fonts that arrive at run time, Atkinson Hyperlegible Regular as font 0 when none is added, and `zuiFingerprint` over its fonts and placement; stb, fetched lazily, so users reach it through `zui.builder.dependency("zui_truetype", .{})` |
 | `text/fonts/` | `zui_fonts` | Atkinson Hyperlegible Regular and Bold and Liberation Mono, each a `pub const` of its bytes, with their licences; no third-party library, so the root re-exports it |
 | `apps/tour/` | `zui_tour` | the tour, zui shown four ways (a landing page, Harbor and its X-ray, field cases and spectacles), `App(.{ .Host, .Renderer, .Text, .renderer_name })` for `zui_app` to run, which gives the font system the three `zui_fonts` typefaces, lays text out for the placement the renderer declares, and offers a screen only when the renderer draws its commands, and acts on its flags, its idle measurement among them; `Kit` and `Tour`, for a driver that begins and ends the frames itself; its headless test on renderers that draw every optional command and none, in pixels and in cells, which alone fetches stb, for `zui_truetype`; no third-party library in the module, so the root re-exports it |
-| `apps/showcase/` | `zui_showcase` | the small application every renderer draws, and `App(.{ .Host, .Renderer, .Text, .title })` for `zui_app` to run, which keeps its controls on whole cells where the renderer draws cells; no third-party library, so the root re-exports it |
-| `renderers/raylib/` | `zui_raylib` | the raylib renderer and the raylib adapter host, their conformance harness, and the `tour` and `showcase` targets on them, in `zui_truetype`'s text; raylib, fetched lazily |
+| `renderers/raylib/` | `zui_raylib` | the raylib renderer and the raylib adapter host, their conformance harness, and the `tour` target on them, in `zui_truetype`'s text; raylib, fetched lazily |
 | `renderers/sokol/` | `zui_sokol` | the sokol renderer, on sokol_gfx through sokol-zig, its conformance harness and its shaders; sokol, fetched lazily. Its targets are `hosts/native/`'s |
-| `renderers/terminal/` | `zui_terminal` | the terminal renderer, the terminal host, its input decoder and raw-mode terminal, its conformance harness, and the `tour` and `showcase` targets on them, in `zui_truetype`'s text laid out in cells; stb, fetched lazily for the targets alone |
+| `renderers/terminal/` | `zui_terminal` | the terminal renderer, the terminal host, its input decoder and raw-mode terminal, its conformance harness, and the `tour` target on them, in `zui_truetype`'s text laid out in cells; stb, fetched lazily for the targets alone |
 | `renderers/webgl/` | `zui_webgl` | the browser's drawing of a frame, laid out in WebAssembly as triangles, as the sokol renderer lays it out, and drawn through WebGL 2 with four samples per pixel: shapes, text from a `zui_glyphs` atlas, backdrop blurs and materials; and `Renderer`, which lays a frame out in the instance that declares it and hands it to the page's drawing of its `.web` canvas; no third-party library |
-| `hosts/native/` | `zui_host` | native hosts, one directory per OS, chosen by target: `windows/` (`04-native-host:01-windows-host`) and `linux/`, on Wayland or X11, chosen at run time (`10-reach:01-linux-host`), their conformance harnesses, and their examples, drawn by the sokol renderer: the `tour` and `showcase` targets among them; sokol and stb, fetched lazily through `renderers/sokol/` and `text/truetype/` for the examples alone |
+| `hosts/native/` | `zui_host` | native hosts, one directory per OS, chosen by target: `windows/` (`04-native-host:01-windows-host`) and `linux/`, on Wayland or X11, chosen at run time (`10-reach:01-linux-host`), their conformance harnesses, and their examples, drawn by the sokol renderer: the `tour` target among them; sokol and stb, fetched lazily through `renderers/sokol/` and `text/truetype/` for the examples alone |
 | `hosts/web/` | `zui_web` | the browser, as a thin client over `zui_wire` (`09-seeing-the-ui:04-demo-in-browser`), then a web host (`10-reach:02-web-host`); today the client's decoder, in WebAssembly, which draws through `renderers/webgl/` and is checked against the sokol renderer drawing the tour's frames, and the page's input written back as records the tour takes, with the cursor its frames ask for shown on the canvas; and the tour in a Web Worker on an `Io` of its own, declared for `zui_webgl.Renderer`, whose tasks take turns on workers sharing its memory, drawing the frames it draws natively and timing them on the worker's clock; `Host`, the web host, which runs an application in a dedicated worker drawing on the canvas its page transferred, and the tour target on it, whose page is the one published to GitHub Pages from CI and made cross-origin isolated by a service worker of its own; the sokol renderer, reached lazily by path for `test-draw`'s reference alone |
 | `themes/` | `zui_themes` | skins for OS design languages (`11-polish:08-zui-themes`); a skeleton today |
 | `examples/` | `zui_examples` | samples and the template project (`11-polish:09-template-project`, `11-polish:10-samples`); a skeleton today |
@@ -398,20 +397,20 @@ and waits on it, closes at `close`, and its targets run through
 `zui_app`. The sokol renderer has no host of its own: it draws into a
 native host's `win32` window without sokol_app, with D3D11 through a
 DirectComposition swapchain that keeps alpha so a system material shows
-(`04-native-host:02-system-material`), and `zui_host` runs the tour and
-the showcase that way (`04-native-host:01-windows-host`), through
-`zui_app` in `zui_truetype`'s text
-(`04-native-host:03-app-text-contract`); on Linux it draws into a native
-host's `wayland` surface with OpenGL through EGL, and `zui_host`'s Linux
-host runs the same targets (`10-reach:01-linux-host`). Its Windows host
-runs its message loop on a thread of its own. Its `remote` example runs
-the tour on `zui_wire`'s host and renderer in one process, and draws it
-in another, through a `zui_wire.Client` over the Windows host and the
-sokol renderer (`05-wire:04-rendering-elsewhere`), and its `theme`
-example restyles a window when its theme file changes, through the
-host's file watch (`05-wire:05-watching-files`). The tour imports no
-renderer, so it builds for `wasm32-freestanding`, for the web host to
-run in a worker declared for `zui_webgl.Renderer`
+(`04-native-host:02-system-material`), and `zui_host` runs the tour that
+way (`04-native-host:01-windows-host`), through `zui_app` in
+`zui_truetype`'s text (`04-native-host:03-app-text-contract`); on Linux
+it draws into a native host's `wayland` surface with OpenGL through EGL,
+and `zui_host`'s Linux host runs the same targets
+(`10-reach:01-linux-host`). Its Windows host runs its message loop on a
+thread of its own. Its `remote` example runs the tour on `zui_wire`'s
+host and renderer in one process, and draws it in another, through a
+`zui_wire.Client` over the Windows host and the sokol renderer
+(`05-wire:04-rendering-elsewhere`), and its `theme` example restyles a
+window when its theme file changes, through the host's file watch
+(`05-wire:05-watching-files`). The tour imports no renderer, so it
+builds for `wasm32-freestanding`, for the web host to run in a worker
+declared for `zui_webgl.Renderer`
 (`09-seeing-the-ui:04-demo-in-browser`).
 
 The terminal renderer, `zui_terminal`, keeps layout in pixel-like units,
@@ -428,12 +427,11 @@ and a pipe elsewhere; `src/host.zig`'s `Host` puts them together as
 zui's host contract, handing the `Renderer` its stdout writer in each
 `.terminal` surface. Its conformance harness reads each pixel back as
 the cell covering it, so it passes the renderer suite at a tolerance of
-0, and its `test` step runs the suite too. Its targets are
+0, and its `test` step runs the suite too. Its target is
 `examples/tour.zig`, the whole tour, less the screens whose commands a
-terminal does not draw, and `examples/showcase.zig`, the UI every
-renderer's showcase target draws, both in `zui_truetype`'s text laid out
-in cells; each takes `--dump`, which draws frames into cells without a
-terminal and prints their glyphs (`examples/dump.zig`).
+terminal does not draw, in `zui_truetype`'s text laid out in cells; it
+takes `--dump`, which draws frames into cells without a terminal and
+prints their glyphs (`examples/dump.zig`).
 
 The raylib renderer, `zui_raylib`, names raylib as a lazy dependency, so
 raylib is fetched only when the package's own `build()` runs, as the
@@ -447,12 +445,11 @@ suite reads each frame back from a render texture, and the host suite
 scripts the sampled state through `Host.script`; its text is
 `zui_truetype.Text`, in its default font. `examples/tour.zig` runs the
 tour through `zui_app`, with screenshots drawn offscreen, the startup
-measurement and the run's report in `zui_debug`'s panel, and
-`examples/showcase.zig` the showcase. On Linux its build links through
-LLVM and LLD, because Zig's own ELF linker rejects the `.sframe`
-relocations in the system's crt1.o, and moves raylib's system libraries
-from its static library onto the module, because LLD fails the link on
-the shared libraries Zig would archive into it.
+measurement and the run's report in `zui_debug`'s panel. On Linux its
+build links through LLVM and LLD, because Zig's own ELF linker rejects
+the `.sframe` relocations in the system's crt1.o, and moves raylib's
+system libraries from its static library onto the module, because LLD
+fails the link on the shared libraries Zig would archive into it.
 
 The sokol renderer, `zui_sokol`, names sokol-zig as a lazy dependency,
 and `text/truetype/` by path for its conformance harness, so sokol-zig
@@ -489,12 +486,11 @@ its own (`linux/dbus.zig`). Its `test` step runs the unit tests and
 host suite and the host's own tests against windows the user never sees,
 reading the Windows host's through a UI Automation client
 (`windows/uia_client.zig`); `check` compiles them and every example. The
-examples in `examples/`, the `tour` and `showcase` targets among them,
-are drawn by the sokol renderer through `examples/sokol_renderer.zig`,
-which the package names by path as a lazy dependency, so sokol-zig and
-stb are fetched only when its own `build()` runs, as the root's does
-not. On Linux its build links through LLVM and LLD, as the renderers'
-do.
+examples in `examples/`, the `tour` target among them, are drawn by the
+sokol renderer through `examples/sokol_renderer.zig`, which the package
+names by path as a lazy dependency, so sokol-zig and stb are fetched
+only when its own `build()` runs, as the root's does not. On Linux its
+build links through LLVM and LLD, as the renderers' do.
 
 The WebGL renderer, `zui_webgl`, is the drawing half of the browser's
 client: `src/draw_list.zig` lays a frame's commands out as triangles in

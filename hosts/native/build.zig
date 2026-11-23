@@ -52,7 +52,7 @@ pub fn build(b: *std.Build) void {
     check_step.dependOn(&unit_tests.step);
     if (has_host) check_step.dependOn(&conformance_tests.step);
 
-    if (has_host) addTourAndShowcase(b, target, optimize, host_module, core, check_step, core_options);
+    if (has_host) addTour(b, target, optimize, host_module, core, check_step, core_options);
     if (has_host) addTheme(b, target, optimize, host_module, core, check_step, core_options);
     if (has_host) addServicesExample(b, target, optimize, host_module, core, check_step, core_options);
     if (has_host) addTitleBarExample(b, target, optimize, host_module, core, check_step, core_options);
@@ -75,37 +75,34 @@ fn linkThroughLlvmOnLinux(compile: *std.Build.Step.Compile) void {
     }
 }
 
-/// zui's tour and showcase on this host, drawn by the sokol renderer: on
+/// zui's tour on this host, drawn by the sokol renderer: on
 /// Windows through a Direct3D 11 swapchain that DirectComposition composes
 /// over the window's backdrop, on Linux with OpenGL through EGL.
-fn addTourAndShowcase(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, host_module: *std.Build.Module, core: *std.Build.Dependency, check_step: *std.Build.Step, core_options: CoreOptions) void {
+fn addTour(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, host_module: *std.Build.Module, core: *std.Build.Dependency, check_step: *std.Build.Step, core_options: CoreOptions) void {
     const zui_sokol_dependency = sokolDeclaring(b, core_options.on(target, optimize), "zui_sokol") orelse return;
     const truetype_dependency = truetypeDeclaring(b, core_options.on(target, optimize)) orelse return;
-    const imports: []const std.Build.Module.Import = &.{
-        .{ .name = "zui_host", .module = host_module },
-        .{ .name = "zui", .module = core.module("zui") },
-        .{ .name = "zui_app", .module = core.module("zui_app") },
-        .{ .name = "zui_sokol", .module = zui_sokol_dependency.module("zui_sokol") },
-        .{ .name = "zui_truetype", .module = truetype_dependency.module("zui_truetype") },
-        .{ .name = "zui_tour", .module = b.dependency("zui_tour", core_options.on(target, optimize)).module("zui_tour") },
-        .{ .name = "zui_showcase", .module = b.dependency("zui_showcase", core_options.on(target, optimize)).module("zui_showcase") },
-    };
-    const apps = [_]struct { name: []const u8, description: []const u8 }{
-        .{ .name = "tour", .description = "Run zui's tour on this host (`-- --frames 300 --cycle 30` visits every screen and quits; `-- --measure-idle` reports its idle CPU time)" },
-        .{ .name = "showcase", .description = "Run zui's showcase on this host (`-- --frames 60` draws 60 frames and quits)" },
-    };
-    for (apps) |app| {
-        const executable = b.addExecutable(.{
-            .name = b.fmt("zui-host-{s}", .{app.name}),
-            .root_module = b.createModule(.{ .root_source_file = b.path(b.fmt("examples/{s}.zig", .{app.name})), .target = target, .optimize = optimize, .imports = imports }),
-        });
-        linkThroughLlvmOnLinux(executable);
-        b.installArtifact(executable);
-        const run = b.addRunArtifact(executable);
-        if (b.args) |arguments| run.addArgs(arguments);
-        b.step(app.name, app.description).dependOn(&run.step);
-        check_step.dependOn(&executable.step);
-    }
+    const tour = b.addExecutable(.{
+        .name = "zui-host-tour",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/tour.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zui_host", .module = host_module },
+                .{ .name = "zui", .module = core.module("zui") },
+                .{ .name = "zui_app", .module = core.module("zui_app") },
+                .{ .name = "zui_sokol", .module = zui_sokol_dependency.module("zui_sokol") },
+                .{ .name = "zui_truetype", .module = truetype_dependency.module("zui_truetype") },
+                .{ .name = "zui_tour", .module = b.dependency("zui_tour", core_options.on(target, optimize)).module("zui_tour") },
+            },
+        }),
+    });
+    linkThroughLlvmOnLinux(tour);
+    b.installArtifact(tour);
+    const run_tour = b.addRunArtifact(tour);
+    if (b.args) |arguments| run_tour.addArgs(arguments);
+    b.step("tour", "Run zui's tour on this host (`-- --frames 300 --cycle 30` visits every screen and quits; `-- --measure-idle` reports its idle CPU time)").dependOn(&run_tour.step);
+    check_step.dependOn(&tour.step);
 }
 
 /// A window styled by a ZON file that the host's file watch reloads, on

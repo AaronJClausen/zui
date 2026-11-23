@@ -142,7 +142,6 @@ compiles it:
 | `zig build tour -- --measure-startup` | report the time from process start to the first presented frame (Windows) |
 | `zig build tour -- --zui-debug` | open `zui_debug`'s inspector, which F12 toggles |
 | `zig build tour -Dzui-tracy=true` | trace zui's zones into Tracy 0.14.1 |
-| `zig build showcase` | run the showcase; `-- --hidden --frames 60` draws 60 frames in a hidden window and quits |
 
 Conformance and the targets open hidden windows, so they need a display;
 CI runs them under `xvfb-run`.
@@ -162,8 +161,7 @@ startup measurement, and the run's report in `zui_debug`'s panel. The
 Light Lab's gradients, shadows, frost and materials are lowered here,
 and Clickable Chaos, which needs transforms, is not offered. The
 `zui_debug` panel's theme does not reload from a file, since this host
-has no file watch. `examples/showcase.zig` runs `zui_showcase` the same
-way.
+has no file watch.
 
 `--measure-idle` runs the tour in a hidden window and reads its own CPU
 time at two frames it asks for with `requestFrameAt`, 10 seconds apart,

@@ -151,10 +151,10 @@ zui is one repository, `zui`, of packages:
 
 | Directory | Holds |
 |---|---|
-| the root | the package `zui`, which re-exports core's modules and those of `zui_glyphs`, `zui_fonts`, `zui_tour` and `zui_showcase` |
+| the root | the package `zui`, which re-exports core's modules and those of `zui_glyphs`, `zui_fonts` and `zui_tour` |
 | `core/` | the core, the contracts, and the modules, as the package `zui_core` |
 | `text/` | text, one package each: `glyphs/` (`zui_glyphs`, what font systems and renderers share), `truetype/` (`zui_truetype`, the default font system) and `fonts/` (`zui_fonts`, the bundled typefaces) |
-| `apps/` | the tour (`zui_tour`) and the showcase (`zui_showcase`), which every renderer and host runs |
+| `apps/` | the tour (`zui_tour`), which every renderer and host runs |
 | `themes/` | skins for OS design languages (`zui_themes`) |
 | `examples/` | samples and the template project |
 | `renderers/` | renderers, one package each: `raylib/` (`zui_raylib`, which also holds an adapter host), `sokol/` (`zui_sokol`), `terminal/` (`zui_terminal`) and `webgl/` (`zui_webgl`, the browser's drawing) |

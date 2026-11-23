@@ -143,26 +143,26 @@ within 10 minutes:
   instruction counts of this commit and of the commit the push or pull
   request is based on, failing on more than 2% growth, with simulated
   cache and branch misses reported beside them;
-- `text/glyphs/`, `text/fonts/`, `text/truetype/`, `apps/showcase/`,
-  `apps/tour/`, `themes/`, `examples/` and `renderers/webgl/`, which are
-  pure Zig and compile for `wasm32-freestanding`: on Linux, three jobs
-  for each, its tests in Debug with `check` there and for x86-64 Windows
-  and ARM64 macOS, and its tests in each release mode; `text/truetype/`,
-  which compiles stb_truetype's C, is also tested on Windows;
+- `text/glyphs/`, `text/fonts/`, `text/truetype/`, `apps/tour/`,
+  `themes/`, `examples/` and `renderers/webgl/`, which are pure Zig and
+  compile for `wasm32-freestanding`: on Linux, three jobs for each, its
+  tests in Debug with `check` there and for x86-64 Windows and ARM64
+  macOS, and its tests in each release mode; `text/truetype/`, which
+  compiles stb_truetype's C, is also tested on Windows;
 - `renderers/raylib/`: its tests and `check` on Linux, Windows and
   macOS, and `check -Dzui-tracy=true` on Linux; and in a job of its own
   on Linux, under `xvfb-run`, its conformance, the `tour` target's visit
-  of every screen, five screenshots, the CPU the tour uses while idle,
-  shown in the job summary, and the `showcase` target's frames. Only
-  Linux runners give it OpenGL 3.3, through Mesa;
+  of every screen, five screenshots, and the CPU the tour uses while
+  idle, shown in the job summary. Only Linux runners give it OpenGL 3.3,
+  through Mesa;
 - `renderers/sokol/`: its tests and `check` on Linux, Windows and macOS,
   its `check` for `wasm32-freestanding` on Linux and with `-Dgl=true` on
   Windows; and its conformance, which reads back through OpenGL, in a
   job of its own on Linux under `xvfb-run`;
-- `renderers/terminal/`: its tests, its conformance, its `check`, the
-  `showcase` target's `--dump`, and the `tour` target's
-  `--dump --every-screen`, which fails when a screen cuts a line of text
-  short at the side of its clip, on Linux, Windows and macOS;
+- `renderers/terminal/`: its tests, its conformance, its `check`, and
+  the `tour` target's `--dump --every-screen`, which fails when a screen
+  cuts a line of text short at the side of its clip, on Linux, Windows
+  and macOS;
 - `hosts/native/`: its tests in Debug and ReleaseSafe and its `check`,
   on Windows, and on Linux under a headless Weston with a D-Bus daemon
   of its own (`.github/actions/wayland-session`), where the Debug tests
@@ -171,10 +171,9 @@ within 10 minutes:
   `check` for ARM64 Windows runs too; and in a job of its own under
   Weston, the `theme` example's `--check`, the `tour` target's visit of
   every screen, which must report no layer or glyph atlas overflow and
-  clean diagnostics, its CPU while idle, shown in the job summary, and
-  the `showcase` target's frames. A headless Weston has no seat, so no
-  clipboard, and the `services` example's `--check` runs on a desktop,
-  as the Windows examples do;
+  clean diagnostics, and its CPU while idle, shown in the job summary. A
+  headless Weston has no seat, so no clipboard, and the `services`
+  example's `--check` runs on a desktop, as the Windows examples do;
 - `hosts/web/`: on Linux, its tests in Debug with `check` there and for
   x86-64 Windows and ARM64 macOS, its tests in each release mode,
   `test-demo` in Debug and in ReleaseSafe, `test-input`, and

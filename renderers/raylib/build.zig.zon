@@ -13,7 +13,6 @@
         .zui_glyphs = .{ .path = "../../text/glyphs" },
         .zui_truetype = .{ .path = "../../text/truetype" },
         .zui_tour = .{ .path = "../../apps/tour" },
-        .zui_showcase = .{ .path = "../../apps/showcase" },
     },
     .paths = .{ "build.zig", "build.zig.zon", "src", "examples" },
 }

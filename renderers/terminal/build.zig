@@ -57,35 +57,30 @@ pub fn build(b: *std.Build) void {
     const check_step = b.step("check", "Compile the backend and the targets without producing output");
     check_step.dependOn(&unit_tests.step);
     const tour_step = b.step("tour", "Run zui's tour in this terminal (Ctrl+C or Ctrl+Q quits); --dump --screen <name> prints a screen's glyphs");
-    const showcase_step = b.step("showcase", "Run zui's showcase in this terminal (Ctrl+C or Ctrl+Q quits); --dump prints its glyphs");
-    // Until stb is fetched, the font system the targets name declares no
+    // Until stb is fetched, the font system the tour names declares no
     // module.
     const truetype_dependency = truetypeDeclaring(b, core_options.on(target, optimize)) orelse return;
-    const target_imports: []const std.Build.Module.Import = &.{
-        .{ .name = "zui_terminal", .module = backend_module },
-        .{ .name = "zui", .module = zui_module },
-        .{ .name = "zui_app", .module = zui_app_module },
-        .{ .name = "zui_truetype", .module = truetype_dependency.module("zui_truetype") },
-        .{ .name = "zui_tour", .module = b.dependency("zui_tour", core_options.on(target, optimize)).module("zui_tour") },
-        .{ .name = "zui_showcase", .module = b.dependency("zui_showcase", core_options.on(target, optimize)).module("zui_showcase") },
-    };
-    for ([_]struct { name: []const u8, step: *std.Build.Step }{ .{ .name = "tour", .step = tour_step }, .{ .name = "showcase", .step = showcase_step } }) |app| {
-        const executable = b.addExecutable(.{
-            .name = b.fmt("zui-terminal-{s}", .{app.name}),
-            .root_module = b.createModule(.{
-                .root_source_file = b.path(b.fmt("examples/{s}.zig", .{app.name})),
-                .target = target,
-                .optimize = optimize,
-                .imports = target_imports,
-            }),
-        });
-        b.installArtifact(executable);
-        check_step.dependOn(&executable.step);
-        const run = b.addRunArtifact(executable);
-        run.stdio = .inherit;
-        if (b.args) |arguments| run.addArgs(arguments);
-        app.step.dependOn(&run.step);
-    }
+    const tour = b.addExecutable(.{
+        .name = "zui-terminal-tour",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/tour.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zui_terminal", .module = backend_module },
+                .{ .name = "zui", .module = zui_module },
+                .{ .name = "zui_app", .module = zui_app_module },
+                .{ .name = "zui_truetype", .module = truetype_dependency.module("zui_truetype") },
+                .{ .name = "zui_tour", .module = b.dependency("zui_tour", core_options.on(target, optimize)).module("zui_tour") },
+            },
+        }),
+    });
+    b.installArtifact(tour);
+    check_step.dependOn(&tour.step);
+    const run_tour = b.addRunArtifact(tour);
+    run_tour.stdio = .inherit;
+    if (b.args) |arguments| run_tour.addArgs(arguments);
+    tour_step.dependOn(&run_tour.step);
 }
 
 /// The font system the targets name, once it has declared its module:

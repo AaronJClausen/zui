@@ -1,12 +1,11 @@
-//! A consumer's module importing `zui` and the apps from the aggregator:
+//! A consumer's module importing `zui` and the tour from the aggregator:
 //! the tour runs on a host and renderer declared with this `zui`, which
-//! compiles only while the apps are built on it.
+//! compiles only while the tour is built on it.
 
 const std = @import("std");
 const zui = @import("zui");
 const zui_app = @import("zui_app");
 const zui_tour = @import("zui_tour");
-const zui_showcase = @import("zui_showcase");
 
 const OffscreenHost = struct {
     pub const zui_surfaces: zui.SurfaceKinds = .initOne(.offscreen);
@@ -51,5 +50,4 @@ const HalfWidthFonts = struct {
 comptime {
     const Tour = zui_tour.App(.{ .Host = OffscreenHost, .Renderer = OffscreenRenderer, .Text = HalfWidthFonts, .renderer_name = "an offscreen renderer" });
     _ = zui_app.Session(Tour);
-    _ = zui_showcase.Showcase(Tour.Ui);
 }

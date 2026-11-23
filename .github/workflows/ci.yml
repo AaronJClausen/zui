@@ -66,7 +66,7 @@ jobs:
           BASE: ${{ steps.base.outputs.base }}
         run: |
           set -o pipefail
-          python3 .github/scripts/affected_packages.py "$BASE" --matrix pure-packages=text/glyphs,text/fonts,text/truetype,apps/showcase,apps/tour,themes,examples,renderers/webgl | tee -a "$GITHUB_OUTPUT"
+          python3 .github/scripts/affected_packages.py "$BASE" --matrix pure-packages=text/glyphs,text/fonts,text/truetype,apps/tour,themes,examples,renderers/webgl | tee -a "$GITHUB_OUTPUT"
 
   lint:
     name: "root: format, docs and check"
@@ -264,12 +264,6 @@ jobs:
       - name: Run the tests and zui's renderer suite
         run: zig build test
       - run: zig build check
-      - name: Render the showcase offscreen
-        shell: bash
-        run: |
-          set -o pipefail
-          zig build showcase -- --dump | tee dump.txt
-          grep -q "zui + terminal" dump.txt
       - name: Render every screen of the tour a terminal draws, failing on text cut short
         run: zig build tour -- --dump --every-screen
 
@@ -333,11 +327,6 @@ jobs:
           set -o pipefail
           timeout 60 xvfb-run --auto-servernum zig build tour -- --measure-idle 2>&1 | grep "^idle" | tee idle.log
           echo "The tour's overview under Xvfb, $(cat idle.log)" >> "$GITHUB_STEP_SUMMARY"
-      - name: Draw the showcase
-        run: |
-          set -o pipefail
-          xvfb-run --auto-servernum zig build showcase -- --hidden --frames 60 2>&1 | tee showcase.log
-          grep "diagnostics ok: true" showcase.log
 
   sokol:
     name: "renderers/sokol: test and check (${{ matrix.os }})"
@@ -459,11 +448,6 @@ jobs:
           set -o pipefail
           timeout 60 zig build tour -- --measure-idle 2>&1 | grep "^idle" | tee idle.log
           echo "The tour's overview under a headless Weston, $(cat idle.log)" >> "$GITHUB_STEP_SUMMARY"
-      - name: Draw the showcase, by the sokol renderer
-        run: |
-          set -o pipefail
-          timeout 120 zig build showcase -- --frames 60 2>&1 | tee showcase.log
-          grep "diagnostics ok: true" showcase.log
 
   # What the browser runs compiles for wasm32-freestanding, so the tests run
   # on Linux, and Windows and macOS are cross-checked.

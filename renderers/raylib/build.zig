@@ -56,27 +56,24 @@ pub fn build(b: *std.Build) void {
     b.step("conformance", "Run zui's renderer and host suites against the renderer and the host, in hidden windows").dependOn(&b.addRunArtifact(addTest(b, conformance_module)).step);
     check.compile(addTest(b, conformance_module));
 
-    const target_imports: []const std.Build.Module.Import = &.{
-        .{ .name = "zui_raylib", .module = backend_module },
-        .{ .name = "zui", .module = zui_module },
-        .{ .name = "zui_app", .module = zui_app_module },
-        .{ .name = "zui_truetype", .module = zui_truetype_module },
-        .{ .name = "zui_tour", .module = b.dependency("zui_tour", core_options.on(target, optimize)).module("zui_tour") },
-        .{ .name = "zui_showcase", .module = b.dependency("zui_showcase", core_options.on(target, optimize)).module("zui_showcase") },
-    };
-    const apps = [_]struct { name: []const u8, description: []const u8 }{
-        .{ .name = "tour", .description = "Run zui's tour (`-- --hidden --frames 600 --cycle 50` visits every screen and quits)" },
-        .{ .name = "showcase", .description = "Run zui's showcase (`-- --hidden --frames 60` draws 60 frames and quits)" },
-    };
-    for (apps) |app| {
-        const app_module = b.createModule(.{ .root_source_file = b.path(b.fmt("examples/{s}.zig", .{app.name})), .target = target, .optimize = optimize, .imports = target_imports });
-        const executable = addAppExecutable(b, app.name, app_module);
-        b.installArtifact(executable);
-        check.compile(addAppExecutable(b, app.name, app_module));
-        const run = b.addRunArtifact(executable);
-        if (b.args) |arguments| run.addArgs(arguments);
-        b.step(app.name, app.description).dependOn(&run.step);
-    }
+    const tour_module = b.createModule(.{
+        .root_source_file = b.path("examples/tour.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zui_raylib", .module = backend_module },
+            .{ .name = "zui", .module = zui_module },
+            .{ .name = "zui_app", .module = zui_app_module },
+            .{ .name = "zui_truetype", .module = zui_truetype_module },
+            .{ .name = "zui_tour", .module = b.dependency("zui_tour", core_options.on(target, optimize)).module("zui_tour") },
+        },
+    });
+    const tour = addTourExecutable(b, tour_module);
+    b.installArtifact(tour);
+    check.compile(addTourExecutable(b, tour_module));
+    const run_tour = b.addRunArtifact(tour);
+    if (b.args) |arguments| run_tour.addArgs(arguments);
+    b.step("tour", "Run zui's tour (`-- --hidden --frames 600 --cycle 50` visits every screen and quits)").dependOn(&run_tour.step);
 }
 
 /// `check` compiles its own copy of each artifact, which nothing else runs
@@ -99,8 +96,8 @@ fn addTest(b: *std.Build, module: *std.Build.Module) *std.Build.Step.Compile {
     return tests;
 }
 
-fn addAppExecutable(b: *std.Build, app_name: []const u8, module: *std.Build.Module) *std.Build.Step.Compile {
-    const executable = b.addExecutable(.{ .name = b.fmt("zui-raylib-{s}", .{app_name}), .root_module = module });
+fn addTourExecutable(b: *std.Build, module: *std.Build.Module) *std.Build.Step.Compile {
+    const executable = b.addExecutable(.{ .name = "zui-raylib-tour", .root_module = module });
     if (module.resolved_target.?.result.os.tag == .windows) executable.subsystem = .windows;
     linkThroughLlvmOnLinux(executable);
     return executable;

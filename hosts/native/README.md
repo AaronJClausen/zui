@@ -54,7 +54,6 @@ and for the examples sokol's
 | `zig build conformance` | only the host suite and the host's own tests |
 | `zig build check` | compile the host, its tests and the examples; add `-Dtarget=x86_64-windows` or `aarch64-windows` to cross-compile |
 | `zig build tour` | run the tour, drawn by the sokol renderer (Windows, Direct3D 11; Linux, OpenGL through EGL on Wayland or X11); `-- --frames 300 --cycle 30` visits every screen and quits, `-- --measure-idle` reports the CPU used over 10 idle seconds |
-| `zig build showcase` | run the showcase, drawn by the sokol renderer; `-- --frames 60` quits after 60 frames |
 | `zig build material` | show the system material, or its fallback; `-- --check` reports a hidden window's material and quits, `-- --frames 120` quits after 120 frames |
 | `zig build hdr` | show HDR white beside SDR white (Windows) |
 | `zig build remote` | run the tour in another process and draw it here, over `zui_wire` (Windows) |
@@ -747,8 +746,7 @@ to 21 ms of CPU over 10 s.
 `zig build tour` runs [the tour](../../apps/tour/README.md) on this
 host, drawn by the sokol renderer, which draws into a `win32` window
 through sokol_gfx with D3D11, or into a `wayland` surface with OpenGL
-through EGL, without sokol_app, and `zig build showcase` runs
-`zui_showcase` the same way. `hosts/native/examples/tour.zig` is the
+through EGL, without sokol_app. `hosts/native/examples/tour.zig` is the
 target: it names the tour, this host, the sokol renderer and the font
 system, and adds the screenshot this host's window gives:
 
@@ -767,7 +765,6 @@ zig build tour -- --screen break_it          # start on one screen
 zig build tour -- --frames 300 --cycle 30    # visit every screen, 30 frames each, then quit
 zig build tour -- --measure-idle             # report the CPU time used over 10 idle seconds
 zig build tour -- --screenshot tour.bmp      # save the window after a few frames, then quit
-zig build showcase -- --frames 60            # draw the showcase for 60 frames, then quit
 ```
 
 Idle, it uses no CPU: on an i9-10900K in ReleaseSafe, the old tour's

@@ -109,33 +109,28 @@ What a terminal cannot do:
 - **No cursor shapes or IME window.** The frame's host requests are not
   applied.
 
-Its targets name the terminal's host and renderer and
+Its target names the terminal's host and renderer and
 `zui_truetype.Text`, laid out one glyph per cell: `zig build tour` runs
 the whole [tour](../../apps/tour/README.md), less the screens whose
 commands a terminal does not draw (Transforms and Materials), which
-`zui_tour` leaves out as it does on any renderer, and
-`zig build showcase` the showcase, its controls on whole cells. `--dump`
-draws either into cells without a terminal and prints the glyphs: the
-tour's a screen at 180×56 cells (`--screen <name>`), or every screen it
-is offered (`--every-screen`), failing when one cuts text short, the
-showcase's three frames at 100×30 with the pointer on "Hover me".
-`--frames <count>` ends a run after that many frames, through
-`Host.close`.
+`zui_tour` leaves out as it does on any renderer. `--dump` draws into
+cells without a terminal and prints the glyphs: a screen at 180×56 cells
+(`--screen <name>`), or every screen the tour is offered
+(`--every-screen`), failing when one cuts text short. `--frames <count>`
+ends a run after that many frames, through `Host.close`.
 
 ## Development
 
-Run from `renderers/terminal/`; the targets fetch stb for
-`zui_truetype`, whose fonts they lay out one glyph per cell:
+Run from `renderers/terminal/`; the tour fetches stb for `zui_truetype`,
+whose fonts it lays out one glyph per cell:
 
 | Command | What it does |
 |---|---|
 | `zig build test` | run its unit tests and zui's renderer suite against it |
 | `zig build conformance` | run zui's renderer suite alone |
-| `zig build check` | compile the renderer and the targets without producing output |
+| `zig build check` | compile the renderer and the tour without producing output |
 | `zig build tour` | run the tour in this terminal, every screen whose commands a terminal draws; Ctrl+C or Ctrl+Q quits, and `-- --frames <count>` quits after that many frames |
 | `zig build tour -- --dump --screen harbor` | render a screen offscreen at 180×56 and print its glyphs |
 | `zig build tour -- --dump --every-screen` | print every screen a terminal is offered the same way, failing when one cuts a line of text short at the side of its clip (a line in an element that scrolls sideways is scrolled, not cut short) |
-| `zig build showcase` | run the showcase in this terminal |
-| `zig build showcase -- --dump` | render the showcase offscreen at 100×30 and print its glyphs |
 
-Without `--dump`, the targets take over the terminal they run in.
+Without `--dump`, the tour takes over the terminal they run in.

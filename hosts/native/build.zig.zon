@@ -8,7 +8,6 @@
         .zui_sokol = .{ .path = "../../renderers/sokol", .lazy = true },
         .zui_truetype = .{ .path = "../../text/truetype" },
         .zui_tour = .{ .path = "../../apps/tour" },
-        .zui_showcase = .{ .path = "../../apps/showcase" },
     },
     .paths = .{ "build.zig", "build.zig.zon", "zui_host.zig", "windows", "linux", "examples" },
 }

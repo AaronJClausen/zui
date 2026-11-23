@@ -143,9 +143,8 @@ exe.root_module.addImport("zui_tracy", zui.module("zui_tracy"));
 // Text: what font systems and renderers share, and the bundled typefaces.
 exe.root_module.addImport("zui_glyphs", zui.module("zui_glyphs"));
 exe.root_module.addImport("zui_fonts", zui.module("zui_fonts"));
-// The tour and the showcase, which a renderer's or a host's targets run.
+// The tour, which a renderer's or a host's `tour` target runs.
 exe.root_module.addImport("zui_tour", zui.module("zui_tour"));
-exe.root_module.addImport("zui_showcase", zui.module("zui_showcase"));
 // The default font system, which builds stb_truetype, so it is a package of its own.
 const zui_truetype = zui.builder.dependency("zui_truetype", .{ .target = target, .optimize = optimize });
 exe.root_module.addImport("zui_truetype", zui_truetype.module("zui_truetype"));
@@ -185,7 +184,6 @@ API, what it draws or reports, its limits, and its build steps.
 | `zui_host` | [hosts/native/](hosts/native/README.md) | the native hosts, for Windows and for Linux on Wayland or X11 |
 | `zui_web` | [hosts/web/](hosts/web/README.md) | the web host, the tour on it as the published page, and the thin client over `zui_wire` the checks compare it with |
 | `zui_tour` | [apps/tour/](apps/tour/README.md) | zui shown four ways: an operations console, the same console with its features pointed out, field cases and spectacles, for any host and renderer |
-| `zui_showcase` | [apps/showcase/](apps/showcase/) | one small application every renderer draws, so their frames can be compared |
 | `zui_themes` | [themes/](themes/) | skins in the design languages of Windows, macOS, GNOME and KDE; a skeleton today |
 | — | [examples/](examples/) | a template project and samples; a skeleton today |
 
