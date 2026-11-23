@@ -2368,6 +2368,52 @@ pub fn auditFrame(app: *App, frame: *const Ui.Frame) void {
 }
 ```
 
+<a id="design-permutations"></a>
+
+### `zui_design.Permutations`: every way a component is seen · *shipped*
+
+`zui_design.Permutations(Component, level)` lists the ways a component
+is seen: every theme, contrast, density, text scale, color vision,
+reading direction, corner preference, reduced transparency and widget
+state, and the content it declares in `zuiPreviews`. `glance` is the
+defaults and the extremes together, about five; `sweep` moves one axis
+at a time; `pairs` is a covering array made at comptime, so every pair
+of two axes' values is seen at least once in under thirty; and `full` is
+every combination, decoded by index. Each permutation's axes become the
+`Preferences` to resolve, the environment changes to send and the state
+to look up. Its `PermutationKey` prints as a short line and parses back,
+and `zui_design.hashCommands` hashes the frame it draws the same in
+every build mode and on every target, so a verdict kept by key goes
+stale exactly when what the permutation draws changes.
+
+`src/review.zig`
+
+```zig
+pub const AlbumChip = struct {
+    pub const Content = struct { title: []const u8 };
+
+    pub const zuiPreviews = .{
+        .short = Content{ .title = "Dunes" },
+        .long = Content{ .title = "Every photo from the long weekend on the coast" },
+    };
+};
+
+pub fn reviewAlbumChip(app: *App, ui: *Ui) !void {
+    const Pairs = zui_design.Permutations(AlbumChip, .pairs);
+    for (0..Pairs.count) |index| {
+        const permutation = Pairs.at(index);
+        _ = zui_design.resolve(darkroom, permutation.axes.preferences(.{}), &app.review_tokens);
+        var events: [zui_design.Axes.environment_change_count]zui.Event = undefined;
+        for (permutation.axes.environmentChanges(), &events) |change, *event| event.* = .{ .environment = change };
+        ui.beginFrame(&.{ .params = app.reviewParams(), .events = &events });
+        declareAlbumChip(ui, &app.review_tokens, Pairs.preview(permutation), permutation.axes.state);
+        const frame = ui.endFrame();
+        defer ui.release(frame);
+        try app.verdicts.record(Pairs.key(permutation), zui_design.hashCommands(frame.commands()));
+    }
+}
+```
+
 <a id="reflect"></a>
 
 ### `zui_reflect`: an editor from any struct · *shipped*

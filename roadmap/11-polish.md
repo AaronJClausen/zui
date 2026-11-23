@@ -33,7 +33,7 @@ and each is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:18-system-accent` The system's accent color | not started |
 | `11-polish:19-default-design` The default design | not started |
 | `11-polish:20-appearance-audit` The appearance audit | done |
-| `11-polish:21-permutations` Every permutation of a component | not started |
+| `11-polish:21-permutations` Every permutation of a component | done |
 | `11-polish:22-appearance-review` The appearance review | not started |
 | `11-polish:23-design-workbench` The design workbench | not started |
 | `11-polish:24-the-tour` The tour, redone | done |
@@ -1437,6 +1437,49 @@ that draw it.
 **Waits for** `11-polish:13-design-vocabulary`.
 
 **Spec.** §18.8.
+
+**Status.** Done. `core/zui_design/permutations.zig`: `Axes`, one value
+of each of SPEC.md §18.8's axes but the content, the user's defaults
+unless set, with `preferences(base)` for `resolve` and
+`environmentChanges()`, the five changes that set theme, contrast, text
+scale, reduced transparency and direction, for a frame's events; the
+`WidgetState` is `axes.state`, for `tokens.look`. `TextScale` names 1,
+1.5 and 2 as `100%`, `150%` and `200%`. `Permutations(Component, level)`
+gives `count`, `at(index)`, `preview(permutation)`, `previewName` and
+`key`, the content axis from the component's `zuiPreviews`. `glance` is
+the defaults, dark, dark at high contrast, compact at 200% and all of
+them right to left, with each further preview at the defaults and at
+every extreme: 5, and 9 with three previews. `sweep` is the defaults and
+then each axis's other values: 19, and 21 with three previews. `pairs`
+is a covering array of strength 2, made at comptime by a greedy
+construction (each row from the first pair still uncovered, every other
+axis given the value covering most new pairs): 27 for a component with
+no previews, 28 with three and 27 with two, against a floor of 25, the
+two five-value axes' product; SPEC.md §18.8's range for it now starts at
+25, and its glance row says what glance is. `full` decodes an index into
+every axis, 10,800 permutations without previews and 32,400 with three.
+`zuiPreviews` is checked by `zui.checkPreviews` in
+`core/src/contracts.zig`, a struct literal of named previews of one
+type, pinned by `previews_of_two_types`. `PermutationKey` formats as
+`component/preview/theme=dark,contrast=high,…`, every axis in order, and
+parses back, refusing a malformed key, an unknown axis or value, a
+repeated axis and a missing one. `hashCommands` hashes each command's
+fields in order with Wyhash, integers little-endian at whole-byte
+widths, floats by their bits with `-0` as `0` and every NaN as one,
+enums and union tags by name, text by length and bytes, and refuses at
+compile time any pointer but text; it runs at comptime. Nine tests in
+`core/zui_design/permutations_tests.zig`: every pair of axis values in
+`pairs` for three components; glance, sweep and full; keys; axes as
+preferences; a fixed declaration hashing to one constant, which passes
+natively, on `x86-linux`, in all three modes, and on big-endian
+`powerpc-linux` under `qemu-ppc-static` (all 60 of `zui_design`'s tests
+pass there); `-0` and NaN; and a swatch that draws `danger` only when
+pressed, whose sweep permutations change hash when `danger` changes
+exactly where the state is `pressed`. `core/tests/instantiate.zig`
+hashes `zuiCheckFrame`'s frame, whose commands carry images and custom
+data, and round-trips a key of a component with previews. In ReleaseFast
+a hash takes about 35 ns a command (6 µs for 171 commands, three runs,
+while other builds shared the machine).
 
 ## 11-polish:22-appearance-review — The appearance review
 

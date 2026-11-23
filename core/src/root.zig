@@ -63,6 +63,10 @@ pub const sharedOutputFormats = surface.sharedOutputFormats;
 /// ```
 pub const checkRenderer = contracts.checkRenderer;
 
+/// Checks a component's `zuiPreviews`, the content it is shown with under
+/// review.
+pub const checkPreviews = contracts.checkPreviews;
+
 pub const WindowId = host.WindowId;
 pub const HostCapabilities = host.HostCapabilities;
 pub const WindowOptions = host.WindowOptions;

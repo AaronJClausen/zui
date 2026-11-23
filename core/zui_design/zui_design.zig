@@ -18,6 +18,7 @@ const repairs_file = @import("repairs.zig");
 const color_vision = @import("color_vision.zig");
 const distinguish = @import("distinguish.zig");
 const audit_file = @import("audit.zig");
+const permutations_file = @import("permutations.zig");
 
 const design = zui.design;
 const Design = design.Design;
@@ -319,6 +320,28 @@ pub const Measured = audit_file.Measured;
 /// The findings an audit kept in its caller's room, and those it dropped.
 pub const Findings = audit_file.Findings;
 
+/// One value of every axis a component is seen under but its content.
+pub const Axes = permutations_file.Axes;
+/// An axis of `Axes`, or the component's preview.
+pub const Axis = permutations_file.Axis;
+/// The text scales a component is seen at.
+pub const TextScale = permutations_file.TextScale;
+/// One way a component is seen: its axes and its preview.
+pub const Permutation = permutations_file.Permutation;
+/// How many permutations a review steps through.
+pub const Level = permutations_file.Level;
+/// Every permutation of a component at a level.
+pub const Permutations = permutations_file.Permutations;
+/// A permutation's name from one build to the next, which formats and
+/// parses.
+pub const PermutationKey = permutations_file.PermutationKey;
+/// A hash of a frame's commands, the same in every mode and on every target.
+pub const hashCommands = permutations_file.hashCommands;
+/// The values an axis has, for a component with that many previews.
+pub const valueCount = permutations_file.valueCount;
+/// The index of a permutation's value of an axis.
+pub const valueIndex = permutations_file.valueIndex;
+
 /// A dichromacy at full severity, or achromatopsia, as a color is
 /// simulated for it.
 pub const Deficiency = color_vision.Deficiency;
@@ -470,4 +493,5 @@ fn fontIdOf(comptime FontId: type, index: u32) FontId {
 test {
     _ = @import("tests.zig");
     _ = @import("audit_tests.zig");
+    _ = @import("permutations_tests.zig");
 }

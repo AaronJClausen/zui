@@ -2825,9 +2825,9 @@ reduced transparency, each `WidgetState`, and its content.
 
   | Level | What | About |
   |---|---|---|
-  | `glance` | the defaults, and the extremes designed to break things together: dark, high contrast, 200%, compact, right to left | 5 per component |
+  | `glance` | the defaults, and the extremes designed to break things together: dark, dark at high contrast, compact at 200%, and all of them right to left; each further preview at the defaults and at every extreme | 5 per component, 2 more per preview |
   | `sweep` | one axis through its values, the rest at their defaults | 5 to 10 per axis |
-  | `pairs` | a covering array: every pair of two axes' values in at least one permutation | 30 to 60 per component |
+  | `pairs` | a covering array: every pair of two axes' values in at least one permutation | 25 to 60 per component |
   | `full` | every combination, for the audit in CI | thousands |
 
 - **The audit** (`zui_design.audit`) checks a finished frame's commands,
@@ -2842,8 +2842,18 @@ reduced transparency, each `WidgetState`, and its content.
   into room the caller gives, the rest counted as dropped.
 
 - **Keys and hashes.** Each permutation has a `PermutationKey`: the
-  component, its preview and every axis value. Its command hash is the
-  same in Debug and release and on every target.
+  component, its preview and every axis value, written
+  `demo.Chip/long/theme=dark,contrast=high,…` and parsed back. Its
+  command hash, `zui_design.hashCommands(frame.commands())`, is the same
+  in Debug and release and on every target: each field little-endian at
+  a fixed width, floats by their bits with `-0` and NaN made one, enums
+  and union tags by name, and no padding or pointer.
+
+- **Previews.** `zuiPreviews` is a struct literal of named previews, all
+  of one type, such as
+  `.{ .short = Content{ .label = "Save" }, .long = … }`. Previews of two
+  types are a compile error:
+  `"zui: demo.Chip.zuiPreviews.count is a u32, but .short is a demo.Chip.Content; every preview is the same type"`.
 
 - **The review** (`apps/review/`) shows each permutation of a level with
   its axis values and its findings. **Y** accepts it, **N** flags it,

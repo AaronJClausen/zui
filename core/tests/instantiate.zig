@@ -120,7 +120,8 @@ export fn zuiCheckFrame(width: f32, height: f32, pointer_x: f32, pointer_y: f32)
     const inspected_content = @intFromEnum(inspected.content) + @intFromBool(inspected.effects != null and inspected.floating != null);
     var audit_room: [8]zui_design.Finding = undefined;
     const findings = zui_design.audit(frame, .{ .page_background = .white, .focus_ring_color = .black }, &audit_room);
-    return findings.slice().len + findings.dropped + frame.commands().len + @intFromBool(ui.nextFrame() == .immediately) + violation_count + failed_check + broken_invariant + frame.elementCount() + host_requests + frame.semantics().len + frame.chromeRegions().len + inspected_content + inspector.rows().len;
+    const command_hash: usize = @truncate(zui_design.hashCommands(frame.commands()));
+    return command_hash +% findings.slice().len + findings.dropped + frame.commands().len + @intFromBool(ui.nextFrame() == .immediately) + violation_count + failed_check + broken_invariant + frame.elementCount() + host_requests + frame.semantics().len + frame.chromeRegions().len + inspected_content + inspector.rows().len;
 }
 
 const MotionCard = struct { offset: [2]f32, background: zui.Color, glow: zui.ExtendedColor, opacity: f32 };
@@ -846,6 +847,28 @@ const StatusBadge = struct {
 
 comptime {
     zui_design.checkDistinguished(resolved_design, .{StatusBadge});
+}
+
+const PreviewedBadge = struct {
+    pub const Content = struct { count: u32 };
+
+    pub const zuiPreviews = .{
+        .none = Content{ .count = 0 },
+        .many = Content{ .count = 1200 },
+    };
+};
+
+export fn zuiCheckPermutations(index: usize) usize {
+    const Pairs = zui_design.Permutations(PreviewedBadge, .pairs);
+    const Full = zui_design.Permutations(PreviewedBadge, .full);
+    const permutation = Full.at(index % Full.count);
+    var buffer: [256]u8 = undefined;
+    const text = std.fmt.bufPrint(&buffer, "{f}", .{Full.key(permutation)}) catch return 0;
+    const parsed = zui_design.PermutationKey.parse(text) catch return 1;
+    const preferences = parsed.axes.preferences(.{});
+    const changes = parsed.axes.environmentChanges();
+    return Pairs.count + zui_design.Permutations(PreviewedBadge, .glance).count + zui_design.Permutations(PreviewedBadge, .sweep).count +
+        Full.preview(permutation).count + @intFromBool(parsed.eql(Full.key(permutation))) + @intFromEnum(preferences.density) + changes.len;
 }
 
 const MeasuredFontMetrics = struct { ascent: f32, descent: f32, line_gap: f32 = 0, x_height: f32, cap_height: f32 };

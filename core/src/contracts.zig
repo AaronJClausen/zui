@@ -40,7 +40,7 @@ const wire_declarations = [_][]const u8{ "zuiSerialize", "zuiDeserialize" };
 const app_declarations = [_][]const u8{ "zuiDeclare", "zuiLoader" };
 /// Declared by a component that `zui.design.Tokens` styles, and by an
 /// application's extra roles.
-const design_declarations = [_][]const u8{ "zuiAppearance", "zuiDistinguish", "zuiPairs" };
+const design_declarations = [_][]const u8{ "zuiAppearance", "zuiDistinguish", "zuiPairs", "zuiPreviews" };
 
 pub fn checkText(comptime Text: type, comptime FontId: type) void {
     if (@typeInfo(Text) != .@"struct") @compileError("zui: Text must be a struct type, got " ++ @typeName(Text));
@@ -502,6 +502,31 @@ pub fn checkExtraRoles(comptime ExtraRoles: type) void {
     }
     for (std.meta.fieldNames(ExtraRoles)) |role| {
         if (!@hasField(@TypeOf(pairs), role)) @compileError("zui: " ++ name ++ ".zuiPairs gives no pair for `" ++ role ++ "`");
+    }
+}
+
+/// A component's `zuiPreviews`, the content it is shown with under review:
+/// a struct literal of named previews, each the same type.
+///
+/// ```zig
+/// pub const zuiPreviews = .{
+///     .short = Content{ .label = "Save" },
+///     .long = Content{ .label = "Save every change to every open document" },
+/// };
+/// ```
+pub fn checkPreviews(comptime Component: type) void {
+    const name = @typeName(Component) ++ ".zuiPreviews";
+    const Previews = @TypeOf(Component.zuiPreviews);
+    const info = @typeInfo(Previews);
+    if (info != .@"struct" or info.@"struct".is_tuple) {
+        @compileError("zui: " ++ name ++ " must be a struct of named previews, such as .{ .short = …, .long = … }, got " ++ @typeName(Previews));
+    }
+    const fields = info.@"struct".fields;
+    if (fields.len == 0) @compileError("zui: " ++ name ++ " names no preview");
+    for (fields[1..]) |field| {
+        if (field.type != fields[0].type) {
+            @compileError("zui: " ++ name ++ "." ++ field.name ++ " is a " ++ @typeName(field.type) ++ ", but ." ++ fields[0].name ++ " is a " ++ @typeName(fields[0].type) ++ "; every preview is the same type");
+        }
     }
 }
 

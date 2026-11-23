@@ -1963,6 +1963,36 @@ pub fn auditFrame(app: *App, frame: *const Ui.Frame) void {
 </script>
       </article>
 
+      <article class="feature" id="design-permutations" data-title="zui_design.Permutations">
+        <div class="feature-head"><h3><code>zui_design.Permutations</code>: every way a component is seen</h3><span class="pill shipped">Shipped</span></div>
+        <p><code class="z">zui_design.Permutations(Component, level)</code> lists the ways a component is seen: every theme, contrast, density, text scale, color vision, reading direction, corner preference, reduced transparency and widget state, and the content it declares in <code class="z">zuiPreviews</code>. <code class="z">glance</code> is the defaults and the extremes together, about five; <code class="z">sweep</code> moves one axis at a time; <code class="z">pairs</code> is a covering array made at comptime, so every pair of two axes' values is seen at least once in under thirty; and <code class="z">full</code> is every combination, decoded by index. Each permutation's axes become the <code class="z">Preferences</code> to resolve, the environment changes to send and the state to look up. Its <code class="z">PermutationKey</code> prints as a short line and parses back, and <code class="z">zui_design.hashCommands</code> hashes the frame it draws the same in every build mode and on every target, so a verdict kept by key goes stale exactly when what the permutation draws changes.</p>
+<script type="text/x-zig" data-file="src/review.zig">
+pub const AlbumChip = struct {
+    pub const Content = struct { title: []const u8 };
+
+    pub const zuiPreviews = .{
+        .short = Content{ .title = "Dunes" },
+        .long = Content{ .title = "Every photo from the long weekend on the coast" },
+    };
+};
+
+pub fn reviewAlbumChip(app: *App, ui: *Ui) !void {
+    const Pairs = zui_design.Permutations(AlbumChip, .pairs);
+    for (0..Pairs.count) |index| {
+        const permutation = Pairs.at(index);
+        _ = zui_design.resolve(darkroom, permutation.axes.preferences(.{}), &app.review_tokens);
+        var events: [zui_design.Axes.environment_change_count]zui.Event = undefined;
+        for (permutation.axes.environmentChanges(), &events) |change, *event| event.* = .{ .environment = change };
+        ui.beginFrame(&.{ .params = app.reviewParams(), .events = &events });
+        declareAlbumChip(ui, &app.review_tokens, Pairs.preview(permutation), permutation.axes.state);
+        const frame = ui.endFrame();
+        defer ui.release(frame);
+        try app.verdicts.record(Pairs.key(permutation), zui_design.hashCommands(frame.commands()));
+    }
+}
+</script>
+      </article>
+
       <article class="feature" id="reflect" data-title="zui_reflect">
         <div class="feature-head"><h3><code>zui_reflect</code>: an editor from any struct</h3><span class="pill shipped">Shipped</span></div>
         <p><code class="z">inspector</code> walks a struct with <code class="z">@typeInfo</code> and declares an editor per field. A <code class="z">bool</code> gets a checkbox, a number with min and max gets a slider, other numbers get − and + buttons, an enum gets a dropdown, <code class="z">EditableText</code> gets a text field, a string is shown read-only, and a nested struct gets a collapsible section. Options live beside the type in <code class="z">zui_inspector</code>, and a misspelled field name there fails to compile.</p>

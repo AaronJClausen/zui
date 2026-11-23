@@ -148,6 +148,7 @@ const compile_error_cases = [_]struct { name: []const u8, expected_error: []cons
     .{ .name = "distinguish_unknown_part", .expected_error = "zui: distinguish_unknown_part.Chip.zuiDistinguish names `badge`, which is not a part of distinguish_unknown_part.Chip.Part" },
     .{ .name = "distinguish_unknown_state", .expected_error = "zui: distinguish_unknown_state.Chip.zuiDistinguish names `normal`, which is not a zui.WidgetState" },
     .{ .name = "distinguish_without_cue", .expected_error = "zui_design: under demo.design, distinguish_without_cue.Chip's container and container_selected are 0.01 apart in lightness under protanopia in light, need 0.15; give one a `.cue` that is not color" },
+    .{ .name = "previews_of_two_types", .expected_error = "zui: previews_of_two_types.Chip.zuiPreviews.count is a u32, but .short is a previews_of_two_types.Chip.Content; every preview is the same type" },
     .{ .name = "distinguish_states_without_cue", .expected_error = "zui_design: under demo.design, distinguish_states_without_cue.Chip.close's idle and hovered layers are 0.02 apart in lightness under protanopia in light, need 0.15; give it a `.cue` that is not color" },
     .{ .name = "extra_roles_not_enum", .expected_error = "zui: ExtraRoles must be an enum or void, got u8" },
     .{ .name = "extra_roles_shadow_color_role", .expected_error = "zui: extra_roles_shadow_color_role.Roles's `accent` is already a zui.design.ColorRole" },
