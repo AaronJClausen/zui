@@ -340,17 +340,17 @@ pub fn Using(comptime kit: type) type {
                 }
             };
 
-            fn bodyColor(palette: kit.Palette, hue_index: u8) zui.Color {
+            fn bodyColor(colors: kit.Colors, hue_index: u8) zui.Color {
                 return switch (hue_index % 4) {
-                    0 => palette.spectacle,
-                    1 => palette.accent,
-                    2 => palette.good,
-                    else => palette.warn,
+                    0 => colors.get(.danger),
+                    1 => colors.get(.accent),
+                    2 => colors.get(.success),
+                    else => colors.get(.warning),
                 };
             }
 
             fn canvasCard(self: *TimeMachine, ui: *Ui, shell: *const Shell) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 shell.openCard(ui, "", .{ .width = .grow, .height = .grow });
                 defer ui.close();
                 {
@@ -358,7 +358,7 @@ pub fn Using(comptime kit: type) type {
                     defer ui.close();
                     shell.label(ui, .heading, "Drag on the field to fling a ball");
                     shell.spacer(ui);
-                    if (!self.atPresent()) shell.chip(ui, "in the past: input here starts a branch", palette.warn);
+                    if (!self.atPresent()) shell.chip(ui, "in the past: input here starts a branch", .warning);
                 }
                 const placement: WorldPlacement = .of(ui.rectOf(ids.canvas) orelse .{ .width = world_size[0], .height = world_size[1] });
                 const scale = placement.scale;
@@ -373,7 +373,7 @@ pub fn Using(comptime kit: type) type {
                 ui.box(.{
                     .floating = .{ .offset = placement.origin, .capture = false, .clip = .target },
                     .layout = .{ .sizing = .{ .width = .fixed(world_size[0] * scale), .height = .fixed(world_size[1] * scale) } },
-                    .decoration = .{ .background = palette.sunken, .border = .{ .color = palette.border, .widths = .all(1) }, .corner_radius = .all(6) },
+                    .decoration = .{ .background = colors.get(.surface_sunken), .border = .{ .color = colors.get(.outline_muted), .widths = .all(1) }, .corner_radius = .all(6) },
                 });
                 for (self.world.bodies[0..self.world.count]) |body| {
                     const diameter = body.radius * 2 * scale;
@@ -381,7 +381,7 @@ pub fn Using(comptime kit: type) type {
                     ui.box(.{
                         .floating = .{ .offset = top_left, .capture = false, .clip = .target },
                         .layout = .{ .sizing = .{ .width = .fixed(diameter), .height = .fixed(diameter) } },
-                        .decoration = .{ .background = bodyColor(palette, body.hue_index), .corner_radius = .all(diameter / 2) },
+                        .decoration = .{ .background = bodyColor(colors, body.hue_index), .corner_radius = .all(diameter / 2) },
                     });
                 }
                 if (self.aim.active) {
@@ -392,25 +392,25 @@ pub fn Using(comptime kit: type) type {
                         ui.box(.{
                             .floating = .{ .offset = .{ point[0] - 3, point[1] - 3 }, .capture = false, .clip = .target },
                             .layout = .{ .sizing = .{ .width = .fixed(6), .height = .fixed(6) } },
-                            .decoration = .{ .background = palette.text, .corner_radius = .all(3) },
+                            .decoration = .{ .background = colors.get(.on_surface), .corner_radius = .all(3) },
                         });
                     }
                 }
             }
 
             fn proofCard(self: *TimeMachine, ui: *Ui, shell: *const Shell) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 shell.openScrollingCard(ui, ids.proof, "", .{ .width = .fixed(330), .height = .grow });
                 defer ui.close();
-                shell.labelColored(ui, .caption, palette.spectacle, "THE STATE IS A FUNCTION OF THE LOG");
+                shell.labelColored(ui, .caption, colors.get(.on_surface_accent), "THE STATE IS A FUNCTION OF THE LOG");
                 const checksum = self.world.checksum();
                 const live_checksum = self.live_checksums[self.world.step];
                 const identical = checksum == live_checksum;
                 if (self.rebuilds == 0) {
-                    shell.labelColored(ui, .title, palette.muted, "Scrub back");
-                    shell.labelColored(ui, .caption, palette.muted, "Drag the timeline: each position is rebuilt from nothing by replaying the log, and checked against the live run.");
+                    shell.labelColored(ui, .title, colors.get(.on_surface_muted), "Scrub back");
+                    shell.labelColored(ui, .caption, colors.get(.on_surface_muted), "Drag the timeline: each position is rebuilt from nothing by replaying the log, and checked against the live run.");
                 } else {
-                    shell.labelColored(ui, .title, if (identical) palette.spectacle else palette.bad, if (identical) "Identical" else "Different");
+                    shell.labelColored(ui, .title, if (identical) colors.get(.on_surface_accent) else colors.get(.on_danger_container), if (identical) "Identical" else "Different");
                 }
                 shell.print(ui, .caption, "step {d}, rebuilt   {x:0>8}", .{ self.world.step, checksum });
                 shell.print(ui, .caption, "step {d}, live run  {x:0>8}", .{ self.world.step, live_checksum });
@@ -420,13 +420,13 @@ pub fn Using(comptime kit: type) type {
                 stat(ui, shell, "inputs applied", "{d}", .{self.last_replay.inputs_applied});
                 stat(ui, shell, "rebuild took", "{d:.0} us", .{self.last_replay.microseconds});
                 stat(ui, shell, "branches", "{d}, {d} inputs forgotten", .{ self.branches, self.inputs_forgotten });
-                if (self.log_full) shell.labelColored(ui, .caption, palette.warn, "The log is full: further input is refused, not half kept. Reset to start over.");
+                if (self.log_full) shell.labelColored(ui, .caption, colors.get(.on_warning_container), "The log is full: further input is refused, not half kept. Reset to start over.");
                 shell.divider(ui);
-                shell.labelColored(ui, .caption, palette.muted, "zui records a whole UI the same way: ui.relayTo(listener) hands over each frame record, its time, events and source deliveries, and feeding them back declares the identical commands.");
+                shell.labelColored(ui, .caption, colors.get(.on_surface_muted), "zui records a whole UI the same way: ui.relayTo(listener) hands over each frame record, its time, events and source deliveries, and feeding them back declares the identical commands.");
                 shell.label(ui, .tiny, "INPUT LOG, NEWEST LAST");
                 const shown = @min(self.log.count, 6);
                 for (self.log.inputs[self.log.count - shown .. self.log.count]) |input| {
-                    const line_style: Ui.TextStyle = .{ .size = 12 * shell.text_scale, .font = shell.fonts.mono, .color = if (input.step <= self.world.step) palette.text else palette.faint };
+                    const line_style: Ui.TextStyle = .{ .size = 12 * shell.text_scale, .font = shell.fonts.mono, .color = if (input.step <= self.world.step) colors.get(.on_surface) else colors.get(.on_surface_muted) };
                     var line: [64]u8 = undefined;
                     ui.text(switch (input.action) {
                         .fling => |fling| std.fmt.bufPrint(&line, "#{d:0>4} fling {d:.0},{d:.0}", .{ input.step, fling.velocity[0], fling.velocity[1] }) catch "fling",
@@ -444,7 +444,7 @@ pub fn Using(comptime kit: type) type {
             }
 
             fn timelineCard(self: *TimeMachine, ui: *Ui, shell: *const Shell) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 shell.openCard(ui, "", .{ .width = .grow });
                 defer ui.close();
                 ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 10, .child_alignment = .{ .y = .center } } });
@@ -463,7 +463,7 @@ pub fn Using(comptime kit: type) type {
                     self.scrubTo(ui, @min(view_step, self.head_step), shell);
                 }
                 ui.open(.{ .layout = .{ .sizing = .{ .width = .fixed(150) }, .child_alignment = .{ .x = .end } } });
-                shell.printColored(ui, .caption, if (self.atPresent()) palette.text else palette.warn, "{d:.1} / {d:.1} s", .{ secondsAt(self.world.step), secondsAt(self.head_step) });
+                shell.printColored(ui, .caption, if (self.atPresent()) colors.get(.on_surface) else colors.get(.on_warning_container), "{d:.1} / {d:.1} s", .{ secondsAt(self.world.step), secondsAt(self.head_step) });
                 ui.close();
                 if (shell.widgets.button(ui, ids.gravity, if (self.world.gravity) "Gravity off" else "Gravity on", .{})) self.take(.toggle_gravity);
                 if (shell.widgets.button(ui, ids.reset, "Reset", .{})) {

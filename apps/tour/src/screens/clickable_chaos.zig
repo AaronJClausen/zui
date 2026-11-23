@@ -58,15 +58,15 @@ pub fn Using(comptime kit: type) type {
 
             fn controls(self: *ClickableChaos, ui: *Ui, shell: *const Shell, hovered_card: ?usize) void {
                 const widgets = shell.widgets;
-                const palette = shell.palette;
+                const colors = shell.colors;
                 shell.openScrollingCard(ui, .of("clickable_chaos.controls"), "", .{ .width = .fixed(300), .height = .grow });
                 defer ui.close();
                 {
                     ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 16 } });
                     defer ui.close();
-                    tally(ui, shell, "hits", "{d}", .{self.hits}, palette.accent);
-                    tally(ui, shell, "flipped", "{d}", .{std.mem.count(bool, &self.flipped, &.{true})}, palette.spectacle);
-                    if (hovered_card) |card| tally(ui, shell, "under the pointer", "#{d}", .{card + 1}, palette.text) else tally(ui, shell, "under the pointer", "none", .{}, palette.faint);
+                    tally(ui, shell, "hits", "{d}", .{self.hits}, colors.get(.on_surface_accent));
+                    tally(ui, shell, "flipped", "{d}", .{std.mem.count(bool, &self.flipped, &.{true})}, colors.get(.on_surface_accent));
+                    if (hovered_card) |card| tally(ui, shell, "under the pointer", "#{d}", .{card + 1}, colors.get(.on_surface)) else tally(ui, shell, "under the pointer", "none", .{}, colors.get(.on_surface_muted));
                 }
                 shell.divider(ui);
                 if (widgets.button(ui, .of("clickable_chaos.pause"), if (self.paused) "Resume the wave" else "Pause the wave", .{ .width = .grow })) self.paused = !self.paused;
@@ -80,15 +80,15 @@ pub fn Using(comptime kit: type) type {
                 }
                 shell.divider(ui);
                 shell.print(ui, .caption, "{d} cards, each its own transform: {d} of the frame's {d} effects.", .{ card_count, card_count, Ui.limits.max_effects });
-                shell.meter(ui, @as(f32, @floatFromInt(card_count)) / @as(f32, @floatFromInt(@max(1, Ui.limits.max_effects))), palette.spectacle, 6);
+                shell.meter(ui, @as(f32, @floatFromInt(card_count)) / @as(f32, @floatFromInt(@max(1, Ui.limits.max_effects))), colors.get(.accent), 6);
                 shell.label(ui, .caption, "Layout never moves: each card is painted turned and scaled, and zui inverts the same transform to find which card the pointer is over, so a corner that swings into a neighbour's box still belongs to its own card.");
             }
 
             fn wall(self: *const ClickableChaos, ui: *Ui, shell: *const Shell) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 ui.open(.{
                     .layout = .{ .direction = .top_to_bottom, .sizing = .grow_both, .padding = .all(18), .child_gap = 0 },
-                    .decoration = .{ .background = palette.sunken, .border = .{ .color = palette.border, .widths = .all(1) }, .corner_radius = .all(8) },
+                    .decoration = .{ .background = colors.get(.surface_sunken), .border = .{ .color = colors.get(.outline_muted), .widths = .all(1) }, .corner_radius = .all(8) },
                     .clip = .both,
                 });
                 defer ui.close();
@@ -101,7 +101,7 @@ pub fn Using(comptime kit: type) type {
                         const hovered = ui.hovered(id);
                         ui.open(.{
                             .layout = .{ .sizing = .grow_both, .padding = .all(3) },
-                            .decoration = if (self.show_layout_boxes) .{ .border = .{ .color = palette.faint, .widths = .all(1) } } else null,
+                            .decoration = if (self.show_layout_boxes) .{ .border = .{ .color = colors.get(.on_surface_muted), .widths = .all(1) } } else null,
                         });
                         defer ui.close();
                         ui.box(.{
@@ -109,22 +109,22 @@ pub fn Using(comptime kit: type) type {
                             .interactive = true,
                             .cursor = .pointer,
                             .layout = .{ .sizing = .grow_both },
-                            .decoration = self.cardDecoration(palette, row, column, hovered),
+                            .decoration = self.cardDecoration(colors, row, column, hovered),
                             .effects = &.{ .transform = self.cardTransform(row, column, hovered, ui.pressed(id)) },
                         });
                     }
                 }
             }
 
-            fn cardDecoration(self: *const ClickableChaos, palette: kit.Palette, row: usize, column: usize, hovered: bool) Ui.Decoration {
+            fn cardDecoration(self: *const ClickableChaos, colors: kit.Colors, row: usize, column: usize, hovered: bool) Ui.Decoration {
                 const flipped = self.flipped[row * wall_columns + column];
                 const across = @as(f32, @floatFromInt(column)) / wall_columns;
                 const down = @as(f32, @floatFromInt(row)) / @as(f32, @floatFromInt(wall_rows));
                 const hue = kit.hueColor(0.55 + 0.3 * across + 0.15 * down, 0.6, 0.9);
-                const face = if (flipped) hue else hue.mix(palette.surface, 0.78);
+                const face = if (flipped) hue else hue.mix(colors.get(.surface), 0.78);
                 return .{
-                    .background = if (hovered) face.mix(palette.text, 0.35) else face,
-                    .border = .{ .color = if (hovered) palette.text else hue.mix(palette.surface, if (flipped) 0.2 else 0.6), .widths = .all(if (hovered) 2 else 1) },
+                    .background = if (hovered) face.mix(colors.get(.on_surface), 0.35) else face,
+                    .border = .{ .color = if (hovered) colors.get(.on_surface) else hue.mix(colors.get(.surface), if (flipped) 0.2 else 0.6), .widths = .all(if (hovered) 2 else 1) },
                     .corner_radius = .all(5),
                 };
             }

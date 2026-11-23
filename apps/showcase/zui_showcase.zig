@@ -31,20 +31,6 @@ pub fn Tokens(comptime Ui: type) type {
     return zui.design.Tokens(Ui, void);
 }
 
-/// The showcase's colors, dark by default.
-pub const Palette = struct {
-    background: zui.Color = .rgb(0x16161c),
-    panel: zui.Color = .rgb(0x20202a),
-    sidebar: zui.Color = .rgb(0x1a1a22),
-    text: zui.Color = .rgb(0xe8e8f0),
-    muted_text: zui.Color = .rgb(0x9a9aae),
-    accent: zui.Color = .rgb(0x5b8cff),
-    border: zui.Color = .rgb(0x34344a),
-    highlight: zui.Color = .rgb(0xffc65c),
-    hovered_row: zui.Color = .rgb(0x3a3a50),
-    overlay: zui.Color = .rgba(0x00000099),
-};
-
 /// Sizes in layout units. A pixel renderer and a cell renderer need
 /// different values for the same UI to read well.
 pub const Metrics = struct {
@@ -69,7 +55,6 @@ pub fn Showcase(comptime Ui: type) type {
         pub const ids = zui.ids(.{ "toolbar", "new", "open", "save", "about", "sidebar", "content", "tooltips", "volume", "hover_me", "dialog_close" });
 
         title: []const u8,
-        palette: Palette = .{},
         metrics: Metrics = .{},
         widgets: zui_widgets.Widgets(Ui, zui_widgets.DesignSkin(Ui)),
 
@@ -80,8 +65,19 @@ pub fn Showcase(comptime Ui: type) type {
         volume: f32 = 0.6,
         about_open: bool = false,
 
+        /// The color the showcase's page is drawn on, for a renderer to
+        /// clear to.
+        pub fn background(self: *const Self) zui.Color {
+            return self.color(.background);
+        }
+
+        fn color(self: *const Self, role: zui.design.ColorRole) zui.Color {
+            const idle = self.widgets.skin.tokens.colors.get(.idle).get(role);
+            return if (Ui.Color == zui.Color) idle else idle.toColor();
+        }
+
         pub fn declare(self: *Self, ui: *Ui) void {
-            ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .grow_both }, .decoration = .{ .background = self.palette.background } });
+            ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .grow_both }, .decoration = .{ .background = self.color(.background) } });
             defer ui.close();
             self.toolbar(ui);
             {
@@ -93,15 +89,15 @@ pub fn Showcase(comptime Ui: type) type {
             self.aboutDialog(ui);
         }
 
-        fn body(self: *const Self, ui: *Ui, content: []const u8, color: zui.Color) void {
-            ui.text(content, .{ .size = self.metrics.body_size, .color = color });
+        fn body(self: *const Self, ui: *Ui, content: []const u8, text_color: zui.Color) void {
+            ui.text(content, .{ .size = self.metrics.body_size, .color = text_color });
         }
 
         fn toolbar(self: *Self, ui: *Ui) void {
             ui.open(.{
                 .id = ids.toolbar,
                 .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(self.metrics.toolbar_height) }, .padding = .symmetric(self.metrics.padding, 0), .child_gap = self.metrics.gap, .child_alignment = .{ .y = .center } },
-                .decoration = .{ .background = self.palette.panel, .border = .{ .color = self.palette.border, .widths = .{ .bottom = 1 } } },
+                .decoration = .{ .background = self.color(.surface), .border = .{ .color = self.color(.outline_muted), .widths = .{ .bottom = 1 } } },
             });
             defer ui.close();
 
@@ -120,7 +116,7 @@ pub fn Showcase(comptime Ui: type) type {
             ui.open(.{
                 .id = ids.sidebar,
                 .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(self.metrics.sidebar_width), .height = .grow } },
-                .decoration = .{ .background = self.palette.sidebar },
+                .decoration = .{ .background = self.color(.surface_sunken) },
                 .scroll = .{},
             });
             defer ui.close();
@@ -135,12 +131,12 @@ pub fn Showcase(comptime Ui: type) type {
                     .cursor = .pointer,
                     .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(self.metrics.row_height) }, .padding = .symmetric(self.metrics.padding, 0), .child_alignment = .{ .y = .center } },
                     .decoration = .{
-                        .background = if (self.selected_row == index) self.palette.accent else if (state == .hovered or state == .pressed) self.palette.hovered_row else null,
-                        .border = if (ui.focused(id)) .{ .color = self.palette.highlight, .widths = .all(1) } else null,
+                        .background = if (self.selected_row == index) self.color(.selection) else if (state == .hovered or state == .pressed) self.color(.secondary_container) else null,
+                        .border = if (ui.focused(id)) .{ .color = self.color(.focus), .widths = .all(1) } else null,
                     },
                 });
                 const name = std.fmt.bufPrint(&name_buffer, "Document {d}", .{index + 1}) catch "Document";
-                self.body(ui, name, self.palette.text);
+                self.body(ui, name, if (self.selected_row == index) self.color(.on_selection) else self.color(.on_surface));
                 ui.close();
                 if (ui.clicked(id)) {
                     self.selected_row = index;
@@ -156,8 +152,8 @@ pub fn Showcase(comptime Ui: type) type {
             });
             defer ui.close();
 
-            ui.text(self.title, .{ .size = self.metrics.title_size, .color = self.palette.text });
-            self.body(ui, "This window is laid out by zui and drawn by the backend named above. The same declaration code runs on every renderer, so differences between them are the renderer's. Resize to watch this paragraph re-wrap, scroll the list with the wheel, and press Tab to move focus.", self.palette.muted_text);
+            ui.text(self.title, .{ .size = self.metrics.title_size, .color = self.color(.on_surface) });
+            self.body(ui, "This window is laid out by zui and drawn by the backend named above. The same declaration code runs on every renderer, so differences between them are the renderer's. Resize to watch this paragraph re-wrap, scroll the list with the wheel, and press Tab to move focus.", self.color(.on_surface_muted));
 
             _ = self.widgets.checkbox(ui, ids.tooltips, "Show tooltips", &self.show_tooltips, .{});
             self.widgets.labeledRow(ui, "Volume");
@@ -167,14 +163,14 @@ pub fn Showcase(comptime Ui: type) type {
             {
                 ui.open(.{ .id = ids.hover_me, .interactive = true, .layout = .{ .padding = .symmetric(self.metrics.padding, self.metrics.padding / 2) }, .decoration = .{ .background = self.widgets.style(ui, .button, ui.widgetState(ids.hover_me)).background, .corner_radius = .all(self.metrics.corner_radius) } });
                 defer ui.close();
-                self.body(ui, "Hover me", self.palette.text);
+                self.body(ui, "Hover me", self.color(.on_surface));
                 if (ui.hovered(ids.hover_me) and self.show_tooltips) {
                     ui.open(.{
                         .floating = .{ .anchor = .top_left, .attach_point = .bottom_left, .offset = .{ 0, self.metrics.gap / 2 } },
                         .layout = .{ .padding = .symmetric(self.metrics.padding / 2, self.metrics.padding / 4) },
-                        .decoration = .{ .background = self.palette.highlight, .corner_radius = .all(self.metrics.corner_radius) },
+                        .decoration = .{ .background = self.color(.surface_inverse), .corner_radius = .all(self.metrics.corner_radius) },
                     });
-                    self.body(ui, "A floating tooltip", self.palette.background);
+                    self.body(ui, "A floating tooltip", self.color(.on_surface_inverse));
                     ui.close();
                 }
             }
@@ -182,7 +178,7 @@ pub fn Showcase(comptime Ui: type) type {
             var status_buffer: [128]u8 = undefined;
             const selected_number = if (self.selected_row) |index| index + 1 else 0;
             const status = std.fmt.bufPrint(&status_buffer, "Clicks: {d}   Last action: {s}   Selected: document {d}   Volume: {d:.2}", .{ self.clicks, self.last_action, selected_number, self.volume }) catch "";
-            self.body(ui, status, self.palette.muted_text);
+            self.body(ui, status, self.color(.on_surface_muted));
         }
 
         fn aboutDialog(self: *Self, ui: *Ui) void {
@@ -193,17 +189,17 @@ pub fn Showcase(comptime Ui: type) type {
                 .interactive = true,
                 .floating = .{ .attach_to = .root, .z = 10 },
                 .layout = .{ .sizing = .grow_both, .child_alignment = .{ .x = .center, .y = .center } },
-                .decoration = .{ .background = self.palette.overlay },
+                .decoration = .{ .background = self.color(.scrim) },
             });
             defer ui.close();
             ui.open(.{
                 .focus_scope = true,
                 .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(self.metrics.dialog_width) }, .padding = .all(self.metrics.padding), .child_gap = self.metrics.gap },
-                .decoration = .{ .background = self.palette.panel, .corner_radius = .all(self.metrics.corner_radius), .border = .{ .color = self.palette.border, .widths = .all(1) } },
+                .decoration = .{ .background = self.color(.surface_overlay), .corner_radius = .all(self.metrics.corner_radius), .border = .{ .color = self.color(.outline_muted), .widths = .all(1) } },
             });
             defer ui.close();
-            ui.text("About", .{ .size = self.metrics.title_size, .color = self.palette.text });
-            self.body(ui, "This dialog floats in its own layer and keeps Tab focus inside it. Press Escape or Close.", self.palette.muted_text);
+            ui.text("About", .{ .size = self.metrics.title_size, .color = self.color(.on_surface) });
+            self.body(ui, "This dialog floats in its own layer and keeps Tab focus inside it. Press Escape or Close.", self.color(.on_surface_muted));
             if (self.widgets.button(ui, ids.dialog_close, "Close", .{})) self.about_open = false;
         }
     };
@@ -294,16 +290,16 @@ pub fn App(comptime config: Config) type {
             app.* = .{ .showcase = undefined, .host = start.host, .options = options };
             resolveTokens(&app.tokens);
             app.showcase = newShowcase(&app.tokens);
-            if (@hasField(Renderer, "background")) start.renderer.background = app.showcase.palette.background;
-            if (@hasField(Renderer, "clear_color")) start.renderer.clear_color = app.showcase.palette.background;
+            if (@hasField(Renderer, "background")) start.renderer.background = app.showcase.background();
+            if (@hasField(Renderer, "clear_color")) start.renderer.clear_color = app.showcase.background();
         }
 
         pub fn deinit(app: *Self) void {
             if (app.options.frame_limit != null) std.log.info("drew {d} frames, diagnostics ok: {}", .{ app.frames, app.diagnostics_ok });
         }
 
-        /// Writes the showcase's tokens: zui's default design in dark, as
-        /// its palette is, and compact where it draws in cells.
+        /// Writes the showcase's tokens: zui's default design in dark, and
+        /// compact where it draws in cells.
         pub fn resolveTokens(tokens: *Tokens(Ui)) void {
             _ = zui_design.resolve(zui_design.default, .{ .theme = .dark, .density = if (draws_in_cells) .compact else .comfortable }, tokens);
         }
@@ -340,7 +336,7 @@ const FixedWidthText = struct {
     }
 };
 
-test "the showcase declares within its limits, with and without its dialog" {
+test "the showcase declares within its limits, with and without its dialog, its text meeting the contrast targets" {
     const Ui = zui.Context(.{ .Text = FixedWidthText });
     var text: FixedWidthText = .{};
     const io = if (@import("builtin").os.tag == .freestanding) std.Io.failing else std.testing.io;
@@ -357,6 +353,9 @@ test "the showcase declares within its limits, with and without its dialog" {
         defer ui.release(frame);
         try std.testing.expect(frame.diagnostics.ok());
         try std.testing.expect(frame.rectOf(Showcase(Ui).ids.sidebar) != null);
+        var room: [64]zui_design.Finding = undefined;
+        const findings = zui_design.audit(frame, .{ .checks = .initOne(.text_contrast), .page_background = showcase.background() }, &room);
+        try std.testing.expectEqual(0, findings.slice().len + findings.dropped);
     }
 }
 
@@ -417,8 +416,8 @@ test "a target runs the showcase through zui_app, its controls on whole cells wh
         while (try session.frame()) {}
         try std.testing.expectEqual(3, session.renderer.submitted);
         try std.testing.expect(session.app.diagnostics_ok);
-        try std.testing.expectEqual(session.app.showcase.palette.background, session.renderer.clear_color);
-        try std.testing.expectEqual(session.app.showcase.palette.background, session.renderer.background);
+        try std.testing.expectEqual(session.app.showcase.background(), session.renderer.clear_color);
+        try std.testing.expectEqual(session.app.showcase.background(), session.renderer.background);
         try std.testing.expectEqual(placement == .cells, session.app.showcase.metrics.row_height == cell_metrics.row_height);
     }
 }

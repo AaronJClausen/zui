@@ -619,7 +619,7 @@ pub fn Using(comptime kit: type) type {
                 ui.open(.{
                     .id = id,
                     .layout = .{ .direction = .top_to_bottom, .sizing = sizing, .padding = .all(16), .child_gap = 10 },
-                    .decoration = .{ .background = shell.palette.surface, .border = .{ .color = shell.palette.border, .widths = .all(1) }, .corner_radius = .all(8), .corner_shape = kit.panel_corner_shape },
+                    .decoration = .{ .background = shell.colors.get(.surface), .border = .{ .color = shell.colors.get(.outline_muted), .widths = .all(1) }, .corner_radius = .all(8), .corner_shape = kit.panel_corner_shape },
                 });
             }
 
@@ -629,15 +629,15 @@ pub fn Using(comptime kit: type) type {
                 ui.open(.{
                     .floating = .{ .attach_to = .{ .element = target }, .anchor = .bottom_center, .attach_point = .top_center, .offset = .{ 0, -6 }, .z = 600, .capture = false },
                     .layout = .{ .padding = .symmetric(8, 4) },
-                    .decoration = .{ .background = shell.palette.text, .corner_radius = .all(4) },
+                    .decoration = .{ .background = shell.colors.get(.surface_inverse), .corner_radius = .all(4) },
                     .effects = &floating_shadow,
                 });
-                ui.text(content, noWrap(shell.style(.caption, shell.palette.background)));
+                ui.text(content, noWrap(shell.style(.caption, shell.colors.get(.on_surface_inverse))));
                 ui.close();
             }
 
             fn toolbar(self: *Harbor, ui: *Ui, shell: *const Shell) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 ui.open(.{
                     .id = ids.harbor_toolbar,
                     .semantics = self.semantic(.{ .role = .group, .label = "Toolbar" }),
@@ -647,26 +647,26 @@ pub fn Using(comptime kit: type) type {
                 _ = shell.widgets.dropdown(ui, ids.harbor_environment, &self.environment_choice, &environments, .{ .label = "Environment" });
                 if (shell.widgets.textField(ui, ids.harbor_filter, &self.filter, .{ .placeholder = "Filter by name, region or status", .width = .fixed(260) }).changed) self.filter_stale = true;
                 var shown_buffer: [32]u8 = undefined;
-                shell.printColored(ui, .caption, palette.muted, "{s} of 5,000", .{withThousands(&shown_buffer, self.shown_count)});
+                shell.printColored(ui, .caption, colors.get(.on_surface_muted), "{s} of 5,000", .{withThousands(&shown_buffer, self.shown_count)});
                 shell.spacer(ui);
                 {
                     const running = self.metrics_producer.phase.load(.acquire) == .running;
                     ui.open(.{
                         .id = ids.harbor_live_pill,
                         .layout = .{ .padding = .symmetric(10, 4), .child_gap = 6, .child_alignment = .{ .y = .center } },
-                        .decoration = .{ .background = palette.sunken, .corner_radius = .all(12) },
+                        .decoration = .{ .background = colors.get(.surface_sunken), .corner_radius = .all(12) },
                     });
                     defer ui.close();
-                    ui.box(.{ .layout = .{ .sizing = .{ .width = .fixed(8), .height = .fixed(8) } }, .decoration = .{ .background = if (running) palette.good else palette.faint, .corner_radius = .all(4) } });
+                    ui.box(.{ .layout = .{ .sizing = .{ .width = .fixed(8), .height = .fixed(8) } }, .decoration = .{ .background = if (running) colors.get(.success) else colors.get(.on_surface_muted), .corner_radius = .all(4) } });
                     const sample = if (self.metrics) |metrics| metrics.sample else 0;
-                    shell.printColored(ui, .caption, palette.muted, "{s} · sample {d}", .{ if (running) "Live" else "Paused", sample });
+                    shell.printColored(ui, .caption, colors.get(.on_surface_muted), "{s} · sample {d}", .{ if (running) "Live" else "Paused", sample });
                 }
                 if (primaryButton(self, ui, shell, ids.harbor_deploy, "Deploy…")) self.openDialog(ui);
                 self.tooltip(ui, shell, ids.harbor_deploy, "Deploy the selected service");
             }
 
             fn kpiRow(self: *Harbor, ui: *Ui, shell: *const Shell) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 ui.open(.{ .id = ids.harbor_kpis, .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 12 } });
                 defer ui.close();
                 const traffic = environment_traffic[self.environment_choice];
@@ -678,12 +678,12 @@ pub fn Using(comptime kit: type) type {
                         "Requests per second",
                         if (reading) |metrics| withThousands(&value_buffer, @intFromFloat(metrics.requests_per_second * traffic)) else "—",
                         "across every region",
-                        palette.accent,
+                        colors.get(.accent),
                         traffic,
                     },
-                    .{ "Error rate", "", "of requests, last minute", if (reading != null and reading.?.error_percent > 1) palette.bad else palette.warn, 1 },
-                    .{ "p95 latency", "", "fleet-wide, rolling", palette.warn, 1 },
-                    .{ "Healthy services", "", "", palette.good, 1 },
+                    .{ "Error rate", "", "of requests, last minute", if (reading != null and reading.?.error_percent > 1) colors.get(.danger) else colors.get(.warning), 1 },
+                    .{ "p95 latency", "", "fleet-wide, rolling", colors.get(.warning), 1 },
+                    .{ "Healthy services", "", "", colors.get(.success), 1 },
                 };
                 for (tiles, 0..) |tile, index| {
                     const tile_id: zui.Id = .indexed("harbor_kpi", index);
@@ -699,16 +699,16 @@ pub fn Using(comptime kit: type) type {
                         .id = tile_id,
                         .semantics = self.semantic(.{ .role = .group, .label = tile[0], .value = .{ .text = value } }),
                         .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow_equal }, .padding = .all(12), .child_gap = 6 },
-                        .decoration = .{ .background = palette.surface, .border = .{ .color = palette.border, .widths = .all(1) }, .corner_radius = .all(8), .corner_shape = kit.panel_corner_shape },
+                        .decoration = .{ .background = colors.get(.surface), .border = .{ .color = colors.get(.outline_muted), .widths = .all(1) }, .corner_radius = .all(8), .corner_shape = kit.panel_corner_shape },
                     });
                     defer ui.close();
-                    ui.text(tile[0], noWrap(shell.style(.caption, palette.muted)));
+                    ui.text(tile[0], noWrap(shell.style(.caption, colors.get(.on_surface_muted))));
                     {
                         ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 8, .child_alignment = .{ .y = .end } } });
                         defer ui.close();
-                        ui.text(value, .{ .size = 24 * shell.text_scale, .font = shell.fonts.bold, .color = palette.text, .wrap = .none });
+                        ui.text(value, .{ .size = 24 * shell.text_scale, .font = shell.fonts.bold, .color = colors.get(.on_surface), .wrap = .none });
                         ui.open(.{ .layout = .{ .sizing = .{ .width = .grow } } });
-                        shell.labelColored(ui, .tiny, palette.faint, detail);
+                        shell.labelColored(ui, .tiny, colors.get(.on_surface_muted), detail);
                         ui.close();
                     }
                     self.sparkline(ui, shell, index, tile[3], tile[4]);
@@ -731,23 +731,23 @@ pub fn Using(comptime kit: type) type {
                     const fraction = if (value == 0) 0.04 else 0.15 + 0.85 * (value / scale - lowest) / span;
                     ui.box(.{
                         .layout = .{ .sizing = .{ .width = .grow_equal, .height = .percent(std.math.clamp(fraction, 0.04, 1)) } },
-                        .decoration = .{ .background = if (age == history_length - 1) color else color.mix(shell.palette.surface, 0.55), .corner_radius = .all(1) },
+                        .decoration = .{ .background = if (age == history_length - 1) color else color.mix(shell.colors.get(.surface), 0.55), .corner_radius = .all(1) },
                     });
                 }
             }
 
             fn servicesPanel(self: *Harbor, ui: *Ui, shell: *const Shell) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 self.openPanel(ui, shell, ids.harbor_services, .grow_both);
                 defer ui.close();
                 {
                     ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 10, .child_alignment = .{ .y = .center } } });
                     defer ui.close();
-                    ui.text("Services", noWrap(shell.style(.heading, palette.text)));
+                    ui.text("Services", noWrap(shell.style(.heading, colors.get(.on_surface))));
                     shell.spacer(ui);
-                    shell.printColored(ui, .caption, palette.good, "{d} healthy", .{self.fleet.healthy});
-                    shell.printColored(ui, .caption, palette.warn, "{d} degraded", .{self.fleet.degraded});
-                    shell.printColored(ui, .caption, palette.bad, "{d} down", .{self.fleet.down});
+                    shell.printColored(ui, .caption, colors.get(.on_success_container), "{d} healthy", .{self.fleet.healthy});
+                    shell.printColored(ui, .caption, colors.get(.on_warning_container), "{d} degraded", .{self.fleet.degraded});
+                    shell.printColored(ui, .caption, colors.get(.on_danger_container), "{d} down", .{self.fleet.down});
                 }
 
                 const body = ui.rectOf(ids.harbor_table_body) orelse zui.Rect{ .width = 800, .height = 480 };
@@ -764,14 +764,14 @@ pub fn Using(comptime kit: type) type {
                     .focusable = true,
                     .semantics = self.semantic(.{ .role = .list_box, .label = "Services" }),
                     .layout = .{ .direction = .top_to_bottom, .sizing = .grow_both },
-                    .decoration = .{ .border = if (ui.focused(ids.harbor_table_body)) .{ .color = palette.focus, .widths = .all(1) } else null, .corner_radius = .all(4) },
+                    .decoration = .{ .border = if (ui.focused(ids.harbor_table_body)) .{ .color = colors.get(.focus), .widths = .all(1) } else null, .corner_radius = .all(4) },
                     .scroll = .{},
                 });
                 defer ui.close();
                 ui.box(.{ .layout = .{ .sizing = .{ .height = .fixed(@as(f32, @floatFromInt(first)) * row_pitch) } } });
                 for (self.shown[first..last], first..) |service, position| self.serviceRow(ui, shell, service, position, table_width);
                 ui.box(.{ .layout = .{ .sizing = .{ .height = .fixed(@as(f32, @floatFromInt(count - last)) * row_pitch) } } });
-                if (count == 0) ui.text("No service matches the filter.", shell.style(.body, palette.muted));
+                if (count == 0) ui.text("No service matches the filter.", shell.style(.body, colors.get(.on_surface_muted)));
             }
 
             /// What the window leaves the table, rather than what it took last frame: columns
@@ -785,11 +785,11 @@ pub fn Using(comptime kit: type) type {
             }
 
             fn tableHeader(self: *Harbor, ui: *Ui, shell: *const Shell, table_width: f32) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 ui.open(.{
                     .id = ids.harbor_table_header,
                     .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(30) }, .padding = .{ .left = 12, .right = 12 }, .child_gap = 8, .child_alignment = .{ .y = .center } },
-                    .decoration = .{ .background = palette.sunken, .corner_radius = .all(4) },
+                    .decoration = .{ .background = colors.get(.surface_sunken), .corner_radius = .all(4) },
                 });
                 defer ui.close();
                 ui.box(.{ .layout = .{ .sizing = .{ .width = .fixed(3) } } });
@@ -815,11 +815,11 @@ pub fn Using(comptime kit: type) type {
                             .child_gap = 4,
                             .child_alignment = .{ .x = if (column.alignsToEnd()) .end else .start, .y = .center },
                         },
-                        .decoration = .{ .border = if (ui.focused(id)) .{ .color = palette.focus, .widths = .all(1) } else null, .corner_radius = .all(3) },
+                        .decoration = .{ .border = if (ui.focused(id)) .{ .color = colors.get(.focus), .widths = .all(1) } else null, .corner_radius = .all(3) },
                     });
                     defer ui.close();
-                    ui.text(column.title(), noWrap(shell.style(.caption, if (sorted) palette.text else if (hovered) palette.text else palette.muted)));
-                    if (sorted) ui.text(if (self.sort_descending) "▼" else "▲", .{ .size = 9 * shell.text_scale, .font = shell.fonts.mono, .color = palette.accent, .wrap = .none });
+                    ui.text(column.title(), noWrap(shell.style(.caption, if (sorted) colors.get(.on_surface) else if (hovered) colors.get(.on_surface) else colors.get(.on_surface_muted))));
+                    if (sorted) ui.text(if (self.sort_descending) "▼" else "▲", .{ .size = 9 * shell.text_scale, .font = shell.fonts.mono, .color = colors.get(.on_surface_accent), .wrap = .none });
                     self.tooltip(ui, shell, id, column.tooltip());
                 }
             }
@@ -849,7 +849,7 @@ pub fn Using(comptime kit: type) type {
             }
 
             fn serviceRow(self: *Harbor, ui: *Ui, shell: *const Shell, index: u16, position: usize, table_width: f32) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 const row_id: zui.Id = .indexed("harbor_row", index);
                 if (ui.clicked(row_id)) {
                     self.select(index);
@@ -859,9 +859,10 @@ pub fn Using(comptime kit: type) type {
                 const service = serviceAt(index);
                 const selected = self.selected == index;
                 const highlight = easeToward(ui, row_id, if (selected) 1 else 0, 18);
-                const selected_background = palette.accent.mix(palette.surface, 0.85);
-                const stripe: ?zui.Color = if (position % 2 == 1) palette.raised.mix(palette.surface, 0.4) else null;
-                const background: ?zui.Color = if (highlight > 0.01) palette.surface.mix(selected_background, highlight) else if (ui.hovered(row_id)) palette.hovered else stripe;
+                const selected_background = colors.get(.selection);
+                const quiet_text = if (selected) colors.get(.on_selection) else colors.get(.on_surface_muted);
+                const stripe: ?zui.Color = if (position % 2 == 1) colors.get(.surface_raised).mix(colors.get(.surface), 0.4) else null;
+                const background: ?zui.Color = if (highlight > 0.01) colors.get(.surface).mix(selected_background, highlight) else if (ui.hovered(row_id)) colors.get(.secondary_container) else stripe;
                 var name_buffer: [40]u8 = undefined;
                 const name = serviceName(index, &name_buffer);
                 ui.open(.{
@@ -875,7 +876,7 @@ pub fn Using(comptime kit: type) type {
                 defer ui.close();
                 ui.box(.{
                     .layout = .{ .sizing = .{ .width = .fixed(3), .height = .fixed(18) } },
-                    .decoration = if (highlight > 0.01) .{ .background = palette.accent.mix(background orelse palette.surface, 1 - highlight), .corner_radius = .all(1.5) } else null,
+                    .decoration = if (highlight > 0.01) .{ .background = colors.get(.accent).mix(background orelse colors.get(.surface), 1 - highlight), .corner_radius = .all(1.5) } else null,
                 });
                 const deploying = if (self.deploy) |deploy| deploy.service == index else false;
                 const patch = service.version_patch + @intFromBool(self.deployed_service == index);
@@ -888,13 +889,13 @@ pub fn Using(comptime kit: type) type {
                     defer ui.close();
                     var buffer: [32]u8 = undefined;
                     switch (column) {
-                        .service => ui.text(name, noWrap(shell.style(.caption, palette.text))),
-                        .region => ui.text(service.region, noWrap(shell.style(.caption, palette.muted))),
-                        .status => if (deploying) statusChip(ui, shell, "deploying", palette.accent) else statusChip(ui, shell, service.status.label(), statusColor(palette, service.status)),
-                        .requests => ui.text(withThousands(&buffer, @intFromFloat(@as(f32, @floatFromInt(service.requests_per_second)) * environment_traffic[self.environment_choice])), self.monoStyle(shell, palette.text)),
-                        .p95 => ui.text(std.fmt.bufPrint(&buffer, "{d} ms", .{service.p95_milliseconds}) catch "", self.monoStyle(shell, if (service.p95_milliseconds > 250) palette.warn else palette.text)),
-                        .errors => ui.text(std.fmt.bufPrint(&buffer, "{d:.2}%", .{@as(f32, @floatFromInt(service.error_basis_points)) / 100}) catch "", self.monoStyle(shell, if (service.error_basis_points > 100) palette.bad else palette.muted)),
-                        .version => ui.text(std.fmt.bufPrint(&buffer, "v2.{d}.{d}", .{ service.version_minor, patch }) catch "", self.monoStyle(shell, palette.muted)),
+                        .service => ui.text(name, noWrap(shell.style(.caption, colors.get(.on_surface)))),
+                        .region => ui.text(service.region, noWrap(shell.style(.caption, quiet_text))),
+                        .status => if (deploying) statusChip(ui, shell, "deploying", .accent) else statusChip(ui, shell, service.status.label(), statusEmphasis(service.status)),
+                        .requests => ui.text(withThousands(&buffer, @intFromFloat(@as(f32, @floatFromInt(service.requests_per_second)) * environment_traffic[self.environment_choice])), self.monoStyle(shell, colors.get(.on_surface))),
+                        .p95 => ui.text(std.fmt.bufPrint(&buffer, "{d} ms", .{service.p95_milliseconds}) catch "", self.monoStyle(shell, if (service.p95_milliseconds > 250) colors.get(.on_warning_container) else colors.get(.on_surface))),
+                        .errors => ui.text(std.fmt.bufPrint(&buffer, "{d:.2}%", .{@as(f32, @floatFromInt(service.error_basis_points)) / 100}) catch "", self.monoStyle(shell, if (service.error_basis_points > 100) colors.get(.on_danger_container) else quiet_text)),
+                        .version => ui.text(std.fmt.bufPrint(&buffer, "v2.{d}.{d}", .{ service.version_minor, patch }) catch "", self.monoStyle(shell, quiet_text)),
                     }
                 }
             }
@@ -904,7 +905,7 @@ pub fn Using(comptime kit: type) type {
             }
 
             fn detailsPanel(self: *Harbor, ui: *Ui, shell: *const Shell) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 const index = self.selected;
                 const service = serviceAt(index);
                 var name_buffer: [40]u8 = undefined;
@@ -915,16 +916,16 @@ pub fn Using(comptime kit: type) type {
                     ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 8, .child_alignment = .{ .y = .center } } });
                     defer ui.close();
                     ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow }, .child_gap = 2 } });
-                    ui.text(name, .{ .size = kit.Tone.heading.size() * shell.text_scale, .font = shell.fonts.bold, .color = palette.text, .wrap = .none });
+                    ui.text(name, .{ .size = kit.Tone.heading.size() * shell.text_scale, .font = shell.fonts.bold, .color = colors.get(.on_surface), .wrap = .none });
                     const patch = service.version_patch + @intFromBool(self.deployed_service == index);
-                    shell.printColored(ui, .caption, palette.muted, "{s} · v2.{d}.{d}", .{ service.region, service.version_minor, patch });
+                    shell.printColored(ui, .caption, colors.get(.on_surface_muted), "{s} · v2.{d}.{d}", .{ service.region, service.version_minor, patch });
                     ui.close();
-                    statusChip(ui, shell, service.status.label(), statusColor(palette, service.status));
+                    statusChip(ui, shell, service.status.label(), statusEmphasis(service.status));
                 }
                 if (self.deploy) |deploy| if (deploy.service == index) {
                     const progress = ui.now().secondsSince(deploy.started_at) / deploy_seconds;
-                    shell.printColored(ui, .caption, palette.accent, "Deploying to {s}{s}: {d:.0}%", .{ environments[deploy.environment], if (deploy.canary) ", canary first" else "", progress * 100 });
-                    shell.meter(ui, progress, palette.accent, 6);
+                    shell.printColored(ui, .caption, colors.get(.on_surface_accent), "Deploying to {s}{s}: {d:.0}%", .{ environments[deploy.environment], if (deploy.canary) ", canary first" else "", progress * 100 });
+                    shell.meter(ui, progress, colors.get(.accent), 6);
                 };
                 {
                     ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 8 } });
@@ -951,7 +952,7 @@ pub fn Using(comptime kit: type) type {
                     miniStat(ui, shell, "Errors", std.fmt.bufPrint(&error_buffer, "{d:.2}%", .{@as(f32, @floatFromInt(service.error_basis_points)) / 100}) catch "");
                 }
                 self.latencyChart(ui, shell, index, service);
-                shell.labelColored(ui, .tiny, palette.faint, "RECENT DEPLOYS");
+                shell.labelColored(ui, .tiny, colors.get(.on_surface_muted), "RECENT DEPLOYS");
                 for (0..3) |age| {
                     const bits = mixBits(@as(u64, index) * 7 + age);
                     const rolled_back = age == 1 and bits % 4 == 0;
@@ -959,27 +960,27 @@ pub fn Using(comptime kit: type) type {
                     defer ui.close();
                     var version_buffer: [16]u8 = undefined;
                     const patch: u8 = service.version_patch -| @as(u8, @intCast(age));
-                    ui.text(std.fmt.bufPrint(&version_buffer, "v2.{d}.{d}", .{ service.version_minor, patch }) catch "", self.monoStyle(shell, palette.text));
-                    shell.printColored(ui, .caption, palette.muted, "{d} h ago · {s}", .{ 2 + age * 26 + bits % 20, deployers[@intCast(bits % deployers.len)] });
+                    ui.text(std.fmt.bufPrint(&version_buffer, "v2.{d}.{d}", .{ service.version_minor, patch }) catch "", self.monoStyle(shell, colors.get(.on_surface)));
+                    shell.printColored(ui, .caption, colors.get(.on_surface_muted), "{d} h ago · {s}", .{ 2 + age * 26 + bits % 20, deployers[@intCast(bits % deployers.len)] });
                     shell.spacer(ui);
-                    if (rolled_back) shell.labelColored(ui, .caption, palette.warn, "rolled back") else shell.labelColored(ui, .caption, palette.good, "ok");
+                    if (rolled_back) shell.labelColored(ui, .caption, colors.get(.on_warning_container), "rolled back") else shell.labelColored(ui, .caption, colors.get(.on_success_container), "ok");
                 }
             }
 
             fn latencyChart(self: *Harbor, ui: *Ui, shell: *const Shell, index: u16, service: Service) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 if (self.chart_service != index) {
                     if (self.chart_service != null) ui.state(ids.harbor_chart, Eased).value = 0;
                     self.chart_service = index;
                 }
                 self.chart_reveal = easeToward(ui, ids.harbor_chart, 1, 9);
                 const sample = if (self.metrics) |metrics| metrics.sample else 0;
-                shell.labelColored(ui, .tiny, palette.faint, "P95 LATENCY, LAST 32 SAMPLES");
+                shell.labelColored(ui, .tiny, colors.get(.on_surface_muted), "P95 LATENCY, LAST 32 SAMPLES");
                 ui.open(.{
                     .id = ids.harbor_chart,
                     .semantics = self.semantic(.{ .role = .image, .label = "p95 latency over the last 32 samples" }),
                     .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(64) }, .padding = .all(4), .child_gap = 2, .child_alignment = .{ .y = .end } },
-                    .decoration = .{ .background = palette.sunken, .corner_radius = .all(6) },
+                    .decoration = .{ .background = colors.get(.surface_sunken), .corner_radius = .all(6) },
                 });
                 defer ui.close();
                 const base: f32 = @floatFromInt(service.p95_milliseconds);
@@ -991,21 +992,21 @@ pub fn Using(comptime kit: type) type {
                     const fraction = std.math.clamp(latency / (base * 1.5), 0.05, 1) * self.chart_reveal;
                     ui.box(.{
                         .layout = .{ .sizing = .{ .width = .grow_equal, .height = .percent(@max(0.02, fraction)) } },
-                        .decoration = .{ .background = if (latency > 250) palette.warn else palette.accent.mix(palette.sunken, 0.25), .corner_radius = .all(1) },
+                        .decoration = .{ .background = if (latency > 250) colors.get(.warning) else colors.get(.accent).mix(colors.get(.surface_sunken), 0.25), .corner_radius = .all(1) },
                     });
                 }
             }
 
             fn eventsPanel(self: *Harbor, ui: *Ui, shell: *const Shell) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 self.openPanel(ui, shell, ids.harbor_events, .{ .width = .grow, .height = .percent(0.38) });
                 defer ui.close();
                 {
                     ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 8, .child_alignment = .{ .y = .center } } });
                     defer ui.close();
-                    ui.text("Events", noWrap(shell.style(.heading, palette.text)));
+                    ui.text("Events", noWrap(shell.style(.heading, colors.get(.on_surface))));
                     shell.spacer(ui);
-                    shell.printColored(ui, .caption, palette.muted, "{d} received", .{self.events_received});
+                    shell.printColored(ui, .caption, colors.get(.on_surface_muted), "{d} received", .{self.events_received});
                 }
                 ui.open(.{
                     .id = ids.harbor_events_list,
@@ -1014,7 +1015,7 @@ pub fn Using(comptime kit: type) type {
                     .scroll = .{},
                 });
                 defer ui.close();
-                if (self.events_count == 0) shell.labelColored(ui, .caption, palette.faint, "Waiting for the first event…");
+                if (self.events_count == 0) shell.labelColored(ui, .caption, colors.get(.on_surface_muted), "Waiting for the first event…");
                 for (0..self.events_count) |age| {
                     const kept = &self.events[(self.events_newest + kept_events - age) % kept_events];
                     ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 8 } });
@@ -1022,16 +1023,16 @@ pub fn Using(comptime kit: type) type {
                     var time_buffer: [16]u8 = undefined;
                     const seconds_ago = @max(0, shell.seconds - kept.received_at_seconds);
                     const ago: []const u8 = if (seconds_ago < 60) std.fmt.bufPrint(&time_buffer, "{d:>3.0}s", .{seconds_ago}) catch "" else std.fmt.bufPrint(&time_buffer, "{d:>3.0}m", .{seconds_ago / 60}) catch "";
-                    ui.text(ago, self.monoStyle(shell, palette.faint));
-                    ui.box(.{ .layout = .{ .sizing = .{ .width = .fixed(6), .height = .fixed(6) } }, .decoration = .{ .background = severityColor(palette, kept.event.severity), .corner_radius = .all(3) } });
+                    ui.text(ago, self.monoStyle(shell, colors.get(.on_surface_muted)));
+                    ui.box(.{ .layout = .{ .sizing = .{ .width = .fixed(6), .height = .fixed(6) } }, .decoration = .{ .background = severityEmphasis(kept.event.severity).fill(colors), .corner_radius = .all(3) } });
                     ui.open(.{ .layout = .{ .sizing = .{ .width = .grow } } });
-                    shell.labelColored(ui, .caption, if (kept.event.severity == .info) palette.muted else severityColor(palette, kept.event.severity), kept.event.text());
+                    shell.labelColored(ui, .caption, if (kept.event.severity == .info) colors.get(.on_surface_muted) else severityEmphasis(kept.event.severity).text(colors), kept.event.text());
                     ui.close();
                 }
             }
 
             fn toastStack(self: *Harbor, ui: *Ui, shell: *const Shell) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 const now = ui.now();
                 var soonest: ?zui.Instant = null;
                 var any = false;
@@ -1055,17 +1056,17 @@ pub fn Using(comptime kit: type) type {
                         .exit = .{ .seconds = 0.3, .fade = .ease_out },
                         .semantics = self.semantic(.{ .role = .label, .label = toast.text() }),
                         .layout = .{ .padding = .symmetric(14, 10), .child_gap = 10, .child_alignment = .{ .y = .center } },
-                        .decoration = .{ .background = palette.raised, .border = .{ .color = palette.border, .widths = .all(1) }, .corner_radius = .all(8), .corner_shape = kit.panel_corner_shape },
+                        .decoration = .{ .background = colors.get(.surface_raised), .border = .{ .color = colors.get(.outline_muted), .widths = .all(1) }, .corner_radius = .all(8), .corner_shape = kit.panel_corner_shape },
                         .effects = &floating_shadow,
                     });
                     defer ui.close();
-                    ui.box(.{ .layout = .{ .sizing = .{ .width = .fixed(8), .height = .fixed(8) } }, .decoration = .{ .background = if (toast.tone == .info) palette.good else severityColor(palette, toast.tone), .corner_radius = .all(4) } });
-                    ui.text(toast.text(), noWrap(shell.style(.body, palette.text)));
+                    ui.box(.{ .layout = .{ .sizing = .{ .width = .fixed(8), .height = .fixed(8) } }, .decoration = .{ .background = if (toast.tone == .info) colors.get(.success) else severityEmphasis(toast.tone).fill(colors), .corner_radius = .all(4) } });
+                    ui.text(toast.text(), noWrap(shell.style(.body, colors.get(.on_surface))));
                 }
             }
 
             fn deployDialog(self: *Harbor, ui: *Ui, shell: *const Shell) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 if (ui.dismissed(ids.harbor_dialog) or ui.clicked(ids.harbor_dialog_backdrop)) {
                     self.dialog_open = false;
                     ui.requestFocus(ids.harbor_deploy);
@@ -1081,7 +1082,7 @@ pub fn Using(comptime kit: type) type {
                     .interactive = true,
                     .floating = .{ .attach_to = .root, .z = 700 },
                     .layout = .{ .sizing = .{ .width = .fixed(viewport[0]), .height = .fixed(viewport[1]) }, .child_alignment = .{ .x = .center, .y = .center } },
-                    .decoration = .{ .background = palette.overlay },
+                    .decoration = .{ .background = colors.get(.scrim) },
                 });
                 defer ui.close();
                 ui.open(.{
@@ -1090,20 +1091,20 @@ pub fn Using(comptime kit: type) type {
                     .focus_scope = true,
                     .semantics = self.semantic(.{ .role = .dialog, .label = "Deploy" }),
                     .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(440) }, .padding = .all(20), .child_gap = 12 },
-                    .decoration = .{ .background = palette.surface, .border = .{ .color = palette.border, .widths = .all(1) }, .corner_radius = .all(10), .corner_shape = kit.panel_corner_shape },
+                    .decoration = .{ .background = colors.get(.surface), .border = .{ .color = colors.get(.outline_muted), .widths = .all(1) }, .corner_radius = .all(10), .corner_shape = kit.panel_corner_shape },
                     .effects = &floating_shadow,
                 });
                 defer ui.close();
-                shell.printColored(ui, .heading, palette.text, "Deploy {s}", .{name});
-                shell.printColored(ui, .body, palette.muted, "v2.{d}.{d} to v2.{d}.{d} on {s}, rolling 25% of replicas at a time.", .{ service.version_minor, service.version_patch, service.version_minor, service.version_patch + 1, environments[self.environment_choice] });
+                shell.printColored(ui, .heading, colors.get(.on_surface), "Deploy {s}", .{name});
+                shell.printColored(ui, .body, colors.get(.on_surface_muted), "v2.{d}.{d} to v2.{d}.{d} on {s}, rolling 25% of replicas at a time.", .{ service.version_minor, service.version_patch, service.version_minor, service.version_patch + 1, environments[self.environment_choice] });
                 {
                     ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 8, .child_alignment = .{ .y = .center } } });
                     defer ui.close();
-                    shell.labelColored(ui, .caption, palette.muted, "Current status");
-                    statusChip(ui, shell, service.status.label(), statusColor(palette, service.status));
+                    shell.labelColored(ui, .caption, colors.get(.on_surface_muted), "Current status");
+                    statusChip(ui, shell, service.status.label(), statusEmphasis(service.status));
                 }
                 _ = shell.widgets.checkbox(ui, ids.harbor_dialog_canary, "Canary first: 5% of traffic for 10 minutes", &self.dialog_canary, .{});
-                shell.labelColored(ui, .caption, palette.faint, "Tab stays inside this dialog. Escape cancels.");
+                shell.labelColored(ui, .caption, colors.get(.on_surface_muted), "Tab stays inside this dialog. Escape cancels.");
                 ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 8 } });
                 defer ui.close();
                 shell.spacer(ui);
@@ -1121,22 +1122,22 @@ pub fn Using(comptime kit: type) type {
             }
 
             fn xrayBar(self: *Harbor, ui: *Ui, shell: *const Shell) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 {
                     ui.open(.{
                         .id = ids.harbor_xray_bar,
                         .layout = .{ .sizing = .{ .width = .grow }, .padding = .symmetric(12, 6), .child_gap = 12, .child_alignment = .{ .y = .center } },
-                        .decoration = .{ .background = palette.accent.mix(palette.surface, 0.88), .corner_radius = .all(8), .corner_shape = kit.panel_corner_shape },
+                        .decoration = .{ .background = colors.get(.accent_container), .corner_radius = .all(8), .corner_shape = kit.panel_corner_shape },
                     });
                     defer ui.close();
-                    ui.text("X-ray", noWrap(shell.style(.heading, palette.accent)));
-                    shell.printColored(ui, .caption, palette.muted, "{d} features marked. Hover, Tab to or click a numbered dot.", .{feature_count});
+                    ui.text("X-ray", noWrap(shell.style(.heading, colors.get(.on_accent_container))));
+                    shell.printColored(ui, .caption, colors.get(.on_accent_container), "{d} features marked. Hover, Tab to or click a numbered dot.", .{feature_count});
                     shell.spacer(ui);
                     _ = shell.widgets.checkbox(ui, ids.harbor_outline_toggle, "Outline regions", &self.outline_regions, .{});
                     _ = shell.widgets.checkbox(ui, ids.harbor_timeline_toggle, "Frame timeline", &self.show_timeline, .{});
                     const environment = ui.environment();
-                    ui.open(.{ .id = ids.harbor_environment_readout, .layout = .{ .padding = .symmetric(8, 3) }, .decoration = .{ .background = palette.surface, .corner_radius = .all(6) } });
-                    shell.printColored(ui, .tiny, palette.muted, "{s} · text {d:.0}% · contrast {t}", .{ if (environment.direction == .left_to_right) "ltr" else "rtl", environment.text_scale * 100, environment.contrast });
+                    ui.open(.{ .id = ids.harbor_environment_readout, .layout = .{ .padding = .symmetric(8, 3) }, .decoration = .{ .background = colors.get(.surface), .corner_radius = .all(6) } });
+                    shell.printColored(ui, .tiny, colors.get(.on_surface_muted), "{s} · text {d:.0}% · contrast {t}", .{ if (environment.direction == .left_to_right) "ltr" else "rtl", environment.text_scale * 100, environment.contrast });
                     ui.close();
                 }
                 if (self.show_timeline) frameTimeline(ui, shell);
@@ -1188,11 +1189,11 @@ pub fn Using(comptime kit: type) type {
             }
 
             fn node(self: *Harbor, ui: *Ui, shell: *const Shell, feature: Feature, pulsing: bool) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 const id = nodeId(feature);
                 const active = self.card_feature == feature or ui.hovered(id) or ui.focused(id);
                 const pulse = if (pulsing) 0.5 + 0.5 * @sin(@as(f32, @floatCast(shell.seconds)) * 5 + @as(f32, @floatFromInt(@intFromEnum(feature)))) else 0;
-                const glow: zui.Effects = .{ .shadow = .glow(palette.accent.mix(palette.background, 0.4 + 0.6 * (1 - pulse)), 2 + 6 * pulse) };
+                const glow: zui.Effects = .{ .shadow = .glow(colors.get(.accent).mix(colors.get(.background), 0.4 + 0.6 * (1 - pulse)), 2 + 6 * pulse) };
                 var label_buffer: [4]u8 = undefined;
                 ui.open(.{
                     .id = id,
@@ -1202,14 +1203,14 @@ pub fn Using(comptime kit: type) type {
                     .floating = .{ .attach_to = .{ .element = nodeTarget(feature) }, .anchor = .center, .attach_point = .top_right, .z = 800, .clip = .target },
                     .layout = .{ .sizing = .{ .height = .fixed(18) }, .padding = .symmetric(5, 0), .child_alignment = .{ .x = .center, .y = .center } },
                     .decoration = .{
-                        .background = if (active) palette.text else palette.accent.mix(palette.text, 0.35 * pulse),
-                        .border = .{ .color = if (ui.focused(id)) palette.focus else palette.surface, .widths = .all(2) },
+                        .background = if (active) colors.get(.on_surface) else colors.get(.accent),
+                        .border = .{ .color = if (ui.focused(id)) colors.get(.focus) else colors.get(.surface), .widths = .all(2) },
                         .corner_radius = .all(9),
                     },
                     .effects = if (pulsing) &glow else null,
                 });
                 defer ui.close();
-                ui.text(std.fmt.bufPrint(&label_buffer, "{d}", .{@intFromEnum(feature) + 1}) catch "", .{ .size = 11 * shell.text_scale, .font = shell.fonts.bold, .color = if (active) palette.background else palette.on_accent, .wrap = .none });
+                ui.text(std.fmt.bufPrint(&label_buffer, "{d}", .{@intFromEnum(feature) + 1}) catch "", .{ .size = 11 * shell.text_scale, .font = shell.fonts.bold, .color = if (active) colors.get(.background) else colors.get(.on_accent), .wrap = .none });
             }
 
             fn outlines(self: *Harbor, ui: *Ui, shell: *const Shell) void {
@@ -1228,21 +1229,21 @@ pub fn Using(comptime kit: type) type {
                         .id = .indexed("harbor_outline", index),
                         .floating = .{ .attach_to = .{ .element = region[0] }, .z = 790, .capture = false },
                         .layout = .{ .sizing = .{ .width = .fixed(rect.width), .height = .fixed(rect.height) } },
-                        .decoration = .{ .border = .{ .color = shell.palette.spectacle, .widths = .all(1) }, .corner_radius = .all(4) },
+                        .decoration = .{ .border = .{ .color = shell.colors.get(.accent), .widths = .all(1) }, .corner_radius = .all(4) },
                     });
                     defer ui.close();
                     ui.open(.{
                         .floating = .{ .anchor = .top_left, .attach_point = .bottom_left, .offset = .{ 4, 0 }, .z = 790, .capture = false },
                         .layout = .{ .padding = .symmetric(6, 1) },
-                        .decoration = .{ .background = shell.palette.spectacle, .corner_radius = .{ .bottom_left = 4, .bottom_right = 4 } },
+                        .decoration = .{ .background = shell.colors.get(.accent), .corner_radius = .{ .bottom_left = 4, .bottom_right = 4 } },
                     });
-                    ui.text(region[1], noWrap(shell.style(.tiny, shell.palette.on_accent)));
+                    ui.text(region[1], noWrap(shell.style(.tiny, shell.colors.get(.on_accent))));
                     ui.close();
                 }
             }
 
             fn featureCard(self: *Harbor, ui: *Ui, shell: *const Shell, feature: Feature) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 const node_rect = ui.rectOf(nodeId(feature)) orelse zui.Rect{};
                 const viewport = ui.viewport();
                 const opens_left = node_rect.x + node_rect.width / 2 > viewport[0] * 0.55;
@@ -1256,27 +1257,27 @@ pub fn Using(comptime kit: type) type {
                     .semantics = self.semantic(.{ .role = .group, .label = feature.title() }),
                     .floating = .{ .attach_to = .{ .element = nodeId(feature) }, .anchor = anchor, .attach_point = attach_point, .offset = overlap, .z = 810 },
                     .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(340) }, .padding = .all(14), .child_gap = 8 },
-                    .decoration = .{ .background = palette.surface, .border = .{ .color = palette.accent.mix(palette.border, 0.5), .widths = .all(1) }, .corner_radius = .all(8), .corner_shape = kit.panel_corner_shape },
+                    .decoration = .{ .background = colors.get(.surface), .border = .{ .color = colors.get(.accent).mix(colors.get(.outline_muted), 0.5), .widths = .all(1) }, .corner_radius = .all(8), .corner_shape = kit.panel_corner_shape },
                     .effects = &floating_shadow,
                 });
                 defer ui.close();
                 {
                     ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 8, .child_alignment = .{ .y = .center } } });
                     defer ui.close();
-                    shell.printColored(ui, .caption, palette.accent, "{d}", .{@intFromEnum(feature) + 1});
-                    ui.text(feature.title(), noWrap(shell.style(.heading, palette.text)));
+                    shell.printColored(ui, .caption, colors.get(.on_surface_accent), "{d}", .{@intFromEnum(feature) + 1});
+                    ui.text(feature.title(), noWrap(shell.style(.heading, colors.get(.on_surface))));
                     shell.spacer(ui);
-                    shell.labelColored(ui, .tiny, palette.faint, if (self.pinned_feature == feature) "pinned · Esc" else "click to pin");
+                    shell.labelColored(ui, .tiny, colors.get(.on_surface_muted), if (self.pinned_feature == feature) "pinned · Esc" else "click to pin");
                 }
                 sectionLabel(ui, shell, "WHAT");
                 self.featureWhat(ui, shell, feature);
                 sectionLabel(ui, shell, "WHY IT MATTERS");
-                shell.labelColored(ui, .caption, palette.muted, feature.why());
+                shell.labelColored(ui, .caption, colors.get(.on_surface_muted), feature.why());
                 sectionLabel(ui, shell, "LIVE PROOF, THIS FRAME");
                 {
                     ui.open(.{
                         .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow }, .padding = .all(8), .child_gap = 3 },
-                        .decoration = .{ .background = palette.sunken, .corner_radius = .all(6) },
+                        .decoration = .{ .background = colors.get(.surface_sunken), .corner_radius = .all(6) },
                     });
                     defer ui.close();
                     self.featureProof(ui, shell, feature);
@@ -1285,23 +1286,23 @@ pub fn Using(comptime kit: type) type {
             }
 
             fn featureWhat(self: *Harbor, ui: *Ui, shell: *const Shell, feature: Feature) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 var count_buffer: [32]u8 = undefined;
                 switch (feature) {
-                    .virtual_scroll => shell.printColored(ui, .body, palette.text, "This table has {s} rows; {d} are declared this frame.", .{ withThousands(&count_buffer, self.shown_count), self.rows_declared }),
-                    .latest_source => shell.labelColored(ui, .body, palette.text, "The metric tiles read a zui_async.Latest: the producer publishes the newest totals, and each frame reads one value."),
-                    .stream_source => shell.labelColored(ui, .body, palette.text, "The events feed reads a zui_async.Stream: every item, in order, through a ring of 64."),
-                    .demand => shell.labelColored(ui, .body, palette.text, "The metrics and events producers run only while a frame reads their sources."),
-                    .anchors => shell.printColored(ui, .body, palette.text, "The environment list, the column tooltips, these {d} dots and this card float above the layout, each anchored to an element.", .{feature_count}),
-                    .focus_scope => shell.labelColored(ui, .body, palette.text, "Deploy opens a dialog declared with focus_scope = true."),
-                    .exit_ghosts => shell.labelColored(ui, .body, palette.text, "Toasts declare exit = .{ .seconds = 0.3 }: once no longer declared, their last commands keep drawing as they fade."),
-                    .motion => shell.labelColored(ui, .body, palette.text, "The selected row's highlight and this chart's bars ease toward their targets, kept in ui.state."),
-                    .text_cache => shell.labelColored(ui, .body, palette.text, "Every label is measured once and cached. The filter re-measures only names it has not shown before."),
-                    .idle => shell.labelColored(ui, .body, palette.text, "zui declares a frame only for a reason: input, a source publishing, a timer coming due, or a request."),
-                    .effects => shell.labelColored(ui, .body, palette.text, "The primary buttons carry a gradient, and floating panels a soft shadow."),
-                    .corner_shapes => shell.labelColored(ui, .body, palette.text, "Tiles, panels, toasts and the dialog declare corner_shape = .continuous beside their radius."),
-                    .semantics => shell.printColored(ui, .body, palette.text, "Rows, headers, buttons and the dialog declare a role and a label: {d} nodes this frame.", .{self.semantic_nodes}),
-                    .environment => shell.labelColored(ui, .body, palette.text, "Direction, text size, contrast and motion come from the environment the host reports."),
+                    .virtual_scroll => shell.printColored(ui, .body, colors.get(.on_surface), "This table has {s} rows; {d} are declared this frame.", .{ withThousands(&count_buffer, self.shown_count), self.rows_declared }),
+                    .latest_source => shell.labelColored(ui, .body, colors.get(.on_surface), "The metric tiles read a zui_async.Latest: the producer publishes the newest totals, and each frame reads one value."),
+                    .stream_source => shell.labelColored(ui, .body, colors.get(.on_surface), "The events feed reads a zui_async.Stream: every item, in order, through a ring of 64."),
+                    .demand => shell.labelColored(ui, .body, colors.get(.on_surface), "The metrics and events producers run only while a frame reads their sources."),
+                    .anchors => shell.printColored(ui, .body, colors.get(.on_surface), "The environment list, the column tooltips, these {d} dots and this card float above the layout, each anchored to an element.", .{feature_count}),
+                    .focus_scope => shell.labelColored(ui, .body, colors.get(.on_surface), "Deploy opens a dialog declared with focus_scope = true."),
+                    .exit_ghosts => shell.labelColored(ui, .body, colors.get(.on_surface), "Toasts declare exit = .{ .seconds = 0.3 }: once no longer declared, their last commands keep drawing as they fade."),
+                    .motion => shell.labelColored(ui, .body, colors.get(.on_surface), "The selected row's highlight and this chart's bars ease toward their targets, kept in ui.state."),
+                    .text_cache => shell.labelColored(ui, .body, colors.get(.on_surface), "Every label is measured once and cached. The filter re-measures only names it has not shown before."),
+                    .idle => shell.labelColored(ui, .body, colors.get(.on_surface), "zui declares a frame only for a reason: input, a source publishing, a timer coming due, or a request."),
+                    .effects => shell.labelColored(ui, .body, colors.get(.on_surface), "The primary buttons carry a gradient, and floating panels a soft shadow."),
+                    .corner_shapes => shell.labelColored(ui, .body, colors.get(.on_surface), "Tiles, panels, toasts and the dialog declare corner_shape = .continuous beside their radius."),
+                    .semantics => shell.printColored(ui, .body, colors.get(.on_surface), "Rows, headers, buttons and the dialog declare a role and a label: {d} nodes this frame.", .{self.semantic_nodes}),
+                    .environment => shell.labelColored(ui, .body, colors.get(.on_surface), "Direction, text size, contrast and motion come from the environment the host reports."),
                 }
             }
 
@@ -1553,13 +1554,12 @@ pub fn Using(comptime kit: type) type {
         }
 
         fn primaryButton(harbor: *Harbor, ui: *Ui, shell: *const Shell, id: zui.Id, content: []const u8) bool {
-            const palette = shell.palette;
+            const colors = shell.colors;
             const state = ui.widgetState(id);
-            const base = switch (state) {
-                .hovered => palette.accent.mix(palette.text, 0.12),
-                .pressed => palette.accent.mix(palette.background, 0.2),
-                else => palette.accent,
-            };
+            const base = shell.tokens.colors.get(switch (state) {
+                .hovered, .pressed => state,
+                else => .idle,
+            }).get(.accent);
             const effects: zui.Effects = .{
                 .gradient = .{ .from = base.mix(.white, 0.14), .to = base, .angle = std.math.pi / 2.0 },
                 .shadow = .{ .color = .rgba(0x00000030), .offset = .{ 0, 1 }, .blur = 3 },
@@ -1572,63 +1572,63 @@ pub fn Using(comptime kit: type) type {
                 .layout = .{ .sizing = .{ .height = .fixed(@round(30 * shell.text_scale)) }, .padding = .symmetric(14, 0), .child_alignment = .{ .x = .center, .y = .center } },
                 .decoration = .{
                     .background = base,
-                    .border = if (ui.focused(id)) .{ .color = palette.focus, .widths = .all(2) } else null,
+                    .border = if (ui.focused(id)) .{ .color = colors.get(.focus), .widths = .all(2) } else null,
                     .corner_radius = .all(6),
                 },
                 .effects = &effects,
             });
-            ui.text(content, noWrap(shell.style(.body, palette.on_accent)));
+            ui.text(content, noWrap(shell.style(.body, colors.get(.on_accent))));
             ui.close();
             return ui.clicked(id);
         }
 
-        fn statusColor(palette: kit.Palette, status: Status) zui.Color {
+        fn statusEmphasis(status: Status) kit.Emphasis {
             return switch (status) {
-                .healthy => palette.good,
-                .degraded => palette.warn,
-                .down => palette.bad,
+                .healthy => .success,
+                .degraded => .warning,
+                .down => .danger,
             };
         }
 
-        fn severityColor(palette: kit.Palette, severity: Severity) zui.Color {
+        fn severityEmphasis(severity: Severity) kit.Emphasis {
             return switch (severity) {
-                .info => palette.accent,
-                .warn => palette.warn,
-                .critical => palette.bad,
+                .info => .accent,
+                .warn => .warning,
+                .critical => .danger,
             };
         }
 
-        fn statusChip(ui: *Ui, shell: *const Shell, content: []const u8, color: zui.Color) void {
+        fn statusChip(ui: *Ui, shell: *const Shell, content: []const u8, emphasis: kit.Emphasis) void {
             ui.open(.{
                 .layout = .{ .padding = .symmetric(8, 2), .child_gap = 6, .child_alignment = .{ .y = .center } },
-                .decoration = .{ .background = color.mix(shell.palette.surface, 0.86), .corner_radius = .all(9) },
+                .decoration = .{ .background = emphasis.container(shell.colors), .corner_radius = .all(9) },
             });
             defer ui.close();
-            ui.box(.{ .layout = .{ .sizing = .{ .width = .fixed(6), .height = .fixed(6) } }, .decoration = .{ .background = color, .corner_radius = .all(3) } });
-            ui.text(content, noWrap(shell.style(.tiny, color)));
+            ui.box(.{ .layout = .{ .sizing = .{ .width = .fixed(6), .height = .fixed(6) } }, .decoration = .{ .background = emphasis.fill(shell.colors), .corner_radius = .all(3) } });
+            ui.text(content, noWrap(shell.style(.tiny, emphasis.onContainer(shell.colors))));
         }
 
         fn miniStat(ui: *Ui, shell: *const Shell, name: []const u8, value: []const u8) void {
             ui.open(.{
                 .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow_equal }, .padding = .symmetric(8, 6), .child_gap = 2 },
-                .decoration = .{ .background = shell.palette.sunken, .corner_radius = .all(6) },
+                .decoration = .{ .background = shell.colors.get(.surface_sunken), .corner_radius = .all(6) },
             });
             defer ui.close();
-            ui.text(name, noWrap(shell.style(.tiny, shell.palette.muted)));
-            ui.text(value, noWrap(shell.style(.body, shell.palette.text)));
+            ui.text(name, noWrap(shell.style(.tiny, shell.colors.get(.on_surface_muted))));
+            ui.text(value, noWrap(shell.style(.body, shell.colors.get(.on_surface))));
         }
 
         fn sectionLabel(ui: *Ui, shell: *const Shell, content: []const u8) void {
-            ui.text(content, noWrap(shell.style(.tiny, shell.palette.accent)));
+            ui.text(content, noWrap(shell.style(.tiny, shell.colors.get(.on_surface_accent))));
         }
 
         fn proofRow(ui: *Ui, shell: *const Shell, name: []const u8, comptime format: []const u8, arguments: anytype) void {
             ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 8 } });
             defer ui.close();
-            ui.text(name, noWrap(shell.style(.caption, shell.palette.muted)));
+            ui.text(name, noWrap(shell.style(.caption, shell.colors.get(.on_surface_muted))));
             shell.spacer(ui);
             var buffer: [64]u8 = undefined;
-            ui.text(std.fmt.bufPrint(&buffer, format, arguments) catch format, .{ .size = 12 * shell.text_scale, .font = shell.fonts.mono, .color = shell.palette.text, .wrap = .none });
+            ui.text(std.fmt.bufPrint(&buffer, format, arguments) catch format, .{ .size = 12 * shell.text_scale, .font = shell.fonts.mono, .color = shell.colors.get(.on_surface), .wrap = .none });
         }
 
         fn yesNo(value: bool) []const u8 {
@@ -1658,11 +1658,11 @@ pub fn Using(comptime kit: type) type {
 
         /// Why each of the last 120 frames was declared, one bar each, colored by the reason.
         fn frameTimeline(ui: *Ui, shell: *const Shell) void {
-            const palette = shell.palette;
+            const colors = shell.colors;
             const perf = shell.perf;
             ui.open(.{
                 .layout = .{ .sizing = .{ .width = .grow }, .padding = .symmetric(12, 6), .child_gap = 16, .child_alignment = .{ .y = .center } },
-                .decoration = .{ .background = palette.surface, .border = .{ .color = palette.border, .widths = .all(1) }, .corner_radius = .all(8) },
+                .decoration = .{ .background = colors.get(.surface), .border = .{ .color = colors.get(.outline_muted), .widths = .all(1) }, .corner_radius = .all(8) },
             });
             defer ui.close();
             {
@@ -1674,26 +1674,26 @@ pub fn Using(comptime kit: type) type {
                     const sample = perf.sampleAt(age);
                     ui.box(.{
                         .layout = .{ .sizing = .{ .width = .{ .rule = .grow_from_min, .amount = 1, .max = 4 }, .height = .fixed(@max(3, 24 * sample.totalMicroseconds() / tallest)) } },
-                        .decoration = .{ .background = reasonColor(palette, sample.reason) },
+                        .decoration = .{ .background = reasonColor(colors, sample.reason) },
                     });
                 }
             }
             for ([_]FrameReason{ .input, .source, .timer, .requested, .resize }) |reason| {
                 ui.open(.{ .layout = .{ .child_gap = 4, .child_alignment = .{ .y = .center } } });
                 defer ui.close();
-                ui.box(.{ .layout = .{ .sizing = .{ .width = .fixed(8), .height = .fixed(8) } }, .decoration = .{ .background = reasonColor(palette, reason), .corner_radius = .all(2) } });
-                ui.text(@tagName(reason), noWrap(shell.style(.tiny, palette.muted)));
+                ui.box(.{ .layout = .{ .sizing = .{ .width = .fixed(8), .height = .fixed(8) } }, .decoration = .{ .background = reasonColor(colors, reason), .corner_radius = .all(2) } });
+                ui.text(@tagName(reason), noWrap(shell.style(.tiny, colors.get(.on_surface_muted))));
             }
         }
 
-        fn reasonColor(palette: kit.Palette, reason: FrameReason) zui.Color {
+        fn reasonColor(colors: kit.Colors, reason: FrameReason) zui.Color {
             return switch (reason) {
-                .first => palette.faint,
-                .input => palette.accent,
-                .resize => palette.muted,
-                .requested => palette.spectacle,
-                .timer => palette.warn,
-                .source => palette.good,
+                .first => colors.get(.on_surface_muted),
+                .input => colors.get(.accent),
+                .resize => colors.get(.on_surface_muted),
+                .requested => colors.get(.danger),
+                .timer => colors.get(.warning),
+                .source => colors.get(.success),
             };
         }
     };

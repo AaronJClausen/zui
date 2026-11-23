@@ -36,7 +36,8 @@ pub fn Kit(comptime spec: Spec) type {
         pub const Lane = shared.Lane;
         pub const DemandedProducer = shared.DemandedProducer;
         pub const Typeface = shared.Typeface;
-        pub const Palette = shared.Palette;
+        pub const Colors = shared.Colors;
+        pub const Emphasis = shared.Emphasis;
         pub const Tone = shared.Tone;
         pub const EnvironmentQueue = shared.EnvironmentQueue;
         pub const hueColor = shared.hueColor;
@@ -123,6 +124,7 @@ pub fn Kit(comptime spec: Spec) type {
                 .light_lab => .{ .title = "Light Lab", .tagline = "Gradients, shadows, frost, materials and corners, or their fallbacks", .lane = .spectacle, .features = &.{ "Effects", "Material", "CornerShape" } },
                 .one_declaration => .{ .title = "One Declaration", .tagline = "The same UI in every theme, size and direction", .lane = .spectacle, .features = &.{ "Environment", "right-to-left", "contrast" } },
                 .clickable_chaos => .{ .title = "Clickable Chaos", .tagline = "Hundreds of turning cards, each hit where drawn", .lane = .spectacle, .features = &.{ "Transform", "hit inversion" } },
+                .preferences => .{ .title = "Preferences", .tagline = "Density, color vision, contrast and text size, for the whole tour", .lane = .start, .features = &.{ "zui_design", "Tokens", "Preferences" } },
             };
         }
 
@@ -146,8 +148,8 @@ pub fn Kit(comptime spec: Spec) type {
 
         pub const Tokens = zui.design.Tokens(Ui, void);
 
-        /// The tokens the widgets are styled from, resolved again only when
-        /// the preferences they follow change.
+        /// The tokens the tour and its widgets are styled from, resolved
+        /// again only when the preferences they follow change.
         pub const Appearance = struct {
             tokens: Tokens = .{},
             preferences: ?zui_design.Preferences = null,
@@ -157,14 +159,40 @@ pub fn Kit(comptime spec: Spec) type {
                 self.preferences = preferences;
                 _ = zui_design.resolve(designWith(fonts), preferences, &self.tokens);
             }
+
+            pub fn colors(self: *const Appearance) Colors {
+                return self.tokens.colors.get(.idle);
+            }
         };
 
-        /// The environment's preferences, its text scale held where the
-        /// tour's layout still fits.
-        pub fn preferencesOf(environment: *const zui.Environment) zui_design.Preferences {
-            var preferences: zui_design.Preferences = .from(environment, .{});
-            preferences.text_scale = std.math.clamp(environment.text_scale, 0.5, 2);
+        /// What the user chose on the preferences screen over what the
+        /// environment reports. A null contrast or text scale follows the
+        /// environment's.
+        pub const PreferenceChoices = struct {
+            density: zui.design.Density = .comfortable,
+            color_vision: zui_design.ColorVision = .typical,
+            contrast: ?zui.Environment.Contrast = null,
+            text_scale: ?f32 = null,
+        };
+
+        /// The text scales the tour's layout still fits.
+        pub const text_scale_range: [2]f32 = .{ 0.5, 2 };
+
+        /// The environment's preferences with the user's `choices`, the
+        /// text scale held where the tour's layout still fits.
+        pub fn preferencesOf(environment: *const zui.Environment, choices: PreferenceChoices) zui_design.Preferences {
+            var preferences: zui_design.Preferences = .from(environment, .{ .density = choices.density, .color_vision = choices.color_vision });
+            if (choices.contrast) |contrast| preferences.contrast = contrast;
+            preferences.text_scale = std.math.clamp(choices.text_scale orelse environment.text_scale, text_scale_range[0], text_scale_range[1]);
             return preferences;
+        }
+
+        /// The tour's background under `environment`'s preferences, for a
+        /// renderer to clear to before the tour has declared a frame.
+        pub fn backgroundOf(environment: *const zui.Environment) zui.Color {
+            var tokens: Tokens = .{};
+            _ = zui_design.resolve(zui_design.default, preferencesOf(environment, .{}), &tokens);
+            return tokens.colors.get(.idle).get(.background);
         }
 
         fn designWith(fonts: Fonts) zui.design.Design {
@@ -181,10 +209,16 @@ pub fn Kit(comptime spec: Spec) type {
         }
 
         /// Everything a screen needs besides its own state, rebuilt each
-        /// frame from the environment the host last reported.
+        /// frame from the environment the host last reported and the
+        /// tokens resolved for it.
         pub const Shell = struct {
             io: std.Io,
-            palette: Palette,
+            tokens: *const Tokens,
+            colors: Colors,
+            /// The preferences the tokens were resolved for.
+            preferences: zui_design.Preferences,
+            /// The tour's, which the preferences screen changes.
+            preference_choices: *PreferenceChoices,
             widgets: Widgets,
             fonts: Fonts,
             text_scale: f32,
@@ -197,16 +231,19 @@ pub fn Kit(comptime spec: Spec) type {
             environment_changes: *EnvironmentQueue,
             requested_screen: *?Screen,
 
-            pub fn init(ui: *const Ui, io: std.Io, seconds: f64, fonts: Fonts, tokens: *const Tokens, perf: *const Perf, sources: *Sources, waker: zui.Waker, environment_changes: *EnvironmentQueue, requested_screen: *?Screen) Shell {
+            /// `appearance` has followed the preferences of this frame.
+            pub fn init(ui: *const Ui, io: std.Io, seconds: f64, fonts: Fonts, appearance: *const Appearance, preference_choices: *PreferenceChoices, perf: *const Perf, sources: *Sources, waker: zui.Waker, environment_changes: *EnvironmentQueue, requested_screen: *?Screen) Shell {
                 const environment = ui.environment();
-                const palette: Palette = .forEnvironment(environment);
-                const text_scale = std.math.clamp(environment.text_scale, 0.5, 2);
+                const preferences = appearance.preferences orelse preferencesOf(environment, preference_choices.*);
                 return .{
                     .io = io,
-                    .palette = palette,
-                    .widgets = .{ .skin = .{ .tokens = tokens } },
+                    .tokens = &appearance.tokens,
+                    .colors = appearance.colors(),
+                    .preferences = preferences,
+                    .preference_choices = preference_choices,
+                    .widgets = .{ .skin = .{ .tokens = &appearance.tokens } },
                     .fonts = fonts,
-                    .text_scale = text_scale,
+                    .text_scale = preferences.text_scale,
                     .reduced_motion = environment.reduced_motion,
                     .seconds = seconds,
                     .perf = perf,
@@ -237,8 +274,8 @@ pub fn Kit(comptime spec: Spec) type {
 
             pub fn defaultColor(self: *const Shell, tone: Tone) zui.Color {
                 return switch (tone) {
-                    .caption, .tiny => self.palette.muted,
-                    else => self.palette.text,
+                    .caption, .tiny => self.colors.get(.on_surface_muted),
+                    else => self.colors.get(.on_surface),
                 };
             }
 
@@ -274,7 +311,7 @@ pub fn Kit(comptime spec: Spec) type {
             fn openCardWith(self: *const Shell, ui: *Ui, element: Ui.Element, title: []const u8) void {
                 var card = element;
                 card.layout = .{ .direction = .top_to_bottom, .sizing = element.layout.?.sizing, .padding = .all(16), .child_gap = 10 };
-                card.decoration = .{ .background = self.palette.surface, .border = .{ .color = self.palette.border, .widths = .all(1) }, .corner_radius = .all(8), .corner_shape = panel_corner_shape };
+                card.decoration = .{ .background = self.colors.get(.surface), .border = .{ .color = self.colors.get(.outline_muted), .widths = .all(1) }, .corner_radius = .all(8), .corner_shape = panel_corner_shape };
                 ui.open(card);
                 if (title.len != 0) self.label(ui, .heading, title);
             }
@@ -284,19 +321,19 @@ pub fn Kit(comptime spec: Spec) type {
             pub fn pageHeading(self: *const Shell, ui: *Ui, eyebrow: []const u8, title: []const u8, description: []const u8) void {
                 ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow }, .child_gap = 4 } });
                 defer ui.close();
-                self.labelColored(ui, .caption, self.palette.accent, eyebrow);
+                self.labelColored(ui, .caption, self.colors.get(.on_surface_accent), eyebrow);
                 self.label(ui, .title, title);
-                self.labelColored(ui, .body, self.palette.muted, description);
+                self.labelColored(ui, .body, self.colors.get(.on_surface_muted), description);
             }
 
             /// The lane's name in a quiet pill of its color.
             pub fn lanePill(self: *const Shell, ui: *Ui, lane: Lane) void {
-                const color = lane.color(self.palette);
+                const emphasis = lane.emphasis();
                 ui.open(.{
                     .layout = .{ .padding = .symmetric(8, 2) },
-                    .decoration = .{ .background = color.mix(self.palette.surface, 0.85), .corner_radius = .all(9) },
+                    .decoration = .{ .background = emphasis.container(self.colors), .corner_radius = .all(9) },
                 });
-                self.labelColored(ui, .tiny, color, lane.name());
+                self.labelColored(ui, .tiny, emphasis.onContainer(self.colors), lane.name());
                 ui.close();
             }
 
@@ -305,12 +342,12 @@ pub fn Kit(comptime spec: Spec) type {
                 self.requested_screen.* = screen;
             }
 
-            pub fn chip(self: *const Shell, ui: *Ui, content: []const u8, color: zui.Color) void {
+            pub fn chip(self: *const Shell, ui: *Ui, content: []const u8, emphasis: Emphasis) void {
                 ui.open(.{
                     .layout = .{ .padding = .symmetric(8, 3) },
-                    .decoration = .{ .background = color.mix(self.palette.surface, 0.8), .border = .{ .color = color, .widths = .all(1) }, .corner_radius = .all(10) },
+                    .decoration = .{ .background = emphasis.container(self.colors), .border = .{ .color = emphasis.fill(self.colors), .widths = .all(1) }, .corner_radius = .all(10) },
                 });
-                self.labelColored(ui, .caption, color, content);
+                self.labelColored(ui, .caption, emphasis.onContainer(self.colors), content);
                 ui.close();
             }
 
@@ -329,14 +366,14 @@ pub fn Kit(comptime spec: Spec) type {
             }
 
             pub fn divider(self: *const Shell, ui: *Ui) void {
-                ui.box(.{ .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(1) } }, .decoration = .{ .background = self.palette.border } });
+                ui.box(.{ .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(1) } }, .decoration = .{ .background = self.colors.get(.outline_muted) } });
             }
 
             pub fn meter(self: *const Shell, ui: *Ui, fraction: f32, color: zui.Color, height: f32) void {
                 const clamped = std.math.clamp(fraction, 0, 1);
                 ui.open(.{
                     .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(height) } },
-                    .decoration = .{ .background = self.palette.sunken, .corner_radius = .all(height / 2) },
+                    .decoration = .{ .background = self.colors.get(.surface_sunken), .corner_radius = .all(height / 2) },
                 });
                 if (clamped > 0) ui.box(.{
                     .layout = .{ .sizing = .{ .width = .percent(clamped), .height = .grow } },
@@ -346,7 +383,7 @@ pub fn Kit(comptime spec: Spec) type {
             }
 
             /// Asks the next frame for an environment change, as an OS
-            /// would report one; widgets and the palette follow it.
+            /// would report one; the tokens follow it.
             pub fn changeEnvironment(self: *const Shell, change: zui.EnvironmentChange) void {
                 self.environment_changes.push(change);
             }

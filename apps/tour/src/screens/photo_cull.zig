@@ -319,7 +319,7 @@ pub fn Using(comptime kit: type) type {
             const RowRange = struct { first: u32, last: u32, total: u32 };
 
             fn grid(self: *PhotoCull, ui: *Ui, shell: *const Shell, photos: anytype, on_screen: anytype, dragged: *?u32) RowRange {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 const grid_id = ids.@"photo_cull.grid";
                 const viewport = ui.rectOf(grid_id) orelse zui.Rect{ .width = 840, .height = 600 };
                 self.columns = @max(1, @as(u32, @intFromFloat((viewport.width - tile_gap) / (thumbnail_width + tile_gap))));
@@ -341,7 +341,7 @@ pub fn Using(comptime kit: type) type {
 
                 ui.open(.{
                     .layout = .{ .sizing = .grow_both, .padding = .all(4), .child_gap = 4 },
-                    .decoration = .{ .background = palette.surface, .border = .{ .color = palette.border, .widths = .all(1) }, .corner_radius = .all(8) },
+                    .decoration = .{ .background = colors.get(.surface), .border = .{ .color = colors.get(.outline_muted), .widths = .all(1) }, .corner_radius = .all(8) },
                 });
                 defer ui.close();
                 {
@@ -372,7 +372,7 @@ pub fn Using(comptime kit: type) type {
 
             /// Returns whether a pointer is dragging the photo.
             fn tile(self: *PhotoCull, ui: *Ui, shell: *const Shell, index: u32, status: PhotoLoads.Status) bool {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 const id: zui.Id = .indexed("photo_cull.photo", index);
                 const verdict = self.verdicts[index];
                 const is_selected = index == self.selected;
@@ -380,10 +380,10 @@ pub fn Using(comptime kit: type) type {
                 const is_dragged = ui.dragging(id) != null;
                 if (is_dragged) ui.startDrag(id, PhotoDrag{ .index = index });
 
-                const ring: ?zui.Color = if (is_selected) palette.accent else switch (verdict) {
-                    .picked => palette.good,
-                    .rejected => palette.bad,
-                    .unsorted => if (ui.hovered(id)) palette.faint else null,
+                const ring: ?zui.Color = if (is_selected) colors.get(.accent) else switch (verdict) {
+                    .picked => colors.get(.success),
+                    .rejected => colors.get(.danger),
+                    .unsorted => if (ui.hovered(id)) colors.get(.on_surface_muted) else null,
                 };
                 var name_buffer: [16]u8 = undefined;
                 ui.open(.{
@@ -405,7 +405,7 @@ pub fn Using(comptime kit: type) type {
                     const inner_height: f32 = if (ring != null) thumbnail_height - 4 else thumbnail_height;
                     picture(ui, shell, status, .{ inner_width, inner_height }, 4);
                     if (verdict == .rejected) {
-                        var veil = palette.background;
+                        var veil = colors.get(.background);
                         veil.a = 170;
                         ui.box(.{
                             .floating = .{ .offset = .{ 2, 2 }, .clip = .target, .capture = false },
@@ -417,11 +417,11 @@ pub fn Using(comptime kit: type) type {
                 {
                     ui.open(.{ .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(caption_height) }, .padding = .{ .left = 2, .right = 2 }, .child_gap = 4, .child_alignment = .{ .y = .center } } });
                     defer ui.close();
-                    shell.labelColored(ui, .tiny, if (is_selected) palette.text else palette.muted, photoName(&name_buffer, index));
+                    shell.labelColored(ui, .tiny, if (is_selected) colors.get(.on_surface) else colors.get(.on_surface_muted), photoName(&name_buffer, index));
                     shell.spacer(ui);
                     switch (verdict) {
-                        .picked => shell.labelColored(ui, .tiny, palette.good, "PICK"),
-                        .rejected => shell.labelColored(ui, .tiny, palette.bad, "REJECT"),
+                        .picked => shell.labelColored(ui, .tiny, colors.get(.on_success_container), "PICK"),
+                        .rejected => shell.labelColored(ui, .tiny, colors.get(.on_danger_container), "REJECT"),
                         .unsorted => {},
                     }
                 }
@@ -429,7 +429,7 @@ pub fn Using(comptime kit: type) type {
             }
 
             fn sidePanel(self: *PhotoCull, ui: *Ui, shell: *const Shell, photos: anytype, on_screen: anytype, rows: RowRange) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 ui.open(.{
                     .id = ids.@"photo_cull.side",
                     .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(side_width), .height = .grow }, .child_gap = 12 },
@@ -447,42 +447,42 @@ pub fn Using(comptime kit: type) type {
                     shell.label(ui, .heading, photoName(&name_buffer, self.selected));
                     shell.spacer(ui);
                     switch (self.verdicts[self.selected]) {
-                        .picked => shell.chip(ui, "Picked", palette.good),
-                        .rejected => shell.chip(ui, "Rejected", palette.bad),
-                        .unsorted => shell.chip(ui, "Unsorted", palette.muted),
+                        .picked => shell.chip(ui, "Picked", .success),
+                        .rejected => shell.chip(ui, "Rejected", .danger),
+                        .unsorted => shell.chip(ui, "Unsorted", .neutral),
                     }
                     ui.close();
                     const exposure: Exposure = .of(self.selected);
-                    shell.printColored(ui, .caption, palette.muted, "1/{d} s  ·  f/{d:.1}  ·  ISO {d}  ·  {d} mm", .{ exposure.shutter_denominator, exposure.aperture, exposure.iso, exposure.focal_millimeters });
+                    shell.printColored(ui, .caption, colors.get(.on_surface_muted), "1/{d} s  ·  f/{d:.1}  ·  ISO {d}  ·  {d} mm", .{ exposure.shutter_denominator, exposure.aperture, exposure.iso, exposure.focal_millimeters });
                 }
 
                 {
                     ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 12 } });
                     defer ui.close();
-                    self.bin(ui, shell, ids.@"photo_cull.picks", "Picks", self.picked, .picked, palette.good);
-                    self.bin(ui, shell, ids.@"photo_cull.rejects", "Rejects", self.rejected, .rejected, palette.bad);
+                    self.bin(ui, shell, ids.@"photo_cull.picks", "Picks", self.picked, .picked, .success);
+                    self.bin(ui, shell, ids.@"photo_cull.rejects", "Rejects", self.rejected, .rejected, .danger);
                 }
                 const sorted = self.picked + self.rejected;
-                shell.printColored(ui, .caption, palette.muted, "{d} of {d} sorted, {d} to go", .{ sorted, photo_count, photo_count - sorted });
-                shell.meter(ui, @as(f32, @floatFromInt(sorted)) / photo_count, palette.accent, 6);
+                shell.printColored(ui, .caption, colors.get(.on_surface_muted), "{d} of {d} sorted, {d} to go", .{ sorted, photo_count, photo_count - sorted });
+                shell.meter(ui, @as(f32, @floatFromInt(sorted)) / photo_count, colors.get(.accent), 6);
 
                 {
                     shell.openCard(ui, "Decoding", .{ .width = .grow });
                     defer ui.close();
                     shell.print(ui, .caption, "Rows {d}-{d} of {d} declared, {d} photos of {d}", .{ rows.first + 1, rows.last, rows.total, (rows.last - rows.first) * self.columns, photo_count });
-                    legendRow(ui, shell, "ready", on_screen.get(.ready), palette.good);
-                    legendRow(ui, shell, "decoding", on_screen.get(.running), palette.accent);
-                    legendRow(ui, shell, "waiting for a thread", on_screen.get(.idle), palette.muted);
+                    legendRow(ui, shell, "ready", on_screen.get(.ready), .success);
+                    legendRow(ui, shell, "decoding", on_screen.get(.running), .accent);
+                    legendRow(ui, shell, "waiting for a thread", on_screen.get(.idle), .neutral);
                     shell.divider(ui);
                     const outcomes = ui.source(.photo_outcomes).get() orelse PhotoOutcomes{};
-                    legendRow(ui, shell, "decodes started", self.decodes_started, palette.text);
-                    legendRow(ui, shell, "finished", outcomes.loaded, palette.good);
-                    legendRow(ui, shell, "cancelled, scrolled away", outcomes.abandoned, palette.warn);
+                    legendRow(ui, shell, "decodes started", self.decodes_started, .neutral);
+                    legendRow(ui, shell, "finished", outcomes.loaded, .success);
+                    legendRow(ui, shell, "cancelled, scrolled away", outcomes.abandoned, .warning);
                 }
             }
 
-            fn bin(self: *PhotoCull, ui: *Ui, shell: *const Shell, id: zui.Id, name: []const u8, count: u32, verdict: Verdict, color: zui.Color) void {
-                const palette = shell.palette;
+            fn bin(self: *PhotoCull, ui: *Ui, shell: *const Shell, id: zui.Id, name: []const u8, count: u32, verdict: Verdict, emphasis: kit.Emphasis) void {
+                const colors = shell.colors;
                 if (ui.dropped(id, PhotoDrag)) |drop| {
                     self.judge(drop.index, verdict);
                     self.selected = drop.index;
@@ -494,14 +494,14 @@ pub fn Using(comptime kit: type) type {
                     .semantics = .{ .role = .group, .label = name },
                     .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow, .height = .fixed(76) }, .padding = .all(10), .child_gap = 2, .child_alignment = .{ .x = .center, .y = .center } },
                     .decoration = .{
-                        .background = if (hovering) color.mix(palette.surface, 0.7) else palette.surface,
-                        .border = .{ .color = if (hovering) color else palette.border, .widths = .all(if (hovering) 2 else 1) },
+                        .background = if (hovering) emphasis.container(colors) else colors.get(.surface),
+                        .border = .{ .color = if (hovering) emphasis.fill(colors) else colors.get(.outline_muted), .widths = .all(if (hovering) 2 else 1) },
                         .corner_radius = .all(8),
                     },
                 });
                 defer ui.close();
-                shell.printColored(ui, .title, color, "{d}", .{count});
-                shell.labelColored(ui, .caption, if (hovering) color else palette.muted, if (hovering) "drop to file" else name);
+                shell.printColored(ui, .title, if (hovering) emphasis.onContainer(colors) else emphasis.text(colors), "{d}", .{count});
+                shell.labelColored(ui, .caption, if (hovering) emphasis.onContainer(colors) else colors.get(.on_surface_muted), if (hovering) "drop to file" else name);
             }
 
             /// The decoder. Runs after every frame, on whichever screen, so
@@ -525,7 +525,7 @@ pub fn Using(comptime kit: type) type {
 
         /// The photo once decoded, and a placeholder of its size until then.
         fn picture(ui: *Ui, shell: *const Shell, status: PhotoLoads.Status, size: [2]f32, radius: f32) void {
-            const palette = shell.palette;
+            const colors = shell.colors;
             switch (status) {
                 .ready => |photo| landscape(ui, photo, size, radius),
                 .idle, .running => {
@@ -533,13 +533,13 @@ pub fn Using(comptime kit: type) type {
                     ui.open(placeholderOf(shell, size, radius));
                     defer ui.close();
                     ui.open(.{ .layout = .{ .sizing = .{ .width = .fixed(size[0] * 0.6) } } });
-                    shell.meter(ui, progress, palette.accent, 4);
+                    shell.meter(ui, progress, colors.get(.accent), 4);
                     ui.close();
                 },
                 .failed, .canceled => {
                     ui.open(placeholderOf(shell, size, radius));
                     defer ui.close();
-                    shell.labelColored(ui, .tiny, palette.faint, "not decoded");
+                    shell.labelColored(ui, .tiny, colors.get(.on_surface_muted), "not decoded");
                 },
             }
         }
@@ -547,7 +547,7 @@ pub fn Using(comptime kit: type) type {
         fn placeholderOf(shell: *const Shell, size: [2]f32, radius: f32) Ui.Element {
             return .{
                 .layout = .{ .sizing = .{ .width = .fixed(size[0]), .height = .fixed(size[1]) }, .child_alignment = .{ .x = .center, .y = .center } },
-                .decoration = .{ .background = shell.palette.sunken, .corner_radius = .all(radius) },
+                .decoration = .{ .background = shell.colors.get(.surface_sunken), .corner_radius = .all(radius) },
             };
         }
 
@@ -583,14 +583,14 @@ pub fn Using(comptime kit: type) type {
         }
 
         fn dragGhost(ui: *Ui, shell: *const Shell, index: u32, status: PhotoLoads.Status) void {
-            const palette = shell.palette;
+            const colors = shell.colors;
             const pointer = ui.primaryPointer() orelse return;
             var name_buffer: [16]u8 = undefined;
             ui.open(.{
                 .id = ids.@"photo_cull.ghost",
                 .floating = .{ .attach_to = .root, .offset = .{ pointer.position[0] + 14, pointer.position[1] + 14 }, .z = 400, .capture = false },
                 .layout = .{ .direction = .top_to_bottom, .padding = .all(6), .child_gap = 4 },
-                .decoration = .{ .background = palette.raised, .border = .{ .color = palette.accent, .widths = .all(1) }, .corner_radius = .all(8) },
+                .decoration = .{ .background = colors.get(.surface_raised), .border = .{ .color = colors.get(.accent), .widths = .all(1) }, .corner_radius = .all(8) },
             });
             defer ui.close();
             picture(ui, shell, status, .{ 96, 72 }, 4);
@@ -600,7 +600,7 @@ pub fn Using(comptime kit: type) type {
         /// A scrollbar zui does not draw for you: the thumb follows the
         /// offset, and pressing or dragging on the track sets it.
         fn scrollTrack(ui: *Ui, shell: *const Shell, offset: f32, visible_height: f32, content_height: f32) void {
-            const palette = shell.palette;
+            const colors = shell.colors;
             const track_id = ids.@"photo_cull.track";
             const maximum_offset = @max(1, content_height - visible_height);
             const track_height = (ui.rectOf(track_id) orelse zui.Rect{ .height = visible_height }).height;
@@ -615,23 +615,23 @@ pub fn Using(comptime kit: type) type {
                 .interactive = true,
                 .cursor = .resize_vertical,
                 .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(10), .height = .grow } },
-                .decoration = .{ .background = palette.sunken, .corner_radius = .all(5) },
+                .decoration = .{ .background = colors.get(.surface_sunken), .corner_radius = .all(5) },
             });
             defer ui.close();
             ui.box(.{ .layout = .{ .sizing = .{ .height = .fixed(thumb_top) } } });
             ui.box(.{
                 .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(thumb_height) } },
-                .decoration = .{ .background = if (ui.hovered(track_id) or ui.pressed(track_id)) palette.accent else palette.faint, .corner_radius = .all(5) },
+                .decoration = .{ .background = if (ui.hovered(track_id) or ui.pressed(track_id)) colors.get(.accent) else colors.get(.on_surface_muted), .corner_radius = .all(5) },
             });
         }
 
-        fn legendRow(ui: *Ui, shell: *const Shell, name: []const u8, count: u32, color: zui.Color) void {
+        fn legendRow(ui: *Ui, shell: *const Shell, name: []const u8, count: u32, emphasis: kit.Emphasis) void {
             ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 8, .child_alignment = .{ .y = .center } } });
             defer ui.close();
-            ui.box(.{ .layout = .{ .sizing = .{ .width = .fixed(8), .height = .fixed(8) } }, .decoration = .{ .background = color, .corner_radius = .all(4) } });
+            ui.box(.{ .layout = .{ .sizing = .{ .width = .fixed(8), .height = .fixed(8) } }, .decoration = .{ .background = emphasis.fill(shell.colors), .corner_radius = .all(4) } });
             shell.label(ui, .caption, name);
             shell.spacer(ui);
-            shell.printColored(ui, .caption, color, "{d}", .{count});
+            shell.printColored(ui, .caption, emphasis.text(shell.colors), "{d}", .{count});
         }
     };
 }

@@ -142,21 +142,21 @@ pub fn Using(comptime kit: type) type {
             }
 
             fn claimCard(self: *QuietMachine, ui: *Ui, shell: *const Shell) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 const seconds_on_screen = self.secondsOnScreen(shell);
                 const game_loop_frames: u64 = @intFromFloat(@floor(seconds_on_screen * game_loop_hertz));
                 const fraction: f32 = if (game_loop_frames == 0) 1 else @floatCast(@min(1, @as(f64, @floatFromInt(self.frames_declared_this_visit)) / @as(f64, @floatFromInt(game_loop_frames))));
 
                 ui.open(.{
                     .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow }, .padding = .all(24), .child_gap = 10 },
-                    .decoration = .{ .background = palette.surface, .border = .{ .color = palette.spectacle.mix(palette.border, 0.6), .widths = .all(1) }, .corner_radius = .all(8) },
+                    .decoration = .{ .background = colors.get(.surface), .border = .{ .color = colors.get(.accent).mix(colors.get(.outline_muted), 0.6), .widths = .all(1) }, .corner_radius = .all(8) },
                 });
                 defer ui.close();
-                shell.labelColored(ui, .caption, palette.spectacle, "THE UI DID NOTHING IT DIDN'T HAVE TO");
+                shell.labelColored(ui, .caption, colors.get(.on_surface_accent), "THE UI DID NOTHING IT DIDN'T HAVE TO");
                 {
                     ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 16, .child_alignment = .{ .y = .end } } });
                     defer ui.close();
-                    shell.printColored(ui, .hero, palette.spectacle, "{d}", .{self.frames_declared_this_visit});
+                    shell.printColored(ui, .hero, colors.get(.on_surface_accent), "{d}", .{self.frames_declared_this_visit});
                     {
                         ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow }, .child_gap = 2, .padding = .{ .bottom = 8 } } });
                         defer ui.close();
@@ -164,9 +164,9 @@ pub fn Using(comptime kit: type) type {
                         shell.print(ui, .heading, "frames declared in {s} on screen", .{formatDuration(&duration, seconds_on_screen)});
                         const times_as_many = 1 / @max(fraction, 0.0001);
                         if (times_as_many < 1.5) {
-                            shell.printColored(ui, .body, palette.muted, "A 60 Hz loop would have drawn {d} frames by now.", .{game_loop_frames});
+                            shell.printColored(ui, .body, colors.get(.on_surface_muted), "A 60 Hz loop would have drawn {d} frames by now.", .{game_loop_frames});
                         } else {
-                            shell.printColored(ui, .body, palette.muted, "A 60 Hz loop would have drawn {d} frames by now, {d:.0}x as many.", .{ game_loop_frames, times_as_many });
+                            shell.printColored(ui, .body, colors.get(.on_surface_muted), "A 60 Hz loop would have drawn {d} frames by now, {d:.0}x as many.", .{ game_loop_frames, times_as_many });
                         }
                     }
                 }
@@ -176,7 +176,7 @@ pub fn Using(comptime kit: type) type {
                     ui.open(.{ .layout = .{ .sizing = .{ .width = .fixed(110) } } });
                     shell.label(ui, .caption, "zui");
                     ui.close();
-                    shell.meter(ui, fraction, palette.spectacle, 10);
+                    shell.meter(ui, fraction, colors.get(.accent), 10);
                 }
                 {
                     ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 12, .child_alignment = .{ .y = .center } } });
@@ -184,9 +184,9 @@ pub fn Using(comptime kit: type) type {
                     ui.open(.{ .layout = .{ .sizing = .{ .width = .fixed(110) } } });
                     shell.label(ui, .caption, "60 Hz loop");
                     ui.close();
-                    shell.meter(ui, 1, palette.faint, 10);
+                    shell.meter(ui, 1, colors.get(.on_surface_muted), 10);
                 }
-                shell.labelColored(ui, .caption, palette.muted, "Each frame below is declared because something changed: a second passed, the sensor moved, or you touched the page. In between, the process sleeps.");
+                shell.labelColored(ui, .caption, colors.get(.on_surface_muted), "Each frame below is declared because something changed: a second passed, the sensor moved, or you touched the page. In between, the process sleeps.");
             }
 
             fn openTile(shell: *const Shell, ui: *Ui, title: []const u8) void {
@@ -195,7 +195,7 @@ pub fn Using(comptime kit: type) type {
             }
 
             fn tileFooter(shell: *const Shell, ui: *Ui, content: []const u8) void {
-                shell.labelColored(ui, .tiny, shell.palette.faint, content);
+                shell.labelColored(ui, .tiny, shell.colors.get(.on_surface_muted), content);
             }
 
             fn clockTile(self: *const QuietMachine, ui: *Ui, shell: *const Shell) void {
@@ -203,7 +203,7 @@ pub fn Using(comptime kit: type) type {
                 openTile(shell, ui, "CLOCK");
                 defer ui.close();
                 const whole: u64 = @intFromFloat(@max(0, @floor(shell.seconds)));
-                shell.printColored(ui, .title, shell.palette.text, "{d:0>2}:{d:0>2}:{d:0>2}", .{ whole / 3600, (whole / 60) % 60, whole % 60 });
+                shell.printColored(ui, .title, shell.colors.get(.on_surface), "{d:0>2}:{d:0>2}:{d:0>2}", .{ whole / 3600, (whole / 60) % 60, whole % 60 });
                 tileFooter(shell, ui, "requestFrameAt the next second");
             }
 
@@ -211,9 +211,9 @@ pub fn Using(comptime kit: type) type {
                 openTile(shell, ui, "SENSOR");
                 defer ui.close();
                 if (reading) |current| {
-                    shell.printColored(ui, .title, shell.palette.good, "{d:.1} C", .{current.celsius});
+                    shell.printColored(ui, .title, shell.colors.get(.on_success_container), "{d:.1} C", .{current.celsius});
                 } else {
-                    shell.printColored(ui, .title, shell.palette.faint, "--.- C", .{});
+                    shell.printColored(ui, .title, shell.colors.get(.on_surface_muted), "--.- C", .{});
                 }
                 const samples = self.sensor_counts.samples_taken.load(.monotonic);
                 const publishes = self.sensor_counts.publishes.load(.monotonic);
@@ -226,8 +226,8 @@ pub fn Using(comptime kit: type) type {
                 defer ui.close();
                 const whole: u64 = @intFromFloat(@max(0, @floor(shell.seconds)));
                 const remaining = countdown_period_seconds - whole % countdown_period_seconds;
-                shell.printColored(ui, .title, shell.palette.warn, "0:{d:0>2}", .{remaining});
-                shell.meter(ui, @as(f32, @floatFromInt(remaining)) / countdown_period_seconds, shell.palette.warn, 4);
+                shell.printColored(ui, .title, shell.colors.get(.on_warning_container), "0:{d:0>2}", .{remaining});
+                shell.meter(ui, @as(f32, @floatFromInt(remaining)) / countdown_period_seconds, shell.colors.get(.warning), 4);
             }
 
             fn tickerTile(self: *const QuietMachine, ui: *Ui, shell: *const Shell) void {
@@ -242,7 +242,7 @@ pub fn Using(comptime kit: type) type {
             }
 
             fn reasonsCard(self: *const QuietMachine, ui: *Ui, shell: *const Shell) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 shell.openScrollingCard(ui, ids.reasons, "Why each frame was declared", .{ .width = .grow, .height = .grow });
                 defer ui.close();
                 shell.label(ui, .caption, "THIS VISIT");
@@ -253,9 +253,9 @@ pub fn Using(comptime kit: type) type {
                     ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 8, .child_alignment = .{ .y = .center } } });
                     defer ui.close();
                     ui.open(.{ .layout = .{ .sizing = .{ .width = .fixed(200) } } });
-                    shell.labelColored(ui, .caption, if (count == 0) palette.faint else palette.text, reason.describe());
+                    shell.labelColored(ui, .caption, if (count == 0) colors.get(.on_surface_muted) else colors.get(.on_surface), reason.describe());
                     ui.close();
-                    shell.meter(ui, @as(f32, @floatFromInt(count)) / @as(f32, @floatFromInt(total)), reasonColor(palette, reason), 6);
+                    shell.meter(ui, @as(f32, @floatFromInt(count)) / @as(f32, @floatFromInt(total)), reasonColor(colors, reason), 6);
                     ui.open(.{ .layout = .{ .sizing = .{ .width = .fixed(48) }, .child_alignment = .{ .x = .end } } });
                     shell.print(ui, .caption, "{d}", .{count});
                     ui.close();
@@ -269,38 +269,38 @@ pub fn Using(comptime kit: type) type {
                     const sample = shell.perf.sampleAt(shared.Perf.history_length - 1 - age);
                     ui.box(.{
                         .layout = .{ .sizing = .{ .width = .fixed(14), .height = .fixed(14) } },
-                        .decoration = .{ .background = reasonColor(palette, sample.reason), .corner_radius = .all(3) },
+                        .decoration = .{ .background = reasonColor(colors, sample.reason), .corner_radius = .all(3) },
                     });
                 }
-                if (shown == 0) shell.labelColored(ui, .caption, palette.faint, "no frames timed yet");
+                if (shown == 0) shell.labelColored(ui, .caption, colors.get(.on_surface_muted), "no frames timed yet");
             }
 
-            fn reasonColor(palette: shared.Palette, reason: FrameReason) zui.Color {
+            fn reasonColor(colors: kit.Colors, reason: FrameReason) zui.Color {
                 return switch (reason) {
-                    .first, .resize => palette.muted,
-                    .input => palette.accent,
-                    .requested => palette.bad,
-                    .timer => palette.spectacle,
-                    .source => palette.good,
+                    .first, .resize => colors.get(.on_surface_muted),
+                    .input => colors.get(.accent),
+                    .requested => colors.get(.danger),
+                    .timer => colors.get(.warning),
+                    .source => colors.get(.success),
                 };
             }
 
             fn nextFrameCard(self: *QuietMachine, ui: *Ui, shell: *const Shell) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 shell.openScrollingCard(ui, ids.next_frame, "What zui will do next", .{ .width = .grow, .height = .grow });
                 defer ui.close();
                 switch (shell.perf.next_frame) {
                     .immediately => {
-                        shell.labelColored(ui, .title, palette.bad, "Draw again at once");
-                        shell.labelColored(ui, .caption, palette.muted, "nextFrame() = .immediately: something asked for every refresh.");
+                        shell.labelColored(ui, .title, colors.get(.on_danger_container), "Draw again at once");
+                        shell.labelColored(ui, .caption, colors.get(.on_surface_muted), "nextFrame() = .immediately: something asked for every refresh.");
                     },
                     .at => {
-                        shell.printColored(ui, .title, palette.spectacle, "Sleep {d:.2} s", .{shell.perf.next_frame_seconds});
-                        shell.labelColored(ui, .caption, palette.muted, "nextFrame() = .at, the next whole second. A sensor change or your input wakes it sooner.");
+                        shell.printColored(ui, .title, colors.get(.on_surface_accent), "Sleep {d:.2} s", .{shell.perf.next_frame_seconds});
+                        shell.labelColored(ui, .caption, colors.get(.on_surface_muted), "nextFrame() = .at, the next whole second. A sensor change or your input wakes it sooner.");
                     },
                     .on_event => {
-                        shell.labelColored(ui, .title, palette.good, "Sleep until input");
-                        shell.labelColored(ui, .caption, palette.muted, "nextFrame() = .on_event: nothing is due.");
+                        shell.labelColored(ui, .title, colors.get(.on_success_container), "Sleep until input");
+                        shell.labelColored(ui, .caption, colors.get(.on_surface_muted), "nextFrame() = .on_event: nothing is due.");
                     },
                 }
                 shell.print(ui, .body, "{d} frames in the last second", .{shell.perf.frames_last_second});
@@ -314,7 +314,7 @@ pub fn Using(comptime kit: type) type {
                 });
                 shell.divider(ui);
                 _ = shell.widgets.checkbox(ui, ids.game_loop, "Compare with a game loop", &self.game_loop, .{});
-                shell.labelColored(ui, .caption, palette.muted, if (self.game_loop)
+                shell.labelColored(ui, .caption, colors.get(.on_surface_muted), if (self.game_loop)
                     "Now every refresh asks for a frame, as a game loop does. Watch the counter above race."
                 else
                     "Turn it on to ask for a frame at every refresh, as a game loop does.");
@@ -323,10 +323,10 @@ pub fn Using(comptime kit: type) type {
             fn codeBlock(ui: *Ui, shell: *const Shell, lines: []const []const u8) void {
                 ui.open(.{
                     .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow }, .padding = .all(12), .child_gap = 4 },
-                    .decoration = .{ .background = shell.palette.sunken, .corner_radius = .all(6) },
+                    .decoration = .{ .background = shell.colors.get(.surface_sunken), .corner_radius = .all(6) },
                 });
                 defer ui.close();
-                for (lines) |line| ui.text(line, .{ .size = 13 * shell.text_scale, .font = shell.fonts.mono, .color = if (std.mem.startsWith(u8, line, "//")) shell.palette.faint else shell.palette.text });
+                for (lines) |line| ui.text(line, .{ .size = 13 * shell.text_scale, .font = shell.fonts.mono, .color = if (std.mem.startsWith(u8, line, "//")) shell.colors.get(.on_surface_muted) else shell.colors.get(.on_surface) });
             }
 
             fn sum(counts: []const u32) u32 {

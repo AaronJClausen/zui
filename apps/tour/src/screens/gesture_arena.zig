@@ -485,7 +485,7 @@ pub fn Using(comptime kit: type) type {
             }
 
             fn toolbar(self: *GestureArena, ui: *Ui, shell: *const Shell) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 12, .child_alignment = .{ .y = .center } } });
                 defer ui.close();
                 _ = shell.widgets.checkbox(ui, ids.lasso_tool, "Lasso tool", &self.lasso_tool, .{});
@@ -495,51 +495,51 @@ pub fn Using(comptime kit: type) type {
                     self.lasso = .{};
                 }
                 shell.spacer(ui);
-                shell.printColored(ui, .caption, palette.muted, "zoom {d:.0}%   list {d:.0}   carousel {d:.0}", .{ self.camera.zoom * 100, self.previous_list_offset[1], self.previous_carousel_offset[0] });
+                shell.printColored(ui, .caption, colors.get(.on_surface_muted), "zoom {d:.0}%   list {d:.0}   carousel {d:.0}", .{ self.camera.zoom * 100, self.previous_list_offset[1], self.previous_carousel_offset[0] });
             }
 
             fn map(self: *GestureArena, ui: *Ui, shell: *const Shell, map_rect: zui.Rect) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 ui.open(.{
                     .id = ids.map,
                     .gestures = .{ .pan = .both, .zoom = true, .custom = self.lasso_tool },
                     .cursor = if (self.lasso_tool) .crosshair else .grab,
                     .layout = .{ .sizing = .grow_both },
-                    .decoration = .{ .background = palette.sunken, .border = .{ .color = palette.border, .widths = .all(1) }, .corner_radius = .all(8) },
+                    .decoration = .{ .background = colors.get(.surface_sunken), .border = .{ .color = colors.get(.outline_muted), .widths = .all(1) }, .corner_radius = .all(8) },
                     .clip = .both,
                 });
                 defer ui.close();
-                self.grid(ui, palette, map_rect);
+                self.grid(ui, colors, map_rect);
                 self.pins(ui, shell, map_rect);
                 self.listPanel(ui, shell, map_rect);
-                self.lassoPath(ui, palette, map_rect);
+                self.lassoPath(ui, colors, map_rect);
                 self.zoomButtons(ui, shell);
             }
 
-            fn grid(self: *const GestureArena, ui: *Ui, palette: kit.Palette, map_rect: zui.Rect) void {
+            fn grid(self: *const GestureArena, ui: *Ui, colors: kit.Colors, map_rect: zui.Rect) void {
                 const top_left = self.camera.toLocal(map_rect, .{ 0, 0 });
                 const extent: [2]f32 = .{ world_size[0] * self.camera.zoom, world_size[1] * self.camera.zoom };
                 ui.box(.{
                     .floating = .{ .offset = top_left, .capture = false, .clip = .target },
                     .layout = .{ .sizing = .{ .width = .fixed(extent[0]), .height = .fixed(extent[1]) } },
-                    .decoration = .{ .background = palette.background, .border = .{ .color = palette.border, .widths = .all(1) } },
+                    .decoration = .{ .background = colors.get(.background), .border = .{ .color = colors.get(.outline_muted), .widths = .all(1) } },
                 });
                 const columns: usize = @intFromFloat(world_size[0] / grid_spacing);
                 for (1..columns) |column| ui.box(.{
                     .floating = .{ .offset = .{ top_left[0] + @as(f32, @floatFromInt(column * grid_spacing)) * self.camera.zoom, top_left[1] }, .capture = false, .clip = .target },
                     .layout = .{ .sizing = .{ .width = .fixed(1), .height = .fixed(extent[1]) } },
-                    .decoration = .{ .background = palette.border.mix(palette.background, 0.5) },
+                    .decoration = .{ .background = colors.get(.outline_muted).mix(colors.get(.background), 0.5) },
                 });
                 const rows: usize = @intFromFloat(world_size[1] / grid_spacing);
                 for (1..rows) |row| ui.box(.{
                     .floating = .{ .offset = .{ top_left[0], top_left[1] + @as(f32, @floatFromInt(row * grid_spacing)) * self.camera.zoom }, .capture = false, .clip = .target },
                     .layout = .{ .sizing = .{ .width = .fixed(extent[0]), .height = .fixed(1) } },
-                    .decoration = .{ .background = palette.border.mix(palette.background, 0.5) },
+                    .decoration = .{ .background = colors.get(.outline_muted).mix(colors.get(.background), 0.5) },
                 });
             }
 
             fn pins(self: *const GestureArena, ui: *Ui, shell: *const Shell, map_rect: zui.Rect) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 for (places, 0..) |place, index| {
                     const at = self.camera.toLocal(map_rect, place.position);
                     const selected = self.selected.isSet(index);
@@ -547,9 +547,9 @@ pub fn Using(comptime kit: type) type {
                     ui.box(.{
                         .floating = .{ .offset = .{ at[0] - diameter / 2, at[1] - diameter / 2 }, .capture = false, .clip = .target },
                         .layout = .{ .sizing = .{ .width = .fixed(diameter), .height = .fixed(diameter) } },
-                        .decoration = .{ .background = if (selected) palette.spectacle else palette.accent, .border = .{ .color = palette.background, .widths = .all(2) }, .corner_radius = .all(diameter / 2) },
+                        .decoration = .{ .background = if (selected) colors.get(.on_surface) else colors.get(.accent), .border = .{ .color = colors.get(.background), .widths = .all(2) }, .corner_radius = .all(diameter / 2) },
                     });
-                    const label_style = shell.style(.tiny, if (selected) palette.spectacle else palette.muted);
+                    const label_style = shell.style(.tiny, if (selected) colors.get(.on_surface) else colors.get(.on_surface_muted));
                     const label_at: [2]f32 = .{ at[0] + 9, at[1] - 8 };
                     const label_size = ui.measureText(place.name, label_style);
                     const label_fits = label_at[0] >= 0 and label_at[1] >= 0 and label_at[0] + label_size[0] <= map_rect.width and label_at[1] + label_size[1] <= map_rect.height;
@@ -561,7 +561,7 @@ pub fn Using(comptime kit: type) type {
             }
 
             fn listPanel(self: *GestureArena, ui: *Ui, shell: *const Shell, map_rect: zui.Rect) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 const at = self.camera.toLocal(map_rect, list_anchor);
                 ui.open(.{
                     .id = ids.list,
@@ -569,11 +569,11 @@ pub fn Using(comptime kit: type) type {
                     .gestures = .{ .pan = .vertical },
                     .scroll = .{},
                     .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(list_size[0]), .height = .fixed(list_size[1]) }, .padding = .all(12), .child_gap = 6 },
-                    .decoration = .{ .background = palette.surface, .border = .{ .color = palette.border, .widths = .all(1) }, .corner_radius = .all(8) },
+                    .decoration = .{ .background = colors.get(.surface), .border = .{ .color = colors.get(.outline_muted), .widths = .all(1) }, .corner_radius = .all(8) },
                 });
                 defer ui.close();
                 shell.label(ui, .heading, "Inner harbor");
-                shell.labelColored(ui, .tiny, palette.muted, "VESSELS DUE, A CAROUSEL");
+                shell.labelColored(ui, .tiny, colors.get(.on_surface_muted), "VESSELS DUE, A CAROUSEL");
                 {
                     ui.open(.{
                         .id = ids.carousel,
@@ -588,14 +588,14 @@ pub fn Using(comptime kit: type) type {
                             .id = id,
                             .interactive = true,
                             .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(card_size[0]), .height = .fixed(card_size[1]) }, .padding = .all(10), .child_gap = 4 },
-                            .decoration = .{ .background = if (ui.pressed(id)) palette.hovered else palette.raised, .border = .{ .color = palette.border, .widths = .all(1) }, .corner_radius = .all(6) },
+                            .decoration = .{ .background = if (ui.pressed(id)) colors.get(.secondary_container) else colors.get(.surface_raised), .border = .{ .color = colors.get(.outline_muted), .widths = .all(1) }, .corner_radius = .all(6) },
                         });
-                        shell.labelColored(ui, .caption, palette.text, vessel[0]);
-                        shell.labelColored(ui, .tiny, palette.muted, vessel[1]);
+                        shell.labelColored(ui, .caption, colors.get(.on_surface), vessel[0]);
+                        shell.labelColored(ui, .tiny, colors.get(.on_surface_muted), vessel[1]);
                         ui.close();
                     }
                 }
-                shell.labelColored(ui, .tiny, palette.muted, "BERTHS, A LIST");
+                shell.labelColored(ui, .tiny, colors.get(.on_surface_muted), "BERTHS, A LIST");
                 for (list_rows, 0..) |row, index| {
                     const id = rowId(index);
                     const picked = if (self.picked_row) |picked_row| picked_row == index else false;
@@ -603,18 +603,18 @@ pub fn Using(comptime kit: type) type {
                         .id = id,
                         .interactive = true,
                         .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(30) }, .padding = .symmetric(10, 0), .child_alignment = .{ .y = .center } },
-                        .decoration = .{ .background = if (picked) palette.spectacle.mix(palette.surface, 0.8) else if (ui.pressed(id)) palette.hovered else palette.raised, .corner_radius = .all(4) },
+                        .decoration = .{ .background = if (picked) colors.get(.selection) else if (ui.pressed(id)) colors.get(.secondary_container) else colors.get(.surface_raised), .corner_radius = .all(4) },
                     });
-                    shell.labelColored(ui, .caption, if (picked) palette.spectacle else palette.text, row);
+                    shell.labelColored(ui, .caption, if (picked) colors.get(.on_selection) else colors.get(.on_surface), row);
                     ui.close();
                 }
             }
 
-            fn lassoPath(self: *const GestureArena, ui: *Ui, palette: kit.Palette, map_rect: zui.Rect) void {
+            fn lassoPath(self: *const GestureArena, ui: *Ui, colors: kit.Colors, map_rect: zui.Rect) void {
                 for (self.lasso.slice()) |point| ui.box(.{
                     .floating = .{ .offset = .{ point[0] - map_rect.x - 2, point[1] - map_rect.y - 2 }, .z = 3, .capture = false, .clip = .target },
                     .layout = .{ .sizing = .{ .width = .fixed(4), .height = .fixed(4) } },
-                    .decoration = .{ .background = palette.spectacle, .corner_radius = .all(2) },
+                    .decoration = .{ .background = colors.get(.accent), .corner_radius = .all(2) },
                 });
             }
 
@@ -625,40 +625,40 @@ pub fn Using(comptime kit: type) type {
                     .layout = .{ .direction = .top_to_bottom, .child_gap = 6 },
                 });
                 defer ui.close();
-                _ = shell.widgets.button(ui, ids.zoom_in, "+", .{ .width = .fixed(34) });
-                _ = shell.widgets.button(ui, ids.zoom_out, "-", .{ .width = .fixed(34) });
+                _ = shell.widgets.button(ui, ids.zoom_in, "+", .{ .width = .fixed(34), .variant = .secondary });
+                _ = shell.widgets.button(ui, ids.zoom_out, "-", .{ .width = .fixed(34), .variant = .secondary });
             }
 
             fn logCard(self: *const GestureArena, ui: *Ui, shell: *const Shell) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 shell.openScrollingCard(ui, ids.log, "", .{ .width = .fixed(340), .height = .grow });
                 defer ui.close();
-                shell.labelColored(ui, .caption, palette.spectacle, "WHO GOT EACH GESTURE, AND WHY");
-                shell.labelColored(ui, .caption, palette.muted, "Past the 8-unit slop a pointer's axis locks, and it goes to the innermost element under its press that pans that way and still has room. A second finger inside a region that zooms makes the pair zoom it.");
+                shell.labelColored(ui, .caption, colors.get(.on_surface_accent), "WHO GOT EACH GESTURE, AND WHY");
+                shell.labelColored(ui, .caption, colors.get(.on_surface_muted), "Past the 8-unit slop a pointer's axis locks, and it goes to the innermost element under its press that pans that way and still has room. A second finger inside a region that zooms makes the pair zoom it.");
                 shell.divider(ui);
                 if (self.log.count == 0) {
-                    shell.labelColored(ui, .body, palette.faint, "Drag the map, the list or the carousel, each both ways; pinch; tap a card; or turn on the lasso tool and draw around a few places.");
+                    shell.labelColored(ui, .body, colors.get(.on_surface_muted), "Drag the map, the list or the carousel, each both ways; pinch; tap a card; or turn on the lasso tool and draw around a few places.");
                     return;
                 }
                 for (0..self.log.count) |age| {
                     const entry = self.log.at(age);
-                    const color = switch (entry.tone) {
-                        .map => palette.accent,
-                        .list => palette.good,
-                        .carousel => palette.warn,
-                        .lasso => palette.spectacle,
-                        .tap => palette.text,
+                    const emphasis: kit.Emphasis = switch (entry.tone) {
+                        .map => .accent,
+                        .list => .success,
+                        .carousel => .warning,
+                        .lasso => .danger,
+                        .tap => .neutral,
                     };
                     ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 10 } });
                     defer ui.close();
-                    ui.box(.{ .layout = .{ .sizing = .{ .width = .fixed(3), .height = .grow } }, .decoration = .{ .background = if (age == 0) color else color.mix(palette.surface, 0.5), .corner_radius = .all(1.5) } });
+                    ui.box(.{ .layout = .{ .sizing = .{ .width = .fixed(3), .height = .grow } }, .decoration = .{ .background = if (age == 0) emphasis.fill(colors) else emphasis.fill(colors).mix(colors.get(.surface), 0.5), .corner_radius = .all(1.5) } });
                     ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow }, .child_gap = 2 } });
                     defer ui.close();
-                    shell.labelColored(ui, .body, if (age == 0) color else palette.text, entry.title());
-                    shell.labelColored(ui, .caption, palette.muted, entry.detail());
-                    shell.labelColored(ui, .tiny, palette.faint, entry.meta());
+                    shell.labelColored(ui, .body, if (age == 0) emphasis.text(colors) else colors.get(.on_surface), entry.title());
+                    shell.labelColored(ui, .caption, colors.get(.on_surface_muted), entry.detail());
+                    shell.labelColored(ui, .tiny, colors.get(.on_surface_muted), entry.meta());
                 }
-                shell.printColored(ui, .tiny, palette.faint, "{d} decisions logged", .{self.log.total});
+                shell.printColored(ui, .tiny, colors.get(.on_surface_muted), "{d} decisions logged", .{self.log.total});
             }
         };
     };

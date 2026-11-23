@@ -93,7 +93,7 @@ fn dumpScreen(init: std.process.Init, screen: zui_tour.Screen) !usize {
         defer ui.release(frame);
         tour.observe(&ui, frame);
         tour.afterFrame(&ui);
-        cells.draw(zui_tour.Palette.forEnvironment(ui.environment()).background, frame.commands());
+        cells.draw(tour.background(), frame.commands());
         lines_cut_short = cells.countTextLinesCutShort(frame);
     }
     try cells.print(init.io);

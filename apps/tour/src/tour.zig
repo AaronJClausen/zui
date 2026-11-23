@@ -57,6 +57,7 @@ pub fn Tour(comptime kit: type) type {
         light_lab: ScreenOf(.light_lab, "LightLab", @import("screens/light_lab.zig")),
         one_declaration: ScreenOf(.one_declaration, "OneDeclaration", @import("screens/one_declaration.zig")),
         clickable_chaos: ScreenOf(.clickable_chaos, "ClickableChaos", @import("screens/clickable_chaos.zig")),
+        preferences: ScreenOf(.preferences, "Preferences", @import("screens/preferences.zig")),
 
         /// `void` for a screen the renderer is not offered, so it costs nothing.
         fn ScreenOf(comptime screen: Screen, comptime name: []const u8, comptime file: type) type {
@@ -80,6 +81,7 @@ pub fn Tour(comptime kit: type) type {
         started_at: zui.Instant,
         fonts: kit.Fonts,
         appearance: kit.Appearance = .{},
+        preference_choices: kit.PreferenceChoices = .{},
 
         zoom: f32 = 1,
         /// Refreshes the strip once a second through `requestFrameAt`, so an
@@ -133,15 +135,21 @@ pub fn Tour(comptime kit: type) type {
 
         fn shell(tour: *Self, ui: *const Ui) Shell {
             const seconds: f64 = ui.now().secondsSince(tour.started_at);
-            tour.appearance.follow(kit.preferencesOf(ui.environment()), tour.fonts);
-            return .init(ui, tour.io, seconds, tour.fonts, &tour.appearance.tokens, &tour.perf, &tour.sources, tour.waker(), &tour.environment_changes, &tour.requested_screen);
+            tour.appearance.follow(kit.preferencesOf(ui.environment(), tour.preference_choices), tour.fonts);
+            return .init(ui, tour.io, seconds, tour.fonts, &tour.appearance, &tour.preference_choices, &tour.perf, &tour.sources, tour.waker(), &tour.environment_changes, &tour.requested_screen);
+        }
+
+        /// The color the tour's page is drawn on, for a renderer to clear
+        /// to; valid once a frame has been declared.
+        pub fn background(tour: *const Self) zui.Color {
+            return tour.appearance.colors().get(.background);
         }
 
         pub fn declare(tour: *Self, ui: *Ui) void {
             var frame_shell = tour.shell(ui);
             tour.handleShortcuts(ui);
 
-            ui.open(.{ .id = ids.root, .layout = .{ .direction = .top_to_bottom, .sizing = .grow_both }, .decoration = .{ .background = frame_shell.palette.background } });
+            ui.open(.{ .id = ids.root, .layout = .{ .direction = .top_to_bottom, .sizing = .grow_both }, .decoration = .{ .background = frame_shell.colors.get(.background) } });
             tour.header(ui, &frame_shell);
             {
                 ui.open(.{ .layout = .{ .sizing = .grow_both } });
@@ -239,21 +247,21 @@ pub fn Tour(comptime kit: type) type {
         }
 
         fn header(tour: *Self, ui: *Ui, frame_shell: *const Shell) void {
-            const palette = frame_shell.palette;
+            const colors = frame_shell.colors;
             const widgets = frame_shell.widgets;
             const info = kit.info(tour.current);
             ui.open(.{
                 .id = ids.header,
                 .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(60) }, .padding = .symmetric(20, 0), .child_gap = 12, .child_alignment = .{ .y = .center } },
-                .decoration = .{ .background = palette.surface, .border = .{ .color = palette.border, .widths = .{ .bottom = 1 } } },
+                .decoration = .{ .background = colors.get(.surface), .border = .{ .color = colors.get(.outline_muted), .widths = .{ .bottom = 1 } } },
             });
             defer ui.close();
 
             {
                 ui.open(.{ .layout = .{ .sizing = .{ .width = .fixed(rail_width - 40) }, .child_gap = 6, .child_alignment = .{ .y = .center } } });
                 defer ui.close();
-                ui.text("zui", .{ .size = 20 * frame_shell.text_scale, .font = frame_shell.fonts.bold, .color = palette.text });
-                frame_shell.labelColored(ui, .body, palette.faint, "tour");
+                ui.text("zui", .{ .size = 20 * frame_shell.text_scale, .font = frame_shell.fonts.bold, .color = colors.get(.on_surface) });
+                frame_shell.labelColored(ui, .body, colors.get(.on_surface_muted), "tour");
             }
             {
                 ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow }, .child_gap = 2 } });
@@ -267,23 +275,23 @@ pub fn Tour(comptime kit: type) type {
                 frame_shell.label(ui, .caption, info.tagline);
             }
 
-            if (widgets.button(ui, ids.zoom_out, "-", .{})) tour.setZoom(tour.zoom - 0.1);
+            if (widgets.button(ui, ids.zoom_out, "-", .{ .variant = .secondary })) tour.setZoom(tour.zoom - 0.1);
             var zoom_buffer: [16]u8 = undefined;
-            if (widgets.button(ui, ids.zoom_reset, std.fmt.bufPrint(&zoom_buffer, "{d:.0}%", .{tour.zoom * 100}) catch "zoom", .{})) tour.zoom = 1;
-            if (widgets.button(ui, ids.zoom_in, "+", .{})) tour.setZoom(tour.zoom + 0.1);
+            if (widgets.button(ui, ids.zoom_reset, std.fmt.bufPrint(&zoom_buffer, "{d:.0}%", .{tour.zoom * 100}) catch "zoom", .{ .variant = .secondary })) tour.zoom = 1;
+            if (widgets.button(ui, ids.zoom_in, "+", .{ .variant = .secondary })) tour.setZoom(tour.zoom + 0.1);
             const dark = ui.environment().theme == .dark;
-            if (widgets.button(ui, ids.theme, if (dark) "Light" else "Dark", .{})) frame_shell.changeEnvironment(.{ .theme = if (dark) .light else .dark });
+            if (widgets.button(ui, ids.theme, if (dark) "Light" else "Dark", .{ .variant = .secondary })) frame_shell.changeEnvironment(.{ .theme = if (dark) .light else .dark });
             _ = widgets.checkbox(ui, ids.live, "Live", &tour.live, .{});
             _ = widgets.checkbox(ui, ids.heartbeat, "1 Hz", &tour.heartbeat, .{});
             _ = widgets.checkbox(ui, ids.inspector_toggle, "Inspector", &tour.inspector_open, .{});
         }
 
         fn rail(tour: *Self, ui: *Ui, frame_shell: *const Shell) void {
-            const palette = frame_shell.palette;
+            const colors = frame_shell.colors;
             ui.open(.{
                 .id = ids.rail,
                 .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(rail_width), .height = .grow }, .padding = .all(10), .child_gap = 4 },
-                .decoration = .{ .background = palette.surface, .border = .{ .color = palette.border, .widths = .{ .right = 1 } } },
+                .decoration = .{ .background = colors.get(.surface), .border = .{ .color = colors.get(.outline_muted), .widths = .{ .right = 1 } } },
                 .scroll = .{},
             });
             defer ui.close();
@@ -293,29 +301,29 @@ pub fn Tour(comptime kit: type) type {
                 const selected = tour.current == screen;
                 const state = ui.widgetState(id);
                 const info = kit.info(screen);
-                const lane_color = info.lane.color(palette);
+                const lane_color = info.lane.emphasis().fill(colors);
                 ui.open(.{
                     .id = id,
                     .focusable = true,
                     .cursor = .pointer,
                     .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(40) }, .padding = .{ .left = 10, .right = 8 }, .child_gap = 10, .child_alignment = .{ .y = .center } },
                     .decoration = .{
-                        .background = if (selected) palette.raised else if (state == .hovered or state == .pressed) palette.hovered else null,
-                        .border = if (ui.focused(id)) .{ .color = palette.focus, .widths = .all(1) } else null,
+                        .background = if (selected) colors.get(.surface_raised) else if (state == .hovered or state == .pressed) colors.get(.secondary_container) else null,
+                        .border = if (ui.focused(id)) .{ .color = colors.get(.focus), .widths = .all(1) } else null,
                         .corner_radius = .all(6),
                     },
                 });
                 ui.box(.{
                     .layout = .{ .sizing = .{ .width = .fixed(3), .height = .fixed(24) } },
-                    .decoration = .{ .background = if (selected) lane_color else lane_color.mix(palette.surface, 0.7), .corner_radius = .all(1.5) },
+                    .decoration = .{ .background = if (selected) lane_color else lane_color.mix(colors.get(.surface), 0.7), .corner_radius = .all(1.5) },
                 });
                 {
                     ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow }, .child_gap = 1 } });
                     defer ui.close();
-                    ui.text(info.title, .{ .size = 14 * frame_shell.text_scale, .font = if (selected) frame_shell.fonts.bold else frame_shell.fonts.body, .color = if (selected) palette.text else palette.muted, .wrap = .none });
-                    ui.text(info.lane.name(), .{ .size = 11 * frame_shell.text_scale, .font = frame_shell.fonts.body, .color = palette.faint, .wrap = .none });
+                    ui.text(info.title, .{ .size = 14 * frame_shell.text_scale, .font = if (selected) frame_shell.fonts.bold else frame_shell.fonts.body, .color = if (selected) colors.get(.on_surface) else colors.get(.on_surface_muted), .wrap = .none });
+                    ui.text(info.lane.name(), .{ .size = 11 * frame_shell.text_scale, .font = frame_shell.fonts.body, .color = colors.get(.on_surface_muted), .wrap = .none });
                 }
-                if (kit.shortcutDigit(screen)) |digit| frame_shell.printColored(ui, .tiny, palette.faint, "^{d}", .{digit});
+                if (kit.shortcutDigit(screen)) |digit| frame_shell.printColored(ui, .tiny, colors.get(.on_surface_muted), "^{d}", .{digit});
                 ui.close();
                 if (ui.clicked(id)) tour.requested_screen = screen;
             }
@@ -329,13 +337,13 @@ pub fn Tour(comptime kit: type) type {
         }
 
         fn strip(tour: *Self, ui: *Ui, frame_shell: *const Shell) void {
-            const palette = frame_shell.palette;
+            const colors = frame_shell.colors;
             const perf = &tour.perf;
             const latest = perf.latest();
             ui.open(.{
                 .id = ids.strip,
                 .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(64) }, .padding = .symmetric(16, 8), .child_gap = 18, .child_alignment = .{ .y = .center } },
-                .decoration = .{ .background = palette.sunken, .border = .{ .color = palette.border, .widths = .{ .top = 1 } } },
+                .decoration = .{ .background = colors.get(.surface_sunken), .border = .{ .color = colors.get(.outline_muted), .widths = .{ .top = 1 } } },
             });
             defer ui.close();
 
@@ -346,32 +354,32 @@ pub fn Tour(comptime kit: type) type {
                 {
                     ui.open(.{ .layout = .{ .child_gap = 16, .child_alignment = .{ .y = .center } } });
                     defer ui.close();
-                    stat(ui, frame_shell, "zui frames", "{d}", .{perf.zui_frames}, palette.accent);
-                    stat(ui, frame_shell, "last second", "{d} frames", .{perf.frames_last_second}, palette.text);
-                    stat(ui, frame_shell, "producer wakes", "{d}", .{perf.wakes}, palette.good);
-                    stat(ui, frame_shell, "this frame because", "{s}", .{latest.reason.describe()}, palette.warn);
+                    stat(ui, frame_shell, "zui frames", "{d}", .{perf.zui_frames}, colors.get(.on_surface_accent));
+                    stat(ui, frame_shell, "last second", "{d} frames", .{perf.frames_last_second}, colors.get(.on_surface));
+                    stat(ui, frame_shell, "producer wakes", "{d}", .{perf.wakes}, colors.get(.on_success_container));
+                    stat(ui, frame_shell, "this frame because", "{s}", .{latest.reason.describe()}, colors.get(.on_warning_container));
                     switch (perf.next_frame) {
-                        .immediately => stat(ui, frame_shell, "next", "immediately", .{}, palette.bad),
-                        .at => stat(ui, frame_shell, "next", "in {d:.2} s", .{perf.next_frame_seconds}, palette.warn),
-                        .on_event => stat(ui, frame_shell, "next", "on input (sleeping)", .{}, palette.good),
+                        .immediately => stat(ui, frame_shell, "next", "immediately", .{}, colors.get(.on_danger_container)),
+                        .at => stat(ui, frame_shell, "next", "in {d:.2} s", .{perf.next_frame_seconds}, colors.get(.on_warning_container)),
+                        .on_event => stat(ui, frame_shell, "next", "on input (sleeping)", .{}, colors.get(.on_success_container)),
                     }
                 }
                 {
                     ui.open(.{ .layout = .{ .child_gap = 16, .child_alignment = .{ .y = .center } } });
                     defer ui.close();
-                    stat(ui, frame_shell, "beginFrame", "{d:.1} us", .{latest.begin_frame_us}, palette.text);
-                    stat(ui, frame_shell, "declare", "{d:.1} us", .{latest.declare_us}, palette.text);
-                    stat(ui, frame_shell, "layout+emit", "{d:.1} us", .{latest.end_frame_us}, palette.text);
-                    stat(ui, frame_shell, kit.renderer_name ++ " submit", "{d:.0} us", .{perf.submit_us}, palette.text);
-                    stat(ui, frame_shell, "elements", "{d}", .{latest.elements}, palette.text);
-                    stat(ui, frame_shell, "commands", "{d}", .{latest.commands}, palette.text);
-                    stat(ui, frame_shell, "texts measured", "{d}", .{latest.measure_calls}, if (latest.measure_calls == 0) palette.good else palette.warn);
+                    stat(ui, frame_shell, "beginFrame", "{d:.1} us", .{latest.begin_frame_us}, colors.get(.on_surface));
+                    stat(ui, frame_shell, "declare", "{d:.1} us", .{latest.declare_us}, colors.get(.on_surface));
+                    stat(ui, frame_shell, "layout+emit", "{d:.1} us", .{latest.end_frame_us}, colors.get(.on_surface));
+                    stat(ui, frame_shell, kit.renderer_name ++ " submit", "{d:.0} us", .{perf.submit_us}, colors.get(.on_surface));
+                    stat(ui, frame_shell, "elements", "{d}", .{latest.elements}, colors.get(.on_surface));
+                    stat(ui, frame_shell, "commands", "{d}", .{latest.commands}, colors.get(.on_surface));
+                    stat(ui, frame_shell, "texts measured", "{d}", .{latest.measure_calls}, if (latest.measure_calls == 0) colors.get(.on_success_container) else colors.get(.on_warning_container));
                 }
             }
         }
 
         fn inspector(tour: *Self, ui: *Ui, frame_shell: *const Shell) void {
-            const palette = frame_shell.palette;
+            const colors = frame_shell.colors;
             const perf = &tour.perf;
             const viewport = ui.viewport();
             tour.inspector_position[0] = std.math.clamp(tour.inspector_position[0], 0, @max(0, viewport[0] - 120));
@@ -381,7 +389,7 @@ pub fn Tour(comptime kit: type) type {
                 .interactive = true,
                 .floating = .{ .attach_to = .root, .offset = tour.inspector_position, .z = 500 },
                 .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(360) } },
-                .decoration = .{ .background = palette.surface, .border = .{ .color = palette.border, .widths = .all(1) }, .corner_radius = .all(10) },
+                .decoration = .{ .background = colors.get(.surface), .border = .{ .color = colors.get(.outline_muted), .widths = .all(1) }, .corner_radius = .all(10) },
                 .effects = &floating_panel_effects,
             });
             defer ui.close();
@@ -392,7 +400,7 @@ pub fn Tour(comptime kit: type) type {
                     .interactive = true,
                     .cursor = if (dragging) .grabbing else .grab,
                     .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(34) }, .padding = .symmetric(12, 0), .child_alignment = .{ .y = .center } },
-                    .decoration = .{ .background = palette.raised, .border = .{ .color = palette.border, .widths = .{ .bottom = 1 } }, .corner_radius = .{ .top_left = 10, .top_right = 10 } },
+                    .decoration = .{ .background = colors.get(.surface_raised), .border = .{ .color = colors.get(.outline_muted), .widths = .{ .bottom = 1 } }, .corner_radius = .{ .top_left = 10, .top_right = 10 } },
                 });
                 defer ui.close();
                 frame_shell.label(ui, .body, "Frame inspector");
@@ -402,9 +410,9 @@ pub fn Tour(comptime kit: type) type {
                     .interactive = true,
                     .cursor = .pointer,
                     .layout = .{ .padding = .symmetric(8, 2) },
-                    .decoration = .{ .background = if (ui.hovered(ids.inspector_close)) palette.hovered else null, .corner_radius = .all(4) },
+                    .decoration = .{ .background = if (ui.hovered(ids.inspector_close)) colors.get(.secondary_container) else null, .corner_radius = .all(4) },
                 });
-                frame_shell.labelColored(ui, .body, palette.muted, "x");
+                frame_shell.labelColored(ui, .body, colors.get(.on_surface_muted), "x");
                 ui.close();
                 if (ui.clicked(ids.inspector_close)) tour.inspector_open = false;
             }
@@ -430,7 +438,7 @@ pub fn Tour(comptime kit: type) type {
                 };
                 for (parts) |part| ui.box(.{ .layout = .{ .sizing = .{ .width = .growWeighted(@max(part[0] / total, 0.0001)), .height = .grow } }, .decoration = .{ .background = part[1] } });
             }
-            frame_shell.printColored(ui, .caption, palette.muted, "begin {d:.0}%  declare {d:.0}%  layout+emit {d:.0}%", .{ 100 * latest.begin_frame_us / total, 100 * latest.declare_us / total, 100 * latest.end_frame_us / total });
+            frame_shell.printColored(ui, .caption, colors.get(.on_surface_muted), "begin {d:.0}%  declare {d:.0}%  layout+emit {d:.0}%", .{ 100 * latest.begin_frame_us / total, 100 * latest.declare_us / total, 100 * latest.end_frame_us / total });
 
             frame_shell.divider(ui);
             frame_shell.label(ui, .caption, "LIMITS: WHAT THE FRAME NEEDED");
@@ -448,7 +456,7 @@ pub fn Tour(comptime kit: type) type {
                 ui.open(.{ .layout = .{ .sizing = .{ .width = .fixed(110) } } });
                 frame_shell.label(ui, .caption, row[1]);
                 ui.close();
-                frame_shell.meter(ui, fraction, if (fraction > 0.9) palette.bad else if (fraction > 0.6) palette.warn else palette.good, 8);
+                frame_shell.meter(ui, fraction, if (fraction > 0.9) colors.get(.danger) else if (fraction > 0.6) colors.get(.warning) else colors.get(.success), 8);
                 ui.open(.{ .layout = .{ .sizing = .{ .width = .fixed(110) }, .child_alignment = .{ .x = .end } } });
                 frame_shell.print(ui, .caption, "{d}/{d}", .{ needed, limit });
                 ui.close();
@@ -459,10 +467,10 @@ pub fn Tour(comptime kit: type) type {
             frame_shell.label(ui, .caption, "DIAGNOSTICS");
             const diagnostics = perf.diagnostics;
             if (diagnostics.ok()) {
-                frame_shell.labelColored(ui, .body, palette.good, "ok: nothing dropped or refused");
+                frame_shell.labelColored(ui, .body, colors.get(.on_success_container), "ok: nothing dropped or refused");
             } else {
-                frame_shell.printColored(ui, .body, palette.bad, "{d} limits exceeded, {d} duplicate ids", .{ diagnostics.exceeded.count(), diagnostics.duplicate_ids });
-                if (diagnostics.refused_publishes != 0) frame_shell.printColored(ui, .body, palette.bad, "{d} publishes refused, first by .{s}", .{ diagnostics.refused_publishes, diagnostics.first_refusing_source });
+                frame_shell.printColored(ui, .body, colors.get(.on_danger_container), "{d} limits exceeded, {d} duplicate ids", .{ diagnostics.exceeded.count(), diagnostics.duplicate_ids });
+                if (diagnostics.refused_publishes != 0) frame_shell.printColored(ui, .body, colors.get(.on_danger_container), "{d} publishes refused, first by .{s}", .{ diagnostics.refused_publishes, diagnostics.first_refusing_source });
             }
             frame_shell.print(ui, .caption, "texts measured since start: {d}", .{perf.measure_calls_total});
             frame_shell.print(ui, .caption, "producer wakes: {d}   dropped input: {d}", .{ perf.wakes, perf.dropped_input_events });
@@ -490,17 +498,17 @@ pub fn Tour(comptime kit: type) type {
 
         /// One bar per zui frame, scaled to the tallest: green under 0.5 ms, red over 4 ms.
         fn sparkline(ui: *Ui, frame_shell: *const Shell, perf: *const Perf, height: f32) void {
-            const palette = frame_shell.palette;
+            const colors = frame_shell.colors;
             var tallest: f32 = 50;
             for (perf.history) |sample| tallest = @max(tallest, sample.totalMicroseconds());
             ui.open(.{
                 .layout = .{ .sizing = .{ .height = .fixed(height) }, .padding = .all(3), .child_gap = 1, .child_alignment = .{ .y = .end } },
-                .decoration = .{ .background = palette.background, .corner_radius = .all(4) },
+                .decoration = .{ .background = colors.get(.background), .corner_radius = .all(4) },
             });
             defer ui.close();
             for (0..Perf.history_length) |age| {
                 const total = perf.sampleAt(age).totalMicroseconds();
-                const color = if (total < 500) palette.good else if (total < 4000) palette.warn else palette.bad;
+                const color = if (total < 500) colors.get(.success) else if (total < 4000) colors.get(.warning) else colors.get(.danger);
                 ui.box(.{
                     .layout = .{ .sizing = .{ .width = .fixed(2), .height = .fixed(@max(1, (height - 6) * total / tallest)) } },
                     .decoration = .{ .background = color },

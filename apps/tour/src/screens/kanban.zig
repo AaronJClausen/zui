@@ -210,7 +210,7 @@ pub fn Using(comptime kit: type) type {
 
             fn toolbar(self: *Kanban, ui: *Ui, shell: *const Shell) void {
                 const widgets = shell.widgets;
-                const palette = shell.palette;
+                const colors = shell.colors;
                 ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 8, .child_alignment = .{ .y = .center } } });
                 defer ui.close();
                 var new_title: EditableText = .{ .buffer = &self.new_title_bytes, .len = self.new_title_len };
@@ -224,9 +224,9 @@ pub fn Using(comptime kit: type) type {
                         self.message = "";
                     } else self.message = "That list is full.";
                 }
-                if (self.message.len != 0) shell.labelColored(ui, .caption, palette.warn, self.message);
+                if (self.message.len != 0) shell.labelColored(ui, .caption, colors.get(.on_warning_container), self.message);
                 shell.spacer(ui);
-                shell.printColored(ui, .caption, palette.muted, "{d} cards, {d} points in progress", .{ self.board.count(), self.pointsIn(1) + self.pointsIn(2) });
+                shell.printColored(ui, .caption, colors.get(.on_surface_muted), "{d} cards, {d} points in progress", .{ self.board.count(), self.pointsIn(1) + self.pointsIn(2) });
             }
 
             fn pointsIn(self: *const Kanban, list: usize) u32 {
@@ -316,7 +316,7 @@ pub fn Using(comptime kit: type) type {
             }
 
             fn declareList(self: *Kanban, ui: *Ui, shell: *const Shell, list: usize) ?DragSeen {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 const scroll_id = listId(list);
                 const items = self.board.lists[list].items();
                 var dragged: ?DragSeen = null;
@@ -329,8 +329,8 @@ pub fn Using(comptime kit: type) type {
                 ui.open(.{
                     .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow_equal, .height = .grow }, .padding = .all(10), .child_gap = 8 },
                     .decoration = .{
-                        .background = palette.sunken,
-                        .border = .{ .color = if (incoming != null) palette.accent else palette.border, .widths = .all(1) },
+                        .background = colors.get(.surface_sunken),
+                        .border = .{ .color = if (incoming != null) colors.get(.accent) else colors.get(.outline_muted), .widths = .all(1) },
                         .corner_radius = .all(8),
                     },
                 });
@@ -341,10 +341,10 @@ pub fn Using(comptime kit: type) type {
                     shell.label(ui, .heading, list_names[list]);
                     shell.spacer(ui);
                     if (limit != 0) {
-                        shell.printColored(ui, .caption, if (over_limit) palette.warn else palette.muted, "{d} / {d}", .{ items.len, limit });
-                    } else shell.printColored(ui, .caption, palette.muted, "{d}", .{items.len});
+                        shell.printColored(ui, .caption, if (over_limit) colors.get(.on_warning_container) else colors.get(.on_surface_muted), "{d} / {d}", .{ items.len, limit });
+                    } else shell.printColored(ui, .caption, colors.get(.on_surface_muted), "{d}", .{items.len});
                 }
-                if (over_limit) shell.labelColored(ui, .caption, palette.warn, "Over its work-in-progress limit");
+                if (over_limit) shell.labelColored(ui, .caption, colors.get(.on_warning_container), "Over its work-in-progress limit");
 
                 ui.open(.{
                     .id = scroll_id,
@@ -364,7 +364,7 @@ pub fn Using(comptime kit: type) type {
                 if (incoming != null and shown_index <= self.drop_index[list]) self.dropIndicator(ui, shell);
                 if (items.len == 0) {
                     ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .padding = .all(12), .child_alignment = .{ .x = .center } } });
-                    shell.labelColored(ui, .caption, palette.faint, "Drop a card here");
+                    shell.labelColored(ui, .caption, colors.get(.on_surface_muted), "Drop a card here");
                     ui.close();
                 }
                 return dragged;
@@ -398,12 +398,12 @@ pub fn Using(comptime kit: type) type {
             }
 
             fn dropIndicator(_: *Kanban, ui: *Ui, shell: *const Shell) void {
-                ui.box(.{ .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(3) } }, .decoration = .{ .background = shell.palette.accent, .corner_radius = .all(1.5) } });
+                ui.box(.{ .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(3) } }, .decoration = .{ .background = shell.colors.get(.accent), .corner_radius = .all(1.5) } });
             }
 
             /// Returns where a pointer is dragging the card, if one is.
             fn declareCard(self: *Kanban, ui: *Ui, shell: *const Shell, slot: u8) ?[2]f32 {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 const card = &self.board.cards[slot];
                 const id = card.id();
 
@@ -430,43 +430,43 @@ pub fn Using(comptime kit: type) type {
                     .exit = .{ .seconds = exit_seconds, .fade = .ease_out },
                     .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow }, .padding = .all(12), .child_gap = 8 },
                     .decoration = .{
-                        .background = if (drag != null) palette.sunken else if (hovered) palette.raised else palette.surface,
-                        .border = .{ .color = if (focused) palette.focus else palette.border, .widths = .all(if (focused) 2 else 1) },
+                        .background = if (drag != null) colors.get(.surface_sunken) else if (hovered) colors.get(.surface_raised) else colors.get(.surface),
+                        .border = .{ .color = if (focused) colors.get(.focus) else colors.get(.outline_muted), .widths = .all(if (focused) 2 else 1) },
                         .corner_radius = .all(8),
                     },
                 });
                 defer ui.close();
                 if (drag != null) {
-                    shell.labelColored(ui, .body, palette.faint, card.title());
+                    shell.labelColored(ui, .body, colors.get(.on_surface_muted), card.title());
                 } else shell.label(ui, .body, card.title());
                 {
                     ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 8, .child_alignment = .{ .y = .center } } });
                     defer ui.close();
-                    shell.chip(ui, card.tag.name(), tagColor(shell, card.tag));
-                    shell.printColored(ui, .caption, palette.muted, "{d} pt", .{card.points});
+                    shell.chip(ui, card.tag.name(), tagEmphasis(card.tag));
+                    shell.printColored(ui, .caption, colors.get(.on_surface_muted), "{d} pt", .{card.points});
                     shell.spacer(ui);
-                    shell.printColored(ui, .tiny, palette.faint, "#{d}", .{card.uid});
+                    shell.printColored(ui, .tiny, colors.get(.on_surface_muted), "#{d}", .{card.uid});
                 }
                 return if (drag) |moving| moving.position else null;
             }
 
             fn dragGhost(self: *Kanban, ui: *Ui, shell: *const Shell, slot: u8, position: [2]f32) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 const card = &self.board.cards[slot];
                 ui.open(.{
                     .id = ids.@"kanban.ghost",
                     .floating = .{ .attach_to = .root, .offset = .{ position[0] + 12, position[1] + 8 }, .z = 400, .capture = false },
                     .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(240) }, .padding = .all(12), .child_gap = 6 },
-                    .decoration = .{ .background = palette.raised, .border = .{ .color = palette.accent, .widths = .all(1) }, .corner_radius = .all(8) },
+                    .decoration = .{ .background = colors.get(.surface_raised), .border = .{ .color = colors.get(.accent), .widths = .all(1) }, .corner_radius = .all(8) },
                     .effects = &.{ .shadow = .{ .color = .rgba(0x00000050), .offset = .{ 0, 8 }, .blur = 20 } },
                 });
                 defer ui.close();
                 shell.label(ui, .body, card.title());
-                shell.chip(ui, card.tag.name(), tagColor(shell, card.tag));
+                shell.chip(ui, card.tag.name(), tagEmphasis(card.tag));
             }
 
             fn actionsMenu(self: *Kanban, ui: *Ui, shell: *const Shell, uid: u32) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 const slot = self.board.slotOfUid(uid) orelse {
                     self.menu_uid = null;
                     return;
@@ -492,7 +492,7 @@ pub fn Using(comptime kit: type) type {
                     .semantics = .{ .role = .group, .label = "Card actions", .actions = .initOne(.dismiss) },
                     .floating = .{ .attach_to = .{ .element = card.id() }, .attach_point = .bottom_left, .offset = .{ 0, 4 }, .z = 301 },
                     .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(220) }, .padding = .all(6), .child_gap = 2 },
-                    .decoration = .{ .background = palette.surface, .border = .{ .color = palette.border, .widths = .all(1) }, .corner_radius = .all(8) },
+                    .decoration = .{ .background = colors.get(.surface), .border = .{ .color = colors.get(.outline_muted), .widths = .all(1) }, .corner_radius = .all(8) },
                     .effects = &.{ .shadow = .{ .color = .rgba(0x00000060), .offset = .{ 0, 8 }, .blur = 24 } },
                 });
                 defer ui.close();
@@ -521,7 +521,7 @@ pub fn Using(comptime kit: type) type {
         };
 
         fn menuOption(ui: *Ui, shell: *const Shell, card_id: zui.Id, index: usize, label: []const u8, destructive: bool) bool {
-            const palette = shell.palette;
+            const colors = shell.colors;
             const id = if (index == 0) card_id.child("menu_first") else card_id.indexedChild("menu_option", index);
             const state = ui.widgetState(id);
             ui.open(.{
@@ -531,11 +531,11 @@ pub fn Using(comptime kit: type) type {
                 .semantics = .{ .role = .button, .label = label },
                 .layout = .{ .sizing = .{ .width = .grow }, .padding = .symmetric(10, 6) },
                 .decoration = .{
-                    .background = if (state == .hovered or state == .pressed or ui.focused(id)) palette.hovered else null,
+                    .background = if (state == .hovered or state == .pressed or ui.focused(id)) colors.get(.secondary_container) else null,
                     .corner_radius = .all(4),
                 },
             });
-            shell.labelColored(ui, .body, if (destructive) palette.bad else palette.text, label);
+            shell.labelColored(ui, .body, if (destructive) colors.get(.on_danger_container) else colors.get(.on_surface), label);
             ui.close();
             return ui.clicked(id);
         }
@@ -549,12 +549,12 @@ pub fn Using(comptime kit: type) type {
             ui.setScrollOffset(scroll_id, .{ offset[0], @max(0, offset[1]) });
         }
 
-        fn tagColor(shell: *const Shell, tag: Tag) zui.Color {
+        fn tagEmphasis(tag: Tag) kit.Emphasis {
             return switch (tag) {
-                .feature => shell.palette.accent,
-                .bug => shell.palette.bad,
-                .chore => shell.palette.muted,
-                .docs => shell.palette.good,
+                .feature => .accent,
+                .bug => .danger,
+                .chore => .neutral,
+                .docs => .success,
             };
         }
     };

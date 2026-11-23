@@ -117,7 +117,7 @@ fn view(gpa: std.mem.Allocator, io: std.Io, port: u16, check_path: ?[]const u8) 
     defer text.deinit();
     var renderer: zui_sokol.Renderer = try .initForSurface(&text, host.zuiSurface(.main));
     defer renderer.deinit();
-    renderer.clear_color = zui_tour.Palette.forEnvironment(&.{}).background;
+    renderer.clear_color = kit.backgroundOf(&.{});
 
     const address: std.Io.net.IpAddress = .{ .ip4 = .loopback(port) };
     const client = try gpa.create(zui_wire.Client(Ui));

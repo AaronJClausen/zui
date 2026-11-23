@@ -1,5 +1,5 @@
 //! What every screen of the tour shares, whatever draws it: its sources,
-//! screens and lanes, typefaces and palettes, and the text it measures with.
+//! screens and lanes, typefaces and colors, and the text it measures with.
 
 const std = @import("std");
 const zui_glyphs = @import("zui_glyphs");
@@ -41,6 +41,7 @@ pub const Screen = enum {
     light_lab,
     one_declaration,
     clickable_chaos,
+    preferences,
 
     pub const Info = struct {
         title: []const u8,
@@ -67,12 +68,11 @@ pub const Lane = enum {
         };
     }
 
-    pub fn color(lane: Lane, palette: Palette) zui.Color {
+    pub fn emphasis(lane: Lane) Emphasis {
         return switch (lane) {
-            .start => palette.muted,
-            .flagship => palette.accent,
-            .field_case => palette.good,
-            .spectacle => palette.spectacle,
+            .start => .neutral,
+            .flagship, .spectacle => .accent,
+            .field_case => .success,
         };
     }
 };
@@ -213,75 +213,59 @@ pub const DragGrip = struct {
     grab_offset: [2]f32 = .{ 0, 0 },
 };
 
-/// The tour's colors: neutral surfaces in three depths, one accent, the
-/// three states, and the spectacles' violet.
-pub const Palette = struct {
-    background: zui.Color,
-    surface: zui.Color,
-    sunken: zui.Color,
-    raised: zui.Color,
-    hovered: zui.Color,
-    border: zui.Color,
-    text: zui.Color,
-    muted: zui.Color,
-    faint: zui.Color,
-    accent: zui.Color,
-    on_accent: zui.Color,
-    good: zui.Color,
-    warn: zui.Color,
-    bad: zui.Color,
-    spectacle: zui.Color,
-    focus: zui.Color,
-    overlay: zui.Color,
+/// Each color role's color at rest, from the tokens the tour resolved:
+/// `colors.get(.on_surface)`.
+pub const Colors = std.EnumArray(zui.design.ColorRole, zui.Color);
 
-    pub const dark: Palette = .{
-        .background = .rgb(0x0e1014),
-        .surface = .rgb(0x161920),
-        .sunken = .rgb(0x0a0c0f),
-        .raised = .rgb(0x1e222b),
-        .hovered = .rgb(0x272c37),
-        .border = .rgb(0x2a2f3a),
-        .text = .rgb(0xe6e8ee),
-        .muted = .rgb(0x9097a6),
-        .faint = .rgb(0x5c6372),
-        .accent = .rgb(0x5b8cff),
-        .on_accent = .rgb(0x0a0c10),
-        .good = .rgb(0x3ecf8e),
-        .warn = .rgb(0xf0b43c),
-        .bad = .rgb(0xf06a6a),
-        .spectacle = .rgb(0xa98bff),
-        .focus = .rgb(0x8fb0ff),
-        .overlay = .rgba(0x000000a0),
-    };
+/// What a color marks, with the roles that draw it as a fill, as a
+/// container with text on it, or as text on a surface.
+pub const Emphasis = enum {
+    neutral,
+    accent,
+    success,
+    warning,
+    danger,
 
-    pub const light: Palette = .{
-        .background = .rgb(0xf4f5f8),
-        .surface = .rgb(0xffffff),
-        .sunken = .rgb(0xe9ebf0),
-        .raised = .rgb(0xf8f9fb),
-        .hovered = .rgb(0xeceff5),
-        .border = .rgb(0xd7dbe3),
-        .text = .rgb(0x161a22),
-        .muted = .rgb(0x596070),
-        .faint = .rgb(0x9aa1b0),
-        .accent = .rgb(0x2f62e9),
-        .on_accent = .rgb(0xffffff),
-        .good = .rgb(0x15885a),
-        .warn = .rgb(0xa86a00),
-        .bad = .rgb(0xc93535),
-        .spectacle = .rgb(0x6c4ad6),
-        .focus = .rgb(0x2f62e9),
-        .overlay = .rgba(0x161a2266),
-    };
+    pub fn fill(emphasis: Emphasis, colors: Colors) zui.Color {
+        return colors.get(switch (emphasis) {
+            .neutral => .outline,
+            .accent => .accent,
+            .success => .success,
+            .warning => .warning,
+            .danger => .danger,
+        });
+    }
 
-    pub fn forEnvironment(environment: *const zui.Environment) Palette {
-        var palette = if (environment.theme == .dark) dark else light;
-        if (environment.contrast == .high) {
-            palette.border = palette.text;
-            palette.muted = palette.text;
-            palette.faint = palette.muted.mix(palette.text, 0.5);
-        }
-        return palette;
+    pub fn container(emphasis: Emphasis, colors: Colors) zui.Color {
+        return colors.get(switch (emphasis) {
+            .neutral => .secondary_container,
+            .accent => .accent_container,
+            .success => .success_container,
+            .warning => .warning_container,
+            .danger => .danger_container,
+        });
+    }
+
+    /// Text on `container`.
+    pub fn onContainer(emphasis: Emphasis, colors: Colors) zui.Color {
+        return colors.get(switch (emphasis) {
+            .neutral => .on_secondary_container,
+            .accent => .on_accent_container,
+            .success => .on_success_container,
+            .warning => .on_warning_container,
+            .danger => .on_danger_container,
+        });
+    }
+
+    /// Text on any surface.
+    pub fn text(emphasis: Emphasis, colors: Colors) zui.Color {
+        return colors.get(switch (emphasis) {
+            .neutral => .on_surface_muted,
+            .accent => .on_surface_accent,
+            .success => .on_success_container,
+            .warning => .on_warning_container,
+            .danger => .on_danger_container,
+        });
     }
 };
 

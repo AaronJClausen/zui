@@ -52,7 +52,7 @@ fn dumpFrames(init: std.process.Init) !void {
         showcase.declare(&ui);
         const frame = ui.endFrame();
         defer ui.release(frame);
-        cells.draw(showcase.palette.background, frame.commands());
+        cells.draw(showcase.background(), frame.commands());
     }
     try cells.print(init.io);
 }

@@ -182,46 +182,16 @@ test "every screen a renderer is offered fits the default window: no scrolling, 
     inline for (renderers) |Renderer| try Harness(KitFor(Renderer)).expectEveryScreenFitsTheDefaultWindow();
 }
 
-/// The palette entries the tour draws text in.
-const TextColor = enum { text, muted, faint, accent, on_accent, good, warn, bad, spectacle };
-
-/// Why the audit found what it found: the check, and for a text the entry
-/// of the palette it is drawn in, or for a target the screen it is on.
+/// Why the audit found what it found: the check, and for a target the
+/// screen it is on.
 const AuditCause = struct {
     check: zui_design.AuditCheck,
-    /// Null for a text in a color of neither palette.
-    text_color: ?TextColor = null,
-    /// A text in an entry of the other theme's palette.
-    other_theme: bool = false,
     screen: ?tour.Screen = null,
 
-    fn of(finding: zui_design.Finding, screen: tour.Screen, theme: zui.Environment.Theme) AuditCause {
-        if (finding.check() != .text_contrast) {
-            return .{ .check = finding.check(), .screen = if (finding.check() == .focus_ring_contrast) null else screen };
-        }
-        const drawn = finding.measured.text_contrast.foreground;
-        const own: tour.Palette = if (theme == .dark) .dark else .light;
-        const other: tour.Palette = if (theme == .dark) .light else .dark;
-        if (entryOf(own, drawn)) |entry| return .{ .check = .text_contrast, .text_color = entry };
-        if (entryOf(other, drawn)) |entry| return .{ .check = .text_contrast, .text_color = entry, .other_theme = true };
-        return .{ .check = .text_contrast };
-    }
-
-    fn entryOf(palette: tour.Palette, color: zui.Color) ?TextColor {
-        inline for (comptime std.enums.values(TextColor)) |entry| {
-            if (@field(palette, @tagName(entry)).eql(color)) return entry;
-        }
-        return null;
+    fn of(finding: zui_design.Finding, screen: tour.Screen) AuditCause {
+        return .{ .check = finding.check(), .screen = if (finding.check() == .target_size) screen else null };
     }
 };
-
-fn textIn(color: TextColor) AuditCause {
-    return .{ .check = .text_contrast, .text_color = color };
-}
-
-fn otherThemeText(color: TextColor) AuditCause {
-    return .{ .check = .text_contrast, .text_color = color, .other_theme = true };
-}
 
 fn target(screen: tour.Screen) AuditCause {
     return .{ .check = .target_size, .screen = screen };
@@ -229,28 +199,26 @@ fn target(screen: tour.Screen) AuditCause {
 
 const focus_ring: AuditCause = .{ .check = .focus_ring_contrast };
 
-/// What the audit finds in the tour today. The text colors go with
-/// `11-polish:19-default-design`, which puts the tour's own text on tokens
-/// as its widgets already are; the focus
-/// ring on the checked `1 Hz` box is `11-polish:25-focus-ring-on-fills`;
-/// the targets are `11-polish:26-small-targets`. A cause that no longer
-/// appears fails too, so this list shrinks as they land. The other theme's
-/// entries are One Declaration's preview of that theme, and Light Lab's
-/// white text, which is light's `on_accent`.
+/// What the audit finds in the tour today: the focus ring on the checked
+/// `1 Hz` box is `11-polish:25-focus-ring-on-fills`, and the targets are
+/// `11-polish:26-small-targets`. A cause that no longer appears fails too,
+/// so this list shrinks as they land.
 const expected_causes = std.EnumArray(zui.Environment.Theme, []const AuditCause).init(.{
-    .light = &.{
-        textIn(.muted),         textIn(.faint),        textIn(.accent),        textIn(.on_accent),
-        textIn(.good),          textIn(.warn),         textIn(.bad),           textIn(.spectacle),
-        otherThemeText(.muted), otherThemeText(.warn), focus_ring,             target(.x_ray),
-        target(.photo_cull),    target(.log_tail),     target(.settings_form), target(.one_declaration),
-    },
-    .dark = &.{
-        textIn(.muted),             textIn(.faint),        textIn(.accent),        textIn(.on_accent),
-        textIn(.good),              textIn(.warn),         textIn(.bad),           textIn(.spectacle),
-        otherThemeText(.on_accent), otherThemeText(.warn), focus_ring,             target(.x_ray),
-        target(.photo_cull),        target(.log_tail),     target(.settings_form), target(.one_declaration),
-    },
+    .light = &.{ focus_ring, target(.x_ray), target(.photo_cull), target(.log_tail), target(.settings_form), target(.one_declaration) },
+    .dark = &.{ focus_ring, target(.x_ray), target(.photo_cull), target(.log_tail), target(.settings_form), target(.one_declaration) },
 });
+
+fn printUnrecorded(theme: zui.Environment.Theme, screen: tour.Screen, finding: zui_design.Finding) void {
+    switch (finding.measured) {
+        .text_contrast => |text| std.debug.print("{t} {t}: element {?d}, text #{x:0>2}{x:0>2}{x:0>2} on #{x:0>2}{x:0>2}{x:0>2}, Lc {d:.1} and {d:.2}:1\n", .{
+            theme,                            screen,              finding.element,
+            text.foreground.r,                text.foreground.g,   text.foreground.b,
+            text.background.r,                text.background.g,   text.background.b,
+            text.measured.lightness_contrast, text.measured.ratio,
+        }),
+        else => std.debug.print("{t} {t}: an unrecorded finding, {any}\n", .{ theme, screen, finding }),
+    }
+}
 
 fn indexOfCause(causes: []const AuditCause, cause: AuditCause) ?usize {
     for (causes, 0..) |candidate, index| if (std.meta.eql(candidate, cause)) return index;
@@ -267,28 +235,25 @@ test "every screen audits as recorded, in light and dark, after Tab focuses a co
     for ([_]zui.Environment.Theme{ .light, .dark }) |theme| {
         const expected = expected_causes.get(theme);
         var seen: std.StaticBitSet(32) = .initEmpty();
+        var unrecorded: usize = 0;
         for (kit.offered_screens) |screen| {
             const audited = harness.frameToAudit(screen, theme);
             defer harness.ui.release(audited);
             try testing.expectEqual(theme, harness.ui.environment().theme);
-            const palette = tour.Palette.forEnvironment(harness.ui.environment());
-            const findings = zui_design.audit(audited, .{ .page_background = palette.background, .focus_ring_color = palette.focus }, room);
+            const tokens = &harness.tour.appearance.tokens;
+            const findings = zui_design.audit(audited, .{ .page_background = tokens.colors.get(.idle).get(.background), .focus_ring_color = tokens.colors.get(.focused).get(.focus) }, room);
             try testing.expectEqual(0, findings.dropped);
-            const widget_rings = zui_design.audit(audited, .{
-                .checks = .initOne(.focus_ring_contrast),
-                .page_background = palette.background,
-                .focus_ring_color = harness.tour.appearance.tokens.colors.get(.focused).get(.focus),
-            }, room[findings.slice().len..]);
-            try testing.expectEqual(0, widget_rings.dropped);
-            for (room[0 .. findings.slice().len + widget_rings.slice().len]) |finding| {
-                const cause: AuditCause = .of(finding, screen, theme);
+            for (findings.slice()) |finding| {
+                const cause: AuditCause = .of(finding, screen);
                 const index = indexOfCause(expected, cause) orelse {
-                    std.debug.print("{t} {t}: an unrecorded finding, {any}\n", .{ theme, screen, finding });
-                    return error.UnrecordedFinding;
+                    printUnrecorded(theme, screen, finding);
+                    unrecorded += 1;
+                    continue;
                 };
                 seen.set(index);
             }
         }
+        if (unrecorded != 0) return error.UnrecordedFinding;
         for (expected, 0..) |cause, index| {
             if (!seen.isSet(index)) {
                 std.debug.print("{t}: {any} is recorded but no longer found; remove it\n", .{ theme, cause });
@@ -296,6 +261,37 @@ test "every screen audits as recorded, in light and dark, after Tab focuses a co
             }
         }
     }
+}
+
+test "the preferences screen's choices resolve the tour's tokens again, over the environment's, and audit clean" {
+    const kit = KitFor(FakeRenderer(true, .pixel_grid));
+    var harness: Harness(kit) = .{};
+    try harness.init();
+    defer harness.deinit();
+    harness.ui.release(harness.frameToAudit(.preferences, .light));
+    const before = harness.tour.appearance.tokens;
+    const before_preferences = harness.tour.appearance.preferences.?;
+    try testing.expectEqual(zui.design.Density.comfortable, before_preferences.density);
+
+    harness.tour.preference_choices = .{ .density = .compact, .color_vision = .protan, .contrast = .high, .text_scale = 1.5 };
+    const audited = harness.frameToAudit(.preferences, .light);
+    defer harness.ui.release(audited);
+    const after = harness.tour.appearance.preferences.?;
+    try testing.expectEqual(zui.design.Density.compact, after.density);
+    try testing.expectEqual(zui_design.ColorVision.protan, after.color_vision);
+    try testing.expectEqual(zui.Environment.Contrast.high, after.contrast);
+    try testing.expectEqual(@as(f32, 1.5), after.text_scale);
+    try testing.expectEqual(zui.Environment.Contrast.normal, harness.ui.environment().contrast);
+    const tokens = &harness.tour.appearance.tokens;
+    try testing.expect(tokens.control_heights.get(.medium) < before.control_heights.get(.medium));
+    try testing.expect(!tokens.colors.get(.idle).get(.danger).eql(before.colors.get(.idle).get(.danger)));
+    try testing.expect(!tokens.colors.get(.idle).get(.outline_muted).eql(before.colors.get(.idle).get(.outline_muted)));
+
+    const room = try testing.allocator.alloc(zui_design.Finding, 256);
+    defer testing.allocator.free(room);
+    const findings = zui_design.audit(audited, .{ .page_background = tokens.colors.get(.idle).get(.background), .focus_ring_color = tokens.colors.get(.focused).get(.focus) }, room);
+    for (findings.slice()) |finding| printUnrecorded(.light, .preferences, finding);
+    try testing.expectEqual(0, findings.slice().len + findings.dropped);
 }
 
 test "a renderer is offered the screens and the frost it draws everything of" {
@@ -462,7 +458,8 @@ test "zui_app runs the tour through every screen it is offered, and stops at the
     try testing.expectEqual(App.kit.offered_screens.len, screens_shown.count());
     try testing.expect(session.app.tour.perf.diagnostics.ok());
     try testing.expectEqual(@as(u64, frame_limit), session.app.tour.perf.zui_frames);
-    try testing.expectEqual(tour.Palette.dark.background, session.renderer.clear_color);
+    try testing.expectEqual(session.app.tour.background(), session.renderer.clear_color);
+    try testing.expectEqual(App.kit.backgroundOf(&.{ .theme = .dark }), session.renderer.clear_color);
 }
 
 fn ignoreNotice(_: zui_app.Notice) void {}

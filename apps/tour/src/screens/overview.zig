@@ -38,20 +38,20 @@ pub fn Using(comptime kit: type) type {
             ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow }, .child_gap = 4 } });
             defer ui.close();
             shell.label(ui, .heading, "An immediate-mode UI engine for Zig.");
-            shell.labelColored(ui, .body, shell.palette.muted, "You declare the whole UI every frame; zui lays it out, measures it and draws it, and sleeps when nothing changes.");
+            shell.labelColored(ui, .body, shell.colors.get(.on_surface_muted), "You declare the whole UI every frame; zui lays it out, measures it and draws it, and sleeps when nothing changes.");
         }
 
         fn frameSteps(ui: *Ui, shell: *const Shell) void {
-            const palette = shell.palette;
+            const colors = shell.colors;
             ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 12 } });
             defer ui.close();
             for (frame_steps, 1..) |step, number| {
                 ui.open(.{
                     .layout = .{ .sizing = .{ .width = .grow_equal }, .padding = .symmetric(12, 10), .child_gap = 10 },
-                    .decoration = .{ .background = palette.raised, .border = .{ .color = palette.border, .widths = .all(1) }, .corner_radius = .all(8) },
+                    .decoration = .{ .background = colors.get(.surface_raised), .border = .{ .color = colors.get(.outline_muted), .widths = .all(1) }, .corner_radius = .all(8) },
                 });
                 defer ui.close();
-                shell.printColored(ui, .heading, palette.accent, "{d}", .{number});
+                shell.printColored(ui, .heading, colors.get(.on_surface_accent), "{d}", .{number});
                 ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow }, .child_gap = 2 } });
                 defer ui.close();
                 shell.label(ui, .body, step.name);
@@ -77,18 +77,18 @@ pub fn Using(comptime kit: type) type {
         }
 
         fn laneCard(ui: *Ui, shell: *const Shell, lane: Lane) void {
-            const palette = shell.palette;
+            const colors = shell.colors;
             ui.open(.{
                 .id = .indexed("overview.lane", @intFromEnum(lane)),
                 .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow_equal, .height = .grow }, .padding = .all(16), .child_gap = 6 },
-                .decoration = .{ .background = palette.surface, .border = .{ .color = palette.border, .widths = .all(1) }, .corner_radius = .all(8) },
+                .decoration = .{ .background = colors.get(.surface), .border = .{ .color = colors.get(.outline_muted), .widths = .all(1) }, .corner_radius = .all(8) },
                 .scroll = .{},
             });
             defer ui.close();
             {
                 ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 8, .child_alignment = .{ .y = .center } } });
                 defer ui.close();
-                ui.box(.{ .layout = .{ .sizing = .{ .width = .fixed(3), .height = .fixed(18) } }, .decoration = .{ .background = lane.color(palette), .corner_radius = .all(1.5) } });
+                ui.box(.{ .layout = .{ .sizing = .{ .width = .fixed(3), .height = .fixed(18) } }, .decoration = .{ .background = lane.emphasis().fill(colors), .corner_radius = .all(1.5) } });
                 shell.label(ui, .heading, lane.name());
                 shell.spacer(ui);
                 const count = screensIn(lane);
@@ -102,7 +102,7 @@ pub fn Using(comptime kit: type) type {
         }
 
         fn screenRow(ui: *Ui, shell: *const Shell, screen: Screen) void {
-            const palette = shell.palette;
+            const colors = shell.colors;
             const info = kit.info(screen);
             const id: zui.Id = .indexed("overview.screen", @intFromEnum(screen));
             if (ui.clicked(id)) shell.requestScreen(screen);
@@ -114,8 +114,8 @@ pub fn Using(comptime kit: type) type {
                 .semantics = .{ .role = .link, .label = info.title },
                 .layout = .{ .sizing = .{ .width = .grow }, .padding = .symmetric(10, 8), .child_gap = 10, .child_alignment = .{ .y = .center } },
                 .decoration = .{
-                    .background = if (state == .hovered or state == .pressed) palette.hovered else palette.raised,
-                    .border = .{ .color = if (ui.focused(id)) palette.focus else palette.border, .widths = .all(1) },
+                    .background = if (state == .hovered or state == .pressed) colors.get(.secondary_container) else colors.get(.surface_raised),
+                    .border = .{ .color = if (ui.focused(id)) colors.get(.focus) else colors.get(.outline_muted), .widths = .all(1) },
                     .corner_radius = .all(6),
                 },
             });
@@ -123,21 +123,21 @@ pub fn Using(comptime kit: type) type {
             {
                 ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow }, .child_gap = 2 } });
                 defer ui.close();
-                ui.text(info.title, shell.style(.body, palette.text));
+                ui.text(info.title, shell.style(.body, colors.get(.on_surface)));
                 shell.label(ui, .caption, info.tagline);
             }
-            if (kit.shortcutDigit(screen)) |digit| shell.printColored(ui, .tiny, palette.faint, "Ctrl+{d}", .{digit});
-            shell.labelColored(ui, .body, if (state == .hovered) palette.accent else palette.faint, ">");
+            if (kit.shortcutDigit(screen)) |digit| shell.printColored(ui, .tiny, colors.get(.on_surface_muted), "Ctrl+{d}", .{digit});
+            shell.labelColored(ui, .body, if (state == .hovered) colors.get(.on_surface_accent) else colors.get(.on_surface_muted), ">");
         }
 
         fn facts(ui: *Ui, shell: *const Shell) void {
-            const palette = shell.palette;
+            const colors = shell.colors;
             ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 20, .child_alignment = .{ .y = .center } } });
             defer ui.close();
             fact(ui, shell, "drawn by", "{s}", .{kit.renderer_name});
             fact(ui, shell, "frames declared", "{d}", .{shell.perf.zui_frames});
             fact(ui, shell, "the last one because", "{s}", .{shell.perf.latest().reason.describe()});
-            shell.labelColored(ui, .caption, palette.faint, "Nothing here moves, so the tour sleeps until you act.");
+            shell.labelColored(ui, .caption, colors.get(.on_surface_muted), "Nothing here moves, so the tour sleeps until you act.");
         }
 
         fn fact(ui: *Ui, shell: *const Shell, name: []const u8, comptime format: []const u8, arguments: anytype) void {

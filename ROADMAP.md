@@ -74,7 +74,7 @@ An item is named `{group}:{item}`, each part a number and a name:
 | [8, effects](roadmap/08-effects.md) | gradients, shadows and glow; backdrop blur; effects in the corners of a decoration that draws nothing; transforms with hit inversion; materials; HDR and wide gamut | done: the sokol renderer draws gradients, shadows, backdrop blurs, transforms and materials through a shader of its own and passes the renderer suite, its effects rounded by a decoration that draws nothing, a pointer hits a turned button where it is drawn, and a frame without effects runs no more instructions than before; `zui.ExtendedColor` is clamped for a renderer that draws only `Color`, and on a monitor in HDR the Windows host opens the window in scRGB and reports its headroom, and the sokol renderer shows twice SDR white at 2.00× and four times it at 4.00×, measured off the desktop |
 | [9, seeing the UI](roadmap/09-seeing-the-ui.md) | `zui_debug`; semantics and accessibility actions; safety sweeps; the demo in a browser | done: every `zui_widgets` control lists its semantics, and the Windows host bridges them to UI Automation with each control's pattern, its state and changes, and every action, so a client out of process toggles, sets, expands, selects, scrolls and invokes the native hosts' accessibility example; the sokol renderer's tour runs in a browser at the display's frame rate, from the published page, in a Web Worker behind a page that draws its frames over `zui_wire` and sleeps between the frames the tour needs; `Frame.inspect` and the inspector's diagnostics, fallbacks, zone times from its `ZoneTimer` tracer, element tree and hovered element's configs, and its theme reloaded from a watched file; the raylib renderer's tour opens it with F12 through `zui_app`'s `zuiObserve`, and draws every screen with it open within its limits |
 | [10, reach](roadmap/10-reach.md) | Linux and web hosts; services; window decorations; many windows; hosts whose platform owns the loop | in progress: the web host, services, many windows and the platform-owned loop are done; the Linux host is in progress; window decorations wait on a person |
-| [11, polish](roadmap/11-polish.md) | `zui_motion` and exit ghosts; the design system (SPEC.md §18); text editing with IME; `zui_color`, `zui_icons`, skins and theme packs; samples, the template and a profiling guide | in progress: `zui_motion`, exit animations, `zui_color`, the skin contract, the profiling guide, the design system's resolver, `zui_design`, and motion in the core are done; the design system's type scale is next |
+| [11, polish](roadmap/11-polish.md) | `zui_motion` and exit ghosts; the design system (SPEC.md §18); text editing with IME; `zui_color`, `zui_icons`, skins and theme packs; samples, the template and a profiling guide | in progress: `zui_motion`, exit animations, `zui_color`, the skin contract, the profiling guide, the design system's resolver, `zui_design`, the default design and motion in the core are done |
 
 No release is tagged; everything is on `main`. From here, work is
 tracked by stage rather than by release number. Each stage may be tagged
@@ -118,19 +118,19 @@ is in the file its group names.
 | `10-reach:04-window-decorations` | `core/src/chrome.zig`, `core/src/context.zig`, `core/zui_app/`, `hosts/native/` | | waiting on a person: the checklist under its *Status*, on `zig build title-bar` in `hosts/native/` |
 | `10-reach:07-x11-ibus` | `hosts/native/linux/` | | not started |
 | `11-polish:18-system-accent` | `core/src/input.zig`, `hosts/` | | waiting on CI: the Windows host's accent, in `hosts/native/`'s Windows conformance tests |
-| `11-polish:19-default-design` | `core/zui_design/`, `core/zui_widgets/`, `apps/` | `11-polish:14-zui-design`, `11-polish:15-type-scale` | in progress; slice 3, the tour and the showcase on tokens, next |
 | `10-reach:08-ring-edges-agree` | `renderers/webgl/`, `renderers/sokol/` | | not started; `hosts/web`'s `test-draw` fails on one frame until it lands |
-| `11-polish:27-essential-inputs` | `core/zui_widgets/` | `11-polish:19-default-design`, `11-polish:07-zui-icons` | |
-| `11-polish:28-containers-and-navigation` | `core/zui_widgets/` | `11-polish:19-default-design` | |
+| `10-reach:09-turned-edges-agree` | `renderers/webgl/`, `renderers/sokol/` | `10-reach:08-ring-edges-agree` | not started; `hosts/web`'s `test-draw` fails on Clickable Chaos until it lands |
+| `11-polish:27-essential-inputs` | `core/zui_widgets/` | `11-polish:07-zui-icons` | |
+| `11-polish:28-containers-and-navigation` | `core/zui_widgets/` | | |
 | `11-polish:29-overlays` | `core/zui_widgets/` | `11-polish:28-containers-and-navigation` | |
-| `11-polish:30-feedback-and-media` | `core/zui_widgets/`, `core/zui_design/` | `11-polish:19-default-design`, `11-polish:07-zui-icons` | |
+| `11-polish:30-feedback-and-media` | `core/zui_widgets/`, `core/zui_design/` | `11-polish:07-zui-icons` | |
 | `11-polish:35-italics` | `text/fonts/`, `core/src/design.zig`, `core/zui_design/` | | |
 | `11-polish:31-rich-text-and-reordering` | `core/zui_widgets/` | `11-polish:28-containers-and-navigation`, `11-polish:35-italics`, `11-polish:06-text-editing` | |
 | `11-polish:32-zui-widgets-data` | `core/zui_widgets_data/` | `11-polish:29-overlays` | |
 | `11-polish:33-pickers` | `core/zui_widgets_data/` | `11-polish:32-zui-widgets-data` | |
-| `11-polish:34-zui-widgets-views` | `core/zui_widgets_views/` | `11-polish:19-default-design`, `11-polish:30-feedback-and-media` | |
+| `11-polish:34-zui-widgets-views` | `core/zui_widgets_views/` | `11-polish:30-feedback-and-media` | |
 | `11-polish:22-appearance-review` | `apps/review/` | `11-polish:20-appearance-audit`, `11-polish:21-permutations` | |
-| `11-polish:08-zui-themes` | `themes/` | `11-polish:19-default-design` | |
+| `11-polish:08-zui-themes` | `themes/` | | |
 | `11-polish:23-design-workbench` | `apps/review/` | `11-polish:22-appearance-review` | |
 | `11-polish:06-text-editing` | `core/src/`, `core/zui_widgets/`, `hosts/native/` | | |
 | `11-polish:07-zui-icons` | `core/zui_icons/` | | |

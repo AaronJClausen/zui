@@ -47,7 +47,6 @@ const text_scale_steps = [_]f32{ 1, 1.25, 1.5 };
 pub fn Using(comptime kit: type) type {
     const Ui = kit.Ui;
     const Shell = kit.Shell;
-    const Palette = kit.Palette;
     const Tone = kit.Tone;
     const Widgets = kit.Widgets;
     return struct {
@@ -67,7 +66,7 @@ pub fn Using(comptime kit: type) type {
                 {
                     ui.open(.{ .layout = .{ .sizing = .{ .width = .grow } } });
                     defer ui.close();
-                    shell.labelColored(ui, .caption, shell.palette.muted, "Per subtree, as parameters: palette, text size, spacing and layout.mirrored. The environment's, for the whole tour: theme, contrast, text scale and reading direction.");
+                    shell.labelColored(ui, .caption, shell.colors.get(.on_surface_muted), "Per subtree, as parameters: tokens, text size, spacing and layout.mirrored. The environment's, for the whole tour: theme, contrast, text scale and reading direction.");
                 }
                 ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .grow_both, .child_gap = 12 } });
                 defer ui.close();
@@ -82,7 +81,7 @@ pub fn Using(comptime kit: type) type {
             }
 
             fn variantPanel(self: *OneDeclaration, ui: *Ui, shell: *const Shell, variant: Variant, variant_index: usize) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow_equal, .height = .grow }, .child_gap = 6 } });
                 defer ui.close();
                 {
@@ -90,14 +89,14 @@ pub fn Using(comptime kit: type) type {
                     defer ui.close();
                     shell.label(ui, .body, variant.name);
                     shell.spacer(ui);
-                    ui.text(variant.parameter, .{ .font = shell.fonts.mono, .size = 12 * shell.text_scale, .color = palette.faint, .wrap = .none });
+                    ui.text(variant.parameter, .{ .font = shell.fonts.mono, .size = 12 * shell.text_scale, .color = colors.get(.on_surface_muted), .wrap = .none });
                 }
                 const appearance = &self.appearances[variant_index];
                 const look: Look = .of(ui.environment(), variant, shell, appearance);
                 ui.open(.{
                     .id = .indexed("one_declaration.view", variant_index),
                     .layout = .{ .direction = .top_to_bottom, .sizing = .grow_both, .padding = .all(look.gap), .mirrored = if (variant.mirrored) .yes else .inherit },
-                    .decoration = .{ .background = look.palette.background, .border = .{ .color = palette.border, .widths = .all(1) }, .corner_radius = .all(8) },
+                    .decoration = .{ .background = look.colors.get(.background), .border = .{ .color = colors.get(.outline_muted), .widths = .all(1) }, .corner_radius = .all(8) },
                     .scroll = .{},
                 });
                 defer ui.close();
@@ -106,39 +105,39 @@ pub fn Using(comptime kit: type) type {
 
             /// The one declaration every view shares.
             fn invoice(self: *OneDeclaration, ui: *Ui, look: Look, variant_index: usize) void {
-                const palette = look.palette;
+                const colors = look.colors;
                 const paid = self.paid_cents >= total_cents;
                 ui.open(.{
                     .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow }, .padding = .all(look.padding), .child_gap = look.gap },
-                    .decoration = .{ .background = palette.surface, .border = .{ .color = palette.border, .widths = .all(1) }, .corner_radius = .all(8) },
+                    .decoration = .{ .background = colors.get(.surface), .border = .{ .color = colors.get(.outline_muted), .widths = .all(1) }, .corner_radius = .all(8) },
                 });
                 defer ui.close();
                 {
                     ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = look.gap, .child_alignment = .{ .y = .center } } });
                     defer ui.close();
-                    look.label(ui, .heading, palette.text, "Invoice 1042");
+                    look.label(ui, .heading, colors.get(.on_surface), "Invoice 1042");
                     ui.box(.{ .layout = .{ .sizing = .{ .width = .grow } } });
-                    look.pill(ui, if (paid) "Paid" else "Due in 5 days", if (paid) palette.good else palette.warn);
+                    look.pill(ui, if (paid) "Paid" else "Due in 5 days", if (paid) .success else .warning);
                 }
                 for (line_items) |item| {
                     ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = look.gap } });
                     defer ui.close();
-                    look.label(ui, .caption, palette.muted, item.name);
+                    look.label(ui, .caption, colors.get(.on_surface_muted), item.name);
                     ui.box(.{ .layout = .{ .sizing = .{ .width = .grow } } });
-                    look.amount(ui, .caption, palette.text, item.cents);
+                    look.amount(ui, .caption, colors.get(.on_surface), item.cents);
                 }
-                ui.box(.{ .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(1) } }, .decoration = .{ .background = palette.border } });
+                ui.box(.{ .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(1) } }, .decoration = .{ .background = colors.get(.outline_muted) } });
                 {
                     ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = look.gap } });
                     defer ui.close();
-                    look.label(ui, .body, palette.text, "Total");
+                    look.label(ui, .body, colors.get(.on_surface), "Total");
                     ui.box(.{ .layout = .{ .sizing = .{ .width = .grow } } });
-                    look.amount(ui, .body, palette.text, total_cents);
+                    look.amount(ui, .body, colors.get(.on_surface), total_cents);
                 }
                 look.progress(ui, @as(f32, @floatFromInt(self.paid_cents)) / total_cents);
                 {
                     var buffer: [32]u8 = undefined;
-                    look.label(ui, .tiny, palette.muted, std.fmt.bufPrint(&buffer, "{f} paid", .{Money{ .cents = self.paid_cents }}) catch "");
+                    look.label(ui, .tiny, colors.get(.on_surface_muted), std.fmt.bufPrint(&buffer, "{f} paid", .{Money{ .cents = self.paid_cents }}) catch "");
                 }
                 look.toggle(ui, .indexed("one_declaration.autopay", variant_index), "Autopay", &self.autopay);
                 look.toggle(ui, .indexed("one_declaration.receipts", variant_index), "Email receipts", &self.receipts);
@@ -155,7 +154,7 @@ pub fn Using(comptime kit: type) type {
 
         /// Everything a view's declaration reads besides the shared state.
         const Look = struct {
-            palette: Palette,
+            colors: kit.Colors,
             text_scale: f32,
             padding: f32,
             gap: f32,
@@ -169,13 +168,14 @@ pub fn Using(comptime kit: type) type {
                 if (variant.contrast) |contrast| variant_environment.contrast = contrast;
                 const compact = variant.density == .compact;
                 const text_scale = shell.text_scale * variant.text_factor;
-                var preferences = kit.preferencesOf(&variant_environment);
+                var preferences = kit.preferencesOf(&variant_environment, shell.preference_choices.*);
+                if (variant.contrast) |contrast| preferences.contrast = contrast;
                 preferences.text_scale = text_scale;
-                preferences.density = if (compact) .compact else .comfortable;
+                if (compact) preferences.density = .compact;
                 appearance.follow(preferences, shell.fonts);
                 return .{
                     .tokens = &appearance.tokens,
-                    .palette = .forEnvironment(&variant_environment),
+                    .colors = appearance.colors(),
                     .text_scale = text_scale,
                     .padding = if (compact) 8 else 14,
                     .gap = if (compact) 4 else 8,
@@ -206,12 +206,12 @@ pub fn Using(comptime kit: type) type {
                 ui.text(std.fmt.bufPrint(&buffer, "{f}", .{Money{ .cents = cents }}) catch "", styled);
             }
 
-            fn pill(look: Look, ui: *Ui, content: []const u8, color: zui.Color) void {
+            fn pill(look: Look, ui: *Ui, content: []const u8, emphasis: kit.Emphasis) void {
                 ui.open(.{
                     .layout = .{ .padding = .symmetric(8, 2) },
-                    .decoration = .{ .background = color.mix(look.palette.surface, 0.82), .corner_radius = .all(9) },
+                    .decoration = .{ .background = emphasis.container(look.colors), .corner_radius = .all(9) },
                 });
-                var styled = look.style(.tiny, color);
+                var styled = look.style(.tiny, emphasis.onContainer(look.colors));
                 styled.wrap = .none;
                 ui.text(content, styled);
                 ui.close();
@@ -222,11 +222,11 @@ pub fn Using(comptime kit: type) type {
                 ui.open(.{
                     .semantics = .{ .role = .progress_bar, .label = "paid", .value = .{ .range = .{ .value = clamped } } },
                     .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(6) } },
-                    .decoration = .{ .background = look.palette.sunken, .corner_radius = .all(3) },
+                    .decoration = .{ .background = look.colors.get(.surface_sunken), .corner_radius = .all(3) },
                 });
                 ui.box(.{
                     .layout = .{ .sizing = .{ .width = .percent(clamped), .height = .grow } },
-                    .decoration = .{ .background = if (clamped >= 1) look.palette.good else look.palette.accent, .corner_radius = .all(3) },
+                    .decoration = .{ .background = if (clamped >= 1) look.colors.get(.success) else look.colors.get(.accent), .corner_radius = .all(3) },
                 });
                 ui.close();
             }
@@ -235,7 +235,7 @@ pub fn Using(comptime kit: type) type {
             /// when on, so a mirrored view moves it the other way.
             fn toggle(look: Look, ui: *Ui, id: zui.Id, content: []const u8, on: *bool) void {
                 if (ui.clicked(id)) on.* = !on.*;
-                const palette = look.palette;
+                const colors = look.colors;
                 const track_height = @round(look.control_height * 0.6);
                 ui.open(.{
                     .id = id,
@@ -243,18 +243,18 @@ pub fn Using(comptime kit: type) type {
                     .cursor = .pointer,
                     .semantics = .{ .role = .toggle, .label = content, .state = .{ .checked = on.* } },
                     .layout = .{ .sizing = .{ .width = .grow }, .child_gap = look.gap, .child_alignment = .{ .y = .center } },
-                    .decoration = .{ .border = if (ui.focused(id)) .{ .color = palette.focus, .widths = .all(1) } else null, .corner_radius = .all(4) },
+                    .decoration = .{ .border = if (ui.focused(id)) .{ .color = colors.get(.focus), .widths = .all(1) } else null, .corner_radius = .all(4) },
                 });
                 defer ui.close();
-                look.label(ui, .caption, palette.text, content);
+                look.label(ui, .caption, colors.get(.on_surface), content);
                 ui.box(.{ .layout = .{ .sizing = .{ .width = .grow } } });
                 ui.open(.{
                     .layout = .{ .sizing = .{ .width = .fixed(track_height * 1.8), .height = .fixed(track_height) }, .padding = .all(2), .child_alignment = .{ .x = if (on.*) .end else .start } },
-                    .decoration = .{ .background = if (on.*) palette.accent else palette.border, .corner_radius = .all(track_height / 2) },
+                    .decoration = .{ .background = if (on.*) colors.get(.accent) else colors.get(.outline), .corner_radius = .all(track_height / 2) },
                 });
                 ui.box(.{
                     .layout = .{ .sizing = .{ .width = .fixed(track_height - 4), .height = .fixed(track_height - 4) } },
-                    .decoration = .{ .background = if (on.*) palette.on_accent else palette.surface, .corner_radius = .all((track_height - 4) / 2) },
+                    .decoration = .{ .background = if (on.*) colors.get(.on_accent) else colors.get(.surface), .corner_radius = .all((track_height - 4) / 2) },
                 });
                 ui.close();
             }
@@ -271,16 +271,16 @@ pub fn Using(comptime kit: type) type {
             defer ui.close();
             shell.label(ui, .body, "The environment:");
             const dark = environment.theme == .dark;
-            if (widgets.button(ui, .of("one_declaration.theme"), if (dark) "Theme: dark" else "Theme: light", .{})) shell.changeEnvironment(.{ .theme = if (dark) .light else .dark });
+            if (widgets.button(ui, .of("one_declaration.theme"), if (dark) "Theme: dark" else "Theme: light", .{ .variant = .secondary })) shell.changeEnvironment(.{ .theme = if (dark) .light else .dark });
             const high = environment.contrast == .high;
-            if (widgets.button(ui, .of("one_declaration.contrast"), if (high) "Contrast: high" else "Contrast: normal", .{})) shell.changeEnvironment(.{ .contrast = if (high) .normal else .high });
+            if (widgets.button(ui, .of("one_declaration.contrast"), if (high) "Contrast: high" else "Contrast: normal", .{ .variant = .secondary })) shell.changeEnvironment(.{ .contrast = if (high) .normal else .high });
             var scale_buffer: [24]u8 = undefined;
             const scale_label = std.fmt.bufPrint(&scale_buffer, "Text: {d:.0}%", .{environment.text_scale * 100}) catch "Text";
-            if (widgets.button(ui, .of("one_declaration.text_scale"), scale_label, .{})) shell.changeEnvironment(.{ .text_scale = nextTextScale(environment.text_scale) });
+            if (widgets.button(ui, .of("one_declaration.text_scale"), scale_label, .{ .variant = .secondary })) shell.changeEnvironment(.{ .text_scale = nextTextScale(environment.text_scale) });
             const right_to_left = environment.direction == .right_to_left;
-            if (widgets.button(ui, .of("one_declaration.direction"), if (right_to_left) "Direction: right to left" else "Direction: left to right", .{})) shell.changeEnvironment(.{ .direction = if (right_to_left) .left_to_right else .right_to_left });
+            if (widgets.button(ui, .of("one_declaration.direction"), if (right_to_left) "Direction: right to left" else "Direction: left to right", .{ .variant = .secondary })) shell.changeEnvironment(.{ .direction = if (right_to_left) .left_to_right else .right_to_left });
             const changed = environment.contrast != .normal or environment.text_scale != 1 or environment.direction != .left_to_right;
-            if (widgets.button(ui, .of("one_declaration.reset"), "Reset", .{ .disabled = !changed })) {
+            if (widgets.button(ui, .of("one_declaration.reset"), "Reset", .{ .variant = .secondary, .disabled = !changed })) {
                 shell.changeEnvironment(.{ .contrast = .normal });
                 shell.changeEnvironment(.{ .text_scale = 1 });
                 shell.changeEnvironment(.{ .direction = .left_to_right });

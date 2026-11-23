@@ -11,10 +11,12 @@ const Tour = zui_tour.App(.{ .Host = zui_raylib.Host, .Renderer = zui_raylib.Ren
 
 is an application `zui_app.run` runs. It sets its text in the three
 `zui_fonts` typefaces, laid out for the placement the renderer draws,
-and offers a screen only when the renderer draws what it needs. It
-imports no renderer, host or font system, and compiles for
-`wasm32-freestanding`. Each renderer's or host's `tour` target names it
-with its own host, renderer and font system:
+draws every color from the tokens `zui_design` resolves from zui's
+default design and the user's preferences, and offers a screen only when
+the renderer draws what it needs. It imports no renderer, host or font
+system, and compiles for `wasm32-freestanding`. Each renderer's or
+host's `tour` target names it with its own host, renderer and font
+system:
 
 | Target | Run from |
 |---|---|
@@ -57,6 +59,7 @@ Each screen belongs to a lane, which the rail marks beside its title.
 | Light Lab | Spectacle | gradients mixed in OKLab, shadows and glow, frost over a moving scene, the renderer's materials, and round, continuous and chamfered corners at the radius the controls set, each beside how a renderer without it lowers it, with its declaration printed as Zig. Frost needs `.backdrop_blur` and materials a `MaterialHandle` of patterns |
 | One Declaration | Spectacle | one function's invoice in six views (dark, light, high contrast, 150% text, right to left, compact) sharing one state, and buttons that change the real environment |
 | Clickable Chaos | Spectacle | offered only to a renderer that draws `.transform`: 240 cards turned and scaled in a wave, each hit where it is drawn |
+| Preferences | Start | density, color vision, contrast and text size, chosen over what the environment reports and resolved by `zui_design` into new tokens only when one changes, with the preferences, control heights, status colors and widgets the tokens give; every screen follows |
 
 Ctrl+1 to Ctrl+0 jump to the first ten screens, Ctrl+PgDn and Ctrl+PgUp
 to the next and previous, Ctrl+= and Ctrl+- zoom (through
@@ -72,5 +75,5 @@ measure with `zui_truetype`:
 
 | Command | What it does |
 |---|---|
-| `zig build test` | declare every screen headlessly on renderers that draw every optional command and none, in pixels and in cells; audit every screen with `zui_design.audit` in light and dark, expecting exactly the causes `11-polish:19-default-design`, `11-polish:25-focus-ring-on-fills` and `11-polish:26-small-targets` record; and check the tour's compile errors |
+| `zig build test` | declare every screen headlessly on renderers that draw every optional command and none, in pixels and in cells; audit every screen with `zui_design.audit` in light and dark, expecting no text contrast finding and exactly the causes `11-polish:25-focus-ring-on-fills` and `11-polish:26-small-targets` record; resolve the preferences screen's choices over the environment's and audit it clean; and check the tour's compile errors |
 | `zig build check` | compile the tour and its tests, natively and for `wasm32-freestanding` |

@@ -305,23 +305,23 @@ pub fn Using(comptime kit: type) type {
                 if (widgets.textField(ui, ids.@"log_tail.filter", &filter_text, .{ .placeholder = "Filter, e.g. 502 or orders", .label = "Filter", .width = .fixed(240) }).changed) self.matches_stale = true;
                 self.filter_len = filter_text.len;
                 shell.spacer(ui);
-                if (widgets.button(ui, ids.@"log_tail.follow", if (self.following) "Pause" else "Resume", .{})) {
+                if (widgets.button(ui, ids.@"log_tail.follow", if (self.following) "Pause" else "Resume", .{ .variant = .secondary })) {
                     if (self.following) self.hold() else self.follow();
                 }
                 const burst_running = self.counters.burst_running.load(.acquire);
                 if (widgets.button(ui, ids.@"log_tail.burst", "Burst 10,000", .{ .disabled = burst_running })) self.startBurst(shell);
-                if (widgets.button(ui, ids.@"log_tail.clear", "Clear", .{})) self.clear();
+                if (widgets.button(ui, ids.@"log_tail.clear", "Clear", .{ .variant = .secondary })) self.clear();
             }
 
             fn levelToggle(self: *LogTail, ui: *Ui, shell: *const Shell, level: Level) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 const id: zui.Id = .indexed("log_tail.level", @intFromEnum(level));
                 if (ui.clicked(id)) {
                     self.shown_levels.toggle(level);
                     self.matches_stale = true;
                 }
                 const shown = self.shown_levels.contains(level);
-                const color = levelColor(shell, level);
+                const emphasis = levelEmphasis(level);
                 const state = ui.widgetState(id);
                 ui.open(.{
                     .id = id,
@@ -330,14 +330,14 @@ pub fn Using(comptime kit: type) type {
                     .semantics = .{ .role = .toggle, .label = level.tag(), .state = .{ .checked = shown } },
                     .layout = .{ .padding = .symmetric(10, 5), .child_gap = 8, .child_alignment = .{ .y = .center } },
                     .decoration = .{
-                        .background = if (shown) color.mix(palette.surface, 0.82) else if (state == .hovered) palette.hovered else palette.surface,
-                        .border = .{ .color = if (ui.focused(id)) palette.focus else if (shown) color else palette.border, .widths = .all(1) },
+                        .background = if (shown) emphasis.container(colors) else if (state == .hovered) colors.get(.secondary_container) else colors.get(.surface),
+                        .border = .{ .color = if (ui.focused(id)) colors.get(.focus) else if (shown) emphasis.fill(colors) else colors.get(.outline_muted), .widths = .all(1) },
                         .corner_radius = .all(12),
                     },
                 });
                 defer ui.close();
-                shell.labelColored(ui, .caption, if (shown) color else palette.faint, std.mem.trimEnd(u8, level.tag(), " "));
-                shell.printColored(ui, .caption, if (shown) palette.text else palette.faint, "{d}", .{self.per_level.get(level)});
+                shell.labelColored(ui, .caption, if (shown) emphasis.onContainer(colors) else colors.get(.on_surface_muted), std.mem.trimEnd(u8, level.tag(), " "));
+                shell.printColored(ui, .caption, if (shown) emphasis.onContainer(colors) else colors.get(.on_surface_muted), "{d}", .{self.per_level.get(level)});
             }
 
             fn hold(self: *LogTail) void {
@@ -369,12 +369,12 @@ pub fn Using(comptime kit: type) type {
             fn rowHeight(ui: *Ui, shell: *const Shell) f32 {
                 return switch (comptime zui_glyphs.placementOf(kit.Renderer)) {
                     .cells => |cell| cell[1],
-                    .pixel_grid => @round(ui.measureText("M", monoStyle(shell, shell.palette.text))[1] + 6),
+                    .pixel_grid => @round(ui.measureText("M", monoStyle(shell, shell.colors.get(.on_surface)))[1] + 6),
                 };
             }
 
             fn logView(self: *LogTail, ui: *Ui, shell: *const Shell) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 const list_id = ids.@"log_tail.list";
                 const row_height = rowHeight(ui, shell);
                 const viewport = ui.rectOf(list_id) orelse zui.Rect{ .width = 800, .height = 560 };
@@ -404,7 +404,7 @@ pub fn Using(comptime kit: type) type {
 
                 ui.open(.{
                     .layout = .{ .direction = .top_to_bottom, .sizing = .grow_both },
-                    .decoration = .{ .background = palette.sunken, .corner_radius = .all(8) },
+                    .decoration = .{ .background = colors.get(.surface_sunken), .corner_radius = .all(8) },
                 });
                 defer ui.close();
                 {
@@ -420,7 +420,7 @@ pub fn Using(comptime kit: type) type {
                     ui.box(.{ .layout = .{ .sizing = .{ .height = .fixed(@as(f32, @floatFromInt(self.match_count - last)) * row_height) } } });
                     if (self.match_count == 0) {
                         ui.open(.{ .layout = .{ .sizing = .grow_both, .padding = .all(16) } });
-                        shell.labelColored(ui, .body, palette.faint, if (self.kept_count == 0) "Waiting for the service's first line..." else "No line matches the filter.");
+                        shell.labelColored(ui, .body, colors.get(.on_surface_muted), if (self.kept_count == 0) "Waiting for the service's first line..." else "No line matches the filter.");
                         ui.close();
                     }
                 }
@@ -428,15 +428,15 @@ pub fn Using(comptime kit: type) type {
             }
 
             fn row(self: *LogTail, ui: *Ui, shell: *const Shell, line: *const Line, row_height: f32) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 ui.open(.{ .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(row_height) }, .padding = .symmetric(12, 0), .child_gap = 12, .child_alignment = .{ .y = .center } } });
                 defer ui.close();
                 const seconds = line.milliseconds / 1000;
                 var time_buffer: [16]u8 = undefined;
                 const time = std.fmt.bufPrint(&time_buffer, "{d:0>2}:{d:0>2}:{d:0>2}.{d:0>3}", .{ 9 + seconds / 3600, seconds / 60 % 60, seconds % 60, line.milliseconds % 1000 }) catch "";
-                ui.text(time, monoStyle(shell, palette.faint));
-                ui.text(line.level.tag(), monoStyle(shell, levelColor(shell, line.level)));
-                const message_color = if (line.level == .@"error") palette.bad else palette.text;
+                ui.text(time, monoStyle(shell, colors.get(.on_surface_muted)));
+                ui.text(line.level.tag(), monoStyle(shell, levelEmphasis(line.level).text(colors)));
+                const message_color = if (line.level == .@"error") colors.get(.on_danger_container) else colors.get(.on_surface);
                 const needle = self.filter();
                 const found = if (needle.len == 0) null else std.ascii.findIgnoreCase(line.text(), needle);
                 const message = line.text();
@@ -444,32 +444,32 @@ pub fn Using(comptime kit: type) type {
                     ui.open(.{ .layout = .{ .child_alignment = .{ .y = .center } } });
                     defer ui.close();
                     if (start != 0) ui.text(message[0..start], monoStyle(shell, message_color));
-                    ui.open(.{ .decoration = .{ .background = palette.warn.mix(palette.sunken, 0.6), .corner_radius = .all(2) } });
-                    ui.text(message[start..][0..needle.len], monoStyle(shell, palette.text));
+                    ui.open(.{ .decoration = .{ .background = colors.get(.warning_container), .corner_radius = .all(2) } });
+                    ui.text(message[start..][0..needle.len], monoStyle(shell, colors.get(.on_surface)));
                     ui.close();
                     if (start + needle.len < message.len) ui.text(message[start + needle.len ..], monoStyle(shell, message_color));
                 } else ui.text(message, monoStyle(shell, message_color));
             }
 
             fn statusBar(self: *LogTail, ui: *Ui, shell: *const Shell, first: usize, last: usize) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 ui.open(.{
                     .layout = .{ .sizing = .{ .width = .grow }, .padding = .symmetric(12, 6), .child_gap = 12, .child_alignment = .{ .y = .center } },
-                    .decoration = .{ .background = palette.raised, .corner_radius = .{ .bottom_left = 8, .bottom_right = 8 } },
+                    .decoration = .{ .background = colors.get(.surface_raised), .corner_radius = .{ .bottom_left = 8, .bottom_right = 8 } },
                 });
                 defer ui.close();
                 if (self.following) {
-                    shell.labelColored(ui, .caption, palette.good, "Following the newest line");
+                    shell.labelColored(ui, .caption, colors.get(.on_success_container), "Following the newest line");
                 } else {
-                    shell.printColored(ui, .caption, palette.warn, "Held: {d} new lines below", .{self.arrived_while_held});
+                    shell.printColored(ui, .caption, colors.get(.on_warning_container), "Held: {d} new lines below", .{self.arrived_while_held});
                 }
                 shell.spacer(ui);
-                shell.printColored(ui, .caption, palette.muted, "lines {d}-{d} of {d} shown", .{ @min(first + 1, last), last, self.match_count });
+                shell.printColored(ui, .caption, colors.get(.on_surface_muted), "lines {d}-{d} of {d} shown", .{ @min(first + 1, last), last, self.match_count });
                 if (!self.following and shell.widgets.button(ui, ids.@"log_tail.jump", "Jump to latest", .{})) self.follow();
             }
 
             fn sidePanel(self: *LogTail, ui: *Ui, shell: *const Shell, rate: Rate) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 ui.open(.{
                     .id = ids.@"log_tail.side",
                     .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(300), .height = .grow }, .child_gap = 12 },
@@ -479,22 +479,22 @@ pub fn Using(comptime kit: type) type {
                 {
                     shell.openCard(ui, "Rate", .{ .width = .grow });
                     defer ui.close();
-                    shell.printColored(ui, .title, palette.accent, "{d:.0} lines/s", .{rate.lines_per_second});
+                    shell.printColored(ui, .title, colors.get(.on_surface_accent), "{d:.0} lines/s", .{rate.lines_per_second});
                     self.rateChart(ui, shell);
                     shell.label(ui, .caption, "Sampled every 33 ms through a Latest source: the UI shows the newest sample and skips any it missed.");
                     shell.widgets.labeledRow(ui, "Service pace");
                     _ = shell.widgets.slider(ui, ids.@"log_tail.rate", &self.pace, .{ .min = 0, .max = 4000, .step = 50, .label = "Service pace" });
                     ui.close();
                     self.counters.lines_per_second.store(self.pace, .monotonic);
-                    shell.printColored(ui, .caption, palette.muted, "{d} lines/s asked of the service", .{self.pace});
+                    shell.printColored(ui, .caption, colors.get(.on_surface_muted), "{d} lines/s asked of the service", .{self.pace});
                 }
                 {
                     shell.openCard(ui, "Stream", .{ .width = .grow });
                     defer ui.close();
-                    statRow(ui, shell, "received this frame", self.received_this_frame, palette.text);
-                    statRow(ui, shell, "received in all", self.received, palette.text);
-                    statRow(ui, shell, "kept in the ring", self.kept_count, palette.text);
-                    statRow(ui, shell, "refused by the stream", rate.refused, if (rate.refused == 0) palette.good else palette.bad);
+                    statRow(ui, shell, "received this frame", self.received_this_frame, colors.get(.on_surface));
+                    statRow(ui, shell, "received in all", self.received, colors.get(.on_surface));
+                    statRow(ui, shell, "kept in the ring", self.kept_count, colors.get(.on_surface));
+                    statRow(ui, shell, "refused by the stream", rate.refused, if (rate.refused == 0) colors.get(.on_success_container) else colors.get(.on_danger_container));
                     shell.label(ui, .caption, "The stream holds 256 lines between frames. The ring keeps the newest 4,096; only the rows in view are declared.");
                 }
                 {
@@ -505,22 +505,22 @@ pub fn Using(comptime kit: type) type {
                     if (delivered + refused == 0) {
                         shell.label(ui, .caption, "Burst sends 10,000 lines in a quarter of a second, more than the stream holds between frames.");
                     } else {
-                        statRow(ui, shell, "sent", delivered + refused, palette.text);
-                        statRow(ui, shell, "delivered", delivered, palette.good);
-                        statRow(ui, shell, "dropped, stream full", refused, if (refused == 0) palette.good else palette.bad);
-                        shell.meter(ui, @as(f32, @floatFromInt(delivered)) / @as(f32, @floatFromInt(delivered + refused)), palette.good, 6);
+                        statRow(ui, shell, "sent", delivered + refused, colors.get(.on_surface));
+                        statRow(ui, shell, "delivered", delivered, colors.get(.on_success_container));
+                        statRow(ui, shell, "dropped, stream full", refused, if (refused == 0) colors.get(.on_success_container) else colors.get(.on_danger_container));
+                        shell.meter(ui, @as(f32, @floatFromInt(delivered)) / @as(f32, @floatFromInt(delivered + refused)), colors.get(.success), 6);
                     }
                 }
-                shell.printColored(ui, .caption, palette.faint, "framesSinceRead(.log_lines) = {d}", .{ui.framesSinceRead(.log_lines)});
+                shell.printColored(ui, .caption, colors.get(.on_surface_muted), "framesSinceRead(.log_lines) = {d}", .{ui.framesSinceRead(.log_lines)});
             }
 
             fn rateChart(self: *LogTail, ui: *Ui, shell: *const Shell) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 var tallest: f32 = 100;
                 for (self.rate_history) |value| tallest = @max(tallest, value);
                 ui.open(.{
                     .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(64) }, .padding = .all(4), .child_alignment = .{ .y = .end } },
-                    .decoration = .{ .background = palette.sunken, .corner_radius = .all(6) },
+                    .decoration = .{ .background = colors.get(.surface_sunken), .corner_radius = .all(6) },
                     .clip = .both,
                 });
                 defer ui.close();
@@ -528,7 +528,7 @@ pub fn Using(comptime kit: type) type {
                     const value = self.rate_history[(self.rate_newest + 1 + age) % rate_history_length];
                     ui.box(.{
                         .layout = .{ .sizing = .{ .width = .growWeighted(1), .height = .percent(std.math.clamp(value / tallest, 0.02, 1)) } },
-                        .decoration = .{ .background = palette.accent },
+                        .decoration = .{ .background = colors.get(.accent) },
                     });
                 }
             }
@@ -568,12 +568,12 @@ pub fn Using(comptime kit: type) type {
             return .{ .size = 13 * shell.text_scale, .font = shell.fonts.mono, .color = color, .wrap = .none };
         }
 
-        fn levelColor(shell: *const Shell, level: Level) zui.Color {
+        fn levelEmphasis(level: Level) kit.Emphasis {
             return switch (level) {
-                .debug => shell.palette.faint,
-                .info => shell.palette.accent,
-                .warn => shell.palette.warn,
-                .@"error" => shell.palette.bad,
+                .debug => .neutral,
+                .info => .accent,
+                .warn => .warning,
+                .@"error" => .danger,
             };
         }
 

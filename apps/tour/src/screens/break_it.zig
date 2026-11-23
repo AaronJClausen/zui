@@ -125,7 +125,7 @@ pub fn Using(comptime kit: type) type {
             }
 
             fn controls(self: *BreakIt, ui: *Ui, shell: *const Shell) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 const diagnostics = shell.perf.diagnostics;
                 shell.openCard(ui, "", .{ .width = .grow });
                 defer ui.close();
@@ -136,11 +136,11 @@ pub fn Using(comptime kit: type) type {
                         ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow }, .child_gap = 2 } });
                         defer ui.close();
                         if (diagnostics.exceeded.count() == 0) {
-                            shell.labelColored(ui, .title, palette.good, "Within every limit");
-                            shell.labelColored(ui, .caption, palette.muted, "Drag a slider past its line. These controls are declared first, so they are always kept.");
+                            shell.labelColored(ui, .title, colors.get(.on_success_container), "Within every limit");
+                            shell.labelColored(ui, .caption, colors.get(.on_surface_muted), "Drag a slider past its line. These controls are declared first, so they are always kept.");
                         } else {
-                            shell.printColored(ui, .title, palette.spectacle, "{d} {s} exceeded, nothing corrupted", .{ diagnostics.exceeded.count(), if (diagnostics.exceeded.count() == 1) "limit" else "limits" });
-                            shell.labelColored(ui, .caption, palette.muted, "What fit was kept and drawn; the rest was dropped and reported. Whatever the page declares last goes first, the tour's strip below among it.");
+                            shell.printColored(ui, .title, colors.get(.on_surface_accent), "{d} {s} exceeded, nothing corrupted", .{ diagnostics.exceeded.count(), if (diagnostics.exceeded.count() == 1) "limit" else "limits" });
+                            shell.labelColored(ui, .caption, colors.get(.on_surface_muted), "What fit was kept and drawn; the rest was dropped and reported. Whatever the page declares last goes first, the tour's strip below among it.");
                         }
                     }
                     if (shell.widgets.button(ui, ids.reset, "Reset", .{})) {
@@ -152,7 +152,7 @@ pub fn Using(comptime kit: type) type {
             }
 
             fn loadRow(self: *BreakIt, ui: *Ui, shell: *const Shell, load: Load) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 const limit = load.limit();
                 const limit_value = limitValue(limit);
                 const exceeded = shell.perf.diagnostics.exceeded.contains(limit);
@@ -171,34 +171,34 @@ pub fn Using(comptime kit: type) type {
                 shell.print(ui, .caption, "{d} {s}", .{ amount.*, load.unit() });
                 ui.close();
                 ui.open(.{ .layout = .{ .sizing = .{ .width = .fixed(160) } } });
-                shell.meter(ui, fraction, if (exceeded or needed > limit_value) palette.bad else if (fraction > 0.8) palette.warn else palette.good, 8);
+                shell.meter(ui, fraction, if (exceeded or needed > limit_value) colors.get(.danger) else if (fraction > 0.8) colors.get(.warning) else colors.get(.success), 8);
                 ui.close();
                 ui.open(.{ .layout = .{ .sizing = .{ .width = .fixed(170) }, .child_alignment = .{ .x = .end } } });
-                shell.printColored(ui, .caption, if (exceeded or needed > limit_value) palette.bad else palette.text, "{s}{d} / {d}", .{ if (counted_only_when_full) "at least " else "", needed, limit_value });
+                shell.printColored(ui, .caption, if (exceeded or needed > limit_value) colors.get(.on_danger_container) else colors.get(.on_surface), "{s}{d} / {d}", .{ if (counted_only_when_full) "at least " else "", needed, limit_value });
                 ui.close();
             }
 
             fn diagnosticsCard(ui: *Ui, shell: *const Shell) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 const diagnostics = shell.perf.diagnostics;
                 shell.openScrollingCard(ui, ids.diagnostics, "What the frame reported", .{ .width = .fixed(380), .height = .grow });
                 defer ui.close();
-                shell.labelColored(ui, .caption, palette.muted, "frame.diagnostics, from the last frame:");
+                shell.labelColored(ui, .caption, colors.get(.on_surface_muted), "frame.diagnostics, from the last frame:");
                 if (diagnostics.ok()) {
-                    shell.labelColored(ui, .body, palette.good, "ok(): nothing dropped or refused");
+                    shell.labelColored(ui, .body, colors.get(.on_success_container), "ok(): nothing dropped or refused");
                 } else {
-                    shell.labelColored(ui, .body, palette.bad, "ok() is false; check() returns error.CapacityExceeded");
+                    shell.labelColored(ui, .body, colors.get(.on_danger_container), "ok() is false; check() returns error.CapacityExceeded");
                     var exceeded = diagnostics.exceeded.iterator();
                     while (exceeded.next()) |limit| {
                         const needed = diagnostics.needed.get(limit);
                         const limit_value = limitValue(limit);
-                        shell.printColored(ui, .caption, palette.text, ".{t}: needed {d}, kept {d}, dropped {d}", .{ limit, needed, @min(needed, limit_value), needed -| limit_value });
+                        shell.printColored(ui, .caption, colors.get(.on_surface), ".{t}: needed {d}, kept {d}, dropped {d}", .{ limit, needed, @min(needed, limit_value), needed -| limit_value });
                     }
-                    if (diagnostics.first_dropped_id != 0) shell.printColored(ui, .caption, palette.muted, "first element dropped: id {x:0>16}", .{diagnostics.first_dropped_id});
+                    if (diagnostics.first_dropped_id != 0) shell.printColored(ui, .caption, colors.get(.on_surface_muted), "first element dropped: id {x:0>16}", .{diagnostics.first_dropped_id});
                 }
-                if (diagnostics.lowered.count() != 0) shell.printColored(ui, .caption, palette.muted, "{d} kinds of command lowered for this renderer (not a failure)", .{diagnostics.lowered.count()});
+                if (diagnostics.lowered.count() != 0) shell.printColored(ui, .caption, colors.get(.on_surface_muted), "{d} kinds of command lowered for this renderer (not a failure)", .{diagnostics.lowered.count()});
                 shell.divider(ui);
-                shell.labelColored(ui, .caption, palette.spectacle, "EVERY LIMIT FAILS THE SAME WAY");
+                shell.labelColored(ui, .caption, colors.get(.on_surface_accent), "EVERY LIMIT FAILS THE SAME WAY");
                 rule(ui, shell, "1", "The part that fits is kept. Overflowing elements are dropped, their subtrees skipped with depth still tracked, so every close still pairs up.");
                 rule(ui, shell, "2", "The frame reports which limit, the peak it needed, and the first id dropped.");
                 rule(ui, shell, "3", "Nothing is corrupted: no wild write, no crash, no lost state. Reset, and the next frame is whole again.");
@@ -207,19 +207,19 @@ pub fn Using(comptime kit: type) type {
             fn rule(ui: *Ui, shell: *const Shell, number: []const u8, content: []const u8) void {
                 ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 8 } });
                 defer ui.close();
-                shell.labelColored(ui, .heading, shell.palette.spectacle, number);
+                shell.labelColored(ui, .heading, shell.colors.get(.on_surface_accent), number);
                 shell.label(ui, .caption, content);
             }
 
             /// Declared last, so it is what a limit cuts off first.
             fn payload(self: *const BreakIt, ui: *Ui, shell: *const Shell) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 shell.openCard(ui, "The load", .{ .width = .grow, .height = .grow });
                 defer ui.close();
                 ui.open(.{
                     .id = ids.payload,
                     .layout = .{ .direction = .top_to_bottom, .sizing = .grow_both, .padding = .all(8), .child_gap = 8 },
-                    .decoration = .{ .background = palette.sunken, .corner_radius = .all(6) },
+                    .decoration = .{ .background = colors.get(.surface_sunken), .corner_radius = .all(6) },
                     .scroll = .both,
                 });
                 defer ui.close();
@@ -228,12 +228,12 @@ pub fn Using(comptime kit: type) type {
                 {
                     ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 8 } });
                     defer ui.close();
-                    nest(ui, palette, self.amounts.get(.depth));
-                    shadows(ui, palette, self.amounts.get(.effects));
+                    nest(ui, colors, self.amounts.get(.depth));
+                    shadows(ui, colors, self.amounts.get(.effects));
                 }
                 lineBlocks(ui, shell, self.amounts.get(.render_commands));
-                boxes(ui, palette, self.amounts.get(.elements));
-                const text_style = shell.style(.tiny, palette.faint);
+                boxes(ui, colors, self.amounts.get(.elements));
+                const text_style = shell.style(.tiny, colors.get(.on_surface_muted));
                 for (0..self.amounts.get(.text_bytes)) |_| ui.text(text_block, .{ .size = text_style.size, .font = text_style.font, .color = text_style.color, .wrap = .none });
             }
 
@@ -246,22 +246,22 @@ pub fn Using(comptime kit: type) type {
                 while (placed < count) {
                     const in_row = @min(line_blocks_per_row, count - placed);
                     ui.open(.{ .layout = .{ .child_gap = 6 } });
-                    for (0..in_row) |_| ui.text(line_block, .{ .size = 10, .font = shell.fonts.mono, .color = shell.palette.spectacle, .wrap = .newlines, .line_height = 0.02 });
+                    for (0..in_row) |_| ui.text(line_block, .{ .size = 10, .font = shell.fonts.mono, .color = shell.colors.get(.on_surface_accent), .wrap = .newlines, .line_height = 0.02 });
                     ui.close();
                     placed += in_row;
                 }
             }
 
-            fn nest(ui: *Ui, palette: kit.Palette, levels: u32) void {
+            fn nest(ui: *Ui, colors: kit.Colors, levels: u32) void {
                 for (0..levels) |level| ui.open(.{
                     .layout = .{ .padding = .all(2) },
-                    .decoration = .{ .border = .{ .color = if (level % 2 == 0) palette.spectacle else palette.border, .widths = .all(1) } },
+                    .decoration = .{ .border = .{ .color = if (level % 2 == 0) colors.get(.accent) else colors.get(.outline_muted), .widths = .all(1) } },
                 });
-                if (levels != 0) ui.box(.{ .layout = .{ .sizing = .{ .width = .fixed(8), .height = .fixed(8) } }, .decoration = .{ .background = palette.spectacle } });
+                if (levels != 0) ui.box(.{ .layout = .{ .sizing = .{ .width = .fixed(8), .height = .fixed(8) } }, .decoration = .{ .background = colors.get(.accent) } });
                 for (0..levels) |_| ui.close();
             }
 
-            fn shadows(ui: *Ui, palette: kit.Palette, count: u32) void {
+            fn shadows(ui: *Ui, colors: kit.Colors, count: u32) void {
                 ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow }, .child_gap = 4, .padding = .all(4) } });
                 defer ui.close();
                 var placed: u32 = 0;
@@ -270,7 +270,7 @@ pub fn Using(comptime kit: type) type {
                     ui.open(.{ .layout = .{ .child_gap = 4 } });
                     for (0..in_row) |_| ui.box(.{
                         .layout = .{ .sizing = .{ .width = .fixed(8), .height = .fixed(8) } },
-                        .decoration = .{ .background = palette.raised, .corner_radius = .all(2) },
+                        .decoration = .{ .background = colors.get(.surface_raised), .corner_radius = .all(2) },
                         .effects = &shadow_effects,
                     });
                     ui.close();
@@ -278,16 +278,16 @@ pub fn Using(comptime kit: type) type {
                 }
             }
 
-            fn boxes(ui: *Ui, palette: kit.Palette, count: u32) void {
+            fn boxes(ui: *Ui, colors: kit.Colors, count: u32) void {
                 ui.open(.{ .layout = .{ .direction = .top_to_bottom, .child_gap = 1 } });
                 defer ui.close();
                 var placed: u32 = 0;
                 while (placed < count) {
                     const in_row = @min(boxes_per_row, count - placed);
-                    ui.open(.{ .layout = .{ .child_gap = 1 }, .decoration = .{ .background = palette.border } });
+                    ui.open(.{ .layout = .{ .child_gap = 1 }, .decoration = .{ .background = colors.get(.outline_muted) } });
                     for (0..in_row) |column| ui.box(.{
                         .layout = .{ .sizing = .{ .width = .fixed(3), .height = .fixed(3) } },
-                        .decoration = if ((placed + column) % 8 == 0) .{ .background = palette.spectacle } else null,
+                        .decoration = if ((placed + column) % 8 == 0) .{ .background = colors.get(.accent) } else null,
                     });
                     ui.close();
                     placed += in_row;

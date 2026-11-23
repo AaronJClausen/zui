@@ -31,7 +31,7 @@ and each is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:16-corner-shapes` Corner shapes | done |
 | `11-polish:17-nested-corners` Nested corners | done |
 | `11-polish:18-system-accent` The system's accent color | done; the Windows host's part waiting on CI |
-| `11-polish:19-default-design` The default design | in progress; slices 1 and 2 done; slice 3, the tour and the showcase, next |
+| `11-polish:19-default-design` The default design | done |
 | `11-polish:20-appearance-audit` The appearance audit | done |
 | `11-polish:21-permutations` Every permutation of a component | done |
 | `11-polish:22-appearance-review` The appearance review | not started |
@@ -1477,13 +1477,14 @@ passes.
 
 **Spec.** §16.7, §18, §19.2.
 
-**Status.** Slice 1 is done: `zui_design.default` resolves at comptime
-in every scheme with nothing repaired, and so does each of its eight
-accent presets at run time. Every role in every state of every scheme
-matches the approved colors in `exports/zui-default-design.json` to the
-byte (`core/zui_design/default_tests.zig`), but where the showcase that
-made them drew one the resolver rightly does not: the hovered, focused
-and pressed layers of `surface_sunken` in light and of every surface but
+**Status.** Done, in three slices. Slice 1 is done: `zui_design.default`
+resolves at comptime in every scheme with nothing repaired, and so does
+each of its eight accent presets at run time. Every role in every state
+of every scheme matches the approved colors in
+`exports/zui-default-design.json` to the byte
+(`core/zui_design/default_tests.zig`), but where the showcase that made
+them drew one the resolver rightly does not: the hovered, focused and
+pressed layers of `surface_sunken` in light and of every surface but
 `surface` in light high contrast, where the showcase's port did not
 check `on_surface` and its full layers would take it below its target;
 `outline_muted` disabled, which the port left unfaded; and `danger`,
@@ -1515,10 +1516,59 @@ test now also audits focus rings in the tokens' color, and no longer
 finds dark's `on_accent` in light, which One Declaration's dark button
 drew. `hosts/web`'s `test-draw` fails on one frame
 (`10-reach:08-ring-edges-agree`); every other check listed for the
-packages it touches passes. Slice 3, the tour's own text and the
-showcase on tokens and the preferences screen, is next; it should give
-the tour's secondary actions, such as its header's, the `secondary`
-variant.
+packages it touches passes.
+
+Slice 3 is done: the tour and the showcase draw every color from the
+tokens they resolve, and neither has a palette. The tour's `Palette`
+gave way to `Colors`, each role's color at rest, which the `Shell` holds
+beside the tokens, each entry by its use as the owner chose; an
+`Emphasis` (neutral, accent, success, warning, danger) gives a status
+its fill, its container, the text on the container and its text on a
+surface, so a chip, a pill or a legend takes the container and its text
+rather than a mix of the fill. The Spectacle lane takes the accent, and
+where four categories had taken the spectacles' violet (Gesture Arena's
+lasso, the frame reasons, Time Machine's balls) they take danger or
+warning. A selected row is drawn in `selection`, its quiet columns in
+`on_selection`; tooltips in `surface_inverse`; Harbor's own primary
+button takes the tokens' hovered and pressed layers of `accent`; Light
+Lab's gradient holds each end no lighter than `accent`, so `on_accent`
+reads on it, and its frosted panes name themselves on a tag in
+`surface_inverse`. The header's buttons, Gesture Arena's zoom, One
+Declaration's environment bar and Log Tail's Pause and Clear take the
+`secondary` variant. One Declaration's views resolve their own tokens
+and draw from them. A preferences screen,
+`apps/tour/src/screens/preferences.zig`, chooses density, color vision,
+contrast and text size over what the environment reports, held in the
+tour as `PreferenceChoices`; `Appearance.follow` resolves again only
+when the combined preferences change, and the screen shows the
+preferences, control heights, status colors and widgets they give. The
+showcase resolves the default design in dark, compact in cells, and
+draws from it, with an audit of its text in its test.
+
+The tour's test expects no text contrast finding in light or dark: from
+2,350 to none. What it still finds, in each theme: the focus ring on the
+checked `1 Hz` box (`11-polish:25-focus-ring-on-fills`) and 32 targets
+below 24 units on Harbor X-ray (14), One Declaration (10), Log Tail (4),
+Settings Form (3) and Photo Culling (1) (`11-polish:26-small-targets`);
+33 before, the same screens. A new test resolves the preferences
+screen's choices, compact, protan, high contrast and 150% text, over a
+normal environment, and audits it clean; the showcase's text audits
+clean with and without its dialog. Passing: `apps/tour` and
+`apps/showcase` `test` in all three modes, `check` and
+`check -Dtarget=x86_64-windows`; the terminal renderer's `test`, `check`
+for Linux, Windows and macOS, `showcase -- --dump` and
+`tour -- --dump --every-screen`; the raylib renderer's `test`, `check`,
+`conformance`, the tour's cycle (600 frames, `diagnostics ok: true`),
+the showcase (60 frames, `diagnostics ok: true`) and
+`tour -- --measure-idle` (7.6 ms of CPU over 10 s, one frame); and
+`hosts/web`'s `test-demo` in Debug and ReleaseSafe. `test-draw` now
+compares a frame of all fifteen screens, not the first thirteen. It
+failed on Harbor X-ray's ring edges before
+(`10-reach:08-ring-edges-agree`); that frame matched in this run, on the
+NVIDIA GPU. It fails on Clickable Chaos, which it did not compare
+before: 758 pixels at one sample per pixel, by at most 137, and 481 at
+four without text, at the edges of the turned cards. The preferences
+screen matches.
 
 ## 11-polish:20-appearance-audit — The appearance audit
 

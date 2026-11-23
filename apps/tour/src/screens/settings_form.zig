@@ -146,7 +146,7 @@ pub fn Using(comptime kit: type) type {
                 defer ui.close();
                 ui.open(.{
                     .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .{ .rule = .grow, .amount = 1, .max = 820 } }, .padding = .all(20), .child_gap = 14 },
-                    .decoration = .{ .background = shell.palette.surface, .border = .{ .color = shell.palette.border, .widths = .all(1) }, .corner_radius = .all(8) },
+                    .decoration = .{ .background = shell.colors.get(.surface), .border = .{ .color = shell.colors.get(.outline_muted), .widths = .all(1) }, .corner_radius = .all(8) },
                 });
                 defer ui.close();
                 var submitted = false;
@@ -202,7 +202,7 @@ pub fn Using(comptime kit: type) type {
             /// What the form is declared under right now, so a switch
             /// above shows its effect in numbers too.
             fn sideCard(self: *SettingsForm, ui: *Ui, shell: *const Shell) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 const environment = ui.environment();
                 shell.openScrollingCard(ui, .of("settings.side"), "Declared under", .{ .width = .fixed(280), .height = .grow });
                 defer ui.close();
@@ -218,7 +218,7 @@ pub fn Using(comptime kit: type) type {
                 factRow(ui, shell, "unsaved", if (self.editing.equals(&self.saved)) "no" else "yes");
                 var saves_buffer: [16]u8 = undefined;
                 factRow(ui, shell, "saves", std.fmt.bufPrint(&saves_buffer, "{d}", .{self.saves}) catch "");
-                shell.labelColored(ui, .caption, palette.muted, "Tab walks the fields in reading order, in either direction. Enter in a field saves when the form is valid.");
+                shell.labelColored(ui, .caption, colors.get(.on_surface_muted), "Tab walks the fields in reading order, in either direction. Enter in a field saves when the form is valid.");
             }
 
             fn problemCount(self: *const SettingsForm) usize {
@@ -230,18 +230,18 @@ pub fn Using(comptime kit: type) type {
             }
 
             fn footer(self: *SettingsForm, ui: *Ui, shell: *const Shell, submitted: bool) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 const problems = self.problemCount();
                 const changed = !self.editing.equals(&self.saved);
                 const can_save = changed and problems == 0;
                 ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 12, .child_alignment = .{ .y = .center } } });
                 defer ui.close();
                 if (problems != 0) {
-                    shell.printColored(ui, .body, palette.bad, "{d} {s} to fix before saving", .{ problems, if (problems == 1) "field" else "fields" });
+                    shell.printColored(ui, .body, colors.get(.on_danger_container), "{d} {s} to fix before saving", .{ problems, if (problems == 1) "field" else "fields" });
                 } else if (changed) {
-                    shell.labelColored(ui, .body, palette.warn, "Unsaved changes");
+                    shell.labelColored(ui, .body, colors.get(.on_warning_container), "Unsaved changes");
                 } else {
-                    shell.labelColored(ui, .body, palette.muted, if (self.saves == 0) "No changes yet" else "All changes saved");
+                    shell.labelColored(ui, .body, colors.get(.on_surface_muted), if (self.saves == 0) "No changes yet" else "All changes saved");
                 }
                 shell.spacer(ui);
                 if (shell.widgets.button(ui, ids.@"settings.discard", "Discard", .{ .disabled = !changed })) {
@@ -258,7 +258,7 @@ pub fn Using(comptime kit: type) type {
             }
 
             fn toast(self: *SettingsForm, ui: *Ui, shell: *const Shell) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 const saved_at = self.saved_at orelse return;
                 const shown_for = shell.seconds - saved_at;
                 if (shown_for >= toast_seconds) {
@@ -272,17 +272,17 @@ pub fn Using(comptime kit: type) type {
                     .semantics = .{ .role = .label, .label = "Settings saved" },
                     .exit = .{ .seconds = 0.3, .fade = .ease_out },
                     .layout = .{ .padding = .symmetric(16, 10), .child_gap = 10, .child_alignment = .{ .y = .center } },
-                    .decoration = .{ .background = palette.raised, .border = .{ .color = palette.good, .widths = .all(1) }, .corner_radius = .all(8) },
+                    .decoration = .{ .background = colors.get(.surface_raised), .border = .{ .color = colors.get(.success), .widths = .all(1) }, .corner_radius = .all(8) },
                     .effects = &.{ .shadow = .{ .color = .rgba(0x00000050), .offset = .{ 0, 6 }, .blur = 18 } },
                 });
                 defer ui.close();
-                ui.box(.{ .layout = .{ .sizing = .{ .width = .fixed(8), .height = .fixed(8) } }, .decoration = .{ .background = palette.good, .corner_radius = .all(4) } });
+                ui.box(.{ .layout = .{ .sizing = .{ .width = .fixed(8), .height = .fixed(8) } }, .decoration = .{ .background = colors.get(.success), .corner_radius = .all(4) } });
                 shell.label(ui, .body, "Saved");
             }
 
             /// Returns whether Enter was pressed in the field.
             fn textRow(self: *SettingsForm, ui: *Ui, shell: *const Shell, field: TextField, label: []const u8, placeholder: []const u8, id: zui.Id) bool {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 const value = switch (field) {
                     .name => &self.editing.name,
                     .email => &self.editing.email,
@@ -298,7 +298,7 @@ pub fn Using(comptime kit: type) type {
                 value.len = text.len;
                 if (result.changed) self.touched.insert(field);
                 if (!self.touched.contains(field)) return result.submitted;
-                if (problemWith(&self.editing, field)) |problem| shell.labelColored(ui, .caption, palette.bad, problem);
+                if (problemWith(&self.editing, field)) |problem| shell.labelColored(ui, .caption, colors.get(.on_danger_container), problem);
                 return result.submitted;
             }
         };
@@ -320,7 +320,7 @@ pub fn Using(comptime kit: type) type {
         fn openRow(ui: *Ui, shell: *const Shell, label: []const u8) void {
             ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 16 } });
             ui.open(.{ .layout = .{ .sizing = .{ .width = .fixed(@round(150 * shell.text_scale)) }, .padding = .{ .top = 6 } } });
-            shell.labelColored(ui, .body, shell.palette.muted, label);
+            shell.labelColored(ui, .body, shell.colors.get(.on_surface_muted), label);
             ui.close();
             ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow }, .child_gap = 8 } });
         }
@@ -333,14 +333,14 @@ pub fn Using(comptime kit: type) type {
         /// Switches that change the environment the whole tour is declared
         /// in, as the OS would.
         fn environmentStrip(ui: *Ui, shell: *const Shell) void {
-            const palette = shell.palette;
+            const colors = shell.colors;
             const environment = ui.environment();
             ui.open(.{
                 .layout = .{ .sizing = .{ .width = .grow }, .padding = .symmetric(12, 8), .child_gap = 12, .child_alignment = .{ .y = .center } },
-                .decoration = .{ .background = palette.sunken, .corner_radius = .all(8) },
+                .decoration = .{ .background = colors.get(.surface_sunken), .corner_radius = .all(8) },
             });
             defer ui.close();
-            shell.labelColored(ui, .caption, palette.muted, "Environment");
+            shell.labelColored(ui, .caption, colors.get(.on_surface_muted), "Environment");
             var right_to_left = environment.direction == .right_to_left;
             if (shell.widgets.checkbox(ui, ids.@"settings.right_to_left", "Right to left", &right_to_left, .{})) {
                 shell.changeEnvironment(.{ .direction = if (right_to_left) .right_to_left else .left_to_right });
@@ -349,7 +349,7 @@ pub fn Using(comptime kit: type) type {
             if (shell.widgets.checkbox(ui, ids.@"settings.high_contrast", "High contrast", &high_contrast, .{})) {
                 shell.changeEnvironment(.{ .contrast = if (high_contrast) .high else .normal });
             }
-            shell.labelColored(ui, .caption, palette.muted, "Text size");
+            shell.labelColored(ui, .caption, colors.get(.on_surface_muted), "Text size");
             for (text_scales, 0..) |scale, index| {
                 const id: zui.Id = .indexed("settings.text_scale", index);
                 const selected = @abs(environment.text_scale - scale) < 0.01;
@@ -364,12 +364,12 @@ pub fn Using(comptime kit: type) type {
                     .semantics = .{ .role = .radio, .label = label, .state = .{ .checked = selected } },
                     .layout = .{ .padding = .symmetric(10, 4) },
                     .decoration = .{
-                        .background = if (selected) palette.accent else if (state == .hovered or state == .pressed) palette.hovered else palette.surface,
-                        .border = .{ .color = if (ui.focused(id)) palette.focus else palette.border, .widths = .all(1) },
+                        .background = if (selected) colors.get(.accent) else if (state == .hovered or state == .pressed) colors.get(.secondary_container) else colors.get(.surface),
+                        .border = .{ .color = if (ui.focused(id)) colors.get(.focus) else colors.get(.outline_muted), .widths = .all(1) },
                         .corner_radius = .all(6),
                     },
                 });
-                shell.labelColored(ui, .caption, if (selected) palette.on_accent else palette.text, label);
+                shell.labelColored(ui, .caption, if (selected) colors.get(.on_accent) else colors.get(.on_surface), label);
                 ui.close();
             }
             shell.spacer(ui);

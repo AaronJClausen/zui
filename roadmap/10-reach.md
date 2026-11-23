@@ -38,6 +38,7 @@ decorations; many windows.
 | `10-reach:06-platform-owned-loop` Hosts whose platform owns the loop | done |
 | `10-reach:07-x11-ibus` The input method on X11 over IBus's D-Bus protocol | not started |
 | `10-reach:08-ring-edges-agree` WebGL and sokol agree on a ring's inner edge | not started |
+| `10-reach:09-turned-edges-agree` WebGL and sokol agree on a turned box's edges | not started |
 
 ---
 
@@ -2256,5 +2257,33 @@ or snap its vertices as both rasterize them alike.
 layout and with the dots moved by a quarter unit each way.
 
 **Spec.** §13.
+
+**Status.** Not started.
+
+## 10-reach:09-turned-edges-agree — WebGL and sokol agree on a turned box's edges
+
+**Grounding** (at the commit of `11-polish:19-default-design`'s slice
+3). That slice raised `test-draw`'s compared frames to all fifteen of
+the tour's screens (`hosts/web/build.zig`, `compared_frames`), and so
+compares Clickable Chaos for the first time. Its frame, 324, differs
+from `zui_sokol`'s at the edges of the turned cards
+(`apps/tour/src/screens/clickable_chaos.zig`, each card drawn through
+its own `zui.Transform`): 758 pixels at one sample per pixel, by at most
+137, and 481 matching no pixel of the other image at four samples
+without text. Both renderers draw transformed boxes
+(`renderers/webgl/src/draw_list.zig`,
+`renderers/sokol/src/renderer.zig`), so the two paths place or rasterize
+a turned edge differently, as `10-reach:08-ring-edges-agree` found for a
+ring's inner edge.
+
+**Plan.** Find where the two disagree, whether the transform's matrix,
+the order its vertices are transformed and snapped in, or the coverage
+at a turned edge, and make them agree without relaxing `check_draw`'s
+tolerance, building on what `10-reach:08-ring-edges-agree` changed.
+
+**Done when.** `test-draw` passes here, and in CI, with all fifteen
+screens compared.
+
+**Spec.** §13, §15.
 
 **Status.** Not started.

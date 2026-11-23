@@ -79,17 +79,38 @@ pub fn Using(comptime kit: type) type {
                 }
             }
 
-            fn gradient(self: *const LightLab, seconds: f32) Ui.Gradient {
+            /// Each end no lighter than the accent, so `on_accent` text reads on it.
+            fn gradient(self: *const LightLab, colors: kit.Colors, seconds: f32) Ui.Gradient {
+                const ceiling = relativeLuminance(colors.get(.accent));
                 return .{
-                    .from = kit.hueColor(self.from_hue, 0.75, 0.95),
-                    .to = kit.hueColor(self.to_hue, 0.75, 0.95),
+                    .from = hueAtMost(self.from_hue, ceiling),
+                    .to = hueAtMost(self.to_hue, ceiling),
                     .angle = std.math.degreesToRadians(self.angle_degrees + seconds * 20),
                 };
             }
 
+            fn hueAtMost(hue: f32, luminance_ceiling: f32) zui.Color {
+                const brightest = relativeLuminance(kit.hueColor(hue, 0.75, 1));
+                // Encoded channels scaled by `value` scale luminance by at
+                // least value^2.2, so this value stays under the ceiling.
+                const value = std.math.pow(f32, luminance_ceiling / brightest, 1.0 / 2.2);
+                return kit.hueColor(hue, 0.75, @min(0.95, value));
+            }
+
+            fn relativeLuminance(color: zui.Color) f32 {
+                const weights = [3]f32{ 0.2126, 0.7152, 0.0722 };
+                var luminance: f32 = 0;
+                for ([3]u8{ color.r, color.g, color.b }, weights) |channel, weight| {
+                    const encoded = @as(f32, @floatFromInt(channel)) / 255;
+                    const linear = if (encoded <= 0.04045) encoded / 12.92 else std.math.pow(f32, (encoded + 0.055) / 1.055, 2.4);
+                    luminance += weight * linear;
+                }
+                return luminance;
+            }
+
             fn shadow(self: *const LightLab, shell: *const Shell) Ui.Shadow {
                 if (self.glow) {
-                    var glow_color = shell.palette.spectacle;
+                    var glow_color = shell.colors.get(.accent);
                     glow_color.a = alphaOf(self.shadow_opacity);
                     var glow: Ui.Shadow = .glow(glow_color, self.shadow_blur);
                     glow.spread = self.shadow_spread;
@@ -118,26 +139,26 @@ pub fn Using(comptime kit: type) type {
 
             fn controls(self: *LightLab, ui: *Ui, shell: *const Shell) void {
                 const widgets = shell.widgets;
-                const palette = shell.palette;
+                const colors = shell.colors;
                 shell.openScrollingCard(ui, .of("light_lab.controls"), "", .{ .width = .fixed(320), .height = .grow });
                 defer ui.close();
-                shell.labelColored(ui, .caption, palette.spectacle, "GRADIENT, MIXED IN OKLAB");
+                shell.labelColored(ui, .caption, colors.get(.on_surface_accent), "GRADIENT, MIXED IN OKLAB");
                 shell.sliderRow(ui, .of("light_lab.angle"), "angle", &self.angle_degrees, 0, 360, 1, "{d:.0}");
                 shell.sliderRow(ui, .of("light_lab.from"), "from hue", &self.from_hue, 0, 1, 0.01, "{d:.2}");
                 shell.sliderRow(ui, .of("light_lab.to"), "to hue", &self.to_hue, 0, 1, 0.01, "{d:.2}");
                 shell.divider(ui);
-                shell.labelColored(ui, .caption, palette.spectacle, "SHADOW");
+                shell.labelColored(ui, .caption, colors.get(.on_surface_accent), "SHADOW");
                 _ = widgets.checkbox(ui, .of("light_lab.glow"), "a glow: no offset", &self.glow, .{});
                 if (!self.glow) shell.sliderRow(ui, .of("light_lab.offset"), "offset y", &self.shadow_offset_y, -40, 40, 1, "{d:.0}");
                 shell.sliderRow(ui, .of("light_lab.blur"), "blur", &self.shadow_blur, 0, 80, 1, "{d:.0}");
                 shell.sliderRow(ui, .of("light_lab.spread"), "spread", &self.shadow_spread, -20, 30, 1, "{d:.0}");
                 shell.sliderRow(ui, .of("light_lab.opacity"), "opacity", &self.shadow_opacity, 0, 1, 0.05, "{d:.2}");
                 shell.divider(ui);
-                shell.labelColored(ui, .caption, palette.spectacle, "FROST");
+                shell.labelColored(ui, .caption, colors.get(.on_surface_accent), "FROST");
                 shell.sliderRow(ui, .of("light_lab.frost_radius"), "blur", &self.frost_radius, 0, 40, 1, "{d:.0}");
                 shell.sliderRow(ui, .of("light_lab.frost_tint"), "tint", &self.frost_tint, 0, 1, 0.05, "{d:.2}");
                 shell.divider(ui);
-                shell.labelColored(ui, .caption, palette.spectacle, "MATERIAL");
+                shell.labelColored(ui, .caption, colors.get(.on_surface_accent), "MATERIAL");
                 if (kit.draws_material_patterns) {
                     ui.open(.{ .layout = .{ .child_gap = 6 } });
                     for (patterns, 0..) |pattern, index| {
@@ -157,12 +178,12 @@ pub fn Using(comptime kit: type) type {
             }
 
             fn scene(self: *const LightLab, ui: *Ui, shell: *const Shell, seconds: f32) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 const bounds = ui.rectOf(scene_id) orelse zui.Rect{ .x = 0, .y = 0, .width = 600, .height = 420 };
                 ui.open(.{
                     .id = scene_id,
                     .layout = .{ .sizing = .{ .width = .{ .rule = .grow_from_min, .amount = 3 }, .height = .grow }, .child_alignment = .{ .x = .center, .y = .center } },
-                    .decoration = .{ .background = palette.sunken, .border = .{ .color = palette.border, .widths = .all(1) }, .corner_radius = .all(8) },
+                    .decoration = .{ .background = colors.get(.surface_sunken), .border = .{ .color = colors.get(.outline_muted), .widths = .all(1) }, .corner_radius = .all(8) },
                     .clip = .both,
                 });
                 defer ui.close();
@@ -172,11 +193,11 @@ pub fn Using(comptime kit: type) type {
                         .floating = .{ .attach_point = .center, .anchor = .center, .z = 2, .clip = .target },
                         .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(300), .height = .fixed(176) }, .padding = .all(22), .child_gap = 4, .child_alignment = .{ .y = .end } },
                         .decoration = .{ .corner_radius = .all(self.corner_radius) },
-                        .effects = &.{ .gradient = self.gradient(seconds), .shadow = self.shadow(shell) },
+                        .effects = &.{ .gradient = self.gradient(colors, seconds), .shadow = self.shadow(shell) },
                     });
                     defer ui.close();
-                    ui.text("Light Lab", shell.style(.title, .rgb(0xffffff)));
-                    ui.text("a gradient in OKLab over a soft shadow", shell.style(.caption, .rgb(0xffffff)));
+                    ui.text("Light Lab", shell.style(.title, colors.get(.on_accent)));
+                    ui.text("a gradient in OKLab over a soft shadow", shell.style(.caption, colors.get(.on_accent)));
                 }
                 if (kit.draws_frost) {
                     const drift = if (bounds.width > 360) (bounds.width / 2 - 110) * @sin(seconds * 0.5) else 0;
@@ -186,7 +207,7 @@ pub fn Using(comptime kit: type) type {
                         .decoration = .{ .border = .{ .color = .rgba(0xffffff40), .widths = .all(1) }, .corner_radius = .all(16) },
                         .effects = &.{ .backdrop_blur = self.frost() },
                     });
-                    ui.text("frosted", shell.style(.caption, .rgb(0xffffff)));
+                    paneLabel(ui, shell, "frosted");
                     ui.close();
                 }
             }
@@ -207,16 +228,16 @@ pub fn Using(comptime kit: type) type {
             }
 
             fn declarationCode(self: *const LightLab, ui: *Ui, shell: *const Shell, seconds: f32) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 ui.open(.{
                     .id = .of("light_lab.code"),
                     .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .{ .rule = .grow_from_min, .amount = 2 }, .height = .grow }, .padding = .all(14), .child_gap = 8 },
-                    .decoration = .{ .background = palette.surface, .border = .{ .color = palette.border, .widths = .all(1) }, .corner_radius = .all(8) },
+                    .decoration = .{ .background = colors.get(.surface), .border = .{ .color = colors.get(.outline_muted), .widths = .all(1) }, .corner_radius = .all(8) },
                     .scroll = .{ .horizontal = true, .vertical = true },
                 });
                 defer ui.close();
                 shell.label(ui, .caption, "THE DECLARATION, AS IT IS NOW");
-                const gradient_now = self.gradient(seconds);
+                const gradient_now = self.gradient(colors, seconds);
                 const shadow_now = self.shadow(shell);
                 const frost_now = self.frost();
                 var buffer: [1024]u8 = undefined;
@@ -261,7 +282,7 @@ pub fn Using(comptime kit: type) type {
                         \\}},
                     , .{ rgbOf(self.materialFallback()), material_now.pattern, rgbOf(material_now.first), rgbOf(material_now.second), @mod(material_now.phase, 1) }) catch {};
                 }
-                ui.text(writer.buffered(), .{ .font = shell.fonts.mono, .size = 13 * shell.text_scale, .color = palette.muted, .wrap = .newlines });
+                ui.text(writer.buffered(), .{ .font = shell.fonts.mono, .size = 13 * shell.text_scale, .color = colors.get(.on_surface_muted), .wrap = .newlines });
             }
 
             fn openLoweringCard(ui: *Ui, shell: *const Shell, title: []const u8, drawn: bool) void {
@@ -269,18 +290,26 @@ pub fn Using(comptime kit: type) type {
                 ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 8, .child_alignment = .{ .y = .center } } });
                 shell.label(ui, .heading, title);
                 shell.spacer(ui);
-                shell.chip(ui, if (drawn) "drawn" else "lowered", if (drawn) shell.palette.good else shell.palette.warn);
+                shell.chip(ui, if (drawn) "drawn" else "lowered", if (drawn) .success else .warning);
+                ui.close();
+            }
+
+            /// A frosted pane's name, on a tag of its own, since the pane
+            /// shows whatever is behind it.
+            fn paneLabel(ui: *Ui, shell: *const Shell, content: []const u8) void {
+                ui.open(.{ .layout = .{ .padding = .symmetric(6, 2) }, .decoration = .{ .background = shell.colors.get(.surface_inverse), .corner_radius = .all(4) } });
+                ui.text(content, .{ .font = shell.fonts.body, .size = 11 * shell.text_scale, .color = shell.colors.get(.on_surface_inverse), .wrap = .none });
                 ui.close();
             }
 
             fn swatchLabel(ui: *Ui, shell: *const Shell, content: []const u8) void {
-                ui.text(content, .{ .font = shell.fonts.body, .size = 11 * shell.text_scale, .color = shell.palette.muted, .wrap = .words });
+                ui.text(content, .{ .font = shell.fonts.body, .size = 11 * shell.text_scale, .color = shell.colors.get(.on_surface_muted), .wrap = .words });
             }
 
             fn gradientLowering(self: *const LightLab, ui: *Ui, shell: *const Shell, seconds: f32) void {
                 openLoweringCard(ui, shell, "Gradient", kit.config.commands.contains(.gradient));
                 defer ui.close();
-                const now = self.gradient(seconds);
+                const now = self.gradient(shell.colors, seconds);
                 const across: Ui.Gradient = .{ .from = now.from, .to = now.to };
                 swatchLabel(ui, shell, "OKLab, as drawn");
                 ui.box(.{ .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(22) } }, .decoration = .{ .corner_radius = .all(5) }, .effects = &.{ .gradient = across } });
@@ -298,7 +327,7 @@ pub fn Using(comptime kit: type) type {
             }
 
             fn shadowLowering(self: *const LightLab, ui: *Ui, shell: *const Shell) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 openLoweringCard(ui, shell, "Shadow", kit.config.commands.contains(.shadow));
                 defer ui.close();
                 ui.open(.{ .layout = .{ .sizing = .grow_both, .padding = .symmetric(4, 8), .child_gap = 16 } });
@@ -308,7 +337,7 @@ pub fn Using(comptime kit: type) type {
                     const name, const cast = side;
                     ui.open(.{
                         .layout = .{ .sizing = .{ .width = .grow_equal, .height = .grow }, .padding = .all(8), .child_alignment = .{ .x = .center, .y = .end } },
-                        .decoration = .{ .background = palette.raised, .border = .{ .color = palette.border, .widths = .all(1) }, .corner_radius = .all(@min(self.corner_radius, 16)) },
+                        .decoration = .{ .background = colors.get(.surface_raised), .border = .{ .color = colors.get(.outline_muted), .widths = .all(1) }, .corner_radius = .all(@min(self.corner_radius, 16)) },
                         .effects = if (cast) |shadow_now| &.{ .shadow = shadow_now } else null,
                     });
                     swatchLabel(ui, shell, name);
@@ -319,13 +348,13 @@ pub fn Using(comptime kit: type) type {
             /// The three corner shapes at the lab's radius, in the controls
             /// beside the radius they follow.
             fn cornerShapes(self: *const LightLab, ui: *Ui, shell: *const Shell) void {
-                const palette = shell.palette;
+                const colors = shell.colors;
                 {
                     ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 8, .child_alignment = .{ .y = .center } } });
                     defer ui.close();
-                    shell.labelColored(ui, .caption, palette.spectacle, "CORNERS");
+                    shell.labelColored(ui, .caption, colors.get(.on_surface_accent), "CORNERS");
                     shell.spacer(ui);
-                    shell.chip(ui, if (kit.draws_every_corner_shape) "drawn" else "lowered", if (kit.draws_every_corner_shape) palette.good else palette.warn);
+                    shell.chip(ui, if (kit.draws_every_corner_shape) "drawn" else "lowered", if (kit.draws_every_corner_shape) .success else .warning);
                 }
                 ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 8 } });
                 defer ui.close();
@@ -334,7 +363,7 @@ pub fn Using(comptime kit: type) type {
                     defer ui.close();
                     ui.box(.{
                         .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(64) } },
-                        .decoration = .{ .background = palette.accent.mix(palette.surface, 0.35), .corner_radius = .all(self.corner_radius), .corner_shape = shape },
+                        .decoration = .{ .background = colors.get(.accent).mix(colors.get(.surface), 0.35), .corner_radius = .all(self.corner_radius), .corner_shape = shape },
                     });
                     const lowered = !kit.config.corner_shapes.contains(shape);
                     swatchLabel(ui, shell, if (lowered) loweredName(shape) else @tagName(shape));
@@ -377,7 +406,7 @@ pub fn Using(comptime kit: type) type {
                         .decoration = .{ .background = if (frosted) null else frost_now.tint, .corner_radius = .all(10) },
                         .effects = if (frosted) &.{ .backdrop_blur = frost_now } else null,
                     });
-                    ui.text(name, .{ .font = shell.fonts.body, .size = 11 * shell.text_scale, .color = .rgb(0xffffff), .wrap = .words });
+                    paneLabel(ui, shell, name);
                     ui.close();
                     place += 1;
                 }
@@ -406,7 +435,7 @@ pub fn Using(comptime kit: type) type {
                             .decoration = .{
                                 .background = self.materialFallback(),
                                 .material = self.material(pattern, seconds),
-                                .border = if (chosen) .{ .color = shell.palette.text, .widths = .all(2) } else null,
+                                .border = if (chosen) .{ .color = shell.colors.get(.on_surface), .widths = .all(2) } else null,
                                 .corner_radius = .all(8),
                             },
                         });
@@ -418,7 +447,7 @@ pub fn Using(comptime kit: type) type {
                     .layout = .{ .sizing = .{ .width = .grow_equal, .height = .grow }, .padding = .all(8), .child_alignment = .{ .y = .end } },
                     .decoration = .{ .background = self.materialFallback(), .corner_radius = .all(8) },
                 });
-                ui.text("lowered: its background", .{ .font = shell.fonts.body, .size = 11 * shell.text_scale, .color = .rgb(0xffffff), .wrap = .words });
+                ui.text("lowered: its background", .{ .font = shell.fonts.body, .size = 11 * shell.text_scale, .color = shell.colors.get(.on_accent), .wrap = .words });
                 ui.close();
             }
         };
