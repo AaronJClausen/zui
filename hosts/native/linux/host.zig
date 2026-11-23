@@ -8,6 +8,7 @@ pub const dbus = @import("dbus.zig");
 pub const desktop_bus = @import("desktop_bus.zig");
 pub const data_device = @import("data_device.zig");
 pub const text_input = @import("text_input.zig");
+pub const ibus = @import("ibus.zig");
 pub const file_watch = @import("file_watch.zig");
 pub const services = @import("services.zig");
 pub const chrome = @import("chrome.zig");
@@ -152,6 +153,7 @@ pub const Host = struct {
         chosen.bus_addresses = self.bus_addresses;
         chosen.service_fake = self.service_fake;
         chosen.forced_window_manager_support = null;
+        chosen.input_method_bus = null;
         try chosen.init(io, options);
     }
 
@@ -283,6 +285,7 @@ test {
     _ = desktop_bus;
     _ = data_device;
     _ = text_input;
+    _ = ibus;
     _ = file_watch;
     _ = services;
     _ = chrome;

@@ -41,25 +41,70 @@ pub fn typedText(state: *xkb.State, modifiers: zui.Modifiers, evdev_code: u32, b
 /// types what it composes, and one that cancels it types nothing. A
 /// repeat types as it would without compose.
 pub fn composedText(state: *xkb.State, compose: *Compose, modifiers: zui.Modifiers, evdev_code: u32, repeat: bool, buffer: *[64]u8) ?[]const u8 {
-    if (modifiers.control or modifiers.alt or modifiers.super) return null;
-    const sequences = compose.state orelse return plainText(state, evdev_code, buffer);
-    if (repeat) return plainText(state, evdev_code, buffer);
-    const keysym = xkb.xkb_state_key_get_one_sym(state, evdev_code + xkb.evdev_offset);
-    if (xkb.xkb_compose_state_feed(sequences, keysym) != .accepted) return plainText(state, evdev_code, buffer);
-    switch (xkb.xkb_compose_state_get_status(sequences)) {
-        .composing => return null,
-        .composed => {
-            defer xkb.xkb_compose_state_reset(sequences);
-            const len = xkb.xkb_compose_state_get_utf8(sequences, buffer, buffer.len);
-            if (len <= 0 or len >= buffer.len) return null;
-            return buffer[0..@intCast(len)];
-        },
-        .cancelled => {
-            xkb.xkb_compose_state_reset(sequences);
-            return null;
-        },
-        else => return plainText(state, evdev_code, buffer),
+    const press: PressedKey = .read(state, modifiers, evdev_code, repeat);
+    return press.composedText(compose, buffer);
+}
+
+/// What a press would type, read from the keyboard's state as the key
+/// went down, so it can be typed later, as when an input method answers
+/// for it, through the compose sequences as they stand then.
+pub const PressedKey = struct {
+    keysym: xkb.Keysym,
+    repeat: bool,
+    is_shortcut: bool,
+    plain_text: [64]u8 = undefined,
+    plain_text_len: u8 = 0,
+
+    pub fn read(state: *xkb.State, modifiers: zui.Modifiers, evdev_code: u32, repeat: bool) PressedKey {
+        var press: PressedKey = .{
+            .keysym = xkb.xkb_state_key_get_one_sym(state, evdev_code + xkb.evdev_offset),
+            .repeat = repeat,
+            .is_shortcut = modifiers.control or modifiers.alt or modifiers.super,
+        };
+        if (plainText(state, evdev_code, &press.plain_text)) |typed| press.plain_text_len = @intCast(typed.len);
+        return press;
     }
+
+    fn plain(self: *const PressedKey, buffer: *[64]u8) ?[]const u8 {
+        if (self.plain_text_len == 0) return null;
+        @memcpy(buffer[0..self.plain_text_len], self.plain_text[0..self.plain_text_len]);
+        return buffer[0..self.plain_text_len];
+    }
+
+    /// Feeds `compose`, as `composedText` does, and returns what the press
+    /// types, written into `buffer`.
+    pub fn composedText(self: *const PressedKey, compose: *Compose, buffer: *[64]u8) ?[]const u8 {
+        if (self.is_shortcut) return null;
+        const sequences = compose.state orelse return self.plain(buffer);
+        if (self.repeat) return self.plain(buffer);
+        if (xkb.xkb_compose_state_feed(sequences, self.keysym) != .accepted) return self.plain(buffer);
+        switch (xkb.xkb_compose_state_get_status(sequences)) {
+            .composing => return null,
+            .composed => {
+                defer xkb.xkb_compose_state_reset(sequences);
+                const len = xkb.xkb_compose_state_get_utf8(sequences, buffer, buffer.len);
+                if (len <= 0 or len >= buffer.len) return null;
+                return buffer[0..@intCast(len)];
+            },
+            .cancelled => {
+                xkb.xkb_compose_state_reset(sequences);
+                return null;
+            },
+            else => return self.plain(buffer),
+        }
+    }
+};
+
+/// The text `keysym` stands for, as an input method's forwarded key names
+/// it, written into `buffer`: none for a control character or a key that
+/// types nothing.
+pub fn textOfKeysym(keysym: xkb.Keysym, buffer: *[64]u8) ?[]const u8 {
+    const len = xkb.xkb_keysym_to_utf8(keysym, buffer, buffer.len);
+    // The length counts the 0 byte it writes after the text.
+    if (len <= 1) return null;
+    const typed = buffer[0..@intCast(len - 1)];
+    if (typed.len == 1 and (typed[0] < 0x20 or typed[0] == 0x7F)) return null;
+    return typed;
 }
 
 fn plainText(state: *xkb.State, evdev_code: u32, buffer: *[64]u8) ?[]const u8 {

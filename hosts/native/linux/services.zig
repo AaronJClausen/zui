@@ -703,7 +703,7 @@ fn publishWithLeftOut(pending: PendingAnswer, outcome: zui.ServiceAnswer.Outcome
 }
 
 /// Text of up to `capacity` bytes, kept whole or not at all.
-fn Text(comptime capacity: usize) type {
+pub fn Text(comptime capacity: usize) type {
     return struct {
         const Self = @This();
 
@@ -711,7 +711,8 @@ fn Text(comptime capacity: usize) type {
         len: usize = 0,
         overflowed: bool = false,
 
-        fn set(self: *Self, text: []const u8) bool {
+        /// False, keeping none of it, for text longer than `capacity`.
+        pub fn set(self: *Self, text: []const u8) bool {
             self.* = .{};
             self.append(text);
             return !self.overflowed;
@@ -726,7 +727,7 @@ fn Text(comptime capacity: usize) type {
             self.len += text.len;
         }
 
-        fn slice(self: *const Self) []const u8 {
+        pub fn slice(self: *const Self) []const u8 {
             return self.bytes[0..self.len];
         }
     };

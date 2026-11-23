@@ -36,7 +36,7 @@ decorations; many windows.
 | `10-reach:04-window-decorations` Window decorations | waiting on a person |
 | `10-reach:05-many-windows` Many windows | done |
 | `10-reach:06-platform-owned-loop` Hosts whose platform owns the loop | done |
-| `10-reach:07-x11-ibus` The input method on X11 over IBus's D-Bus protocol | not started |
+| `10-reach:07-x11-ibus` The input method on X11 over IBus's D-Bus protocol | waiting on CI |
 | `10-reach:08-ring-edges-agree` WebGL and sokol agree on a ring's inner edge | done |
 | `10-reach:09-turned-edges-agree` WebGL and sokol agree on a turned box's edges | not started |
 
@@ -794,16 +794,18 @@ Decided here:
   Mesa and NVIDIA do; without it, a transparent surface is drawn opaque.
   X11 will carry the same field on `.x11` and draw through the same
   `Device`.
-- **No input method on X11 yet, and compose on both backends.** XIM
-  opens its input context by waiting for the input method's client
-  messages on Xlib's event queue, and filters Xlib `XEvent`s, so it
-  needs Xlib to own the queue. The X11 host hands the queue to xcb,
-  which its event loop and the EGL path on `Surface.x11` rely on, so XIM
-  would mean rebuilding the host's loop around Xlib. IBus's D-Bus
-  protocol, served by ibus-daemon and by fcitx5, needs no change to the
-  queue and reaches the most input methods, so it is the path, queued as
-  `10-reach:07-x11-ibus`. Until then typed text comes through xkb, now
-  with xkbcommon's compose sequences, shared by both backends.
+- **The input method on X11 is IBus's D-Bus protocol, not XIM, and
+  compose is on both backends.** XIM opens its input context by waiting
+  for the input method's client messages on Xlib's event queue, and
+  filters Xlib `XEvent`s, so it needs Xlib to own the queue. The X11
+  host hands the queue to xcb, which its event loop and the EGL path on
+  `Surface.x11` rely on, so XIM would mean rebuilding the host's loop
+  around Xlib. IBus's D-Bus protocol, served by ibus-daemon and by
+  fcitx5, needs no change to the queue and reaches the most input
+  methods, so the X11 host speaks it (`10-reach:07-x11-ibus`), through
+  the portal `org.freedesktop.portal.IBus`. Where no input method
+  answers, typed text comes through xkb with xkbcommon's compose
+  sequences, shared by both backends.
 - **An X11 custom title bar needs the window manager's moves, and gives
   way to its frame.** `custom_title_bar` is true only where
   `_NET_SUPPORTED` lists `_NET_WM_MOVERESIZE`, since a title bar the
@@ -2184,8 +2186,13 @@ Text arrives as an `IBusText`, a variant holding the struct
 `(sa{sv}sv)`: its name, its attachments, the text and its attributes.
 The host's own D-Bus client (`hosts/native/linux/dbus.zig`), which the
 desktop's settings and the services use over `session.zig`, reads
-strings, integers, arrays and variants of those, but not a struct inside
-a variant. Keys reach the window as the server sends them
+strings, integers, arrays, variants and structs; a struct inside a
+variant is read by hand, as the accent's `(ddd)` is in
+`desktop_bus.zig`, with no reader that checks the variant holds the
+struct asked for. (Checked again at `cff955e`: fcitx5 still owns the
+four names, and a context made through the portal introspects with the
+methods and signals above, and goes when the connection that made it
+closes.) Keys reach the window as the server sends them
 (`X11Host.onKey`), typing at once, so nothing holds a key until an input
 method has answered for it.
 
@@ -2228,7 +2235,57 @@ cycle passes on X11.
 
 **Spec.** §7, §16.3, §16.6.
 
-**Status.** Not started.
+**Status.** Done here, in `hosts/native/` alone, with CI's Xvfb leg
+still to confirm it. `hosts/native/linux/ibus.zig` holds
+`ibus.InputContext`, on a connection of its own to the session bus:
+`X11Host.init` opens it within the same 250 ms as the desktop's settings
+(`Session.readDesktopUntil`), says `Hello`, watches the portal's
+`NameOwnerChanged` and sends `CreateInputContext("zui")` with
+`no_auto_start`, waiting for no answer; the answer, read by the host's
+wait, makes the context ready, watches its signals by path and sender,
+and sets its capabilities (preedit text and focus). `zuiApply`, focus
+and `ConfigureNotify` focus it with the caret in root coordinates (the
+window's origin from `xcb_translate_coordinates`, kept until the window
+is configured) or unfocus it, each request sent only when it changes.
+`X11Host.onKey` reads each key's keysym, evdev code, X modifier mask and
+what it would type (`keyboard.PressedKey`) as it goes down, and hands it
+to `takeKey`, which holds it in order, behind up to 64 entries, until
+`ProcessKeyEvent` answers: consumed, it reaches the record as a key and
+types nothing; not consumed, it types through xkb and compose as before.
+Past 100 ms (`answer_bound_ns`, which `zuiWait` wakes for) every key
+held is typed and the input method is passed over until a reply of its
+arrives; an error reply, the input method leaving the bus or the bus
+hanging up types the keys at once, and a new owner of the portal is
+asked for a context again. `CommitText` is typed through the inbox once,
+behind the keys held before it (4 KiB held); `ForwardKeyEvent` reaches
+the record as a key and types its keysym's text; the preedit
+(`UpdatePreeditText`, `UpdatePreeditTextWithMode`, `Show`/`Hide`) is
+kept with its cursor in bytes for `11-polish:06-text-editing`. What does
+not fit counts in the record's dropped events and text bytes. `dbus.zig`
+gained `Reader.beginVariantStruct`, which `ibus.readText` reads
+`IBusText` with. Measured: fcitx5 here answers `ProcessKeyEvent` in a
+median of 0.1 ms and at most 1.7 ms over 100 keys, so the 100 ms bound
+stands; the idle tour on X11 drew 1 frame and woke 0 times in 10 s (3.8
+ms of CPU). Six unit tests in `ibus.zig` run over a socket pair, with
+one more in `dbus.zig`, and five tests in `x11_conformance.zig` run on
+`ZUI_HOST_TEST_SESSION_BUS`, four playing the input method there (the
+context's creation with focus and the caret following frames, consumed
+and unconsumed keys and a commit typed once, keys past the bound typed
+in order and the input method asked again once it answers, and one
+leaving the bus) and one with none; the host reads no other service from
+that bus (`X11Host.input_method_bus`), so the services' and desktop's
+tests, running beside them, keep their names. The opt-in test, with
+`ZUI_HOST_TEST_SHOWN_WINDOW`, typed "zui" through fcitx5 into a shown
+window, each key answered within the bound (Hyprland did not focus the
+Xwayland window, so the test stands in for the server's `FocusIn`). The
+host suite passes in Debug and ReleaseSafe on Wayland and with
+`ZUI_HOST_BACKEND=x11` on `:0`, 155 of 158 with the bus (the stand-in
+window manager and the two opt-in tests skipped), `check` passes for
+this target, `x86_64-windows` and `aarch64-windows`, and `services`,
+`theme`, `title-bar`, the tour's cycle and the showcase pass on both
+backends. Not done: a real input method's commit (fcitx5 ran in its
+keyboard layout, so it consumed nothing), and CI: its Xvfb leg of
+`hosts/native` is to pass the five bus tests with its private bus.
 
 ## 10-reach:08-ring-edges-agree — WebGL and sokol agree on a ring's inner edge
 

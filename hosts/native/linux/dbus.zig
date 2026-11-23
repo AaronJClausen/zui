@@ -279,6 +279,20 @@ pub const Reader = struct {
         return inner;
     }
 
+    /// Reads a variant's signature and, when it holds the struct
+    /// `struct_signature`, such as IBus's text `(sa{sv}sv)`, begins the
+    /// struct, its fields read next. A variant of another type is skipped
+    /// whole, and false returned.
+    pub fn beginVariantStruct(self: *Reader, struct_signature: []const u8) Error!bool {
+        const held = try self.variantSignature();
+        if (!std.mem.eql(u8, held, struct_signature)) {
+            try self.skip(held);
+            return false;
+        }
+        try self.beginStruct();
+        return true;
+    }
+
     /// Skips one value of the single complete type `type_signature`.
     pub fn skip(self: *Reader, type_signature: []const u8) Error!void {
         var rest = type_signature;
@@ -908,6 +922,26 @@ test "an a{sv} of strings, booleans, numbers, byte arrays and filters, and an as
     try testing.expectEqualStrings("file:///a", try reader.string());
     try testing.expectEqualStrings("file:///b", try reader.string());
     try testing.expectEqual(uris_end, reader.position);
+}
+
+test "a variant holding the struct asked for is begun, its fields read next, and one of another type is skipped whole" {
+    var buffer: [128]u8 = undefined;
+    var writer: Writer = .{ .buffer = &buffer };
+    writer.signature("(su)");
+    writer.beginStruct();
+    writer.string("name");
+    writer.uint32(7);
+    writer.signature("as");
+    writer.stringArray(&.{"skipped"});
+    writer.string("after");
+    try testing.expect(!writer.overflowed);
+
+    var reader: Reader = .{ .bytes = buffer[0..writer.len] };
+    try testing.expect(try reader.beginVariantStruct("(su)"));
+    try testing.expectEqualStrings("name", try reader.string());
+    try testing.expectEqual(@as(u32, 7), try reader.uint32());
+    try testing.expect(!try reader.beginVariantStruct("(su)"));
+    try testing.expectEqualStrings("after", try reader.string());
 }
 
 test "authentication answers the bus's OK, then begins, and a refusal fails" {

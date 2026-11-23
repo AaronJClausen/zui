@@ -65,7 +65,7 @@ pub const TextInput = struct {
         }
 
         /// Keeps none of a text that does not fit, and returns its length.
-        fn set(self: *Text, utf8: []const u8) u32 {
+        pub fn set(self: *Text, utf8: []const u8) u32 {
             if (utf8.len > text_capacity) {
                 self.len = 0;
                 return @intCast(utf8.len);

@@ -395,19 +395,40 @@ far it:
   through `_NET_WM_MOVERESIZE` and draws no frame of its own; presses on
   the frame's chrome regions go to the window manager, and the host
   works the caption buttons; see *A custom title bar* below;
+- types through the session's input method over IBus's D-Bus protocol,
+  which ibus-daemon and fcitx5 both serve: at `init`, within its 250 ms,
+  it connects to the session bus and asks the portal
+  `org.freedesktop.portal.IBus` for an input context (without starting
+  an input method the session does not run), setting its capabilities to
+  preedit text and focus once it answers. While a frame's
+  `HostRequests.text_input` names a caret and the window has focus, the
+  context is focused (`FocusIn`) with the caret's rectangle in root
+  coordinates (`SetCursorLocation`), and otherwise unfocused
+  (`FocusOut`), each sent only when it changes. While it is focused,
+  each press and release goes to `ProcessKeyEvent` with its keysym,
+  evdev code and modifier mask, and waits, in order behind the keys
+  before it, for the answer: a key the input method consumes reaches the
+  record as a key and types nothing, and one it does not types through
+  the keymap and compose. A key unanswered after 100 ms (fcitx5 here
+  answers in under 2 ms) is typed with every key behind it, and the
+  input method is passed over until it answers again. `CommitText` is
+  typed once, behind the keys held before it, `ForwardKeyEvent` types
+  the key it names, and the preedit (`UpdatePreeditText`) is kept but
+  not yet reported. An input method that leaves the bus types the keys
+  it held at once, and one that takes its place is asked for a context
+  again. Up to 64 keys and 4 KiB of committed text are held; what does
+  not fit is counted in the record's dropped events and text bytes;
 - reports the desktop's environment, the lifecycle events and the
   services as the Wayland host does, through the same D-Bus clients, and
   watches directories through the same inotify watches;
 - waits as `nextFrame` says, on the connection, the desktop's buses, the
-  watches and the wake.
+  watches, the input method and the wake.
 
 Not yet on X11, each answered as on a compositor without the protocol:
-the input method (XIM needs Xlib to own the event queue, which the host
-gives to xcb; IBus's D-Bus protocol, served by ibus-daemon and fcitx5,
-is `10-reach:07-x11-ibus`), many windows (`zuiOpenWindow` is
-`error.TooManyWindows`) and the system material (`system_material` is
-false). It links libX11, libX11-xcb, libxcb, libxcb-xkb, libxcb-cursor
-and libxkbcommon-x11.
+many windows (`zuiOpenWindow` is `error.TooManyWindows`) and the system
+material (`system_material` is false). XIM is not used: it needs Xlib to
+own the event queue, which the host gives to xcb. It links libX11,
+libX11-xcb, libxcb, libxcb-xkb, libxcb-cursor and libxkbcommon-x11.
 
 It passes zui's host suite against a window that is never mapped, whose
 harness delivers what the server would to the host's own handlers, and
@@ -416,9 +437,17 @@ makes, `Xft.dpi`, focus, the close button and the cursor. Another client
 on a connection of its own reads the window's clipboard as each target,
 owns the clipboard and answers the window's reads whole, refused, never,
 and in `INCR`'s chunks within and past the bound, and drags and drops
-onto the window, with and without a URI list. Without an X server to
-connect to, they are skipped with a message. Under Wayland they run
-against Xwayland when `DISPLAY` is set, and CI runs them under Xvfb.
+onto the window, with and without a URI list. With
+`ZUI_HOST_TEST_SESSION_BUS` set, a test plays the input method on that
+bus under the portal's name and checks the context's creation, focus and
+the caret following the frames, a consumed key typing nothing and an
+unconsumed one typing, committed text typed once, keys unanswered past
+the bound typed in order, and an input method that leaves the bus, or
+none at all, leaving typing to the keymap; with
+`ZUI_HOST_TEST_SHOWN_WINDOW` set, a shown window types through the
+session's own input method. Without an X server to connect to, they are
+skipped with a message. Under Wayland they run against Xwayland when
+`DISPLAY` is set, and CI runs them under Xvfb.
 
 ## Accessibility
 

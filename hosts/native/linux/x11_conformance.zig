@@ -21,13 +21,16 @@ const UnmappedWindow = struct {
     title_bar: zui.TitleBar = .native,
     /// Null reads the window manager's from the root window.
     window_manager_support: ?WindowManagerSupport = null,
+    /// The bus the input method is reached on; null reaches none.
+    input_method_bus: ?[]const u8 = null,
 
     /// With `forced_scale` set, a physical pixel is that many layout units
-    /// at a zoom of 1. The window reads no bus, so its environment starts
-    /// at zui's defaults.
+    /// at a zoom of 1. The window reads no bus but `input_method_bus`, so
+    /// its environment starts at zui's defaults.
     fn open(self: *UnmappedWindow, forced_scale: ?f32) !void {
         self.window_host.forced_scale = forced_scale;
         self.window_host.bus_addresses = no_buses;
+        self.window_host.input_method_bus = self.input_method_bus;
         self.window_host.service_fake = &self.service_fake;
         self.window_host.forced_window_manager_support = self.window_manager_support;
         self.window_host.init(testing.io, .{ .title = "zui host suite on X11", .size = .{ 320, 240 }, .visible = false, .title_bar = self.title_bar }) catch |err| switch (err) {
@@ -1307,4 +1310,463 @@ test "on X11 the window manager is sent each request as EWMH and ICCCM name it, 
     _ = x11.xcb_flush(window_manager.connection);
     try titled.pollUntilReported(.{ .custom_title_bar = false });
     try testing.expectEqual(@as(?zui.ChromeKind, null), titled.kindAt(title));
+}
+
+const dbus = zui_host.linux.dbus;
+const ibus = zui_host.linux.ibus;
+
+const played_context_path = "/org/freedesktop/IBus/InputContext_7";
+const bus_service: dbus.Header = .{ .type = .method_call, .destination = "org.freedesktop.DBus", .path = "/org/freedesktop/DBus", .interface = "org.freedesktop.DBus" };
+
+/// An input method played on the test's session bus under the IBus
+/// portal's name, which keeps the calls made of it in order and answers
+/// only as a test says.
+const PlayedInputMethod = struct {
+    bus: dbus.Connection = .{},
+    calls: [64]Call = undefined,
+    call_count: usize = 0,
+    calls_taken: usize = 0,
+    reply_serials_seen: [8]u32 = @splat(0),
+    replies_seen: usize = 0,
+
+    const Call = struct {
+        member: services.Text(32) = .{},
+        serial: u32 = 0,
+        sender: services.Text(64) = .{},
+        arguments: [4]u32 = @splat(0),
+    };
+
+    fn open(self: *PlayedInputMethod, address: []const u8) !void {
+        const give_up_at = deadlineIn(5);
+        try self.bus.open(testing.io, address, give_up_at);
+        var hello = bus_service;
+        hello.member = "Hello";
+        try self.awaitReply(try self.bus.send(testing.io, hello, "", give_up_at));
+        var body_buffer: [128]u8 = undefined;
+        var body: dbus.Writer = .{ .buffer = &body_buffer };
+        body.string(ibus.portal.service);
+        const do_not_queue = 4;
+        body.uint32(do_not_queue);
+        var request_name = bus_service;
+        request_name.member = "RequestName";
+        request_name.signature = "su";
+        try self.awaitReply(try self.bus.send(testing.io, request_name, body_buffer[0..body.len], give_up_at));
+    }
+
+    fn close(self: *PlayedInputMethod) void {
+        self.bus.close();
+    }
+
+    pub fn onMessage(self: *PlayedInputMethod, message: dbus.Message) void {
+        const header = message.header;
+        if (header.type == .method_return) {
+            self.reply_serials_seen[self.replies_seen % self.reply_serials_seen.len] = header.reply_serial orelse 0;
+            self.replies_seen += 1;
+            return;
+        }
+        if (header.type != .method_call or self.call_count == self.calls.len) return;
+        const interface = header.interface orelse return;
+        if (!std.mem.eql(u8, interface, ibus.portal.interface) and !std.mem.eql(u8, interface, ibus.context_interface)) return;
+        var call: Call = .{ .serial = header.serial };
+        _ = call.member.set(header.member orelse "");
+        _ = call.sender.set(header.sender orelse "");
+        var body = message.body;
+        for (header.signature, 0..) |code, index| {
+            if (index == call.arguments.len or (code != 'u' and code != 'i')) break;
+            call.arguments[index] = body.uint32() catch break;
+        }
+        self.calls[self.call_count] = call;
+        self.call_count += 1;
+    }
+
+    fn awaitReply(self: *PlayedInputMethod, serial: u32) !void {
+        const give_up_at = deadlineIn(5);
+        while (std.mem.indexOfScalar(u32, &self.reply_serials_seen, serial) == null) {
+            if (!self.bus.waitFor(testing.io, std.os.linux.POLL.IN, give_up_at)) return error.Timeout;
+            try self.bus.receive(self);
+        }
+    }
+
+    /// The next call the host made of the input method, which must be a
+    /// call of `member`.
+    fn expectCall(self: *PlayedInputMethod, member: []const u8) !Call {
+        const give_up_at = deadlineIn(5);
+        while (self.calls_taken == self.call_count) {
+            if (!self.bus.waitFor(testing.io, std.os.linux.POLL.IN, give_up_at)) return error.Timeout;
+            try self.bus.receive(self);
+        }
+        defer self.calls_taken += 1;
+        const call = self.calls[self.calls_taken];
+        try testing.expectEqualStrings(member, call.member.slice());
+        return call;
+    }
+
+    fn reply(self: *PlayedInputMethod, call: *const Call, signature: []const u8, body: []const u8) !void {
+        _ = try self.bus.send(testing.io, .{ .type = .method_return, .reply_serial = call.serial, .destination = call.sender.slice(), .signature = signature }, body, deadlineIn(1));
+    }
+
+    fn answerKey(self: *PlayedInputMethod, call: *const Call, consumed: bool) !void {
+        var body_buffer: [8]u8 = undefined;
+        var body: dbus.Writer = .{ .buffer = &body_buffer };
+        body.boolean(consumed);
+        try self.reply(call, "b", body_buffer[0..body.len]);
+    }
+
+    fn commit(self: *PlayedInputMethod, text: []const u8) !void {
+        var body_buffer: [512]u8 = undefined;
+        var body: dbus.Writer = .{ .buffer = &body_buffer };
+        ibus.writeText(&body, text);
+        _ = try self.bus.send(testing.io, .{ .type = .signal, .path = played_context_path, .interface = ibus.context_interface, .member = "CommitText", .signature = "v" }, body_buffer[0..body.len], deadlineIn(1));
+    }
+};
+
+fn deadlineIn(seconds: f64) zui.Instant {
+    return zui.Instant.fromTimestamp(std.Io.Timestamp.now(testing.io, .awake)).addSeconds(seconds);
+}
+
+/// What the polls since it was made reported: the text typed and the
+/// evdev codes of the keys, in order.
+const Reported = struct {
+    text: [256]u8 = undefined,
+    text_len: usize = 0,
+    keys_down: [32]u32 = undefined,
+    keys_down_count: usize = 0,
+    keys_up_count: usize = 0,
+
+    fn typed(self: *const Reported) []const u8 {
+        return self.text[0..self.text_len];
+    }
+
+    fn pressed(self: *const Reported) []const u32 {
+        return self.keys_down[0..self.keys_down_count];
+    }
+};
+
+/// A window on the test's session bus, its context made by the played
+/// input method and focused at a caret, at a scale of 2.
+const InputMethodWindow = struct {
+    window: UnmappedWindow = .{},
+    played: PlayedInputMethod = .{},
+    polled: zui_testing.PolledRecord = .{},
+    reported: Reported = .{},
+
+    const caret: zui.Rect = .{ .x = 10, .y = 20, .width = 1, .height = 16 };
+
+    fn open(self: *InputMethodWindow) !void {
+        const address = std.mem.span(std.c.getenv("ZUI_HOST_TEST_SESSION_BUS") orelse return error.SkipZigTest);
+        try self.played.open(address);
+        errdefer self.played.close();
+        self.window.input_method_bus = address;
+        try self.window.open(2);
+        errdefer self.window.close();
+        if (self.host().keymap == null) {
+            std.debug.print("skipped: the X server offers no XKB keymap\n", .{});
+            return error.SkipZigTest;
+        }
+        self.polled.init();
+        _ = self.polled.poll(self.host());
+
+        const created = try self.played.expectCall("CreateInputContext");
+        var body_buffer: [64]u8 = undefined;
+        var body: dbus.Writer = .{ .buffer = &body_buffer };
+        body.string(played_context_path);
+        try self.played.reply(&created, "o", body_buffer[0..body.len]);
+        try self.pumpUntil(isReady);
+        try testing.expectEqual(ibus.capabilities, (try self.played.expectCall("SetCapabilities")).arguments[0]);
+    }
+
+    fn close(self: *InputMethodWindow) void {
+        self.window.close();
+        self.played.close();
+    }
+
+    fn host(self: *InputMethodWindow) *X11Host {
+        return self.window.host();
+    }
+
+    fn askForTextInput(self: *InputMethodWindow, at: ?zui.Rect) void {
+        self.host().zuiApply(.main, .{ .text_input = if (at) |rect| .{ .caret = rect } else null });
+    }
+
+    /// Focuses the window and asks for text input at `caret`, which the
+    /// input method must be told.
+    fn focusAtCaret(self: *InputMethodWindow) !void {
+        self.host().onFocus(true);
+        self.askForTextInput(caret);
+        _ = try self.played.expectCall("FocusIn");
+        _ = try self.played.expectCall("SetCursorLocation");
+    }
+
+    /// Waits a moment for what the buses send, and polls.
+    fn pump(self: *InputMethodWindow) void {
+        const window_host = self.host();
+        window_host.zuiWait(.{ .at = window_host.now().addSeconds(0.005) });
+        _ = self.polled.poll(window_host);
+        const reported = &self.reported;
+        for (self.polled.builder.events()) |event| switch (event) {
+            .text => |text| {
+                @memcpy(reported.text[reported.text_len..][0..text.len], text);
+                reported.text_len += text.len;
+            },
+            .key_down => |key| {
+                reported.keys_down[reported.keys_down_count] = key.scancode;
+                reported.keys_down_count += 1;
+            },
+            .key_up => reported.keys_up_count += 1,
+            else => {},
+        };
+    }
+
+    fn pumpUntil(self: *InputMethodWindow, comptime condition: fn (*InputMethodWindow) bool) !void {
+        const give_up_at = deadlineIn(5);
+        while (!condition(self)) {
+            if (!self.host().now().isBefore(give_up_at)) return error.Timeout;
+            self.pump();
+        }
+    }
+
+    fn pumpFor(self: *InputMethodWindow, seconds: f64) void {
+        const until = self.host().now().addSeconds(seconds);
+        while (self.host().now().isBefore(until)) self.pump();
+    }
+
+    fn evdevCodeOf(self: *InputMethodWindow, key: zui.Key) u32 {
+        return keycodeOf(self.host(), key).? - 8;
+    }
+
+    fn press(self: *InputMethodWindow, key: zui.Key, pressed: bool) void {
+        self.host().onKey(keycodeOf(self.host(), key).?, pressed);
+    }
+
+    fn isReady(self: *InputMethodWindow) bool {
+        return self.host().input_context.phase == .ready;
+    }
+};
+
+fn requestsSent(input_method_window: *InputMethodWindow) u32 {
+    return input_method_window.host().input_context.requests_sent;
+}
+
+test "on X11 the session's input method is asked for a context at init, and focus and the caret in root coordinates follow the frames, each sent once" {
+    var tested: InputMethodWindow = .{};
+    try tested.open();
+    defer tested.close();
+    const window_host = tested.host();
+
+    tested.askForTextInput(InputMethodWindow.caret);
+    window_host.onFocus(true);
+    _ = try tested.played.expectCall("FocusIn");
+    const origin = window_host.window.origin_on_root.?;
+    const located = try tested.played.expectCall("SetCursorLocation");
+    try testing.expectEqual([4]u32{ @bitCast(origin[0] + 20), @bitCast(origin[1] + 40), 2, 32 }, located.arguments);
+
+    const sent = requestsSent(&tested);
+    tested.askForTextInput(InputMethodWindow.caret);
+    tested.pump();
+    try testing.expectEqual(sent, requestsSent(&tested));
+
+    tested.askForTextInput(.{ .x = 30, .y = 20, .width = 1, .height = 16 });
+    try testing.expectEqual(@as(u32, @bitCast(origin[0] + 60)), (try tested.played.expectCall("SetCursorLocation")).arguments[0]);
+    tested.askForTextInput(null);
+    _ = try tested.played.expectCall("FocusOut");
+
+    window_host.onFocus(false);
+    tested.askForTextInput(InputMethodWindow.caret);
+    const unfocused_sent = requestsSent(&tested);
+    tested.pump();
+    try testing.expectEqual(unfocused_sent, requestsSent(&tested));
+    window_host.onFocus(true);
+    _ = try tested.played.expectCall("FocusIn");
+    _ = try tested.played.expectCall("SetCursorLocation");
+}
+
+test "on X11 a key the input method consumes reaches the record as a key and types nothing, one it does not types, and committed text is typed once" {
+    var tested: InputMethodWindow = .{};
+    try tested.open();
+    defer tested.close();
+    try tested.focusAtCaret();
+
+    tested.press(.a, true);
+    tested.pump();
+    try testing.expectEqual(@as(usize, 0), tested.reported.keys_down_count);
+    const pressed = try tested.played.expectCall("ProcessKeyEvent");
+    try testing.expectEqual(@as(u32, 'a'), pressed.arguments[0]);
+    try testing.expectEqual(tested.evdevCodeOf(.a), pressed.arguments[1]);
+    try testing.expectEqual(@as(u32, 0), pressed.arguments[2] & ibus.release_mask);
+    try tested.played.answerKey(&pressed, true);
+    try tested.pumpUntil(struct {
+        fn pressedOne(input_method_window: *InputMethodWindow) bool {
+            return input_method_window.reported.keys_down_count == 1;
+        }
+    }.pressedOne);
+
+    tested.press(.a, false);
+    const released = try tested.played.expectCall("ProcessKeyEvent");
+    try testing.expect(released.arguments[2] & ibus.release_mask != 0);
+    try tested.played.answerKey(&released, false);
+    tested.press(.b, true);
+    try tested.played.answerKey(&(try tested.played.expectCall("ProcessKeyEvent")), false);
+    try tested.pumpUntil(struct {
+        fn typedB(input_method_window: *InputMethodWindow) bool {
+            return input_method_window.reported.text_len > 0;
+        }
+    }.typedB);
+    try testing.expectEqualStrings("b", tested.reported.typed());
+    try testing.expectEqual(@as(usize, 1), tested.reported.keys_up_count);
+
+    try tested.played.commit("\u{4f60}\u{597d}");
+    try tested.pumpUntil(struct {
+        fn committed(input_method_window: *InputMethodWindow) bool {
+            return input_method_window.reported.text_len > 1;
+        }
+    }.committed);
+    tested.pumpFor(0.05);
+    try testing.expectEqualStrings("b\u{4f60}\u{597d}", tested.reported.typed());
+    try testing.expectEqualSlices(u32, &.{ tested.evdevCodeOf(.a), tested.evdevCodeOf(.b) }, tested.reported.pressed());
+}
+
+test "on X11 keys the input method does not answer within the bound are typed in order, it is passed over until it answers, and then asked again" {
+    var tested: InputMethodWindow = .{};
+    try tested.open();
+    defer tested.close();
+    try tested.focusAtCaret();
+
+    const held_at = tested.host().now();
+    tested.press(.c, true);
+    tested.press(.d, true);
+    const first = try tested.played.expectCall("ProcessKeyEvent");
+    const second = try tested.played.expectCall("ProcessKeyEvent");
+    try tested.pumpUntil(struct {
+        fn typedBoth(input_method_window: *InputMethodWindow) bool {
+            return input_method_window.reported.text_len == 2;
+        }
+    }.typedBoth);
+    const waited_ns = tested.host().now().nanoseconds - held_at.nanoseconds;
+    try testing.expect(waited_ns >= ibus.InputContext.answer_bound_ns);
+    try testing.expect(waited_ns < 4 * ibus.InputContext.answer_bound_ns);
+    try testing.expectEqualStrings("cd", tested.reported.typed());
+    try testing.expectEqualSlices(u32, &.{ tested.evdevCodeOf(.c), tested.evdevCodeOf(.d) }, tested.reported.pressed());
+    try testing.expect(!tested.host().input_context.answering);
+
+    const sent = requestsSent(&tested);
+    tested.press(.e, true);
+    tested.pump();
+    try testing.expectEqualStrings("cde", tested.reported.typed());
+    try testing.expectEqual(sent, requestsSent(&tested));
+
+    try tested.played.answerKey(&first, true);
+    try tested.played.answerKey(&second, true);
+    try tested.pumpUntil(struct {
+        fn answering(input_method_window: *InputMethodWindow) bool {
+            return input_method_window.host().input_context.answering;
+        }
+    }.answering);
+    try testing.expectEqualStrings("cde", tested.reported.typed());
+    tested.press(.f, true);
+    _ = try tested.played.expectCall("ProcessKeyEvent");
+}
+
+test "on X11 an input method that leaves the bus while it holds a key leaves typing to the keymap, the key typed without waiting for the bound" {
+    var tested: InputMethodWindow = .{};
+    try tested.open();
+    defer tested.close();
+    try tested.focusAtCaret();
+
+    tested.press(.g, true);
+    _ = try tested.played.expectCall("ProcessKeyEvent");
+    const left_at = tested.host().now();
+    tested.played.close();
+    try tested.pumpUntil(struct {
+        fn typed(input_method_window: *InputMethodWindow) bool {
+            return input_method_window.reported.text_len == 1;
+        }
+    }.typed);
+    try testing.expect(tested.host().now().nanoseconds - left_at.nanoseconds < ibus.InputContext.answer_bound_ns);
+    try tested.pumpUntil(struct {
+        fn closed(input_method_window: *InputMethodWindow) bool {
+            return input_method_window.host().input_context.phase == .closed;
+        }
+    }.closed);
+
+    tested.press(.h, true);
+    tested.pump();
+    try testing.expectEqualStrings("gh", tested.reported.typed());
+}
+
+test "on X11 without an input method on the session bus, keys type through the keymap at once" {
+    const address = std.mem.span(std.c.getenv("ZUI_HOST_TEST_SESSION_BUS") orelse return error.SkipZigTest);
+    var window: UnmappedWindow = .{ .input_method_bus = address };
+    try window.open(1);
+    defer window.close();
+    const window_host = window.host();
+    if (window_host.keymap == null) return error.SkipZigTest;
+    var polled: zui_testing.PolledRecord = .{};
+    polled.init();
+    const give_up_at = deadlineIn(5);
+    while (window_host.input_context.phase == .creating) {
+        if (!window_host.now().isBefore(give_up_at)) return error.Timeout;
+        window_host.zuiWait(.{ .at = window_host.now().addSeconds(0.005) });
+        _ = polled.poll(window_host);
+    }
+    try testing.expectEqual(ibus.InputContext.Phase.closed, window_host.input_context.phase);
+    window_host.onFocus(true);
+    window_host.zuiApply(.main, .{ .text_input = .{ .caret = InputMethodWindow.caret } });
+    window_host.onKey(keycodeOf(window_host, .z).?, true);
+    _ = polled.poll(window_host);
+    var buffer: [8]u8 = undefined;
+    try testing.expectEqualStrings("z", typedText(&polled, &buffer));
+}
+
+test "with ZUI_HOST_TEST_SHOWN_WINDOW set, keys typed into a shown X11 window go through the session's input method, which answers each within the bound" {
+    _ = std.c.getenv("ZUI_HOST_TEST_SHOWN_WINDOW") orelse return error.SkipZigTest;
+    var window_host: X11Host = undefined;
+    window_host.forced_scale = 1;
+    window_host.bus_addresses = null;
+    window_host.service_fake = null;
+    window_host.forced_window_manager_support = null;
+    window_host.input_method_bus = null;
+    window_host.init(testing.io, .{ .title = "zui host suite: input method", .size = .{ 320, 240 } }) catch |err| switch (err) {
+        error.NoX11Display => return skipWithoutServer(),
+        else => return err,
+    };
+    defer window_host.deinit();
+    if (window_host.keymap == null) return error.SkipZigTest;
+    var polled: zui_testing.PolledRecord = .{};
+    polled.init();
+    const give_up_at = deadlineIn(3);
+    const focus_given_up_at = deadlineIn(1);
+    while (window_host.input_context.phase == .creating or (!window_host.window.focused and window_host.now().isBefore(focus_given_up_at))) {
+        if (!window_host.now().isBefore(give_up_at)) return error.Timeout;
+        window_host.zuiWait(.{ .at = window_host.now().addSeconds(0.01) });
+        _ = polled.poll(&window_host);
+    }
+    if (window_host.input_context.phase != .ready) {
+        std.debug.print("skipped: no input method serves org.freedesktop.portal.IBus on the session bus\n", .{});
+        return error.SkipZigTest;
+    }
+    if (!window_host.window.focused) {
+        // The input method takes its focus from the context, not from the server.
+        std.debug.print("note: the window manager did not focus the window, so the test focuses it as the server would\n", .{});
+        window_host.onFocus(true);
+    }
+    window_host.zuiApply(.main, .{ .text_input = .{ .caret = .{ .x = 20, .y = 20, .width = 1, .height = 16 } } });
+    try testing.expect(window_host.input_context.focused);
+
+    var typed: [32]u8 = undefined;
+    var typed_len: usize = 0;
+    for ([_]zui.Key{ .z, .u, .i }) |key| {
+        window_host.onKey(keycodeOf(&window_host, key).?, true);
+        window_host.onKey(keycodeOf(&window_host, key).?, false);
+    }
+    while (window_host.input_context.answerDeadline() != null) {
+        if (!window_host.now().isBefore(give_up_at.addSeconds(2))) return error.Timeout;
+        window_host.zuiWait(.{ .at = window_host.now().addSeconds(0.005) });
+        _ = polled.poll(&window_host);
+        const text = typedText(&polled, typed[typed_len..]);
+        typed_len += text.len;
+    }
+    _ = polled.poll(&window_host);
+    typed_len += typedText(&polled, typed[typed_len..]).len;
+    try testing.expect(window_host.input_context.answering);
+    try testing.expectEqualStrings("zui", typed[0..typed_len]);
 }

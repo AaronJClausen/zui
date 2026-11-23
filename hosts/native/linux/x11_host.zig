@@ -14,6 +14,8 @@ const ReportedEnvironment = session_module.ReportedEnvironment;
 const Inbox = @import("inbox.zig").Inbox;
 const x11_selections = @import("x11_selections.zig");
 const x11_chrome = @import("x11_chrome.zig");
+const ibus = @import("ibus.zig");
+const TextInput = @import("text_input.zig").TextInput;
 
 /// zui's host contract on an X11 window, through Xlib's display and the
 /// xcb connection beneath it, on the thread that polls it: events are read
@@ -41,6 +43,16 @@ const x11_chrome = @import("x11_chrome.zig");
 /// `_GTK_SHOW_WINDOW_MENU` is offered, the edges resize it, and the host
 /// works the caption buttons itself; `custom_title_bar` reports it, and
 /// `window_maximized` follows `_NET_WM_STATE`.
+///
+/// Typed text goes through the session's input method over IBus's D-Bus
+/// protocol, where the portal `org.freedesktop.portal.IBus` answers, as
+/// ibus-daemon and fcitx5 do: while a frame asks for text input and the
+/// window has focus, the input context is focused with its caret in root
+/// coordinates, and each key is held until the input method answers for
+/// it, for at most `ibus.InputContext.answer_bound_ns`. A key it consumes
+/// reaches the record as a key and types nothing; text it commits is
+/// typed. Otherwise keys type through the keymap and the locale's compose
+/// sequences.
 ///
 /// It opens one window, which `visible = false` leaves unmapped, so the
 /// server never shows it. `deinit` closes it, after the renderer's
@@ -126,6 +138,9 @@ pub const X11Host = struct {
     /// root window's `_NET_SUPPORTED`, for tests that must not depend on
     /// the window manager.
     forced_window_manager_support: ?x11_chrome.WindowManagerSupport = null,
+    /// The bus the input method is reached on in place of the session's,
+    /// for tests that play one there and read nothing else from it.
+    input_method_bus: ?[]const u8 = null,
 
     display: *x11.Display,
     connection: *x11.Connection,
@@ -162,6 +177,7 @@ pub const X11Host = struct {
 
     window: Window,
     session: Session,
+    input_context: ibus.InputContext,
 
     const cursor_count = std.meta.fields(zui.Cursor).len;
     const wm_class = "zui\x00zui\x00";
@@ -188,6 +204,10 @@ pub const X11Host = struct {
         requests: zui.HostRequests = .{},
         applied_cursor: ?zui.Cursor = null,
         window_chrome: x11_chrome.WindowChrome = .{},
+        /// Its top-left corner on the root window, which the input method
+        /// places its candidates by; null until asked for, and after the
+        /// window is configured.
+        origin_on_root: ?[2]i32 = null,
         /// Null until the window has reported the whole environment.
         reported_environment: ?ReportedEnvironment = null,
 
@@ -224,12 +244,14 @@ pub const X11Host = struct {
         const bus_addresses = self.bus_addresses;
         const service_fake = self.service_fake;
         const forced_window_manager_support = self.forced_window_manager_support;
+        const input_method_bus = self.input_method_bus;
         self.* = .{
             .io = io,
             .forced_scale = forced_scale,
             .bus_addresses = bus_addresses,
             .service_fake = service_fake,
             .forced_window_manager_support = forced_window_manager_support,
+            .input_method_bus = input_method_bus,
             .display = display,
             .connection = connection,
             .screen = screen,
@@ -252,6 +274,7 @@ pub const X11Host = struct {
             .pointer_root_position = .{ 0, 0 },
             .window = .{},
             .session = undefined,
+            .input_context = .{},
         };
         errdefer xkb.xkb_context_unref(self.xkb_context);
         self.compose = .fromLocale(self.xkb_context);
@@ -270,7 +293,11 @@ pub const X11Host = struct {
         try self.openWindow(options);
         errdefer _ = x11.xcb_destroy_window(connection, self.window.id);
 
-        self.session.readDesktop(self.bus_addresses, self);
+        var session_address: [256]u8 = undefined;
+        const addresses = self.bus_addresses orelse desktop_bus.DesktopBus.addressesFromEnvironment(&session_address);
+        const deadline = self.now().addNanoseconds(Session.desktop_answer_ns);
+        if (input_method_bus orelse addresses.session) |address| self.input_context.open(io, address, deadline);
+        self.session.readDesktopUntil(addresses, self, deadline);
         self.window.reportEnvironment(self.session.settings);
         self.session.handleTerminationSignals();
     }
@@ -383,6 +410,7 @@ pub const X11Host = struct {
     /// Call after the renderer's `deinit`, whose EGL objects live on this
     /// display.
     pub fn deinit(self: *Host) void {
+        self.input_context.close();
         self.session.close();
         self.releaseKeyboardAndCursors();
         if (self.window.id != 0) _ = x11.xcb_destroy_window(self.connection, self.window.id);
@@ -450,7 +478,7 @@ pub const X11Host = struct {
             if (self.awaitsPoll()) return;
             const now_instant = self.now();
             if (frame_at) |instant| if (!now_instant.isBefore(instant)) return;
-            const wake_at = earlier(earlier(frame_at, self.clipboard.deadline()), self.drop.deadline());
+            const wake_at = earlier(earlier(earlier(frame_at, self.clipboard.deadline()), self.drop.deadline()), self.input_context.answerDeadline());
             const timeout_ns: ?u64 = if (wake_at) |instant| instant.nanoseconds -| now_instant.nanoseconds else null;
             if (self.waitForEvents(timeout_ns) == .woken) return;
         }
@@ -465,8 +493,8 @@ pub const X11Host = struct {
     const Waited = enum { events, woken, timed_out };
 
     /// Waits up to `timeout_ns` (forever for null) for the connection, the
-    /// desktop's buses, a watch or a wake, then reads and dispatches what
-    /// they sent. Events xcb read while waiting for a reply are dispatched
+    /// desktop's buses, a watch, the input method or a wake, then reads and
+    /// dispatches what they sent. Events xcb read while waiting for a reply are dispatched
     /// before the wait, since the socket no longer holds them.
     fn waitForEvents(self: *Host, timeout_ns: ?u64) Waited {
         self.session.publishPending();
@@ -474,9 +502,12 @@ pub const X11Host = struct {
         if (timeout_ns != 0 and self.awaitsPoll()) return .events;
         _ = x11.xcb_flush(self.connection);
         const first_session = 1;
+        const input_method = first_session + Session.descriptor_count;
         var descriptors = [_]linux.pollfd{
             .{ .fd = x11.xcb_get_file_descriptor(self.connection), .events = linux.POLL.IN, .revents = 0 },
-        } ++ self.session.pollDescriptors();
+        } ++ self.session.pollDescriptors() ++ [_]linux.pollfd{
+            .{ .fd = self.input_context.descriptor(), .events = linux.POLL.IN, .revents = 0 },
+        };
         var timeout: linux.timespec = undefined;
         if (timeout_ns) |nanoseconds| timeout = Session.timespecOf(nanoseconds);
         const ready = linux.ppoll(&descriptors, descriptors.len, if (timeout_ns != null) &timeout else null, null);
@@ -486,7 +517,10 @@ pub const X11Host = struct {
         const now_instant = self.now();
         self.clipboard.expire(now_instant);
         self.drop.expire(self.selectionEndpoint(), now_instant);
-        const woken = polled and self.session.receive(descriptors[first_session..].*, self);
+        var listener: InputMethodListener = .{ .host = self };
+        if (polled and descriptors[input_method].revents != 0) self.input_context.receive(self.io, &listener);
+        self.input_context.expire(now_instant, &listener);
+        const woken = polled and self.session.receive(descriptors[first_session..input_method].*, self);
         _ = x11.xcb_flush(self.connection);
         if (woken) return .woken;
         return if (polled and ready > 0) .events else .timed_out;
@@ -537,7 +571,11 @@ pub const X11Host = struct {
             x11.expose => self.window.input_arrived = true,
             x11.configure_notify => {
                 const configure: *const x11.ConfigureNotifyEvent = @ptrCast(event);
-                if (configure.window == window) self.onConfigure(configure.width, configure.height);
+                if (configure.window == window) {
+                    self.window.origin_on_root = null;
+                    self.onConfigure(configure.width, configure.height);
+                    self.applyInputMethod();
+                }
             },
             x11.client_message => {
                 const message: *const x11.ClientMessageEvent = @ptrCast(event);
@@ -625,8 +663,81 @@ pub const X11Host = struct {
         if (id != .main) return;
         self.window.requests = requests;
         self.applyCursor();
+        self.applyInputMethod();
         _ = x11.xcb_flush(self.connection);
     }
+
+    /// Focuses the input context at the caret while the last frame asked
+    /// for text input and the window has focus, and otherwise takes its
+    /// focus away.
+    fn applyInputMethod(self: *Host) void {
+        if (!self.input_context.bus.isOpen()) return;
+        const window = &self.window;
+        const area = window.requests.text_input orelse return self.input_context.want(self.io, null);
+        if (!window.focused) return self.input_context.want(self.io, null);
+        const origin = self.windowOriginOnRoot();
+        var caret: TextInput.CursorRectangle = .covering(area.caret, window.surface_coordinates_per_unit);
+        caret.x +|= origin[0];
+        caret.y +|= origin[1];
+        self.input_context.want(self.io, caret);
+    }
+
+    fn windowOriginOnRoot(self: *Host) [2]i32 {
+        if (self.window.origin_on_root) |origin| return origin;
+        const cookie = x11.xcb_translate_coordinates(self.connection, self.window.id, self.screen.root, 0, 0);
+        const reply = x11.xcb_translate_coordinates_reply(self.connection, cookie, null) orelse return .{ 0, 0 };
+        defer x11.free(reply);
+        const origin: [2]i32 = .{ reply.dst_x, reply.dst_y };
+        self.window.origin_on_root = origin;
+        return origin;
+    }
+
+    /// Hands what the input context answers to the window.
+    const InputMethodListener = struct {
+        host: *Host,
+
+        pub fn onKeyAnswered(self: *InputMethodListener, key: *const ibus.HeldKey, types: bool) void {
+            const host = self.host;
+            host.window.deliver(key.event);
+            if (!types) return;
+            const pressed_key = key.pressed_key orelse return;
+            var utf8: [64]u8 = undefined;
+            if (pressed_key.composedText(&host.compose, &utf8)) |typed| host.window.deliverText(typed);
+        }
+
+        pub fn onCommittedText(self: *InputMethodListener, utf8: []const u8) void {
+            self.host.window.deliverText(utf8);
+        }
+
+        /// The key the input method names, typing its keysym's text unless
+        /// Control, Alt or Super is held.
+        pub fn onForwardedKey(self: *InputMethodListener, forwarded: ibus.ForwardedKey) void {
+            const host = self.host;
+            const named = keys.keyFromKeysym(forwarded.keysym);
+            const key_event: zui.KeyEvent = .{
+                .key = if (named != .unidentified) named else host.keyOf(forwarded.evdev_code),
+                .modifiers = host.modifiers,
+                .scancode = forwarded.evdev_code,
+                .at = host.now(),
+            };
+            if (forwarded.isRelease()) return host.window.deliver(.{ .key_up = key_event });
+            host.window.deliver(.{ .key_down = key_event });
+            if (forwarded.state & (x11_control_mask | x11_alt_mask | x11_super_mask) != 0) return;
+            var utf8: [64]u8 = undefined;
+            if (key_translation.textOfKeysym(forwarded.keysym, &utf8)) |typed| host.window.deliverText(typed);
+        }
+
+        pub fn onLeftOut(self: *InputMethodListener, events: u32, bytes: u32) void {
+            const window = &self.host.window;
+            window.inbox.dropped_events +|= events;
+            window.inbox.dropped_bytes +|= bytes;
+            window.input_arrived = true;
+        }
+    };
+
+    const x11_control_mask: u32 = 1 << 2;
+    const x11_alt_mask: u32 = 1 << 3;
+    const x11_super_mask: u32 = 1 << 6;
 
     /// Answers services through `fake` instead of the bus, from the next
     /// call on.
@@ -853,6 +964,7 @@ pub const X11Host = struct {
         if (self.window.focused == focused) return;
         self.window.focused = focused;
         self.window.deliver(.{ .environment = .{ .window_focused = focused } });
+        self.applyInputMethod();
     }
 
     /// In the window's physical pixels.
@@ -953,18 +1065,26 @@ pub const X11Host = struct {
     }
 
     /// An X key code, which is the evdev code plus 8. A press of a key
-    /// already down is a repeat.
+    /// already down is a repeat. While the input context is focused, the
+    /// key waits for the input method's answer before it reaches the
+    /// window.
     pub fn onKey(self: *Host, x_keycode: u8, pressed: bool) void {
         if (x_keycode < xkb.evdev_offset) return;
         const evdev_code: u32 = x_keycode - xkb.evdev_offset;
         const repeat = pressed and self.keys_down.isSet(x_keycode);
         self.keys_down.setValue(x_keycode, pressed);
         const key_event: zui.KeyEvent = .{ .key = self.keyOf(evdev_code), .modifiers = self.modifiers, .repeat = repeat, .scancode = evdev_code, .at = self.now() };
-        self.window.deliver(if (pressed) .{ .key_down = key_event } else .{ .key_up = key_event });
-        if (!pressed) return;
-        const state = self.key_state orelse return;
-        var utf8: [64]u8 = undefined;
-        if (key_translation.composedText(state, &self.compose, self.modifiers, evdev_code, repeat, &utf8)) |typed| self.window.deliverText(typed);
+        const state = self.key_state;
+        const release_bit: u32 = if (pressed) 0 else ibus.release_mask;
+        const key: ibus.HeldKey = .{
+            .event = if (pressed) .{ .key_down = key_event } else .{ .key_up = key_event },
+            .pressed_key = if (pressed and state != null) key_translation.PressedKey.read(state.?, self.modifiers, evdev_code, repeat) else null,
+            .keysym = if (state) |key_state| xkb.xkb_state_key_get_one_sym(key_state, x_keycode) else 0,
+            .evdev_code = evdev_code,
+            .state = release_bit | if (state) |key_state| xkb.xkb_state_serialize_mods(key_state, xkb.state_mods_effective) else 0,
+        };
+        var listener: InputMethodListener = .{ .host = self };
+        self.input_context.takeKey(self.io, key, key_event.at, &listener);
     }
 
     /// The logical key at an evdev code in the server's keymap.

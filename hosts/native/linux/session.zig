@@ -90,7 +90,7 @@ pub const Session = struct {
 
     /// How long `readDesktop` waits for the desktop's settings, so the
     /// first frame has them; later answers arrive as changes.
-    const desktop_answer_ns = 250 * std.time.ns_per_ms;
+    pub const desktop_answer_ns = 250 * std.time.ns_per_ms;
     const termination_signals = [_]std.posix.SIG{ .INT, .TERM, .HUP };
 
     /// The descriptors `pollDescriptors` gives, which a host waits on
@@ -137,7 +137,13 @@ pub const Session = struct {
     pub fn readDesktop(self: *Session, addresses: ?desktop_bus.Addresses, listener: anytype) void {
         var session_address: [256]u8 = undefined;
         const chosen = addresses orelse desktop_bus.DesktopBus.addressesFromEnvironment(&session_address);
-        const deadline = self.now().addNanoseconds(desktop_answer_ns);
+        self.readDesktopUntil(chosen, listener, self.now().addNanoseconds(desktop_answer_ns));
+    }
+
+    /// `readDesktop` at `chosen`, waiting no later than `deadline`, for a
+    /// host that connects to the session bus for more and waits for all of
+    /// it at once.
+    pub fn readDesktopUntil(self: *Session, chosen: desktop_bus.Addresses, listener: anytype, deadline: zui.Instant) void {
         self.desktop.open(self.io, chosen, deadline);
         if (chosen.session) |session| self.services.open(self.io, session, deadline);
         while (self.desktop.awaitingReplies()) {

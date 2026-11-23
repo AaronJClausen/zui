@@ -33,6 +33,8 @@ pub extern "xkbcommon" fn xkb_state_key_get_layout(state: *State, key: u32) call
 pub extern "xkbcommon" fn xkb_state_key_get_utf8(state: *State, key: u32, buffer: ?[*]u8, size: usize) callconv(.c) c_int;
 pub extern "xkbcommon" fn xkb_state_mod_name_is_active(state: *State, name: [*:0]const u8, kind: c_int) callconv(.c) c_int;
 pub extern "xkbcommon" fn xkb_state_key_get_one_sym(state: *State, key: u32) callconv(.c) Keysym;
+pub extern "xkbcommon" fn xkb_state_serialize_mods(state: *State, components: c_int) callconv(.c) u32;
+pub extern "xkbcommon" fn xkb_keysym_to_utf8(keysym: Keysym, buffer: [*]u8, size: usize) callconv(.c) c_int;
 
 pub const ComposeTable = opaque {};
 pub const ComposeState = opaque {};
