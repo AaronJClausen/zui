@@ -28,8 +28,7 @@ pub const backend_variable = "ZUI_HOST_BACKEND";
 ///
 /// Its declarations are the Wayland host's. On X11, which does not yet
 /// do all of them, a call answers as on a compositor without the
-/// protocol: the clipboard is unavailable, a second window is refused as
-/// one too many, chrome regions are kept by nobody, and the environment
+/// protocol: a second window is refused as one too many, chrome regions are kept by nobody, and the environment
 /// reports no system material and no custom title bar.
 ///
 /// ```zig
@@ -45,19 +44,16 @@ pub const Host = struct {
     pub const max_windows = WaylandHost.max_windows;
     pub const wheel_step = WaylandHost.wheel_step;
 
-    /// The Wayland host's clipboard; on X11, `error.Unavailable`.
     pub const zuiClipboard = struct {
         pub fn write(host: *Host, text: []const u8) zui.ServiceError!void {
             return switch (host.backend) {
-                .wayland => |*wayland_host| WaylandHost.zuiClipboard.write(wayland_host, text),
-                .x11 => error.Unavailable,
+                inline else => |*chosen| @TypeOf(chosen.*).zuiClipboard.write(chosen, text),
             };
         }
 
         pub fn read(host: *Host, request: zui.ServiceRequest, sink: zui.ServiceSink) zui.ServiceError!void {
             return switch (host.backend) {
-                .wayland => |*wayland_host| WaylandHost.zuiClipboard.read(wayland_host, request, sink),
-                .x11 => error.Unavailable,
+                inline else => |*chosen| @TypeOf(chosen.*).zuiClipboard.read(chosen, request, sink),
             };
         }
     };
@@ -292,6 +288,7 @@ test {
     _ = chrome;
     _ = material;
     _ = @import("x11_host.zig");
+    _ = @import("x11_selections.zig");
 }
 
 test "ZUI_HOST_BACKEND forces wayland or x11, and anything else leaves the choice to the compositor" {

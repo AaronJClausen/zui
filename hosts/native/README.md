@@ -359,6 +359,28 @@ far it:
 - closes when the window manager sends `WM_DELETE_WINDOW`;
 - sets the cursor a frame asks for from the cursor theme (`xcb-cursor`),
   by its CSS name or the X cursor font's;
+- offers the clipboard as text through the `CLIPBOARD` selection:
+  `Host.zuiClipboard.write(host, text)` owns it with up to 64 KiB of
+  UTF-8 and answers other clients' requests for `TARGETS`,
+  `UTF8_STRING`, `text/plain;charset=utf-8`, `TEXT` and `STRING` (in
+  Latin-1, each character past it a `?`), refusing any other target, and
+  drops the text when another client takes the selection;
+  `read(host, request, sink)` answers the window's own text at once, and
+  otherwise converts the selection to `UTF8_STRING` into a property of
+  the window, publishing a `zui.ServiceReply` from the host's wait once
+  the owner has written it, whole or in `INCR`'s chunks: up to 64 KiB,
+  cut at a character with the rest counted as left out, `""` when no
+  client owns it or its owner refuses, and `.failed` when the owner
+  takes longer than 2 s for it or a chunk of it. The `PRIMARY` selection
+  is not read or written;
+- reports files dropped onto the window through XDND, version 5
+  (`XdndAware`): a drag that offers `text/uri-list`, among its first
+  three types or on its `XdndTypeList`, is accepted for copying in each
+  `XdndStatus`, and its drop's list is read from `XdndSelection` as the
+  clipboard's is, up to 32 KiB of whole lines, then finished with
+  `XdndFinished`; each `file://` URI on this machine is percent-decoded
+  to its path and reported at the drop's position. Any other drag is
+  refused, and its drop finished unaccepted;
 - reports the desktop's environment, the lifecycle events and the
   services as the Wayland host does, through the same D-Bus clients, and
   watches directories through the same inotify watches;
@@ -366,8 +388,7 @@ far it:
   watches and the wake.
 
 Not yet on X11, each answered as on a compositor without the protocol:
-the clipboard (`zuiClipboard` is `error.Unavailable`), drops, the input
-method, a custom title bar (chrome regions are not kept, and
+the input method, a custom title bar (chrome regions are not kept, and
 `custom_title_bar` is false), `minimize` and `toggleMaximized` (which do
 nothing), many windows (`zuiOpenWindow` is `error.TooManyWindows`) and
 the system material (`system_material` is false). It links libX11,
@@ -376,10 +397,13 @@ libX11-xcb, libxcb, libxcb-xkb, libxcb-cursor and libxkbcommon-x11.
 It passes zui's host suite against a window that is never mapped, whose
 harness delivers what the server would to the host's own handlers, and
 its own tests drive the keys, a repeat, the wheel, a resize the server
-makes, `Xft.dpi`, focus, the close button and the cursor. Without an X
-server to connect to, they are skipped with a message. Under Wayland
-they run against Xwayland when `DISPLAY` is set, and CI runs them under
-Xvfb.
+makes, `Xft.dpi`, focus, the close button and the cursor. Another client
+on a connection of its own reads the window's clipboard as each target,
+owns the clipboard and answers the window's reads whole, refused, never,
+and in `INCR`'s chunks within and past the bound, and drags and drops
+onto the window, with and without a URI list. Without an X server to
+connect to, they are skipped with a message. Under Wayland they run
+against Xwayland when `DISPLAY` is set, and CI runs them under Xvfb.
 
 ## Accessibility
 

@@ -2693,10 +2693,11 @@ notifications, the portal's file dialogs and opening URLs, the
 environment from the desktop portal and UPower over D-Bus, and signals,
 sleep and waking as lifecycle events), and on X11 so far one window with
 the same pointer, wheel, keys, repeats, focus, cursor, scale from
-`Xft.dpi`, environment, services and watching, drawn by the sokol
-renderer through EGL; and, in `hosts/web/`, the web host, which runs an
-application in a Web Worker and draws its frames over `zui_wire` through
-the WebGL renderer in `renderers/webgl/`.
+`Xft.dpi`, clipboard through `CLIPBOARD`, files dropped through XDND,
+environment, services and watching, drawn by the sokol renderer through
+EGL; and, in `hosts/web/`, the web host, which runs an application in a
+Web Worker and draws its frames over `zui_wire` through the WebGL
+renderer in `renderers/webgl/`.
 
 <a id="renderer"></a>
 

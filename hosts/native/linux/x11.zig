@@ -3,6 +3,7 @@
 //! since EGL's X11 platform takes an Xlib `Display`, and spoken to through
 //! the xcb connection beneath it, which owns its event queue.
 
+const std = @import("std");
 const xkb = @import("xkb.zig");
 
 pub const Display = opaque {};
@@ -15,6 +16,8 @@ pub const VoidCookie = extern struct { sequence: c_uint };
 pub const InternAtomCookie = extern struct { sequence: c_uint };
 pub const GetPropertyCookie = extern struct { sequence: c_uint };
 pub const PerClientFlagsCookie = extern struct { sequence: c_uint };
+pub const GetSelectionOwnerCookie = extern struct { sequence: c_uint };
+pub const TranslateCoordinatesCookie = extern struct { sequence: c_uint };
 
 pub const Screen = extern struct {
     root: Window,
@@ -145,6 +148,38 @@ pub const PropertyNotifyEvent = extern struct {
     pad1: [3]u8,
 };
 
+pub const SelectionClearEvent = extern struct {
+    response_type: u8,
+    pad0: u8,
+    sequence: u16,
+    time: u32,
+    owner: Window,
+    selection: Atom,
+};
+
+pub const SelectionRequestEvent = extern struct {
+    response_type: u8,
+    pad0: u8,
+    sequence: u16,
+    time: u32,
+    owner: Window,
+    requestor: Window,
+    selection: Atom,
+    target: Atom,
+    property: Atom,
+};
+
+pub const SelectionNotifyEvent = extern struct {
+    response_type: u8,
+    pad0: u8,
+    sequence: u16,
+    time: u32,
+    requestor: Window,
+    selection: Atom,
+    target: Atom,
+    property: Atom,
+};
+
 /// Every XKB event shares these first bytes; `xkb_type` tells them apart.
 pub const XkbEventHeader = extern struct {
     response_type: u8,
@@ -198,6 +233,24 @@ pub const GetPropertyReply = extern struct {
     bytes_after: u32,
     value_len: u32,
     pad0: [12]u8,
+};
+
+pub const GetSelectionOwnerReply = extern struct {
+    response_type: u8,
+    pad0: u8,
+    sequence: u16,
+    length: u32,
+    owner: Window,
+};
+
+pub const TranslateCoordinatesReply = extern struct {
+    response_type: u8,
+    same_screen: u8,
+    sequence: u16,
+    length: u32,
+    child: Window,
+    dst_x: i16,
+    dst_y: i16,
 };
 
 pub const PerClientFlagsReply = extern struct {
@@ -269,7 +322,14 @@ pub const focus_out = 10;
 pub const expose = 12;
 pub const configure_notify = 22;
 pub const property_notify = 28;
+pub const selection_clear = 29;
+pub const selection_request = 30;
+pub const selection_notify = 31;
 pub const client_message = 33;
+
+pub const property_new_value = 0;
+pub const current_time = 0;
+pub const atom_none = 0;
 
 pub const notify_mode_grab = 1;
 pub const notify_mode_ungrab = 2;
@@ -345,6 +405,14 @@ pub extern "xcb" fn xcb_get_property(connection: *Connection, delete: u8, window
 pub extern "xcb" fn xcb_get_property_reply(connection: *Connection, cookie: GetPropertyCookie, err: ?*?*GenericError) callconv(.c) ?*GetPropertyReply;
 pub extern "xcb" fn xcb_get_property_value(reply: *const GetPropertyReply) callconv(.c) ?[*]const u8;
 pub extern "xcb" fn xcb_get_property_value_length(reply: *const GetPropertyReply) callconv(.c) c_int;
+pub extern "xcb" fn xcb_delete_property(connection: *Connection, window: Window, property: Atom) callconv(.c) VoidCookie;
+pub extern "xcb" fn xcb_set_selection_owner(connection: *Connection, owner: Window, selection: Atom, time: u32) callconv(.c) VoidCookie;
+pub extern "xcb" fn xcb_get_selection_owner(connection: *Connection, selection: Atom) callconv(.c) GetSelectionOwnerCookie;
+pub extern "xcb" fn xcb_get_selection_owner_reply(connection: *Connection, cookie: GetSelectionOwnerCookie, err: ?*?*GenericError) callconv(.c) ?*GetSelectionOwnerReply;
+pub extern "xcb" fn xcb_convert_selection(connection: *Connection, requestor: Window, selection: Atom, target: Atom, property: Atom, time: u32) callconv(.c) VoidCookie;
+pub extern "xcb" fn xcb_send_event(connection: *Connection, propagate: u8, destination: Window, event_mask: u32, event: *const [32]u8) callconv(.c) VoidCookie;
+pub extern "xcb" fn xcb_translate_coordinates(connection: *Connection, source: Window, destination: Window, x: i16, y: i16) callconv(.c) TranslateCoordinatesCookie;
+pub extern "xcb" fn xcb_translate_coordinates_reply(connection: *Connection, cookie: TranslateCoordinatesCookie, err: ?*?*GenericError) callconv(.c) ?*TranslateCoordinatesReply;
 pub extern "xcb" fn xcb_free_cursor(connection: *Connection, cursor: u32) callconv(.c) VoidCookie;
 pub extern "xcb" fn xcb_flush(connection: *Connection) callconv(.c) c_int;
 pub extern "xcb" fn xcb_poll_for_event(connection: *Connection) callconv(.c) ?*GenericEvent;
@@ -366,12 +434,67 @@ pub extern "xkbcommon-x11" fn xkb_x11_state_new_from_device(keymap: *xkb.Keymap,
 
 pub extern "c" fn free(pointer: ?*anyopaque) callconv(.c) void;
 
+/// The atoms the X11 host names, each 0 when the server did not answer.
+pub const Atoms = struct {
+    wm_protocols: Atom = 0,
+    wm_delete_window: Atom = 0,
+    net_wm_name: Atom = 0,
+    utf8_string: Atom = 0,
+    clipboard: Atom = 0,
+    targets: Atom = 0,
+    text: Atom = 0,
+    text_plain_utf8: Atom = 0,
+    incr: Atom = 0,
+    /// The host's window's property a clipboard's owner writes into.
+    clipboard_property: Atom = 0,
+    /// The host's window's property a drop's source writes into.
+    drop_property: Atom = 0,
+    uri_list: Atom = 0,
+    xdnd_aware: Atom = 0,
+    xdnd_enter: Atom = 0,
+    xdnd_position: Atom = 0,
+    xdnd_status: Atom = 0,
+    xdnd_leave: Atom = 0,
+    xdnd_drop: Atom = 0,
+    xdnd_finished: Atom = 0,
+    xdnd_selection: Atom = 0,
+    xdnd_type_list: Atom = 0,
+    xdnd_action_copy: Atom = 0,
+
+    const names: [std.meta.fields(Atoms).len][]const u8 = .{
+        "WM_PROTOCOLS", "WM_DELETE_WINDOW", "_NET_WM_NAME", "UTF8_STRING",   "CLIPBOARD",    "TARGETS",        "TEXT",         "text/plain;charset=utf-8",
+        "INCR",         "ZUI_CLIPBOARD",    "ZUI_DROP",     "text/uri-list", "XdndAware",    "XdndEnter",      "XdndPosition", "XdndStatus",
+        "XdndLeave",    "XdndDrop",         "XdndFinished", "XdndSelection", "XdndTypeList", "XdndActionCopy",
+    };
+
+    /// Asks for every atom at once, then waits for the answers, so the
+    /// round trips overlap.
+    pub fn intern(connection: *Connection) Atoms {
+        var cookies: [names.len]InternAtomCookie = undefined;
+        for (names, &cookies) |name, *cookie| cookie.* = xcb_intern_atom(connection, 0, @intCast(name.len), name.ptr);
+        var atoms: Atoms = .{};
+        inline for (std.meta.fields(Atoms), cookies) |field, cookie| {
+            if (xcb_intern_atom_reply(connection, cookie, null)) |reply| {
+                defer free(reply);
+                @field(atoms, field.name) = reply.atom;
+            }
+        }
+        return atoms;
+    }
+};
+
 /// The atom named `name`, made if the server has none yet; 0 when the
 /// server does not answer.
 pub fn internAtom(connection: *Connection, name: []const u8) Atom {
     const reply = xcb_intern_atom_reply(connection, xcb_intern_atom(connection, 0, @intCast(name.len), name.ptr), null) orelse return 0;
     defer free(reply);
     return reply.atom;
+}
+
+/// Sends a 32-bit client message of `message_type` to `destination`.
+pub fn sendClientMessage(connection: *Connection, destination: Window, message_type: Atom, data: [5]u32) void {
+    const message: ClientMessageEvent = .{ .response_type = client_message, .format = 32, .sequence = 0, .window = destination, .type = message_type, .data32 = data };
+    _ = xcb_send_event(connection, 0, destination, 0, @ptrCast(&message));
 }
 
 /// The screen numbered `number`, or the first.

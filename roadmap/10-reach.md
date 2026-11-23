@@ -524,6 +524,67 @@ IME, through XIM or none, to be decided then; a custom title bar through
 material through `_KDE_NET_WM_BLUR_BEHIND_REGION` and an ARGB visual,
 with `transparent` on `.x11`. The clipboard and drops are next.
 
+Slice 9's second sub-slice, the clipboard and drops, is done in
+`hosts/native/` alone (`hosts/native/linux/x11_selections.zig`,
+`hosts/native/linux/x11_host.zig`, `hosts/native/linux/x11.zig`,
+`hosts/native/linux/x11_conformance.zig`,
+`hosts/native/linux/data_device.zig`), in the Wayland host's shapes and
+bounds, its URI lists decoded by the same `pathsFromUriList` and cut by
+the same `wholeUriLines` and `wholeCharacters`. `X11Host` declares
+`zuiClipboard`, and the chooser passes it on. `write` owns `CLIPBOARD`
+at the server time of the last key or button, confirms it with
+`GetSelectionOwner` (another owner is `error.Unavailable`), and keeps up
+to 64 KiB of UTF-8; `SelectionRequest` is answered for `TARGETS`,
+`UTF8_STRING`, `text/plain;charset=utf-8`, `TEXT` (as `UTF8_STRING`) and
+`STRING` (Latin-1, `?` past it), into the requestor's property, or the
+target for a client that names none, and any other target, or a request
+while the window owns nothing, is refused with `None`; `SelectionClear`
+drops the text. `read` answers the window's own text at once, so reading
+its own selection never waits on itself, and otherwise converts
+`CLIPBOARD` to `UTF8_STRING` into `ZUI_CLIPBOARD` on the window:
+`SelectionNotify` with `None` answers `""`, as the Wayland host answers
+a clipboard without text, a property is read whole, and `INCR` is read
+chunk by chunk on each `PropertyNotify` of a new value, deleting each to
+ask for the next, until an empty one; text past 64 KiB is read, cut at a
+character and counted in `left_out_bytes`, the contract's answer, as on
+Wayland. Each step is bounded at 2 s, the Wayland host's transfer bound,
+after which the read answers `.failed`; the wait ends at the bound. XDND
+version 5: the window carries `XdndAware`; `XdndEnter` learns whether
+`text/uri-list` is among its three types or, with its first bit set, the
+source's `XdndTypeList`; each `XdndPosition` is translated from the root
+to the window and answered with `XdndStatus`, accepting with
+`XdndActionCopy` or refusing with `None`; `XdndLeave` forgets the drag;
+`XdndDrop` converts `XdndSelection` to `text/uri-list` into `ZUI_DROP`,
+read as the clipboard is (whole or `INCR`, 32 KiB, whole lines), then
+reports `files_dropped` at the last position in layout units and sends
+`XdndFinished` accepted, or unaccepted for a refused drag, a `None`
+answer or 2 s without one. Nothing allocates after `init`. The `PRIMARY`
+selection is not read or written, and the window drags nothing out. 126
+of 127 tests pass in Debug and ReleaseSafe, on Wayland and with
+`ZUI_HOST_BACKEND=x11 DISPLAY=:0`, the opt-in one skipped: the host
+suite now runs its clipboard steps on X11, and six tests run a second
+client on a connection of its own against Xwayland: it reads the
+window's text as each of the five targets and is refused `image/png`; it
+owns the clipboard and answers the window's reads whole, refused, never
+(`.failed` after 2 s) and in `INCR` chunks (20,001 bytes in 4 KiB chunks
+whole; 70,002 bytes of three-byte characters cut to 65,535 with 4,467
+left out); the window's own text is answered without asking it; its
+ownership clears the window's, and a `SelectionClear` drops the text; it
+drags a URI list in through `XdndTypeList` and drops it, getting a copy
+status and an accepted finish while the window reports the two `file://`
+paths and not the `https:` one at 60, 40 at a scale of 2; and a drag
+without a URI list is refused and finished unaccepted, and one that
+leaves drops nothing and asks for nothing. A unit test covers the
+Latin-1 conversion. `ZUI_HOST_BACKEND=x11` with
+`zig build services -- --check` now passes, printing every service
+answered, the copy and the paste among them; `theme -- --check` passes
+on X11 (21.5 ms) and Wayland (30.1 ms), file watching being the shared
+session's; the tour's cycle passes on both, `showcase -- --frames 60` on
+X11, and tour idle on X11 was 2.7 and 3.3 ms of CPU over 10 s, 1 frame,
+no wakes. Not run: a drag from a real file manager, and pasting into
+another X application by hand. The services, checked on X11 by
+`zig build services`, need no sub-slice of their own; the IME is next.
+
 Decided here:
 
 - **libwayland-client, linked,** as sokol-zig links it, since the

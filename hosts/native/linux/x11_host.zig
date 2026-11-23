@@ -12,6 +12,7 @@ const Session = session_module.Session;
 const DesktopSettings = session_module.DesktopSettings;
 const ReportedEnvironment = session_module.ReportedEnvironment;
 const Inbox = @import("inbox.zig").Inbox;
+const x11_selections = @import("x11_selections.zig");
 
 /// zui's host contract on an X11 window, through Xlib's display and the
 /// xcb connection beneath it, on the thread that polls it: events are read
@@ -21,10 +22,12 @@ const Inbox = @import("inbox.zig").Inbox;
 /// (96 dots an inch is 1, and without it the scale is 1), the window's
 /// size from `ConfigureNotify`, the pointer, the wheel by notch, keys
 /// through the server's XKB keymap with their modifiers, evdev codes and
-/// repeats, typed text, focus and the close button; the desktop's
+/// repeats, typed text, focus, files dropped through XDND and the close
+/// button; the desktop's
 /// environment over D-Bus; SIGINT, SIGTERM and SIGHUP as terminate
 /// requests and the system sleeping and waking as lifecycle events. It
-/// sets the cursor from the cursor theme, watches directories, offers
+/// sets the cursor from the cursor theme, reads and writes the
+/// `CLIPBOARD` selection as text, watches directories, offers
 /// notifications, file dialogs and opening URLs over the session bus, and
 /// waits for `nextFrame` on the connection, the desktop's buses, its
 /// watches, a wake and a deadline.
@@ -37,6 +40,27 @@ pub const X11Host = struct {
     const Host = X11Host;
     pub const zui_surfaces: zui.SurfaceKinds = .initOne(.x11);
     pub const zui_capabilities: zui.HostCapabilities = .{};
+
+    /// The `CLIPBOARD` selection, as text. `write` owns it with up to
+    /// `x11_selections.Clipboard.text_capacity` bytes of UTF-8, answering
+    /// other clients' requests for `TARGETS`, `UTF8_STRING`,
+    /// `text/plain;charset=utf-8`, `TEXT` and `STRING`. `read` answers the
+    /// window's own text at once, and another owner's from the host's wait
+    /// once it has written it, whole or in `INCR`'s chunks, up to that
+    /// many bytes with the rest counted as left out; `""` when no client
+    /// owns it or its owner gives no text, and `.failed` when the owner
+    /// takes longer than `transfer_timeout_ns` for it or a chunk of it.
+    pub const zuiClipboard = struct {
+        pub fn write(host: *Host, text: []const u8) zui.ServiceError!void {
+            try host.clipboard.write(host.selectionEndpoint(), text, host.latest_server_time);
+            _ = x11.xcb_flush(host.connection);
+        }
+
+        pub fn read(host: *Host, request: zui.ServiceRequest, sink: zui.ServiceSink) zui.ServiceError!void {
+            try host.clipboard.startRead(host.selectionEndpoint(), request, sink, host.zuiWaker(), host.latest_server_time, host.now());
+            _ = x11.xcb_flush(host.connection);
+        }
+    };
 
     /// Watches up to `file_watch.Watches.capacity` directories, each with
     /// its subdirectories, until `deinit`, publishing from the host's wait.
@@ -73,6 +97,8 @@ pub const X11Host = struct {
 
     /// Layout units scrolled per notch of the mouse wheel.
     pub const wheel_step = 40;
+    /// UTF-8 bytes of text the clipboard is given, or a read answers with.
+    pub const clipboard_text_capacity = x11_selections.Clipboard.text_capacity;
     /// The dots an inch of a scale of 1.
     pub const unscaled_dpi = 96;
 
@@ -90,7 +116,12 @@ pub const X11Host = struct {
     display: *x11.Display,
     connection: *x11.Connection,
     screen: *x11.Screen,
-    atoms: Atoms,
+    atoms: x11.Atoms,
+    /// The server's time of the last key or button, which owning and
+    /// converting a selection name; 0, the current time, before one.
+    latest_server_time: u32,
+    clipboard: x11_selections.Clipboard,
+    drop: x11_selections.Drop,
     /// Physical pixels per layout unit, from `Xft.dpi`.
     resource_scale: f32,
     cursor_context: ?*x11.CursorContext,
@@ -118,13 +149,6 @@ pub const X11Host = struct {
     const wm_class = "zui\x00zui\x00";
 
     const XkbKeyboard = struct { device_id: i32, first_event: u8 };
-
-    pub const Atoms = struct {
-        wm_protocols: x11.Atom = 0,
-        wm_delete_window: x11.Atom = 0,
-        net_wm_name: x11.Atom = 0,
-        utf8_string: x11.Atom = 0,
-    };
 
     /// The host's window: what it has been told since its last poll, its
     /// size, and what the last frame asked of it.
@@ -186,6 +210,9 @@ pub const X11Host = struct {
             .connection = connection,
             .screen = screen,
             .atoms = .{},
+            .latest_server_time = x11.current_time,
+            .clipboard = .{},
+            .drop = .{},
             .resource_scale = 1,
             .cursor_context = null,
             .loaded_cursors = @splat(null),
@@ -204,12 +231,7 @@ pub const X11Host = struct {
         try self.session.open(io, service_fake);
         errdefer self.session.close();
 
-        self.atoms = .{
-            .wm_protocols = x11.internAtom(connection, "WM_PROTOCOLS"),
-            .wm_delete_window = x11.internAtom(connection, "WM_DELETE_WINDOW"),
-            .net_wm_name = x11.internAtom(connection, "_NET_WM_NAME"),
-            .utf8_string = x11.internAtom(connection, "UTF8_STRING"),
-        };
+        self.atoms = .intern(connection);
         const root_mask: u32 = x11.event_mask_property_change;
         _ = x11.xcb_change_window_attributes(connection, screen.root, x11.window_attribute_event_mask, &root_mask);
         self.readResourceManager();
@@ -233,7 +255,7 @@ pub const X11Host = struct {
         self.window.deliver(.{ .environment = .{ .window_focused = false } });
         const event_mask: u32 = x11.event_mask_key_press | x11.event_mask_key_release | x11.event_mask_button_press | x11.event_mask_button_release |
             x11.event_mask_enter_window | x11.event_mask_leave_window | x11.event_mask_pointer_motion | x11.event_mask_exposure |
-            x11.event_mask_structure_notify | x11.event_mask_focus_change;
+            x11.event_mask_structure_notify | x11.event_mask_focus_change | x11.event_mask_property_change;
         _ = x11.xcb_create_window(connection, x11.copy_from_parent, self.window.id, self.screen.root, 0, 0, @intCast(size[0]), @intCast(size[1]), 0, x11.window_class_input_output, x11.copy_from_parent, x11.window_attribute_event_mask, &event_mask);
 
         const window = self.window.id;
@@ -242,6 +264,7 @@ pub const X11Host = struct {
         _ = x11.xcb_change_property(connection, x11.property_mode_replace, window, x11.atom_wm_name, x11.atom_string, 8, @intCast(title.len), title.ptr);
         _ = x11.xcb_change_property(connection, x11.property_mode_replace, window, x11.atom_wm_class, x11.atom_string, 8, wm_class.len, wm_class);
         _ = x11.xcb_change_property(connection, x11.property_mode_replace, window, self.atoms.wm_protocols, x11.atom_atom, 32, 1, &self.atoms.wm_delete_window);
+        x11_selections.Drop.advertise(self.selectionEndpoint());
         if (!options.resizable) {
             const hints: x11.SizeHints = .{
                 .flags = x11.SizeHints.program_min_size | x11.SizeHints.program_max_size,
@@ -254,6 +277,10 @@ pub const X11Host = struct {
         }
         if (options.visible) _ = x11.xcb_map_window(connection, window);
         if (x11.xcb_flush(connection) <= 0 or x11.xcb_connection_has_error(connection) != 0) return error.X11ServerUnreachable;
+    }
+
+    fn selectionEndpoint(self: *Host) x11_selections.Endpoint {
+        return .{ .connection = self.connection, .window = self.window.id, .atoms = &self.atoms };
     }
 
     fn physicalLength(units: u32, scale: f32) u32 {
@@ -378,9 +405,16 @@ pub const X11Host = struct {
             if (self.awaitsPoll()) return;
             const now_instant = self.now();
             if (frame_at) |instant| if (!now_instant.isBefore(instant)) return;
-            const timeout_ns: ?u64 = if (frame_at) |instant| instant.nanoseconds -| now_instant.nanoseconds else null;
+            const wake_at = earlier(earlier(frame_at, self.clipboard.deadline()), self.drop.deadline());
+            const timeout_ns: ?u64 = if (wake_at) |instant| instant.nanoseconds -| now_instant.nanoseconds else null;
             if (self.waitForEvents(timeout_ns) == .woken) return;
         }
+    }
+
+    fn earlier(first: ?zui.Instant, second: ?zui.Instant) ?zui.Instant {
+        const one = first orelse return second;
+        const other = second orelse return one;
+        return if (other.isBefore(one)) other else one;
     }
 
     const Waited = enum { events, woken, timed_out };
@@ -404,6 +438,9 @@ pub const X11Host = struct {
         const polled = linux.errno(ready) == .SUCCESS;
         if (polled and descriptors[0].revents & (linux.POLL.HUP | linux.POLL.ERR) != 0) self.window.closed = true;
         self.dispatchQueuedEvents();
+        const now_instant = self.now();
+        self.clipboard.expire(now_instant);
+        self.drop.expire(self.selectionEndpoint(), now_instant);
         const woken = polled and self.session.receive(descriptors[first_session..].*, self);
         _ = x11.xcb_flush(self.connection);
         if (woken) return .woken;
@@ -424,10 +461,12 @@ pub const X11Host = struct {
         switch (event.code()) {
             x11.key_press, x11.key_release => {
                 const key: *const x11.InputEvent = @ptrCast(event);
+                self.latest_server_time = key.time;
                 if (key.event == window) self.onKey(key.detail, event.code() == x11.key_press);
             },
             x11.button_press, x11.button_release => {
                 const button: *const x11.InputEvent = @ptrCast(event);
+                self.latest_server_time = button.time;
                 if (button.event == window) self.onButton(button.detail, event.code() == x11.button_press, .{ @floatFromInt(button.event_x), @floatFromInt(button.event_y) });
             },
             x11.motion_notify => {
@@ -455,11 +494,24 @@ pub const X11Host = struct {
             },
             x11.client_message => {
                 const message: *const x11.ClientMessageEvent = @ptrCast(event);
-                if (message.window == window and message.format == 32) self.onClientMessage(message.type, message.data32[0]);
+                if (message.window == window and message.format == 32) self.onClientMessage(message.type, message.data32);
+            },
+            x11.selection_request => {
+                const request: *const x11.SelectionRequestEvent = @ptrCast(event);
+                if (request.owner == window) self.onSelectionRequest(request.*);
+            },
+            x11.selection_notify => {
+                const notify: *const x11.SelectionNotifyEvent = @ptrCast(event);
+                if (notify.requestor == window) self.onSelectionNotify(notify.selection, notify.property);
+            },
+            x11.selection_clear => {
+                const clear: *const x11.SelectionClearEvent = @ptrCast(event);
+                if (clear.owner == window) self.onSelectionClear(clear.selection);
             },
             x11.property_notify => {
                 const property: *const x11.PropertyNotifyEvent = @ptrCast(event);
                 if (property.window == self.screen.root and property.atom == x11.atom_resource_manager) self.readResourceManager();
+                if (property.window == window and property.state == x11.property_new_value) self.onPropertyNewValue(property.atom);
             },
             else => |code| if (self.xkb_keyboard) |keyboard_device| if (code == keyboard_device.first_event) self.dispatchXkb(@ptrCast(event), keyboard_device),
         }
@@ -619,9 +671,64 @@ pub const X11Host = struct {
         self.window.input_arrived = true;
     }
 
-    /// `WM_PROTOCOLS`' `WM_DELETE_WINDOW` is the close button.
-    pub fn onClientMessage(self: *Host, message_type: x11.Atom, first_word: u32) void {
-        if (message_type == self.atoms.wm_protocols and first_word == self.atoms.wm_delete_window) self.close();
+    /// `WM_PROTOCOLS`' `WM_DELETE_WINDOW` is the close button, and XDND's
+    /// messages a drag over the window.
+    pub fn onClientMessage(self: *Host, message_type: x11.Atom, data: [5]u32) void {
+        const atoms = &self.atoms;
+        const endpoint = self.selectionEndpoint();
+        if (message_type == atoms.wm_protocols) {
+            if (data[0] == atoms.wm_delete_window) self.close();
+        } else if (message_type == atoms.xdnd_enter) {
+            self.drop.onEnter(endpoint, data);
+        } else if (message_type == atoms.xdnd_position) {
+            self.drop.onPosition(endpoint, data, self.screen.root);
+        } else if (message_type == atoms.xdnd_leave) {
+            self.drop.onLeave(data);
+        } else if (message_type == atoms.xdnd_drop) {
+            self.drop.onDrop(endpoint, data, self.now());
+        }
+        _ = x11.xcb_flush(self.connection);
+    }
+
+    /// Another client asks for a selection the window owns.
+    pub fn onSelectionRequest(self: *Host, request: x11.SelectionRequestEvent) void {
+        self.clipboard.answerRequest(self.selectionEndpoint(), request);
+        _ = x11.xcb_flush(self.connection);
+    }
+
+    /// A selection's owner answered the window's conversion of it, into
+    /// `property`, or `None`.
+    pub fn onSelectionNotify(self: *Host, selection: x11.Atom, property: x11.Atom) void {
+        const endpoint = self.selectionEndpoint();
+        if (selection == self.atoms.clipboard) {
+            self.clipboard.onSelectionNotify(endpoint, property, self.now());
+        } else if (selection == self.atoms.xdnd_selection) {
+            if (self.drop.onSelectionNotify(endpoint, property, self.now())) |dropped| self.deliverDrop(dropped);
+        }
+        _ = x11.xcb_flush(self.connection);
+    }
+
+    /// For `INCR`, an owner wrote the next chunk into `property`.
+    pub fn onPropertyNewValue(self: *Host, property: x11.Atom) void {
+        const endpoint = self.selectionEndpoint();
+        if (property == self.atoms.clipboard_property) {
+            self.clipboard.onPropertyNewValue(endpoint, self.now());
+        } else if (property == self.atoms.drop_property) {
+            if (self.drop.onPropertyNewValue(endpoint, self.now())) |dropped| self.deliverDrop(dropped);
+        }
+    }
+
+    /// Another client took the selection, and the text the window held
+    /// is dropped.
+    pub fn onSelectionClear(self: *Host, selection: x11.Atom) void {
+        if (selection == self.atoms.clipboard) self.clipboard.onSelectionClear();
+    }
+
+    fn deliverDrop(self: *Host, dropped: x11_selections.Drop.Dropped) void {
+        const inbox = &self.window.inbox;
+        inbox.dropped_bytes +|= dropped.received.left_out_bytes;
+        inbox.pushFilesDropped(dropped.position, dropped.received.uri_list, self.now());
+        self.window.input_arrived = true;
     }
 
     /// The window gained or lost the keyboard's focus; losing it forgets

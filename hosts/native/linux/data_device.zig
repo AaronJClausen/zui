@@ -284,15 +284,9 @@ pub const DataDevice = struct {
             if (!now_instant.isBefore(read.deadline)) self.endDrop();
             return null;
         }
-        var whole_lines = self.uri_list[0..read.len];
-        var left_out_bytes = read.left_out_bytes;
-        if (left_out_bytes > 0) {
-            const cut_line_start = if (std.mem.lastIndexOfScalar(u8, whole_lines, '\n')) |newline| newline + 1 else 0;
-            left_out_bytes += whole_lines.len - cut_line_start;
-            whole_lines = whole_lines[0..cut_line_start];
-        }
+        const received = wholeUriLines(self.uri_list[0..read.len], read.left_out_bytes);
         self.endDrop();
-        return .{ .uri_list = whole_lines, .left_out_bytes = std.math.lossyCast(u32, left_out_bytes) };
+        return received;
     }
 
     fn answerClipboardRead(self: *DataDevice) void {
@@ -540,9 +534,18 @@ fn percentDecode(encoded: []const u8, buffer: []u8) error{ NoRoom, HoldsZeroByte
     return len;
 }
 
+/// The whole lines of a URI list that ran past its buffer, `left_out_bytes`
+/// beyond `received`: the line it cut is left out too.
+pub fn wholeUriLines(received: []const u8, left_out_bytes: usize) DataDevice.ReceivedDrop {
+    if (left_out_bytes == 0) return .{ .uri_list = received, .left_out_bytes = 0 };
+    const cut_line_start = if (std.mem.lastIndexOfScalar(u8, received, '\n')) |newline| newline + 1 else 0;
+    const left_out = left_out_bytes + received.len - cut_line_start;
+    return .{ .uri_list = received[0..cut_line_start], .left_out_bytes = std.math.lossyCast(u32, left_out) };
+}
+
 /// How many bytes of `text` hold whole UTF-8 characters, when its end may
 /// cut one short.
-fn wholeCharacters(text: []const u8) usize {
+pub fn wholeCharacters(text: []const u8) usize {
     var start = text.len;
     while (start > 0) {
         start -= 1;
