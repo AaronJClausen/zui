@@ -2338,6 +2338,40 @@ comptime {
 }
 ```
 
+<a id="design-default"></a>
+
+### `zui_design.default`: zui's own design · *shipped*
+
+`zui_design.default` is zui's own design, for an app that wants to look
+good before it has a design of its own: one blue accent on cool
+neutrals, Atkinson Hyperlegible's x-height at 16 on a 1.2 scale,
+controls with 8-unit corners and containers and popups with 16, pills
+for chips and indicators, all with continuous corners. It is designed
+for dark too, not inverted: in dark, height is a lighter surface and a
+lit rim, accent-colored text is lighter and softer, and the containers
+are deep tints. Its roles include an overlay surface for menus and
+dialogs, accent-colored text for links, a pale container with its own
+text for each status, a selection fill, and the shadow and rim of four
+elevation levels, from a card's to a command palette's. The tokens also
+carry a control's height and icon size at three sizes for the density,
+none below 44 for a touch pointer. It resolves in every scheme with
+nothing repaired, and so does each of its eight accent presets. Its
+fonts are yours to fill from your `FontId`s.
+
+`src/appearance.zig`
+
+```zig
+pub const app_design: zui.design.Design = design: {
+    var with_fonts = zui_design.default;
+    with_fonts.type.fonts = .{ .regular = @intFromEnum(FontId.body), .strong = @intFromEnum(FontId.body_bold), .monospace = @intFromEnum(FontId.mono) };
+    break :design with_fonts;
+};
+
+pub fn cardLift(tokens: *const zui.design.Tokens(Ui, void)) zui.Effects {
+    return .{ .shadow = tokens.elevations.get(.raised).shadow };
+}
+```
+
 <a id="design-audit"></a>
 
 ### `zui_design.audit`: checks of a finished frame · *shipped*

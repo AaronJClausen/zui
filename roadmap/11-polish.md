@@ -31,7 +31,7 @@ and each is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:16-corner-shapes` Corner shapes | done |
 | `11-polish:17-nested-corners` Nested corners | done |
 | `11-polish:18-system-accent` The system's accent color | done; the Windows host's part waiting on CI |
-| `11-polish:19-default-design` The default design | not started |
+| `11-polish:19-default-design` The default design | in progress; slice 1, `zui_design.default`, done; slice 2, `DesignSkin`, next |
 | `11-polish:20-appearance-audit` The appearance audit | done |
 | `11-polish:21-permutations` Every permutation of a component | done |
 | `11-polish:22-appearance-review` The appearance review | not started |
@@ -1361,12 +1361,20 @@ Light Lab's white text on its gradients 7 more, which match light's
 `on_accent`. The tour's test (`apps/tour/src/tests.zig`) expects exactly
 these causes until they are fixed.
 
-**Plan.**
+**Plan.** In three slices, D1 to D3 of the plan in
+`docs/plans/default-ui-designs/README.md`, whose `exports/` hold the
+approved design:
 
-1. `zui_design.default`, a `Design` on the bundled fonts.
+1. `zui_design.default` and the vocabulary it needs: 12 new roles
+   (`surface_overlay`, `on_surface_accent`, a container and its text for
+   each status, `selection` and `on_selection`, `shadow` and `rim`),
+   `label_strong` and headings in the strong font, the four schemes'
+   tones, and in `Tokens` control heights and icon sizes per
+   `ControlSize`, the focus ring's offset and a `Lift` per `Elevation`.
 2. `zui_widgets.DesignSkin(Ui)`, a skin over a `*const Tokens`: each
-   `Part` declares its appearance, and `zuiStyle` answers from
-   `tokens.look`. `DefaultSkin` is removed, and its callers move.
+   `Part` declares its appearance from the plan's `components` entry for
+   its widget, and `zuiStyle` answers from `tokens.look`. `DefaultSkin`
+   is removed, and its callers move.
 3. The tour and the showcase resolve tokens on a change of preferences,
    and the tour gains a screen of density, color vision, contrast and
    text scale for the user to choose.
@@ -1383,6 +1391,19 @@ passes.
 `11-polish:16-corner-shapes`.
 
 **Spec.** §16.7, §18, §19.2.
+
+**Status.** Slice 1 is done: `zui_design.default` resolves at comptime
+in every scheme with nothing repaired, and so does each of its eight
+accent presets at run time. Every role in every state of every scheme
+matches the approved colors in `exports/zui-default-design.json` to the
+byte (`core/zui_design/default_tests.zig`), but where the showcase that
+made them drew one the resolver rightly does not: the hovered, focused
+and pressed layers of `surface_sunken` in light and of every surface but
+`surface` in light high contrast, where the showcase's port did not
+check `on_surface` and its full layers would take it below its target;
+`outline_muted` disabled, which the port left unfaded; and `danger`,
+darkened by the owner's choice (`roadmap/decisions.md`). The text styles
+match at text scale 1 and 1.5. Slice 2, `DesignSkin`, is next.
 
 ## 11-polish:20-appearance-audit — The appearance audit
 

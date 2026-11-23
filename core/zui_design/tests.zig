@@ -622,8 +622,8 @@ test "text roles take the text tier, outlines and the focus ring the non-text ti
     }
     var on_surface_backgrounds: usize = 0;
     for (zui_design.checked_pairs) |pair| on_surface_backgrounds += @intFromBool(pair.foreground == .on_surface);
-    try testing.expectEqual(4, on_surface_backgrounds);
-    try testing.expectEqual(14, zui_design.checked_pairs.len);
+    try testing.expectEqual(5, on_surface_backgrounds);
+    try testing.expectEqual(20, zui_design.checked_pairs.len);
 }
 
 fn expectEveryPairMeetsItsTarget(tokens: *const Tokens, contrast_setting: zui.Environment.Contrast) !void {

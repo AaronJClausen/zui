@@ -12,10 +12,12 @@ pub const ColorRole = enum {
     surface,
     surface_raised,
     surface_sunken,
+    surface_overlay,
     surface_inverse,
     on_surface,
     on_surface_muted,
     on_surface_inverse,
+    on_surface_accent,
     accent,
     on_accent,
     accent_container,
@@ -24,14 +26,24 @@ pub const ColorRole = enum {
     on_secondary_container,
     danger,
     on_danger,
+    danger_container,
+    on_danger_container,
     warning,
     on_warning,
+    warning_container,
+    on_warning_container,
     success,
     on_success,
+    success_container,
+    on_success_container,
+    selection,
+    on_selection,
     outline,
     outline_muted,
     focus,
     scrim,
+    shadow,
+    rim,
 };
 
 /// A spacing tier, from no space to the widest; a density gives each its
@@ -40,7 +52,7 @@ pub const Space = enum { none, hair, xs, s, m, l, xl, xxl };
 
 /// The only way a design names a text style: each is a step of the type
 /// scale, or body text in another font.
-pub const TypeRole = enum { display, headline, title, body, body_strong, label, caption, code, numeric };
+pub const TypeRole = enum { display, headline, title, body, body_strong, label, label_strong, caption, code, numeric };
 
 /// What a part's corners are for, which a design gives a `CornerSize`.
 pub const ShapeRole = enum { control, container, popup, chip, image, indicator };
@@ -56,6 +68,16 @@ pub const Target = enum { none, pointer, touch };
 /// How tightly a design spaces its parts, the user's choice in the
 /// application: the column of `Design.density` it reads.
 pub const Density = enum { compact, comfortable, roomy };
+
+/// How large a control is drawn, which a density gives a height and an
+/// icon size.
+pub const ControlSize = enum { small, medium, large };
+
+/// How far a part stands above the page, each level one shadow and a rim:
+/// `raised` for a card, `floating` for a menu, a popover or a tooltip,
+/// `modal` for a dialog or a toast, `topmost` for a command palette or a
+/// row being dragged.
+pub const Elevation = enum { raised, floating, modal, topmost };
 
 /// A face's vertical metrics in font units, which a design sizes its text
 /// by. Sizes follow the font's `ascent - descent`, as a font system's do.
@@ -197,10 +219,12 @@ pub fn ColorChoice(comptime ExtraRoles: type) type {
         surface,
         surface_raised,
         surface_sunken,
+        surface_overlay,
         surface_inverse,
         on_surface,
         on_surface_muted,
         on_surface_inverse,
+        on_surface_accent,
         accent,
         on_accent,
         accent_container,
@@ -209,14 +233,24 @@ pub fn ColorChoice(comptime ExtraRoles: type) type {
         on_secondary_container,
         danger,
         on_danger,
+        danger_container,
+        on_danger_container,
         warning,
         on_warning,
+        warning_container,
+        on_warning_container,
         success,
         on_success,
+        success_container,
+        on_success_container,
+        selection,
+        on_selection,
         outline,
         outline_muted,
         focus,
         scrim,
+        shadow,
+        rim,
         extra_role: if (ExtraRoles == void) enum {} else ExtraRoles,
         unchecked_color: Unchecked,
 
@@ -441,10 +475,26 @@ pub fn Tokens(comptime Ui: type, comptime ExtraRoles: type) type {
         corner_shapes: std.EnumArray(ShapeRole, style.CornerShape) = .initFill(.round),
         /// The least width and height of a part with each target.
         target_floors: std.EnumArray(Target, f32) = .initFill(0),
+        /// A control's height at each size, at the user's density.
+        control_heights: std.EnumArray(ControlSize, f32) = .initFill(0),
+        /// The side of the icon a control of each size draws.
+        icon_sizes: std.EnumArray(ControlSize, f32) = .initFill(0),
         outline_width: f32 = 0,
         focus_ring_width: f32 = 0,
+        /// The gap between a part's edge and its focus ring.
+        focus_ring_offset: f32 = 0,
+        elevations: std.EnumArray(Elevation, Lift) = .initFill(.{}),
         /// The width of a column of body text, in layout units.
         measure: f32 = 0,
+
+        /// What a part at one `Elevation` draws beneath and around itself.
+        pub const Lift = struct {
+            /// The role its surface takes, drawn in its part's state.
+            surface: ColorRole = .surface_raised,
+            shadow: Ui.Shadow = .{ .color = .transparent },
+            /// Drawn `outline_width` wide round its edge; null for none.
+            rim: ?Ui.Color = null,
+        };
 
         /// A part in one state, in the context's own types.
         pub const Look = struct {

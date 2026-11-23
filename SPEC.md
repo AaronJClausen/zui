@@ -2434,19 +2434,24 @@ no cascade.
 ```zig
 pub const design = struct {
     pub const ColorRole = enum {
-        background, surface, surface_raised, surface_sunken, surface_inverse,
-        on_surface, on_surface_muted, on_surface_inverse,
+        background, surface, surface_raised, surface_sunken, surface_overlay, surface_inverse,
+        on_surface, on_surface_muted, on_surface_inverse, on_surface_accent,
         accent, on_accent, accent_container, on_accent_container,
         secondary_container, on_secondary_container,
-        danger, on_danger, warning, on_warning, success, on_success,
-        outline, outline_muted, focus, scrim,
+        danger, on_danger, danger_container, on_danger_container,
+        warning, on_warning, warning_container, on_warning_container,
+        success, on_success, success_container, on_success_container,
+        selection, on_selection,
+        outline, outline_muted, focus, scrim, shadow, rim,
     };
     pub const Space = enum { none, hair, xs, s, m, l, xl, xxl };
-    pub const TypeRole = enum { display, headline, title, body, body_strong, label, caption, code, numeric };
+    pub const TypeRole = enum { display, headline, title, body, body_strong, label, label_strong, caption, code, numeric };
     pub const ShapeRole = enum { control, container, popup, chip, image, indicator };
     pub const CornerSize = enum { square, sharp, smooth, soft, bubble };
     pub const Target = enum { none, pointer, touch };
     pub const Density = enum { compact, comfortable, roomy };
+    pub const ControlSize = enum { small, medium, large };
+    pub const Elevation = enum { raised, floating, modal, topmost };
     pub const FaceMetrics = struct { ascent: f32, descent: f32, x_height: f32, cap_height: f32 }; // font units
 
     pub const Design = struct { ... };                             // what an application or theme pack declares
@@ -2458,11 +2463,17 @@ pub const design = struct {
 ```
 
 - **`ColorRole`** names what a color is for, never what it looks like.
-  Each `on_*` role is the text and icons on its partner. An application
-  adds its own roles as an enum, `ExtraRoles`, each declared with the
-  role it pairs with in its `zuiPairs`; they are solved and checked like
-  the built-in ones. A part names one as `.extra(.brand)`, in an
-  appearance made with `AppearanceWith(Part, ExtraRoles, …)`.
+  Each `on_*` role is the text and icons on its partner.
+  `surface_overlay` is the surface of a menu, a popover or a dialog;
+  `on_surface_accent` is accent-colored text, as a link, on `surface`;
+  each status role has a `*_container`, a pale fill for a banner or a
+  badge, with its own text; `selection` is selected text's or a selected
+  row's fill; `shadow` and `rim` are an elevation's shadow and edge
+  (§18.7). An application adds its own roles as an enum, `ExtraRoles`,
+  each declared with the role it pairs with in its `zuiPairs`; they are
+  solved and checked like the built-in ones. A part names one as
+  `.extra(.brand)`, in an appearance made with
+  `AppearanceWith(Part, ExtraRoles, …)`.
 
   ```zig
   const Roles = enum {
@@ -2486,14 +2497,15 @@ pub const design = struct {
 
 - **`Tokens`** holds a color per role in each `WidgetState`'s layer of
   the resolved theme, a length per tier, a `TextStyle` per type role, a
-  `CornerRadius` and `CornerShape` per shape role, the target floors,
-  the outline and focus ring widths, the factor a part that draws text
-  pads by, and the body text's measure; `tokens.space(.m)` reads a tier.
-  Every field is empty until a resolver writes it.
-  `tokens.look(Component, part, state)` answers a part's decoration,
-  padding, gap, text style and minimum size in one `WidgetState`, and
-  checks the component's appearance the first time it is read, so a
-  component no tokens read costs nothing.
+  `CornerRadius` and `CornerShape` per shape role, the target floors, a
+  control's height and icon size per `ControlSize`, the outline and
+  focus ring widths and the ring's offset, a `Lift` per `Elevation`
+  (§18.7), the factor a part that draws text pads by, and the body
+  text's measure; `tokens.space(.m)` reads a tier. Every field is empty
+  until a resolver writes it. `tokens.look(Component, part, state)`
+  answers a part's decoration, padding, gap, text style and minimum size
+  in one `WidgetState`, and checks the component's appearance the first
+  time it is read, so a component no tokens read costs nothing.
 
 ### 18.2 The appearance contract
 
@@ -2633,14 +2645,21 @@ if (!std.meta.eql(preferences, app.preferences)) {
 
   Both are measured on the color as it is encoded in sRGB, its alpha
   ignored. Each `on_*` role is text; `outline` and `focus` are the
-  non-text tier; `outline_muted`, the surfaces and `scrim` have no
-  target. The resolver moves the foreground's OKLCH lightness away from
-  the background, keeping its hue and chroma, until both pass; if no
-  lightness of it passes, it goes to white or black and the background
-  moves too. The hovered, focused and pressed layers are held to the
-  same targets: a fill whose pairs would fall below them moves less of
-  the way toward its `on_*` role, or, when too little of the way would
-  show, moves as far toward white or black instead.
+  non-text tier; `outline_muted`, the surfaces, the fills, `scrim`,
+  `shadow` and `rim` have no target. `on_surface` is checked on every
+  surface it is drawn on, `background`, `surface`, `surface_raised`,
+  `surface_sunken` and `surface_overlay`, and `on_surface_accent` on
+  `surface`. The resolver moves the foreground's OKLCH lightness away
+  from the background, keeping its hue and chroma, until both pass; if
+  no lightness of it passes, it goes to white or black and the
+  background moves too. The hovered, focused and pressed layers are held
+  to the same targets: a fill whose pairs would fall below them moves
+  less of the way toward its `on_*` role, or, when too little of the way
+  would show, moves as far toward white or black instead. Disabled,
+  every role but the surfaces, `scrim`, `shadow` and `rim` greys and
+  fades to 38% of its alpha. Reduced transparency raises a translucent
+  role to an alpha of 0.85, all but `shadow` and `rim`, which a raised
+  alpha would turn into a border.
 
 - **A design that cannot meet a target at comptime is a compile error**
   naming the design by `Design.name`, the pair, the scheme and the
@@ -2676,7 +2695,7 @@ if (!std.meta.eql(preferences, app.preferences)) {
     At comptime either is a compile error unless the user chose the
     color vision, as for a design in `demo.zig` whose `success_hue` is
     red, resolved in high contrast:
-    `"zui_design: demo.design's danger and success are 0.14 apart in lightness under protanopia in light high contrast, need 0.15; success at L 0.42 passes"`.
+    `"zui_design: demo.design's danger and success are 0.13 apart in lightness under protanopia in light high contrast, need 0.15; success at L 0.43 passes"`.
   - **`zuiDistinguish` pairs** are checked, not moved: their roles are
     shared by every component, so moving one for one pair would move it
     for all.
@@ -2711,10 +2730,22 @@ if (!std.meta.eql(preferences, app.preferences)) {
 - **Density is not one factor.** The small tiers shrink most and the
   large ones least, so grouping survives a compact layout. A `Design`
   may give its own table.
+
+- **Control heights and icon sizes** come from a `ControlSize` at the
+  density, and under `Preferences.pointer = .touch` no height is below
+  44:
+
+  | `ControlSize` | height: compact | comfortable | roomy | icon: compact | comfortable | roomy |
+  |---|---|---|---|---|---|---|
+  | `small` | 24 | 28 | 32 | 12 | 16 | 16 |
+  | `medium` | 28 | 36 | 44 | 16 | 20 | 24 |
+  | `large` | 36 | 44 | 52 | 20 | 24 | 28 |
+
 - **Floors no density breaks:** a part with `target = .pointer` is at
   least 24 units on each side, with `.touch` (or
   `Preferences.pointer = .touch`) at least 44; the focus ring keeps its
-  2 units.
+  2 units, drawn 2 units outside the part's edge.
+
 - **Text scale reaches spacing by half:** a part that draws text pads by
   its tier × (1 + (text_scale − 1) / 2), so large text has room without
   the layout outgrowing the window.
@@ -2723,9 +2754,10 @@ if (!std.meta.eql(preferences, app.preferences)) {
 
 - **Sizes from a scale.** `Design.type` gives a ratio (1.2 by default),
   the body size (15), and a font for regular, strong and monospace text.
-  Each `TypeRole` is a step of the scale: `caption` −2, `label` −1,
-  `body` 0, `title` 1, `headline` 2, `display` 4. `body_strong` is body
-  in the strong font; `code` and `numeric` are body in monospace and
+  Each `TypeRole` is a step of the scale: `caption` −2, `label` and
+  `label_strong` −1, `body` 0, `title` 1, `headline` 2, `display` 4.
+  `label_strong`, `body_strong` and the headings from `title` up are in
+  the strong font; `code` and `numeric` are body in monospace and
   tabular figures.
 - **Set by the face.** Sizes are scaled so the body face's x-height
   (`zui_glyphs.FontMetrics.x_height`) is the design's, so two faces at
@@ -2762,6 +2794,18 @@ if (!std.meta.eql(preferences, app.preferences)) {
   | `smooth` | 8 |
   | `soft` | 16 |
   | `bubble` | half the shorter side |
+
+- **Elevation.** Each `Elevation` is one shadow, since an element draws
+  one, and a 1-unit rim in the `rim` role. Its shadow is the `shadow`
+  role at the level's alpha, denser in dark, where height reads mostly
+  from a lighter surface and the lit rim:
+
+  | `Elevation` | for | surface | offset | blur | spread | alpha: light | dark |
+  |---|---|---|---|---|---|---|---|
+  | `raised` | a card | `surface_raised` | 0, 1 | 3 | 0 | 0.10 | 0.32 |
+  | `floating` | a menu, a popover, a tooltip | `surface_overlay` | 0, 6 | 16 | −2 | 0.12 | 0.42 |
+  | `modal` | a dialog, a toast | `surface_overlay` | 0, 12 | 32 | −4 | 0.16 | 0.50 |
+  | `topmost` | a command palette, a dragged row | `surface_overlay` | 0, 20 | 48 | −6 | 0.20 | 0.58 |
 
 - **Emission clamps** each corner to half the element's shorter side, so
   `bubble` is any radius that large.
@@ -3407,7 +3451,12 @@ each component's `zuiDistinguish` pairs against a design at comptime. It
 also holds the audit of a finished frame (`audit`), the axes and levels
 of a component's permutations (`Permutations`, `PermutationKey`), and
 the verdict file and report the review writes (§18.8).
-`zui_design.default` is zui's own design, on the bundled fonts.
+`zui_design.default` is zui's own design: one accent (OKLCH L 0.55, C
+0.17, H 258) on cool neutrals of the same hue, Atkinson Hyperlegible's
+x-height at 16 on a 1.2 scale, `smooth` controls, `soft` containers and
+popups, pill chips and indicators, and `continuous` corners. Its fonts
+are left for the application to fill from its `FontId`s, and it resolves
+at comptime in every scheme with nothing repaired.
 
 ---
 

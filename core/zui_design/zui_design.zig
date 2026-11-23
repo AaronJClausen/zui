@@ -19,13 +19,20 @@ const color_vision = @import("color_vision.zig");
 const distinguish = @import("distinguish.zig");
 const audit_file = @import("audit.zig");
 const permutations_file = @import("permutations.zig");
+const default_file = @import("default.zig");
+const elevation = @import("elevation.zig");
 
 const design = zui.design;
 const Design = design.Design;
 const CornerSize = design.CornerSize;
 const Density = design.Density;
+const ControlSize = design.ControlSize;
 const Target = design.Target;
 const TypeRole = design.TypeRole;
+
+/// zui's own design, which a design language or an application starts
+/// from.
+pub const default = default_file.default;
 
 /// The color vision the status roles are adapted for: `protan` and
 /// `deutan` move danger toward orange and success to azure; `tritan` and
@@ -108,10 +115,14 @@ pub const Repair = repairs_file.Repair;
 /// names the lightness that passes; one a chosen accent or a chosen color
 /// vision needs is repaired.
 ///
+/// Each `Elevation` is one shadow, the `shadow` role at the level's alpha,
+/// and a rim in the `rim` role, from `elevation_levels`.
+///
 /// Spacing is the design's density table at `preferences.density`, and a
 /// part that draws text pads by its tiers times half of `text_scale` past
 /// 1 added to 1. No density lowers the target floors, `pointer_floor` and
-/// `touch_floor`, or narrows `focus_ring_width`.
+/// `touch_floor`, or narrows `focus_ring_width`. Control heights and icon
+/// sizes are `control_heights` and `icon_sizes` at the density.
 ///
 /// Each type role is a step of the design's modular scale from body text,
 /// sized in each font whose face the design gives so its x-height is the
@@ -133,7 +144,9 @@ pub const Repair = repairs_file.Repair;
 pub fn resolve(resolved_design: Design, preferences: Preferences, tokens: anytype) Repairs {
     @setEvalBranchQuota(2_000_000);
     var repairs: Repairs = .{};
-    writeColors(palettesFor(resolved_design.seeds, preferences, &repairs), tokens);
+    const palettes = palettesFor(resolved_design.seeds, preferences, &repairs);
+    writeColors(palettes, tokens);
+    elevation.write(palettes.get(.idle), .of(preferences.theme, preferences.contrast), tokens);
     if (@inComptime()) failOnRepairsTheDesignNeeds(resolved_design, preferences, &repairs);
     tokens.spacing = resolved_design.density.get(preferences.density);
     tokens.text_padding_scale = 1 + (preferences.text_scale - 1) / 2;
@@ -144,8 +157,14 @@ pub fn resolve(resolved_design: Design, preferences: Preferences, tokens: anytyp
         tokens.corner_shapes.set(role, resolved_design.corner_shape);
     }
     tokens.target_floors = targetFloorsFor(preferences.pointer);
+    for (std.enums.values(ControlSize)) |size| {
+        const height = control_heights.get(size).get(preferences.density);
+        tokens.control_heights.set(size, if (preferences.pointer == .touch) @max(height, touch_floor) else height);
+        tokens.icon_sizes.set(size, icon_sizes.get(size).get(preferences.density));
+    }
     tokens.outline_width = outline_width;
     tokens.focus_ring_width = focus_ring_width;
+    tokens.focus_ring_offset = focus_ring_offset;
     tokens.measure = measure_characters * average_character_width * tokens.text_styles.get(.body).size;
     return repairs;
 }
@@ -218,6 +237,31 @@ pub const bubble_radius: f32 = 1 << 16;
 pub const outline_width: f32 = 1;
 /// The width of the focus ring, which no density narrows.
 pub const focus_ring_width: f32 = 2;
+/// The gap between a part's edge and its focus ring, so the ring shows on
+/// a fill of any color.
+pub const focus_ring_offset: f32 = 2;
+
+pub const ByControlSize = std.EnumArray(ControlSize, std.EnumArray(Density, f32));
+
+/// A control's height at each size and density; under
+/// `Preferences.pointer = .touch` none is below `touch_floor`.
+pub const control_heights: ByControlSize = .init(.{
+    .small = .init(.{ .compact = 24, .comfortable = 28, .roomy = 32 }),
+    .medium = .init(.{ .compact = 28, .comfortable = 36, .roomy = 44 }),
+    .large = .init(.{ .compact = 36, .comfortable = 44, .roomy = 52 }),
+});
+
+/// The side of a control's icon at each size and density.
+pub const icon_sizes: ByControlSize = .init(.{
+    .small = .init(.{ .compact = 12, .comfortable = 16, .roomy = 16 }),
+    .medium = .init(.{ .compact = 16, .comfortable = 20, .roomy = 24 }),
+    .large = .init(.{ .compact = 20, .comfortable = 24, .roomy = 28 }),
+});
+
+/// Each elevation's shadow and rim in each scheme.
+pub const elevation_levels = elevation.levels;
+/// One elevation's shadow and rim in one scheme.
+pub const ElevationLevel = elevation.Level;
 
 /// A part a pointer hits is at least this wide and tall, whatever the
 /// density.
@@ -415,7 +459,7 @@ const average_character_width = 0.5;
 fn scaleStepOf(role: TypeRole) f32 {
     return switch (role) {
         .caption => -2,
-        .label => -1,
+        .label, .label_strong => -1,
         .body, .body_strong, .code, .numeric => 0,
         .title => 1,
         .headline => 2,
@@ -463,14 +507,25 @@ fn interpolated(at: f32, from: [2]f32, to: [2]f32) f32 {
     return from[1] + (to[1] - from[1]) * progress;
 }
 
+const FontSlot = enum { regular, strong, monospace };
+
+/// Labels that lead and headings from `title` up are set in the strong font.
+fn fontSlotOf(role: TypeRole) FontSlot {
+    return switch (role) {
+        .label_strong, .body_strong, .title, .headline, .display => .strong,
+        .code, .numeric => .monospace,
+        .caption, .label, .body => .regular,
+    };
+}
+
 fn writeTextStyles(scale: Design.TypeScale, text_scale: f32, tokens: anytype) void {
     @setEvalBranchQuota(100_000);
     const TextStyle = @TypeOf(tokens.text_styles).Value;
     for (std.enums.values(TypeRole)) |role| {
-        const font_index, const face = switch (role) {
-            .body_strong => .{ scale.fonts.strong, scale.faces.strong },
-            .code, .numeric => .{ scale.fonts.monospace, scale.faces.monospace },
-            else => .{ scale.fonts.regular, scale.faces.regular },
+        const font_index, const face = switch (fontSlotOf(role)) {
+            .regular => .{ scale.fonts.regular, scale.faces.regular },
+            .strong => .{ scale.fonts.strong, scale.faces.strong },
+            .monospace => .{ scale.fonts.monospace, scale.faces.monospace },
         };
         const size = bodySizeIn(scale, face) * std.math.pow(f32, scale.ratio, scaleStepOf(role)) * std.math.pow(f32, text_scale, textScalePowerOf(role));
         tokens.text_styles.set(role, .{
@@ -495,4 +550,5 @@ test {
     _ = @import("tests.zig");
     _ = @import("audit_tests.zig");
     _ = @import("permutations_tests.zig");
+    _ = @import("default_tests.zig");
 }

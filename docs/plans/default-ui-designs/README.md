@@ -55,6 +55,28 @@ Beyond the resolver's own pairs, they include the text roles on every
 surface text sits on, which `rows hover in secondary_container` below
 depends on.
 
+## Where the resolver differs from the export
+
+D1 found three places where `resolved` in the JSON is not what the
+resolver writes, and the resolver was kept in each:
+
+- **`danger`.** It shared `success`'s lightness in every scheme, so the
+  two collapsed under simulated tritanopia and achromatopsia, and the
+  comptime resolve failed, as the check above foresaw. By the owner's
+  choice `danger` is darker: L 0.355 in light and dark, 0.24 in high
+  contrast. Its resolved bytes in the JSON are out of date.
+- **The surfaces' layers.** The port searched each surface's layer share
+  against the text role partnered with it alone, but `on_surface` sits
+  on every surface. In light `surface_sunken` and in light high contrast
+  `background`, `surface_raised`, `surface_sunken` and `surface_overlay`
+  its full layers would take `on_surface` below its target, so the
+  resolver gives them less.
+- **`outline_muted` disabled.** The port left it as it was; the resolver
+  greys and fades every foreground role.
+
+`core/zui_design/default_tests.zig` compares every other value to the
+byte.
+
 ## What the design decides
 
 - **Consumer apps first.** Comfortable density, Atkinson Hyperlegible at

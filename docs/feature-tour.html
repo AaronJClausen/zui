@@ -1945,6 +1945,22 @@ comptime {
 </script>
       </article>
 
+      <article class="feature" id="design-default" data-title="zui_design.default">
+        <div class="feature-head"><h3><code>zui_design.default</code>: zui's own design</h3><span class="pill shipped">Shipped</span></div>
+        <p><code class="z">zui_design.default</code> is zui's own design, for an app that wants to look good before it has a design of its own: one blue accent on cool neutrals, Atkinson Hyperlegible's x-height at 16 on a 1.2 scale, controls with 8-unit corners and containers and popups with 16, pills for chips and indicators, all with continuous corners. It is designed for dark too, not inverted: in dark, height is a lighter surface and a lit rim, accent-colored text is lighter and softer, and the containers are deep tints. Its roles include an overlay surface for menus and dialogs, accent-colored text for links, a pale container with its own text for each status, a selection fill, and the shadow and rim of four elevation levels, from a card's to a command palette's. The tokens also carry a control's height and icon size at three sizes for the density, none below 44 for a touch pointer. It resolves in every scheme with nothing repaired, and so does each of its eight accent presets. Its fonts are yours to fill from your <code class="z">FontId</code>s.</p>
+<script type="text/x-zig" data-file="src/appearance.zig">
+pub const app_design: zui.design.Design = design: {
+    var with_fonts = zui_design.default;
+    with_fonts.type.fonts = .{ .regular = @intFromEnum(FontId.body), .strong = @intFromEnum(FontId.body_bold), .monospace = @intFromEnum(FontId.mono) };
+    break :design with_fonts;
+};
+
+pub fn cardLift(tokens: *const zui.design.Tokens(Ui, void)) zui.Effects {
+    return .{ .shadow = tokens.elevations.get(.raised).shadow };
+}
+</script>
+      </article>
+
       <article class="feature" id="design-audit" data-title="zui_design.audit">
         <div class="feature-head"><h3><code>zui_design.audit</code>: checks of a finished frame</h3><span class="pill shipped">Shipped</span></div>
         <p><code class="z">zui_design.audit</code> checks a frame after <code class="z">endFrame</code>, so it sees what the declarations cannot: custom drawing, colors declared <code class="z">.unchecked</code>, and text laid over a photo's tint. Each line of text is measured against what is painted beneath its middle, blending translucent fills, and held to Lc 75 and 4.5:1, or Lc 60 and 3:1 from the title size up; a border in the focus color is measured against what is just outside and just inside it; every enabled control is held to the 24-unit floor; a line that runs past the side of a clip that does not scroll is reported as cut short; and two controls whose visible areas overlap in one layer are reported. <code class="z">auditDistinguished</code> checks your components' <code class="z">zuiDistinguish</code> pairs in the tokens you resolved, with the user's accent and color vision. Findings go into room you give, with a count of those that did not fit, and each names the element <code class="z">inspect</code> takes, its check and the value it measured against its target.</p>
