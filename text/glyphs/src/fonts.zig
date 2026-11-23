@@ -15,6 +15,10 @@ pub const FontMetrics = struct {
     /// Below the baseline, so negative.
     descent: f32,
     line_gap: f32 = 0,
+    /// The top of a flat lowercase letter such as `x`, above the baseline.
+    x_height: f32,
+    /// The top of a flat capital such as `H`, above the baseline.
+    cap_height: f32,
 
     /// Layout units per font unit for text of `size`.
     pub fn scaleFor(self: FontMetrics, size: f32) f32 {

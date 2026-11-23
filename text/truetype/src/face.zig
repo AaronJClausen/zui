@@ -1,6 +1,7 @@
 const std = @import("std");
 const stbtt = @import("stb_truetype");
 const zui_glyphs = @import("zui_glyphs");
+const zui_fonts = @import("zui_fonts");
 const FontMetrics = zui_glyphs.FontMetrics;
 const GlyphBox = zui_glyphs.GlyphBox;
 const GlyphId = zui_glyphs.GlyphId;
@@ -77,7 +78,14 @@ pub const Face = struct {
         var line_gap: c_int = 0;
         stbtt.stbtt_GetFontVMetrics(&face.info, &ascent, &descent, &line_gap);
         if (ascent - descent <= 0) return error.InvalidFont;
-        face.metrics = .{ .ascent = @floatFromInt(ascent), .descent = @floatFromInt(descent), .line_gap = @floatFromInt(line_gap) };
+        const heights = typographicHeightsOf(&face.info, data[@intCast(offset)..], @floatFromInt(ascent));
+        face.metrics = .{
+            .ascent = @floatFromInt(ascent),
+            .descent = @floatFromInt(descent),
+            .line_gap = @floatFromInt(line_gap),
+            .x_height = heights.x_height,
+            .cap_height = heights.cap_height,
+        };
         for (0..128) |codepoint| {
             face.ascii_glyphs[codepoint] = stbtt.stbtt_FindGlyphIndex(&face.info, @intCast(codepoint));
             face.ascii_advances[codepoint] = face.glyphAdvance(face.ascii_glyphs[codepoint]);
@@ -129,3 +137,101 @@ pub const Face = struct {
         return allocator.refusals == 0;
     }
 };
+
+const TypographicHeights = struct { x_height: f32, cap_height: f32 };
+
+/// The OS/2 table's, which version 2 and later carry; else the tops of the
+/// `x` and `H` glyphs; else shares of the ascent typical of text faces.
+fn typographicHeightsOf(info: *const stbtt.stbtt_fontinfo, font: []const u8, ascent: f32) TypographicHeights {
+    if (os2HeightsOf(font)) |heights| return heights;
+    const estimated_from_ascent = heightsEstimatedFromAscent(ascent);
+    return .{
+        .x_height = glyphTopOf(info, 'x') orelse estimated_from_ascent.x_height,
+        .cap_height = glyphTopOf(info, 'H') orelse estimated_from_ascent.cap_height,
+    };
+}
+
+const os2_version_with_heights = 2;
+const os2_x_height_offset = 86;
+const os2_cap_height_offset = 88;
+
+fn os2HeightsOf(font: []const u8) ?TypographicHeights {
+    const table = tableOf(font, "OS/2") orelse return null;
+    if (table.len < os2_cap_height_offset + 2) return null;
+    if (std.mem.readInt(u16, table[0..2], .big) < os2_version_with_heights) return null;
+    const x_height = std.mem.readInt(i16, table[os2_x_height_offset..][0..2], .big);
+    const cap_height = std.mem.readInt(i16, table[os2_cap_height_offset..][0..2], .big);
+    if (x_height <= 0 or cap_height <= 0) return null;
+    return .{ .x_height = @floatFromInt(x_height), .cap_height = @floatFromInt(cap_height) };
+}
+
+/// The bytes of the table tagged `tag` in the font that starts at `font[0]`.
+fn tableOf(font: []const u8, comptime tag: *const [4]u8) ?[]const u8 {
+    const table_record_size = 16;
+    const first_record = 12;
+    if (font.len < first_record) return null;
+    const table_count = std.mem.readInt(u16, font[4..6], .big);
+    for (0..table_count) |index| {
+        const record_start = first_record + index * table_record_size;
+        if (record_start + table_record_size > font.len) return null;
+        const record = font[record_start..][0..table_record_size];
+        if (!std.mem.eql(u8, record[0..4], tag)) continue;
+        const start = std.mem.readInt(u32, record[8..12], .big);
+        const length = std.mem.readInt(u32, record[12..16], .big);
+        if (@as(u64, start) + length > font.len) return null;
+        return font[start..][0..length];
+    }
+    return null;
+}
+
+fn glyphTopOf(info: *const stbtt.stbtt_fontinfo, codepoint: u8) ?f32 {
+    const glyph = stbtt.stbtt_FindGlyphIndex(info, codepoint);
+    if (glyph == 0) return null;
+    var x0: c_int = 0;
+    var y0: c_int = 0;
+    var x1: c_int = 0;
+    var y1: c_int = 0;
+    if (stbtt.stbtt_GetGlyphBox(info, glyph, &x0, &y0, &x1, &y1) == 0 or y1 <= 0) return null;
+    return @floatFromInt(y1);
+}
+
+fn heightsEstimatedFromAscent(ascent: f32) TypographicHeights {
+    return .{ .x_height = 0.55 * ascent, .cap_height = 0.75 * ascent };
+}
+
+fn expectHeights(expected_x_height: f32, expected_cap_height: f32, font: []const u8) !void {
+    const face: Face = try .init(font);
+    try std.testing.expectEqual(expected_x_height, face.metrics.x_height);
+    try std.testing.expectEqual(expected_cap_height, face.metrics.cap_height);
+}
+
+test "each bundled face reports the x-height and cap height of its OS/2 table" {
+    try expectHeights(496, 668, zui_fonts.atkinson_hyperlegible_regular);
+    try expectHeights(496, 668, zui_fonts.atkinson_hyperlegible_bold);
+    try expectHeights(1082, 1349, zui_fonts.liberation_mono_regular);
+}
+
+test "a face whose OS/2 table predates the heights takes them from the tops of x and H" {
+    for ([_][]const u8{ zui_fonts.atkinson_hyperlegible_regular, zui_fonts.liberation_mono_regular }) |bundled| {
+        const font = try std.testing.allocator.dupe(u8, bundled);
+        defer std.testing.allocator.free(font);
+        const os2 = tableOf(font, "OS/2").?;
+        const os2_start = @intFromPtr(os2.ptr) - @intFromPtr(font.ptr);
+        std.mem.writeInt(u16, font[os2_start..][0..2], 1, .big);
+        try std.testing.expectEqual(null, os2HeightsOf(font));
+
+        const from_os2: Face = try .init(bundled);
+        const estimated: Face = try .init(font);
+        try std.testing.expectEqual(glyphTopOf(&estimated.info, 'x').?, estimated.metrics.x_height);
+        try std.testing.expectEqual(glyphTopOf(&estimated.info, 'H').?, estimated.metrics.cap_height);
+        try std.testing.expectApproxEqRel(from_os2.metrics.x_height, estimated.metrics.x_height, 0.03);
+        try std.testing.expectApproxEqRel(from_os2.metrics.cap_height, estimated.metrics.cap_height, 0.03);
+    }
+}
+
+test "a face with neither the heights nor an x or H estimates them from its ascent" {
+    try std.testing.expectEqual(TypographicHeights{ .x_height = 550, .cap_height = 750 }, heightsEstimatedFromAscent(1000));
+    try std.testing.expectEqual(null, tableOf("too short", "OS/2"));
+    const face: Face = try .init(zui_fonts.atkinson_hyperlegible_regular);
+    try std.testing.expectEqual(null, glyphTopOf(&face.info, ' '));
+}

@@ -9,7 +9,7 @@ const GlyphBox = fonts.GlyphBox;
 /// font 1 a third wider than font 0.
 pub const BoxFonts = struct {
     pub const font_count = 2;
-    pub const metrics: FontMetrics = .{ .ascent = 800, .descent = -200, .line_gap = 100 };
+    pub const metrics: FontMetrics = .{ .ascent = 800, .descent = -200, .line_gap = 100, .x_height = 500, .cap_height = 700 };
 
     pub fn fontMetrics(_: *const BoxFonts, font: FontId) ?FontMetrics {
         return if (font < font_count) metrics else null;

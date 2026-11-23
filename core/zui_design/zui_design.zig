@@ -110,6 +110,13 @@ pub const Repair = repairs_file.Repair;
 /// 1 added to 1. No density lowers the target floors, `pointer_floor` and
 /// `touch_floor`, or narrows `focus_ring_width`.
 ///
+/// Each type role is a step of the design's modular scale from body text,
+/// sized in each font whose face the design gives so its x-height is the
+/// design's (`bodySizeIn`), and multiplied by `text_scale` to a power of 1
+/// up to `body`, falling to 0.5 at `display`. Its line height is
+/// `lineHeightFor` and its letter spacing `trackingFor` its size. The
+/// measure is 66 characters of half the body size.
+///
 /// ```zig
 /// var tokens: zui.design.Tokens(Ui, void) = .{};
 /// _ = zui_design.resolve(app.design, .from(ui.environment(), app.choices), &tokens);
@@ -357,13 +364,13 @@ fn targetFloorsFor(pointer: Target) std.EnumArray(Target, f32) {
     });
 }
 
-/// The body text's measure is this many average characters, each about
-/// half the body size wide until the type scale measures the face.
+/// The body text's measure is this many average characters, each taken
+/// as half the body size wide, a figure close to running text's mean
+/// advance in most text faces.
 const measure_characters = 66;
 const average_character_width = 0.5;
 
-/// Each role's step of the modular scale; the type scale's line heights,
-/// tracking and x-height come later.
+/// Each role's step of the modular scale.
 fn scaleStepOf(role: TypeRole) f32 {
     return switch (role) {
         .caption => -2,
@@ -375,25 +382,63 @@ fn scaleStepOf(role: TypeRole) f32 {
     };
 }
 
-/// `text_scale` reaches `caption` fully and `display` by its square root,
-/// so headings do not outgrow the screen.
+/// `text_scale` reaches `caption` to `body` fully and `display` by its
+/// square root, so headings do not outgrow the screen.
 fn textScalePowerOf(role: TypeRole) f32 {
-    const lowest_step = scaleStepOf(.caption);
     const highest_step = scaleStepOf(.display);
-    return 1 - 0.5 * (scaleStepOf(role) - lowest_step) / (highest_step - lowest_step);
+    return 1 - 0.5 * @max(0, scaleStepOf(role)) / highest_step;
+}
+
+/// The size body text takes in `face`, so its x-height is the scale's; in
+/// a face not given, `body_size`.
+pub fn bodySizeIn(scale: Design.TypeScale, face: ?design.FaceMetrics) f32 {
+    const x_height_per_size = if (face) |given| given.xHeightPerSize() else 0;
+    return if (x_height_per_size > 0) scale.x_height / x_height_per_size else scale.body_size;
+}
+
+/// Every line is a whole number of these tall.
+pub const line_grid: f32 = 4;
+
+/// A line of text of `size`: 1.5 times it at 14 and below, falling in
+/// proportion to 1.15 times it at 40 and above, rounded to `line_grid`.
+pub fn lineHeightFor(size: f32) f32 {
+    const leading = interpolated(size, .{ 14, 1.5 }, .{ 40, 1.15 });
+    return @max(line_grid, @round(size * leading / line_grid) * line_grid);
+}
+
+/// The letter spacing of text of `size`: +1% of it at 12 and below, none
+/// at 16, and −2% at 32 and above, in proportion between.
+pub fn trackingFor(size: f32) f32 {
+    const share = if (size <= 16)
+        interpolated(size, .{ 12, 0.01 }, .{ 16, 0 })
+    else
+        interpolated(size, .{ 16, 0 }, .{ 32, -0.02 });
+    return size * share;
+}
+
+/// The value at `at`, in proportion between two points and held beyond them.
+fn interpolated(at: f32, from: [2]f32, to: [2]f32) f32 {
+    const progress = std.math.clamp((at - from[0]) / (to[0] - from[0]), 0, 1);
+    return from[1] + (to[1] - from[1]) * progress;
 }
 
 fn writeTextStyles(scale: Design.TypeScale, text_scale: f32, tokens: anytype) void {
     @setEvalBranchQuota(100_000);
     const TextStyle = @TypeOf(tokens.text_styles).Value;
     for (std.enums.values(TypeRole)) |role| {
-        const font_index = switch (role) {
-            .body_strong => scale.fonts.strong,
-            .code, .numeric => scale.fonts.monospace,
-            else => scale.fonts.regular,
+        const font_index, const face = switch (role) {
+            .body_strong => .{ scale.fonts.strong, scale.faces.strong },
+            .code, .numeric => .{ scale.fonts.monospace, scale.faces.monospace },
+            else => .{ scale.fonts.regular, scale.faces.regular },
         };
-        const size = scale.body_size * std.math.pow(f32, scale.ratio, scaleStepOf(role)) * std.math.pow(f32, text_scale, textScalePowerOf(role));
-        tokens.text_styles.set(role, .{ .font = fontIdOf(@FieldType(TextStyle, "font"), font_index), .size = size, .color = tokens.colors.get(.idle).get(.on_surface) });
+        const size = bodySizeIn(scale, face) * std.math.pow(f32, scale.ratio, scaleStepOf(role)) * std.math.pow(f32, text_scale, textScalePowerOf(role));
+        tokens.text_styles.set(role, .{
+            .font = fontIdOf(@FieldType(TextStyle, "font"), font_index),
+            .size = size,
+            .letter_spacing = trackingFor(size),
+            .line_height = lineHeightFor(size),
+            .color = tokens.colors.get(.idle).get(.on_surface),
+        });
     }
 }
 

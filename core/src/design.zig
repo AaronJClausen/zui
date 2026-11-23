@@ -57,6 +57,29 @@ pub const Target = enum { none, pointer, touch };
 /// application: the column of `Design.density` it reads.
 pub const Density = enum { compact, comfortable, roomy };
 
+/// A face's vertical metrics in font units, which a design sizes its text
+/// by. Sizes follow the font's `ascent - descent`, as a font system's do.
+pub const FaceMetrics = struct {
+    ascent: f32,
+    /// Below the baseline, so negative.
+    descent: f32,
+    x_height: f32,
+    cap_height: f32,
+
+    /// From any value with these four fields, such as a
+    /// `zui_glyphs.FontMetrics`.
+    pub fn of(metrics: anytype) FaceMetrics {
+        return .{ .ascent = metrics.ascent, .descent = metrics.descent, .x_height = metrics.x_height, .cap_height = metrics.cap_height };
+    }
+
+    /// The x-height of text of size 1; zero for metrics that measure no
+    /// height.
+    pub fn xHeightPerSize(self: FaceMetrics) f32 {
+        const span = self.ascent - self.descent;
+        return if (span > 0 and self.x_height > 0) self.x_height / span else 0;
+    }
+};
+
 /// A color in OKLCH: `lightness` from 0 to 1, `chroma` from 0, and `hue`
 /// in degrees.
 pub const Oklch = struct {
@@ -102,11 +125,26 @@ pub const Design = struct {
     /// Each `TypeRole` is a step of a modular scale from the body size.
     pub const TypeScale = struct {
         ratio: f32 = 1.2,
+        /// Body text's size in a font whose face `faces` does not give.
         body_size: f32 = 15,
-        /// The x-height body text is scaled to, in layout units, so two
-        /// faces at one role look one size; null sets it at `body_size`.
-        x_height: ?f32 = null,
+        /// Body text's x-height in layout units, which each font whose
+        /// face `faces` gives is sized to, so two faces at one role look
+        /// one size. Atkinson Hyperlegible's at 15 is 6.
+        x_height: f32 = 6,
         fonts: Fonts = .{},
+        faces: Faces = .{},
+    };
+
+    /// Each font's face, as the application's font system measures it.
+    ///
+    /// ```zig
+    /// var app_design = harbor;
+    /// app_design.type.faces.regular = .of(text.fontMetrics(fonts.inter).?);
+    /// ```
+    pub const Faces = struct {
+        regular: ?FaceMetrics = null,
+        strong: ?FaceMetrics = null,
+        monospace: ?FaceMetrics = null,
     };
 
     /// Each the integer value of the application's `FontId`, so a design

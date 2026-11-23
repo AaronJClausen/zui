@@ -27,7 +27,7 @@ and each is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:12-developer-experience-audit` A developer-experience audit | not started |
 | `11-polish:13-design-vocabulary` The design vocabulary and the appearance contract | done |
 | `11-polish:14-zui-design` `zui_design`: tokens from seeds and preferences | done |
-| `11-polish:15-type-scale` The type scale | not started |
+| `11-polish:15-type-scale` The type scale | done |
 | `11-polish:16-corner-shapes` Corner shapes | done |
 | `11-polish:17-nested-corners` Nested corners | done |
 | `11-polish:18-system-accent` The system's accent color | not started |
@@ -1040,6 +1040,53 @@ role's line height is a multiple of 4; the text packages' tests and
 `check` pass.
 
 **Spec.** §9.1, §18.6.
+
+**Status.** Done. `zui_glyphs.FontMetrics` gained `x_height` and
+`cap_height`, in font units, without defaults, and
+`zui_glyphs.expectFontsConform` holds them above the baseline, the
+x-height no higher than the cap height and that no higher than the
+ascent (`BoxFonts` gives 500 and 700). `zui_truetype.Face` reads them
+from the OS/2 table's `sxHeight` and `sCapHeight` (offsets 86 and 88,
+version 2 on), finding the table in the font's directory itself, since
+stb_truetype's `stbtt__find_table` is internal. A face whose table is
+older or missing takes them from the tops of its `x` and `H` glyphs
+(`stbtt_GetGlyphBox`), and a face without those from 0.55 and 0.75 of
+its ascent. Measured, and checked against the tables read by a short
+Python script outside the repository: Atkinson Hyperlegible Regular and
+Bold are 496 and 668 of 1,240 units from ascent to descent (x-height
+0.40 of the size), Liberation Mono 1,082 and 1,349 of 2,320 (0.466);
+with the OS/2 version set to 1 in a copy, both faces' glyph tops are
+within 3% of the tables'. Three tests in `text/truetype/src/face.zig`.
+
+In core, `zui.design.FaceMetrics` (ascent, descent, x-height and cap
+height, `.of(any value with them)`, `xHeightPerSize`) and
+`Design.TypeScale.faces`, a face for each of regular, strong and
+monospace, which the application fills from its font system, since
+`zui_design` cannot import `zui_glyphs`; `TypeScale.x_height` became 6,
+Atkinson Hyperlegible's at 15, rather than optional. `zui_design` sizes
+body text in each font whose face is given so its x-height is the
+design's (`bodySizeIn`), and in a font not given at `body_size`;
+`body_strong` takes the strong font and face, `code` and `numeric` the
+monospace ones. A role's line height is `lineHeightFor` its size, 1.5
+times it at 14 and below falling to 1.15 at 40, rounded to the 4-unit
+grid; its letter spacing `trackingFor`, +1% at 12 and below, none at 16
+and −2% at 32 and above. The measure stays 66 characters of half the
+body size, now of the body face's size. `text_scale`'s power is 1 up to
+`body` and falls to 0.5 at `display`; slice 1's fell from `caption`, so
+body text grew only 2^0.83 = 1.78 times at `text_scale = 2`, against the
+Done when, and SPEC.md §18.6 now says so. Tests in
+`core/zui_design/tests.zig` (42): Atkinson and Liberation Mono as body
+faces, 0.40 and 0.47 x-height per size, set body text at x-height 6 and
+6, 0 apart where at size 15 they would be 1.0 apart, and code in
+Liberation Mono beside Atkinson body matches its x-height; at
+`text_scale = 2` the roles up to body double, and title, headline and
+display grow 1.83, 1.68 and 1.41 times; every role's line height at text
+scales 1 to 3 is a multiple of 4 and within 2 of its leading; tracking
+is 0.12 at 12, 0 at 16, −0.24 at 24 and −0.64 at 32.
+`zuiCheckDesignResolve` in `core/tests/instantiate.zig` resolves with a
+face given through `FaceMetrics.of`. `numeric` is body in monospace,
+whose figures are tabular already; `Ui.TextStyle` has no way to ask a
+proportional face for tabular figures.
 
 ## 11-polish:16-corner-shapes — Corner shapes
 

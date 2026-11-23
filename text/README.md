@@ -39,6 +39,16 @@ providing `zui_glyphs`' few methods (`fontMetrics`, `advance`,
 bytes and its placement, so a remote renderer refuses a stream measured
 with other fonts.
 
+A font's `zui_glyphs.FontMetrics` give its ascent, descent and line gap,
+and its x-height and cap height, in font units, which a design sizes its
+text by (`zui.design.FaceMetrics.of`). `zui_truetype` reads the two
+heights from the font's OS/2 table, which carries them from its version
+2 on. A face whose table is older, or missing, takes them from the tops
+of its `x` and `H` glyphs, and a face without those from 0.55 and 0.75
+of its ascent. The bundled faces carry them: Atkinson Hyperlegible's are
+496 and 668 of 1,240 units from ascent to descent, Liberation Mono's
+1,082 and 1,349 of 2,320.
+
 ## Development
 
 Run from each package's directory, `zig build test` and

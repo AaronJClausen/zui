@@ -5,6 +5,7 @@ const Atlas = @import("atlas.zig").Atlas;
 pub const FontsViolation = error{
     NoFontZero,
     MetricsInverted,
+    HeightsOutOfOrder,
     NotAdditive,
     LineHeightNotTheFonts,
     GlyphsOutOfStep,
@@ -17,10 +18,12 @@ pub const FontsViolation = error{
 /// What every font system's fonts must do for measuring and drawing to
 /// agree, checked on its font 0: a run measures as its parts do, each glyph
 /// starts where the one before ends and the last ends at the run's extent,
-/// in cells every glyph is one cell, a glyph rasterizes into an atlas, and
-/// an id it has no font for is not answered. `text` is a pointer to the
-/// font system; one that is also zui's text contract must measure, with
-/// `zuiMeasure`, exactly what it lays out for its `placement`.
+/// in cells every glyph is one cell, a glyph rasterizes into an atlas, an
+/// id it has no font for is not answered, and the x-height is above the
+/// baseline and no higher than the cap height, which is no higher than the
+/// ascent. `text` is a pointer to the font system; one that is also zui's
+/// text contract must measure, with `zuiMeasure`, exactly what it lays out
+/// for its `placement`.
 ///
 /// ```zig
 /// test "the fonts conform" {
@@ -31,6 +34,7 @@ pub const FontsViolation = error{
 pub fn expectFontsConform(text: anytype, gpa: std.mem.Allocator) !void {
     const metrics = text.fontMetrics(0) orelse return error.NoFontZero;
     if (!(metrics.ascent > 0 and metrics.descent <= 0 and metrics.line_gap >= 0)) return error.MetricsInverted;
+    if (!(metrics.x_height > 0 and metrics.x_height <= metrics.cap_height and metrics.cap_height <= metrics.ascent)) return error.HeightsOutOfOrder;
 
     const words = [_][]const u8{ "Hello,", " ", "wide", " ", "w\u{f6}rld", "\xff" };
     for ([_]f32{ 0, 1.5 }) |letter_spacing| {

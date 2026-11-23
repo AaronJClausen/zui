@@ -846,9 +846,14 @@ comptime {
     zui_design.checkDistinguished(resolved_design, .{StatusBadge});
 }
 
+const MeasuredFontMetrics = struct { ascent: f32, descent: f32, line_gap: f32 = 0, x_height: f32, cap_height: f32 };
+var measured_body_face: MeasuredFontMetrics = .{ .ascent = 950, .descent = -290, .x_height = 496, .cap_height = 668 };
+
 export fn zuiCheckDesignResolve() f32 {
     const preferences: zui_design.Preferences = .from(&resolved_environment, .{ .accent = .rgb(0xff8800), .color_vision = .deutan });
-    const repairs = zui_design.resolve(resolved_design, preferences, &resolved_tokens);
+    var design_with_faces = resolved_design;
+    design_with_faces.type.faces.regular = .of(measured_body_face);
+    const repairs = zui_design.resolve(design_with_faces, preferences, &resolved_tokens);
     _ = zui_design.resolve(resolved_design, preferences, &resolved_extended_tokens);
     const repaired: f32 = @floatFromInt(repairs.slice().len + repairs.dropped);
     return resolved_tokens.space(.m) + resolved_extended_tokens.space(.m) + tokens_resolved_at_comptime.measure + repaired;

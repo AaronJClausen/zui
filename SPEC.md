@@ -2447,6 +2447,7 @@ pub const design = struct {
     pub const CornerSize = enum { square, sharp, smooth, soft, bubble };
     pub const Target = enum { none, pointer, touch };
     pub const Density = enum { compact, comfortable, roomy };
+    pub const FaceMetrics = struct { ascent: f32, descent: f32, x_height: f32, cap_height: f32 }; // font units
 
     pub const Design = struct { ... };                             // what an application or theme pack declares
     pub fn Tokens(comptime Ui: type, comptime ExtraRoles: type) type // resolved values; `ExtraRoles` an enum or void
@@ -2728,14 +2729,19 @@ if (!std.meta.eql(preferences, app.preferences)) {
   tabular figures.
 - **Set by the face.** Sizes are scaled so the body face's x-height
   (`zui_glyphs.FontMetrics.x_height`) is the design's, so two faces at
-  the same role look the same size.
+  the same role look the same size. `Design.type.x_height` is body
+  text's x-height, 6 by default, Atkinson Hyperlegible's at 15. Each
+  font whose face `Design.type.faces` gives, as
+  `zui.design.FaceMetrics.of(text.fontMetrics(font).?)`, is sized to it;
+  a font whose face is not given is set at the body size.
 - **Line height** falls with size, from 1.5 at 14 and below to 1.15 at
   40 and above, and is rounded to the 4-unit grid.
 - **Tracking** is +1% of the size at 12 and below, none at 16, and −2%
   at 32 and above, between them in proportion.
 - **Text scale by role.** A role's size is multiplied by `text_scale` to
-  a power that falls from 1 for `caption` to 0.5 for `display`, so
-  headings do not outgrow the screen at 200%.
+  a power of 1 from `caption` to `body`, falling in proportion to the
+  step to 0.5 for `display`, so body text doubles at 200% and headings
+  do not outgrow the screen.
 - **Measure.** `Tokens.measure` is the width of 66 average characters of
   body text, for a column to cap its width at.
 

@@ -2264,25 +2264,30 @@ large so grouping survives a compact layout; corners come from the
 design's shape table moved a size sharper or rounder at the user's word;
 target floors stay at 24 units, 44 for touch, and the focus ring at 2,
 at every density; and a part that draws text pads by half of the user's
-text scale past 1, so large text has room. Your own roles take the
-colors of the roles their pairs name. `resolve` allocates nothing, and
-runs at comptime as well as at run time, so a design's dark
-high-contrast tokens can be a constant. Every pair of a role on its
-partner is held to APCA's lightness contrast and WCAG 2's ratio at once:
-Lc 75 and 4.5:1 for text, Lc 45 and 3:1 for outlines and the focus ring,
-more under high contrast, in every state's layer. A design whose own
-seeds miss a target fails to compile with a message naming the pair, the
-scheme and the lightness that would pass; a color that arrives at run
-time, such as the user's accent, keeps its own lightness and is moved
-until it passes, and `resolve` returns each repair. Under simulated
-protanopia, deuteranopia, tritanopia and achromatopsia, the danger,
-warning and success fills stay at least 0.15 apart in lightness, so they
-can be told apart without their hue; a user who chose a color vision
-gets status hues moved off the axis they confuse, or the fills held
-further apart. Pairs your components list in `zuiDistinguish` are
-checked against your design with `zui_design.checkDistinguished`, and
-one that would look alike without color fails to compile unless a part
-names its `.cue`.
+text scale past 1, so large text has room. Each type role is a step of
+the design's scale, sized by its font's x-height when the design is
+given the face's metrics
+(`.faces.regular = .of(text.fontMetrics(body).?)`), so two faces look
+one size; its line height sits on the 4-unit grid, its tracking tightens
+as it grows, and at twice the text size body text doubles while display
+grows by √2. Your own roles take the colors of the roles their pairs
+name. `resolve` allocates nothing, and runs at comptime as well as at
+run time, so a design's dark high-contrast tokens can be a constant.
+Every pair of a role on its partner is held to APCA's lightness contrast
+and WCAG 2's ratio at once: Lc 75 and 4.5:1 for text, Lc 45 and 3:1 for
+outlines and the focus ring, more under high contrast, in every state's
+layer. A design whose own seeds miss a target fails to compile with a
+message naming the pair, the scheme and the lightness that would pass; a
+color that arrives at run time, such as the user's accent, keeps its own
+lightness and is moved until it passes, and `resolve` returns each
+repair. Under simulated protanopia, deuteranopia, tritanopia and
+achromatopsia, the danger, warning and success fills stay at least 0.15
+apart in lightness, so they can be told apart without their hue; a user
+who chose a color vision gets status hues moved off the axis they
+confuse, or the fills held further apart. Pairs your components list in
+`zuiDistinguish` are checked against your design with
+`zui_design.checkDistinguished`, and one that would look alike without
+color fails to compile unless a part names its `.cue`.
 
 `src/appearance.zig`
 
@@ -3244,9 +3249,8 @@ These names compile, but they don't do anything yet. This list is from
   scripted host, but no shipped host declares `zuiRun` yet; macOS, iOS
   and Android's are to come.
 - **Still to come**: Multi-line text editing, the rest of the design
-  system (density's coupling to text size, a type scale, and a review of
-  every permutation), theme packs, the inspector over the wire, and more
-  hosts (Linux and web; macOS later).
+  system (a review of every permutation), theme packs, the inspector
+  over the wire, and more hosts (Linux and web; macOS later).
 
 <a id="dx"></a>
 

@@ -273,6 +273,116 @@ test "a part that draws text pads by its tiers times half of text scale past 1, 
     try testing.expectEqual(zui.Edges.symmetric(12, 6), doubled.look(DensityProbe, .label, .idle).padding);
 }
 
+const atkinson_hyperlegible_regular: design.FaceMetrics = .{ .ascent = 950, .descent = -290, .x_height = 496, .cap_height = 668 };
+const liberation_mono_regular: design.FaceMetrics = .{ .ascent = 1705, .descent = -615, .x_height = 1082, .cap_height = 1349 };
+
+fn xHeightOf(text_style: Ui.TextStyle, face: design.FaceMetrics) f32 {
+    return text_style.size * face.xHeightPerSize();
+}
+
+fn withFaces(faces: design.Design.Faces) design.Design {
+    var with_faces = harbor;
+    with_faces.type.faces = faces;
+    return with_faces;
+}
+
+test "two bundled faces of different x-heights set body text at the design's x-height" {
+    const faces = [_]design.FaceMetrics{ atkinson_hyperlegible_regular, liberation_mono_regular };
+    try testing.expect(@abs(15 * faces[0].xHeightPerSize() - 15 * faces[1].xHeightPerSize()) > 0.5);
+    var body_x_heights: [faces.len]f32 = undefined;
+    for (faces, &body_x_heights) |face, *body_x_height| {
+        var tokens: Tokens = .{};
+        _ = zui_design.resolve(withFaces(.{ .regular = face }), .{}, &tokens);
+        body_x_height.* = xHeightOf(tokens.text_styles.get(.body), face);
+        try testing.expectApproxEqAbs(harbor.type.x_height, body_x_height.*, 0.001);
+    }
+    try testing.expect(@abs(body_x_heights[0] - body_x_heights[1]) <= 0.5);
+
+    var tokens: Tokens = .{};
+    _ = zui_design.resolve(withFaces(.{ .regular = atkinson_hyperlegible_regular, .monospace = liberation_mono_regular }), .{}, &tokens);
+    try testing.expectApproxEqAbs(xHeightOf(tokens.text_styles.get(.body), atkinson_hyperlegible_regular), xHeightOf(tokens.text_styles.get(.code), liberation_mono_regular), 0.001);
+    try testing.expectApproxEqAbs(15, tokens.text_styles.get(.body).size, 0.001);
+    try testing.expectApproxEqAbs(15, tokens.text_styles.get(.body_strong).size, 0.001);
+    try testing.expect(tokens.text_styles.get(.numeric).size < 15);
+}
+
+test "FaceMetrics takes a font system's metrics, and metrics with no height leave body_size" {
+    const FontSystemMetrics = struct { ascent: f32, descent: f32, line_gap: f32, x_height: f32, cap_height: f32 };
+    const measured: FontSystemMetrics = .{ .ascent = 950, .descent = -290, .line_gap = 0, .x_height = 496, .cap_height = 668 };
+    try testing.expectEqual(atkinson_hyperlegible_regular, design.FaceMetrics.of(measured));
+    try testing.expectApproxEqAbs(0.4, atkinson_hyperlegible_regular.xHeightPerSize(), 0.0001);
+    const flat: design.FaceMetrics = .{ .ascent = 0, .descent = 0, .x_height = 0, .cap_height = 0 };
+    try testing.expectEqual(harbor.type.body_size, zui_design.bodySizeIn(harbor.type, flat));
+    try testing.expectEqual(harbor.type.body_size, zui_design.bodySizeIn(harbor.type, null));
+}
+
+test "at text_scale 2 body text doubles and display grows by at most 1.5 times" {
+    for ([_]design.Design.Faces{ .{}, .{ .regular = liberation_mono_regular, .monospace = liberation_mono_regular } }) |faces| {
+        var normal: Tokens = .{};
+        _ = zui_design.resolve(withFaces(faces), .{}, &normal);
+        var doubled: Tokens = .{};
+        _ = zui_design.resolve(withFaces(faces), .{ .text_scale = 2 }, &doubled);
+        for ([_]design.TypeRole{ .caption, .label, .body, .body_strong, .code, .numeric }) |role| {
+            try testing.expectApproxEqAbs(2 * normal.text_styles.get(role).size, doubled.text_styles.get(role).size, 0.001);
+        }
+        var growth_before: f32 = 2;
+        for ([_]design.TypeRole{ .title, .headline, .display }) |role| {
+            const growth = doubled.text_styles.get(role).size / normal.text_styles.get(role).size;
+            try testing.expect(growth < growth_before);
+            growth_before = growth;
+        }
+        try testing.expect(growth_before <= 1.5);
+    }
+}
+
+test "every role's line height is on the 4-unit grid, from 1.5 times its size at 14 to 1.15 at 40" {
+    for ([_]f32{ 1, 1.5, 2, 3 }) |text_scale| {
+        for ([_]design.Design.Faces{ .{}, .{ .regular = atkinson_hyperlegible_regular, .monospace = liberation_mono_regular } }) |faces| {
+            var tokens: Tokens = .{};
+            _ = zui_design.resolve(withFaces(faces), .{ .text_scale = text_scale }, &tokens);
+            for (tokens.text_styles.values) |text_style| {
+                try testing.expectEqual(0, @rem(text_style.line_height, 4));
+                try testing.expect(text_style.line_height >= text_style.size);
+                try testing.expectEqual(zui_design.lineHeightFor(text_style.size), text_style.line_height);
+            }
+        }
+    }
+    try testing.expectEqual(16, zui_design.lineHeightFor(10));
+    try testing.expectEqual(20, zui_design.lineHeightFor(14));
+    try testing.expectEqual(48, zui_design.lineHeightFor(40));
+    try testing.expectEqual(68, zui_design.lineHeightFor(60));
+    for ([_]f32{ 8, 14, 20, 27, 33, 40, 52 }) |size| {
+        const leading: f32 = if (size <= 14) 1.5 else if (size >= 40) 1.15 else 1.5 - 0.35 * (size - 14) / 26;
+        try testing.expect(@abs(zui_design.lineHeightFor(size) - size * leading) <= 2);
+    }
+}
+
+test "tracking is +1% at 12 and below, none at 16, and -2% at 32 and above, in proportion between" {
+    try testing.expectApproxEqAbs(0.08, zui_design.trackingFor(8), 0.0001);
+    try testing.expectApproxEqAbs(0.12, zui_design.trackingFor(12), 0.0001);
+    try testing.expectApproxEqAbs(0.07, zui_design.trackingFor(14), 0.0001);
+    try testing.expectEqual(0, zui_design.trackingFor(16));
+    try testing.expectApproxEqAbs(-0.24, zui_design.trackingFor(24), 0.0001);
+    try testing.expectApproxEqAbs(-0.64, zui_design.trackingFor(32), 0.0001);
+    try testing.expectApproxEqAbs(-0.96, zui_design.trackingFor(48), 0.0001);
+
+    var tokens: Tokens = .{};
+    _ = zui_design.resolve(harbor, .{}, &tokens);
+    for (tokens.text_styles.values) |text_style| try testing.expectEqual(zui_design.trackingFor(text_style.size), text_style.letter_spacing);
+    try testing.expect(tokens.text_styles.get(.caption).letter_spacing > 0);
+    try testing.expect(tokens.text_styles.get(.display).letter_spacing < 0);
+}
+
+test "the measure is 66 characters of half the body size, in the body face" {
+    for ([_]design.Design.Faces{ .{}, .{ .regular = liberation_mono_regular } }) |faces| {
+        for ([_]f32{ 1, 2 }) |text_scale| {
+            var tokens: Tokens = .{};
+            _ = zui_design.resolve(withFaces(faces), .{ .text_scale = text_scale }, &tokens);
+            try testing.expectApproxEqAbs(66 * 0.5 * tokens.text_styles.get(.body).size, tokens.measure, 0.001);
+        }
+    }
+}
+
 test "text styles take the design's fonts in the context's FontId" {
     var with_fonts = harbor;
     with_fonts.type.fonts = .{ .regular = 0, .strong = 1, .monospace = 2 };
