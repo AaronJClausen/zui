@@ -39,6 +39,7 @@ decorations; many windows.
 | `10-reach:07-x11-ibus` The input method on X11 over IBus's D-Bus protocol | waiting on CI |
 | `10-reach:08-ring-edges-agree` WebGL and sokol agree on a ring's inner edge | done |
 | `10-reach:09-turned-edges-agree` WebGL and sokol agree on a turned box's edges | done |
+| `10-reach:10-light-lab-on-llvmpipe` Light & Depth's text within llvmpipe's tolerance | not started |
 
 ---
 
@@ -2397,3 +2398,30 @@ tests, `check` native, for `wasm32-freestanding`, `x86_64-windows` and
 `-Dgl=true`, and `conformance`; `hosts/web` tests in three modes and
 `check`; the native tour's cycle; `test-all` and `check-all` pass. Only
 CI can confirm its own container's run.
+
+## 10-reach:10-light-lab-on-llvmpipe — Light & Depth's text within llvmpipe's tolerance
+
+**Grounding** (at the commit of `10-reach:09-turned-edges-agree`). With
+all fifteen screens compared, `test-draw` passes against the sokol
+renderer on NVIDIA, but against a reference drawn on llvmpipe, as CI
+draws it, frame 228 (Light & Depth) fails with one sample per pixel: 2
+pixels differ by more than 5, by at most 6 levels, at (671,603) and
+(682,603), the top-right corner pixel of two identical glyphs, with no
+transform there (drawn 129,146,173, reference 125,140,173). It fails the
+same way before `10-reach:09-turned-edges-agree`. llvmpipe rounds
+`src * alpha` and `dst * (1 - alpha)` separately in each 8-bit blend,
+which is why the owner let a color differ by 5 against llvmpipe
+(`09-seeing-the-ui`, `roadmap/decisions.md`); frame 228 needed exactly 5
+then, and `11-polish:19-default-design`'s colors take it to 6.
+
+**Plan.** Find the translucent layers stacked under those glyphs on
+Light & Depth, and draw them so that llvmpipe's double rounding stays
+within 5, by fewer layers or opaque ones where the look allows, without
+raising the tolerance, which the owner chose to keep.
+
+**Done when.** `test-draw` passes against an llvmpipe reference here and
+in CI, and on NVIDIA.
+
+**Spec.** §13.
+
+**Status.** Not started.

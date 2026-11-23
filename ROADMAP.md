@@ -117,6 +117,7 @@ is in the file its group names.
 | `10-reach:01-linux-host` | `hosts/native/`, `renderers/sokol/` | | in progress; slice 9, X11, continues with many windows |
 | `10-reach:04-window-decorations` | `core/src/chrome.zig`, `core/src/context.zig`, `core/zui_app/`, `hosts/native/` | | waiting on a person: the checklist under its *Status*, on `zig build title-bar` in `hosts/native/` |
 | `10-reach:07-x11-ibus` | `hosts/native/linux/` | | waiting on CI: the five IBus bus tests in `hosts/native`'s Xvfb leg (`x11_conformance.zig`) |
+| `10-reach:10-light-lab-on-llvmpipe` | `apps/tour/src/screens/light_lab.zig`, `renderers/` | | not started; CI's llvmpipe `test-draw` fails on frame 228 until it lands |
 | `11-polish:18-system-accent` | `core/src/input.zig`, `hosts/` | | waiting on CI: the Windows host's accent, in `hosts/native/`'s Windows conformance tests |
 | `11-polish:27-essential-inputs` | `core/zui_widgets/` | `11-polish:07-zui-icons` | |
 | `11-polish:28-containers-and-navigation` | `core/zui_widgets/` | | |
