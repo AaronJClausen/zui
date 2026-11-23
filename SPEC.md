@@ -155,7 +155,7 @@ zui is one repository, `zui`, of packages:
 | `core/` | the core, the contracts, and the modules, as the package `zui_core` |
 | `text/` | text, one package each: `glyphs/` (`zui_glyphs`, what font systems and renderers share), `truetype/` (`zui_truetype`, the default font system) and `fonts/` (`zui_fonts`, the bundled typefaces) |
 | `apps/` | the tour (`zui_tour`), which every renderer and host runs |
-| `themes/` | skins for OS design languages (`zui_themes`) |
+| `themes/` | the OS design languages as `Design`s (`zui_themes`) |
 | `examples/` | samples and the template project |
 | `renderers/` | renderers, one package each: `raylib/` (`zui_raylib`, which also holds an adapter host), `sokol/` (`zui_sokol`), `terminal/` (`zui_terminal`) and `webgl/` (`zui_webgl`, the browser's drawing) |
 | `hosts/` | hosts, one package each: native hosts in `native/` (`zui_host`), one directory per OS, and the web host in `web/` (`zui_web`) |
@@ -2351,8 +2351,8 @@ instantiated. A skin is a struct that declares `zuiStyle` and no other
 - **A skin of data** holds its tables and returns from them:
   `parts: std.EnumArray(Part, std.EnumArray(WidgetState, Style(Ui)))`
   answers `return skin.parts.get(part).get(state);`. A theme pack
-  (`zui_themes`) is such a type, generic over `Ui` so the application
-  gives it its fonts.
+  (`zui_themes`) is not a skin but a `Design` (§18), which `DesignSkin`
+  draws once the application resolves it.
 - **No cost beyond the call.** `Skin` is a comptime type and `zuiStyle`
   a direct call, so `Widgets` is exactly as large as its skin and has no
   vtable.

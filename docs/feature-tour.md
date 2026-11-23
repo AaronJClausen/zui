@@ -2462,6 +2462,48 @@ pub fn albumSynced(ui: *Ui, tokens: *const zui.design.Tokens(Ui, void)) void {
 }
 ```
 
+<a id="design-languages"></a>
+
+### `zui_themes`: Fluent, libadwaita and Breeze · *shipped*
+
+`zui_themes` holds the design languages of the desktops zui runs on,
+each a plain `zui.design.Design` you resolve in place of
+`zui_design.default`: `zui_themes.fluent` for Windows 11,
+`zui_themes.libadwaita` for GNOME and `zui_themes.breeze` for KDE
+Plasma. Each takes its language's accent, neutral and status hues, its
+type ramp's ratio and body size, its corner radii as shape roles, its
+spacing and its motion from the language's own documentation and
+stylesheets, and keeps the default's tones, so every one meets the same
+contrast targets in light, dark and high contrast at every density. The
+user's accent, which the hosts report, replaces the language's at run
+time. The fonts stay yours: none of Segoe UI, Adwaita Sans or Noto Sans
+is bundled, so text is sized to the language's x-height in your own
+font.
+
+`src/appearance.zig`
+
+```zig
+pub const app_design: zui.design.Design = design: {
+    var language = switch (builtin.os.tag) {
+        .windows => zui_themes.fluent,
+        else => zui_themes.libadwaita,
+    };
+    language.type.fonts = .{
+        .regular = @intFromEnum(FontId.body),
+        .strong = @intFromEnum(FontId.body_bold),
+        .monospace = @intFromEnum(FontId.mono),
+    };
+    break :design language;
+};
+
+pub fn resolveOnChange(self: *Appearance, environment: *const zui.Environment) void {
+    const preferences: zui_design.Preferences = .from(environment, self.choices);
+    if (self.preferences != null and std.meta.eql(preferences, self.preferences.?)) return;
+    self.preferences = preferences;
+    _ = zui_design.resolve(app_design, preferences, &self.tokens);
+}
+```
+
 <a id="design-audit"></a>
 
 ### `zui_design.audit`: checks of a finished frame · *shipped*
@@ -3450,8 +3492,8 @@ These names compile, but they don't do anything yet. This list is from
   scripted host, but no shipped host declares `zuiRun` yet; macOS, iOS
   and Android's are to come.
 - **Still to come**: Multi-line text editing, the rest of the design
-  system (a review of every permutation), theme packs, the inspector
-  over the wire, and more hosts (Linux and web; macOS later).
+  system (a review of every permutation), the inspector over the wire,
+  and more hosts (Linux and web; macOS later).
 
 <a id="dx"></a>
 

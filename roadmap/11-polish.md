@@ -20,7 +20,7 @@ and each is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:05-default-skin` The default skin | retired: merged into `11-polish:19-default-design` |
 | `11-polish:06-text-editing` Text editing | not started |
 | `11-polish:07-zui-icons` `zui_icons` | done |
-| `11-polish:08-zui-themes` `zui_themes` | not started |
+| `11-polish:08-zui-themes` `zui_themes` | done |
 | `11-polish:09-template-project` The template project | not started |
 | `11-polish:10-samples` Samples | not started |
 | `11-polish:11-profiling-guide` A profiling guide | done |
@@ -743,6 +743,86 @@ which the resolver keeps for every design (`roadmap/decisions.md`). The
 plan's personalities, `quiet-instrument` and `crisp-technical`
 (`docs/plans/default-ui-designs/personalities/`), show how far that
 reaches from `zui_design.default`.
+
+**Grounding** (at `68d1959`). `zui.design.Design`
+(`core/src/design.zig:126`) holds `name`, `seeds` (`Seeds`, `:139`: the
+accent and neutral as `Oklch` and three optional status hues), `type`,
+`shapes` (each `ShapeRole` a `CornerSize`), `corner_shape`, `density`
+(defaulting to `default_density`, `:203`) and `motion` (`Motion`,
+`:227`). `zui_design.resolve` (`core/zui_design/zui_design.zig:147`)
+reads only each seed's hue and chroma, takes every role's lightness from
+its own tones, and at comptime fails the build on any repair the
+design's own seeds need (`:153`, `:176`). A shape role's radius is the
+resolver's for its `CornerSize` and density (`cornerRadiusOf`, `:289`:
+`sharp` 4, or 2 at compact; `smooth` 8; `soft` 16; `bubble` a pill), so
+a language's radii are rounded to those five. `Preferences.from` (`:80`)
+takes the system's accent from `zui.Environment.accent`, which
+`rampSeeds` (`core/zui_design/palette.zig:99`) and `idlePalette`
+(`:116`, `:124`) put in place of the accent seed, the fill as it is.
+`palettesFor` (`core/zui_design/zui_design.zig:312`) gives each role's
+idle shade before encoding, which is where a tone is compared.
+`zui_design.default` (`core/zui_design/default.zig`) is the template,
+and `core/zui_design/default_tests.zig` checks it at comptime in the
+four schemes; it calls no `checkDistinguished`, and `zui_widgets`
+declares no `zuiDistinguish`, so neither do these tests. A size in a
+design follows its font's ascent less descent, as the default's Atkinson
+Hyperlegible at 16 with an x-height of 6.4 does (496 of 950 + 290
+units). `themes/` was a skeleton: `themes/build.zig` with one test of
+the `zui_themes` module on `zui`, and `themes/src/root.zig` a smoke
+test.
+
+**Plan.** In one commit: `themes/src/fluent.zig`,
+`themes/src/libadwaita.zig` and `themes/src/breeze.zig`, each a
+`pub const` `Design` with every value's source in its doc comment,
+exported from `themes/src/root.zig`; a second test module,
+`themes/src/tests.zig`, on `zui`, `zui_design`, `zui_color` and the
+`zui_themes` module, so the module itself still imports only `zui`; its
+shared checks in `themes/src/design_checks.zig` and one test file beside
+each design.
+
+**Done when.** Each design resolves at comptime in light, dark and both
+high contrasts at every density with nothing repaired; every checked
+pair meets its target in its idle tokens; each role's idle lightness and
+alpha equal the default's in every scheme; each seed equals
+`zui_color`'s conversion of its published sRGB color; the system's
+accent replaces the seed; the shapes, spacing, type and motion reach the
+tokens. `themes/`'s `test` passes in three modes and its `check`;
+`test-all` and `check-all` pass.
+
+**Spec.** §16.7, §18.
+
+**Status.** Done. `zui_themes.fluent`, `.libadwaita` and `.breeze`
+(`themes/src/fluent.zig`, `libadwaita.zig`, `breeze.zig`) are plain
+`Design`s importing only `zui`, each value sourced in its doc comment:
+learn.microsoft.com's Windows pages (the type ramp, geometry, spacing,
+timing and easing) for Fluent; libadwaita's `_colors.scss`,
+`_palette.scss`, `_common.scss` and `widgets/_labels.scss`, its CSS
+variables and `org.gnome.desktop.interface`'s default font for
+libadwaita; Breeze's `BreezeLight.colors` and `BreezeDark.colors`,
+`breezemetrics.h` and `breeze.kcfg`, Kirigami's `units.cpp` and
+`Heading.qml`, and plasma-integration's `kfontsettingsdata.cpp` for
+Breeze. The seeds are the published sRGB colors in OKLCH, which the
+tests compare with `zui_color`'s conversion to 0.0005 and 0.05°. Each
+resolves at comptime in the four schemes at the three densities with
+nothing repaired, meets every checked pair's target in its idle tokens,
+keeps the default's lightness and alpha for every role in every scheme,
+takes the system's accent in place of its seed in light and dark, and
+carries its spacing, radii, corner shape, type and motion into its
+tokens (`themes/src/design_checks.zig`, `themes/src/*_tests.zig`, on
+`zui_design` and `zui_color` in a test module of their own). The
+language had to give way twice. Fluent's success hue is WinUI's 143
+moved to 148, where the default's tones keep it apart from danger under
+tritanopia: at 143, 144 and 146 the resolve fails the build, danger and
+success 0.14 apart in lightness where 0.15 is needed. A radius is one of
+the five `CornerSize`s, so libadwaita's 9-unit buttons draw at 8 and its
+12- and 15-unit cards and popovers at 16, and Breeze's 5 at 4. Segoe
+UI's and Noto Sans' x-heights were taken from the fonts' published
+metrics, which no documentation site lists, and were not measured here;
+Adwaita Sans' was read from its font file in gnome's adwaita-fonts.
+`themes/`'s `test` in Debug, ReleaseFast and ReleaseSafe, its `check`
+and `fmt-check`, and the root's `test-all` and `check-all` pass. Counts
+were not run: no hot path changes. The root does not re-export
+`zui_themes`, so an application names `themes/` by path.
 
 ## 11-polish:09-template-project — The template project
 

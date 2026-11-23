@@ -15,8 +15,24 @@ pub fn build(b: *std.Build) void {
     });
 
     const unit_tests = b.addTest(.{ .root_module = themes_module });
-    b.step("test", "Run the unit tests").dependOn(&b.addRunArtifact(unit_tests).step);
-    b.step("check", "Compile the unit tests without running them").dependOn(&unit_tests.step);
+    const design_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/tests.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zui", .module = core.module("zui") },
+            .{ .name = "zui_design", .module = core.module("zui_design") },
+            .{ .name = "zui_color", .module = core.module("zui_color") },
+            .{ .name = "zui_themes", .module = themes_module },
+        },
+    }) });
+
+    const test_step = b.step("test", "Run the unit tests and resolve every design");
+    test_step.dependOn(&b.addRunArtifact(unit_tests).step);
+    test_step.dependOn(&b.addRunArtifact(design_tests).step);
+    const check_step = b.step("check", "Compile the unit tests without running them");
+    check_step.dependOn(&unit_tests.step);
+    check_step.dependOn(&design_tests.step);
 
     const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src" };
     b.step("fmt", "Format all Zig sources").dependOn(&b.addFmt(.{ .paths = formatted_paths }).step);

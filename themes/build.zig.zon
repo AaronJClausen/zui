@@ -6,5 +6,5 @@
     .dependencies = .{
         .zui_core = .{ .path = "../core" },
     },
-    .paths = .{ "build.zig", "build.zig.zon", "src" },
+    .paths = .{ "build.zig", "build.zig.zon", "src", "README.md" },
 }

@@ -185,7 +185,7 @@ API, what it draws or reports, its limits, and its build steps.
 | `zui_host` | [hosts/native/](hosts/native/README.md) | the native hosts, for Windows and for Linux on Wayland or X11 |
 | `zui_web` | [hosts/web/](hosts/web/README.md) | the web host, the tour on it as the published page, and the thin client over `zui_wire` the checks compare it with |
 | `zui_tour` | [apps/tour/](apps/tour/README.md) | zui shown four ways: an operations console, the same console with its features pointed out, field cases and spectacles, for any host and renderer |
-| `zui_themes` | [themes/](themes/) | skins in the design languages of Windows, macOS, GNOME and KDE; a skeleton today |
+| `zui_themes` | [themes/](themes/) | the design languages of Windows (Fluent), GNOME (libadwaita) and KDE (Breeze) as `zui.design.Design`s |
 | — | [examples/](examples/) | a template project and samples; a skeleton today |
 
 ## Development

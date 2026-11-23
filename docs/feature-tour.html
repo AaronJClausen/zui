@@ -2005,6 +2005,31 @@ pub fn albumSynced(ui: *Ui, tokens: *const zui.design.Tokens(Ui, void)) void {
 }
 </script>
       </article>
+      <article class="feature" id="design-languages" data-title="zui_themes">
+        <div class="feature-head"><h3><code>zui_themes</code>: Fluent, libadwaita and Breeze</h3><span class="pill shipped">Shipped</span></div>
+        <p><code class="z">zui_themes</code> holds the design languages of the desktops zui runs on, each a plain <code class="z">zui.design.Design</code> you resolve in place of <code class="z">zui_design.default</code>: <code class="z">zui_themes.fluent</code> for Windows 11, <code class="z">zui_themes.libadwaita</code> for GNOME and <code class="z">zui_themes.breeze</code> for KDE Plasma. Each takes its language's accent, neutral and status hues, its type ramp's ratio and body size, its corner radii as shape roles, its spacing and its motion from the language's own documentation and stylesheets, and keeps the default's tones, so every one meets the same contrast targets in light, dark and high contrast at every density. The user's accent, which the hosts report, replaces the language's at run time. The fonts stay yours: none of Segoe UI, Adwaita Sans or Noto Sans is bundled, so text is sized to the language's x-height in your own font.</p>
+<script type="text/x-zig" data-file="src/appearance.zig">
+pub const app_design: zui.design.Design = design: {
+    var language = switch (builtin.os.tag) {
+        .windows => zui_themes.fluent,
+        else => zui_themes.libadwaita,
+    };
+    language.type.fonts = .{
+        .regular = @intFromEnum(FontId.body),
+        .strong = @intFromEnum(FontId.body_bold),
+        .monospace = @intFromEnum(FontId.mono),
+    };
+    break :design language;
+};
+
+pub fn resolveOnChange(self: *Appearance, environment: *const zui.Environment) void {
+    const preferences: zui_design.Preferences = .from(environment, self.choices);
+    if (self.preferences != null and std.meta.eql(preferences, self.preferences.?)) return;
+    self.preferences = preferences;
+    _ = zui_design.resolve(app_design, preferences, &self.tokens);
+}
+</script>
+      </article>
 
       <article class="feature" id="design-audit" data-title="zui_design.audit">
         <div class="feature-head"><h3><code>zui_design.audit</code>: checks of a finished frame</h3><span class="pill shipped">Shipped</span></div>
@@ -2682,7 +2707,7 @@ fn present(renderer: *Renderer, surface: zui.Surface, frame: *const Ui.Frame) !v
       <p class="group-intro">These names compile, but they don't do anything yet. This list is from <code>ARCHITECTURE.md</code> §7 and the roadmap.</p>
       <ul class="gap-list">
         <li><b>A host that runs its own loop</b><span><code class="z">zuiRun</code> and the <code class="z">zui.Driver</code> it is handed, with <code class="z">suspendSurfaces</code> and <code class="z">resumeSurfaces</code> for a surface the platform takes away, compile and pass <code class="z">zui_app</code>'s tests against a scripted host, but no shipped host declares <code class="z">zuiRun</code> yet; macOS, iOS and Android's are to come.</span></li>
-        <li><b>Still to come</b><span>Multi-line text editing, the rest of the design system (a review of every permutation), theme packs, the inspector over the wire, and more hosts (Linux and web; macOS later).</span></li>
+        <li><b>Still to come</b><span>Multi-line text editing, the rest of the design system (a review of every permutation), the inspector over the wire, and more hosts (Linux and web; macOS later).</span></li>
       </ul>
     </section>
 
