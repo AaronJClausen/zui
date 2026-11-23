@@ -200,6 +200,8 @@ const caption_height = 22;
 const tile_gap = 8;
 const tile_pitch = thumbnail_height + caption_height + tile_gap;
 const side_width = 300;
+const grid_panel_padding = 4;
+const track_width = 10;
 const loupe_height = 201;
 
 /// The screen, declared through `kit`, the tour's `Kit`.
@@ -340,7 +342,7 @@ pub fn Using(comptime kit: type) type {
                 const last_row: u32 = @min(total_rows, @as(u32, @intFromFloat(@max(0, @ceil((offset + viewport.height) / tile_pitch)))) + 1);
 
                 ui.open(.{
-                    .layout = .{ .sizing = .grow_both, .padding = .all(4), .child_gap = 4 },
+                    .layout = .{ .sizing = .grow_both, .padding = .{ .left = grid_panel_padding, .top = grid_panel_padding, .bottom = grid_panel_padding } },
                     .decoration = .{ .background = colors.get(.surface), .border = .{ .color = colors.get(.outline_muted), .widths = .all(1) }, .corner_radius = .all(8) },
                 });
                 defer ui.close();
@@ -614,14 +616,18 @@ pub fn Using(comptime kit: type) type {
                 .id = track_id,
                 .interactive = true,
                 .cursor = .resize_vertical,
-                .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(10), .height = .grow } },
-                .decoration = .{ .background = colors.get(.surface_sunken), .corner_radius = .all(5) },
+                .layout = .{ .sizing = .{ .width = .fixed(shell.tokens.target_floors.get(.pointer)), .height = .grow }, .padding = .{ .right = grid_panel_padding }, .child_alignment = .{ .x = .end } },
+            });
+            defer ui.close();
+            ui.open(.{
+                .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(track_width), .height = .grow } },
+                .decoration = .{ .background = colors.get(.surface_sunken), .corner_radius = .all(track_width / 2) },
             });
             defer ui.close();
             ui.box(.{ .layout = .{ .sizing = .{ .height = .fixed(thumb_top) } } });
             ui.box(.{
                 .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(thumb_height) } },
-                .decoration = .{ .background = if (ui.hovered(track_id) or ui.pressed(track_id)) colors.get(.accent) else colors.get(.on_surface_muted), .corner_radius = .all(5) },
+                .decoration = .{ .background = if (ui.hovered(track_id) or ui.pressed(track_id)) colors.get(.accent) else colors.get(.on_surface_muted), .corner_radius = .all(track_width / 2) },
             });
         }
 

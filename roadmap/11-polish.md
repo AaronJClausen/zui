@@ -38,7 +38,7 @@ and each is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:23-design-workbench` The design workbench | not started |
 | `11-polish:24-the-tour` The tour, redone | done |
 | `11-polish:25-focus-ring-on-fills` A focus ring that shows on a filled control | done |
-| `11-polish:26-small-targets` Targets of at least 24 units in the tour | not started |
+| `11-polish:26-small-targets` Targets of at least 24 units in the tour | done |
 | `11-polish:27-essential-inputs` Essential inputs | not started |
 | `11-polish:28-containers-and-navigation` Containers and navigation | not started |
 | `11-polish:29-overlays` Overlays | not started |
@@ -1905,16 +1905,24 @@ on one frame, Clickable Chaos's turned cards
 Every control the tour declares can be hit at the floor of SPEC.md
 §18.5.
 
-**Grounding** (at `8a8507e`). `11-polish:20-appearance-audit` found 33
-interactive elements under the 24-unit floor, in light and in dark
-alike: X-ray's fourteen numbered markers, `1` to `14`, 14 to 20 units
-wide and 18 tall (`apps/tour/src/screens/harbor.zig:1212`); Photo Cull's
-scrollbar, 10 units wide (`apps/tour/src/screens/photo_cull.zig:617`);
-Log Tail's level chips, `DEBUG`, `INFO`, `WARN` and `ERROR`, 23 tall;
-Settings Form's text scale choices, `100%`, `150%` and `200%`, 21 tall;
-and One Declaration's `Autopay` and `Email receipts` toggles, 18 tall in
-four of its variants and 13 in the fifth, with its `Pay $786.00` button
-there 22 tall (`apps/tour/src/screens/one_declaration.zig:226`).
+**Grounding** (at `b3399bb`). The tour's audit test finds 32 interactive
+elements under the 24-unit floor, in light and in dark alike: X-ray's
+fourteen numbered markers, `1` to `14`, 14 to 20 units wide and 18 tall
+(`apps/tour/src/screens/harbor.zig:1204`); Photo Cull's scroll track, 10
+units wide (`apps/tour/src/screens/photo_cull.zig:617`); Log Tail's
+level chips, `DEBUG`, `INFO`, `WARN` and `ERROR`, 23 tall
+(`apps/tour/src/screens/log_tail.zig:331`); Settings Form's text scale
+choices, `100%`, `150%` and `200%`, 21 tall
+(`apps/tour/src/screens/settings_form.zig:365`); and One Declaration's
+`Autopay` and `Email receipts` toggles, 18 tall in four of its variants
+and 13 in the compact one
+(`apps/tour/src/screens/one_declaration.zig:236`). Its `Pay $786.00`
+button, 22 tall at `8a8507e`, takes the tokens' control height since
+`11-polish:19-default-design` and passes. The audit measures an
+interactive element's own rectangle and compares overlaps only within
+one floating layer, skipping an element's descendants
+(`core/zui_design/audit.zig:372`, `:434`), so a transparent interactive
+parent padded around a drawn child counts at the parent's size.
 
 **Plan.** Raise each to the floor, by its height or by padding a hit
 area around what it draws, so the look need not grow.
@@ -1923,6 +1931,36 @@ area around what it draws, so the look need not grow.
 finding, in light or dark; `test-all`, `check-all`.
 
 **Spec.** §18.5.
+
+**Status.** Done. Every target in the tour is at least the tokens'
+pointer floor, `target_floors.get(.pointer)`, 24 units with a mouse.
+Where growing the drawn element would change the design, a transparent
+interactive parent is padded around it: X-ray's numbered nodes are a
+24-unit hit area around the 18-unit dot, which keeps its size and
+position, and the feature card attaches to the dot, so it opens where it
+did; Photo Cull's scroll track is a 24-unit hit area that runs to the
+panel's edge, taking the panel's right padding and the gap before it, so
+the 10-unit track draws where it did and the grid is 6 units narrower,
+still six columns in the default window. Where the element was within a
+few units of the floor, it grows: Log Tail's level chips by 1 unit,
+Settings Form's text scale choices by 3, and One Declaration's toggle
+rows to 24 in the four variants where they were 18 and the compact one
+where they were 13, the gap between the two toggles giving back what
+they grew, so the tracks keep their spacing and each invoice is 6 units
+taller (18 in compact). Raylib screenshots of `x_ray`, `photo_cull`,
+`log_tail`, `settings_form` and `one_declaration` before and after:
+X-ray and Photo Culling draw the same, the others differ only by those
+heights; the 150% variant of One Declaration, pushed down 6 units by the
+taller row above it, now scrolls its card's last 6 units of padding. The
+tour's audit test expects a clean audit in light and dark, from 32
+target findings in each; its expected-cause list is gone. No overlap
+finding appeared: X-ray's nodes each float on a layer of their own.
+Passing: `apps/tour` `test` in all three modes, `check` and
+`check -Dtarget=x86_64-windows`; the raylib tour's cycle (600 frames,
+`0 layer overflows, 0 glyph atlas overflows, diagnostics ok: true`); the
+terminal's `tour -- --dump --every-screen`; `hosts/web`'s `test-demo`
+and `test-draw` on the NVIDIA GPU, every frame matching; `test-all` and
+`check-all`.
 
 ## 11-polish:27-essential-inputs — Essential inputs
 

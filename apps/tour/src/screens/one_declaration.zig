@@ -139,8 +139,13 @@ pub fn Using(comptime kit: type) type {
                     var buffer: [32]u8 = undefined;
                     look.label(ui, .tiny, colors.get(.on_surface_muted), std.fmt.bufPrint(&buffer, "{f} paid", .{Money{ .cents = self.paid_cents }}) catch "");
                 }
-                look.toggle(ui, .indexed("one_declaration.autopay", variant_index), "Autopay", &self.autopay);
-                look.toggle(ui, .indexed("one_declaration.receipts", variant_index), "Email receipts", &self.receipts);
+                {
+                    const row_growth = look.toggleRowHeight() - look.toggleTrackHeight();
+                    ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow }, .child_gap = @max(0, look.gap - row_growth) } });
+                    defer ui.close();
+                    look.toggle(ui, .indexed("one_declaration.autopay", variant_index), "Autopay", &self.autopay);
+                    look.toggle(ui, .indexed("one_declaration.receipts", variant_index), "Email receipts", &self.receipts);
+                }
                 const widgets = look.widgets();
                 if (paid) {
                     if (widgets.button(ui, .indexed("one_declaration.undo", variant_index), "Undo payment", .{ .width = .grow })) self.paid_cents = deposit_cents;
@@ -231,18 +236,29 @@ pub fn Using(comptime kit: type) type {
                 ui.close();
             }
 
+            fn toggleTrackHeight(look: Look) f32 {
+                return @round(look.control_height * 0.6);
+            }
+
+            /// A toggle's row is at least the target floor tall, however
+            /// small its track; its gap to the next toggle gives back
+            /// what it grew.
+            fn toggleRowHeight(look: Look) f32 {
+                return @max(look.toggleTrackHeight(), look.tokens.target_floors.get(.pointer));
+            }
+
             /// A switch: its knob sits at the start when off and the end
             /// when on, so a mirrored view moves it the other way.
             fn toggle(look: Look, ui: *Ui, id: zui.Id, content: []const u8, on: *bool) void {
                 if (ui.clicked(id)) on.* = !on.*;
                 const colors = look.colors;
-                const track_height = @round(look.control_height * 0.6);
+                const track_height = look.toggleTrackHeight();
                 ui.open(.{
                     .id = id,
                     .focusable = true,
                     .cursor = .pointer,
                     .semantics = .{ .role = .toggle, .label = content, .state = .{ .checked = on.* } },
-                    .layout = .{ .sizing = .{ .width = .grow }, .child_gap = look.gap, .child_alignment = .{ .y = .center } },
+                    .layout = .{ .sizing = .{ .width = .grow, .height = .fitBetween(look.toggleRowHeight(), std.math.inf(f32)) }, .child_gap = look.gap, .child_alignment = .{ .y = .center } },
                     .decoration = .{ .border = if (ui.focused(id)) .{ .color = colors.get(.focus), .widths = .all(1) } else null, .corner_radius = .all(4) },
                 });
                 defer ui.close();

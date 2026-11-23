@@ -328,7 +328,7 @@ pub fn Using(comptime kit: type) type {
                     .focusable = true,
                     .cursor = .pointer,
                     .semantics = .{ .role = .toggle, .label = level.tag(), .state = .{ .checked = shown } },
-                    .layout = .{ .padding = .symmetric(10, 5), .child_gap = 8, .child_alignment = .{ .y = .center } },
+                    .layout = .{ .sizing = .{ .height = .fitBetween(shell.tokens.target_floors.get(.pointer), std.math.inf(f32)) }, .padding = .symmetric(10, 5), .child_gap = 8, .child_alignment = .{ .y = .center } },
                     .decoration = .{
                         .background = if (shown) emphasis.container(colors) else if (state == .hovered) colors.get(.secondary_container) else colors.get(.surface),
                         .border = .{ .color = if (ui.focused(id)) colors.get(.focus) else if (shown) emphasis.fill(colors) else colors.get(.outline_muted), .widths = .all(1) },

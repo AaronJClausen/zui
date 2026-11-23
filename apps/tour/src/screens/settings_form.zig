@@ -362,7 +362,7 @@ pub fn Using(comptime kit: type) type {
                     .focusable = true,
                     .cursor = .pointer,
                     .semantics = .{ .role = .radio, .label = label, .state = .{ .checked = selected } },
-                    .layout = .{ .padding = .symmetric(10, 4) },
+                    .layout = .{ .sizing = .{ .height = .fitBetween(shell.tokens.target_floors.get(.pointer), std.math.inf(f32)) }, .padding = .symmetric(10, 4), .child_alignment = .{ .y = .center } },
                     .decoration = .{
                         .background = if (selected) colors.get(.accent) else if (state == .hovered or state == .pressed) colors.get(.secondary_container) else colors.get(.surface),
                         .border = .{ .color = if (ui.focused(id)) colors.get(.focus) else colors.get(.outline_muted), .widths = .all(1) },

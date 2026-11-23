@@ -136,7 +136,6 @@ is in the file its group names.
 | `11-polish:09-template-project` | `examples/` | | |
 | `11-polish:10-samples` | `examples/` | `11-polish:09-template-project` | |
 | `11-polish:12-developer-experience-audit` | `examples/`, `README.md`, `docs/` | `11-polish:09-template-project`, `11-polish:10-samples` | |
-| `11-polish:26-small-targets` | `apps/tour/src/screens/` | | |
 
 Stage 11's rows follow stage 10's, in dependency order, the design
 system's first (`roadmap/11-polish.md`, *The design system*), by the

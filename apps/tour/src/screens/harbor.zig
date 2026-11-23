@@ -1169,6 +1169,13 @@ pub fn Using(comptime kit: type) type {
                 return .indexed("harbor_xray_node", @intFromEnum(feature));
             }
 
+            /// The numbered dot drawn inside a node's hit area, which the feature card attaches to.
+            fn nodeDotId(feature: Feature) zui.Id {
+                return .indexed("harbor_xray_node_dot", @intFromEnum(feature));
+            }
+
+            const node_dot_height = 18;
+
             fn nodeTarget(feature: Feature) zui.Id {
                 return switch (feature) {
                     .virtual_scroll => ids.harbor_services,
@@ -1194,6 +1201,7 @@ pub fn Using(comptime kit: type) type {
                 const active = self.card_feature == feature or ui.hovered(id) or ui.focused(id);
                 const pulse = if (pulsing) 0.5 + 0.5 * @sin(@as(f32, @floatCast(shell.seconds)) * 5 + @as(f32, @floatFromInt(@intFromEnum(feature)))) else 0;
                 const glow: zui.Effects = .{ .shadow = .glow(colors.get(.accent).mix(colors.get(.background), 0.4 + 0.6 * (1 - pulse)), 2 + 6 * pulse) };
+                const hit_size = shell.tokens.target_floors.get(.pointer);
                 var label_buffer: [4]u8 = undefined;
                 ui.open(.{
                     .id = id,
@@ -1201,11 +1209,16 @@ pub fn Using(comptime kit: type) type {
                     .cursor = .pointer,
                     .semantics = self.semantic(.{ .role = .button, .label = feature.title() }),
                     .floating = .{ .attach_to = .{ .element = nodeTarget(feature) }, .anchor = .center, .attach_point = .top_right, .z = 800, .clip = .target },
-                    .layout = .{ .sizing = .{ .height = .fixed(18) }, .padding = .symmetric(5, 0), .child_alignment = .{ .x = .center, .y = .center } },
+                    .layout = .{ .sizing = .{ .width = .fitBetween(hit_size, std.math.inf(f32)), .height = .fixed(hit_size) }, .child_alignment = .{ .x = .center, .y = .center } },
+                });
+                defer ui.close();
+                ui.open(.{
+                    .id = nodeDotId(feature),
+                    .layout = .{ .sizing = .{ .height = .fixed(node_dot_height) }, .padding = .symmetric(5, 0), .child_alignment = .{ .x = .center, .y = .center } },
                     .decoration = .{
                         .background = if (active) colors.get(.on_surface) else colors.get(.accent),
                         .border = .{ .color = if (ui.focused(id)) colors.get(.focus) else colors.get(.surface), .widths = .all(2) },
-                        .corner_radius = .all(9),
+                        .corner_radius = .all(node_dot_height / 2),
                     },
                     .effects = if (pulsing) &glow else null,
                 });
@@ -1244,7 +1257,7 @@ pub fn Using(comptime kit: type) type {
 
             fn featureCard(self: *Harbor, ui: *Ui, shell: *const Shell, feature: Feature) void {
                 const colors = shell.colors;
-                const node_rect = ui.rectOf(nodeId(feature)) orelse zui.Rect{};
+                const node_rect = ui.rectOf(nodeDotId(feature)) orelse zui.Rect{};
                 const viewport = ui.viewport();
                 const opens_left = node_rect.x + node_rect.width / 2 > viewport[0] * 0.55;
                 const opens_up = node_rect.y + node_rect.height / 2 > viewport[1] * 0.5;
@@ -1255,7 +1268,7 @@ pub fn Using(comptime kit: type) type {
                     .id = ids.harbor_xray_card,
                     .interactive = true,
                     .semantics = self.semantic(.{ .role = .group, .label = feature.title() }),
-                    .floating = .{ .attach_to = .{ .element = nodeId(feature) }, .anchor = anchor, .attach_point = attach_point, .offset = overlap, .z = 810 },
+                    .floating = .{ .attach_to = .{ .element = nodeDotId(feature) }, .anchor = anchor, .attach_point = attach_point, .offset = overlap, .z = 810 },
                     .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(340) }, .padding = .all(14), .child_gap = 8 },
                     .decoration = .{ .background = colors.get(.surface), .border = .{ .color = colors.get(.accent).mix(colors.get(.outline_muted), 0.5), .widths = .all(1) }, .corner_radius = .all(8), .corner_shape = kit.panel_corner_shape },
                     .effects = &floating_shadow,
