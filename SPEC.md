@@ -2466,6 +2466,9 @@ pub const design = struct {
     pub const ControlSize = enum { small, medium, large };
     pub const Elevation = enum { raised, floating, modal, topmost };
     pub const FaceMetrics = struct { ascent: f32, descent: f32, x_height: f32, cap_height: f32 }; // font units
+    pub const Icon = enum { chevron_down, chevron_right, check, close, search, alert, info, success, warning, danger, arrow_up, arrow_down, broken_image, spinner };
+    pub const IconSet = struct { codepoints: std.EnumArray(Icon, u21) };   // each icon's codepoint in an icon font
+    pub const IconGlyph = struct { font: u32, codepoint: u21, ... };      // one icon to draw, as `utf8()` text
 
     pub const Design = struct { ... };                             // what an application or theme pack declares
     pub const Motion = struct { ... };                             // a `zui.motion` option per kind of change, and the press scale
@@ -2505,10 +2508,20 @@ pub const design = struct {
 
 - **`Design`** holds the seeds, the type scale's inputs and fonts, each
   shape role's size and the corner family, the density table, a length
-  per `Space` at each `Density`, and its `motion`. It is plain data, so
-  a theme pack imports only `zui`: its fonts are the integer values of
-  the application's `FontId`, and its seeds are OKLCH as
-  `zui.design.Oklch`.
+  per `Space` at each `Density`, its `motion`, and its `icons`. It is
+  plain data, so a theme pack imports only `zui`: its fonts are the
+  integer values of the application's `FontId`, and its seeds are OKLCH
+  as `zui.design.Oklch`.
+
+- **`Icon`** names each icon a component draws: the chevrons of a
+  dropdown and a disclosure, a check, close, search, a field's `alert`,
+  the four status glyphs, a table's sort arrows, `broken_image` and a
+  spinner's arc. A design draws them in an icon font, its id in
+  `Design.type.fonts.icons` and each icon's codepoint in `Design.icons`,
+  an `IconSet`; both are null by default and are given together, so a
+  design resolved at comptime with one and not the other fails to
+  compile (§19.8). The design's icons are the application's, as its
+  fonts are: `zui_icons.tabler` gives Tabler Icons'.
 
 - **`Motion`** is how each kind of change moves: a
   `zui.motion.TweenOptions` for `state` (a part's colors changing),
@@ -2530,8 +2543,11 @@ pub const design = struct {
   control's height and icon size per `ControlSize`, the outline and
   focus ring widths and the ring's offset, a `Lift` per `Elevation`
   (§18.7), the factor a part that draws text pads by, the body text's
-  measure, and the design's `motion`; `tokens.space(.m)` reads a tier.
-  Every field but `motion` is empty until a resolver writes it.
+  measure, the design's `motion`, and its icon font and each `Icon`'s
+  codepoint in it; `tokens.space(.m)` reads a tier, and
+  `tokens.icon(.check)` an icon, an `IconGlyph`, or null when the design
+  has no icon font, so the component draws none. Every field but
+  `motion` is empty until a resolver writes it.
   `tokens.look(Component, part, state)` answers a part's decoration,
   padding, gap, text style and minimum size in one `WidgetState`, and
   checks the component's appearance the first time it is read, so a
@@ -3448,6 +3464,34 @@ in another process. An application on `zui_app` hands it each frame from
 
 OKLab, OKLCH and HSL conversion, mixing and palettes, all usable at
 comptime; icon names to codepoints in an icon font, drawn as text.
+
+`zui_icons` names the icons of Tabler Icons (MIT) that `zui_fonts`
+bundles as `tabler_icons`, a subset of at most 64 glyphs: the
+components' icons (§18.1's `Icon`) and the common ones an application
+reaches for first, such as `plus`, `settings`, `trash` and `user`.
+`zui_icons.Name` is an enum of them, by Tabler's names with `_` for `-`;
+`codepoint(name)` is its codepoint in the font and `utf8(name)` the text
+that draws it, comptime-known for a comptime name. `zui_icons.tabler` is
+a `zui.design.IconSet`, each `Icon` in Tabler's glyphs, danger as
+`alert_octagon` so every status glyph differs from the others in shape.
+An application adds the font and names it in its design:
+
+```zig
+const tabler_icons = try text.addFont(zui_fonts.tabler_icons);
+var app_design = zui_design.default;
+app_design.icons = zui_icons.tabler;
+app_design.type.fonts.icons = @intFromEnum(tabler_icons);
+
+ui.text(zui_icons.utf8(.settings), .{ .font = tabler_icons, .size = tokens.icon_sizes.get(.medium) });
+```
+
+A design that names an icon font without `icons`, or `icons` without a
+font, resolves to no icons, and resolved at comptime fails with
+"zui_design: demo.design names an icon font in type.fonts.icons but
+gives no icons, each zui.design.Icon's codepoint in it" or "zui_design:
+demo.design gives icons but names no icon font in type.fonts.icons to
+draw them in". A component asked for an icon under a design without one
+draws none and counts it in `Diagnostics`.
 
 ### 19.9 `zui_motion`
 

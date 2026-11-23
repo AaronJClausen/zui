@@ -42,6 +42,7 @@ fn poisonedTokens() Tokens {
         .focus_ring_width = -1,
         .measure = -1,
         .motion = .{ .press_scale = -1 },
+        .icon_font = std.math.maxInt(u32),
     };
 }
 
@@ -60,6 +61,7 @@ fn expectEveryFieldWritten(tokens: *const Tokens) !void {
     try testing.expect(tokens.focus_ring_width > 0);
     try testing.expect(tokens.measure > 0);
     try testing.expect(tokens.motion.press_scale > 0);
+    try testing.expectEqual(null, tokens.icon_font);
 }
 
 test "Preferences.from takes the environment's settings and the user's choices" {
@@ -984,4 +986,60 @@ test "Preferences.from seeds the accent from the system's when the user chose no
 test "Preferences.from keeps the user's accent over the system's" {
     const environment: zui.Environment = .{ .accent = .rgb(0x0078d4) };
     try testing.expectEqual(zui.Color.rgb(0xff8800), zui_design.Preferences.from(&environment, .{ .accent = .rgb(0xff8800) }).accent.?);
+}
+
+const lettered_icons: design.IconSet = .{ .codepoints = .init(.{
+    .chevron_down = 'v',
+    .chevron_right = '>',
+    .check = 0xea5e,
+    .close = 'x',
+    .search = '?',
+    .alert = '!',
+    .info = 'i',
+    .success = 's',
+    .warning = 'w',
+    .danger = 'd',
+    .arrow_up = '^',
+    .arrow_down = '_',
+    .broken_image = '#',
+    .spinner = '@',
+}) };
+
+fn harborWithIcons(font: ?u32, icons: ?design.IconSet) design.Design {
+    var with_icons = harbor;
+    with_icons.type.fonts.icons = font;
+    with_icons.icons = icons;
+    return with_icons;
+}
+
+test "a design's icon font and codepoints resolve into tokens" {
+    var tokens: Tokens = .{};
+    _ = zui_design.resolve(harborWithIcons(7, lettered_icons), .{}, &tokens);
+    const check = tokens.icon(.check).?;
+    try testing.expectEqual(7, check.font);
+    try testing.expectEqual(0xea5e, check.codepoint);
+    try testing.expectEqualStrings("\u{ea5e}", check.utf8());
+    for (std.enums.values(design.Icon)) |name| {
+        try testing.expectEqual(lettered_icons.codepoints.get(name), tokens.icon(name).?.codepoint);
+    }
+
+    const resolved_at_comptime = comptime resolved: {
+        var at_comptime: Tokens = .{};
+        _ = zui_design.resolve(harborWithIcons(7, lettered_icons), .{ .theme = .dark }, &at_comptime);
+        break :resolved at_comptime;
+    };
+    try testing.expectEqualStrings("x", resolved_at_comptime.icon(.close).?.utf8());
+}
+
+test "a design without both an icon font and its codepoints gives no icon" {
+    for ([_]design.Design{ harbor, harborWithIcons(7, null), harborWithIcons(null, lettered_icons) }) |half_or_none| {
+        var tokens = poisonedTokens();
+        _ = zui_design.resolve(half_or_none, .{}, &tokens);
+        try testing.expectEqual(null, tokens.icon(.check));
+    }
+}
+
+test "a codepoint UTF-8 cannot encode is no icon glyph" {
+    try testing.expectEqual(null, design.IconGlyph.of(0, 0xd800));
+    try testing.expectEqualStrings("\u{10ffff}", design.IconGlyph.of(0, 0x10ffff).?.utf8());
 }

@@ -74,6 +74,66 @@ pub const Density = enum { compact, comfortable, roomy };
 /// icon size.
 pub const ControlSize = enum { small, medium, large };
 
+/// An icon a component draws: a dropdown's and a disclosure's chevrons, a
+/// check, a close button, a search field's, a field's error, the four
+/// status glyphs, a table's sort arrows, a failed image and a spinner's
+/// arc. A design gives each a codepoint in its icon font (`IconSet`).
+pub const Icon = enum {
+    chevron_down,
+    chevron_right,
+    check,
+    close,
+    search,
+    alert,
+    info,
+    success,
+    warning,
+    danger,
+    arrow_up,
+    arrow_down,
+    broken_image,
+    spinner,
+};
+
+/// Each `Icon`'s codepoint in the font a design names in
+/// `Design.Fonts.icons`.
+///
+/// ```zig
+/// var app_design = zui_design.default;
+/// app_design.icons = zui_icons.tabler;
+/// app_design.type.fonts.icons = @intFromEnum(FontId.tabler_icons);
+/// ```
+pub const IconSet = struct {
+    codepoints: std.EnumArray(Icon, u21),
+};
+
+/// One icon as a component draws it: text of `utf8()` in font `font`, the
+/// integer of the application's `FontId`.
+///
+/// ```zig
+/// if (tokens.icon(.check)) |check| {
+///     ui.text(check.utf8(), .{ .font = @enumFromInt(check.font), .size = tokens.icon_sizes.get(.medium) });
+/// }
+/// ```
+pub const IconGlyph = struct {
+    font: u32,
+    codepoint: u21,
+    encoded: [4]u8,
+    encoded_len: u3,
+
+    /// Null for a codepoint UTF-8 cannot encode, a surrogate or past
+    /// U+10FFFF.
+    pub fn of(font: u32, codepoint: u21) ?IconGlyph {
+        var encoded: [4]u8 = @splat(0);
+        const encoded_len = std.unicode.utf8Encode(codepoint, &encoded) catch return null;
+        return .{ .font = font, .codepoint = codepoint, .encoded = encoded, .encoded_len = encoded_len };
+    }
+
+    pub fn utf8(self: *const IconGlyph) []const u8 {
+        return self.encoded[0..self.encoded_len];
+    }
+};
+
 /// How far a part stands above the page, each level one shadow and a rim:
 /// `raised` for a card, `floating` for a menu, a popover or a tooltip,
 /// `modal` for a dialog or a toast, `topmost` for a command palette or a
@@ -134,6 +194,9 @@ pub const Design = struct {
     /// The length of each tier at each density, in layout units.
     density: DensityTable = default_density,
     motion: Motion = .{},
+    /// Where `type.fonts.icons` draws each `Icon`; the two are given
+    /// together or not at all.
+    icons: ?IconSet = null,
 
     /// Each becomes a tonal ramp, and every role is taken from a ramp.
     pub const Seeds = struct {
@@ -196,6 +259,9 @@ pub const Design = struct {
         italic: ?u32 = null,
         /// The slanted `strong`; null sets emphasis in `strong` itself.
         strong_italic: ?u32 = null,
+        /// The font `Design.icons` draws in; null for a design without
+        /// icons.
+        icons: ?u32 = null,
     };
 
     pub const DensityTable = std.EnumArray(Density, std.EnumArray(Space, f32));
@@ -546,6 +612,10 @@ pub fn Tokens(comptime Ui: type, comptime ExtraRoles: type) type {
         /// The width of a column of body text, in layout units.
         measure: f32 = 0,
         motion: Motion = .{},
+        /// The font each `Icon` is drawn in, null when the design has no
+        /// icons, and each icon's codepoint in it.
+        icon_font: ?u32 = null,
+        icon_codepoints: std.EnumArray(Icon, u21) = .initFill(0),
 
         /// What a part at one `Elevation` draws beneath and around itself.
         pub const Lift = struct {
@@ -568,6 +638,13 @@ pub fn Tokens(comptime Ui: type, comptime ExtraRoles: type) type {
 
         pub fn space(self: *const Self, tier: Space) f32 {
             return self.spacing.get(tier);
+        }
+
+        /// `name` in the design's icon font, or null when the design has
+        /// none, so the component draws no icon.
+        pub fn icon(self: *const Self, name: Icon) ?IconGlyph {
+            const font = self.icon_font orelse return null;
+            return .of(font, self.icon_codepoints.get(name));
         }
 
         /// `part` of `Component` in `state`, from the roles its

@@ -6,15 +6,16 @@ Three packages hold zui's text:
 |---|---|
 | [`glyphs/`](glyphs/), `zui_glyphs` | what font systems and renderers share, so text is drawn where it was measured: the one layout that places a run's glyphs, the placement a renderer declares (a pixel grid, or the terminal's cells), the handle a renderer draws a text's fonts through, and the glyph atlas. Pure Zig; the root re-exports it |
 | [`truetype/`](truetype/), `zui_truetype` | the default font system, `zui_truetype.Text`, on stb_truetype, which its first build fetches. It is reached through `zui.builder.dependency("zui_truetype", …)`, never re-exported |
-| [`fonts/`](fonts/), `zui_fonts` | Atkinson Hyperlegible Regular, Bold, Italic and Bold Italic and Liberation Mono, each a `pub const` of its bytes, with their licences. The root re-exports it |
+| [`fonts/`](fonts/), `zui_fonts` | Atkinson Hyperlegible Regular, Bold, Italic and Bold Italic, Liberation Mono, and the 51 glyphs of Tabler Icons that `zui_icons` names, each a `pub const` of its bytes, with their licences. The root re-exports it |
 
 zui measures text through the text contract the application names, and
 `zui_truetype.Text` is the default one: TrueType fonts on stb_truetype,
 which given no fonts measures and draws in Atkinson Hyperlegible Regular
 as font 0, the only font it then embeds. Fonts are added before the
 first frame, each `addFont` returning its `FontId`; `zui_fonts` bundles
-Atkinson Hyperlegible Regular, Bold, Italic and Bold Italic and
-Liberation Mono, and only the ones an application references are
+Atkinson Hyperlegible Regular, Bold, Italic and Bold Italic, Liberation
+Mono and `tabler_icons`, a subset of Tabler Icons (MIT) whose glyphs
+`zui_icons` names, and only the ones an application references are
 embedded. A font's bytes may also arrive at run time, into memory the
 application reserves.
 

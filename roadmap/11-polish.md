@@ -19,7 +19,7 @@ and each is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:04-skin-contract` The skin contract | done |
 | `11-polish:05-default-skin` The default skin | retired: merged into `11-polish:19-default-design` |
 | `11-polish:06-text-editing` Text editing | not started |
-| `11-polish:07-zui-icons` `zui_icons` | not started |
+| `11-polish:07-zui-icons` `zui_icons` | done |
 | `11-polish:08-zui-themes` `zui_themes` | not started |
 | `11-polish:09-template-project` The template project | not started |
 | `11-polish:10-samples` Samples | not started |
@@ -631,7 +631,98 @@ toast), search, an alert (a field's error, the banner), the four status
 glyphs (info, success, warning, danger), arrows up and down (a table's
 sort), a broken image (`asyncImage`'s failure) and a spinner's arc.
 `11-polish:27-essential-inputs` and `11-polish:30-feedback-and-media`
-wait for them.
+wait for them. The owner chose Tabler Icons (MIT), drawn as text.
+
+**Grounding** (at `68d1959`). `zui_fonts` embeds five faces and their
+licences (`text/fonts/zui_fonts.zig:14` to `:36`). A design names its
+fonts as the integers of the application's `FontId` in `Design.Fonts`
+(`core/src/design.zig:191`), and `Tokens` carries `icon_sizes` per
+`ControlSize` (`:540`) but no icon; `zui_design.resolve`
+(`core/zui_design/zui_design.zig:147`) writes the tokens. `zui_widgets`
+cannot import a module of icons (SPEC.md §3.3), so what a component
+draws must reach it through `zui.design`. `Diagnostics`
+(`core/src/context.zig:144`) is held at 96 bytes and has no count of a
+missing icon.
+
+**Plan.**
+
+1. A subset of Tabler Icons 3.52.0 (`@tabler/icons-webfont`), at most 64
+   glyphs, TrueType, joins `zui_fonts` as `tabler_icons`, with its MIT
+   licence as `licences.tabler_icons`, both in `.paths`.
+2. `zui.design.Icon`, the components' icons; `zui.design.IconSet`, each
+   one's codepoint; `Design.icons: ?IconSet` and
+   `Design.Fonts.icons: ?u32`, given together. `Tokens` carries the font
+   and the codepoints, written by `zui_design.resolve`, and
+   `Tokens.icon(name)` gives an `IconGlyph`, or null without an icon
+   font. Resolved at comptime, a design with one of the two and not the
+   other fails to compile, pinned by compile-error tests.
+   `zui_design.default` gives no icons, as it gives no fonts, so
+   `zui_design` stays free of `zui_icons`.
+3. `zui_icons` (`core/zui_icons/`): `Name`, an enum of the subset whose
+   values are its codepoints, `codepoint`, `utf8`, and `tabler`, the
+   `IconSet` an application puts in its design with its own font id;
+   registered wherever a module is.
+4. A sample in `examples/samples/icons/` finds every `Name`'s glyph in
+   `zui_fonts.tabler_icons` through `zui_truetype`, the one package that
+   may import the font, the codepoints and the font system together.
+
+Counting a missing icon in `Diagnostics` needs a component that draws
+one, so it is `11-polish:27-essential-inputs`'s.
+
+**Done when.** Every `Name` has a glyph in the bundled font;
+`zui_icons`' tests round-trip `utf8` and check `tabler`; `zui_design`'s
+tests resolve the icons into `Tokens` at run time and at comptime and
+give none for a design with half of them; the compile-error cases;
+`core/tests/instantiate.zig` resolves and draws one; core's checks for a
+change to `core/src/`; the text packages' `test` and `check`; `counts`
+within 2% of the parent; `test-all` and `check-all`.
+
+**Waits for** `11-polish:19-default-design`.
+
+**Spec.** §18.1, §19.8.
+
+**Status.** Done: `zui_fonts` bundles `TablerIcons-Subset.ttf`, 51
+glyphs and 11,628 bytes, TrueType, cut from `@tabler/icons-webfont`
+3.52.0's `dist/fonts/tabler-icons.ttf` by
+`pyftsubset --unicodes=<each codepoint> --no-hinting --layout-features=''`
+(the command is in `zui_fonts.tabler_icons`' doc comment), with
+`TablerIcons-LICENSE.txt`, Tabler's MIT licence, as
+`licences.tabler_icons`; both are in `.paths`, and its test checks the
+TrueType tag and the licence. The published page copies only the tour's
+fonts' licences, and the tour loads no icons, so `site_scripts` is
+unchanged. `zui.design` gains `Icon` (the 14 components' icons),
+`IconSet` and `IconGlyph`; `Design.icons: ?IconSet` and
+`Design.Fonts.icons: ?u32`; and `Tokens.icon_font`,
+`Tokens.icon_codepoints` and `Tokens.icon(name) ?IconGlyph`, null
+without an icon font. `zui_design.resolve` passes them through when the
+design gives both and writes no icons otherwise; resolved at comptime, a
+design with one and not the other fails to compile, pinned by
+`design_icon_font_without_icons` and `design_icons_without_font`.
+`zui_design.default` gives no icons, as it gives no fonts, so
+`zui_design` names no codepoint and stays free of `zui_icons`. A missing
+icon is null at run time because tokens are resolved at run time;
+counting it in `Diagnostics` would change `core/src/context.zig` with no
+component drawing an icon yet, so it is item 27's, as its Plan and
+ARCHITECTURE.md §7 say. `zui_icons` (`core/zui_icons/`) holds `Name`, an
+`enum(u21)` of the 51 whose values are their codepoints, `codepoint`,
+`utf8` (an inline switch, comptime-known for a comptime name) and
+`tabler`; danger is `alert_octagon` rather than `circle_x`, so the four
+status glyphs differ in shape and not only in color, as a circled cross
+would beside the circled check. It is registered in `core/build.zig`
+(module, test shard, compile-error and `check` imports,
+`formatted_paths`), `core/build.zig.zon`, the root's `core_modules` and
+`README.md`. `examples/samples/icons/` finds every `Name`'s glyph in
+`zui_fonts.tabler_icons` through `zui_truetype` and draws one through
+`Tokens.icon`; `examples/` now depends on `zui_fonts` and
+`zui_truetype`. `zui_icons`' tests round-trip `utf8` and check `tabler`;
+`zui_design`'s resolve the icons at run time and at comptime, and none
+for a design with half of them; `core/tests/instantiate.zig` resolves
+and draws one. `counts` against the parent: every scenario +0.00%.
+Passed: core's `test` in three modes and on `x86-linux`, and `check` for
+`wasm32-freestanding` and `powerpc-linux`; `text/fonts`' `test` in three
+modes and `check`; `text/truetype`'s `test`; `examples/`' `test` in
+three modes and `check`; `test-all` and `check-all`. No icon is drawn in
+the tour yet.
 
 ## 11-polish:08-zui-themes — `zui_themes`
 
@@ -1998,6 +2089,9 @@ for the existing widgets, `button`, `text_field`, `label`,
    disclosure's chevron, turning with `motion.disclosure`.
 3. Motion from `Tokens.motion`: the press scale, the toggle's spring,
    the checkbox's check.
+4. Icons from `Tokens.icon`: a component asked for an icon under a
+   design without an icon font draws none and counts it in
+   `Diagnostics`.
 
 **Done when.** The components' common Done when (*The design system*).
 

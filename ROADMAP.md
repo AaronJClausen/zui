@@ -127,7 +127,6 @@ is in the file its group names.
 | `11-polish:08-zui-themes` | `themes/` | | |
 | `11-polish:23-design-workbench` | `apps/review/` | `11-polish:22-appearance-review` | |
 | `11-polish:06-text-editing` | `core/src/`, `core/zui_widgets/`, `hosts/native/` | | |
-| `11-polish:07-zui-icons` | `core/zui_icons/` | | |
 | `11-polish:09-template-project` | `examples/` | | |
 | `11-polish:10-samples` | `examples/` | `11-polish:09-template-project` | |
 | `11-polish:12-developer-experience-audit` | `examples/`, `README.md`, `docs/` | `11-polish:09-template-project`, `11-polish:10-samples` | |

@@ -6,3 +6,7 @@ test "zui initializes a context in a buffer" {
     var memory: [Ui.required_bytes]u8 align(Ui.buffer_alignment) = undefined;
     _ = try Ui.initBuffer(&memory, std.testing.io);
 }
+
+test {
+    _ = @import("icons/icons.zig");
+}

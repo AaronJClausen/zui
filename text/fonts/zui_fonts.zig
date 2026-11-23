@@ -29,20 +29,34 @@ pub const atkinson_hyperlegible_bold_italic: []const u8 = @embedFile("AtkinsonHy
 /// 1.1 (`LiberationMono-LICENSE.txt`).
 pub const liberation_mono_regular: []const u8 = @embedFile("LiberationMono-Regular.ttf");
 
+/// 51 of Tabler Icons' glyphs, by Paweł Kuna, under the MIT licence
+/// (`TablerIcons-LICENSE.txt`): those `zui_icons.Name` lists, at the
+/// codepoints `zui_icons.codepoint` gives. Cut from `@tabler/icons-webfont`
+/// 3.52.0's `dist/fonts/tabler-icons.ttf` with
+/// `pyftsubset tabler-icons.ttf --unicodes=<each codepoint> --no-hinting --layout-features='' --output-file=TablerIcons-Subset.ttf`.
+///
+/// ```zig
+/// const icons = try text.addFont(zui_fonts.tabler_icons);
+/// ui.text(zui_icons.utf8(.search), .{ .font = icons, .size = 20 });
+/// ```
+pub const tabler_icons: []const u8 = @embedFile("TablerIcons-Subset.ttf");
+
 /// The licence each font is distributed under, to ship beside an
 /// application that embeds the font.
 pub const licences = struct {
     pub const atkinson_hyperlegible: []const u8 = @embedFile("OFL.txt");
     pub const liberation_mono: []const u8 = @embedFile("LiberationMono-LICENSE.txt");
+    pub const tabler_icons: []const u8 = @embedFile("TablerIcons-LICENSE.txt");
 };
 
 test "every font is a TrueType file" {
     const true_type_version = [_]u8{ 0, 1, 0, 0 };
-    for ([_][]const u8{ atkinson_hyperlegible_regular, atkinson_hyperlegible_bold, atkinson_hyperlegible_italic, atkinson_hyperlegible_bold_italic, liberation_mono_regular }) |font| {
+    for ([_][]const u8{ atkinson_hyperlegible_regular, atkinson_hyperlegible_bold, atkinson_hyperlegible_italic, atkinson_hyperlegible_bold_italic, liberation_mono_regular, tabler_icons }) |font| {
         try std.testing.expectEqualSlices(u8, &true_type_version, font[0..4]);
     }
     try std.testing.expect(std.mem.indexOf(u8, licences.atkinson_hyperlegible, "SIL OPEN FONT LICENSE") != null);
     try std.testing.expect(std.mem.indexOf(u8, licences.liberation_mono, "Red Hat") != null);
+    try std.testing.expect(std.mem.indexOf(u8, licences.tabler_icons, "MIT License") != null);
 }
 
 test "the italics are Atkinson Hyperlegible's, under its licence" {

@@ -127,6 +127,8 @@ const compile_error_cases = [_]struct { name: []const u8, expected_error: []cons
     .{ .name = "color_ramp_too_few_steps", .expected_error = "zui_color: ramp needs at least 2 steps, one for each end; got 0" },
     .{ .name = "color_lightness_scale_too_few_steps", .expected_error = "zui_color: lightnessScale needs at least 2 steps, one for each end; got 1" },
     .{ .name = "design_status_roles_collapse", .expected_error = "zui_design: demo.design's danger and success are 0.13 apart in lightness under protanopia in light high contrast, need 0.15; success at L 0.43 passes" },
+    .{ .name = "design_icon_font_without_icons", .expected_error = "zui_design: demo.design names an icon font in type.fonts.icons but gives no icons, each zui.design.Icon's codepoint in it" },
+    .{ .name = "design_icons_without_font", .expected_error = "zui_design: demo.design gives icons but names no icon font in type.fonts.icons to draw them in" },
     .{ .name = "skin_not_a_struct", .expected_error = "zui_widgets: a skin must be a struct type, got u32" },
     .{ .name = "skin_unknown_declaration", .expected_error = "zui_widgets: skin_unknown_declaration.Skin declares unknown `zuiStlye`" },
     .{ .name = "skin_missing_style", .expected_error = "zui_widgets: skin_missing_style.Skin does not implement the skin contract: missing `zuiStyle`" },
@@ -270,6 +272,14 @@ pub fn build(b: *std.Build) void {
         .imports = &.{.{ .name = "zui", .module = zui_module }},
     });
 
+    const icons_module = b.addModule("zui_icons", .{
+        .root_source_file = b.path("zui_icons/zui_icons.zig"),
+        .target = target,
+        .optimize = optimize,
+        .sanitize_thread = if (sanitize_thread) true else null,
+        .imports = &.{.{ .name = "zui", .module = zui_module }},
+    });
+
     const test_step = b.step("test", "Run the unit tests and the compile-error tests, and compile the benchmark tools");
     const unit_test_step = b.step("test-unit", "Run the unit tests, in the selected optimize mode");
     const compile_error_test_step = b.step("test-compile-errors", "Check every compile error's message, which no optimize mode changes");
@@ -284,7 +294,7 @@ pub fn build(b: *std.Build) void {
     // outlasts a small CI runner, and CI runs each shard as a job of its own.
     // zui's own binary is the longest, so its shard takes the cheap ones.
     const unit_test_shards = [_][]const *std.Build.Module{
-        &.{ zui_module, bench_statistics_module, color_module, design_module, motion_module, tracy_module, reflect_module },
+        &.{ zui_module, bench_statistics_module, color_module, design_module, icons_module, motion_module, tracy_module, reflect_module },
         &.{ testing_module, app_module, debug_module, async_module, widgets_module, wire_module },
     };
     for (unit_test_shards, 1..) |shard_modules, shard_number| {
@@ -333,6 +343,7 @@ pub fn build(b: *std.Build) void {
                     .{ .name = "zui_motion", .module = motion_module },
                     .{ .name = "zui_color", .module = color_module },
                     .{ .name = "zui_design", .module = design_module },
+                    .{ .name = "zui_icons", .module = icons_module },
                 },
             }),
         });
@@ -374,6 +385,7 @@ pub fn build(b: *std.Build) void {
                 .{ .name = "zui_motion", .module = motion_module },
                 .{ .name = "zui_color", .module = color_module },
                 .{ .name = "zui_design", .module = design_module },
+                .{ .name = "zui_icons", .module = icons_module },
             },
         }),
     });
@@ -460,7 +472,7 @@ pub fn build(b: *std.Build) void {
     b.step("bench-report", "Set side by side each machine's results for one commit: -- <results dir> [<commit>]").dependOn(&run_bench_report.step);
     bench_tools_step.dependOn(&bench_report_executable.step);
 
-    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "tests", "bench", "zui_testing", "zui_async", "zui_widgets", "zui_reflect", "zui_tracy", "zui_app", "zui_wire", "zui_debug", "zui_motion", "zui_color", "zui_design" };
+    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "tests", "bench", "zui_testing", "zui_async", "zui_widgets", "zui_reflect", "zui_tracy", "zui_app", "zui_wire", "zui_debug", "zui_motion", "zui_color", "zui_design", "zui_icons" };
     b.step("fmt", "Format all Zig sources").dependOn(&b.addFmt(.{ .paths = formatted_paths }).step);
     b.step("fmt-check", "Fail if any Zig source is not formatted").dependOn(&b.addFmt(.{ .paths = formatted_paths, .check = true }).step);
 }

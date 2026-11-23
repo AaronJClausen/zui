@@ -2417,6 +2417,50 @@ pub fn emphasized(ui: *Ui, tokens: *const zui.design.Tokens(Ui, void), content: 
 }
 ```
 
+<a id="icons"></a>
+
+### `zui_icons`: icons drawn as text · *shipped*
+
+`zui_icons` names 51 icons of Tabler Icons, which `zui_fonts` bundles as
+`tabler_icons`, a 12 KB subset under the MIT licence: the chevrons,
+check, close, search, alert and status glyphs, sort arrows, broken image
+and spinner arc that zui's components draw, and the ones an app reaches
+for first, such as `plus`, `settings`, `trash`, `user`, `folder`, `eye`
+and `star`. An icon is text: `zui_icons.utf8(.trash)` in the icon font,
+at the tokens' icon size for the control. Name the font in your design
+with `zui_icons.tabler`, and `tokens.icon(.success)` gives the font and
+codepoint of each icon a component draws, or null when the design has no
+icon font, so nothing is drawn. A design resolved at comptime with the
+font and not the icons, or the icons and not the font, fails to compile
+with a message naming it.
+
+`src/appearance.zig`
+
+```zig
+pub const app_design: zui.design.Design = design: {
+    var with_icons = zui_design.default;
+    with_icons.icons = zui_icons.tabler;
+    with_icons.type.fonts.icons = @intFromEnum(FontId.icons);
+    break :design with_icons;
+};
+
+pub fn loadFonts(text: *zui_truetype.Text) !void {
+    _ = try text.addFont(zui_fonts.atkinson_hyperlegible_regular);
+    _ = try text.addFont(zui_fonts.tabler_icons);
+}
+
+pub fn deleteButton(ui: *Ui, tokens: *const zui.design.Tokens(Ui, void)) void {
+    ui.open(.{ .id = .of("delete"), .focusable = true });
+    defer ui.close();
+    ui.text(zui_icons.utf8(.trash), .{ .font = .icons, .size = tokens.icon_sizes.get(.medium) });
+}
+
+pub fn albumSynced(ui: *Ui, tokens: *const zui.design.Tokens(Ui, void)) void {
+    const success = tokens.icon(.success) orelse return;
+    ui.text(success.utf8(), .{ .font = @enumFromInt(success.font), .size = tokens.icon_sizes.get(.small), .color = tokens.colors.get(.idle).get(.success) });
+}
+```
+
 <a id="design-audit"></a>
 
 ### `zui_design.audit`: checks of a finished frame · *shipped*

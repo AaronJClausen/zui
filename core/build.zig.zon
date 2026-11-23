@@ -27,5 +27,6 @@
         "zui_motion",
         "zui_color",
         "zui_design",
+        "zui_icons",
     },
 }

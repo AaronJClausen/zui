@@ -4,7 +4,8 @@ const zui = @import("zui");
 /// neutrals, Atkinson Hyperlegible at 16 on a 1.2 scale, smooth controls
 /// and soft containers with continuous corners, and short eased tweens
 /// and springs that press a control to 97%. Its fonts are the
-/// application's to fill from its `FontId`s.
+/// application's to fill from its `FontId`s, and so are its icons, which
+/// `zui_icons.tabler` gives for Tabler Icons.
 ///
 /// ```zig
 /// var app_design = zui_design.default;
@@ -16,6 +17,8 @@ const zui = @import("zui");
 ///     .strong_italic = @intFromEnum(FontId.atkinson_bold_italic),
 /// };
 /// app_design.type.faces.regular = .of(text.fontMetrics(fonts.atkinson_regular).?);
+/// app_design.icons = zui_icons.tabler;
+/// app_design.type.fonts.icons = @intFromEnum(FontId.tabler_icons);
 /// ```
 pub const default: zui.design.Design = .{
     .name = "zui_design.default",

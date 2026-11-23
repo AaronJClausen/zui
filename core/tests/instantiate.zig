@@ -1273,3 +1273,18 @@ export fn zuiCheckRemote(port: u16) usize {
     defer client.deinit();
     return @intFromBool(client.frame(&host, &renderer) catch return 0);
 }
+
+const zui_icons = @import("zui_icons");
+
+var icon_tokens: zui.design.Tokens(Ui, void) = .{};
+var icon_name: zui_icons.Name = .settings;
+
+/// An application's icon font in its design, resolved and drawn as text.
+export fn zuiCheckIcons(font: u32) usize {
+    var design_with_icons = zui_design.default;
+    design_with_icons.icons = zui_icons.tabler;
+    design_with_icons.type.fonts.icons = font;
+    _ = zui_design.resolve(design_with_icons, .{}, &icon_tokens);
+    const check = icon_tokens.icon(.check) orelse return 0;
+    return check.utf8().len + zui_icons.utf8(icon_name).len + zui_icons.codepoint(icon_name);
+}

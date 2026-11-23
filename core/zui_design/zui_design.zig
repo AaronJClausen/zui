@@ -133,6 +133,8 @@ pub const Repair = repairs_file.Repair;
 ///
 /// The motion is the design's as it declares it: under reduced motion
 /// `zui.motion.tween` and `zui.motion.spring` land at once by themselves.
+/// The icons are the design's icon font and its codepoints, when it gives
+/// both.
 ///
 /// ```zig
 /// var tokens: zui.design.Tokens(Ui, void) = .{};
@@ -170,7 +172,28 @@ pub fn resolve(resolved_design: Design, preferences: Preferences, tokens: anytyp
     tokens.focus_ring_offset = focus_ring_offset;
     tokens.measure = measure_characters * average_character_width * tokens.text_styles.get(.body).size;
     tokens.motion = resolved_design.motion;
+    writeIcons(resolved_design, tokens);
     return repairs;
+}
+
+/// A design with an icon font but no icons, or icons but no font, draws
+/// none; resolved at comptime, it fails to compile.
+fn writeIcons(resolved_design: Design, tokens: anytype) void {
+    const font = resolved_design.type.fonts.icons;
+    if (@inComptime()) failOnHalfAnIconFont(resolved_design);
+    if (font != null and resolved_design.icons != null) {
+        tokens.icon_font = font;
+        tokens.icon_codepoints = resolved_design.icons.?.codepoints;
+    } else {
+        tokens.icon_font = null;
+    }
+}
+
+fn failOnHalfAnIconFont(resolved_design: Design) void {
+    if (resolved_design.type.fonts.icons != null and resolved_design.icons == null)
+        @compileError("zui_design: " ++ resolved_design.name ++ " names an icon font in type.fonts.icons but gives no icons, each zui.design.Icon's codepoint in it");
+    if (resolved_design.icons != null and resolved_design.type.fonts.icons == null)
+        @compileError("zui_design: " ++ resolved_design.name ++ " gives icons but names no icon font in type.fonts.icons to draw them in");
 }
 
 fn failOnRepairsTheDesignNeeds(resolved_design: Design, preferences: Preferences, repairs: *const Repairs) void {

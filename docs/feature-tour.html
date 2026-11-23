@@ -1977,6 +1977,35 @@ pub fn emphasized(ui: *Ui, tokens: *const zui.design.Tokens(Ui, void), content: 
 </script>
       </article>
 
+      <article class="feature" id="icons" data-title="zui_icons">
+        <div class="feature-head"><h3><code>zui_icons</code>: icons drawn as text</h3><span class="pill shipped">Shipped</span></div>
+        <p><code class="z">zui_icons</code> names 51 icons of Tabler Icons, which <code class="z">zui_fonts</code> bundles as <code class="z">tabler_icons</code>, a 12 KB subset under the MIT licence: the chevrons, check, close, search, alert and status glyphs, sort arrows, broken image and spinner arc that zui's components draw, and the ones an app reaches for first, such as <code class="z">plus</code>, <code class="z">settings</code>, <code class="z">trash</code>, <code class="z">user</code>, <code class="z">folder</code>, <code class="z">eye</code> and <code class="z">star</code>. An icon is text: <code class="z">zui_icons.utf8(.trash)</code> in the icon font, at the tokens' icon size for the control. Name the font in your design with <code class="z">zui_icons.tabler</code>, and <code class="z">tokens.icon(.success)</code> gives the font and codepoint of each icon a component draws, or null when the design has no icon font, so nothing is drawn. A design resolved at comptime with the font and not the icons, or the icons and not the font, fails to compile with a message naming it.</p>
+<script type="text/x-zig" data-file="src/appearance.zig">
+pub const app_design: zui.design.Design = design: {
+    var with_icons = zui_design.default;
+    with_icons.icons = zui_icons.tabler;
+    with_icons.type.fonts.icons = @intFromEnum(FontId.icons);
+    break :design with_icons;
+};
+
+pub fn loadFonts(text: *zui_truetype.Text) !void {
+    _ = try text.addFont(zui_fonts.atkinson_hyperlegible_regular);
+    _ = try text.addFont(zui_fonts.tabler_icons);
+}
+
+pub fn deleteButton(ui: *Ui, tokens: *const zui.design.Tokens(Ui, void)) void {
+    ui.open(.{ .id = .of("delete"), .focusable = true });
+    defer ui.close();
+    ui.text(zui_icons.utf8(.trash), .{ .font = .icons, .size = tokens.icon_sizes.get(.medium) });
+}
+
+pub fn albumSynced(ui: *Ui, tokens: *const zui.design.Tokens(Ui, void)) void {
+    const success = tokens.icon(.success) orelse return;
+    ui.text(success.utf8(), .{ .font = @enumFromInt(success.font), .size = tokens.icon_sizes.get(.small), .color = tokens.colors.get(.idle).get(.success) });
+}
+</script>
+      </article>
+
       <article class="feature" id="design-audit" data-title="zui_design.audit">
         <div class="feature-head"><h3><code>zui_design.audit</code>: checks of a finished frame</h3><span class="pill shipped">Shipped</span></div>
         <p><code class="z">zui_design.audit</code> checks a frame after <code class="z">endFrame</code>, so it sees what the declarations cannot: custom drawing, colors declared <code class="z">.unchecked</code>, and text laid over a photo's tint. Each line of text is measured against what is painted beneath its middle, blending translucent fills, and held to Lc 75 and 4.5:1, or Lc 60 and 3:1 from the title size up; a border in the focus color is measured against what is just outside and just inside it; every enabled control is held to the 24-unit floor; a line that runs past the side of a clip that does not scroll is reported as cut short; and two controls whose visible areas overlap in one layer are reported. <code class="z">auditDistinguished</code> checks your components' <code class="z">zuiDistinguish</code> pairs in the tokens you resolved, with the user's accent and color vision. Findings go into room you give, with a count of those that did not fit, and each names the element <code class="z">inspect</code> takes, its check and the value it measured against its target.</p>
