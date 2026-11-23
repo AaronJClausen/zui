@@ -1,6 +1,6 @@
 wrap = 72
 end_of_line = "lf"
-exclude = ["**/zig-out/**", "**/zig-pkg/**", "**/.zig-cache/**", "**/node_modules/**", ".claude/**"]
+exclude = ["**/zig-out/**", "**/zig-pkg/**", "**/.zig-cache/**", "**/node_modules/**", ".claude/**", "docs/plans/default-ui-designs/exports/**"]
 
 [plugin.tables]
 compact_tables = true

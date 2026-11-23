@@ -1,0 +1,73 @@
+pub const ControlSize = enum { small, medium, large };
+
+pub const control_heights: std.EnumArray(ControlSize, std.EnumArray(Density, f32)) = .init(.{
+    .small = .init(.{ .compact = 24, .comfortable = 28, .roomy = 32 }),
+    .medium = .init(.{ .compact = 28, .comfortable = 36, .roomy = 44 }),
+    .large = .init(.{ .compact = 36, .comfortable = 44, .roomy = 52 }),
+});
+
+pub const icon_sizes: std.EnumArray(ControlSize, std.EnumArray(Density, f32)) = .init(.{
+    .small = .init(.{ .compact = 12, .comfortable = 16, .roomy = 16 }),
+    .medium = .init(.{ .compact = 16, .comfortable = 20, .roomy = 24 }),
+    .large = .init(.{ .compact = 20, .comfortable = 24, .roomy = 28 }),
+});
+
+pub const focus_ring_width: f32 = 2;
+pub const focus_ring_offset: f32 = 2;
+pub const outline_width: f32 = 1;
+pub const pointer_floor: f32 = 24;
+pub const touch_floor: f32 = 44;
+
+pub const Elevation = struct {
+    surface: ColorRole,
+    rim: bool,
+    offset: [2]f32,
+    blur: f32,
+    spread: f32,
+    /// Replaces the shadow role's alpha.
+    alpha: f32,
+};
+
+pub const elevations: std.EnumArray(Scheme, [4]Elevation) = .init(.{
+    .light = .{
+        .{ .surface = .surface_raised, .rim = true, .offset = .{ 0, 1 }, .blur = 3, .spread = 0, .alpha = 0.1 },
+        .{ .surface = .surface_overlay, .rim = true, .offset = .{ 0, 6 }, .blur = 16, .spread = -2, .alpha = 0.12 },
+        .{ .surface = .surface_overlay, .rim = true, .offset = .{ 0, 12 }, .blur = 32, .spread = -4, .alpha = 0.16 },
+        .{ .surface = .surface_overlay, .rim = true, .offset = .{ 0, 20 }, .blur = 48, .spread = -6, .alpha = 0.2 },
+    },
+    .dark = .{
+        .{ .surface = .surface_raised, .rim = true, .offset = .{ 0, 1 }, .blur = 3, .spread = 0, .alpha = 0.32 },
+        .{ .surface = .surface_overlay, .rim = true, .offset = .{ 0, 6 }, .blur = 16, .spread = -2, .alpha = 0.42 },
+        .{ .surface = .surface_overlay, .rim = true, .offset = .{ 0, 12 }, .blur = 32, .spread = -4, .alpha = 0.5 },
+        .{ .surface = .surface_overlay, .rim = true, .offset = .{ 0, 20 }, .blur = 48, .spread = -6, .alpha = 0.58 },
+    },
+    .light_high_contrast = .{
+        .{ .surface = .surface_raised, .rim = true, .offset = .{ 0, 1 }, .blur = 3, .spread = 0, .alpha = 0.1 },
+        .{ .surface = .surface_overlay, .rim = true, .offset = .{ 0, 6 }, .blur = 16, .spread = -2, .alpha = 0.12 },
+        .{ .surface = .surface_overlay, .rim = true, .offset = .{ 0, 12 }, .blur = 32, .spread = -4, .alpha = 0.16 },
+        .{ .surface = .surface_overlay, .rim = true, .offset = .{ 0, 20 }, .blur = 48, .spread = -6, .alpha = 0.2 },
+    },
+    .dark_high_contrast = .{
+        .{ .surface = .surface_raised, .rim = true, .offset = .{ 0, 1 }, .blur = 3, .spread = 0, .alpha = 0.32 },
+        .{ .surface = .surface_overlay, .rim = true, .offset = .{ 0, 6 }, .blur = 16, .spread = -2, .alpha = 0.42 },
+        .{ .surface = .surface_overlay, .rim = true, .offset = .{ 0, 12 }, .blur = 32, .spread = -4, .alpha = 0.5 },
+        .{ .surface = .surface_overlay, .rim = true, .offset = .{ 0, 20 }, .blur = 48, .spread = -6, .alpha = 0.58 },
+    },
+});
+
+pub const motion = struct {
+    pub const state: zui_motion.TweenOptions = .{ .duration = 0.12, .easing = .ease_out };
+    pub const press: zui_motion.TweenOptions = .{ .duration = 0.08, .easing = .ease_out };
+    pub const toggle: zui_motion.SpringOptions = .{ .angular_frequency = 28 };
+    pub const check: zui_motion.TweenOptions = .{ .duration = 0.16, .easing = .ease_out };
+    pub const popover_enter: zui_motion.TweenOptions = .{ .duration = 0.16, .easing = .ease_out };
+    pub const popover_exit: zui_motion.TweenOptions = .{ .duration = 0.1, .easing = .ease_in };
+    pub const dialog_enter: zui_motion.TweenOptions = .{ .duration = 0.22, .easing = .ease_out };
+    pub const dialog_exit: zui_motion.TweenOptions = .{ .duration = 0.14, .easing = .ease_in };
+    pub const toast_enter: zui_motion.SpringOptions = .{ .angular_frequency = 22 };
+    pub const toast_exit: zui_motion.TweenOptions = .{ .duration = 0.16, .easing = .ease_in };
+    pub const drawer: zui_motion.SpringOptions = .{ .angular_frequency = 20 };
+    pub const reorder: zui_motion.SpringOptions = .{ .angular_frequency = 30 };
+    pub const disclosure: zui_motion.TweenOptions = .{ .duration = 0.2, .easing = .ease_in_out };
+    pub const press_scale: f32 = 0.97;
+};
