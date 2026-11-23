@@ -72,5 +72,5 @@ measure with `zui_truetype`:
 
 | Command | What it does |
 |---|---|
-| `zig build test` | declare every screen headlessly on renderers that draw every optional command and none, in pixels and in cells, and check the tour's compile errors |
+| `zig build test` | declare every screen headlessly on renderers that draw every optional command and none, in pixels and in cells; audit every screen with `zui_design.audit` in light and dark, expecting exactly the causes `11-polish:19-default-design`, `11-polish:25-focus-ring-on-fills` and `11-polish:26-small-targets` record; and check the tour's compile errors |
 | `zig build check` | compile the tour and its tests, natively and for `wasm32-freestanding` |

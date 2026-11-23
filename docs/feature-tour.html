@@ -1945,6 +1945,24 @@ comptime {
 </script>
       </article>
 
+      <article class="feature" id="design-audit" data-title="zui_design.audit">
+        <div class="feature-head"><h3><code>zui_design.audit</code>: checks of a finished frame</h3><span class="pill shipped">Shipped</span></div>
+        <p><code class="z">zui_design.audit</code> checks a frame after <code class="z">endFrame</code>, so it sees what the declarations cannot: custom drawing, colors declared <code class="z">.unchecked</code>, and text laid over a photo's tint. Each line of text is measured against what is painted beneath its middle, blending translucent fills, and held to Lc 75 and 4.5:1, or Lc 60 and 3:1 from the title size up; a border in the focus color is measured against what is just outside and just inside it; every enabled control is held to the 24-unit floor; a line that runs past the side of a clip that does not scroll is reported as cut short; and two controls whose visible areas overlap in one layer are reported. <code class="z">auditDistinguished</code> checks your components' <code class="z">zuiDistinguish</code> pairs in the tokens you resolved, with the user's accent and color vision. Findings go into room you give, with a count of those that did not fit, and each names the element <code class="z">inspect</code> takes, its check and the value it measured against its target.</p>
+<script type="text/x-zig" data-file="src/appearance.zig">
+pub fn auditFrame(app: *App, frame: *const Ui.Frame) void {
+    var room: [64]zui_design.Finding = undefined;
+    var findings = zui_design.audit(frame, .fromTokens(&app.appearance.tokens, app.appearance.preferences.?.contrast), &room);
+    zui_design.auditDistinguished(&app.appearance.tokens, .{AlbumChip}, &findings);
+    for (findings.slice()) |finding| switch (finding.measured) {
+        .text_contrast => |measured| log.warn("text at element {?d}: Lc {d:.0}, needs {d:.0}", .{ finding.element, measured.measured.lightness_contrast, measured.target.lightness_contrast }),
+        .target_size => |measured| log.warn("target at element {?d}: {d:.0}x{d:.0}, needs {d:.0}", .{ finding.element, measured.size[0], measured.size[1], measured.floor }),
+        else => log.warn("{t} at element {?d}", .{ finding.check(), finding.element }),
+    };
+    if (findings.dropped > 0) log.warn("{d} more findings", .{findings.dropped});
+}
+</script>
+      </article>
+
       <article class="feature" id="reflect" data-title="zui_reflect">
         <div class="feature-head"><h3><code>zui_reflect</code>: an editor from any struct</h3><span class="pill shipped">Shipped</span></div>
         <p><code class="z">inspector</code> walks a struct with <code class="z">@typeInfo</code> and declares an editor per field. A <code class="z">bool</code> gets a checkbox, a number with min and max gets a slider, other numbers get − and + buttons, an enum gets a dropdown, <code class="z">EditableText</code> gets a text field, a string is shown read-only, and a nested struct gets a collapsible section. Options live beside the type in <code class="z">zui_inspector</code>, and a misspelled field name there fails to compile.</p>

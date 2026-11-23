@@ -32,11 +32,13 @@ and each is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:17-nested-corners` Nested corners | done |
 | `11-polish:18-system-accent` The system's accent color | not started |
 | `11-polish:19-default-design` The default design | not started |
-| `11-polish:20-appearance-audit` The appearance audit | not started |
+| `11-polish:20-appearance-audit` The appearance audit | done |
 | `11-polish:21-permutations` Every permutation of a component | not started |
 | `11-polish:22-appearance-review` The appearance review | not started |
 | `11-polish:23-design-workbench` The design workbench | not started |
 | `11-polish:24-the-tour` The tour, redone | done |
+| `11-polish:25-focus-ring-on-fills` A focus ring that shows on a filled control | not started |
+| `11-polish:26-small-targets` Targets of at least 24 units in the tour | not started |
 
 ### The design system
 
@@ -1290,6 +1292,24 @@ light and one for dark, and reads neither `contrast` nor `text_scale`.
 The tour builds a theme each frame from its palette
 (`apps/tour/src/kit.zig`).
 
+`11-polish:20-appearance-audit` found the tour's text below SPEC.md
+§18.4's targets (Lc 75 and 4.5:1 for body text, Lc 60 and 3:1 from
+`title` up) on every screen, 2,350 lines in all, by the palette entry
+(`apps/tour/src/shared.zig:218`) each is drawn in. `muted`: dark
+#9097a6, 842 lines at Lc 40 to 46 (4.4 to 6.7:1); light #596070, 210 at
+Lc 63 to 70 (4.7 to 5.3:1). `faint`: dark #5c6372, 448 at Lc 19 to 21
+(2.5 to 3.2:1); light #9aa1b0, 439 at Lc 39 to 51 (2.2 to 2.6:1). The
+status and accent colors as text: in light `good` 82 lines at Lc 53 to
+71, `accent` 31 at Lc 57 to 63, `warn` 27 at Lc 55 to 70, `bad` 23 at Lc
+55 to 74 and `spectacle` 9 at Lc 64 to 67; in dark `good` 82 at Lc 57 to
+64, `accent` 46 at Lc 38 to 43, `warn` 27 at Lc 61 to 67, `bad` 25 at Lc
+40 to 45 and `spectacle` 23 at Lc 46 to 50. `on_accent` on `accent` in
+dark, #0a0c10 on #5b8cff, 22 lines at Lc 45 to 60. One Declaration's
+preview of the other theme adds 7 lines in that theme's entries, and
+Light Lab's white text on its gradients 7 more, which match light's
+`on_accent`. The tour's test (`apps/tour/src/tests.zig`) expects exactly
+these causes until they are fixed.
+
 **Plan.**
 
 1. `zui_design.default`, a `Design` on the bundled fonts.
@@ -1302,9 +1322,11 @@ The tour builds a theme each frame from its palette
 
 **Done when.** `test-all`, `check-all`; every widget meets SPEC.md §18.4
 in every theme, contrast and density, by `11-polish:20-appearance-audit`
-when it lands and by `zui_design`'s pair checks until then; the raylib
-tour's cycle prints `diagnostics ok: true`; the terminal tour's
-`--dump --every-screen` passes.
+when it lands and by `zui_design`'s pair checks until then; the tour's
+every screen audits clean for text contrast in light and dark, and its
+test expects no text contrast finding; the raylib tour's cycle prints
+`diagnostics ok: true`; the terminal tour's `--dump --every-screen`
+passes.
 
 **Waits for** `11-polish:14-zui-design`, `11-polish:15-type-scale`,
 `11-polish:16-corner-shapes`.
@@ -1336,6 +1358,59 @@ finding is an item.
 **Waits for** `11-polish:14-zui-design`.
 
 **Spec.** §18.8.
+
+**Status.** Done. `core/zui_design/audit.zig`:
+`zui_design.audit(frame, options, room) Findings` checks a finished
+frame into the caller's room, allocating nothing, keeping what fits and
+counting the dropped, as `Repairs` does. A `Finding` names its element,
+the index `Frame.inspect` takes, and its id hash, its check
+(`AuditCheck`), and in `Measured` the value with its target: a contrast
+with the two colors measured, a size and the floor, a line's width and
+how much of it shows, the other control and the overlap. Text is
+measured at the middle of each line against the topmost rectangle,
+border band or gradient painted there, found by walking back through the
+commands with their clips and blending translucent fills, over
+`AuditOptions.page_background`; text over an image, a material or a
+custom command, or inside a transform, is not measured, nor is a
+disabled element's. `title` size and up takes a new tier,
+`Tier.large_text` (Lc 60 and 3:1). A focus ring is a border in
+`AuditOptions.focus_ring_color`, since the frame does not record focus,
+measured just outside and just inside it. A target is every interactive,
+enabled, visible element against the floor; text is cut short when a
+line runs past its clip's side, where no enclosing clip scrolls
+sideways; two controls overlap when their visible areas, inside every
+clip around them, meet by more than half a unit, in one floating layer,
+neither inside the other.
+`auditDistinguished(tokens, components, *Findings)` checks
+`zuiDistinguish` pairs in the colors `tokens.look` gives, with a chosen
+accent and color vision. `AuditOptions.fromTokens` takes the page, the
+focus color, the floor and the title size from tokens. An element
+without an id is found by searching from the last one found, since
+commands come nearly in declaration order. Eight tests in
+`core/zui_design/audit_tests.zig`: one fault of each kind found exactly,
+naming its element and value; a clean scene clean; room for 2 of 5
+keeping the first and dropping 3; checks turned off; a translucent fill
+blended; a disabled control's text skipped; large text's target;
+distinguish pairs, with a cue and apart; `fromTokens`.
+`core/tests/instantiate.zig` runs both audits.
+
+The tour's test audits every screen in light and dark, settled, with Tab
+pressed so a control shows its ring: 2,418 findings, none dropped in a
+room of 1,024. 2,350 are text contrast in the tour's palette, which
+moves to tokens in `11-polish:19-default-design`, whose Grounding and
+Done when now carry them; 2 are the focus ring on the checked `1 Hz`
+box, `11-polish:25-focus-ring-on-fills`; 66 are 33 targets below 24
+units in each theme, `11-polish:26-small-targets`. Nothing is cut short
+and no controls overlap. The test classifies each finding by check and
+by the palette entry its text is drawn in, or the screen of its target,
+and fails on a finding it cannot classify and on a recorded cause no
+longer found. The harness had shown the light overview in dark: the tour
+asks for dark when it starts, and that came after the requested theme in
+the first frame, so the harness now draws a frame before it asks. In
+ReleaseFast an audit of a tour screen takes 53 µs (Time Machine, 306
+commands) to 680 µs (Break It, 2,546 commands), and 1.6 ms for Clickable
+Chaos, whose 800 elements are mostly controls the overlap check pairs,
+measured while other builds shared the machine.
 
 ## 11-polish:21-permutations — Every permutation of a component
 
@@ -1457,3 +1532,54 @@ continuous corners, which the raylib and terminal tours draw round and
 report; Harbor's X-ray has a fourteenth node for them, and the Light Lab
 shows all three shapes. The tour's palette moves to `zui_design`'s
 tokens in `11-polish:19-default-design`.
+
+## 11-polish:25-focus-ring-on-fills — A focus ring that shows on a filled control
+
+The focus ring stands apart from the control it rings and from what is
+around it, also on a control filled with the accent.
+
+**Grounding** (at `8a8507e`). `11-polish:20-appearance-audit` found the
+ring of the tour header's checked `1 Hz` checkbox
+(`apps/tour/src/tour.zig:275`) at Lc 0 and 1:1 in light, where the
+ring's color, the palette's `focus`, is the box's own accent fill
+(#2f62e9 on #2f62e9, `apps/tour/src/shared.zig:273`), and at Lc 16 and
+1.48:1 in dark (#8fb0ff on #5b8cff), against the non-text target of Lc
+45 and 3:1. The tour hands `zui_widgets`' skin its palette's `focus` as
+`focus_ring` (`apps/tour/src/kit.zig:165`), and the skin draws the ring
+as the box's own 2-unit border (`core/zui_widgets/zui_widgets.zig:274`),
+inside the fill. Tab reaches the box from the kanban screen in light and
+the Clickable Chaos screen in dark in the tour's test.
+
+**Plan.** Draw the ring outside a filled control, with a gap in the
+surface's color, or give `focus` a color apart from `accent` in both
+themes; take whichever keeps the ring Lc 45 and 3:1 from both its
+neighbors in light, dark and high contrast.
+
+**Done when.** The tour's test no longer expects a `focus_ring_contrast`
+finding, in light or dark; `test-all`, `check-all`.
+
+**Spec.** §18.2, §18.4.
+
+## 11-polish:26-small-targets — Targets of at least 24 units in the tour
+
+Every control the tour declares can be hit at the floor of SPEC.md
+§18.5.
+
+**Grounding** (at `8a8507e`). `11-polish:20-appearance-audit` found 33
+interactive elements under the 24-unit floor, in light and in dark
+alike: X-ray's fourteen numbered markers, `1` to `14`, 14 to 20 units
+wide and 18 tall (`apps/tour/src/screens/harbor.zig:1212`); Photo Cull's
+scrollbar, 10 units wide (`apps/tour/src/screens/photo_cull.zig:617`);
+Log Tail's level chips, `DEBUG`, `INFO`, `WARN` and `ERROR`, 23 tall;
+Settings Form's text scale choices, `100%`, `150%` and `200%`, 21 tall;
+and One Declaration's `Autopay` and `Email receipts` toggles, 18 tall in
+four of its variants and 13 in the fifth, with its `Pay $786.00` button
+there 22 tall (`apps/tour/src/screens/one_declaration.zig:226`).
+
+**Plan.** Raise each to the floor, by its height or by padding a hit
+area around what it draws, so the look need not grow.
+
+**Done when.** The tour's test no longer expects a `target_size`
+finding, in light or dark; `test-all`, `check-all`.
+
+**Spec.** §18.5.

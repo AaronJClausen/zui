@@ -119,6 +119,18 @@ pub fn lightnessDifferences(first: Oklch, second: Oklch) std.EnumArray(Deficienc
     return differences;
 }
 
+/// Each simulation's lightness difference of two encoded colors.
+pub fn lightnessDifferencesOfColors(first: zui.Color, second: zui.Color) std.EnumArray(Deficiency, f32) {
+    const first_linear = linearOfColor(first);
+    const second_linear = linearOfColor(second);
+    var differences: std.EnumArray(Deficiency, f32) = undefined;
+    for (std.enums.values(Deficiency)) |deficiency| {
+        differences.set(deficiency, @abs(lightnessOfLinear(simulatedLinear(first_linear, deficiency)) -
+            lightnessOfLinear(simulatedLinear(second_linear, deficiency))));
+    }
+    return differences;
+}
+
 fn nearestOfLinear(first: [3]f32, second: [3]f32) Nearest {
     var nearest: Nearest = .{ .deficiency = .protanopia, .lightness_difference = std.math.inf(f32) };
     for (std.enums.values(Deficiency)) |deficiency| {

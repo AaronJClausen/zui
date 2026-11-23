@@ -17,6 +17,7 @@ const contrast = @import("contrast.zig");
 const repairs_file = @import("repairs.zig");
 const color_vision = @import("color_vision.zig");
 const distinguish = @import("distinguish.zig");
+const audit_file = @import("audit.zig");
 
 const design = zui.design;
 const Design = design.Design;
@@ -302,6 +303,22 @@ pub fn checkDistinguished(comptime resolved_design: Design, comptime components:
     }
 }
 
+/// Checks a finished frame: text and focus ring contrast against what is
+/// painted beneath, target sizes, text cut short and overlapping controls.
+pub const audit = audit_file.audit;
+/// Checks each component's `zuiDistinguish` pairs in a resolve's tokens.
+pub const auditDistinguished = audit_file.auditDistinguished;
+/// What the audit checks.
+pub const AuditCheck = audit_file.Check;
+/// What the audit holds a frame to.
+pub const AuditOptions = audit_file.Options;
+/// One thing the audit found, naming its element, check and value.
+pub const Finding = audit_file.Finding;
+/// What a finding measured, by its check.
+pub const Measured = audit_file.Measured;
+/// The findings an audit kept in its caller's room, and those it dropped.
+pub const Findings = audit_file.Findings;
+
 /// A dichromacy at full severity, or achromatopsia, as a color is
 /// simulated for it.
 pub const Deficiency = color_vision.Deficiency;
@@ -452,4 +469,5 @@ fn fontIdOf(comptime FontId: type, index: u32) FontId {
 
 test {
     _ = @import("tests.zig");
+    _ = @import("audit_tests.zig");
 }

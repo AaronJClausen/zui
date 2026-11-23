@@ -35,6 +35,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "zui_tour", .module = tour_module },
             .{ .name = "zui", .module = coreModule(b, target, optimize, core_options, "zui") },
             .{ .name = "zui_app", .module = coreModule(b, target, optimize, core_options, "zui_app") },
+            .{ .name = "zui_design", .module = coreModule(b, target, optimize, core_options, "zui_design") },
             .{ .name = "zui_glyphs", .module = b.dependency("zui_glyphs", .{ .target = target, .optimize = optimize }).module("zui_glyphs") },
             .{ .name = "zui_truetype", .module = truetype_dependency.module("zui_truetype") },
         },

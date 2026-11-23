@@ -41,6 +41,8 @@ pub const Target = struct {
 pub const Tier = enum {
     /// Text at body size and smaller.
     text,
+    /// Text at `title` size and larger.
+    large_text,
     /// Icons, outlines that show a state, and the focus ring.
     non_text,
 
@@ -49,6 +51,10 @@ pub const Tier = enum {
             .text => switch (contrast) {
                 .normal => .{ .lightness_contrast = 75, .ratio = 4.5 },
                 .high => .{ .lightness_contrast = 90, .ratio = 7 },
+            },
+            .large_text => switch (contrast) {
+                .normal => .{ .lightness_contrast = 60, .ratio = 3 },
+                .high => .{ .lightness_contrast = 75, .ratio = 4.5 },
             },
             .non_text => switch (contrast) {
                 .normal => .{ .lightness_contrast = 45, .ratio = 3 },

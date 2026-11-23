@@ -119,7 +119,6 @@ is in the file its group names.
 | `10-reach:07-x11-ibus` | `hosts/native/linux/` | | not started |
 | `11-polish:18-system-accent` | `core/src/input.zig`, `hosts/` | | |
 | `11-polish:19-default-design` | `core/zui_design/`, `core/zui_widgets/`, `apps/` | `11-polish:14-zui-design`, `11-polish:15-type-scale` | |
-| `11-polish:20-appearance-audit` | `core/zui_design/` | `11-polish:14-zui-design` | |
 | `11-polish:21-permutations` | `core/zui_design/` | | |
 | `11-polish:22-appearance-review` | `apps/review/` | `11-polish:20-appearance-audit`, `11-polish:21-permutations` | |
 | `11-polish:08-zui-themes` | `themes/` | `11-polish:19-default-design` | |
@@ -129,6 +128,8 @@ is in the file its group names.
 | `11-polish:09-template-project` | `examples/` | | |
 | `11-polish:10-samples` | `examples/` | `11-polish:09-template-project` | |
 | `11-polish:12-developer-experience-audit` | `examples/`, `README.md`, `docs/` | `11-polish:09-template-project`, `11-polish:10-samples` | |
+| `11-polish:25-focus-ring-on-fills` | `apps/tour/src/kit.zig`, `apps/tour/src/shared.zig`, `core/zui_widgets/` | | |
+| `11-polish:26-small-targets` | `apps/tour/src/screens/` | | |
 
 Stage 11's rows follow stage 10's, in dependency order, the design
 system's first (`roadmap/11-polish.md`, *The design system*), by the

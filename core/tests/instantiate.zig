@@ -118,7 +118,9 @@ export fn zuiCheckFrame(width: f32, height: f32, pointer_x: f32, pointer_y: f32)
     const host_requests = @intFromEnum(requests.cursor) + @intFromBool(requests.text_input != null);
     const inspected = frame.inspect(frame.elementCount() - 1);
     const inspected_content = @intFromEnum(inspected.content) + @intFromBool(inspected.effects != null and inspected.floating != null);
-    return frame.commands().len + @intFromBool(ui.nextFrame() == .immediately) + violation_count + failed_check + broken_invariant + frame.elementCount() + host_requests + frame.semantics().len + frame.chromeRegions().len + inspected_content + inspector.rows().len;
+    var audit_room: [8]zui_design.Finding = undefined;
+    const findings = zui_design.audit(frame, .{ .page_background = .white, .focus_ring_color = .black }, &audit_room);
+    return findings.slice().len + findings.dropped + frame.commands().len + @intFromBool(ui.nextFrame() == .immediately) + violation_count + failed_check + broken_invariant + frame.elementCount() + host_requests + frame.semantics().len + frame.chromeRegions().len + inspected_content + inspector.rows().len;
 }
 
 const MotionCard = struct { offset: [2]f32, background: zui.Color, glow: zui.ExtendedColor, opacity: f32 };
@@ -855,8 +857,12 @@ export fn zuiCheckDesignResolve() f32 {
     design_with_faces.type.faces.regular = .of(measured_body_face);
     const repairs = zui_design.resolve(design_with_faces, preferences, &resolved_tokens);
     _ = zui_design.resolve(resolved_design, preferences, &resolved_extended_tokens);
-    const repaired: f32 = @floatFromInt(repairs.slice().len + repairs.dropped);
-    return resolved_tokens.space(.m) + resolved_extended_tokens.space(.m) + tokens_resolved_at_comptime.measure + repaired;
+    var audit_room: [4]zui_design.Finding = undefined;
+    var findings: zui_design.Findings = .init(&audit_room);
+    zui_design.auditDistinguished(&resolved_extended_tokens, .{StatusBadge}, &findings);
+    const audit_options: zui_design.AuditOptions = .fromTokens(&resolved_extended_tokens, .high);
+    const repaired: f32 = @floatFromInt(repairs.slice().len + repairs.dropped + findings.slice().len);
+    return audit_options.target_floor + resolved_tokens.space(.m) + resolved_extended_tokens.space(.m) + tokens_resolved_at_comptime.measure + repaired;
 }
 
 const CheckPanelTheme = zui_debug.PanelTheme(u16, zui.Color);

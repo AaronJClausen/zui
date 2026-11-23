@@ -1,6 +1,7 @@
 const std = @import("std");
 const zui = @import("zui");
 const zui_app = @import("zui_app");
+const zui_design = @import("zui_design");
 const zui_glyphs = @import("zui_glyphs");
 const zui_truetype = @import("zui_truetype");
 const tour = @import("zui_tour");
@@ -121,6 +122,20 @@ fn Harness(comptime kit: type) type {
             return .{ @max(0, content[0] - stage.width), @max(0, content[1] - stage.height) };
         }
 
+        /// `screen` in `theme`, settled, with Tab pressed so the first
+        /// control is focused and shows its ring; the caller releases it.
+        /// The first frame takes the theme the tour asks for when it starts,
+        /// so `theme` is given after it.
+        fn frameToAudit(harness: *Self, screen: tour.Screen, theme: zui.Environment.Theme) *const Ui.Frame {
+            harness.tour.show(screen);
+            harness.ui.release(harness.frame(default_window));
+            harness.ui.release(harness.frameWith(default_window, &.{.{ .environment = .{ .theme = theme } }}));
+            for (0..30) |_| harness.ui.release(harness.frame(default_window));
+            const tab: zui.Event = .{ .key_down = .{ .key = .tab, .at = .zero } };
+            harness.ui.release(harness.frameWith(default_window, &.{tab}));
+            return harness.frame(default_window);
+        }
+
         fn expectEveryScreenWithinLimits() !void {
             var harness: Self = .{};
             try harness.init();
@@ -165,6 +180,116 @@ test "every screen a renderer is offered declares within its limits, in the defa
 
 test "every screen a renderer is offered fits the default window: no scrolling, no text cut off" {
     inline for (renderers) |Renderer| try Harness(KitFor(Renderer)).expectEveryScreenFitsTheDefaultWindow();
+}
+
+/// The palette entries the tour draws text in.
+const TextColor = enum { text, muted, faint, accent, on_accent, good, warn, bad, spectacle };
+
+/// Why the audit found what it found: the check, and for a text the entry
+/// of the palette it is drawn in, or for a target the screen it is on.
+const AuditCause = struct {
+    check: zui_design.AuditCheck,
+    /// Null for a text in a color of neither palette.
+    text_color: ?TextColor = null,
+    /// A text in an entry of the other theme's palette.
+    other_theme: bool = false,
+    screen: ?tour.Screen = null,
+
+    fn of(finding: zui_design.Finding, screen: tour.Screen, theme: zui.Environment.Theme) AuditCause {
+        if (finding.check() != .text_contrast) {
+            return .{ .check = finding.check(), .screen = if (finding.check() == .focus_ring_contrast) null else screen };
+        }
+        const drawn = finding.measured.text_contrast.foreground;
+        const own: tour.Palette = if (theme == .dark) .dark else .light;
+        const other: tour.Palette = if (theme == .dark) .light else .dark;
+        if (entryOf(own, drawn)) |entry| return .{ .check = .text_contrast, .text_color = entry };
+        if (entryOf(other, drawn)) |entry| return .{ .check = .text_contrast, .text_color = entry, .other_theme = true };
+        return .{ .check = .text_contrast };
+    }
+
+    fn entryOf(palette: tour.Palette, color: zui.Color) ?TextColor {
+        inline for (comptime std.enums.values(TextColor)) |entry| {
+            if (@field(palette, @tagName(entry)).eql(color)) return entry;
+        }
+        return null;
+    }
+};
+
+fn textIn(color: TextColor) AuditCause {
+    return .{ .check = .text_contrast, .text_color = color };
+}
+
+fn otherThemeText(color: TextColor) AuditCause {
+    return .{ .check = .text_contrast, .text_color = color, .other_theme = true };
+}
+
+fn target(screen: tour.Screen) AuditCause {
+    return .{ .check = .target_size, .screen = screen };
+}
+
+const focus_ring: AuditCause = .{ .check = .focus_ring_contrast };
+
+/// What the audit finds in the tour today. The text colors go with
+/// `11-polish:19-default-design`, which puts the tour on tokens; the focus
+/// ring on the checked `1 Hz` box is `11-polish:25-focus-ring-on-fills`;
+/// the targets are `11-polish:26-small-targets`. A cause that no longer
+/// appears fails too, so this list shrinks as they land. The other theme's
+/// entries are One Declaration's preview of that theme, and Light Lab's
+/// white text, which is light's `on_accent`.
+const expected_causes = std.EnumArray(zui.Environment.Theme, []const AuditCause).init(.{
+    .light = &.{
+        textIn(.muted),           textIn(.faint),             textIn(.accent),       textIn(.on_accent),
+        textIn(.good),            textIn(.warn),              textIn(.bad),          textIn(.spectacle),
+        otherThemeText(.muted),   otherThemeText(.on_accent), otherThemeText(.warn), focus_ring,
+        target(.x_ray),           target(.photo_cull),        target(.log_tail),     target(.settings_form),
+        target(.one_declaration),
+    },
+    .dark = &.{
+        textIn(.muted),             textIn(.faint),        textIn(.accent),        textIn(.on_accent),
+        textIn(.good),              textIn(.warn),         textIn(.bad),           textIn(.spectacle),
+        otherThemeText(.on_accent), otherThemeText(.warn), focus_ring,             target(.x_ray),
+        target(.photo_cull),        target(.log_tail),     target(.settings_form), target(.one_declaration),
+    },
+});
+
+fn indexOfCause(causes: []const AuditCause, cause: AuditCause) ?usize {
+    for (causes, 0..) |candidate, index| if (std.meta.eql(candidate, cause)) return index;
+    return null;
+}
+
+test "every screen audits as recorded, in light and dark, after Tab focuses a control" {
+    const kit = KitFor(FakeRenderer(true, .pixel_grid));
+    var harness: Harness(kit) = .{};
+    try harness.init();
+    defer harness.deinit();
+    const room = try testing.allocator.alloc(zui_design.Finding, 1024);
+    defer testing.allocator.free(room);
+    for ([_]zui.Environment.Theme{ .light, .dark }) |theme| {
+        const expected = expected_causes.get(theme);
+        var seen: std.StaticBitSet(32) = .initEmpty();
+        for (kit.offered_screens) |screen| {
+            const audited = harness.frameToAudit(screen, theme);
+            defer harness.ui.release(audited);
+            try testing.expectEqual(theme, harness.ui.environment().theme);
+            const palette = tour.Palette.forEnvironment(harness.ui.environment());
+            const findings = zui_design.audit(audited, .{ .page_background = palette.background, .focus_ring_color = palette.focus }, room);
+            try testing.expectEqual(0, findings.dropped);
+            for (findings.slice()) |finding| {
+                const cause: AuditCause = .of(finding, screen, theme);
+                const index = indexOfCause(expected, cause) orelse {
+                    std.debug.print("{t} {t}: an unrecorded finding, {any}\n", .{ theme, screen, finding });
+                    return error.UnrecordedFinding;
+                };
+                seen.set(index);
+            }
+        }
+        for (expected, 0..) |cause, index| {
+            if (!seen.isSet(index)) {
+                std.debug.print("{t}: {any} is recorded but no longer found; remove it\n", .{ theme, cause });
+                return error.RecordedFindingGone;
+            }
+        }
+    }
 }
 
 test "a renderer is offered the screens and the frost it draws everything of" {

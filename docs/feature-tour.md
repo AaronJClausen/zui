@@ -2333,6 +2333,41 @@ comptime {
 }
 ```
 
+<a id="design-audit"></a>
+
+### `zui_design.audit`: checks of a finished frame · *shipped*
+
+`zui_design.audit` checks a frame after `endFrame`, so it sees what the
+declarations cannot: custom drawing, colors declared `.unchecked`, and
+text laid over a photo's tint. Each line of text is measured against
+what is painted beneath its middle, blending translucent fills, and held
+to Lc 75 and 4.5:1, or Lc 60 and 3:1 from the title size up; a border in
+the focus color is measured against what is just outside and just inside
+it; every enabled control is held to the 24-unit floor; a line that runs
+past the side of a clip that does not scroll is reported as cut short;
+and two controls whose visible areas overlap in one layer are reported.
+`auditDistinguished` checks your components' `zuiDistinguish` pairs in
+the tokens you resolved, with the user's accent and color vision.
+Findings go into room you give, with a count of those that did not fit,
+and each names the element `inspect` takes, its check and the value it
+measured against its target.
+
+`src/appearance.zig`
+
+```zig
+pub fn auditFrame(app: *App, frame: *const Ui.Frame) void {
+    var room: [64]zui_design.Finding = undefined;
+    var findings = zui_design.audit(frame, .fromTokens(&app.appearance.tokens, app.appearance.preferences.?.contrast), &room);
+    zui_design.auditDistinguished(&app.appearance.tokens, .{AlbumChip}, &findings);
+    for (findings.slice()) |finding| switch (finding.measured) {
+        .text_contrast => |measured| log.warn("text at element {?d}: Lc {d:.0}, needs {d:.0}", .{ finding.element, measured.measured.lightness_contrast, measured.target.lightness_contrast }),
+        .target_size => |measured| log.warn("target at element {?d}: {d:.0}x{d:.0}, needs {d:.0}", .{ finding.element, measured.size[0], measured.size[1], measured.floor }),
+        else => log.warn("{t} at element {?d}", .{ finding.check(), finding.element }),
+    };
+    if (findings.dropped > 0) log.warn("{d} more findings", .{findings.dropped});
+}
+```
+
 <a id="reflect"></a>
 
 ### `zui_reflect`: an editor from any struct · *shipped*

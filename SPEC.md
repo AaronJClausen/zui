@@ -2833,9 +2833,13 @@ reduced transparency, each `WidgetState`, and its content.
 - **The audit** (`zui_design.audit`) checks a finished frame's commands,
   not the declarations, so custom drawing and `.unchecked` colors are
   caught too: text against what is painted beneath it, the focus ring
-  against its surroundings, hit target sizes, text cut short,
-  overlapping controls, and each `zuiDistinguish` pair under every
-  simulation. Each finding names its element, its check and the value.
+  against its surroundings, hit target sizes, text cut short and
+  overlapping controls. A frame does not say which part of a component
+  an element is, so each `zuiDistinguish` pair is checked under every
+  simulation in the resolved tokens, by `zui_design.auditDistinguished`;
+  nor does it say what is focused, so a focus ring is a border in the
+  focus color. Each finding names its element, its check and the value,
+  into room the caller gives, the rest counted as dropped.
 
 - **Keys and hashes.** Each permutation has a `PermutationKey`: the
   component, its preview and every axis value. Its command hash is the
