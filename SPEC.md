@@ -1074,6 +1074,7 @@ pub const Border = struct {
     color: config.Color,
     widths: Edges = .{},
     between_children: f32 = 0,   // a divider of this width between each two adjacent children in the flow
+    offset: f32 = 0,             // above zero, the outline is drawn this far outside the element
 };
 ```
 
@@ -1167,7 +1168,14 @@ emitted inside the element's clip, so they scroll and are cut off with
 the children they separate, and they paint over the children and under
 the border. A border whose widths are all zero emits no `border`
 command, so `.border = .{ .color = line, .between_children = 1 }` draws
-dividers alone.
+dividers alone. A border with an `offset` above zero is drawn outside
+its element, as a focus ring that must not touch a filled control: its
+`border` command's bounds grow by the offset and the width on each side,
+and each rounded corner's radius by the same, so the ring is concentric
+with the element; a square corner stays square. It takes no space and
+changes no hit testing, and the clips around the element, its own
+included, cut it off where it passes them. An offset of zero emits the
+command as before.
 
 The four switches are written as booleans, `.focusable = true`, and null
 means false. They are optional because Zig stores a `bool` field as one
@@ -1507,8 +1515,8 @@ adding a base command always does, at compile time.
 `Frame.commands()` is in paint order: by layer, then declaration order.
 A border and its dividers are emitted after its element's subtree,
 inside the element's own clip, which leaves them whole since both lie in
-its box. Bounds snap to whole physical pixels using the frame's
-`scale × zoom`.
+its box, except a border with an offset, which lies outside it. Bounds
+snap to whole physical pixels using the frame's `scale × zoom`.
 
 ### 13.3 Lowering
 
@@ -2561,9 +2569,12 @@ const look = tokens.look(Chip, .container, ui.widgetState(id));
   own part's surface. A part draws text or an icon, not both.
 - **States** come from the resolver's state layers: hovered, pressed,
   focused and disabled are derived from the part's roles, and the focus
-  ring is the `focus` role, drawn as the outline of a part with a
-  `target` while it is focused. A part may give a state its own colors
-  with `.states = .{ .pressed = .{ ... } }`, read in that state's layer.
+  ring is the `focus` role, drawn in place of the outline of a part with
+  a `target` while it is focused, `focus_ring_offset` outside the part's
+  edge (`Border.offset`), so the surface around the part shows between
+  them and the ring stands apart from a filled control. A part may give
+  a state its own colors with `.states = .{ .pressed = .{ ... } }`, read
+  in that state's layer.
 - **`zuiDistinguish`** lists the pairs of parts that must look
   different, as a checked and an unchecked box are parts of their own
   (§16.7); `.{ .part, .idle, .hovered }` pairs one part in two states.
@@ -2671,7 +2682,10 @@ if (!std.meta.eql(preferences, app.preferences)) {
   `shadow` and `rim` have no target. `on_surface` is checked on every
   surface it is drawn on, `background`, `surface`, `surface_raised`,
   `surface_sunken` and `surface_overlay`, and `on_surface_accent` on
-  `surface`. The resolver moves the foreground's OKLCH lightness away
+  `surface`. `focus` is checked on `surface` alone: the ring is drawn
+  `focus_ring_offset` outside the part it rings, on the surface around
+  it, so it never meets the part's own fill, even when that fill is
+  `accent`. The resolver moves the foreground's OKLCH lightness away
   from the background, keeping its hue and chroma, until both pass; if
   no lightness of it passes, it goes to white or black and the
   background moves too. The hovered, focused and pressed layers are held

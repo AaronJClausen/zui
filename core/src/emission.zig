@@ -852,9 +852,10 @@ fn Emitter(comptime Ui: type) type {
             self.push(.{ .bounds = self.snap(self.rectOf(level.element)), .id = self.frame.element_id[level.element], .z = level.z, .payload = .transform_end });
         }
 
-        /// Dividers and the border. Both lie inside the element's box, so
-        /// its own clip leaves them whole, and a floating element's
-        /// target's clip cuts them off with the rest of it.
+        /// Dividers and the border, inside the element's own clip, so a
+        /// floating element's target's clip cuts them off with the rest of
+        /// it. A border with an offset lies outside the box, and that clip
+        /// cuts it off too.
         inline fn closeSubtree(self: *Self, level: *const Level) void {
             const frame = self.frame;
             const element = level.element;
@@ -863,16 +864,45 @@ fn Emitter(comptime Ui: type) type {
             if (border.between_children > 0) @call(.never_inline, emitDividers, .{ self, element, border, level });
             const widths = border.widths;
             if (widths.left == 0 and widths.right == 0 and widths.top == 0 and widths.bottom == 0) return;
-            const bounds = self.rectOf(element);
+            const element_bounds = self.rectOf(element);
+            const drawn_outside = border.offset > 0;
+            const bounds = if (drawn_outside) outsetBorderBounds(element_bounds, widths, border.offset) else element_bounds;
             if (bounds.intersect(level.outer_clip).isEmpty()) return;
             const snapped = self.snap(bounds);
-            const corners = self.cornersIn(snapped, self.cornerRadiusOf(element, found), found.corner_shape);
+            const element_radius = self.cornerRadiusOf(element, found);
+            const radius = if (drawn_outside) outsetBorderRadius(element_radius.clampedTo(self.snap(element_bounds)), widths, border.offset) else element_radius;
+            const corners = self.cornersIn(snapped, radius, found.corner_shape);
             self.push(.{ .bounds = snapped, .id = frame.element_id[element], .z = level.z, .payload = .{ .border = .{
                 .color = self.commandColor(border.color),
                 .widths = widths,
                 .corner_radius = corners.radius,
                 .corner_shape = corners.shape,
             } } });
+        }
+
+        fn outsetBorderBounds(element_bounds: style.Rect, widths: style.Edges, offset: f32) style.Rect {
+            const left = offset + widths.left;
+            const top = offset + widths.top;
+            return .{
+                .x = element_bounds.x - left,
+                .y = element_bounds.y - top,
+                .width = element_bounds.width + left + offset + widths.right,
+                .height = element_bounds.height + top + offset + widths.bottom,
+            };
+        }
+
+        /// A square corner stays square, as an outline around a sharp box is.
+        fn outsetBorderRadius(element_radius: style.CornerRadius, widths: style.Edges, offset: f32) style.CornerRadius {
+            return .{
+                .top_left = outsetCorner(element_radius.top_left, offset + @max(widths.left, widths.top)),
+                .top_right = outsetCorner(element_radius.top_right, offset + @max(widths.right, widths.top)),
+                .bottom_left = outsetCorner(element_radius.bottom_left, offset + @max(widths.left, widths.bottom)),
+                .bottom_right = outsetCorner(element_radius.bottom_right, offset + @max(widths.right, widths.bottom)),
+            };
+        }
+
+        fn outsetCorner(radius: f32, growth: f32) f32 {
+            return if (radius > 0) radius + growth else 0;
         }
 
         /// What cuts off the children of a floating element's target. An

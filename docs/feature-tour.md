@@ -92,8 +92,10 @@ struct literal: `layout` sets direction, sizing, padding, gap and
 alignment, and `decoration` sets background, border and corner radius. A
 border's `between_children` draws a divider between each two children,
 centered in the gap, over the children and under the border; with no
-`widths` it draws the dividers alone. Because `defer ui.close()` keeps
-the tree balanced, a helper function reads like markup.
+`widths` it draws the dividers alone. A border's `offset` draws it that
+far outside the element, as a focus ring, taking no space. Because
+`defer ui.close()` keeps the tree balanced, a helper function reads like
+markup.
 
 `src/ui/shell.zig`
 
@@ -2143,7 +2145,9 @@ skin fails to compile with a message naming it.
 `zui_widgets.DesignSkin(Ui)` is zui's own skin: every part drawn in the
 roles, tiers and shapes of the default design, from `zui.design.Tokens`
 you resolve again when a preference changes, so the widgets follow the
-theme, contrast, density, text size and color vision. A button takes a
+theme, contrast, density, text size and color vision. Its focus ring is
+drawn 2 units outside the control, so it shows on an accent-filled
+button or a checked box as well as on the page. A button takes a
 variant, `primary`, `secondary`, `tonal`, `tertiary` or `danger`.
 
 `src/ui/settings.zig`
@@ -2290,11 +2294,11 @@ on it, and a disabled one greys and fades. Spacing comes from the
 density the user chose, which moves the small tiers further than the
 large so grouping survives a compact layout; corners come from the
 design's shape table moved a size sharper or rounder at the user's word;
-target floors stay at 24 units, 44 for touch, and the focus ring at 2,
-at every density; and a part that draws text pads by half of the user's
-text scale past 1, so large text has room. Each type role is a step of
-the design's scale, sized by its font's x-height when the design is
-given the face's metrics
+target floors stay at 24 units, 44 for touch, and the focus ring at 2
+wide and 2 out from the part it rings, at every density; and a part that
+draws text pads by half of the user's text scale past 1, so large text
+has room. Each type role is a step of the design's scale, sized by its
+font's x-height when the design is given the face's metrics
 (`.faces.regular = .of(text.fontMetrics(body).?)`), so two faces look
 one size; its line height sits on the 4-unit grid, its tracking tightens
 as it grows, and at twice the text size body text doubles while display

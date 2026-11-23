@@ -128,7 +128,7 @@ fn rectangleRadius(frame: *const NestingUi.Frame, command: usize) zui.CornerRadi
 
 test "without the feature a decoration holds no nested corners and stays its size" {
     try testing.expectEqual(0, @sizeOf(@FieldType(zui.Decoration, "nested_corners")));
-    try testing.expectEqual(52, @sizeOf(zui.Decoration));
+    try testing.expectEqual(56, @sizeOf(zui.Decoration));
     try testing.expect(RoundUi.Decoration == zui.Decoration);
     try testing.expect(NestingUi.Decoration != zui.Decoration);
 }

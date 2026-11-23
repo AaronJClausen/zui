@@ -358,6 +358,18 @@ pub fn BorderWith(comptime ColorType: type) type {
         /// });
         /// ```
         between_children: f32 = 0,
+        /// Above zero, the outline is drawn outside the element instead, this
+        /// far from its edge, as a focus ring that must not touch a filled
+        /// control: its `border` command's bounds grow by the offset and the
+        /// width on each side, and each rounded corner's radius by the same,
+        /// so the ring stays concentric. It takes no space and changes no
+        /// hit testing; the clips around the element cut it off, its own
+        /// clip included.
+        ///
+        /// ```zig
+        /// .decoration = .{ .background = accent, .corner_radius = .all(6), .border = .{ .color = focus, .widths = .all(2), .offset = 2 } },
+        /// ```
+        offset: f32 = 0,
     };
 }
 

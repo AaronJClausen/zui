@@ -309,7 +309,7 @@ roadmap item named:
 
 | Today | The spec | Where today | Item |
 |---|---|---|---|
-| the widgets, the tour and the showcase draw from the default design's tokens, and the tour's text meets its targets, but in each theme the focus ring on a checked checkbox and 32 of the tour's targets fail the audit | every focus ring offset from its part and every target at its floor (SPEC.md §18.4, §19.2, §19.11) | `core/zui_widgets/`, `apps/tour/` | `11-polish:25-focus-ring-on-fills`, `11-polish:26-small-targets` |
+| the widgets, the tour and the showcase draw from the default design's tokens, and the tour's text and focus rings meet their targets, but in each theme 32 of the tour's targets fail the audit | every target at its floor (SPEC.md §18.5, §19.2, §19.11) | `apps/tour/` | `11-polish:26-small-targets` |
 | no review of a component's permutations | the review app, its verdicts, its report and the workbench (SPEC.md §18.8) | `apps/review/` | `11-polish:22-appearance-review`, `11-polish:23-design-workbench` |
 | `zui_debug`'s inspector runs in the application's process; a frame on the wire carries no elements for it | over the wire, the inspector runs in another process (SPEC.md §19.7) | `core/zui_debug/`, `core/zui_wire/` | not yet queued |
 | a frame on the wire carries no chrome regions, and the wire host declares no `zuiChromeRegions`, so a remote window keeps the system's title bar | chrome over the wire | `core/zui_wire/` | not yet queued |

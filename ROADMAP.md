@@ -136,7 +136,6 @@ is in the file its group names.
 | `11-polish:09-template-project` | `examples/` | | |
 | `11-polish:10-samples` | `examples/` | `11-polish:09-template-project` | |
 | `11-polish:12-developer-experience-audit` | `examples/`, `README.md`, `docs/` | `11-polish:09-template-project`, `11-polish:10-samples` | |
-| `11-polish:25-focus-ring-on-fills` | `apps/tour/src/kit.zig`, `apps/tour/src/shared.zig`, `core/zui_widgets/` | | |
 | `11-polish:26-small-targets` | `apps/tour/src/screens/` | | |
 
 Stage 11's rows follow stage 10's, in dependency order, the design

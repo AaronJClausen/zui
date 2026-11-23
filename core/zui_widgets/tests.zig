@@ -874,3 +874,45 @@ test "every widget in the design skin meets its contrast and target floor in eve
         }
     }
 }
+
+test "the design skin's focus ring stands apart from every focused control, filled ones too, in every scheme" {
+    const SkinnedForm = EveryWidget(Widgets);
+    const OnPage = struct {
+        fn declare(form: *SkinnedForm, ui: *Ui) void {
+            const page = form.widgets.skin.tokens.colors.get(.idle).get(.surface);
+            ui.open(.{ .layout = .{ .sizing = .grow_both }, .decoration = .{ .background = page } });
+            SkinnedForm.declare(form, ui);
+            ui.close();
+        }
+    };
+    // Not the slider, whose thumb's ring crosses the accent track on
+    // either side of it.
+    const focused_controls = [_]zui.Id{ SkinnedForm.ids.expanded, SkinnedForm.ids.button } ++ SkinnedForm.ids.variants ++
+        [_]zui.Id{ SkinnedForm.ids.checked, SkinnedForm.ids.unchecked, SkinnedForm.ids.dropdown };
+    inline for (comptime std.enums.values(zui_design.Scheme)) |scheme| {
+        const theme: zui.Environment.Theme = if (scheme == .light or scheme == .light_high_contrast) .light else .dark;
+        const tokens = comptime TokensIn(Ui, .{ .theme = theme, .contrast = scheme.environmentContrast(), .density = .comfortable });
+        const ring_color = tokens.colors.get(.focused).get(.focus);
+        var fixture: Fixture = .{};
+        try fixture.init();
+        defer fixture.deinit();
+        var form: SkinnedForm = undefined;
+        form.init(.{ .skin = .{ .tokens = &tokens } });
+        fixture.driver.viewport = .{ 800, 1000 };
+        _ = try fixture.driver.frame(&form, OnPage.declare, &.{});
+        for (focused_controls) |control| {
+            const frame = try fixture.driver.focus(&form, OnPage.declare, control);
+            var rings: usize = 0;
+            for (frame.commands()) |command| if (command.payload == .border and command.payload.border.color.eql(ring_color)) {
+                rings += 1;
+            };
+            try testing.expectEqual(1, rings);
+            var room: [16]zui_design.Finding = undefined;
+            var options: zui_design.AuditOptions = .fromTokens(&tokens, scheme.environmentContrast());
+            options.checks = .initOne(.focus_ring_contrast);
+            const findings = zui_design.audit(frame, options, &room);
+            for (findings.slice()) |finding| std.debug.print("{s}, control {x}: {any}\n", .{ scheme.name(), control.hash, finding.measured });
+            try testing.expectEqual(0, findings.slice().len + findings.dropped);
+        }
+    }
+}

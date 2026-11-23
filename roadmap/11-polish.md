@@ -37,7 +37,7 @@ and each is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:22-appearance-review` The appearance review | not started |
 | `11-polish:23-design-workbench` The design workbench | not started |
 | `11-polish:24-the-tour` The tour, redone | done |
-| `11-polish:25-focus-ring-on-fills` A focus ring that shows on a filled control | not started |
+| `11-polish:25-focus-ring-on-fills` A focus ring that shows on a filled control | done |
 | `11-polish:26-small-targets` Targets of at least 24 units in the tour | not started |
 | `11-polish:27-essential-inputs` Essential inputs | not started |
 | `11-polish:28-containers-and-navigation` Containers and navigation | not started |
@@ -1509,14 +1509,14 @@ examples resolve the default design in dark, as their palettes are.
 Where the spec could not be kept: the slider's thumb is ringed in
 `outline`, not `accent`, since light high contrast draws `accent` and
 `focus` alike, so a focused thumb would look idle; the focus ring is not
-yet offset from the part (`11-polish:25-focus-ring-on-fills`); button
-sizes, and the toggle, the text area, the progress bar and the image,
-which `zui_widgets` does not have yet, wait for their items. The tour's
-test now also audits focus rings in the tokens' color, and no longer
-finds dark's `on_accent` in light, which One Declaration's dark button
-drew. `hosts/web`'s `test-draw` fails on one frame
-(`10-reach:08-ring-edges-agree`); every other check listed for the
-packages it touches passes.
+yet offset from the part (`11-polish:25-focus-ring-on-fills`; offset
+since that item); button sizes, and the toggle, the text area, the
+progress bar and the image, which `zui_widgets` does not have yet, wait
+for their items. The tour's test now also audits focus rings in the
+tokens' color, and no longer finds dark's `on_accent` in light, which
+One Declaration's dark button drew. `hosts/web`'s `test-draw` fails on
+one frame (`10-reach:08-ring-edges-agree`); every other check listed for
+the packages it touches passes.
 
 Slice 3 is done: the tour and the showcase draw every color from the
 tokens they resolve, and neither has a palette. The tour's `Palette`
@@ -1547,14 +1547,14 @@ draws from it, with an audit of its text in its test.
 
 The tour's test expects no text contrast finding in light or dark: from
 2,350 to none. What it still finds, in each theme: the focus ring on the
-checked `1 Hz` box (`11-polish:25-focus-ring-on-fills`) and 32 targets
-below 24 units on Harbor X-ray (14), One Declaration (10), Log Tail (4),
-Settings Form (3) and Photo Culling (1) (`11-polish:26-small-targets`);
-33 before, the same screens. A new test resolves the preferences
-screen's choices, compact, protan, high contrast and 150% text, over a
-normal environment, and audits it clean; the showcase's text audits
-clean with and without its dialog. Passing: `apps/tour` and
-`apps/showcase` `test` in all three modes, `check` and
+checked `1 Hz` box (`11-polish:25-focus-ring-on-fills`, gone since that
+item) and 32 targets below 24 units on Harbor X-ray (14), One
+Declaration (10), Log Tail (4), Settings Form (3) and Photo Culling (1)
+(`11-polish:26-small-targets`); 33 before, the same screens. A new test
+resolves the preferences screen's choices, compact, protan, high
+contrast and 150% text, over a normal environment, and audits it clean;
+the showcase's text audits clean with and without its dialog. Passing:
+`apps/tour` and `apps/showcase` `test` in all three modes, `check` and
 `check -Dtarget=x86_64-windows`; the terminal renderer's `test`, `check`
 for Linux, Windows and macOS, `showcase -- --dump` and
 `tour -- --dump --every-screen`; the raylib renderer's `test`, `check`,
@@ -1818,17 +1818,28 @@ tokens in `11-polish:19-default-design`.
 The focus ring stands apart from the control it rings and from what is
 around it, also on a control filled with the accent.
 
-**Grounding** (at `8a8507e`). `11-polish:20-appearance-audit` found the
+**Grounding** (at `3f8357f`). `11-polish:20-appearance-audit` found the
 ring of the tour header's checked `1 Hz` checkbox
-(`apps/tour/src/tour.zig:275`) at Lc 0 and 1:1 in light, where the
-ring's color, the palette's `focus`, is the box's own accent fill
-(#2f62e9 on #2f62e9, `apps/tour/src/shared.zig:273`), and at Lc 16 and
-1.48:1 in dark (#8fb0ff on #5b8cff), against the non-text target of Lc
-45 and 3:1. The tour hands `zui_widgets`' skin its palette's `focus` as
-`focus_ring` (`apps/tour/src/kit.zig:165`), and the skin draws the ring
-as the box's own 2-unit border (`core/zui_widgets/zui_widgets.zig:274`),
-inside the fill. Tab reaches the box from the kanban screen in light and
-the Clickable Chaos screen in dark in the tour's test.
+(`apps/tour/src/tour.zig:285`, `widgets.checkbox`) at Lc 0 and 1:1 in
+light and Lc 16 and 1.48:1 in dark, against the non-text target of Lc 45
+and 3:1: the box is drawn in `accent` (`checkbox_box_checked`,
+`core/zui_widgets/zui_widgets.zig:419`), and the ring, the `focus` role,
+lay on that fill. `Tokens.lookIn` (`core/src/design.zig:581-587`) drew
+the ring as the part's own border, `focus_ring_width` wide, inside its
+fill; `focus_ring_offset` was resolved
+(`core/zui_design/zui_design.zig:170`, 2 units) but nothing read it.
+`zui_widgets.DesignSkin` copies that border into `Style.focus_ring`
+(`core/zui_widgets/zui_widgets.zig:312`), which `decorationOf` (:1078)
+draws in place of `border` while the control is focused. The audit
+(`core/zui_design/audit.zig:228-236`) measures a border in the focus
+color 1 unit outside and 1 unit inside its command's bounds. No
+decoration drew outside its element without taking space: a shadow with
+spread is an optional command, which the terminal does not draw, and one
+per element, so it has no gap; a floating element cannot be sized to its
+parent plus a margin (`core/src/layout.zig:471-486`); and a ring that
+touches the fill cannot be recolored to clear both neighbours, since
+light's accent (#2f62e9) is about Lc 70 from white and black on it only
+about Lc 25.
 
 **Plan.** Draw the ring outside a filled control, with a gap in the
 surface's color, or give `focus` a color apart from `accent` in both
@@ -1839,6 +1850,55 @@ neighbors in light, dark and high contrast.
 finding, in light or dark; `test-all`, `check-all`.
 
 **Spec.** §18.2, §18.4.
+
+**Status.** Done in one commit, with the offset ring, the owner's choice
+over a floating ring sized from the last frame or a shadow. `zui.Border`
+gains `offset`: above zero, the outline is drawn that far outside its
+element, as the same `border` command with its bounds grown by the
+offset and the width on each side and each rounded corner's radius by
+the same, so the ring stays concentric, and a square corner stays
+square. It takes no space and changes neither layout nor hit testing; an
+offset of zero emits the command as before. This had to be in core, not
+a module: nothing in the public API draws outside an element without
+taking space, in every renderer, with a gap. `Tokens.lookIn` gives the
+focus ring `focus_ring_offset`, so the default design's ring is 2 wide,
+2 out from the part, with the surface between, as the approved spec
+draws it; the audit then measures it against the gap and what lies
+outside, both the surface around the control. A ring at the edge of a
+clipping parent, or of an element that clips its own children, is cut
+off by that clip. The ring still replaces the part's outline while
+focused, so an unchecked box or a slider's thumb shows its ring and not
+its outline. `zui.Decoration` grows from 52 to 56 bytes. The tour's test
+no longer expects a `focus_ring_contrast` finding in light or dark; it
+finds only the 32 targets of `11-polish:26-small-targets` in each.
+`core/src/tests/borders.zig` pins a border without an offset, one with
+an offset and rounded, clamped and square corners, and the element's own
+commands left in place. Every widget still passes the audit in all four
+schemes and three densities, and a new test in
+`core/zui_widgets/tests.zig` focuses each control in turn, the
+disclosure, every button variant, the checked and unchecked boxes and
+the dropdown, and finds one ring and no `focus_ring_contrast` finding in
+every scheme. It leaves out two things that focusing them found, which
+were there before this item and are not the ring on a fill: the slider's
+thumb, whose ring crosses the `accent` track on either side of it (Lc 0
+in light and light high contrast, Lc 31 in dark), as the ring drawn
+inside the thumb did; and the focused dropdown's `v`, `on_surface_muted`
+on the focused layer of `surface_sunken`, Lc 65 in light and 88 in light
+high contrast, below text's 75 and 90. Neither has an item yet.
+`counts -- --compare` against `3f8357f`: instructions unchanged in every
+scenario but `documents view` endFrame (+0.02%), the `3000 cells`
+endFrames (+10 instructions) and `1000 labels, rendered` endFrame
+(+0.01%). Passing: core's `test` in all three modes, `check` for
+`wasm32-freestanding` and `powerpc-linux`, `test -Dtarget=x86-linux`;
+`apps/tour`'s `test` in all three modes, `check` and
+`check -Dtarget=x86_64-windows`; the raylib renderer's
+`tour -- --hidden --frames 600 --cycle 50` (`diagnostics ok: true`) and
+screenshots of Clickable Chaos, Kanban and Preferences, in which nothing
+is focused, since the screenshot flag cannot focus a control; the
+terminal renderer's `tour -- --dump --every-screen`; `hosts/web`'s
+`test-demo`; `test-all` and `check-all`. `hosts/web`'s `test-draw` fails
+on one frame, Clickable Chaos's turned cards
+(`10-reach:09-turned-edges-agree`), with no focus ring in it.
 
 ## 11-polish:26-small-targets — Targets of at least 24 units in the tour
 

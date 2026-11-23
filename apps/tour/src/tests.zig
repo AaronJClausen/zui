@@ -197,15 +197,12 @@ fn target(screen: tour.Screen) AuditCause {
     return .{ .check = .target_size, .screen = screen };
 }
 
-const focus_ring: AuditCause = .{ .check = .focus_ring_contrast };
-
-/// What the audit finds in the tour today: the focus ring on the checked
-/// `1 Hz` box is `11-polish:25-focus-ring-on-fills`, and the targets are
+/// What the audit finds in the tour today: the targets are
 /// `11-polish:26-small-targets`. A cause that no longer appears fails too,
 /// so this list shrinks as they land.
 const expected_causes = std.EnumArray(zui.Environment.Theme, []const AuditCause).init(.{
-    .light = &.{ focus_ring, target(.x_ray), target(.photo_cull), target(.log_tail), target(.settings_form), target(.one_declaration) },
-    .dark = &.{ focus_ring, target(.x_ray), target(.photo_cull), target(.log_tail), target(.settings_form), target(.one_declaration) },
+    .light = &.{ target(.x_ray), target(.photo_cull), target(.log_tail), target(.settings_form), target(.one_declaration) },
+    .dark = &.{ target(.x_ray), target(.photo_cull), target(.log_tail), target(.settings_form), target(.one_declaration) },
 });
 
 fn printUnrecorded(theme: zui.Environment.Theme, screen: tour.Screen, finding: zui_design.Finding) void {

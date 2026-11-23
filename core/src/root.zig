@@ -285,4 +285,5 @@ test {
     _ = @import("tests/motion.zig");
     _ = @import("tests/design.zig");
     _ = @import("tests/corners.zig");
+    _ = @import("tests/borders.zig");
 }

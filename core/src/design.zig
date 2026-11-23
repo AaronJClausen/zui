@@ -326,8 +326,9 @@ pub fn PartAppearance(comptime ExtraRoles: type) type {
         padding: Padding = .{},
         gap: Space = .none,
         type: ?TypeRole = null,
-        /// A part with a target takes input, so it draws the `focus` role
-        /// as its outline while focused, unless `states.focused` gives one.
+        /// A part with a target takes input, so while focused it draws the
+        /// `focus` role as a ring `focus_ring_offset` outside its edge, in
+        /// place of its outline, unless `states.focused` gives an outline.
         target: Target = .none,
         /// Each state's colors default to the part's own, in that state's
         /// layer; one given here replaces them in that state.
@@ -581,7 +582,7 @@ pub fn Tokens(comptime Ui: type, comptime ExtraRoles: type) type {
             const draws_focus_ring = state == .focused and declared.target != .none and
                 (declared.states.focused == null or declared.states.focused.?.outline == null);
             if (draws_focus_ring) {
-                result.decoration.border = .{ .color = self.colors.get(state).get(.focus), .widths = .all(self.focus_ring_width) };
+                result.decoration.border = .{ .color = self.colors.get(state).get(.focus), .widths = .all(self.focus_ring_width), .offset = self.focus_ring_offset };
             } else if (colors.outline) |outline| {
                 result.decoration.border = .{ .color = self.colorOf(outline, state), .widths = .all(self.outline_width) };
             }
