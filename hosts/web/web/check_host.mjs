@@ -6,8 +6,8 @@
 // draw the tour on the canvas the page transferred to it, at the canvas's
 // size; idle, take no turns but the tour's once-a-second heartbeat while
 // the display runs on; take the input the page sends it, so the mouse over
-// the rail shows the pointer the tour asks for on the page's canvas, and
-// Ctrl+PageDown draws the next screen; when its WebGL context is lost
+// a row of the rail shows the pointer the tour asks for on the page's
+// canvas, and Ctrl+PageDown draws the next screen; when its WebGL context is lost
 // through `WEBGL_lose_context` and restored, draw that screen again; hear
 // the page's settings first, its system accent color among them, then
 // each change: an emulated dark scheme darkens the canvas and a light one
@@ -152,7 +152,8 @@ const animationSettleMilliseconds = 1_000;
 const idleMilliseconds = 2_000;
 // The tour's heartbeat refreshes its strip each whole second, and a wait of
 // two seconds can span three, and of one second two.
-const idleTurnsMost = 3;
+const heartbeatTurnsMost = (milliseconds) => Math.floor(milliseconds / 1000) + 1;
+const idleTurnsMost = heartbeatTurnsMost(idleMilliseconds);
 const quietMilliseconds = 1_000;
 const quietTurnsMost = 2;
 const animationFramesFewest = 30;
@@ -200,8 +201,22 @@ async function chord(key, code, windowsVirtualKeyCode) {
 
 const overviewIdle = await idleTurns("the Overview");
 
-await expectDrawnAfter("the mouse moved over the rail", () => send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 50, y: 266 }));
-await waitUntil(() => evaluate(`host.canvas.style.cursor === "pointer"`), "the canvas did not show the pointer cursor over the rail");
+// Down the rail's column, wherever its rows lie, until one shows the pointer.
+const railColumn = 50;
+const railStep = 16;
+const cursorPatienceMilliseconds = 500;
+async function moveOntoARailRow() {
+  const pointerShown = () => evaluate(`host.canvas.style.cursor === "pointer"`);
+  for (let y = 80; y < 800; y += railStep) {
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: railColumn, y });
+    for (let waited = 0; waited < cursorPatienceMilliseconds; waited += 50) {
+      if (await pointerShown()) return;
+      await pause(50);
+    }
+  }
+  await fail("the canvas did not show the pointer cursor over any row of the rail");
+}
+await expectDrawnAfter("the mouse moved over the rail", moveOntoARailRow);
 await idleTurns("the Overview, under the mouse");
 
 await inWorker("keepPixels('overview')");
@@ -210,10 +225,19 @@ const screenChangeFewest = 0.05;
 await waitUntil(async () => (await inWorker("differingFrom('overview')")) > screenChangeFewest, "the canvas still showed the Overview after Ctrl+PageDown");
 const nextScreenChange = await inWorker("differingFrom('overview')");
 
-// Harbor, the next screen, runs live; Settings, five screens on, waits
-// for its user.
-const pageDownsToSettings = 5;
-for (let screen = 0; screen < pageDownsToSettings; screen += 1) await expectDrawnAfter("Ctrl+PageDown", () => chord("PageDown", "PageDown", 34));
+// A frame drawn after a chord can be the heartbeat's, before the worker
+// took the chord, and the tour takes one screen change from a record:
+// the next chord waits until the canvas shows another screen.
+async function expectScreenChangedBy(what, act) {
+  await inWorker("keepPixels('before the chord')");
+  await expectDrawnAfter(what, act);
+  await waitUntil(async () => (await inWorker("differingFrom('before the chord')")) > screenChangeFewest, `the canvas showed the same screen after ${what}`);
+}
+
+// Harbor, the next screen, runs live; Settings, the seventh, waits for its
+// user.
+const toSettings = () => chord("7", "Digit7", 55);
+await expectScreenChangedBy("Ctrl+7", toSettings);
 const settingsIdle = await idleTurns("Settings");
 
 await inWorker("keepPixels('before the loss')");
@@ -304,38 +328,49 @@ const shownChange = await inWorker("differingFrom('before hidden')");
 if (shownChange > keptScreenChangeMost) await fail(`once the page was shown again, ${(shownChange * 100).toFixed(1)}% of the canvas differs from before it was hidden`);
 await send("Target.closeTarget", { targetId: otherTab });
 
-// Clickable Chaos, the rail's last screen, moves its wall in a wave unless
-// motion is reduced.
-const clickableChaosOnTheRail = { x: 64, y: 706 };
-await expectDrawnAfter("a click on Clickable Chaos in the rail", async () => {
-  for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, ...clickableChaosOnTheRail, button: "left", buttons: type === "mousePressed" ? 1 : 0, clickCount: 1 });
-});
-// Software rendering draws the wall at a fraction of the display's rate,
-// under load at a fifth of it.
-const movingTurnsFewest = 3 * idleTurnsMost;
-async function turnsInIdleTime() {
+// Clickable Chaos, two screens back from the Overview, turns its wall in a
+// wave unless motion is reduced.
+await expectScreenChangedBy("Ctrl+1", () => chord("1", "Digit1", 49));
+for (let step = 0; step < 2; step += 1) await expectScreenChangedBy("Ctrl+PageUp", () => chord("PageUp", "PageUp", 33));
+// How often the worker draws the wall is the machine's: CI's software
+// rendering draws it a few times a second, a twentieth of the display's
+// rate. That it moves is not: the worker takes more turns than the
+// heartbeat could, and the wall is drawn somewhere else by the end.
+const movingMilliseconds = 4_000;
+const movingTurnsFewest = heartbeatTurnsMost(movingMilliseconds) + 1;
+const wallMovedFewest = screenChangeFewest;
+async function wallMovement() {
   await pause(animationSettleMilliseconds);
+  await inWorker("keepPixels('the wall')");
   const before = await inWorker("zuiHost.turns");
-  await pause(idleMilliseconds);
-  return (await inWorker("zuiHost.turns")) - before;
+  await pause(movingMilliseconds);
+  return { turns: (await inWorker("zuiHost.turns")) - before, moved: await inWorker("differingFrom('the wall')") };
 }
-const movingTurns = await turnsInIdleTime();
-if (movingTurns < movingTurnsFewest) await fail(`the worker took ${movingTurns} turns in ${idleMilliseconds / 1000} s on Clickable Chaos, so its wall does not move`);
+async function expectWallMoving(when) {
+  const movement = await wallMovement();
+  const seconds = movingMilliseconds / 1000;
+  if (movement.turns < movingTurnsFewest) await fail(`the worker took ${movement.turns} turns in ${seconds} s on Clickable Chaos${when}, so its wall does not move`);
+  if (movement.moved < wallMovedFewest) await fail(`${(movement.moved * 100).toFixed(1)}% of the canvas changed in ${seconds} s on Clickable Chaos${when}, so its wall does not move`);
+  return movement;
+}
+const moving = await expectWallMoving("");
 await expectSetting("reduced_motion", "true", () => emulateMedia({ "prefers-reduced-motion": "reduce" }));
 const reducedMotionIdle = await idleTurns("Clickable Chaos, with reduced motion");
+await inWorker("keepPixels('the still wall')");
+await pause(quietMilliseconds);
+const stillWallChange = await inWorker("differingFrom('the still wall')");
+if (stillWallChange > keptScreenChangeMost) await fail(`${(stillWallChange * 100).toFixed(1)}% of the canvas changed in ${quietMilliseconds / 1000} s on Clickable Chaos with reduced motion, so its wall still moves`);
 await expectSetting("reduced_motion", "false", () => emulateMedia({ "prefers-reduced-motion": "no-preference" }));
-const movingAgainTurns = await turnsInIdleTime();
-if (movingAgainTurns < movingTurnsFewest) await fail(`the worker took ${movingAgainTurns} turns in ${idleMilliseconds / 1000} s on Clickable Chaos once motion was no longer reduced`);
+const movingAgain = await expectWallMoving(" once motion was no longer reduced");
 
-// Back on Settings, through its entry on the rail, a click in its Port
-// field gives it the focus, and the page its hidden field.
-const settingsOnTheRail = { x: 70, y: 348 };
+// Back on Settings, a click in its Port field gives it the focus, and the
+// page its hidden field.
 const portField = { x: 540, y: 434 };
 async function click({ x, y }) {
   await send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount: 1 });
   await send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount: 1 });
 }
-await expectDrawnAfter("a click on Settings in the rail", () => click(settingsOnTheRail));
+await expectDrawnAfter("Ctrl+7", toSettings);
 await pause(animationSettleMilliseconds);
 await expectDrawnAfter("a click in the Port field", () => click(portField));
 await waitUntil(() => evaluate(`document.activeElement?.tagName === "TEXTAREA"`), "the page did not focus its hidden text field after a click in the Port field");
@@ -385,6 +420,7 @@ console.log(
     `after a lost context came back, ${(restoredChange * 100).toFixed(2)}% of Settings differs from before; ` +
     `the canvas's luminance went from ${darkLuminance.toFixed(0)} dark to ${lightLuminance.toFixed(0)} light, more contrast changed ${(contrastChange * 100).toFixed(1)}% of it ` +
     `and right to left ${(mirroredChange * 100).toFixed(0)}%; hidden, the worker drew no frame and took ${turnsWhileHidden} turns in ${hiddenMilliseconds / 1000} s; ` +
-    `on Clickable Chaos it took ${movingTurns} turns in ${idleMilliseconds / 1000} s, ${reducedMotionIdle.turns} with reduced motion and ${movingAgainTurns} after; ` +
+    `on Clickable Chaos it took ${moving.turns} turns in ${movingMilliseconds / 1000} s, moving ${(moving.moved * 100).toFixed(0)}% of the canvas, ` +
+    `${reducedMotionIdle.turns} in ${idleMilliseconds / 1000} s with reduced motion, changing ${(stillWallChange * 100).toFixed(2)}% in ${quietMilliseconds / 1000} s, and ${movingAgain.turns} after; ` +
     `the Port field's hidden text field took ${JSON.stringify(receivedText.slice(receivedBefore.length))} once, and the clipboard went both ways`,
 );
