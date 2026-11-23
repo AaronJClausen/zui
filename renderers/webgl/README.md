@@ -8,17 +8,18 @@ samples per pixel resolved to one, which smooth every edge as the sokol
 renderer's multisampled targets do with `sample_count = 4`: rectangles,
 borders, clips, gradients, shadows and transforms, with round,
 continuous and chamfered corners traced point for point as the sokol
-renderer traces them, and text, once the page hands over the stream's
-fonts: glyphs placed where `zui_glyphs` lays them out, from a
-`zui_glyphs` atlas of RG8 texels, as the sokol renderer places and packs
-its own; text in a font id the text has no face for is not drawn. It
-draws any text's fonts, taken as `anytype`, and depends on no font
-system or third-party library. A backdrop blur copies what was drawn
-beneath it and blurs it as the sokol renderer does, along x and then y
-into two float targets, before the pane is drawn from them; a material
-is drawn by the sokol renderer's material shader, ported to GLSL ES. The
-blur is summed in RGBA32F where WebGL can render, blend and filter it
-(`EXT_color_buffer_float`, `EXT_float_blend`,
+renderer traces them, each point on a sixteenth of a pixel, so that
+SwiftShader and a GPU place them alike, and text, once the page hands
+over the stream's fonts: glyphs placed where `zui_glyphs` lays them out,
+from a `zui_glyphs` atlas of RG8 texels, as the sokol renderer places
+and packs its own; text in a font id the text has no face for is not
+drawn. It draws any text's fonts, taken as `anytype`, and depends on no
+font system or third-party library. A backdrop blur copies what was
+drawn beneath it and blurs it as the sokol renderer does, along x and
+then y into two float targets, before the pane is drawn from them; a
+material is drawn by the sokol renderer's material shader, ported to
+GLSL ES. The blur is summed in RGBA32F where WebGL can render, blend and
+filter it (`EXT_color_buffer_float`, `EXT_float_blend`,
 `OES_texture_float_linear`), as the sokol renderer sums it where its GPU
 can, and otherwise in RGBA16F, whose rounding differs between drivers by
 several color steps; without `EXT_color_buffer_float`, blurs are drawn

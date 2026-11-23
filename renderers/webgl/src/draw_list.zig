@@ -12,7 +12,7 @@ const SplitWeight = backdrop_blur.SplitWeight;
 /// rectangle, so the page draws a frame with one vertex buffer and one draw
 /// call per batch. The geometry is the sokol renderer's, triangle for
 /// triangle: round and continuous corners in eight segments, chamfers in
-/// one, borders inside their bounds, gradients in bands of OKLab color,
+/// one, their points on a sixteenth of a pixel, borders inside their bounds, gradients in bands of OKLab color,
 /// shadows faded in rings, text as a textured quad per glyph, and
 /// transforms applied to every vertex.
 /// A backdrop blur runs before the batch that samples it, and a material
@@ -211,7 +211,13 @@ pub const DrawList = struct {
     /// `zui_glyphs.Fonts.of` erases. The atlas gains the glyphs the frame
     /// needs.
     pub fn layOut(self: *DrawList, commands: anytype, params: zui.FrameParams, text: anytype) void {
-        var builder: Builder = .{ .list = self, .viewport = params.viewport, .pixels_per_unit = params.scale * params.zoom };
+        const pixels_per_unit = params.scale * params.zoom;
+        var builder: Builder = .{
+            .list = self,
+            .viewport = params.viewport,
+            .pixels_per_unit = pixels_per_unit,
+            .subpixel_grid = .of(params.viewport, pixels_per_unit),
+        };
         const fonts = zui_glyphs.Fonts.of(text);
         self.glyph_atlas.addFrameGlyphs(fonts, commands, builder.pixels_per_unit);
         self.vertex_count = 0;
@@ -259,6 +265,7 @@ const Builder = struct {
     list: *DrawList,
     viewport: [2]f32,
     pixels_per_unit: f32,
+    subpixel_grid: SubpixelGrid,
     to_window: zui.Affine = .identity,
     shape_start: u32 = 0,
     shape_overflowed: bool = false,
@@ -327,7 +334,7 @@ const Builder = struct {
         if (self.list.blurs_backdrops) {
             if (self.recordBackdropBlur(bounds, blur.radius)) {
                 var outline: Outline = .{};
-                outline.trace(bounds, .of(blur), .{});
+                outline.trace(bounds, .of(blur), .{}, self.subpixel_grid);
                 self.fillOutlineWith(&outline, centerOf(bounds), .{ .position = undefined, .color = .white, .texture = .backdrop_blur }, null);
             }
         }
@@ -392,7 +399,7 @@ const Builder = struct {
         };
         list.material_count += 1;
         var outline: Outline = .{};
-        outline.trace(bounds, .of(material), .{});
+        outline.trace(bounds, .of(material), .{}, self.subpixel_grid);
         self.fillOutlineWith(&outline, centerOf(bounds), .{ .position = undefined, .color = .white, .texture = .material }, .{ bounds.x, bounds.y });
         _ = self.beginBatchWith(scissor, DrawList.no_material);
     }
@@ -485,7 +492,7 @@ const Builder = struct {
             return;
         }
         var outline: Outline = .{};
-        outline.trace(bounds, corners, .{});
+        outline.trace(bounds, corners, .{}, self.subpixel_grid);
         self.fillOutline(&outline, centerOf(bounds), color);
     }
 
@@ -500,8 +507,8 @@ const Builder = struct {
     fn strokeBorder(self: *Builder, bounds: zui.Rect, widths: zui.Edges, corners: Corners, color: zui.Color) void {
         var outer: Outline = .{};
         var inner: Outline = .{};
-        outer.trace(bounds, corners, .{});
-        inner.trace(bounds, corners, widths);
+        outer.trace(bounds, corners, .{}, self.subpixel_grid);
+        inner.trace(bounds, corners, widths, self.subpixel_grid);
         for (0..outer.count) |index| {
             const next = (index + 1) % outer.count;
             self.triangle(.{ outer.points[index], outer.points[next], inner.points[next] }, color);
@@ -517,7 +524,7 @@ const Builder = struct {
         const band_length_limit = 4;
         const max_bands = 64;
         var outline: Outline = .{};
-        outline.trace(bounds, .of(gradient), .{});
+        outline.trace(bounds, .of(gradient), .{}, self.subpixel_grid);
         const direction: [2]f32 = .{ @cos(gradient.angle), @sin(gradient.angle) };
         const length = @abs(bounds.width * direction[0]) + @abs(bounds.height * direction[1]);
         const band_count: usize = @intFromFloat(std.math.clamp(@ceil(length / band_length_limit), 1, max_bands));
@@ -550,7 +557,7 @@ const Builder = struct {
         const spread = @max(shadow.spread, -@min(caster.width, caster.height) / 2);
         var inner: Outline = .{};
         const corners: Corners = .of(shadow);
-        inner.trace(caster, corners, .all(-spread));
+        inner.trace(caster, corners, .all(-spread), self.subpixel_grid);
         const shadow_color = colorOf(shadow.color);
         self.fillOutline(&inner, centerOf(caster), shadow_color);
         if (shadow.blur <= 0) return;
@@ -559,7 +566,7 @@ const Builder = struct {
         for (1..fade_rings + 1) |ring| {
             const reached = @as(f32, @floatFromInt(ring)) / fade_rings;
             var outer: Outline = .{};
-            outer.trace(caster, corners, .all(-(spread + shadow.blur * reached)));
+            outer.trace(caster, corners, .all(-(spread + shadow.blur * reached)), self.subpixel_grid);
             var outer_color = shadow_color;
             outer_color.a = @intFromFloat(@round(@as(f32, @floatFromInt(shadow_color.a)) * (1 - smoothstep(reached))));
             for (0..outer.count) |index| {
@@ -684,7 +691,7 @@ const Corners = struct {
 /// top-left corner, `corner_segments + 1` points along each round or
 /// continuous corner and the two ends of each chamfer's cut, for any
 /// radius, so that two outlines of one rectangle can be joined point by
-/// point.
+/// point. Each point is on `grid`.
 const Outline = struct {
     const max_points = 4 * (DrawList.corner_segments + 1);
     /// A chamfer's cut, moved in by an inset, keeps its 45° when its two
@@ -694,7 +701,7 @@ const Outline = struct {
     points: [max_points][2]f32 = undefined,
     count: usize = 0,
 
-    fn trace(self: *Outline, bounds: zui.Rect, corners: Corners, inset: zui.Edges) void {
+    fn trace(self: *Outline, bounds: zui.Rect, corners: Corners, inset: zui.Edges, grid: SubpixelGrid) void {
         const segments = DrawList.corner_segments;
         const radius = corners.radius;
         const left = bounds.x + inset.left;
@@ -721,7 +728,7 @@ const Outline = struct {
             for (0..point_count) |step| {
                 const angle = corner.start_angle + 0.5 * std.math.pi * @as(f32, @floatFromInt(step)) / step_count;
                 const toward = towardCurve(corners.shape, angle);
-                self.points[self.count] = .{ arc_center_x + toward[0] * corner_radius, arc_center_y + toward[1] * corner_radius };
+                self.points[self.count] = grid.snap(.{ arc_center_x + toward[0] * corner_radius, arc_center_y + toward[1] * corner_radius });
                 self.count += 1;
             }
         }
@@ -738,6 +745,37 @@ const Outline = struct {
             std.math.copysign(@sqrt(@abs(on_circle[0])), on_circle[0]),
             std.math.copysign(@sqrt(@abs(on_circle[1])), on_circle[1]),
         };
+    }
+};
+
+/// The sokol renderer's grid, step for step: a sixteenth of a pixel along
+/// each axis of the target. SwiftShader snaps a vertex to a sixteenth of a
+/// pixel and a GPU to a 256th, so a point off the grid is moved by up to a
+/// 32nd of a pixel in one and not the other, and a pixel whose center is
+/// that close to an edge is drawn on either side of it.
+const SubpixelGrid = struct {
+    const steps_per_pixel = 16;
+
+    /// Zero along an axis the target has no pixels on, which is not snapped.
+    steps_per_unit: [2]f32,
+
+    /// For a target of `viewport` units drawn into its pixels rounded to
+    /// whole ones.
+    fn of(viewport: [2]f32, pixels_per_unit: f32) SubpixelGrid {
+        var steps_per_unit: [2]f32 = .{ 0, 0 };
+        for (viewport, &steps_per_unit) |units, *steps| {
+            const pixels = @round(units * pixels_per_unit);
+            if (units > 0 and pixels > 0 and std.math.isFinite(pixels)) steps.* = steps_per_pixel * pixels / units;
+        }
+        return .{ .steps_per_unit = steps_per_unit };
+    }
+
+    fn snap(self: SubpixelGrid, point: [2]f32) [2]f32 {
+        var snapped = point;
+        for (&snapped, self.steps_per_unit) |*coordinate, steps| {
+            if (steps > 0) coordinate.* = @round(coordinate.* * steps) / steps;
+        }
+        return snapped;
     }
 };
 

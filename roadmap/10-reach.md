@@ -37,7 +37,7 @@ decorations; many windows.
 | `10-reach:05-many-windows` Many windows | done |
 | `10-reach:06-platform-owned-loop` Hosts whose platform owns the loop | done |
 | `10-reach:07-x11-ibus` The input method on X11 over IBus's D-Bus protocol | not started |
-| `10-reach:08-ring-edges-agree` WebGL and sokol agree on a ring's inner edge | not started |
+| `10-reach:08-ring-edges-agree` WebGL and sokol agree on a ring's inner edge | done |
 | `10-reach:09-turned-edges-agree` WebGL and sokol agree on a turned box's edges | not started |
 
 ---
@@ -2258,7 +2258,32 @@ layout and with the dots moved by a quarter unit each way.
 
 **Spec.** §13.
 
-**Status.** Not started.
+**Status.** Done. The two renderers traced the same points, with the
+same eight segments a corner; what disagreed was where the rasterizers
+put them. The page draws in headless Chromium's SwiftShader, which snaps
+a vertex to a sixteenth of a pixel, and the reference on a GPU, which
+snaps to a 256th (NVIDIA here, llvmpipe in CI), so a corner's off-grid
+point moved by up to a 32nd of a pixel in one and not the other. The
+four failing pixels a ring had were 0.020 of a pixel inside the inner
+outline at its exact points, where sokol drew the fill and SwiftShader's
+moved edge took them into the ring. Both renderers now snap every
+outline point to a sixteenth of a physical pixel (`SubpixelGrid`, from
+the viewport and its rounded pixel size, in
+`renderers/sokol/src/renderer.zig` beside a `Tracing` that carries it
+with `corner_segments`, and the same in
+`renderers/webgl/src/draw_list.zig`), so a fill, a ring and both its
+edges are on points both rasterizers keep as they are. `test-draw`
+passes here on NVIDIA, at the tour's layout and with the dots offset by
+(+¼, +¼), (−¼, −¼), (+¼, −¼) and (−¼, +¼) units (an offset in
+`harbor.zig` that was reverted), and against a reference drawn on
+llvmpipe at all five, as CI's is. `renderers/webgl` tests in three modes
+and `check`; `renderers/sokol` tests, `check` native, for
+`wasm32-freestanding`, `x86_64-windows` and `-Dgl=true`, and
+`conformance`; `hosts/web` tests in three modes and `check`; the native
+tour's cycle (0 layer overflows, 0 glyph atlas overflows, diagnostics
+ok); `test-all` and `check-all` pass. Only CI can confirm its own
+container's run. Points under a transform are snapped before it, so a
+turned or scaled outline is still off the grid.
 
 ## 10-reach:09-turned-edges-agree — WebGL and sokol agree on a turned box's edges
 

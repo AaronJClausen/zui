@@ -365,6 +365,7 @@ pub const Renderer = struct {
         sgl.ortho(0, viewport[0], viewport[1], 0, -1, 1);
         const pixels_per_unit = params.scale * params.zoom;
         self.prepareGlyphs(commands, pixels_per_unit);
+        const tracing: Tracing = .{ .corner_segments = self.corner_segments, .subpixel_grid = .of(viewport, pixels_per_unit) };
 
         var recorder: LayerRecorder = .{ .renderer = self };
         recorder.begin();
@@ -375,11 +376,11 @@ pub const Renderer = struct {
             switch (command.payload) {
                 .rectangle => |rectangle| {
                     recorder.beginShapes();
-                    fillRectangle(bounds, .of(rectangle), .of(rectangle.color, format), self.corner_segments);
+                    fillRectangle(bounds, .of(rectangle), .of(rectangle.color, format), tracing);
                 },
                 .border => |border| {
                     recorder.beginShapes();
-                    strokeBorder(bounds, border.widths, .of(border), .of(border.color, format), self.corner_segments);
+                    strokeBorder(bounds, border.widths, .of(border), .of(border.color, format), tracing);
                 },
                 .text => |line| if (self.glyphs) |atlas| {
                     recorder.beginShapes();
@@ -387,31 +388,31 @@ pub const Renderer = struct {
                 },
                 .image => |image| {
                     recorder.beginShapes();
-                    drawImage(image.handle, bounds, .of(image.tint, format), .of(image), self.corner_segments);
+                    drawImage(image.handle, bounds, .of(image.tint, format), .of(image), tracing);
                 },
                 .gradient => |gradient| {
                     recorder.beginShapes();
-                    fillGradient(bounds, gradient, format, self.corner_segments);
+                    fillGradient(bounds, gradient, format, tracing);
                 },
                 .shadow => |shadow| {
                     recorder.beginShapes();
-                    drawShadow(bounds, shadow, format, self.corner_segments);
+                    drawShadow(bounds, shadow, format, tracing);
                 },
                 .backdrop_blur => |blur| {
                     if (self.backdrop_blurs.ready) if (recorder.beginBackdropBlur()) |layer| {
                         const to_window = transforms.current();
                         if (self.backdrop_blurs.record(to_window.boundsOf(bounds), blur.radius, viewport, layer)) {
                             var outline: Outline = .{};
-                            outline.trace(bounds, .of(blur), .{}, self.corner_segments);
+                            outline.trace(bounds, .of(blur), .{}, tracing);
                             self.backdrop_blurs.drawBlurred(outline.points[0..outline.count], centerOf(bounds), to_window, viewport);
                         }
                     };
                     recorder.beginShapes();
-                    fillRectangle(bounds, .of(blur), .of(blur.tint, format), self.corner_segments);
+                    fillRectangle(bounds, .of(blur), .of(blur.tint, format), tracing);
                 },
-                .material => |material| if (!self.recordMaterial(&recorder, material, bounds, transforms.current(), viewport)) {
+                .material => |material| if (!self.recordMaterial(&recorder, material, bounds, transforms.current(), viewport, tracing)) {
                     recorder.beginShapes();
-                    fillRectangle(bounds, .of(material), .of(material.fallback, format), self.corner_segments);
+                    fillRectangle(bounds, .of(material), .of(material.fallback, format), tracing);
                 },
                 .clip_begin => |clip| {
                     clips.push(if (transforms.isActive()) transforms.current().boundsOf(clip).intersect(clips.current() orelse wholeViewport(viewport)) else clip);
@@ -438,7 +439,7 @@ pub const Renderer = struct {
 
     /// False when the material is to be drawn as its fallback: the backend
     /// cannot draw it, or the frame has no layer or room left for it.
-    fn recordMaterial(self: *Renderer, recorder: *LayerRecorder, material: anytype, bounds: zui.Rect, to_window: zui.Affine, viewport: [2]f32) bool {
+    fn recordMaterial(self: *Renderer, recorder: *LayerRecorder, material: anytype, bounds: zui.Rect, to_window: zui.Affine, viewport: [2]f32, tracing: Tracing) bool {
         if (!self.materials.isReady()) {
             self.materials.lowered += 1;
             return false;
@@ -448,7 +449,7 @@ pub const Renderer = struct {
             return false;
         };
         var outline: Outline = .{};
-        outline.trace(bounds, .of(material), .{}, self.corner_segments);
+        outline.trace(bounds, .of(material), .{}, tracing);
         return self.materials.record(material.handle, outline.points[0..outline.count], bounds, to_window, viewport, layer, self.format);
     }
 
@@ -687,7 +688,7 @@ fn hasRoundedCorners(radius: zui.CornerRadius) bool {
     return radius.top_left > 0 or radius.top_right > 0 or radius.bottom_left > 0 or radius.bottom_right > 0;
 }
 
-fn fillRectangle(bounds: zui.Rect, corners: Corners, color: VertexColor, corner_segments: u8) void {
+fn fillRectangle(bounds: zui.Rect, corners: Corners, color: VertexColor, tracing: Tracing) void {
     color.apply();
     if (!hasRoundedCorners(corners.radius)) {
         sgl.beginQuads();
@@ -699,7 +700,7 @@ fn fillRectangle(bounds: zui.Rect, corners: Corners, color: VertexColor, corner_
         return;
     }
     var outline: Outline = .{};
-    outline.trace(bounds, corners, .{}, corner_segments);
+    outline.trace(bounds, corners, .{}, tracing);
     fillOutline(&outline, centerOf(bounds));
 }
 
@@ -729,9 +730,9 @@ const max_gradient_bands = 64;
 
 /// A rectangle with corners of any shape is convex, so each band of it is
 /// a convex polygon: the outline cut by the two lines that bound the band.
-fn fillGradient(bounds: zui.Rect, gradient: anytype, format: zui.OutputFormat, corner_segments: u8) void {
+fn fillGradient(bounds: zui.Rect, gradient: anytype, format: zui.OutputFormat, tracing: Tracing) void {
     var outline: Outline = .{};
-    outline.trace(bounds, .of(gradient), .{}, corner_segments);
+    outline.trace(bounds, .of(gradient), .{}, tracing);
     const direction: [2]f32 = .{ @cos(gradient.angle), @sin(gradient.angle) };
     const length = @abs(bounds.width * direction[0]) + @abs(bounds.height * direction[1]);
     const band_count: usize = @intFromFloat(std.math.clamp(@ceil(length / gradient_band_length), 1, max_gradient_bands));
@@ -791,12 +792,12 @@ const shadow_fade_rings = 6;
 
 /// The box at the shadow's offset, grown by its spread, in its color; then
 /// rings out to the blur, each fainter, easing out as a blurred edge does.
-fn drawShadow(bounds: zui.Rect, shadow: anytype, format: zui.OutputFormat, corner_segments: u8) void {
+fn drawShadow(bounds: zui.Rect, shadow: anytype, format: zui.OutputFormat, tracing: Tracing) void {
     const caster: zui.Rect = .{ .x = bounds.x + shadow.offset[0], .y = bounds.y + shadow.offset[1], .width = bounds.width, .height = bounds.height };
     const spread = @max(shadow.spread, -@min(caster.width, caster.height) / 2);
     var inner: Outline = .{};
     const corners: Corners = .of(shadow);
-    inner.trace(caster, corners, .all(-spread), corner_segments);
+    inner.trace(caster, corners, .all(-spread), tracing);
     const shadow_color: VertexColor = .of(shadow.color, format);
     shadow_color.apply();
     fillOutline(&inner, centerOf(caster));
@@ -807,7 +808,7 @@ fn drawShadow(bounds: zui.Rect, shadow: anytype, format: zui.OutputFormat, corne
     for (1..shadow_fade_rings + 1) |ring| {
         const reached = @as(f32, @floatFromInt(ring)) / shadow_fade_rings;
         var outer: Outline = .{};
-        outer.trace(caster, corners, .all(-(spread + shadow.blur * reached)), corner_segments);
+        outer.trace(caster, corners, .all(-(spread + shadow.blur * reached)), tracing);
         const outer_alpha: u8 = @intFromFloat(@round(@as(f32, @floatFromInt(shadow_color.rgba.a)) * (1 - smoothstep(reached))));
         const inner_color = shadow_color.withAlpha(inner_alpha);
         const outer_color = shadow_color.withAlpha(outer_alpha);
@@ -838,11 +839,11 @@ fn smoothstep(amount: f32) f32 {
 
 /// Borders are drawn inside the bounds, as CSS draws them: a ring between
 /// the outer outline and one inset by each edge's width.
-fn strokeBorder(bounds: zui.Rect, widths: zui.Edges, corners: Corners, color: VertexColor, corner_segments: u8) void {
+fn strokeBorder(bounds: zui.Rect, widths: zui.Edges, corners: Corners, color: VertexColor, tracing: Tracing) void {
     var outer: Outline = .{};
     var inner: Outline = .{};
-    outer.trace(bounds, corners, .{}, corner_segments);
-    inner.trace(bounds, corners, widths, corner_segments);
+    outer.trace(bounds, corners, .{}, tracing);
+    inner.trace(bounds, corners, widths, tracing);
     color.apply();
     sgl.beginTriangles();
     for (0..outer.count) |index| {
@@ -871,11 +872,50 @@ const Corners = struct {
     }
 };
 
+/// How a frame's outlines are traced.
+const Tracing = struct {
+    corner_segments: u8,
+    subpixel_grid: SubpixelGrid,
+};
+
+/// A sixteenth of a pixel along each axis of the target. SwiftShader snaps
+/// a vertex to a sixteenth of a pixel and a GPU to a 256th, so a point off
+/// the grid is moved by up to a 32nd of a pixel in one and not the other,
+/// and a pixel whose center is that close to an edge is drawn on either
+/// side of it.
+const SubpixelGrid = struct {
+    const steps_per_pixel = 16;
+    const none: SubpixelGrid = .{ .steps_per_unit = .{ 0, 0 } };
+
+    /// Zero along an axis the target has no pixels on, which is not snapped.
+    steps_per_unit: [2]f32,
+
+    /// For a target of `viewport` units drawn into its pixels rounded to
+    /// whole ones.
+    fn of(viewport: [2]f32, pixels_per_unit: f32) SubpixelGrid {
+        var steps_per_unit: [2]f32 = .{ 0, 0 };
+        for (viewport, &steps_per_unit) |units, *steps| {
+            const pixels = @round(units * pixels_per_unit);
+            if (units > 0 and pixels > 0 and std.math.isFinite(pixels)) steps.* = steps_per_pixel * pixels / units;
+        }
+        return .{ .steps_per_unit = steps_per_unit };
+    }
+
+    fn snap(self: SubpixelGrid, point: [2]f32) [2]f32 {
+        var snapped = point;
+        for (&snapped, self.steps_per_unit) |*coordinate, steps| {
+            if (steps > 0) coordinate.* = @round(coordinate.* * steps) / steps;
+        }
+        return snapped;
+    }
+};
+
 /// The points around a rectangle with shaped corners, clockwise from the
 /// top-left corner, with the same number of points for any radius of one
 /// shape, so that two outlines of one rectangle can be joined point by
 /// point: `corner_segments + 1` points along each round or continuous
-/// corner, and the two ends of each chamfer's cut.
+/// corner, and the two ends of each chamfer's cut. Each point is on the
+/// tracing's subpixel grid.
 const Outline = struct {
     const max_segments = 32;
     const max_points = 4 * (max_segments + 1);
@@ -886,8 +926,8 @@ const Outline = struct {
     points: [max_points][2]f32 = undefined,
     count: usize = 0,
 
-    fn trace(self: *Outline, bounds: zui.Rect, corners: Corners, inset: zui.Edges, corner_segments: u8) void {
-        const segments = std.math.clamp(corner_segments, 1, max_segments);
+    fn trace(self: *Outline, bounds: zui.Rect, corners: Corners, inset: zui.Edges, tracing: Tracing) void {
+        const segments = std.math.clamp(tracing.corner_segments, 1, max_segments);
         const radius = corners.radius;
         const left = bounds.x + inset.left;
         const top = bounds.y + inset.top;
@@ -913,7 +953,7 @@ const Outline = struct {
             for (0..point_count) |step| {
                 const angle = corner.start_angle + 0.5 * std.math.pi * @as(f32, @floatFromInt(step)) / step_count;
                 const toward = towardCurve(corners.shape, angle);
-                self.points[self.count] = .{ arc_center_x + toward[0] * corner_radius, arc_center_y + toward[1] * corner_radius };
+                self.points[self.count] = tracing.subpixel_grid.snap(.{ arc_center_x + toward[0] * corner_radius, arc_center_y + toward[1] * corner_radius });
                 self.count += 1;
             }
         }
@@ -953,7 +993,7 @@ fn drawText(fonts: zui_glyphs.Fonts, atlas: *const GlyphAtlas, view: sg.View, sa
 
 /// sokol_gl multiplies each texel by the vertex color, which is the tint.
 /// A rounded image is a fan of textured triangles from its center.
-fn drawImage(image: Image, bounds: zui.Rect, tint: VertexColor, corners: Corners, corner_segments: u8) void {
+fn drawImage(image: Image, bounds: zui.Rect, tint: VertexColor, corners: Corners, tracing: Tracing) void {
     sgl.enableTexture();
     sgl.texture(.{ .id = image.view.id }, .{ .id = image.sampler.id });
     tint.apply();
@@ -965,7 +1005,7 @@ fn drawImage(image: Image, bounds: zui.Rect, tint: VertexColor, corners: Corners
         sgl.v2fT2f(bounds.x, bounds.y + bounds.height, 0, 1);
     } else {
         var outline: Outline = .{};
-        outline.trace(bounds, corners, .{}, corner_segments);
+        outline.trace(bounds, corners, .{}, tracing);
         const center: [2]f32 = .{ bounds.x + bounds.width / 2, bounds.y + bounds.height / 2 };
         sgl.beginTriangles();
         for (0..outline.count) |index| {
@@ -1024,11 +1064,20 @@ test "a column-major matrix carries the offset in its last column" {
     try std.testing.expectEqualSlices(f32, &.{ 2, 3, 0, 0, 4, 5, 0, 0, 0, 0, 1, 0, 6, 7, 0, 1 }, &matrix);
 }
 
+const test_tracing: Tracing = .{ .corner_segments = 8, .subpixel_grid = .none };
+
+test "a subpixel grid snaps to a sixteenth of a physical pixel, and not along an axis with no pixels" {
+    const doubled: SubpixelGrid = .of(.{ 100, 50 }, 2);
+    try std.testing.expectEqual([2]f32{ 3.53125, 7.0 }, doubled.snap(.{ 3.54, 7.01 }));
+    const flat: SubpixelGrid = .of(.{ 100, 0 }, 1);
+    try std.testing.expectEqual([2]f32{ 3.5625, 7.01 }, flat.snap(.{ 3.54, 7.01 }));
+}
+
 test "outlines keep the same point count for any radius" {
     var square: Outline = .{};
     var rounded: Outline = .{};
-    square.trace(.{ .width = 100, .height = 40 }, .{ .radius = .zero, .shape = .round }, .{}, 8);
-    rounded.trace(.{ .width = 100, .height = 40 }, .{ .radius = .all(500), .shape = .round }, .{}, 8);
+    square.trace(.{ .width = 100, .height = 40 }, .{ .radius = .zero, .shape = .round }, .{}, test_tracing);
+    rounded.trace(.{ .width = 100, .height = 40 }, .{ .radius = .all(500), .shape = .round }, .{}, test_tracing);
     try std.testing.expectEqual(square.count, rounded.count);
     try std.testing.expectEqual([2]f32{ 0, 0 }, square.points[0]);
     try std.testing.expectApproxEqAbs(@as(f32, 20), rounded.points[0][1], 0.001);
@@ -1039,8 +1088,8 @@ test "a chamfer is one cut per corner, which an inset moves in at 45 degrees" {
     const chamfer: Corners = .{ .radius = .all(10), .shape = .chamfer };
     var outer: Outline = .{};
     var inner: Outline = .{};
-    outer.trace(bounds, chamfer, .{}, 8);
-    inner.trace(bounds, chamfer, .all(2), 8);
+    outer.trace(bounds, chamfer, .{}, test_tracing);
+    inner.trace(bounds, chamfer, .all(2), test_tracing);
     try std.testing.expectEqual(8, outer.count);
     try std.testing.expectEqual(outer.count, inner.count);
     try std.testing.expectApproxEqAbs(@as(f32, 0), outer.points[0][0], 0.001);
@@ -1057,8 +1106,8 @@ test "a continuous corner fills more of its corner than a round one, and meets t
     const bounds: zui.Rect = .{ .width = 100, .height = 100 };
     var round: Outline = .{};
     var continuous: Outline = .{};
-    round.trace(bounds, .{ .radius = .all(24), .shape = .round }, .{}, 8);
-    continuous.trace(bounds, .{ .radius = .all(24), .shape = .continuous }, .{}, 8);
+    round.trace(bounds, .{ .radius = .all(24), .shape = .round }, .{}, test_tracing);
+    continuous.trace(bounds, .{ .radius = .all(24), .shape = .continuous }, .{}, test_tracing);
     try std.testing.expectEqual(round.count, continuous.count);
     for ([_]usize{ 0, 8 }) |end| {
         try std.testing.expectApproxEqAbs(round.points[end][0], continuous.points[end][0], 0.01);
