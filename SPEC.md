@@ -3105,6 +3105,24 @@ color vision the tokens were resolved for.
 | `dropdown`, `dropdownEnum` | `*usize`, any enum | changed |
 | `disclosure` | `*bool` | toggled |
 | `progressBar`, `asyncImage`, `label`, `labeledRow` | nothing | nothing |
+| `card` | nothing | clicked, when interactive |
+| `divider`, `groupBox` | nothing | nothing |
+| `scrollArea`, `scrollbar` | the scroll offset | nothing |
+| `tabs` | any enum | changed |
+| `navigationList` | `*usize` | changed |
+| `breadcrumbs` | nothing | the crumb chosen |
+
+`card`, `scrollArea` and `groupBox` open a container: a card closes with
+`ui.close()`, and the others with `end` on the value they return, which
+declares what follows the content: the scroll area's scrollbars and edge
+fades, the group box's description. The scrollbar is thin at rest, wider
+while the pointer is over its track, and fades once scrolling stops; it
+is a function of its own, `scrollbar`, for any scroll container that
+holds its content in one child. Tabs and the navigation list keep only
+the selected tab or row in the Tab order, and the arrow keys move the
+selection and the focus with it. Each container and navigation component
+declares its `zuiPreviews` in `zui_widgets.previews`, with a `declare`
+that shows it through any `Widgets`.
 
 Every control is focusable, draws the skin's focus ring, reports
 semantics when the feature is on, and is operable by keyboard and by

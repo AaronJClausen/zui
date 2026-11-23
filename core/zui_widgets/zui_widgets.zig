@@ -165,6 +165,89 @@ pub const Part = enum {
     dropdown_option,
     /// The selected option, read as `dropdown_option`.
     dropdown_option_selected,
+    /// `card`: `background`, `border`, `focus_ring`, `corner_radius`,
+    /// `shadow`, `padding`, `gap`, and `scale` and `motion` while pressed.
+    /// A card that is not interactive is asked only `.idle`.
+    card,
+    /// `cardTitle`: `text`.
+    card_title,
+    /// `cardBody`: `text`.
+    card_body,
+    /// `divider`'s line: `background`, `size[0]` for its thickness and
+    /// `padding.left` for how far an inset pulls it in.
+    divider,
+    /// A divider's label: `text`, and `gap` between it and the line.
+    divider_label,
+    /// `scrollArea` while it is focused: `focus_ring` and `corner_radius`.
+    scroll_area,
+    /// The track a scrollbar's thumb runs in, which takes the pointer:
+    /// `background` and `size[0]`, its width across the scrolling axis.
+    scroll_track,
+    /// The thumb: `background`, `corner_radius`, `size[0]` for its
+    /// thickness, `size[1]` for its least length, `padding.top` for its
+    /// inset from the track's ends and side, and `motion`. The track's
+    /// hover asks it `.hovered`, a drag `.pressed`.
+    scroll_thumb,
+    /// The fade at an edge with more content beyond it: `background`, the
+    /// surface it fades into, and `size[1]`, how deep it is.
+    scroll_edge_fade,
+    /// The fade over a card's surface, read as `scroll_edge_fade`.
+    scroll_edge_fade_raised,
+    /// `groupBox`'s title: `text`, `padding`, and `gap` below it.
+    group_box_title,
+    /// The box its rows sit in: `background`, `border`, `corner_radius`,
+    /// `shadow`, `padding` and `gap`.
+    group_box_body,
+    /// The description below the box: `text`, `padding`, and `gap` above it.
+    group_box_description,
+    /// `tabs` of `.style = .underline`, the bar: `border` along its bottom
+    /// and `gap` between the tabs.
+    tabs,
+    /// A tab: `background`, `border`, `focus_ring`, `corner_radius`,
+    /// `size[1]`, `padding` and `text`.
+    tab,
+    /// The selected tab, read as `tab`.
+    tab_selected,
+    /// The line under the selected tab's label: `background`,
+    /// `corner_radius`, `size[1]` for its thickness, and `motion`.
+    tab_indicator,
+    /// `tabs` of `.style = .pill`, the groove: `background`,
+    /// `corner_radius`, `size[1]` and `padding`.
+    tabs_groove,
+    /// A tab in the groove, read as `tab`.
+    tab_pill,
+    /// The selected tab in the groove, read as `tab`.
+    tab_pill_selected,
+    /// The thumb behind the selected tab in the groove: `background`,
+    /// `border`, `corner_radius`, `shadow` and `motion`.
+    tab_pill_thumb,
+    /// A row of `navigationList`: `background`, `border`, `focus_ring`,
+    /// `corner_radius`, `size[1]`, `padding`, `gap` and `text`.
+    navigation_item,
+    /// The selected row, read as `navigation_item`.
+    navigation_item_selected,
+    /// A section's heading: `text`, `padding`, and `gap` above it.
+    navigation_heading,
+    /// A row's count at its end: `text`.
+    navigation_count,
+    /// The selected row's count: `text`.
+    navigation_count_selected,
+    /// A crumb of `breadcrumbs` that leads back: `background`, `border`,
+    /// `focus_ring`, `corner_radius`, `size[1]`, `padding` and `text`.
+    crumb,
+    /// The page the trail ends at, read as `crumb`.
+    crumb_current,
+    /// Between two crumbs: `glyph`, `text`, and `gap` either side.
+    crumb_separator,
+};
+
+/// How a widget moves a value it draws toward the skin's next one: at once,
+/// or through `zui.motion.tween` or `zui.motion.spring`, which land at once
+/// under reduced motion.
+pub const Motion = union(enum) {
+    none,
+    tween: zui.motion.TweenOptions,
+    spring: zui.motion.SpringOptions,
 };
 
 /// What a skin's `zuiStyle` returns for one `Part` in one state, in the
@@ -193,6 +276,11 @@ pub fn Style(comptime Ui: type) type {
         glyph: []const u8 = "",
         /// The layer a popup paints in; its content paints in the next one up.
         layer: i16 = 0,
+        /// Drawn at this scale about its center, where the context draws
+        /// transforms.
+        scale: f32 = 1,
+        /// How a part that moves or fades follows this style.
+        motion: Motion = .none,
     };
 }
 
@@ -286,7 +374,103 @@ pub fn DesignSkinWith(comptime Ui: type, comptime ExtraRoles: type) type {
                 },
                 .dropdown_option => sized(skin.styled(.dropdown_option, state), .{ 0, medium_height }),
                 .dropdown_option_selected => sized(skin.styled(.dropdown_option_selected, state), .{ 0, medium_height }),
+                .card => card: {
+                    var card = skin.raised(.card, state, if (state == .hovered) .floating else .raised);
+                    card.motion = .{ .tween = tokens.motion.press };
+                    if (state == .pressed) card.scale = card_pressed_scale;
+                    break :card card;
+                },
+                .card_title => skin.styled(.card_title, state),
+                .card_body => skin.styled(.card_body, state),
+                .divider => sized(skin.styled(.divider, state), .{ divider_thickness, 0 }),
+                .divider_label => skin.styled(.divider_label, state),
+                .scroll_area => skin.styled(.scroll_area, state),
+                .scroll_track => track: {
+                    var track = sized(skin.styled(.scroll_track, state), .{ tokens.target_floors.get(.pointer), 0 });
+                    if (track.background) |color| track.background = faded(color, scroll_track_hovered_share);
+                    break :track track;
+                },
+                .scroll_thumb => skin.scrollThumb(state),
+                .scroll_edge_fade => sized(skin.styled(.scroll_edge_fade, state), .{ 0, scroll_edge_fade_depth }),
+                .scroll_edge_fade_raised => sized(skin.styled(.scroll_edge_fade_raised, state), .{ 0, scroll_edge_fade_depth }),
+                .group_box_title => skin.styled(.group_box_title, state),
+                .group_box_body => skin.raised(.group_box_body, state, .raised),
+                .group_box_description => skin.styled(.group_box_description, state),
+                .tabs => bar: {
+                    var bar = skin.styled(.tabs, state);
+                    if (bar.border) |*border| border.widths = .{ .bottom = tokens.outline_width };
+                    break :bar bar;
+                },
+                .tab => sized(skin.styled(.tab, state), .{ 0, medium_height }),
+                .tab_selected => sized(skin.styled(.tab_selected, state), .{ 0, medium_height }),
+                .tab_indicator => indicator: {
+                    var indicator = sized(skin.styled(.tab_indicator, state), .{ 0, tab_indicator_thickness });
+                    indicator.motion = .{ .spring = tokens.motion.toggle };
+                    break :indicator indicator;
+                },
+                .tabs_groove => sized(skin.styled(.tabs_groove, state), .{ 0, medium_height }),
+                .tab_pill => sized(skin.styled(.tab_pill, state), .{ 0, skin.pillHeight() }),
+                .tab_pill_selected => sized(skin.styled(.tab_pill_selected, state), .{ 0, skin.pillHeight() }),
+                .tab_pill_thumb => thumb: {
+                    var thumb = sized(skin.raised(.tab_pill_thumb, state, .raised), .{ 0, skin.pillHeight() });
+                    const groove_corner = tokens.corner_radii.get(.control);
+                    const groove_padding = tokens.space(.hair);
+                    thumb.corner_radius = .{
+                        .top_left = @max(groove_corner.top_left - groove_padding, 0),
+                        .top_right = @max(groove_corner.top_right - groove_padding, 0),
+                        .bottom_left = @max(groove_corner.bottom_left - groove_padding, 0),
+                        .bottom_right = @max(groove_corner.bottom_right - groove_padding, 0),
+                    };
+                    thumb.motion = .{ .spring = tokens.motion.toggle };
+                    break :thumb thumb;
+                },
+                .navigation_item => sized(skin.styled(.navigation_item, state), .{ 0, medium_height }),
+                .navigation_item_selected => sized(skin.styled(.navigation_item_selected, state), .{ 0, medium_height }),
+                .navigation_heading => skin.styled(.navigation_heading, state),
+                .navigation_count => skin.styled(.navigation_count, state),
+                .navigation_count_selected => skin.styled(.navigation_count_selected, state),
+                .crumb => sized(skin.styled(.crumb, state), .{ 0, tokens.control_heights.get(.small) }),
+                .crumb_current => sized(skin.styled(.crumb_current, state), .{ 0, tokens.control_heights.get(.small) }),
+                .crumb_separator => withGlyph(skin.styled(.crumb_separator, state), "›"),
             };
+        }
+
+        /// A part standing at `elevation`: the rim and the shadow of that
+        /// level, on the raised surface at rest. A state lifts or presses
+        /// the part rather than tinting it, so the muted text on it keeps
+        /// its contrast.
+        fn raised(skin: *const Skin, comptime designed: Designed.Part, state: zui.WidgetState, elevation: zui.design.Elevation) Style(Ui) {
+            const tokens = skin.tokens;
+            const resting = tokens.elevations.get(.raised);
+            const lift = tokens.elevations.get(elevation);
+            var part = skin.styled(designed, state);
+            part.background = tokens.colors.get(.idle).get(resting.surface);
+            part.border = if (resting.rim) |rim| .{ .color = rim, .widths = .all(tokens.outline_width) } else null;
+            part.shadow = lift.shadow;
+            return part;
+        }
+
+        /// The approved thumb is 6, 8 and 10 thick at rest at the three
+        /// densities, and 4 more while the pointer is over its track.
+        fn scrollThumb(skin: *const Skin, state: zui.WidgetState) Style(Ui) {
+            const tokens = skin.tokens;
+            const resting_thickness = (tokens.control_heights.get(.medium) - 4) / 4;
+            const widened = state == .hovered or state == .pressed;
+            const least_length = @max(scroll_thumb_least_length, tokens.target_floors.get(.pointer));
+            var thumb = sized(skin.styled(.scroll_thumb, state), .{ if (widened) resting_thickness + scroll_thumb_widening else resting_thickness, least_length });
+            thumb.padding = .all(scroll_thumb_inset);
+            thumb.motion = .{ .tween = tokens.motion.state };
+            const share: f32 = switch (state) {
+                .hovered => scroll_thumb_hovered_share,
+                .pressed => scroll_thumb_dragged_share,
+                else => scroll_thumb_resting_share,
+            };
+            if (thumb.background) |color| thumb.background = faded(color, share);
+            return thumb;
+        }
+
+        fn pillHeight(skin: *const Skin) f32 {
+            return skin.tokens.control_heights.get(.medium) - 2 * skin.tokens.space(.hair);
         }
 
         /// The approved checkbox is 16, 18 and 20 at the three densities.
@@ -349,6 +533,31 @@ const slider_thumb_border_width = 2;
 const caret_width = 2;
 /// Popups paint in this layer and the next one up.
 const popup_layer = 100;
+const card_pressed_scale = 0.985;
+const divider_thickness = 1;
+const scroll_thumb_widening = 4;
+const scroll_thumb_least_length = 32;
+const scroll_thumb_inset = 2;
+const scroll_thumb_resting_share = 0.28;
+const scroll_thumb_hovered_share = 0.44;
+const scroll_thumb_dragged_share = 0.56;
+const scroll_track_hovered_share = 0.06;
+const scroll_edge_fade_depth = 16;
+const tab_indicator_thickness = 2;
+
+const keyboard_scroll_step = 40;
+/// Of the view, so a line of the last page stays in sight on the next.
+const page_share = 0.9;
+const scrollbar_idle_seconds = 0.8;
+const most_crumbs_shown = 4;
+const collapsed_crumbs_glyph = "…";
+
+/// `color` with its alpha scaled by `share`, in any context's color type.
+fn faded(color: anytype, share: f32) @TypeOf(color) {
+    var clear = color;
+    clear.a = 0;
+    return clear.mix(color, share);
+}
 
 /// The roles and tiers each part of `DesignSkin` is drawn in. Text on the
 /// page is drawn `.on` `page`, the surface beneath every widget.
@@ -380,6 +589,35 @@ const Designed = struct {
         dropdown_popup,
         dropdown_option,
         dropdown_option_selected,
+        card,
+        card_title,
+        card_body,
+        divider,
+        divider_label,
+        scroll_area,
+        scroll_track,
+        scroll_thumb,
+        scroll_edge_fade,
+        scroll_edge_fade_raised,
+        group_box_title,
+        group_box_body,
+        group_box_description,
+        tabs,
+        tab,
+        tab_selected,
+        tab_indicator,
+        tabs_groove,
+        tab_pill,
+        tab_pill_selected,
+        tab_pill_thumb,
+        navigation_item,
+        navigation_item_selected,
+        navigation_heading,
+        navigation_count,
+        navigation_count_selected,
+        crumb,
+        crumb_current,
+        crumb_separator,
     };
 
     const on_hover: zui.design.PartAppearance(void).Colors = .{ .surface = .secondary_container, .text = .on_secondary_container };
@@ -444,7 +682,84 @@ const Designed = struct {
             selected.cue = "its label in the strong font";
             break :selected selected;
         },
+        .card = .{ .surface = .surface_raised, .shape = .container, .padding = .{ .x = .l, .y = .l }, .gap = .m, .target = .pointer },
+        .card_title = .{ .text = .on_surface, .type = .title, .on = .card },
+        .card_body = .{ .text = .on_surface_muted, .type = .body, .on = .card },
+        .divider = .{ .surface = .outline_muted, .padding = .{ .x = .l } },
+        .divider_label = .{ .text = .on_surface_muted, .type = .caption, .on = .page, .gap = .m },
+        .scroll_area = .{ .shape = .control, .target = .pointer },
+        .scroll_track = .{ .states = .{ .hovered = .{ .surface = .on_surface }, .pressed = .{ .surface = .on_surface } } },
+        .scroll_thumb = .{ .surface = .on_surface, .shape = .indicator },
+        .scroll_edge_fade = .{ .surface = .surface },
+        .scroll_edge_fade_raised = .{ .surface = .surface_raised },
+        .group_box_title = .{ .text = .on_surface_muted, .type = .label_strong, .on = .page, .padding = .{ .x = .l }, .gap = .s },
+        .group_box_body = .{ .surface = .surface_raised, .shape = .container, .padding = .{ .x = .l, .y = .s }, .gap = .s },
+        .group_box_description = .{ .text = .on_surface_muted, .type = .caption, .on = .page, .padding = .{ .x = .l }, .gap = .s },
+        .tabs = .{ .outline = .outline_muted, .gap = .xs },
+        .tab = tab(.on_surface_muted, .page),
+        .tab_selected = selected: {
+            var selected = tab(.on_surface_accent, .page);
+            selected.states = .{};
+            selected.cue = "the line beneath its label";
+            break :selected selected;
+        },
+        .tab_indicator = .{ .surface = .accent, .shape = .indicator },
+        .tabs_groove = .{ .surface = .surface_sunken, .shape = .control, .padding = .{ .x = .hair, .y = .hair } },
+        .tab_pill = tab(.on_surface_muted, .tabs_groove),
+        .tab_pill_selected = selected: {
+            var selected = tab(.on_surface, .tab_pill_thumb);
+            selected.cue = "the raised thumb behind it";
+            break :selected selected;
+        },
+        .tab_pill_thumb = .{ .surface = .surface_raised, .shape = .control },
+        .navigation_item = .{
+            .text = .on_surface,
+            .type = .body,
+            .on = .page,
+            .shape = .control,
+            .padding = .{ .x = .m },
+            .gap = .m,
+            .target = .pointer,
+            .states = .{ .hovered = on_hover, .pressed = on_hover },
+        },
+        .navigation_item_selected = .{
+            .surface = .accent_container,
+            .text = .on_accent_container,
+            .type = .body_strong,
+            .on = .navigation_item_selected,
+            .shape = .control,
+            .padding = .{ .x = .m },
+            .gap = .m,
+            .target = .pointer,
+            .cue = "its fill and its label in the strong font",
+        },
+        .navigation_heading = .{ .text = .on_surface_muted, .type = .label_strong, .on = .page, .padding = .{ .x = .m, .y = .s }, .gap = .l },
+        .navigation_count = .{ .text = .on_surface_muted, .type = .label, .on = .page, .states = .{ .hovered = .{ .text = .on_secondary_container }, .pressed = .{ .text = .on_secondary_container } } },
+        .navigation_count_selected = .{ .text = .on_accent_container, .type = .label, .on = .navigation_item_selected },
+        .crumb = .{
+            .text = .on_surface_muted,
+            .type = .label,
+            .on = .page,
+            .shape = .control,
+            .padding = .{ .x = .xs },
+            .target = .pointer,
+            .states = .{ .hovered = .{ .text = .on_surface }, .pressed = .{ .text = .on_surface } },
+        },
+        .crumb_current = .{ .text = .on_surface, .type = .label_strong, .on = .page, .padding = .{ .x = .xs } },
+        .crumb_separator = .{ .text = .on_surface_muted, .type = .label, .on = .page, .gap = .xs },
     });
+
+    fn tab(comptime text: zui.design.ColorChoice(void), comptime on: @EnumLiteral()) zui.design.PartAppearance(void) {
+        return .{
+            .text = text,
+            .type = .label_strong,
+            .on = on,
+            .shape = .control,
+            .padding = .{ .x = .m },
+            .target = .pointer,
+            .states = .{ .hovered = .{ .text = .on_surface }, .pressed = .{ .text = .on_surface } },
+        };
+    }
 
     fn filledButton(comptime surface: zui.design.ColorChoice(void), comptime text: zui.design.ColorChoice(void)) zui.design.PartAppearance(void) {
         return .{
@@ -491,6 +806,33 @@ pub const ButtonVariant = enum {
             .danger => .button_danger,
         };
     }
+};
+
+pub const DividerAxis = enum { horizontal, vertical };
+
+/// Where a divider stops short of its parent's edges: at the leading one, as
+/// between rows that start with an inset label, or at both.
+pub const DividerInset = enum { none, leading, both };
+
+pub const ScrollAxis = enum { vertical, horizontal, both };
+
+/// The surface an edge of a scroll area fades into where more content lies
+/// beyond it.
+pub const EdgeFade = enum { none, page, card };
+
+/// `.underline` for a page's sections, `.pill` for views of one thing in a
+/// groove, as a segmented control.
+pub const TabsStyle = enum { underline, pill };
+
+/// A row of `navigationList`, or a section's heading above the rows after
+/// it.
+pub const NavigationItem = struct {
+    label: []const u8,
+    /// Shown at the row's end, such as how many items are unread; none when
+    /// empty.
+    count: []const u8 = "",
+    /// A heading, which is never selected.
+    heading: bool = false,
 };
 
 /// Controls declared into a `*Ui` and styled by `Skin`, any type that
@@ -1044,13 +1386,9 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
         /// `dropdown` over an enum's named tags, labeled with
         /// `labelFromIdentifier`.
         pub fn dropdownEnum(self: Self, ui: *Ui, id: zui.Id, value: anytype, options: DropdownOptions) bool {
-            const Enum = EnumPointee(@TypeOf(value));
+            const Enum = EnumPointee(@TypeOf(value), "dropdownEnum");
             const tags = @typeInfo(Enum).@"enum".fields;
-            const labels = comptime blk: {
-                var tag_labels: [tags.len][]const u8 = undefined;
-                for (tags, 0..) |tag, index| tag_labels[index] = labelFromIdentifier(tag.name);
-                break :blk tag_labels;
-            };
+            const labels = comptime tagLabels(Enum);
             var selected: usize = tags.len;
             inline for (tags, 0..) |tag, index| {
                 if (@intFromEnum(value.*) == tag.value) selected = index;
@@ -1060,6 +1398,704 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                 if (index == selected) value.* = @enumFromInt(tag.value);
             }
             return true;
+        }
+
+        pub const CardOptions = struct {
+            /// Focusable and clickable as a button, lifted while hovered
+            /// and pressed in while pressed.
+            interactive: bool = false,
+            /// Its name to an assistive technology, when it is interactive.
+            label: []const u8 = "",
+            width: zui.Sizing = .grow,
+            height: zui.Sizing = .fit,
+        };
+
+        /// Opens a card at the `raised` elevation, its content in a
+        /// column; declare it, then close the card with `ui.close()`. An
+        /// interactive card returns true in the frame it is clicked, or
+        /// activated with Enter or Space while focused; one that is not
+        /// returns false.
+        ///
+        /// ```zig
+        /// if (widgets.card(ui, .of("notes"), .{ .interactive = true, .label = "Release notes" })) app.open(.release_notes);
+        /// widgets.cardTitle(ui, "Release notes");
+        /// widgets.cardBody(ui, "Version 2.4 adds offline sync.");
+        /// ui.close();
+        /// ```
+        pub fn card(self: Self, ui: *Ui, id: zui.Id, options: CardOptions) bool {
+            const interactive = options.interactive;
+            const look = self.style(ui, .card, if (interactive) ui.widgetState(id) else .idle);
+            const scale = if (interactive and Ui.draws_transforms) animate(ui, id.child("press"), f32, look.scale, look.motion) else 1;
+            const effects: Ui.Effects = .{ .shadow = look.shadow, .transform = if (scale != 1) .{ .scale = @splat(scale) } else null };
+            ui.open(.{
+                .id = id,
+                .focusable = interactive,
+                .cursor = if (interactive) .pointer else null,
+                .semantics = if (interactive) .{ .role = .button, .label = options.label } else null,
+                .decoration = decorationOf(look, interactive and ui.focused(id)),
+                .effects = if (look.shadow != null or scale != 1) &effects else null,
+                .layout = .{
+                    .direction = .top_to_bottom,
+                    .sizing = .{ .width = options.width, .height = options.height },
+                    .padding = look.padding,
+                    .child_gap = look.gap,
+                },
+            });
+            return interactive and ui.clicked(id);
+        }
+
+        /// A card's title, wrapped to its width.
+        pub fn cardTitle(self: Self, ui: *Ui, content: []const u8) void {
+            ui.text(content, self.style(ui, .card_title, .idle).text);
+        }
+
+        /// A card's text, wrapped to its width.
+        pub fn cardBody(self: Self, ui: *Ui, content: []const u8) void {
+            ui.text(content, self.style(ui, .card_body, .idle).text);
+        }
+
+        pub const DividerOptions = struct {
+            axis: DividerAxis = .horizontal,
+            inset: DividerInset = .none,
+            /// Centered, breaking the line.
+            label: ?[]const u8 = null,
+        };
+
+        /// A line across its parent, or down it, between groups of content.
+        ///
+        /// ```zig
+        /// widgets.divider(ui, .{ .label = "or" });
+        /// ```
+        pub fn divider(self: Self, ui: *Ui, options: DividerOptions) void {
+            const line = self.style(ui, .divider, .idle);
+            const label_look = if (options.label != null) self.style(ui, .divider_label, .idle) else line;
+            const leading: f32 = if (options.inset == .none) 0 else line.padding.left;
+            const trailing: f32 = if (options.inset == .both) line.padding.left else 0;
+            const horizontal = options.axis == .horizontal;
+            ui.open(.{ .layout = .{
+                .direction = if (horizontal) .left_to_right else .top_to_bottom,
+                .sizing = if (horizontal) .{ .width = .grow } else .{ .height = .grow },
+                .padding = if (horizontal) .{ .left = leading, .right = trailing } else .{ .top = leading, .bottom = trailing },
+                .child_gap = label_look.gap,
+                .child_alignment = .{ .x = .center, .y = .center },
+            } });
+            dividerLine(ui, line, horizontal);
+            if (options.label) |content| {
+                ui.text(content, singleLine(label_look.text));
+                dividerLine(ui, line, horizontal);
+            }
+            ui.close();
+        }
+
+        fn dividerLine(ui: *Ui, line: SkinStyle, horizontal: bool) void {
+            ui.box(.{
+                .decoration = .{ .background = line.background },
+                .layout = .{ .sizing = if (horizontal) .{ .width = .grow, .height = .fixed(line.size[0]) } else .{ .width = .fixed(line.size[0]), .height = .grow } },
+            });
+        }
+
+        pub const ScrollAreaOptions = struct {
+            axis: ScrollAxis = .vertical,
+            width: zui.Sizing = .grow,
+            height: zui.Sizing = .grow,
+            /// How the content is laid out.
+            direction: zui.Direction = .top_to_bottom,
+            padding: zui.Edges = .zero,
+            child_gap: f32 = 0,
+            /// Its name to an assistive technology.
+            label: []const u8 = "",
+            /// Drawn only where the context draws gradients.
+            edge_fade: EdgeFade = .page,
+            /// The floating layer the area is in, which its scrollbars and
+            /// fades paint in too: 0 on the page.
+            layer: i16 = 0,
+        };
+
+        /// What `scrollArea` opened, which `end` closes.
+        pub const ScrollArea = struct {
+            widgets: Self,
+            id: zui.Id,
+            options: ScrollAreaOptions,
+
+            /// Closes the content and declares the scrollbars and fades
+            /// over it.
+            pub fn end(area: ScrollArea, ui: *Ui) void {
+                ui.close();
+                const axes = scrolledAxes(area.options.axis);
+                for ([_]zui.Axis{ .x, .y }) |axis| {
+                    if (!axes[@intFromEnum(axis)]) continue;
+                    area.widgets.scrollbar(ui, area.id, contentId(area.id), axis, area.options.layer);
+                    area.widgets.edgeFades(ui, area.id, axis, area.options);
+                }
+                ui.close();
+            }
+        };
+
+        /// Opens a view that scrolls its content with the wheel, a drag,
+        /// the scrollbar's thumb, or, while it is focused, the arrow keys,
+        /// Page Up and Down, Home and End. Its scrollbar is thin at rest,
+        /// wider while the pointer is over it, and fades once scrolling
+        /// stops. Declare the content, then call `end` on what it returns:
+        ///
+        /// ```zig
+        /// const history = widgets.scrollArea(ui, .of("history"), .{ .height = .fixed(240), .child_gap = 4 });
+        /// for (app.events) |event| widgets.label(ui, event.summary);
+        /// history.end(ui);
+        /// ```
+        pub fn scrollArea(self: Self, ui: *Ui, id: zui.Id, options: ScrollAreaOptions) ScrollArea {
+            const axes = scrolledAxes(options.axis);
+            const view = ui.rectOf(id);
+            const overflow = overflowOf(ui, id);
+            const overflows = (axes[0] and overflow[0] > 0) or (axes[1] and overflow[1] > 0);
+            if (ui.focused(id)) if (view) |rect| scrollByKeys(ui, id, axes, .{ rect.width, rect.height }, overflow);
+
+            const look = self.style(ui, .scroll_area, ui.widgetState(id));
+            const gutter = self.style(ui, .scroll_track, .idle).size[0];
+            var padding = options.padding;
+            if (axes[1] and overflow[1] > 0) padding.right += gutter;
+            if (axes[0] and overflow[0] > 0) padding.bottom += gutter;
+            ui.open(.{
+                .id = id,
+                .interactive = true,
+                .focusable = overflows,
+                .scroll = .{ .horizontal = axes[0], .vertical = axes[1] },
+                .semantics = .{ .role = .scroll_area, .label = options.label },
+                .decoration = .{ .border = if (ui.focused(id)) look.focus_ring else null, .corner_radius = look.corner_radius, .corner_shape = look.corner_shape },
+                .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = options.width, .height = options.height } },
+            });
+            ui.open(.{
+                .id = contentId(id),
+                .layout = .{
+                    .direction = options.direction,
+                    .sizing = .{ .width = if (axes[0]) .fit else .grow, .height = if (axes[1]) .fit else .grow },
+                    .padding = padding,
+                    .child_gap = options.child_gap,
+                },
+            });
+            return .{ .widgets = self, .id = id, .options = options };
+        }
+
+        fn contentId(area_id: zui.Id) zui.Id {
+            return area_id.child("content");
+        }
+
+        fn scrolledAxes(axis: ScrollAxis) [2]bool {
+            return .{ axis != .vertical, axis != .horizontal };
+        }
+
+        /// How far the area's content reached past its view on each axis
+        /// in the previous frame.
+        fn overflowOf(ui: *const Ui, id: zui.Id) [2]f32 {
+            const view = ui.rectOf(id) orelse return .{ 0, 0 };
+            const content = ui.rectOf(contentId(id)) orelse return .{ 0, 0 };
+            return .{ @max(content.width - view.width, 0), @max(content.height - view.height, 0) };
+        }
+
+        fn scrollByKeys(ui: *Ui, id: zui.Id, axes: [2]bool, view: [2]f32, overflow: [2]f32) void {
+            const paged: usize = if (axes[1]) 1 else 0;
+            const previous = ui.scrollOffset(id);
+            var offset = previous;
+            for (ui.keyEvents()) |key_event| switch (key_event.key) {
+                .up => offset[1] -= keyboard_scroll_step,
+                .down => offset[1] += keyboard_scroll_step,
+                .left => offset[0] -= keyboard_scroll_step,
+                .right => offset[0] += keyboard_scroll_step,
+                .page_up => offset[paged] -= view[paged] * page_share,
+                .page_down => offset[paged] += view[paged] * page_share,
+                .home => offset[paged] = 0,
+                .end => offset[paged] = overflow[paged],
+                else => {},
+            };
+            for (0..2) |axis| offset[axis] = if (axes[axis]) std.math.clamp(offset[axis], 0, overflow[axis]) else 0;
+            if (!std.meta.eql(offset, previous)) ui.setScrollOffset(id, offset);
+        }
+
+        const ScrollbarMotion = struct {
+            last_offset: f32,
+            scrolled_at: zui.Instant,
+            /// Where along the thumb the pointer took hold of it.
+            grab: f32,
+            seen: bool,
+            dragging: bool,
+        };
+
+        /// The scrollbar along `axis` of `scroll_id`, a scroll container
+        /// whose one child, `content_id`, holds what it scrolls over.
+        /// Declare it inside the container, after the content; it draws
+        /// from both rectangles in the previous frame, and draws nothing
+        /// while the content fits. The thumb follows the offset, drags it,
+        /// and a click on the track beside it pages toward the pointer.
+        ///
+        /// ```zig
+        /// ui.open(.{ .id = table_id, .scroll = .{}, .layout = .{ .sizing = .grow_both } });
+        /// ui.open(.{ .id = table_id.child("rows"), .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow } } });
+        /// declareRows(ui);
+        /// ui.close();
+        /// widgets.scrollbar(ui, table_id, table_id.child("rows"), .y, 0);
+        /// ui.close();
+        /// ```
+        pub fn scrollbar(self: Self, ui: *Ui, scroll_id: zui.Id, content_id: zui.Id, axis: zui.Axis, layer: i16) void {
+            const along = @intFromEnum(axis);
+            const vertical = axis == .y;
+            const view = ui.rectOf(scroll_id) orelse return;
+            const content = ui.rectOf(content_id) orelse return;
+            const view_length = if (vertical) view.height else view.width;
+            const content_length = if (vertical) content.height else content.width;
+            const overflow = content_length - view_length;
+            if (overflow < 0.5 or view_length <= 0) return;
+
+            const track_id = if (vertical) scroll_id.child("vertical_track") else scroll_id.child("horizontal_track");
+            const thumb_id = track_id.child("thumb");
+            const motion = ui.state(track_id, ScrollbarMotion);
+            const dragging = ui.pressed(thumb_id);
+            const over_track = ui.hovered(track_id);
+            const thumb = self.style(ui, .scroll_thumb, if (dragging) .pressed else if (over_track) .hovered else .idle);
+            const track = self.style(ui, .scroll_track, if (dragging or over_track) .hovered else .idle);
+            const inset = thumb.padding.top;
+            const track_length = @max(view_length - 2 * inset, 0);
+            const thumb_length = std.math.clamp(track_length * view_length / content_length, @min(thumb.size[1], track_length), track_length);
+            const travel = track_length - thumb_length;
+            const view_start = if (vertical) view.y else view.x;
+
+            var offset = ui.scrollOffset(scroll_id);
+            const thumb_start_before = inset + travel * offset[along] / overflow;
+            if (dragging) {
+                if (ui.primaryPointer()) |pointer| {
+                    const pointer_along = pointer.position[along] - view_start;
+                    if (!motion.dragging) motion.grab = pointer_along - thumb_start_before;
+                    motion.dragging = true;
+                    if (travel > 0) offset[along] = std.math.clamp((pointer_along - motion.grab - inset) / travel * overflow, 0, overflow);
+                    ui.setScrollOffset(scroll_id, offset);
+                }
+            } else {
+                motion.dragging = false;
+                if (ui.clicked(track_id)) if (ui.pointerLocal(track_id)) |local| {
+                    const page = view_length * page_share;
+                    offset[along] = std.math.clamp(if (local[along] < thumb_start_before) offset[along] - page else offset[along] + page, 0, overflow);
+                    ui.setScrollOffset(scroll_id, offset);
+                };
+            }
+
+            const now = ui.now();
+            if (!motion.seen or offset[along] != motion.last_offset) {
+                motion.seen = true;
+                motion.last_offset = offset[along];
+                motion.scrolled_at = now;
+            }
+            const fades_at = motion.scrolled_at.addSeconds(scrollbar_idle_seconds);
+            const recently_scrolled = now.isBefore(fades_at);
+            if (recently_scrolled) ui.requestFrameAt(fades_at);
+            const shown = recently_scrolled or over_track or dragging or ui.focused(scroll_id);
+            const opacity = animate(ui, thumb_id.child("opacity"), f32, if (shown) 1 else 0, thumb.motion);
+            const thickness = animate(ui, thumb_id.child("thickness"), f32, thumb.size[0], thumb.motion);
+            const thumb_start = inset + travel * offset[along] / overflow;
+
+            const corner: zui.AnchorPoint = if (vertical) .top_right else .bottom_left;
+            ui.open(.{
+                .id = track_id,
+                .interactive = true,
+                .floating = .{ .attach_to = .parent, .anchor = corner, .attach_point = corner, .z = layer, .clip = .target },
+                .decoration = .{ .background = if (track.background) |color| faded(color, opacity) else null },
+                .layout = .{
+                    .direction = if (vertical) .top_to_bottom else .left_to_right,
+                    .sizing = if (vertical)
+                        .{ .width = .fixed(track.size[0]), .height = .fixed(view_length) }
+                    else
+                        .{ .width = .fixed(view_length), .height = .fixed(track.size[0]) },
+                    .padding = if (vertical) .{ .top = thumb_start } else .{ .left = thumb_start },
+                },
+            });
+            ui.open(.{
+                .id = thumb_id,
+                .interactive = true,
+                .gestures = .{ .pan = if (vertical) .vertical else .horizontal },
+                .layout = .{
+                    .sizing = if (vertical) .{ .width = .grow, .height = .fixed(thumb_length) } else .{ .width = .fixed(thumb_length), .height = .grow },
+                    .padding = if (vertical) .{ .right = inset } else .{ .bottom = inset },
+                    .child_alignment = if (vertical) .{ .x = .end } else .{ .y = .end },
+                },
+            });
+            ui.box(.{
+                .decoration = .{
+                    .background = if (thumb.background) |color| faded(color, opacity) else null,
+                    .corner_radius = thumb.corner_radius,
+                    .corner_shape = thumb.corner_shape,
+                },
+                .layout = .{ .sizing = if (vertical) .{ .width = .fixed(thickness), .height = .grow } else .{ .width = .grow, .height = .fixed(thickness) } },
+            });
+            ui.close();
+            ui.close();
+        }
+
+        fn edgeFades(self: Self, ui: *Ui, id: zui.Id, axis: zui.Axis, options: ScrollAreaOptions) void {
+            if (comptime !Ui.RenderCommand.commands.contains(.gradient)) return;
+            if (options.edge_fade == .none) return;
+            const look = self.style(ui, if (options.edge_fade == .card) .scroll_edge_fade_raised else .scroll_edge_fade, .idle);
+            const surface = look.background orelse return;
+            const along = @intFromEnum(axis);
+            const overflow = overflowOf(ui, id)[along];
+            const offset = ui.scrollOffset(id)[along];
+            if (offset > 0.5) edgeFade(ui, axis, false, surface, faded(surface, 0), look.size[1], options.layer);
+            if (offset < overflow - 0.5) edgeFade(ui, axis, true, faded(surface, 0), surface, look.size[1], options.layer);
+        }
+
+        fn edgeFade(ui: *Ui, axis: zui.Axis, at_end: bool, from: Ui.Color, to: Ui.Color, depth: f32, layer: i16) void {
+            const effects: Ui.Effects = .{ .gradient = .{ .from = from, .to = to, .angle = if (axis == .y) std.math.pi / 2.0 else 0 } };
+            const point: zui.AnchorPoint = if (!at_end) .top_left else if (axis == .y) .bottom_left else .top_right;
+            ui.box(.{
+                .effects = &effects,
+                .floating = .{ .attach_to = .parent, .anchor = point, .attach_point = point, .z = layer, .capture = false, .clip = .target },
+                .layout = .{ .sizing = if (axis == .y) .{ .width = .grow, .height = .fixed(depth) } else .{ .width = .fixed(depth), .height = .grow } },
+            });
+        }
+
+        pub const GroupBoxOptions = struct {
+            /// Below the box, wrapped to its width; none when empty.
+            description: []const u8 = "",
+            width: zui.Sizing = .grow,
+        };
+
+        /// What `groupBox` opened, which `end` closes.
+        pub const GroupBox = struct {
+            widgets: Self,
+            description: []const u8,
+
+            /// Closes the box and declares the description below it.
+            pub fn end(group: GroupBox, ui: *Ui) void {
+                ui.close();
+                if (group.description.len != 0) {
+                    const description = group.widgets.style(ui, .group_box_description, .idle);
+                    var padding = description.padding;
+                    padding.top = description.gap;
+                    ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .padding = padding } });
+                    ui.text(group.description, description.text);
+                    ui.close();
+                }
+                ui.close();
+            }
+        };
+
+        /// Opens a titled box of related rows, such as a page of settings;
+        /// declare the rows, with dividers between them, then call `end`
+        /// on what it returns:
+        ///
+        /// ```zig
+        /// const account = widgets.groupBox(ui, .of("account"), "Account", .{ .description = "Your team sees your name." });
+        /// widgets.labeledRow(ui, "Name");
+        /// _ = widgets.textField(ui, .of("name"), &app.name, .{ .label = "Name" });
+        /// ui.close();
+        /// account.end(ui);
+        /// ```
+        pub fn groupBox(self: Self, ui: *Ui, id: zui.Id, title: []const u8, options: GroupBoxOptions) GroupBox {
+            const title_look = self.style(ui, .group_box_title, .idle);
+            const body = self.style(ui, .group_box_body, .idle);
+            ui.open(.{
+                .id = id,
+                .semantics = .{ .role = .group, .label = title },
+                .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = options.width } },
+            });
+            var title_padding = title_look.padding;
+            title_padding.bottom = title_look.gap;
+            ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .padding = title_padding } });
+            ui.text(title, singleLine(title_look.text));
+            ui.close();
+            const effects: Ui.Effects = .{ .shadow = body.shadow };
+            ui.open(.{
+                .decoration = decorationOf(body, false),
+                .effects = if (body.shadow != null) &effects else null,
+                .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow }, .padding = body.padding, .child_gap = body.gap },
+            });
+            return .{ .widgets = self, .description = options.description };
+        }
+
+        pub const TabsOptions = struct {
+            style: TabsStyle = .underline,
+            /// Its name to an assistive technology.
+            label: []const u8 = "",
+        };
+
+        /// A tab for each named tag of the enum behind `selected`, labeled
+        /// with `labelFromIdentifier`. Clicking one selects it; the arrow
+        /// keys move the selection and the focus with it, wrapping, and
+        /// Home and End reach the first and the last. Only the selected tab
+        /// is in the Tab order. Returns whether the selection changed.
+        ///
+        /// ```zig
+        /// _ = widgets.tabs(ui, .of("project.tabs"), &app.project_tab, .{});
+        /// switch (app.project_tab) { ... }
+        /// ```
+        pub fn tabs(self: Self, ui: *Ui, id: zui.Id, selected: anytype, options: TabsOptions) bool {
+            const Enum = EnumPointee(@TypeOf(selected), "tabs");
+            const tags = comptime std.enums.values(Enum);
+            const labels = comptime tagLabels(Enum);
+            const current = std.mem.indexOfScalar(Enum, tags, selected.*) orelse 0;
+            var chosen = current;
+            for (0..tags.len) |index| {
+                if (ui.clicked(id.indexedChild("tab", index))) chosen = index;
+            }
+            if (ui.navigated(id.indexedChild("tab", current))) |direction| {
+                const forward = (direction == .right) != (ui.environment().direction == .right_to_left);
+                if (direction == .left or direction == .right) chosen = if (forward) (current + 1) % tags.len else (current + tags.len - 1) % tags.len;
+            }
+            if (ui.focused(id.indexedChild("tab", current))) {
+                if (ui.keyPressed(.home)) chosen = 0;
+                if (ui.keyPressed(.end)) chosen = tags.len - 1;
+            }
+            const changed = chosen != current;
+            if (changed) {
+                selected.* = tags[chosen];
+                ui.requestFocus(id.indexedChild("tab", chosen));
+            }
+
+            const pill = options.style == .pill;
+            const bar = self.style(ui, if (pill) .tabs_groove else .tabs, .idle);
+            ui.open(.{
+                .id = id,
+                .semantics = .{ .role = .group, .label = options.label },
+                .decoration = decorationOf(bar, false),
+                .layout = .{
+                    .sizing = if (pill) .{ .height = .fixed(bar.size[1]) } else .{ .width = .grow },
+                    .padding = bar.padding,
+                    .child_gap = bar.gap,
+                    .child_alignment = .{ .y = .center },
+                },
+            });
+            self.tabIndicator(ui, id, id.indexedChild("tab", chosen), pill);
+            for (labels, 0..) |tab_label, index| {
+                const tab_id = id.indexedChild("tab", index);
+                const is_selected = index == chosen;
+                const part: Part = if (pill) (if (is_selected) .tab_pill_selected else .tab_pill) else if (is_selected) .tab_selected else .tab;
+                const look = self.style(ui, part, ui.widgetState(tab_id));
+                ui.open(.{
+                    .id = tab_id,
+                    .interactive = true,
+                    .focusable = is_selected,
+                    .cursor = .pointer,
+                    .semantics = .{ .role = .radio, .label = tab_label, .state = .{ .checked = is_selected, .selected = is_selected } },
+                    .decoration = decorationOf(look, ui.focused(tab_id)),
+                    .layout = .{ .sizing = .{ .height = .fixed(look.size[1]) }, .padding = look.padding, .child_alignment = .{ .x = .center, .y = .center } },
+                });
+                ui.text(tab_label, singleLine(look.text));
+                ui.close();
+            }
+            ui.close();
+            return changed;
+        }
+
+        /// The selected tab's underline, or the thumb behind it in a
+        /// groove, sliding from tab to tab. It is placed from the previous
+        /// frame's rectangles, so the first frame draws none.
+        fn tabIndicator(self: Self, ui: *Ui, bar_id: zui.Id, tab_id: zui.Id, pill: bool) void {
+            const bar_rect = ui.rectOf(bar_id) orelse return ui.requestFrame();
+            const tab_rect = ui.rectOf(tab_id) orelse return ui.requestFrame();
+            const look = self.style(ui, if (pill) .tab_pill_thumb else .tab_indicator, .idle);
+            const label_inset = if (pill) 0 else self.style(ui, .tab, .idle).padding.left;
+            const from_start = if (ui.environment().direction == .right_to_left)
+                (bar_rect.x + bar_rect.width) - (tab_rect.x + tab_rect.width)
+            else
+                tab_rect.x - bar_rect.x;
+            const placed = animate(ui, bar_id.child("indicator"), [2]f32, .{ from_start + label_inset, @max(tab_rect.width - 2 * label_inset, 0) }, look.motion);
+            const point: zui.AnchorPoint = if (pill) .center_left else .bottom_left;
+            const effects: Ui.Effects = .{ .shadow = look.shadow };
+            ui.box(.{
+                .floating = .{ .attach_to = .parent, .anchor = point, .attach_point = point, .offset = .{ placed[0], 0 }, .z = 0, .capture = false },
+                .decoration = decorationOf(look, false),
+                .effects = if (look.shadow != null) &effects else null,
+                .layout = .{ .sizing = .{ .width = .fixed(placed[1]), .height = .fixed(look.size[1]) } },
+            });
+        }
+
+        pub const NavigationListOptions = struct {
+            /// Its name to an assistive technology.
+            label: []const u8 = "",
+            width: zui.Sizing = .grow,
+        };
+
+        /// A sidebar's list of places, `selected` indexing `items`.
+        /// Clicking a row selects it; Up and Down move the selection and
+        /// the focus with it past the headings, and Home and End reach the
+        /// first and the last row. Only the selected row is in the Tab
+        /// order. Returns whether the selection changed.
+        ///
+        /// ```zig
+        /// const places = [_]zui_widgets.NavigationItem{
+        ///     .{ .label = "Mail", .heading = true },
+        ///     .{ .label = "Inbox", .count = "12" },
+        ///     .{ .label = "Sent" },
+        /// };
+        /// _ = widgets.navigationList(ui, .of("places"), &places, &app.place, .{ .label = "Places" });
+        /// ```
+        pub fn navigationList(self: Self, ui: *Ui, id: zui.Id, items: []const NavigationItem, selected: *usize, options: NavigationListOptions) bool {
+            const focus_row = if (selected.* < items.len and !items[selected.*].heading) selected.* else nextRow(items, 0, .forward);
+            var chosen = selected.*;
+            for (items, 0..) |item, index| {
+                if (!item.heading and ui.clicked(id.indexedChild("item", index))) chosen = index;
+            }
+            if (focus_row) |row| if (ui.focused(id.indexedChild("item", row))) {
+                if (ui.navigated(id.indexedChild("item", row))) |direction| switch (direction) {
+                    .up => if (row > 0) if (nextRow(items, row - 1, .backward)) |previous| {
+                        chosen = previous;
+                    },
+                    .down => if (nextRow(items, row + 1, .forward)) |next| {
+                        chosen = next;
+                    },
+                    else => {},
+                };
+                if (ui.keyPressed(.home)) chosen = nextRow(items, 0, .forward) orelse chosen;
+                if (ui.keyPressed(.end)) chosen = nextRow(items, items.len - 1, .backward) orelse chosen;
+            };
+            const changed = chosen != selected.*;
+            if (changed) {
+                selected.* = chosen;
+                ui.requestFocus(id.indexedChild("item", chosen));
+            }
+            const focusable_row = if (changed) chosen else focus_row;
+
+            ui.open(.{
+                .id = id,
+                .semantics = .{ .role = .list_box, .label = options.label },
+                .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = options.width } },
+            });
+            for (items, 0..) |item, index| {
+                if (item.heading) {
+                    const heading = self.style(ui, .navigation_heading, .idle);
+                    var padding = heading.padding;
+                    if (index != 0) padding.top += heading.gap;
+                    ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .padding = padding } });
+                    ui.text(item.label, singleLine(heading.text));
+                    ui.close();
+                    continue;
+                }
+                const row_id = id.indexedChild("item", index);
+                const is_selected = index == chosen;
+                const state = ui.widgetState(row_id);
+                const look = self.style(ui, if (is_selected) .navigation_item_selected else .navigation_item, state);
+                ui.open(.{
+                    .id = row_id,
+                    .interactive = true,
+                    .focusable = focusable_row == index,
+                    .cursor = .pointer,
+                    .semantics = .{ .role = .option, .label = item.label, .state = .{ .selected = is_selected } },
+                    .decoration = decorationOf(look, ui.focused(row_id)),
+                    .layout = .{
+                        .sizing = .{ .width = .grow, .height = .fixed(look.size[1]) },
+                        .padding = look.padding,
+                        .child_gap = look.gap,
+                        .child_alignment = .{ .y = .center },
+                    },
+                });
+                ui.text(item.label, singleLine(look.text));
+                if (item.count.len != 0) {
+                    ui.box(.{ .layout = .{ .sizing = .{ .width = .grow } } });
+                    ui.text(item.count, singleLine(self.style(ui, if (is_selected) .navigation_count_selected else .navigation_count, state).text));
+                }
+                ui.close();
+            }
+            ui.close();
+            return changed;
+        }
+
+        const Toward = enum { forward, backward };
+
+        /// The first row at or past `from` going `toward`, skipping headings.
+        fn nextRow(items: []const NavigationItem, from: usize, toward: Toward) ?usize {
+            var index = from;
+            while (index < items.len) {
+                if (!items[index].heading) return index;
+                if (toward == .backward) {
+                    if (index == 0) return null;
+                    index -= 1;
+                } else index += 1;
+            }
+            return null;
+        }
+
+        pub const BreadcrumbsOptions = struct {
+            /// Its name to an assistive technology.
+            label: []const u8 = "",
+        };
+
+        const Trail = struct { expanded: bool };
+
+        /// The way back from the current page, `crumbs` from the top: each
+        /// crumb but the last is a link, focusable and activated with Enter
+        /// or Space. Past four crumbs the middle ones collapse into a "…"
+        /// crumb, which shows them when chosen. Returns the index of the
+        /// crumb chosen this frame.
+        ///
+        /// ```zig
+        /// if (widgets.breadcrumbs(ui, .of("path"), app.path(), .{ .label = "Location" })) |depth| app.goUp(depth);
+        /// ```
+        pub fn breadcrumbs(self: Self, ui: *Ui, id: zui.Id, crumbs: []const []const u8, options: BreadcrumbsOptions) ?usize {
+            if (crumbs.len == 0) return null;
+            const last = crumbs.len - 1;
+            const trail = ui.state(id, Trail);
+            const more_id = id.child("more");
+            if (crumbs.len > most_crumbs_shown and !trail.expanded and ui.clicked(more_id)) {
+                trail.expanded = true;
+                ui.requestFocus(id.indexedChild("crumb", 1));
+            }
+            const collapsed = crumbs.len > most_crumbs_shown and !trail.expanded;
+            var chosen: ?usize = null;
+            for (0..last) |index| {
+                if (ui.clicked(id.indexedChild("crumb", index))) chosen = index;
+            }
+
+            const separator = self.style(ui, .crumb_separator, .idle);
+            ui.open(.{
+                .id = id,
+                .semantics = .{ .role = .group, .label = options.label },
+                .layout = .{ .child_gap = separator.gap, .child_alignment = .{ .y = .center } },
+            });
+            for (crumbs, 0..) |crumb, index| {
+                if (collapsed and index > 0 and index < last - 1) {
+                    if (index == 1) {
+                        self.crumbLink(ui, more_id, collapsed_crumbs_glyph, "Show the hidden levels");
+                        ui.text(separator.glyph, singleLine(separator.text));
+                    }
+                    continue;
+                }
+                if (index == last) {
+                    const current = self.style(ui, .crumb_current, .idle);
+                    ui.open(.{
+                        .semantics = .{ .role = .label, .label = crumb, .state = .{ .selected = true } },
+                        .layout = .{ .sizing = .{ .height = .fixed(current.size[1]) }, .padding = current.padding, .child_alignment = .{ .y = .center } },
+                    });
+                    ui.text(crumb, singleLine(current.text));
+                    ui.close();
+                } else {
+                    self.crumbLink(ui, id.indexedChild("crumb", index), crumb, crumb);
+                    ui.text(separator.glyph, singleLine(separator.text));
+                }
+            }
+            ui.close();
+            return chosen;
+        }
+
+        fn crumbLink(self: Self, ui: *Ui, crumb_id: zui.Id, content: []const u8, accessible_name: []const u8) void {
+            const look = self.style(ui, .crumb, ui.widgetState(crumb_id));
+            ui.open(.{
+                .id = crumb_id,
+                .focusable = true,
+                .cursor = .pointer,
+                .semantics = .{ .role = .link, .label = accessible_name },
+                .decoration = decorationOf(look, ui.focused(crumb_id)),
+                .layout = .{
+                    .sizing = .{ .width = .fitBetween(look.size[1], std.math.inf(f32)), .height = .fixed(look.size[1]) },
+                    .padding = look.padding,
+                    .child_alignment = .{ .x = .center, .y = .center },
+                },
+            });
+            ui.text(content, singleLine(look.text));
+            ui.close();
+        }
+
+        fn animate(ui: *Ui, id: zui.Id, comptime T: type, target: T, motion: Motion) T {
+            return switch (motion) {
+                .none => target,
+                .tween => |options| zui.motion.tween(ui, id, T, target, options),
+                .spring => |options| zui.motion.spring(ui, id, T, target, options),
+            };
         }
 
         /// A control disabled this frame is styled as disabled at once;
@@ -1097,6 +2133,159 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
     };
 }
 
+/// The containers and navigation as review shows them: each component's
+/// `zuiPreviews`, the content it is seen with, and `declare`, which
+/// declares it with one of them through any `Widgets`.
+///
+/// ```zig
+/// const Glance = zui_design.Permutations(zui_widgets.previews.Tabs, .glance);
+/// const permutation = Glance.at(index);
+/// zui_widgets.previews.Tabs.declare(widgets, ui, Glance.preview(permutation));
+/// ```
+pub const previews = struct {
+    pub const Card = struct {
+        pub const Content = struct { title: []const u8, body: []const u8, interactive: bool = false };
+
+        pub const zuiPreviews = .{
+            .short = Content{ .title = "Storage", .body = "12 GB of 50 GB used." },
+            .long = Content{
+                .title = "Every deployment this week, in every region",
+                .body = "Each service rolled out without a failed health check, and two rolled themselves back when their error rate rose.",
+            },
+            .interactive = Content{ .title = "Release notes", .body = "Version 2.4 adds offline sync.", .interactive = true },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            _ = widgets.card(ui, .of("preview.card"), .{ .interactive = content.interactive, .label = content.title });
+            widgets.cardTitle(ui, content.title);
+            widgets.cardBody(ui, content.body);
+            ui.close();
+        }
+    };
+
+    pub const Divider = struct {
+        pub const Content = struct { label: ?[]const u8 = null, axis: DividerAxis = .horizontal, inset: DividerInset = .none };
+
+        pub const zuiPreviews = .{
+            .plain = Content{},
+            .labeled = Content{ .label = "or continue with" },
+            .inset = Content{ .inset = .leading },
+            .vertical = Content{ .axis = .vertical },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            ui.open(.{ .layout = .{
+                .direction = if (content.axis == .horizontal) .top_to_bottom else .left_to_right,
+                .sizing = .{ .width = .grow, .height = .fixed(preview_height) },
+                .child_gap = 8,
+                .child_alignment = .{ .x = .center, .y = .center },
+            } });
+            widgets.label(ui, "Above");
+            widgets.divider(ui, .{ .axis = content.axis, .inset = content.inset, .label = content.label });
+            widgets.label(ui, "Below");
+            ui.close();
+        }
+    };
+
+    pub const ScrollArea = struct {
+        pub const Content = struct { rows: []const []const u8 };
+
+        pub const zuiPreviews = .{
+            .overflowing = Content{ .rows = &preview_rows },
+            .fitting = Content{ .rows = preview_rows[0..2] },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            const area = widgets.scrollArea(ui, .of("preview.scroll_area"), .{ .height = .fixed(preview_height), .child_gap = 8, .label = "Messages" });
+            for (content.rows) |row| widgets.label(ui, row);
+            area.end(ui);
+        }
+    };
+
+    pub const GroupBox = struct {
+        pub const Content = struct { title: []const u8, description: []const u8 = "" };
+
+        pub const zuiPreviews = .{
+            .plain = Content{ .title = "Account" },
+            .described = Content{ .title = "Notifications", .description = "Sent to the address on your account, at most once a day." },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            const group = widgets.groupBox(ui, .of("preview.group_box"), content.title, .{ .description = content.description });
+            widgets.label(ui, "Display name");
+            widgets.divider(ui, .{});
+            widgets.label(ui, "Email");
+            group.end(ui);
+        }
+    };
+
+    pub const Tabs = struct {
+        pub const Section = enum { overview, activity, settings };
+        pub const Content = struct { style: TabsStyle, selected: Section };
+
+        pub const zuiPreviews = .{
+            .underline = Content{ .style = .underline, .selected = .overview },
+            .pill = Content{ .style = .pill, .selected = .activity },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            var selected = content.selected;
+            _ = widgets.tabs(ui, .of("preview.tabs"), &selected, .{ .style = content.style, .label = "Sections" });
+        }
+    };
+
+    pub const NavigationList = struct {
+        pub const Content = struct { items: []const NavigationItem, selected: usize };
+
+        pub const zuiPreviews = .{
+            .sections = Content{ .items = &.{
+                .{ .label = "Mail", .heading = true },
+                .{ .label = "Inbox", .count = "12" },
+                .{ .label = "Drafts", .count = "2" },
+                .{ .label = "Sent" },
+                .{ .label = "Labels", .heading = true },
+                .{ .label = "Receipts" },
+            }, .selected = 1 },
+            .flat = Content{ .items = &.{ .{ .label = "General" }, .{ .label = "Appearance" }, .{ .label = "Privacy and security" } }, .selected = 2 },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            var selected = content.selected;
+            _ = widgets.navigationList(ui, .of("preview.navigation_list"), content.items, &selected, .{ .label = "Places" });
+        }
+    };
+
+    pub const Breadcrumbs = struct {
+        pub const Content = struct { crumbs: []const []const u8 };
+
+        pub const zuiPreviews = .{
+            .short = Content{ .crumbs = &.{ "Home", "Projects", "Harbor" } },
+            .collapsed = Content{ .crumbs = &.{ "Home", "Projects", "Harbor", "Services", "Orders", "Settings" } },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            _ = widgets.breadcrumbs(ui, .of("preview.breadcrumbs"), content.crumbs, .{ .label = "Location" });
+        }
+    };
+
+    /// Every component above, for a review or an audit to step through.
+    pub const all = .{ Card, Divider, ScrollArea, GroupBox, Tabs, NavigationList, Breadcrumbs };
+
+    const preview_height = 160;
+    const preview_rows = [_][]const u8{
+        "Invoice 2041 was paid",
+        "Ada commented on the release plan",
+        "The nightly build passed",
+        "Grace joined the design team",
+        "Storage is 80% full",
+        "Backup finished in 4 minutes",
+        "Two new sign-ins from Lisbon",
+        "The quarterly report is ready",
+        "A reviewer approved your change",
+        "Your trial ends in 9 days",
+    };
+};
+
 fn NumberPointee(comptime Pointer: type, comptime widget: []const u8) type {
     const info = @typeInfo(Pointer);
     if (info == .pointer and info.pointer.size == .one and !info.pointer.is_const) {
@@ -1108,13 +2297,20 @@ fn NumberPointee(comptime Pointer: type, comptime widget: []const u8) type {
     @compileError("zui_widgets: " ++ widget ++ " needs a pointer to an integer or float, got " ++ @typeName(Pointer));
 }
 
-fn EnumPointee(comptime Pointer: type) type {
+fn EnumPointee(comptime Pointer: type, comptime widget: []const u8) type {
     const info = @typeInfo(Pointer);
     if (info == .pointer and info.pointer.size == .one and !info.pointer.is_const and @typeInfo(info.pointer.child) == .@"enum") {
-        if (@typeInfo(info.pointer.child).@"enum".fields.len == 0) @compileError("zui_widgets: dropdownEnum needs an enum with at least one named tag, got " ++ @typeName(info.pointer.child));
+        if (@typeInfo(info.pointer.child).@"enum".fields.len == 0) @compileError("zui_widgets: " ++ widget ++ " needs an enum with at least one named tag, got " ++ @typeName(info.pointer.child));
         return info.pointer.child;
     }
-    @compileError("zui_widgets: dropdownEnum needs a pointer to an enum, got " ++ @typeName(Pointer));
+    @compileError("zui_widgets: " ++ widget ++ " needs a pointer to an enum, got " ++ @typeName(Pointer));
+}
+
+fn tagLabels(comptime Enum: type) [@typeInfo(Enum).@"enum".fields.len][]const u8 {
+    const tags = @typeInfo(Enum).@"enum".fields;
+    var labels: [tags.len][]const u8 = undefined;
+    for (tags, &labels) |tag, *label| label.* = labelFromIdentifier(tag.name);
+    return labels;
 }
 
 fn numberToFloat(number: anytype) f64 {
@@ -1161,4 +2357,5 @@ fn boundaryAtOrBefore(text: []const u8, position: usize) usize {
 
 test {
     _ = @import("tests.zig");
+    _ = @import("containers_tests.zig");
 }

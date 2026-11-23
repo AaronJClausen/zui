@@ -115,7 +115,6 @@ is in the file its group names.
 | Item | Where | Waits for | Status |
 |---|---|---|---|
 | `11-polish:27-essential-inputs` | `core/zui_widgets/` | `11-polish:07-zui-icons` | |
-| `11-polish:28-containers-and-navigation` | `core/zui_widgets/` | | |
 | `11-polish:29-overlays` | `core/zui_widgets/` | `11-polish:28-containers-and-navigation` | |
 | `11-polish:30-feedback-and-media` | `core/zui_widgets/`, `core/zui_design/` | `11-polish:07-zui-icons` | |
 | `11-polish:31-rich-text-and-reordering` | `core/zui_widgets/` | `11-polish:28-containers-and-navigation`, `11-polish:06-text-editing` | |

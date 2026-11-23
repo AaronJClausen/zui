@@ -2132,6 +2132,57 @@ fn settingsPanel(app: *App, ui: *Ui) void {
 control. That's flexible, but it's an easy thing to forget, and an
 unbalanced tree is caught only at the end of the frame.
 
+<a id="widget-containers"></a>
+
+### Containers and navigation · *shipped*
+
+Cards at the raised elevation, which can act as buttons; dividers with
+an inset or a label; scroll areas whose scrollbar is thin at rest,
+widens under the pointer and fades when scrolling stops; group boxes of
+settings rows; tabs over an enum, underlined or in a pill groove; a
+sidebar's navigation list with section headings and counts; and
+breadcrumbs that return the crumb chosen. The arrow keys move the
+selection of tabs and the list, and a focused scroll area scrolls with
+the arrows, Page Up and Down, Home and End.
+
+`src/ui/library.zig`
+
+```zig
+const places = [_]zui_widgets.NavigationItem{
+    .{ .label = "Library", .heading = true },
+    .{ .label = "All photos", .count = "2,481" },
+    .{ .label = "Favorites" },
+};
+
+const Tab = enum { photos, albums, settings };
+
+fn library(app: *App, ui: *Ui) void {
+    ui.open(.{ .layout = .{ .sizing = .grow_both, .child_gap = 16 } });
+    defer ui.close();
+    _ = widgets.navigationList(ui, .of("places"), &places, &app.place, .{ .label = "Places" });
+    widgets.divider(ui, .{ .axis = .vertical });
+
+    ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .grow_both, .child_gap = 12 } });
+    defer ui.close();
+    if (widgets.breadcrumbs(ui, .of("path"), app.path(), .{ .label = "Location" })) |depth| app.goUp(depth);
+    _ = widgets.tabs(ui, .of("tabs"), &app.tab, .{});
+
+    const albums = widgets.scrollArea(ui, .of("albums"), .{ .child_gap = 12 });
+    defer albums.end(ui);
+    for (app.albums, 0..) |album, index| {
+        if (widgets.card(ui, .indexed("album", index), .{ .interactive = true, .label = album.name })) app.openAlbum(index);
+        widgets.cardTitle(ui, album.name);
+        widgets.cardBody(ui, album.summary);
+        ui.close();
+    }
+}
+```
+
+A card closes with `ui.close()`; a scroll area and a group box close
+with `end` on what they return, which draws the scrollbar or the
+description after the content. A table of your own reuses the scrollbar
+with `widgets.scrollbar(ui, table_id, rows_id, .y, 0)`.
+
 <a id="widget-theme"></a>
 
 ### Theming widgets · *shipped*

@@ -306,7 +306,7 @@ await send("Target.closeTarget", { targetId: otherTab });
 
 // Clickable Chaos, the rail's last screen, moves its wall in a wave unless
 // motion is reduced.
-const clickableChaosOnTheRail = { x: 64, y: 662 };
+const clickableChaosOnTheRail = { x: 64, y: 706 };
 await expectDrawnAfter("a click on Clickable Chaos in the rail", async () => {
   for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, ...clickableChaosOnTheRail, button: "left", buttons: type === "mousePressed" ? 1 : 0, clickCount: 1 });
 });

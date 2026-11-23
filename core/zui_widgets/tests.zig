@@ -3,6 +3,7 @@ const zui = @import("zui");
 const zui_testing = @import("zui_testing");
 const zui_widgets = @import("zui_widgets.zig");
 const zui_design = @import("zui_design");
+const EveryContainer = @import("containers_tests.zig").EveryContainer;
 
 const testing = std.testing;
 const Text = zui_testing.FixedMetricsText(u16);
@@ -801,22 +802,39 @@ const RecordingSkin = struct {
 
 test "every part and every state reach the skin" {
     var asked: AskedOfSkin = .{};
-    const SkinnedForm = EveryWidget(zui_widgets.Widgets(Ui, RecordingSkin));
+    const Recorded = zui_widgets.Widgets(Ui, RecordingSkin);
+    const SkinnedForm = EveryWidget(Recorded);
+    const SkinnedContainers = EveryContainer(Recorded);
+    const Both = struct {
+        form: SkinnedForm,
+        containers: SkinnedContainers,
+
+        fn declare(both: *@This(), ui: *Ui) void {
+            ui.open(.{ .layout = .{ .sizing = .grow_both } });
+            SkinnedForm.declare(&both.form, ui);
+            SkinnedContainers.declare(&both.containers, ui);
+            ui.close();
+        }
+    };
 
     var fixture: Fixture = .{};
     try fixture.init();
     defer fixture.deinit();
     const driver = &fixture.driver;
-    var form: SkinnedForm = undefined;
-    form.init(.{ .skin = .{ .asked = &asked } });
-    _ = try driver.frame(&form, SkinnedForm.declare, &.{});
-    _ = try driver.hover(&form, SkinnedForm.declare, SkinnedForm.ids.button);
-    _ = try driver.drag(&form, SkinnedForm.declare, SkinnedForm.ids.slider, .{ 0.5, 0.5 }, .{ 0.6, 0.5 });
-    _ = try driver.focus(&form, SkinnedForm.declare, SkinnedForm.ids.field);
-    _ = try driver.click(&form, SkinnedForm.declare, SkinnedForm.ids.dropdown);
-    _ = try driver.frame(&form, SkinnedForm.declare, &.{});
+    var both: Both = .{ .form = undefined, .containers = .{ .widgets = .{ .skin = .{ .asked = &asked } } } };
+    both.form.init(.{ .skin = .{ .asked = &asked } });
+    _ = try driver.frame(&both, Both.declare, &.{});
+    _ = try driver.hover(&both, Both.declare, SkinnedForm.ids.button);
+    _ = try driver.drag(&both, Both.declare, SkinnedForm.ids.slider, .{ 0.5, 0.5 }, .{ 0.6, 0.5 });
+    _ = try driver.focus(&both, Both.declare, SkinnedForm.ids.field);
+    _ = try driver.click(&both, Both.declare, SkinnedForm.ids.dropdown);
+    _ = try driver.frame(&both, Both.declare, &.{});
 
+    // A context that draws no gradients asks for no edge fades; the
+    // containers' own tests draw them.
+    const drawn_only_with_gradients = [_]zui_widgets.Part{ .scroll_edge_fade, .scroll_edge_fade_raised };
     for (std.enums.values(zui_widgets.Part)) |part| {
+        if (std.mem.indexOfScalar(zui_widgets.Part, &drawn_only_with_gradients, part) != null) continue;
         if (!asked.parts.get(part)) {
             std.debug.print("never asked for {t}\n", .{part});
             return error.PartNeverStyled;

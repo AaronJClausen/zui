@@ -40,7 +40,7 @@ and each is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:25-focus-ring-on-fills` A focus ring that shows on a filled control | done |
 | `11-polish:26-small-targets` Targets of at least 24 units in the tour | done |
 | `11-polish:27-essential-inputs` Essential inputs | not started |
-| `11-polish:28-containers-and-navigation` Containers and navigation | not started |
+| `11-polish:28-containers-and-navigation` Containers and navigation | done |
 | `11-polish:29-overlays` Overlays | not started |
 | `11-polish:30-feedback-and-media` Feedback and media | not started |
 | `11-polish:31-rich-text-and-reordering` Rich text and the reorderable list | not started |
@@ -2186,8 +2186,8 @@ for the existing widgets, `button`, `text_field`, `label`,
 
 What holds and moves between content: D5 of the default design's plan.
 
-**Grounding** (at `1aa1061`). `Tokens.elevations`
-(`core/src/design.zig:486`) gives the `raised` level a card stands at,
+**Grounding** (at `68d1959`). `Tokens.elevations`
+(`core/src/design.zig:545`) gives the `raised` level a card stands at,
 its shadow, rim and surface role. Scrolling is the core's
 (`Element.scroll`, `core/src/context.zig:218`; `scrollOffset` and
 `setScrollOffset`, `:2771`, `:2777`). The specs are `card`, `divider`,
@@ -2209,7 +2209,68 @@ sidebar's list, whose rows hover in `secondary_container`, and
 
 **Spec.** §18, §19.2.
 
-**Status.** Not started.
+**Status.** Done. `Widgets(Ui, Skin)` in
+`core/zui_widgets/zui_widgets.zig` gains `card` (closed with
+`ui.close()`, at the `raised` elevation; an interactive one is a
+focusable button that lifts to the `floating` shadow while hovered and
+scales to 0.985 through `Tokens.motion.press` while pressed, where the
+context draws transforms), `cardTitle` and `cardBody`; `divider` (an
+axis, an inset of the `l` tier at the leading edge or both, a centered
+label); `scrollArea`, closed by `end` on the `ScrollArea` it returns,
+which declares the scrollbars and the edge fades over the content;
+`scrollbar`, the same bar for any scroll container whose content is one
+child, for the table and tree of `11-polish:32-zui-widgets-data`;
+`groupBox`, closed by `end` on its `GroupBox`, which declares the
+description below the box; `tabs` over any enum (`.underline`, whose
+line slides through `Tokens.motion.toggle`, or `.pill`, whose raised
+thumb slides in a groove); `navigationList` over
+`zui_widgets.NavigationItem`s (headings, counts, rows hovered in
+`secondary_container` and selected in `accent_container`); and
+`breadcrumbs`, which returns the crumb chosen and folds the middle ones
+into a "…" crumb past four. 29 `Part` tags, each in `Designed`'s
+appearance and `DesignSkin`; the scrollbar's metrics are the skin's
+named constants (thickness `(control_height.medium − 4) / 4`, 6, 8 and
+10, and 4 wider while the track is hovered; least length 32 or the
+target floor; inset 2; the thumb `on_surface` at 28%, 44% and 56%; the
+track at 6%; fade after 0.8 s; edges 16 deep). `Style` gains `scale` and
+`motion` (`zui_widgets.Motion`: none, a tween or a spring), so a skin
+sets how a part moves and reduced motion lands it at once. The thumb's
+hit area is the track, as wide as the pointer's target floor, so the
+content gains a gutter that wide while it overflows; a focused area
+scrolls with the arrows, Page Up and Down, Home and End, and takes a Tab
+stop only while it overflows. Tabs and the list keep only the selected
+tab or row in the Tab order; the arrows move the selection and the focus
+with it (tabs wrapping and mirrored right to left), Home and End too.
+`zui_widgets.previews` holds each component's `zuiPreviews` and a
+`declare` showing it through any `Widgets`. Tested in
+`core/zui_widgets/containers_tests.zig` with `zui_testing.Driver`: every
+state and key the specs list, the semantics and actions, the motion
+under reduced motion, the fades in a context that draws gradients, and
+every component's `glance` permutations and each preview in every scheme
+and density audited clean; `tests.zig`'s every-part test covers the new
+parts. `core/tests/instantiate.zig` exercises each API through three
+skins. The tour gains a Field Guide screen
+(`apps/tour/src/screens/field_guide.zig`): a sidebar list, breadcrumbs,
+underline and pill tabs, interactive cards, group boxes and scroll
+areas. Where the specs could not be met here, `ARCHITECTURE.md` §7 says
+so: no tab or navigation semantic role (tabs report `radio`, the list
+`list_box` and `option`); the separator is "›" in `on_surface_muted`,
+since `outline` text falls short of the text contrast target, until
+`11-polish:07-zui-icons` gives the chevron; the folded crumbs show
+inline until `11-polish:29-overlays` gives a menu; no card media or tab
+badges (`11-polish:30-feedback-and-media`). A horizontal scrollbar is
+not mirrored for right to left, and a scroll area or tabs inside a
+floating layer pass its z as `layer` (the scroll area) or draw their
+indicator in layer 0. Verified: core `test` in three modes, `check` for
+`wasm32-freestanding` and `powerpc-linux`; the tour's `test` in three
+modes and `check`, also for `x86_64-windows`; raylib's tour cycle
+(`diagnostics ok: true`) and screenshots of `overview`, `harbor`,
+`x_ray`, `log_tail`, `light_lab` and `field_guide`; the terminal's
+`tour -- --dump --every-screen`; the native host's tour cycle
+(`0 layer overflows, 0 glyph atlas overflows, diagnostics ok: true`);
+`test-all`, `check-all` and the web host's `test-demo`. The showcase was
+skipped: it is being removed from `main`. `counts` is +0.00% on every
+scenario against the parent, none of which uses these widgets.
 
 ## 11-polish:29-overlays — Overlays
 

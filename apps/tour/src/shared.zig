@@ -34,6 +34,7 @@ pub const Screen = enum {
     log_tail,
     kanban,
     settings_form,
+    field_guide,
     quiet_machine,
     time_machine,
     break_it,

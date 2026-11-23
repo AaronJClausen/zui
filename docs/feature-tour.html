@@ -1798,6 +1798,42 @@ fn settingsPanel(app: *App, ui: *Ui) void {
         <p><code class="z">labeledRow</code> opens a row that you close yourself after declaring the control. That's flexible, but it's an easy thing to forget, and an unbalanced tree is caught only at the end of the frame.</p>
       </article>
 
+      <article class="feature" id="widget-containers" data-title="Containers and navigation">
+        <div class="feature-head"><h3>Containers and navigation</h3><span class="pill shipped">Shipped</span></div>
+        <p>Cards at the raised elevation, which can act as buttons; dividers with an inset or a label; scroll areas whose scrollbar is thin at rest, widens under the pointer and fades when scrolling stops; group boxes of settings rows; tabs over an enum, underlined or in a pill groove; a sidebar's navigation list with section headings and counts; and breadcrumbs that return the crumb chosen. The arrow keys move the selection of tabs and the list, and a focused scroll area scrolls with the arrows, Page Up and Down, Home and End.</p>
+<script type="text/x-zig" data-file="src/ui/library.zig">
+const places = [_]zui_widgets.NavigationItem{
+    .{ .label = "Library", .heading = true },
+    .{ .label = "All photos", .count = "2,481" },
+    .{ .label = "Favorites" },
+};
+
+const Tab = enum { photos, albums, settings };
+
+fn library(app: *App, ui: *Ui) void {
+    ui.open(.{ .layout = .{ .sizing = .grow_both, .child_gap = 16 } });
+    defer ui.close();
+    _ = widgets.navigationList(ui, .of("places"), &places, &app.place, .{ .label = "Places" });
+    widgets.divider(ui, .{ .axis = .vertical });
+
+    ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .grow_both, .child_gap = 12 } });
+    defer ui.close();
+    if (widgets.breadcrumbs(ui, .of("path"), app.path(), .{ .label = "Location" })) |depth| app.goUp(depth);
+    _ = widgets.tabs(ui, .of("tabs"), &app.tab, .{});
+
+    const albums = widgets.scrollArea(ui, .of("albums"), .{ .child_gap = 12 });
+    defer albums.end(ui);
+    for (app.albums, 0..) |album, index| {
+        if (widgets.card(ui, .indexed("album", index), .{ .interactive = true, .label = album.name })) app.openAlbum(index);
+        widgets.cardTitle(ui, album.name);
+        widgets.cardBody(ui, album.summary);
+        ui.close();
+    }
+}
+</script>
+        <p>A card closes with <code class="z">ui.close()</code>; a scroll area and a group box close with <code class="z">end</code> on what they return, which draws the scrollbar or the description after the content. A table of your own reuses the scrollbar with <code class="z">widgets.scrollbar(ui, table_id, rows_id, .y, 0)</code>.</p>
+      </article>
+
       <article class="feature" id="widget-theme" data-title="Theming widgets">
         <div class="feature-head"><h3>Theming widgets</h3><span class="pill shipped">Shipped</span></div>
         <p>A widget set is styled by a skin: any struct that declares <code class="z">zuiStyle(part, state, environment)</code> and returns a <code class="z">zui_widgets.Style(Ui)</code> for each element a widget draws, so a theme pack restyles every widget without forking it. The skin reads the environment, so it follows dark mode, contrast and text size, and the style's <code class="z">focus_ring</code> is drawn while a control has focus. A mistake in a skin fails to compile with a message naming it. <code class="z">zui_widgets.DesignSkin(Ui)</code> is zui's own skin: every part drawn in the roles, tiers and shapes of the default design, from <code class="z">zui.design.Tokens</code> you resolve again when a preference changes, so the widgets follow the theme, contrast, density, text size and color vision. Its focus ring is drawn 2 units outside the control, so it shows on an accent-filled button or a checked box as well as on the page. A button takes a variant, <code class="z">primary</code>, <code class="z">secondary</code>, <code class="z">tonal</code>, <code class="z">tertiary</code> or <code class="z">danger</code>.</p>

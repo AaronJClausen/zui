@@ -50,6 +50,7 @@ pub fn Tour(comptime kit: type) type {
         log_tail: ScreenOf(.log_tail, "LogTail", @import("screens/log_tail.zig")),
         kanban: ScreenOf(.kanban, "Kanban", @import("screens/kanban.zig")),
         settings_form: ScreenOf(.settings_form, "SettingsForm", @import("screens/settings_form.zig")),
+        field_guide: ScreenOf(.field_guide, "FieldGuide", @import("screens/field_guide.zig")),
         quiet_machine: ScreenOf(.quiet_machine, "QuietMachine", @import("screens/quiet_machine.zig")),
         time_machine: ScreenOf(.time_machine, "TimeMachine", @import("screens/time_machine.zig")),
         break_it: ScreenOf(.break_it, "BreakIt", @import("screens/break_it.zig")),
