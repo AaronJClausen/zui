@@ -188,7 +188,10 @@ every build, and keeps a cache of Zig's for each job, OS and the leg its
 `cache-key` names. A repository's caches are held to 10 GB, and a run
 saves one of each, so legs that share most of their build share a key (a
 package's legs, the shards of one optimize mode), and the quickest jobs
-keep none.
+keep none. Zig never deletes what its cache no longer needs, so each key
+also names the day (UTC): a run restores the cache saved earlier that
+day, and a day's first run starts cold, rather than every cache growing
+by each run's builds until setup-zig empties it at 2 GiB.
 
 When CI passes on a push to `main` and its `test-site` job ran, the
 Pages workflow builds the site in ReleaseSmall, runs `test-site` on it,

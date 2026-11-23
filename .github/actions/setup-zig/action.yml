@@ -14,8 +14,14 @@ runs:
       if: runner.os == 'Windows'
       shell: pwsh
       run: Set-MpPreference -DisableRealtimeMonitoring $true
+    # Zig never deletes what its cache no longer needs, so a cache restored
+    # and saved by every run grows until setup-zig empties it at 2 GiB.
+    # Starting each one afresh every day keeps it to one day's builds.
+    - id: cache-day
+      shell: bash
+      run: echo "day=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
     - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
       with:
         version: ${{ env.ZIG_VERSION }}
         use-cache: ${{ inputs.use-cache }}
-        cache-key: ${{ inputs.cache-key }}
+        cache-key: ${{ inputs.cache-key && format('{0}-{1}', steps.cache-day.outputs.day, inputs.cache-key) || steps.cache-day.outputs.day }}
