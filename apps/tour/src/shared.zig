@@ -24,8 +24,9 @@ pub const Sources = struct {
     quiet_reading: quiet_machine.ReadingSource = .{},
 };
 
-/// Every screen of the tour, in the rail's order. A renderer that does not
-/// draw what a screen needs is not offered it: `Kit.offered_screens`.
+/// Every screen of the tour, in the order Ctrl+PgDn steps through them; the
+/// rail groups them by lane. A renderer that does not draw what a screen
+/// needs is not offered it: `Kit.offered_screens`.
 pub const Screen = enum {
     overview,
     harbor,

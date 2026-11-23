@@ -76,6 +76,13 @@ fn textBounds(frame: anytype, content: []const u8) ?zui.Rect {
     return null;
 }
 
+fn textColor(frame: anytype, content: []const u8) ?zui.Color {
+    for (frame.commands()) |command| {
+        if (command.payload == .text and std.mem.eql(u8, command.payload.text.content, content)) return command.payload.text.style.color;
+    }
+    return null;
+}
+
 /// Equal but for snapping to whole pixels.
 fn expectNear(expected: zui.Rect, actual: zui.Rect) !void {
     inline for (.{ "x", "y", "width", "height" }) |field| try testing.expectApproxEqAbs(@field(expected, field), @field(actual, field), 0.5);
@@ -761,6 +768,65 @@ test "a navigation row hovers in secondary_container and is selected in accent_c
     try testing.expectEqual(@as(usize, 2), app.place);
 }
 
+test "a navigation list's rows stand the xs tier apart, which grows with the density" {
+    const Spaced = struct {
+        widgets: Widgets,
+        place: usize = 1,
+
+        fn declare(app: *@This(), ui: *Ui) void {
+            ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(240) } } });
+            _ = app.widgets.navigationList(ui, Mail.id, &Mail.items, &app.place, .{ .label = "Places" });
+            ui.close();
+        }
+    };
+    const expected_gaps = std.EnumArray(zui.design.Density, f32).init(.{ .compact = 2, .comfortable = 4, .roomy = 6 });
+    for (std.enums.values(zui.design.Density)) |density| {
+        var density_tokens: zui.design.Tokens(Ui, void) = .{};
+        _ = zui_design.resolve(zui_design.default, .{ .theme = .dark, .density = density }, &density_tokens);
+        try testing.expectEqual(expected_gaps.get(density), density_tokens.space(.xs));
+
+        var fixture: Fixture(Ui) = .{};
+        try fixture.init();
+        defer fixture.deinit();
+        var app: Spaced = .{ .widgets = .{ .skin = .{ .tokens = &density_tokens } } };
+        const frame = try fixture.driver.frame(&app, Spaced.declare, &.{});
+        const inbox = frame.rectOf(Mail.row(1)).?;
+        const drafts = frame.rectOf(Mail.row(2)).?;
+        try testing.expectApproxEqAbs(expected_gaps.get(density), drafts.y - (inbox.y + inbox.height), 0.01);
+    }
+}
+
+test "a navigation row shows its shortcut at its end, after its count" {
+    const Shortcuts = struct {
+        const items = [_]zui_widgets.NavigationItem{
+            .{ .label = "Inbox", .count = "12", .shortcut = "Ctrl+1" },
+            .{ .label = "Drafts", .shortcut = "Ctrl+2" },
+        };
+        place: usize = 0,
+
+        fn declare(app: *@This(), ui: *Ui) void {
+            ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(240) } } });
+            _ = widgets.navigationList(ui, Mail.id, &items, &app.place, .{ .label = "Places" });
+            ui.close();
+        }
+    };
+    var fixture: Fixture(Ui) = .{};
+    try fixture.init();
+    defer fixture.deinit();
+    var app: Shortcuts = .{};
+    const frame = try fixture.driver.frame(&app, Shortcuts.declare, &.{});
+    const inbox = frame.rectOf(Mail.row(0)).?;
+    const count = textBounds(frame, "12").?;
+    const first_shortcut = textBounds(frame, "Ctrl+1").?;
+    const second_shortcut = textBounds(frame, "Ctrl+2").?;
+    try testing.expect(first_shortcut.x > count.x + count.width);
+    const padding = tokens.space(.m);
+    try testing.expectApproxEqAbs(inbox.x + inbox.width - padding, first_shortcut.x + first_shortcut.width, 0.5);
+    try testing.expectApproxEqAbs(first_shortcut.x + first_shortcut.width, second_shortcut.x + second_shortcut.width, 0.5);
+    try testing.expectEqual(tokens.colors.get(.idle).get(.on_accent_container), textColor(frame, "Ctrl+1").?);
+    try testing.expectEqual(tokens.colors.get(.idle).get(.on_surface_muted), textColor(frame, "Ctrl+2").?);
+}
+
 // =============================================================
 // Breadcrumbs
 // =============================================================
@@ -935,7 +1001,7 @@ pub fn EveryContainer(comptime SkinnedWidgets: type) type {
             group.end(ui);
             _ = used.tabs(ui, ids.tabs, &form.tab, .{});
             _ = used.tabs(ui, ids.pills, &form.pill, .{ .style = .pill });
-            _ = used.navigationList(ui, ids.places, &.{ .{ .label = "heading", .heading = true }, .{ .label = "one", .count = "1" }, .{ .label = "two", .count = "2" } }, &form.place, .{});
+            _ = used.navigationList(ui, ids.places, &.{ .{ .label = "heading", .heading = true }, .{ .label = "one", .count = "1" }, .{ .label = "two", .count = "2", .shortcut = "Ctrl+2" } }, &form.place, .{});
             _ = used.breadcrumbs(ui, ids.path, &.{ "a", "b", "c", "d", "e" }, .{});
             ui.close();
         }

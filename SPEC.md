@@ -3120,9 +3120,13 @@ while the pointer is over its track, and fades once scrolling stops; it
 is a function of its own, `scrollbar`, for any scroll container that
 holds its content in one child. Tabs and the navigation list keep only
 the selected tab or row in the Tab order, and the arrow keys move the
-selection and the focus with it. Each container and navigation component
-declares its `zuiPreviews` in `zui_widgets.previews`, with a `declare`
-that shows it through any `Widgets`.
+selection and the focus with it. A navigation list's row
+(`zui_widgets.NavigationItem`) may end in a count and a shortcut, and
+its rows stand the skin's `navigation_list` gap apart, in `DesignSkin`
+the `xs` spacing tier, so the gap follows the density. Each container
+and navigation component declares its `zuiPreviews` in
+`zui_widgets.previews`, with a `declare` that shows it through any
+`Widgets`.
 
 Every control is focusable, draws the skin's focus ring, reports
 semantics when the feature is on, and is operable by keyboard and by

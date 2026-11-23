@@ -7,10 +7,10 @@
 // worker must then draw the tour, which times its frames above 0 µs as the
 // tour's strip shows them. Idle, the worker must sleep as a native host
 // does, drawing only the tour's once-a-second heartbeat while the display
-// runs on, until input wakes it: the mouse over the rail turns the cursor
-// to the pointer the tour asks for, Ctrl+PageDown draws the next screen,
-// and a click on Log Tail's entry starts its producers' tasks, whose frames
-// keep coming without input. On Photo Culling, its photos must all load
+// runs on, until input wakes it: the mouse over a row of the rail turns the
+// cursor to the pointer the tour asks for, Ctrl+PageDown draws the next
+// screen, and Ctrl+5, Log Tail's shortcut, starts its producers' tasks,
+// whose frames keep coming without input. On Photo Culling, its photos must all load
 // without input, and the worker then sleep again.
 
 import { readdir } from "node:fs/promises";
@@ -165,8 +165,22 @@ const previousScreen = () => chord("PageUp", "PageUp", 33);
 
 const overviewIdle = await idleFrames("the Overview");
 
-await expectDrawnAfter("the mouse moved over the rail", () => send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 50, y: 266 }));
-await waitUntil(() => evaluate(`host.canvas.style.cursor === "pointer"`), "the canvas did not show the pointer cursor over the rail");
+// Down the rail's column, wherever its rows lie, until one shows the pointer.
+const railColumn = 50;
+const railStep = 16;
+const cursorPatienceMilliseconds = 500;
+async function moveOntoARailRow() {
+  const pointerShown = () => evaluate(`host.canvas.style.cursor === "pointer"`);
+  for (let y = 80; y < 800; y += railStep) {
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: railColumn, y });
+    for (let waited = 0; waited < cursorPatienceMilliseconds; waited += 50) {
+      if (await pointerShown()) return;
+      await pause(50);
+    }
+  }
+  await fail("the canvas did not show the pointer cursor over any row of the rail");
+}
+await expectDrawnAfter("the mouse moved over the rail", moveOntoARailRow);
 await idleFrames("the Overview, under the mouse");
 
 const overviewDigest = await inWorker("canvasDigest()");
@@ -174,9 +188,8 @@ await expectDrawnAfter("Ctrl+PageDown", nextScreen);
 await waitUntil(async () => (await inWorker("canvasDigest()")) !== overviewDigest, "the canvas still showed the Overview after Ctrl+PageDown");
 
 const tasksBefore = await inWorker("tasks().started");
-await send("Input.dispatchMouseEvent", { type: "mousePressed", x: 50, y: 266, button: "left", buttons: 1, clickCount: 1 });
-await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: 50, y: 266, button: "left", buttons: 0, clickCount: 1 });
-await waitUntil(async () => (await inWorker("tasks().started")) > tasksBefore, "the tour started no tasks after the click on Log Tail's entry");
+await chord("5", "Digit5", 53);
+await waitUntil(async () => (await inWorker("tasks().started")) > tasksBefore, "the tour started no tasks after Ctrl+5, Log Tail's shortcut");
 const logTasks = await inWorker("tasks()");
 
 // How fast the worker draws is the machine's: a runner's software GPU draws
@@ -228,6 +241,6 @@ console.log(
   `check_site: isolated by its service worker after one reload; ${distinctColors} colors, the newest frame declared in ${frameMicroseconds.toFixed(0)} µs; ` +
     `idle, ${perSecond(overviewIdle)} on the Overview and ${perSecond(photoIdle)} on Photo Culling; ` +
     `woken and drawn by the mouse over the rail, which shows the pointer, and by Ctrl+PageDown; ` +
-    `${logTasks.started} tasks started after the click on Log Tail, ${(logFrames / (producerMilliseconds / 1000)).toFixed(0)} frames a second of its producers, ` +
+    `${logTasks.started} tasks started after Ctrl+5 showed Log Tail, ${(logFrames / (producerMilliseconds / 1000)).toFixed(0)} frames a second of its producers, ` +
     `and ${photoTasks.finished - logTasks.finished} tasks finished without input on Photo Culling`,
 );

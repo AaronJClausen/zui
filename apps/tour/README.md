@@ -41,7 +41,10 @@ it each frame. The tour sets the record's zoom and the environment
 changes it makes up, hands each frame to `zui_debug` while its panel is
 open, and times each step for the strip.
 
-Each screen belongs to a lane, which the rail marks beside its title.
+Each screen belongs to a lane. The rail is `zui_widgets`'
+`navigationList`, a section for each lane holding its screens, each row
+showing the shortcut that reaches it; a click, or Up and Down while it
+has focus, shows another screen.
 
 | Screen | Lane | What it shows |
 |---|---|---|
@@ -52,7 +55,7 @@ Each screen belongs to a lane, which the rail marks beside its title.
 | Log Tail | Field case | a busy service's log through a `Stream`, with its rate through a `Latest` 30 times a second: a 4,096-line ring in a virtual list, level chips, a filter, follow-tail that holds when scrolled up, and a 10,000-line burst that shows what the stream refused |
 | Kanban | Field case | four lists of cards dragged within and between lists with a drop indicator and auto-scroll, moved by Ctrl+arrows, deleted with an exit animation, and an actions menu in a focus scope |
 | Settings Form | Field case | an account form with validation, a sensible Tab order and Save only when valid, and switches that change the real environment (right to left, high contrast, text at 150% and 200%) so it is seen to hold up |
-| Field Guide | Field case | a documentation browser built from `zui_widgets`' containers and navigation: a sidebar list with headings and counts, breadcrumbs back up, underline and pill tabs, interactive cards, group boxes of settings, and scroll areas whose scrollbar widens under the pointer and fades when idle |
+| Field Guide | Field case | a documentation browser built from `zui_widgets`' containers and navigation: its sections (Getting started, Layout, Containers, Navigation, Tokens, Changelog) on underline tabs, each with its own guides, example and update to follow; an overview, examples and settings in a pill groove; how many guides the section holds; breadcrumbs that follow both; interactive cards, group boxes of settings, and scroll areas whose scrollbar widens under the pointer and fades when idle |
 | Quiet Machine | Spectacle | a busy page (a clock, a sensor, a countdown, a ticker) that declares a frame only when something changes, counted against a 60 Hz loop, with why each frame was declared and what `nextFrame` says; a toggle compares it with a game loop |
 | Time Machine | Spectacle | a small deterministic world of flung balls, a pure function of its input log: a scrubber replays it to any step, interacting in the past branches, and a checksum proves the replay matches the live run |
 | Break It | Spectacle | sliders that push elements, depth, text bytes, render commands, effects and state slots past their limits, with the frame's `Diagnostics`: what was kept and dropped, and nothing corrupted |

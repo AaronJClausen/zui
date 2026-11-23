@@ -162,10 +162,19 @@ const Script = struct {
     const Step = struct { screen: zui_tour.Screen, key: ?zui.Key };
     const steps = [_]Step{
         .{ .screen = .overview, .key = null },
-        .{ .screen = .harbor, .key = .digit_2 },
-        .{ .screen = .photo_cull, .key = .digit_4 },
-        .{ .screen = .time_machine, .key = .digit_9 },
+        shortcut(.digit_2),
+        shortcut(.digit_4),
+        shortcut(.digit_9),
     };
+
+    /// Ctrl and `key`, and the screen the tour shows for it.
+    fn shortcut(comptime key: zui.Key) Step {
+        const digit = @intFromEnum(key) - @intFromEnum(zui.Key.digit_0);
+        for (kit.offered_screens) |screen| {
+            if (kit.shortcutDigit(screen) == digit) return .{ .screen = screen, .key = key };
+        }
+        @compileError("no screen of the tour answers Ctrl+" ++ @tagName(key));
+    }
 
     fn post(self: *Script, record: *zui.RecordBuilder, now: zui.Instant) void {
         if (self.done or self.pressed) return;

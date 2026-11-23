@@ -221,6 +221,8 @@ pub const Part = enum {
     /// The thumb behind the selected tab in the groove: `background`,
     /// `border`, `corner_radius`, `shadow` and `motion`.
     tab_pill_thumb,
+    /// `navigationList` itself: `gap` between its rows and headings.
+    navigation_list,
     /// A row of `navigationList`: `background`, `border`, `focus_ring`,
     /// `corner_radius`, `size[1]`, `padding`, `gap` and `text`.
     navigation_item,
@@ -228,9 +230,9 @@ pub const Part = enum {
     navigation_item_selected,
     /// A section's heading: `text`, `padding`, and `gap` above it.
     navigation_heading,
-    /// A row's count at its end: `text`.
+    /// A row's count and shortcut at its end: `text`.
     navigation_count,
-    /// The selected row's count: `text`.
+    /// The selected row's count and shortcut: `text`.
     navigation_count_selected,
     /// A crumb of `breadcrumbs` that leads back: `background`, `border`,
     /// `focus_ring`, `corner_radius`, `size[1]`, `padding` and `text`.
@@ -424,6 +426,7 @@ pub fn DesignSkinWith(comptime Ui: type, comptime ExtraRoles: type) type {
                     thumb.motion = .{ .spring = tokens.motion.toggle };
                     break :thumb thumb;
                 },
+                .navigation_list => skin.styled(.navigation_list, state),
                 .navigation_item => sized(skin.styled(.navigation_item, state), .{ 0, medium_height }),
                 .navigation_item_selected => sized(skin.styled(.navigation_item_selected, state), .{ 0, medium_height }),
                 .navigation_heading => skin.styled(.navigation_heading, state),
@@ -610,6 +613,7 @@ const Designed = struct {
         tab_pill,
         tab_pill_selected,
         tab_pill_thumb,
+        navigation_list,
         navigation_item,
         navigation_item_selected,
         navigation_heading,
@@ -712,6 +716,7 @@ const Designed = struct {
             break :selected selected;
         },
         .tab_pill_thumb = .{ .surface = .surface_raised, .shape = .control },
+        .navigation_list = .{ .gap = .xs },
         .navigation_item = .{
             .text = .on_surface,
             .type = .body,
@@ -831,6 +836,9 @@ pub const NavigationItem = struct {
     /// Shown at the row's end, such as how many items are unread; none when
     /// empty.
     count: []const u8 = "",
+    /// The keys that reach the place, shown at the row's end after its
+    /// count, such as "Ctrl+1"; none when empty.
+    shortcut: []const u8 = "",
     /// A heading, which is never selected.
     heading: bool = false,
 };
@@ -1915,13 +1923,15 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
         /// Clicking a row selects it; Up and Down move the selection and
         /// the focus with it past the headings, and Home and End reach the
         /// first and the last row. Only the selected row is in the Tab
-        /// order. Returns whether the selection changed.
+        /// order. The rows stand the `navigation_list` part's gap apart,
+        /// in `DesignSkin` the `xs` spacing tier, which grows with the
+        /// density. Returns whether the selection changed.
         ///
         /// ```zig
         /// const places = [_]zui_widgets.NavigationItem{
         ///     .{ .label = "Mail", .heading = true },
-        ///     .{ .label = "Inbox", .count = "12" },
-        ///     .{ .label = "Sent" },
+        ///     .{ .label = "Inbox", .count = "12", .shortcut = "Ctrl+1" },
+        ///     .{ .label = "Sent", .shortcut = "Ctrl+2" },
         /// };
         /// _ = widgets.navigationList(ui, .of("places"), &places, &app.place, .{ .label = "Places" });
         /// ```
@@ -1954,7 +1964,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
             ui.open(.{
                 .id = id,
                 .semantics = .{ .role = .list_box, .label = options.label },
-                .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = options.width } },
+                .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = options.width }, .child_gap = self.style(ui, .navigation_list, .idle).gap },
             });
             for (items, 0..) |item, index| {
                 if (item.heading) {
@@ -1985,9 +1995,11 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                     },
                 });
                 ui.text(item.label, singleLine(look.text));
-                if (item.count.len != 0) {
+                if (item.count.len != 0 or item.shortcut.len != 0) {
                     ui.box(.{ .layout = .{ .sizing = .{ .width = .grow } } });
-                    ui.text(item.count, singleLine(self.style(ui, if (is_selected) .navigation_count_selected else .navigation_count, state).text));
+                    const trailing = singleLine(self.style(ui, if (is_selected) .navigation_count_selected else .navigation_count, state).text);
+                    if (item.count.len != 0) ui.text(item.count, trailing);
+                    if (item.shortcut.len != 0) ui.text(item.shortcut, trailing);
                 }
                 ui.close();
             }
@@ -2247,6 +2259,11 @@ pub const previews = struct {
                 .{ .label = "Receipts" },
             }, .selected = 1 },
             .flat = Content{ .items = &.{ .{ .label = "General" }, .{ .label = "Appearance" }, .{ .label = "Privacy and security" } }, .selected = 2 },
+            .shortcuts = Content{ .items = &.{
+                .{ .label = "Inbox", .count = "12", .shortcut = "Ctrl+1" },
+                .{ .label = "Drafts", .shortcut = "Ctrl+2" },
+                .{ .label = "Sent", .shortcut = "Ctrl+3" },
+            }, .selected = 0 },
         };
 
         pub fn declare(widgets: anytype, ui: anytype, content: Content) void {

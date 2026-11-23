@@ -1,4 +1,4 @@
-//! The tour's frame: a header, a rail of screens marked by lane, the
+//! The tour's frame: a header, a rail of screens in sections by lane, the
 //! screen itself, and a performance strip that is always on screen.
 
 const std = @import("std");
@@ -22,6 +22,8 @@ const ids = zui.ids(.{
     "heartbeat",
     "inspector_toggle",
     "rail",
+    "rail.scroll",
+    "rail.screens",
     "stage",
     "strip",
     "inspector",
@@ -31,6 +33,9 @@ const ids = zui.ids(.{
 
 /// The id of the area every screen lays out in.
 pub const stage_id = ids.stage;
+/// The id of the rail's `navigationList` of screens; its row for a screen
+/// is `rail_screens_id.indexedChild("item", RailRows(kit).rowOf(screen))`.
+pub const rail_screens_id = ids.@"rail.screens";
 /// The id of the tour's outermost element.
 pub const root_id = ids.root;
 
@@ -40,6 +45,7 @@ pub const root_id = ids.root;
 pub fn Tour(comptime kit: type) type {
     const Ui = kit.Ui;
     const Shell = kit.Shell;
+    const rail_rows = RailRows(kit);
 
     const Screens = struct {
         overview: ScreenOf(.overview, "Overview", @import("screens/overview.zig")),
@@ -210,7 +216,8 @@ pub fn Tour(comptime kit: type) type {
             tour.requested_screen = offeredAfter(tour.current, 1);
         }
 
-        /// The screen `steps` places further along the rail, wrapping around.
+        /// The screen `steps` places further along `kit.offered_screens`, wrapping
+        /// around.
         fn offeredAfter(screen: Screen, steps: isize) Screen {
             const count: isize = @intCast(kit.offered_screens.len);
             const position: isize = @intCast(kit.positionOf(screen));
@@ -291,45 +298,18 @@ pub fn Tour(comptime kit: type) type {
             const colors = frame_shell.colors;
             ui.open(.{
                 .id = ids.rail,
-                .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(rail_width), .height = .grow }, .padding = .all(10), .child_gap = 4 },
+                .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(rail_width), .height = .grow } },
                 .decoration = .{ .background = colors.get(.surface), .border = .{ .color = colors.get(.outline_muted), .widths = .{ .right = 1 } } },
-                .scroll = .{},
             });
             defer ui.close();
+            const area = frame_shell.widgets.scrollArea(ui, ids.@"rail.scroll", .{ .padding = .all(10), .child_gap = 4, .label = "Screens" });
+            defer area.end(ui);
 
-            for (kit.offered_screens, 0..) |screen, index| {
-                const id: zui.Id = .indexed("rail_item", index);
-                const selected = tour.current == screen;
-                const state = ui.widgetState(id);
-                const info = kit.info(screen);
-                const lane_color = info.lane.emphasis().fill(colors);
-                ui.open(.{
-                    .id = id,
-                    .focusable = true,
-                    .cursor = .pointer,
-                    .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(40) }, .padding = .{ .left = 10, .right = 8 }, .child_gap = 10, .child_alignment = .{ .y = .center } },
-                    .decoration = .{
-                        .background = if (selected) colors.get(.surface_raised) else if (state == .hovered or state == .pressed) colors.get(.secondary_container) else null,
-                        .border = if (ui.focused(id)) .{ .color = colors.get(.focus), .widths = .all(1) } else null,
-                        .corner_radius = .all(6),
-                    },
-                });
-                ui.box(.{
-                    .layout = .{ .sizing = .{ .width = .fixed(3), .height = .fixed(24) } },
-                    .decoration = .{ .background = if (selected) lane_color else lane_color.mix(colors.get(.surface), 0.7), .corner_radius = .all(1.5) },
-                });
-                {
-                    ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow }, .child_gap = 1 } });
-                    defer ui.close();
-                    ui.text(info.title, .{ .size = 14 * frame_shell.text_scale, .font = if (selected) frame_shell.fonts.bold else frame_shell.fonts.body, .color = if (selected) colors.get(.on_surface) else colors.get(.on_surface_muted), .wrap = .none });
-                    ui.text(info.lane.name(), .{ .size = 11 * frame_shell.text_scale, .font = frame_shell.fonts.body, .color = colors.get(.on_surface_muted), .wrap = .none });
-                }
-                if (kit.shortcutDigit(screen)) |digit| frame_shell.printColored(ui, .tiny, colors.get(.on_surface_muted), "^{d}", .{digit});
-                ui.close();
-                if (ui.clicked(id)) tour.requested_screen = screen;
+            var selected = rail_rows.rowOf(tour.current);
+            if (frame_shell.widgets.navigationList(ui, rail_screens_id, &rail_rows.items, &selected, .{ .label = "Screens" })) {
+                tour.requested_screen = rail_rows.screens[selected];
             }
             frame_shell.spacer(ui);
-            frame_shell.label(ui, .tiny, "Ctrl+1..0  jump to a screen");
             frame_shell.label(ui, .tiny, "Ctrl+PgUp/PgDn  prev/next");
             frame_shell.label(ui, .tiny, "Ctrl+= / Ctrl+-  zoom");
             frame_shell.label(ui, .tiny, "Ctrl+I  frame inspector");
@@ -515,6 +495,52 @@ pub fn Tour(comptime kit: type) type {
                     .decoration = .{ .background = color },
                 });
             }
+        }
+    };
+}
+
+/// The rail's rows for `kit`'s screens: a heading for each lane, then
+/// that lane's screens in the order Ctrl+PgDn steps through them, each
+/// showing the shortcut that reaches it.
+pub fn RailRows(comptime kit: type) type {
+    const NavigationItem = kit.zui_widgets.NavigationItem;
+    const lanes = std.enums.values(shared.Lane);
+    const row_count = kit.offered_screens.len + lanes.len;
+    return struct {
+        pub const items: [row_count]NavigationItem = rows.items;
+        /// The screen each row shows; a heading's is the first of its lane.
+        pub const screens: [row_count]Screen = rows.screens;
+
+        const rows = rows: {
+            var listed: struct { items: [row_count]NavigationItem, screens: [row_count]Screen } = undefined;
+            var count: usize = 0;
+            for (lanes) |lane| {
+                var headed = false;
+                for (kit.offered_screens) |screen| {
+                    const info = kit.info(screen);
+                    if (info.lane != lane) continue;
+                    if (!headed) {
+                        listed.items[count] = .{ .label = lane.name(), .heading = true };
+                        listed.screens[count] = screen;
+                        count += 1;
+                        headed = true;
+                    }
+                    const shortcut = if (kit.shortcutDigit(screen)) |digit| std.fmt.comptimePrint("Ctrl+{d}", .{digit}) else "";
+                    listed.items[count] = .{ .label = info.title, .shortcut = shortcut };
+                    listed.screens[count] = screen;
+                    count += 1;
+                }
+            }
+            if (count != row_count) @compileError("every lane of the tour must hold a screen the renderer is offered");
+            break :rows listed;
+        };
+
+        /// The row that shows `screen`.
+        pub fn rowOf(screen: Screen) usize {
+            for (screens, items, 0..) |listed, item, row| {
+                if (listed == screen and !item.heading) return row;
+            }
+            unreachable;
         }
     };
 }

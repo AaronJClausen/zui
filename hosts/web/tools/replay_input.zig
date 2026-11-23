@@ -14,11 +14,11 @@ const kit = tour_session.kit;
 const Ui = tour_session.Ui;
 const Screen = kit.Screen;
 
-/// The rail's fifth entry, Log Tail, on a canvas 1280 by 800 CSS
-/// pixels.
+/// On Harbor's row of the rail, on a canvas 1280 by 800 CSS pixels; the
+/// first frame checks it lies there.
 const rail_entry: [2]f32 = .{ 50, 266 };
-const rail_entry_screen: Screen = .log_tail;
-const rail_entry_id: zui.Id = .indexed("rail_item", @intFromEnum(rail_entry_screen));
+const rail_entry_screen: Screen = .harbor;
+const rail_entry_id: zui.Id = kit.rail_screens_id.indexedChild("item", kit.rail.rowOf(rail_entry_screen));
 
 /// What one record must hold, its events' instants and scancodes left out,
 /// and what the tour must have done with it.

@@ -2140,18 +2140,19 @@ Cards at the raised elevation, which can act as buttons; dividers with
 an inset or a label; scroll areas whose scrollbar is thin at rest,
 widens under the pointer and fades when scrolling stops; group boxes of
 settings rows; tabs over an enum, underlined or in a pill groove; a
-sidebar's navigation list with section headings and counts; and
-breadcrumbs that return the crumb chosen. The arrow keys move the
-selection of tabs and the list, and a focused scroll area scrolls with
-the arrows, Page Up and Down, Home and End.
+sidebar's navigation list with section headings, counts and shortcuts,
+its rows a density's `xs` spacing tier apart; and breadcrumbs that
+return the crumb chosen. The arrow keys move the selection of tabs and
+the list, and a focused scroll area scrolls with the arrows, Page Up and
+Down, Home and End.
 
 `src/ui/library.zig`
 
 ```zig
 const places = [_]zui_widgets.NavigationItem{
     .{ .label = "Library", .heading = true },
-    .{ .label = "All photos", .count = "2,481" },
-    .{ .label = "Favorites" },
+    .{ .label = "All photos", .count = "2,481", .shortcut = "Ctrl+1" },
+    .{ .label = "Favorites", .shortcut = "Ctrl+2" },
 };
 
 const Tab = enum { photos, albums, settings };

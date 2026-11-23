@@ -90,6 +90,27 @@ fn Harness(comptime kit: type) type {
             return result;
         }
 
+        /// A mouse click on the center of `element_id` as the last frame
+        /// placed it, then a frame for the click's effect to show in.
+        fn click(harness: *Self, element_id: zui.Id) !void {
+            const placed = harness.frame(default_window);
+            const rect = placed.rectOf(element_id) orelse return error.NotPlaced;
+            harness.ui.release(placed);
+            const pointer: zui.Pointer = .{ .id = .mouse, .kind = .mouse, .position = .{ rect.x + rect.width / 2, rect.y + rect.height / 2 }, .at = .fromNanoseconds(harness.frame_number * std.time.ns_per_s / 60) };
+            harness.ui.release(harness.frameWith(default_window, &.{
+                .{ .pointer_move = .{ .pointer = pointer } },
+                .{ .pointer_down = .{ .pointer = pointer } },
+                .{ .pointer_up = .{ .pointer = pointer } },
+            }));
+            harness.ui.release(harness.frame(default_window));
+        }
+
+        fn pressKey(harness: *Self, key: zui.Key) void {
+            const at: zui.Instant = .fromNanoseconds(harness.frame_number * std.time.ns_per_s / 60);
+            harness.ui.release(harness.frameWith(default_window, &.{ .{ .key_down = .{ .key = key, .at = at } }, .{ .key_up = .{ .key = key, .at = at } } }));
+            harness.ui.release(harness.frame(default_window));
+        }
+
         fn settledFrame(harness: *Self, screen: tour.Screen, viewport: [2]f32) *const Ui.Frame {
             harness.tour.show(screen);
             for (0..3) |_| harness.ui.release(harness.frame(viewport));
@@ -247,6 +268,110 @@ test "the preferences screen's choices resolve the tour's tokens again, over the
     const findings = zui_design.audit(audited, .{ .page_background = tokens.colors.get(.idle).get(.background), .focus_ring_color = tokens.colors.get(.focused).get(.focus) }, room);
     for (findings.slice()) |finding| printFinding(.light, .preferences, finding);
     try testing.expectEqual(0, findings.slice().len + findings.dropped);
+}
+
+test "the rail lists every screen under its lane, and a click or Down on it shows another" {
+    const kit = KitFor(FakeRenderer(true, .pixel_grid));
+    const rail = tour.RailRows(kit);
+    for (kit.offered_screens) |screen| {
+        var heading = rail.rowOf(screen);
+        while (!rail.items[heading].heading) heading -= 1;
+        try testing.expectEqualStrings(kit.info(screen).lane.name(), rail.items[heading].label);
+        try testing.expectEqualStrings(kit.info(screen).title, rail.items[rail.rowOf(screen)].label);
+    }
+    try testing.expectEqualStrings("Ctrl+1", rail.items[rail.rowOf(.overview)].shortcut);
+    try testing.expectEqualStrings("", rail.items[rail.rowOf(.clickable_chaos)].shortcut);
+
+    var harness: Harness(kit) = .{};
+    try harness.init();
+    defer harness.deinit();
+    harness.ui.release(harness.settledFrame(.overview, default_window));
+    try harness.click(tour.rail_screens_id.indexedChild("item", rail.rowOf(.harbor)));
+    try testing.expectEqual(tour.Screen.harbor, harness.tour.current);
+    harness.pressKey(.down);
+    try testing.expectEqual(tour.Screen.x_ray, harness.tour.current);
+    harness.pressKey(.down);
+    try testing.expectEqual(tour.Screen.photo_cull, harness.tour.current);
+}
+
+test "the rail's rows are the xs tier apart at every density, and every one a target of at least 24" {
+    const kit = KitFor(FakeRenderer(true, .pixel_grid));
+    const rail = tour.RailRows(kit);
+    const expected_gaps = std.EnumArray(zui.design.Density, f32).init(.{ .compact = 2, .comfortable = 4, .roomy = 6 });
+    var harness: Harness(kit) = .{};
+    try harness.init();
+    defer harness.deinit();
+    for (std.enums.values(zui.design.Density)) |density| {
+        harness.tour.preference_choices.density = density;
+        const settled = harness.settledFrame(.overview, default_window);
+        defer harness.ui.release(settled);
+        try testing.expectEqual(expected_gaps.get(density), harness.tour.appearance.tokens.space(.xs));
+        const overview = settled.rectOf(tour.rail_screens_id.indexedChild("item", rail.rowOf(.overview))).?;
+        const preferences = settled.rectOf(tour.rail_screens_id.indexedChild("item", rail.rowOf(.preferences))).?;
+        try testing.expectApproxEqAbs(expected_gaps.get(density), preferences.y - (overview.y + overview.height), 0.01);
+        for (rail.items, 0..) |item, row| {
+            if (item.heading) continue;
+            const placed = settled.rectOf(tour.rail_screens_id.indexedChild("item", row)).?;
+            try testing.expect(placed.height >= 24);
+        }
+    }
+}
+
+/// The text of the first line in `frame` that starts with `prefix`.
+fn textStartingWith(frame: anytype, prefix: []const u8) ?[]const u8 {
+    for (frame.commands()) |command| {
+        if (command.payload == .text and std.mem.startsWith(u8, command.payload.text.content, prefix)) return command.payload.text.content;
+    }
+    return null;
+}
+
+fn semanticLabel(frame: anytype, element_id: zui.Id) ?[]const u8 {
+    for (frame.semantics()) |node| {
+        if (node.id == element_id.hash) return node.label;
+    }
+    return null;
+}
+
+test "each section of the field guide shows its own guides, counted truly, and the trail follows the selection" {
+    const kit = KitFor(FakeRenderer(true, .pixel_grid));
+    var harness: Harness(kit) = .{};
+    try harness.init();
+    defer harness.deinit();
+    harness.ui.release(harness.settledFrame(.field_guide, default_window));
+    const sections: zui.Id = .of("field_guide.sections");
+    const views: zui.Id = .of("field_guide.views");
+    const path: zui.Id = .of("field_guide.path");
+    const section_count = 6;
+
+    var first_guides: [section_count][]const u8 = undefined;
+    for (0..section_count) |section| {
+        try harness.click(sections.indexedChild("tab", section));
+        const shown = harness.frame(default_window);
+        defer harness.ui.release(shown);
+        var guides: usize = 0;
+        while (shown.rectOf(.indexed("field_guide.guide", guides)) != null) guides += 1;
+        try testing.expect(guides >= 3);
+        first_guides[section] = semanticLabel(shown, .indexed("field_guide.guide", 0)).?;
+
+        const title = semanticLabel(shown, sections.indexedChild("tab", section)).?;
+        var expected_count: [64]u8 = undefined;
+        try testing.expectEqualStrings(try std.fmt.bufPrint(&expected_count, "{d} guides in {s}", .{ guides, title }), textStartingWith(shown, try std.fmt.bufPrint(&expected_count, "{d} guide", .{guides})).?);
+        try testing.expectEqualStrings(title, semanticLabel(shown, path.indexedChild("crumb", 2)).?);
+    }
+    for (first_guides[0 .. section_count - 1], 1..) |guide, next| {
+        for (first_guides[next..]) |other| try testing.expect(!std.mem.eql(u8, guide, other));
+    }
+
+    try harness.click(views.indexedChild("tab", 1));
+    const examples = harness.frame(default_window);
+    defer harness.ui.release(examples);
+    try testing.expect(examples.rectOf(.of("field_guide.example")) != null);
+    try testing.expect(examples.rectOf(.indexed("field_guide.guide", 0)) == null);
+    var examples_shown: usize = 0;
+    for (examples.commands()) |command| {
+        if (command.payload == .text and std.mem.eql(u8, command.payload.text.content, "Examples")) examples_shown += 1;
+    }
+    try testing.expectEqual(@as(usize, 2), examples_shown);
 }
 
 test "a renderer is offered the screens and the frost it draws everything of" {

@@ -80,7 +80,8 @@ pub fn Kit(comptime spec: Spec) type {
         pub const Material = config.MaterialHandle;
         pub const draws_material_patterns = config.commands.contains(.material) and shared.offersPatterns(Material);
 
-        /// The screens this renderer draws everything of, in the rail's order.
+        /// The screens this renderer draws everything of, in the order
+        /// Ctrl+PgDn steps through them.
         pub const offered_screens: []const Screen = offered: {
             var screens: []const Screen = &.{};
             for (std.enums.values(Screen)) |screen| {
@@ -96,7 +97,12 @@ pub fn Kit(comptime spec: Spec) type {
             };
         }
 
-        /// The screen's place in the rail.
+        /// The rail's rows for these screens, and the id of the list they
+        /// are the rows of.
+        pub const rail = @import("tour.zig").RailRows(@This());
+        pub const rail_screens_id = @import("tour.zig").rail_screens_id;
+
+        /// The screen's place in `offered_screens`.
         pub fn positionOf(screen: Screen) usize {
             return std.mem.indexOfScalar(Screen, offered_screens, screen) orelse 0;
         }
@@ -117,7 +123,7 @@ pub fn Kit(comptime spec: Spec) type {
                 .log_tail => .{ .title = "Log Tail", .tagline = "Follow a busy service's log without stalling", .lane = .field_case, .features = &.{ "Stream", "Latest", "framesSinceRead" } },
                 .kanban => .{ .title = "Kanban", .tagline = "Cards dragged between lists, or moved by keys", .lane = .field_case, .features = &.{ "drag and drop", "focus", "actions" } },
                 .settings_form => .{ .title = "Settings Form", .tagline = "A form that holds up at any size and direction", .lane = .field_case, .features = &.{ "textField", "validation", "right-to-left" } },
-                .field_guide => .{ .title = "Field Guide", .tagline = "A docs browser's sidebar, tabs, cards and scroll areas", .lane = .field_case, .features = &.{ "navigationList", "tabs", "scrollArea" } },
+                .field_guide => .{ .title = "Field Guide", .tagline = "A docs browser's section tabs, trail, cards and scroll areas", .lane = .field_case, .features = &.{ "tabs", "breadcrumbs", "scrollArea" } },
                 .quiet_machine => .{ .title = "Quiet Machine", .tagline = "A busy page that declares almost no frames", .lane = .spectacle, .features = &.{ "requestFrameAt", "NextFrame", "idle" } },
                 .time_machine => .{ .title = "Time Machine", .tagline = "Scrub a session back and forth, frame by frame", .lane = .spectacle, .features = &.{ "determinism", "replay", "scrubbing" } },
                 .break_it => .{ .title = "Break It", .tagline = "Push every limit and watch nothing corrupt", .lane = .spectacle, .features = &.{ "Limits", "Diagnostics", "graceful" } },

@@ -196,7 +196,7 @@ fn declareContainersWith(widgets: anytype, ui: *Ui, scope: zui.Id) void {
     widgets.label(ui, "row");
     group.end(ui);
     _ = widgets.tabs(ui, scope.child("tabs"), &container_section, .{ .style = .pill });
-    _ = widgets.navigationList(ui, scope.child("places"), &.{ .{ .label = "heading", .heading = true }, .{ .label = "row", .count = "2" } }, &container_place, .{});
+    _ = widgets.navigationList(ui, scope.child("places"), &.{ .{ .label = "heading", .heading = true }, .{ .label = "row", .count = "2", .shortcut = "Ctrl+2" } }, &container_place, .{});
     _ = widgets.breadcrumbs(ui, scope.child("path"), &.{ "a", "b", "c", "d", "e" }, .{});
     inline for (zui_widgets.previews.all) |Component| {
         Component.declare(widgets, ui, zui_design.Permutations(Component, .glance).preview(.{}));

@@ -2273,6 +2273,37 @@ modes and `check`, also for `x86_64-windows`; raylib's tour cycle
 skipped: it is being removed from `main`. `counts` is +0.00% on every
 scenario against the parent, none of which uses these widgets.
 
+Followed up after the owner's review. GitHub's `hosts/web: test-host`
+failed with "the worker took 8 turns in 2 s on Clickable Chaos": the
+click on the rail did land there (an idle screen takes at most 3 turns
+in 2 s), but the runner's software rendering drew the wall 4 times a
+second where the check asked for 4.5; pinned to one core here it drew 2.
+`hosts/web/web/check_host.mjs` now proves the wall moves at any rate
+(more turns in 4 s than the heartbeat's 5, and at least 5% of the canvas
+changed; with reduced motion, idle and under 2% changed in a second),
+and reaches screens by shortcut rather than rail positions, each chord
+waiting until another screen shows, since a chord taken in the same
+record as another changes the screen once; `check_site.mjs` finds a rail
+row by walking down its column and shows Log Tail with Ctrl+5;
+`hosts/web/tools/replay_input.zig` takes Harbor's row from `Kit.rail`,
+and `hosts/native/examples/remote.zig` asks the tour which screen each
+digit reaches (it expected Ctrl+9 to reach Time Machine). The tour's
+rail is now `navigationList` in a `scrollArea`, a section for each lane
+(Preferences shows under Start, after the Overview, while Ctrl+PgDn
+keeps the screens' order), each row showing its shortcut.
+`NavigationItem` gains `shortcut`, drawn at the row's end after the
+count, and `Part` gains `navigation_list`, whose `gap` stands the rows
+apart: the `xs` tier in `DesignSkin`, 2, 4 and 6 at compact, comfortable
+and roomy, tested at each density in the widgets and in the tour's rail,
+whose rows are targets of at least 24 at each. The Field Guide's sidebar
+became underline `tabs` of its six sections, each with its own guides (3
+to 5 cards), example and update to follow; Overview, Examples and
+Settings sit in a pill groove beside "N guides in Section", N the cards
+the section declares; the breadcrumbs follow both,
+`Docs › Field guide › Section › View`. The separator stays "›": the tour
+loads no icon font, and loading one would change every target and the
+published page's licences.
+
 ## 11-polish:29-overlays — Overlays
 
 What floats over the page: D6 of the default design's plan.
