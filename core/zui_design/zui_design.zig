@@ -105,6 +105,11 @@ pub const Repair = repairs_file.Repair;
 /// names the lightness that passes; one a chosen accent or a chosen color
 /// vision needs is repaired.
 ///
+/// Spacing is the design's density table at `preferences.density`, and a
+/// part that draws text pads by its tiers times half of `text_scale` past
+/// 1 added to 1. No density lowers the target floors, `pointer_floor` and
+/// `touch_floor`, or narrows `focus_ring_width`.
+///
 /// ```zig
 /// var tokens: zui.design.Tokens(Ui, void) = .{};
 /// _ = zui_design.resolve(app.design, .from(ui.environment(), app.choices), &tokens);

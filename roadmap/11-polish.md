@@ -26,7 +26,7 @@ and each is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:11-profiling-guide` A profiling guide | done |
 | `11-polish:12-developer-experience-audit` A developer-experience audit | not started |
 | `11-polish:13-design-vocabulary` The design vocabulary and the appearance contract | done |
-| `11-polish:14-zui-design` `zui_design`: tokens from seeds and preferences | in progress |
+| `11-polish:14-zui-design` `zui_design`: tokens from seeds and preferences | done |
 | `11-polish:15-type-scale` The type scale | not started |
 | `11-polish:16-corner-shapes` Corner shapes | done |
 | `11-polish:17-nested-corners` Nested corners | done |
@@ -858,22 +858,22 @@ the hues and hold the fills 0.20 apart instead. Fifth, a repair a chosen
 color vision needs is never fatal at comptime, as a chosen accent's is
 not.
 
-**Status.** Slice 1 done: `core/zui_design/`, wired as a module and
-re-exported by the root, with `Preferences`, `Preferences.from` (the
-accent from `Choices` alone until `11-polish:18-system-accent`),
-`Repairs` (empty until slice 3) and `resolve`, which writes spacing from
-the density table, each shape role's radius one `CornerSize` step from
-its design's by `Preferences.corners` (`bubble` is 65,536 units, which
-emission's clamp makes a pill), the design's corner shape, target floors
-of 24 and 44 (44 for both under `pointer = .touch`), an outline of 1 and
-a focus ring of 2, `text_padding_scale` as 1 + (text_scale −
-
-1. / 2, text styles at the modular scale's sizes in the design's fonts
-   with `text_scale` to a power from 1 at `caption` to 0.5 at `display`,
-   and a measure of 66 characters of half the body size.
-   `zig build check` type-checks `zuiCheckDesignResolve` in
-   `core/tests/instantiate.zig`, which resolves at run time and at
-   comptime, in `zui.Color` and `zui.ExtendedColor`, with extra roles.
+**Status.** Done, in five slices. Slice 1 done: `core/zui_design/`,
+wired as a module and re-exported by the root, with `Preferences`,
+`Preferences.from` (the accent from `Choices` alone until
+`11-polish:18-system-accent`), `Repairs` (empty until slice 3) and
+`resolve`, which writes spacing from the density table, each shape
+role's radius one `CornerSize` step from its design's by
+`Preferences.corners` (`bubble` is 65,536 units, which emission's clamp
+makes a pill), the design's corner shape, target floors of 24 and 44 (44
+for both under `pointer = .touch`), an outline of 1 and a focus ring of
+2, `text_padding_scale` as half of `text_scale` past 1 added to 1, text
+styles at the modular scale's sizes in the design's fonts with
+`text_scale` to a power from 1 at `caption` to 0.5 at `display`, and a
+measure of 66 characters of half the body size. `zig build check`
+type-checks `zuiCheckDesignResolve` in `core/tests/instantiate.zig`,
+which resolves at run time and at comptime, in `zui.Color` and
+`zui.ExtendedColor`, with extra roles.
 
 Slice 2 done: color (`core/zui_design/palette.zig`). Each seed is a
 tonal ramp of its hue and chroma: the neutral, the accent (its hue and
@@ -973,6 +973,41 @@ to 1/512 rather than 1/4096, brought a mix of half typical and half
 `achromat` resolves down from a median of 53 to 57 µs (90th percentile
 75 µs) to 36 µs. 32 tests in `core/zui_design/tests.zig`. Slice 5,
 density, is next.
+
+Slice 5 done: density, and with it the item. Slice 1's resolve already
+met SPEC.md §18.5, so no code changed; four tests in
+`core/zui_design/tests.zig` now hold it, through `Tokens.look` on a
+component of a button (`target = .pointer`), a label that draws text, a
+close icon (`target = .touch`) and a panel. `Design.default_density` is
+the spec's table, every tier at every density, written out cell by cell
+in the test, and resolves as it is; a `Design`'s own table is still used
+when given. Density is not one factor: from `compact` to `roomy`, `xs`
+and `s` grow 3 and 2.5 times and `xl` and `xxl` 2 times, and to
+`compact` from `comfortable` the first two halve while the last two keep
+2/3 and 3/4. In every theme and contrast, at every density, at
+`text_scale` 1, 1.5 and 2, in every state, the button is 24 units on
+each side (44 under `Preferences.pointer = .touch`), the close icon 44
+and the panel unfloored, and the focused button and icon ring in `focus`
+2 units wide. The label pads by its tiers times 1, 1.25 and 1.5 at those
+text scales; the button's padding and gap, the icon's and the panel's
+are not scaled. Each criterion of the Done when is held by a test or a
+measurement: every hue's seed meeting every target in every state of
+every scheme, by "a seed of every hue meets every target"; the static
+design that cannot, by the compile error `design_status_roles_collapse`;
+the run-time pure yellow, by "a chosen pure yellow accent keeps its
+lightness"; the status fills, by "the status fills stay apart in
+lightness under every simulation"; a resolve allocating nothing, since
+`resolve` takes no allocator and runs at comptime; and the time,
+measured by a program outside the repository that resolves every token
+with six extra roles 2,001 times, alternating theme and four accents: in
+ReleaseFast, in three runs, a median of 30.3 to 31.2 µs with typical
+color vision (90th percentile 31.6 to 32.0 µs), 30.6 to 30.9 µs for
+`deutan` and 38.9 to 39.9 µs for `achromat` (90th percentile up to 41.5
+µs), and the same within 1 µs when density and `text_scale` change on
+every resolve too, under the 50 µs budget, measured while other builds
+shared the machine. 36 tests in `core/zui_design/tests.zig`. The type
+scale, `11-polish:15-type-scale`, reworks `writeTextStyles` and the
+measure.
 
 ## 11-polish:15-type-scale — The type scale
 

@@ -158,6 +158,121 @@ test "text scale reaches padding by half, captions fully and display by its squa
     try testing.expectApproxEqAbs(display * @sqrt(2.0), tokens.text_styles.get(.display).size, 0.001);
 }
 
+test "the default density table is the spec's tier table, cell by cell, and resolves as it is" {
+    const TierRow = struct { tier: design.Space, compact: f32, comfortable: f32, roomy: f32 };
+    const spec_table = [_]TierRow{
+        .{ .tier = .none, .compact = 0, .comfortable = 0, .roomy = 0 },
+        .{ .tier = .hair, .compact = 1, .comfortable = 1, .roomy = 2 },
+        .{ .tier = .xs, .compact = 2, .comfortable = 4, .roomy = 6 },
+        .{ .tier = .s, .compact = 4, .comfortable = 8, .roomy = 10 },
+        .{ .tier = .m, .compact = 8, .comfortable = 12, .roomy = 16 },
+        .{ .tier = .l, .compact = 12, .comfortable = 16, .roomy = 24 },
+        .{ .tier = .xl, .compact = 16, .comfortable = 24, .roomy = 32 },
+        .{ .tier = .xxl, .compact = 24, .comfortable = 32, .roomy = 48 },
+    };
+    try testing.expectEqual(std.enums.values(design.Space).len, spec_table.len);
+    const table = design.Design.default_density;
+    for (spec_table) |row| {
+        try testing.expectEqual(row.compact, table.get(.compact).get(row.tier));
+        try testing.expectEqual(row.comfortable, table.get(.comfortable).get(row.tier));
+        try testing.expectEqual(row.roomy, table.get(.roomy).get(row.tier));
+    }
+    for (every_density) |density| {
+        var tokens: Tokens = .{};
+        _ = zui_design.resolve(harbor, .{ .density = density }, &tokens);
+        for (spec_table) |row| {
+            const expected = switch (density) {
+                .compact => row.compact,
+                .comfortable => row.comfortable,
+                .roomy => row.roomy,
+            };
+            try testing.expectEqual(expected, tokens.space(row.tier));
+        }
+    }
+}
+
+test "density is not one factor: xs and s grow more than xl and xxl from compact to roomy, and shrink more to compact" {
+    const table = design.Design.default_density;
+    const small_tiers = [_]design.Space{ .xs, .s };
+    const large_tiers = [_]design.Space{ .xl, .xxl };
+    for (small_tiers) |small| {
+        for (large_tiers) |large| {
+            const small_growth = table.get(.roomy).get(small) / table.get(.compact).get(small);
+            const large_growth = table.get(.roomy).get(large) / table.get(.compact).get(large);
+            try testing.expect(small_growth > large_growth);
+
+            const small_shrink = table.get(.compact).get(small) / table.get(.comfortable).get(small);
+            const large_shrink = table.get(.compact).get(large) / table.get(.comfortable).get(large);
+            try testing.expect(small_shrink < large_shrink);
+        }
+    }
+}
+
+const DensityProbe = struct {
+    pub const Part = enum { button, label, close, panel };
+
+    pub const zuiAppearance = design.Appearance(Part, .{
+        .button = .{ .surface = .accent, .shape = .control, .padding = .{ .x = .m, .y = .s }, .gap = .xs, .target = .pointer },
+        .label = .{ .text = .on_accent, .type = .label, .on = .button, .padding = .{ .x = .s, .y = .xs } },
+        .close = .{ .icon = .on_accent, .on = .button, .padding = .{ .x = .xs, .y = .xs }, .target = .touch },
+        .panel = .{ .surface = .surface, .padding = .{ .x = .xl, .y = .l }, .gap = .m },
+    });
+};
+
+const every_text_scale = [_]f32{ 1, 1.5, 2 };
+
+test "a pointer target is 24 on each side and a touch target 44, at every density, and focused parts ring 2 wide" {
+    for (every_theme) |theme| {
+        for (every_contrast) |contrast| {
+            for (every_density) |density| {
+                for (every_text_scale) |text_scale| {
+                    for ([_]design.Target{ .pointer, .touch }) |pointer| {
+                        var tokens: Tokens = .{};
+                        _ = zui_design.resolve(harbor, .{ .theme = theme, .contrast = contrast, .density = density, .text_scale = text_scale, .pointer = pointer }, &tokens);
+                        const pointer_floor: f32 = if (pointer == .touch) 44 else 24;
+                        for (std.enums.values(zui.WidgetState)) |state| {
+                            try testing.expectEqual([2]f32{ pointer_floor, pointer_floor }, tokens.look(DensityProbe, .button, state).min_size);
+                            try testing.expectEqual([2]f32{ 44, 44 }, tokens.look(DensityProbe, .close, state).min_size);
+                            try testing.expectEqual([2]f32{ 0, 0 }, tokens.look(DensityProbe, .panel, state).min_size);
+                        }
+                        const focus = tokens.colors.get(.focused).get(.focus);
+                        for ([_]DensityProbe.Part{ .button, .close }) |part| {
+                            const ring = tokens.look(DensityProbe, part, .focused).decoration.border.?;
+                            try testing.expectEqual(zui.Edges.all(2), ring.widths);
+                            try testing.expect(ring.color.eql(focus));
+                        }
+                        try testing.expectEqual(null, tokens.look(DensityProbe, .panel, .focused).decoration.border);
+                    }
+                }
+            }
+        }
+    }
+}
+
+test "a part that draws text pads by its tiers times half of text scale past 1, and no other part is scaled" {
+    for (every_density) |density| {
+        const tiers = design.Design.default_density.get(density);
+        for (every_text_scale) |text_scale| {
+            var tokens: Tokens = .{};
+            _ = zui_design.resolve(harbor, .{ .density = density, .text_scale = text_scale }, &tokens);
+            const text_padding_scale = 1 + (text_scale - 1) / 2;
+            for (std.enums.values(zui.WidgetState)) |state| {
+                try testing.expectEqual(
+                    zui.Edges.symmetric(tiers.get(.s) * text_padding_scale, tiers.get(.xs) * text_padding_scale),
+                    tokens.look(DensityProbe, .label, state).padding,
+                );
+                try testing.expectEqual(zui.Edges.symmetric(tiers.get(.m), tiers.get(.s)), tokens.look(DensityProbe, .button, state).padding);
+                try testing.expectEqual(tiers.get(.xs), tokens.look(DensityProbe, .button, state).gap);
+                try testing.expectEqual(zui.Edges.all(tiers.get(.xs)), tokens.look(DensityProbe, .close, state).padding);
+                try testing.expectEqual(zui.Edges.symmetric(tiers.get(.xl), tiers.get(.l)), tokens.look(DensityProbe, .panel, state).padding);
+            }
+        }
+    }
+    var doubled: Tokens = .{};
+    _ = zui_design.resolve(harbor, .{ .text_scale = 2 }, &doubled);
+    try testing.expectEqual(zui.Edges.symmetric(12, 6), doubled.look(DensityProbe, .label, .idle).padding);
+}
+
 test "text styles take the design's fonts in the context's FontId" {
     var with_fonts = harbor;
     with_fonts.type.fonts = .{ .regular = 0, .strong = 1, .monospace = 2 };

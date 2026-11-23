@@ -2259,26 +2259,30 @@ pub var tokens: zui.design.Tokens(Ui, DarkroomRoles) = .{};
 OKLCH, and every role is a lightness on one in light, dark and high
 contrast; a hovered, focused or pressed fill moves toward the role drawn
 on it, and a disabled one greys and fades. Spacing comes from the
-density the user chose, corners from the design's shape table moved a
-size sharper or rounder at the user's word, and target floors stay at 24
-units, 44 for touch. Your own roles take the colors of the roles their
-pairs name. `resolve` allocates nothing, and runs at comptime as well as
-at run time, so a design's dark high-contrast tokens can be a constant.
-Every pair of a role on its partner is held to APCA's lightness contrast
-and WCAG 2's ratio at once: Lc 75 and 4.5:1 for text, Lc 45 and 3:1 for
-outlines and the focus ring, more under high contrast, in every state's
-layer. A design whose own seeds miss a target fails to compile with a
-message naming the pair, the scheme and the lightness that would pass; a
-color that arrives at run time, such as the user's accent, keeps its own
-lightness and is moved until it passes, and `resolve` returns each
-repair. Under simulated protanopia, deuteranopia, tritanopia and
-achromatopsia, the danger, warning and success fills stay at least 0.15
-apart in lightness, so they can be told apart without their hue; a user
-who chose a color vision gets status hues moved off the axis they
-confuse, or the fills held further apart. Pairs your components list in
-`zuiDistinguish` are checked against your design with
-`zui_design.checkDistinguished`, and one that would look alike without
-color fails to compile unless a part names its `.cue`.
+density the user chose, which moves the small tiers further than the
+large so grouping survives a compact layout; corners come from the
+design's shape table moved a size sharper or rounder at the user's word;
+target floors stay at 24 units, 44 for touch, and the focus ring at 2,
+at every density; and a part that draws text pads by half of the user's
+text scale past 1, so large text has room. Your own roles take the
+colors of the roles their pairs name. `resolve` allocates nothing, and
+runs at comptime as well as at run time, so a design's dark
+high-contrast tokens can be a constant. Every pair of a role on its
+partner is held to APCA's lightness contrast and WCAG 2's ratio at once:
+Lc 75 and 4.5:1 for text, Lc 45 and 3:1 for outlines and the focus ring,
+more under high contrast, in every state's layer. A design whose own
+seeds miss a target fails to compile with a message naming the pair, the
+scheme and the lightness that would pass; a color that arrives at run
+time, such as the user's accent, keeps its own lightness and is moved
+until it passes, and `resolve` returns each repair. Under simulated
+protanopia, deuteranopia, tritanopia and achromatopsia, the danger,
+warning and success fills stay at least 0.15 apart in lightness, so they
+can be told apart without their hue; a user who chose a color vision
+gets status hues moved off the axis they confuse, or the fills held
+further apart. Pairs your components list in `zuiDistinguish` are
+checked against your design with `zui_design.checkDistinguished`, and
+one that would look alike without color fails to compile unless a part
+names its `.cue`.
 
 `src/appearance.zig`
 
