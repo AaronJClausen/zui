@@ -60,7 +60,10 @@ const lines_per_block = 1000;
 /// One kilobyte of text, declared as many times as the text slider asks.
 const text_block: *const [1024]u8 = ("Keep what fits, report it, never corrupt. " ** 25)[0..1024];
 /// A thousand one-character lines: one element, a thousand render commands.
-const line_block: *const [2 * lines_per_block]u8 = ".\n" ** lines_per_block;
+/// A full block, since its sides land on whole pixels: a glyph with
+/// antialiased sides stacked a thousand deep drifts on a rasterizer that
+/// rounds each blend twice, as llvmpipe does.
+const line_block = "█\n" ** lines_per_block;
 const boxes_per_row = 128;
 const effects_per_row = 40;
 const line_blocks_per_row = 12;

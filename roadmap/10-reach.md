@@ -39,7 +39,7 @@ decorations; many windows.
 | `10-reach:07-x11-ibus` The input method on X11 over IBus's D-Bus protocol | waiting on CI |
 | `10-reach:08-ring-edges-agree` WebGL and sokol agree on a ring's inner edge | done |
 | `10-reach:09-turned-edges-agree` WebGL and sokol agree on a turned box's edges | done |
-| `10-reach:10-light-lab-on-llvmpipe` Light & Depth's text within llvmpipe's tolerance | not started |
+| `10-reach:10-light-lab-on-llvmpipe` Break It's line blocks within llvmpipe's tolerance | done |
 
 ---
 
@@ -2399,29 +2399,50 @@ tests, `check` native, for `wasm32-freestanding`, `x86_64-windows` and
 `check`; the native tour's cycle; `test-all` and `check-all` pass. Only
 CI can confirm its own container's run.
 
-## 10-reach:10-light-lab-on-llvmpipe — Light & Depth's text within llvmpipe's tolerance
+## 10-reach:10-light-lab-on-llvmpipe — Break It's line blocks within llvmpipe's tolerance
 
 **Grounding** (at the commit of `10-reach:09-turned-edges-agree`). With
 all fifteen screens compared, `test-draw` passes against the sokol
 renderer on NVIDIA, but against a reference drawn on llvmpipe, as CI
-draws it, frame 228 (Light & Depth) fails with one sample per pixel: 2
-pixels differ by more than 5, by at most 6 levels, at (671,603) and
-(682,603), the top-right corner pixel of two identical glyphs, with no
-transform there (drawn 129,146,173, reference 125,140,173). It fails the
-same way before `10-reach:09-turned-edges-agree`. llvmpipe rounds
+draws it, frame 228 fails with one sample per pixel. Frame 228 is
+`24 * 9 + 12`, Break It, the tenth case of `Screen`
+(`apps/tour/src/shared.zig:29-44`). 2 pixels differ by more than 5, by
+at most 6 levels, at (671,603) and (682,603), the top-right corner pixel
+of the two columns of Break It's render-command load (drawn 129,146,173,
+reference 125,140,173). Each column is one text element of a thousand
+one-character lines 0.02 units apart (`lineBlocks` in
+`apps/tour/src/screens/break_it.zig`), so each pixel at its edge blends
+the same antialiased glyph edge dozens of times. llvmpipe rounds
 `src * alpha` and `dst * (1 - alpha)` separately in each 8-bit blend,
 which is why the owner let a color differ by 5 against llvmpipe
 (`09-seeing-the-ui`, `roadmap/decisions.md`); frame 228 needed exactly 5
 then, and `11-polish:19-default-design`'s colors take it to 6.
 
-**Plan.** Find the translucent layers stacked under those glyphs on
-Light & Depth, and draw them so that llvmpipe's double rounding stays
-within 5, by fewer layers or opaque ones where the look allows, without
-raising the tolerance, which the owner chose to keep.
+**Plan.** Draw Break It's line blocks so that no pixel blends a partly
+covered glyph edge many times over, keeping a thousand render commands
+per block, none culled, without raising the tolerance, which the owner
+chose to keep.
 
 **Done when.** `test-draw` passes against an llvmpipe reference here and
 in CI, and on NVIDIA.
 
 **Spec.** §13.
 
-**Status.** Not started.
+**Status.** Done. The label names Light & Depth because the first
+Grounding misread frame 228 as that screen; it is Break It, and the
+label is kept because labels are never renamed. Each line of a block is
+now a full block, `█`, in place of `.`: its sides fall on the advance,
+whole pixels in the mono face at size 10, so the thousand layers cover
+the pixels under them fully or not at all, and only the column's top and
+bottom rows blend partly. Spacing alone did not do it: lines 0.1 apart,
+100 units for a block in place of 20, failed on 198 pixels, the whole
+right edge of each column, by 6 (drawn 167,190,224, reference
+168,184,224). With the block, frame 228 against llvmpipe (LLVM 23.1.3)
+differs by at most 4 with one sample and 1 with four, and every frame
+passes there and on NVIDIA. The columns are 6 units wide in place of 2
+and keep their place; raylib's screenshots before and after look alike
+otherwise. On the same llvmpipe run, frame 276, Light & Depth, has 4
+pixels differing by more than 5 (by up to 46) with four samples and
+without text, and 3 (by up to 146) with one; each matches a neighbour
+within 1, so none counts against the allowance of 4 and 1 unmatched
+pixels.
