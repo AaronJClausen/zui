@@ -38,7 +38,7 @@ decorations; many windows.
 | `10-reach:06-platform-owned-loop` Hosts whose platform owns the loop | done |
 | `10-reach:07-x11-ibus` The input method on X11 over IBus's D-Bus protocol | waiting on CI |
 | `10-reach:08-ring-edges-agree` WebGL and sokol agree on a ring's inner edge | done |
-| `10-reach:09-turned-edges-agree` WebGL and sokol agree on a turned box's edges | not started |
+| `10-reach:09-turned-edges-agree` WebGL and sokol agree on a turned box's edges | done |
 
 ---
 
@@ -2368,4 +2368,32 @@ screens compared.
 
 **Spec.** §13, §15.
 
-**Status.** Not started.
+**Status.** Done. The two renderers turned each card by the same matrix
+and traced the same points; what disagreed was again where the
+rasterizers put them. `10-reach:08-ring-edges-agree` snapped each
+outline point to a sixteenth of a pixel in the card's own units, before
+its transform, so a turned or scaled point landed off the grid in the
+window, where SwiftShader moved it by up to a 32nd of a pixel and the
+GPU did not. The 763 pixels that differed on NVIDIA, by up to 94 levels,
+were single pixels along the cards' straight edges, the border's color
+in one image and the wall's in the other. Both renderers now snap a
+point where it lands in the window: `SubpixelGrid.through` carries the
+transform and its inverse, and `snap` maps the point to the window,
+rounds it there and maps it back (`renderers/sokol/src/renderer.zig`,
+set on each `transform_begin` and `transform_end`; the same in
+`renderers/webgl/src/draw_list.zig`). A transform that flattens the
+plane is not snapped. `test-draw` passes here on NVIDIA with all fifteen
+screens compared, at the tour's state and with the cards' wave moved by
+0.37 s and, separately, turned by a further 11.3° and scaled by 0.03
+less (changes in `clickable_chaos.zig` that were reverted). Against a
+reference drawn on llvmpipe, as CI's is, frame 324 matches at all three
+(no pixel by more than 2 with one sample). Outside this item, frame 228
+fails there with one sample: 2 pixels differ by more than 5, by at most
+6 levels, at (671, 603) and (682, 603), the top-right corner pixel of
+two identical glyphs with no transform there. It fails the same way at
+`226801c` without this change, and passes against NVIDIA.
+`renderers/webgl` tests in three modes and `check`; `renderers/sokol`
+tests, `check` native, for `wasm32-freestanding`, `x86_64-windows` and
+`-Dgl=true`, and `conformance`; `hosts/web` tests in three modes and
+`check`; the native tour's cycle; `test-all` and `check-all` pass. Only
+CI can confirm its own container's run.

@@ -365,7 +365,8 @@ pub const Renderer = struct {
         sgl.ortho(0, viewport[0], viewport[1], 0, -1, 1);
         const pixels_per_unit = params.scale * params.zoom;
         self.prepareGlyphs(commands, pixels_per_unit);
-        const tracing: Tracing = .{ .corner_segments = self.corner_segments, .subpixel_grid = .of(viewport, pixels_per_unit) };
+        const window_grid: SubpixelGrid = .of(viewport, pixels_per_unit);
+        var tracing: Tracing = .{ .corner_segments = self.corner_segments, .subpixel_grid = window_grid };
 
         var recorder: LayerRecorder = .{ .renderer = self };
         recorder.begin();
@@ -425,10 +426,12 @@ pub const Renderer = struct {
                 .transform_begin => |transform| {
                     if (!transforms.push(transform.affine(bounds))) self.transform_overflows += 1;
                     loadModelview(transforms.current());
+                    tracing.subpixel_grid = window_grid.through(transforms.current());
                 },
                 .transform_end => {
                     transforms.pop();
                     loadModelview(transforms.current());
+                    tracing.subpixel_grid = window_grid.through(transforms.current());
                 },
             }
         }
@@ -878,17 +881,21 @@ const Tracing = struct {
     subpixel_grid: SubpixelGrid,
 };
 
-/// A sixteenth of a pixel along each axis of the target. SwiftShader snaps
-/// a vertex to a sixteenth of a pixel and a GPU to a 256th, so a point off
-/// the grid is moved by up to a 32nd of a pixel in one and not the other,
-/// and a pixel whose center is that close to an edge is drawn on either
-/// side of it.
+/// A sixteenth of a pixel along each axis of the target, seen from inside
+/// the transforms a point is drawn through. SwiftShader snaps a vertex to a
+/// sixteenth of a pixel and a GPU to a 256th, so a point off the grid is
+/// moved by up to a 32nd of a pixel in one and not the other, and a pixel
+/// whose center is that close to an edge is drawn on either side of it. A
+/// point is snapped where it lands in the window, since a turned or scaled
+/// point snapped before its transform is off the grid after it.
 const SubpixelGrid = struct {
     const steps_per_pixel = 16;
     const none: SubpixelGrid = .{ .steps_per_unit = .{ 0, 0 } };
 
     /// Zero along an axis the target has no pixels on, which is not snapped.
     steps_per_unit: [2]f32,
+    to_window: zui.Affine = .identity,
+    from_window: zui.Affine = .identity,
 
     /// For a target of `viewport` units drawn into its pixels rounded to
     /// whole ones.
@@ -901,12 +908,19 @@ const SubpixelGrid = struct {
         return .{ .steps_per_unit = steps_per_unit };
     }
 
+    /// The same grid for points drawn through `to_window`. A transform
+    /// that flattens the plane draws nothing with area, and is not snapped.
+    fn through(self: SubpixelGrid, to_window: zui.Affine) SubpixelGrid {
+        const from_window = to_window.inverse() orelse return .none;
+        return .{ .steps_per_unit = self.steps_per_unit, .to_window = to_window, .from_window = from_window };
+    }
+
     fn snap(self: SubpixelGrid, point: [2]f32) [2]f32 {
-        var snapped = point;
+        var snapped = self.to_window.apply(point);
         for (&snapped, self.steps_per_unit) |*coordinate, steps| {
             if (steps > 0) coordinate.* = @round(coordinate.* * steps) / steps;
         }
-        return snapped;
+        return self.from_window.apply(snapped);
     }
 };
 
@@ -1071,6 +1085,18 @@ test "a subpixel grid snaps to a sixteenth of a physical pixel, and not along an
     try std.testing.expectEqual([2]f32{ 3.53125, 7.0 }, doubled.snap(.{ 3.54, 7.01 }));
     const flat: SubpixelGrid = .of(.{ 100, 0 }, 1);
     try std.testing.expectEqual([2]f32{ 3.5625, 7.01 }, flat.snap(.{ 3.54, 7.01 }));
+}
+
+test "a point drawn through a turn is snapped where it lands in the window" {
+    const turn = zui.Transform{ .rotation = 0.4, .scale = @splat(0.9), .translation = .{ 3.3, -1.7 } };
+    const to_window = turn.affine(.{ .x = 40, .y = 60, .width = 30, .height = 20 });
+    const grid = SubpixelGrid.of(.{ 100, 100 }, 2).through(to_window);
+    const in_window = to_window.apply(grid.snap(.{ 51.37, 63.81 }));
+    for (in_window) |coordinate| {
+        const steps = coordinate * 32;
+        try std.testing.expectApproxEqAbs(@round(steps), steps, 1e-3);
+    }
+    try std.testing.expectEqual(SubpixelGrid.none, SubpixelGrid.of(.{ 100, 100 }, 2).through(.{ .x_axis = .{ 0, 0 }, .y_axis = .{ 0, 0 } }));
 }
 
 test "outlines keep the same point count for any radius" {

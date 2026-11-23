@@ -12,10 +12,10 @@ const SplitWeight = backdrop_blur.SplitWeight;
 /// rectangle, so the page draws a frame with one vertex buffer and one draw
 /// call per batch. The geometry is the sokol renderer's, triangle for
 /// triangle: round and continuous corners in eight segments, chamfers in
-/// one, their points on a sixteenth of a pixel, borders inside their bounds, gradients in bands of OKLab color,
-/// shadows faded in rings, text as a textured quad per glyph, and
-/// transforms applied to every vertex.
-/// A backdrop blur runs before the batch that samples it, and a material
+/// one, their points on a sixteenth of a pixel of the window, borders
+/// inside their bounds, gradients in bands of OKLab color, shadows faded in
+/// rings, text as a textured quad per glyph, and transforms applied to
+/// every vertex. A backdrop blur runs before the batch that samples it, and a material
 /// is a batch of its own, drawn by its pattern. Text is drawn where
 /// `zui_glyphs` lays it out, from `glyph_atlas`; text in a font the text
 /// has no face for is not drawn. Images are not laid out yet. Memory is
@@ -212,11 +212,12 @@ pub const DrawList = struct {
     /// needs.
     pub fn layOut(self: *DrawList, commands: anytype, params: zui.FrameParams, text: anytype) void {
         const pixels_per_unit = params.scale * params.zoom;
+        const window_grid: SubpixelGrid = .of(params.viewport, pixels_per_unit);
         var builder: Builder = .{
             .list = self,
             .viewport = params.viewport,
             .pixels_per_unit = pixels_per_unit,
-            .subpixel_grid = .of(params.viewport, pixels_per_unit),
+            .subpixel_grid = window_grid,
         };
         const fonts = zui_glyphs.Fonts.of(text);
         self.glyph_atlas.addFrameGlyphs(fonts, commands, builder.pixels_per_unit);
@@ -230,7 +231,6 @@ pub const DrawList = struct {
         var transforms: TransformStack = .{};
         for (commands) |command| {
             const bounds = command.bounds;
-            builder.to_window = transforms.current();
             builder.beginShape();
             switch (command.payload) {
                 .rectangle => |rectangle| builder.fillRectangle(bounds, .of(rectangle), colorOf(rectangle.color)),
@@ -250,10 +250,14 @@ pub const DrawList = struct {
                     clips.pop();
                     builder.beginBatch(clips.current());
                 },
-                .transform_begin => |transform| if (!transforms.push(transform.affine(bounds))) {
-                    self.transform_overflows += 1;
+                .transform_begin => |transform| {
+                    if (!transforms.push(transform.affine(bounds))) self.transform_overflows += 1;
+                    builder.drawThrough(transforms.current(), window_grid);
                 },
-                .transform_end => transforms.pop(),
+                .transform_end => {
+                    transforms.pop();
+                    builder.drawThrough(transforms.current(), window_grid);
+                },
                 else => {},
             }
             builder.endShape();
@@ -269,6 +273,11 @@ const Builder = struct {
     to_window: zui.Affine = .identity,
     shape_start: u32 = 0,
     shape_overflowed: bool = false,
+
+    fn drawThrough(self: *Builder, to_window: zui.Affine, window_grid: SubpixelGrid) void {
+        self.to_window = to_window;
+        self.subpixel_grid = window_grid.through(to_window);
+    }
 
     fn beginShape(self: *Builder) void {
         self.shape_start = self.list.vertex_count;
@@ -749,15 +758,21 @@ const Outline = struct {
 };
 
 /// The sokol renderer's grid, step for step: a sixteenth of a pixel along
-/// each axis of the target. SwiftShader snaps a vertex to a sixteenth of a
-/// pixel and a GPU to a 256th, so a point off the grid is moved by up to a
-/// 32nd of a pixel in one and not the other, and a pixel whose center is
-/// that close to an edge is drawn on either side of it.
+/// each axis of the target, seen from inside the transforms a point is
+/// drawn through. SwiftShader snaps a vertex to a sixteenth of a pixel and
+/// a GPU to a 256th, so a point off the grid is moved by up to a 32nd of a
+/// pixel in one and not the other, and a pixel whose center is that close
+/// to an edge is drawn on either side of it. A point is snapped where it
+/// lands in the window, since a turned or scaled point snapped before its
+/// transform is off the grid after it.
 const SubpixelGrid = struct {
     const steps_per_pixel = 16;
+    const none: SubpixelGrid = .{ .steps_per_unit = .{ 0, 0 } };
 
     /// Zero along an axis the target has no pixels on, which is not snapped.
     steps_per_unit: [2]f32,
+    to_window: zui.Affine = .identity,
+    from_window: zui.Affine = .identity,
 
     /// For a target of `viewport` units drawn into its pixels rounded to
     /// whole ones.
@@ -770,12 +785,19 @@ const SubpixelGrid = struct {
         return .{ .steps_per_unit = steps_per_unit };
     }
 
+    /// The same grid for points drawn through `to_window`. A transform
+    /// that flattens the plane draws nothing with area, and is not snapped.
+    fn through(self: SubpixelGrid, to_window: zui.Affine) SubpixelGrid {
+        const from_window = to_window.inverse() orelse return .none;
+        return .{ .steps_per_unit = self.steps_per_unit, .to_window = to_window, .from_window = from_window };
+    }
+
     fn snap(self: SubpixelGrid, point: [2]f32) [2]f32 {
-        var snapped = point;
+        var snapped = self.to_window.apply(point);
         for (&snapped, self.steps_per_unit) |*coordinate, steps| {
             if (steps > 0) coordinate.* = @round(coordinate.* * steps) / steps;
         }
-        return snapped;
+        return self.from_window.apply(snapped);
     }
 };
 
@@ -870,6 +892,18 @@ const TransformStack = struct {
         }
     }
 };
+
+test "a point drawn through a turn is snapped where it lands in the window" {
+    const turn = zui.Transform{ .rotation = 0.4, .scale = @splat(0.9), .translation = .{ 3.3, -1.7 } };
+    const to_window = turn.affine(.{ .x = 40, .y = 60, .width = 30, .height = 20 });
+    const grid = SubpixelGrid.of(.{ 100, 100 }, 2).through(to_window);
+    const in_window = to_window.apply(grid.snap(.{ 51.37, 63.81 }));
+    for (in_window) |coordinate| {
+        const steps = coordinate * 32;
+        try std.testing.expectApproxEqAbs(@round(steps), steps, 1e-3);
+    }
+    try std.testing.expectEqual(SubpixelGrid.none, SubpixelGrid.of(.{ 100, 100 }, 2).through(.{ .x_axis = .{ 0, 0 }, .y_axis = .{ 0, 0 } }));
+}
 
 test "a turned glyph's texture coordinates at each corner are the corner's" {
     const quarter_turn: zui.Affine = .{ .x_axis = .{ 0, 1 }, .y_axis = .{ -1, 0 }, .offset = .{ 100, 20 } };
