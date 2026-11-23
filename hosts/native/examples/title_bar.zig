@@ -4,7 +4,8 @@
 //! maximizes it on a double click and opens its window menu on a secondary
 //! click. Windows also snaps it with Win+arrows, shows snap layouts over the
 //! maximize button, and resizes it from every edge; a Wayland compositor
-//! resizes it from the grips the application declares.
+//! or an X11 window manager resizes it from the grips the application
+//! declares.
 //!
 //! ```sh
 //! zig build title-bar                          # interactive window
@@ -168,8 +169,8 @@ const TitleBarApp = struct {
         return ui.clicked(id);
     }
 
-    pub fn zuiObserve(app: *TitleBarApp, _: *const Ui, frame: *const Ui.Frame) void {
-        if (app.check) |*check| check.observe(frame);
+    pub fn zuiObserve(app: *TitleBarApp, ui: *const Ui, frame: *const Ui.Frame) void {
+        if (app.check) |*check| check.observe(ui, frame);
     }
 
     pub fn zuiLoader(app: *TitleBarApp, _: *const Ui, _: std.Io) void {
@@ -198,11 +199,13 @@ const Check = struct {
     const Answer = if (builtin.os.tag == .windows) win32.LRESULT else ?zui.ChromeKind;
 
     frames: u32 = 0,
+    custom_title_bar: bool = false,
     centres: [expectations.len]?[2]f32 = @splat(null),
     failures: u32 = 0,
     done: bool = false,
 
-    fn observe(check: *Check, frame: *const Ui.Frame) void {
+    fn observe(check: *Check, ui: *const Ui, frame: *const Ui.Frame) void {
+        check.custom_title_bar = ui.environment().custom_title_bar;
         for (expectations, &check.centres) |expectation, *centre| {
             const rect = frame.rectOf(expectation.id) orelse continue;
             centre.* = .{ rect.x + rect.width / 2, rect.y + rect.height * 0.75 };
@@ -213,6 +216,13 @@ const Check = struct {
         check.frames += 1;
         if (check.done) return;
         if (check.frames < 3) return host.zuiWaker().wake();
+        defer host.close();
+        check.done = true;
+        if (!check.custom_title_bar) {
+            std.debug.print("title-bar check: the host reports no custom title bar, so the system keeps its own\n", .{});
+            check.failures += 1;
+            return;
+        }
         for (expectations, check.centres) |expectation, centre| {
             const at = centre orelse {
                 std.debug.print("title-bar check: {s} was not drawn\n", .{expectation.name});
@@ -226,8 +236,6 @@ const Check = struct {
                 check.failures += 1;
             }
         }
-        check.done = true;
-        host.close();
     }
 
     fn expectedAnswer(kind: ?zui.ChromeKind) Answer {

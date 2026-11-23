@@ -1390,7 +1390,10 @@ host asks the compositor for client-side decorations and hands presses
 on the title bar and the edges to it; it draws no border, so declare the
 `.resize_*` grips you want resized from. A compositor that insists on
 drawing its own title bar, as Hyprland does, gets it, and
-`custom_title_bar` is false.
+`custom_title_bar` is false. On X11 the host asks the window manager for
+no decorations through `_MOTIF_WM_HINTS` and hands presses to it through
+`_NET_WM_MOVERESIZE`; `custom_title_bar` is true only where the window
+manager supports that and frames the window with nothing of its own.
 
 `src/ui/title_bar.zig`
 

@@ -622,6 +622,87 @@ and `showcase -- --frames 60` on X11. Not run: typing through fcitx5
 into the tour on X11, which this sub-slice does not reach. The custom
 title bar on X11 is next.
 
+Slice 9's fourth sub-slice, the custom title bar on X11 with minimize
+and maximize, is done in `hosts/native/` alone
+(`hosts/native/linux/chrome.zig`, `hosts/native/linux/x11_chrome.zig`,
+`hosts/native/linux/x11_host.zig`, `hosts/native/linux/x11.zig`,
+`hosts/native/linux/host.zig`, `hosts/native/linux/x11_conformance.zig`,
+`hosts/native/examples/title_bar.zig`). What Wayland and X11 share moved
+out of the Wayland host's `WindowChrome` into `chrome.zig`: the
+snapshot's hit test (`ChromeSnapshot.windowManagerKindAt`, which drops
+`.client` and, for a window that is not resizable, the edges), and
+`ChromePresses`, the press and release bookkeeping and the double click
+measured press to press, which answers a press with a `ChromeGesture`
+(move, resize from an edge, the window menu at a point, or toggle
+maximize) that each backend sends in its own protocol; the Wayland
+host's behaviour, fields and tests are unchanged. `X11Host` declares
+`zuiChromeRegions`, `chromeKindAt`, `minimize` and `toggleMaximized` and
+`custom_title_bar` among its capabilities, and `zui_host.Host`
+dispatches both backends to them. A `.custom` window sets
+`_MOTIF_WM_HINTS` to decorations only, none, before it is mapped, and
+reports `custom_title_bar` where the root window's `_NET_SUPPORTED`
+lists `_NET_WM_MOVERESIZE` and the window's `_NET_FRAME_EXTENTS` gives
+it no border, both read at open and again on their `PropertyNotify`, for
+the reasons under *Decided here*. Up to 256 regions are kept in physical
+pixels. A primary press on the title bar or an edge ungrabs the pointer
+and sends `_NET_WM_MOVERESIZE` to the root window with
+`SubstructureRedirect|SubstructureNotify`, at the press's root position
+(kept from each `ButtonPress` and `MotionNotify`), with the direction (0
+to 7 for the edges, 8 to move), the X button and source 1; a second
+within `zui.Gestures.double_tap_seconds` sends `_NET_WM_STATE` adding or
+removing `_NET_WM_STATE_MAXIMIZED_VERT` and `_HORZ`, as maximize does; a
+secondary press on the title bar sends `_GTK_SHOW_WINDOW_MENU` at its
+root position where `_NET_SUPPORTED` lists it, and reaches zui where it
+does not; minimize is `WM_CHANGE_STATE` with `IconicState`. Neither a
+press handed to the window manager nor its release reaches the record; a
+caption button's press does, and its release arrives as `pointer_cancel`
+while the host works the button, as on Wayland. `window_maximized` is
+true while the window's `_NET_WM_STATE` holds both maximized states.
+`zui_host.Host`'s `init` on X11 now clears the test-only
+`forced_window_manager_support`, which a `.x11 = undefined` left as
+garbage; `title-bar -- --check` found it, and the chooser's test pins
+it. The example's `--check` now says when the host reports no custom
+title bar, rather than that each part was not drawn. Nothing allocates
+after `init`. 143 of 145 tests pass in Debug and ReleaseSafe on Wayland
+and with `ZUI_HOST_BACKEND=x11 DISPLAY=:0`, the opt-in one and the
+stand-in window manager's skipped; 13 are new: a unit test of
+`ChromePresses`' double click, four of `x11_chrome` (`_NET_SUPPORTED`'s
+atoms, the moves and the frame deciding `custom_title_bar`, both
+maximized states, the directions), and eight on X11, with the window
+manager's support forced where they do not stand in for one: the Motif
+hint on a `.custom` window and its absence on a native one, which keeps
+no chrome and whose presses reach zui; no custom title bar without
+`_NET_WM_MOVERESIZE` or with a frame of the window manager's; a press on
+the title bar and on each of the eight edges as `_NET_WM_MOVERESIZE`
+from its root position, none of them reaching the record; the window
+menu where offered and a secondary press reaching zui where not; the
+caption buttons iconifying, maximizing, closing, and a release off the
+button working nothing; the double click maximizing, then restoring once
+`_NET_WM_STATE` says maximized; `window_maximized` following the
+`_NET_WM_STATE` a second connection writes and deletes; and a test that
+stands in for the window manager from a second connection, which selects
+`SubstructureRedirect` on the root, lists `_NET_WM_MOVERESIZE` and
+`_GTK_SHOW_WINDOW_MENU` in `_NET_SUPPORTED`, receives each request with
+the fields above, and sets `_NET_FRAME_EXTENTS`, after which
+`custom_title_bar` is false. Under Hyprland's Xwayland the window
+manager holds the redirect, so that test skips with a message
+(BadAccess); it ran here against a second, rootless Xwayland on `:57`
+with no window manager, where 144 of 145 pass in Debug and ReleaseSafe,
+and CI's `xvfb-run` leg runs it. One ReleaseSafe run on `:0` failed the
+clipboard's `INCR` test once and passed twice after, with other workers
+using `:0`'s `CLIPBOARD` at the time. `title-bar -- --check` passes on
+Wayland and X11 (on `:57`, with no window manager, it fails saying the
+system keeps its title bar); `services` and `theme` `-- --check`, the
+tour's cycle (300 frames, no layer or glyph atlas overflow, clean
+diagnostics) and `showcase -- --frames 60` pass on both; the checks pass
+for the host, `x86_64-windows` and `aarch64-windows`. Tour idle: X11 4.0
+and 6.3 ms of CPU over 10 s, Wayland 7.8 and 9.3 ms, 1 frame, no wakes,
+at a load average of about 3 to 5 with other builds running. Not run:
+moving, resizing or maximizing a shown window by hand under a window
+manager that honours the Motif hint (Hyprland's Xwayland lists
+`_NET_WM_MOVERESIZE` but not `_GTK_SHOW_WINDOW_MENU`), and a window
+manager that ignores the hint. Many windows on X11 are next.
+
 Decided here:
 
 - **libwayland-client, linked,** as sokol-zig links it, since the
@@ -722,6 +803,28 @@ Decided here:
   queue and reaches the most input methods, so it is the path, queued as
   `10-reach:07-x11-ibus`. Until then typed text comes through xkb, now
   with xkbcommon's compose sequences, shared by both backends.
+- **An X11 custom title bar needs the window manager's moves, and gives
+  way to its frame.** `custom_title_bar` is true only where
+  `_NET_SUPPORTED` lists `_NET_WM_MOVERESIZE`, since a title bar the
+  application draws without it would leave the window unmovable, and
+  while `_NET_FRAME_EXTENTS` is unset or zero: a window manager that
+  ignores the Motif hint and frames the window sets a border there, as a
+  compositor that insists on `server_side` takes the title bar back on
+  Wayland. A window manager that ignores the hint and sets no extents
+  cannot be told apart, and the application's title bar then shows
+  beneath its own. Without a window manager, as under a bare Xvfb, there
+  is no custom title bar.
+- **The X11 window menu only where it is offered:** a secondary press on
+  the title bar is `_GTK_SHOW_WINDOW_MENU` where `_NET_SUPPORTED` lists
+  it, and otherwise reaches zui, so the application may show its own.
+- **Maximize adds or removes, rather than toggling,** each of
+  `_NET_WM_STATE_MAXIMIZED_VERT` and `_HORZ`, from the state the window
+  last reported, as the Wayland host sets or unsets maximized; a window
+  is maximized while both are set.
+- **The title bar's gestures are shared, their protocols are not:**
+  `chrome.ChromePresses` decides what a press is, and each backend's
+  `WindowChrome` sends it, with a Wayland serial or an X11 root position
+  and button.
 
 ## 10-reach:02-web-host — Web
 

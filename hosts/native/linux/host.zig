@@ -11,6 +11,7 @@ pub const text_input = @import("text_input.zig");
 pub const file_watch = @import("file_watch.zig");
 pub const services = @import("services.zig");
 pub const chrome = @import("chrome.zig");
+pub const x11_chrome = @import("x11_chrome.zig");
 pub const material = @import("material.zig");
 pub const WaylandHost = @import("wayland_host.zig").WaylandHost;
 pub const X11Host = @import("x11_host.zig").X11Host;
@@ -28,8 +29,8 @@ pub const backend_variable = "ZUI_HOST_BACKEND";
 ///
 /// Its declarations are the Wayland host's. On X11, which does not yet
 /// do all of them, a call answers as on a compositor without the
-/// protocol: a second window is refused as one too many, chrome regions are kept by nobody, and the environment
-/// reports no system material and no custom title bar.
+/// protocol: a second window is refused as one too many, and the
+/// environment reports no system material.
 ///
 /// ```zig
 /// const App = struct {
@@ -150,6 +151,7 @@ pub const Host = struct {
         chosen.forced_scale = self.forced_scale;
         chosen.bus_addresses = self.bus_addresses;
         chosen.service_fake = self.service_fake;
+        chosen.forced_window_manager_support = null;
         try chosen.init(io, options);
     }
 
@@ -217,20 +219,19 @@ pub const Host = struct {
         }
     }
 
-    /// On X11, which leaves the title bar to the window manager, the
-    /// regions are not kept.
+    /// See `WaylandHost.zuiChromeRegions` and `X11Host.zuiChromeRegions`.
     pub fn zuiChromeRegions(self: *Host, id: zui.WindowId, regions: []const zui.ChromeRegion) void {
         switch (self.backend) {
-            .wayland => |*wayland_host| wayland_host.zuiChromeRegions(id, regions),
-            .x11 => {},
+            inline else => |*chosen| chosen.zuiChromeRegions(id, regions),
         }
     }
 
-    /// See `WaylandHost.chromeKindAt`; null on X11.
+    /// What a press at `position`, in `id`'s surface coordinates (an X11
+    /// window's physical pixels), would be to the window manager: null
+    /// where it reaches zui.
     pub fn chromeKindAt(self: *Host, id: zui.WindowId, position: [2]f32) ?zui.ChromeKind {
         return switch (self.backend) {
-            .wayland => |*wayland_host| wayland_host.chromeKindAt(id, position),
-            .x11 => null,
+            inline else => |*chosen| chosen.chromeKindAt(id, position),
         };
     }
 
@@ -259,20 +260,19 @@ pub const Host = struct {
         }
     }
 
-    /// Asks the compositor to minimize the main window; nothing on X11 yet.
+    /// Asks the compositor or the window manager to minimize the main
+    /// window.
     pub fn minimize(self: *Host) void {
         switch (self.backend) {
-            .wayland => |*wayland_host| wayland_host.minimize(),
-            .x11 => {},
+            inline else => |*chosen| chosen.minimize(),
         }
     }
 
-    /// Asks the compositor to maximize or restore the main window; nothing
-    /// on X11 yet.
+    /// Asks the compositor or the window manager to maximize or restore the
+    /// main window.
     pub fn toggleMaximized(self: *Host) void {
         switch (self.backend) {
-            .wayland => |*wayland_host| wayland_host.toggleMaximized(),
-            .x11 => {},
+            inline else => |*chosen| chosen.toggleMaximized(),
         }
     }
 };
@@ -286,6 +286,7 @@ test {
     _ = file_watch;
     _ = services;
     _ = chrome;
+    _ = x11_chrome;
     _ = material;
     _ = @import("x11_host.zig");
     _ = @import("x11_selections.zig");

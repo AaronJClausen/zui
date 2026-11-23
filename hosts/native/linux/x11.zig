@@ -343,6 +343,8 @@ pub const event_mask_leave_window = 32;
 pub const event_mask_pointer_motion = 64;
 pub const event_mask_exposure = 32768;
 pub const event_mask_structure_notify = 131072;
+pub const event_mask_substructure_notify = 524288;
+pub const event_mask_substructure_redirect = 1048576;
 pub const event_mask_focus_change = 2097152;
 pub const event_mask_property_change = 4194304;
 
@@ -398,6 +400,9 @@ pub extern "xcb" fn xcb_destroy_window(connection: *Connection, window: Window) 
 pub extern "xcb" fn xcb_map_window(connection: *Connection, window: Window) callconv(.c) VoidCookie;
 pub extern "xcb" fn xcb_configure_window(connection: *Connection, window: Window, value_mask: u16, values: ?*const anyopaque) callconv(.c) VoidCookie;
 pub extern "xcb" fn xcb_change_window_attributes(connection: *Connection, window: Window, value_mask: u32, values: ?*const anyopaque) callconv(.c) VoidCookie;
+pub extern "xcb" fn xcb_change_window_attributes_checked(connection: *Connection, window: Window, value_mask: u32, values: ?*const anyopaque) callconv(.c) VoidCookie;
+pub extern "xcb" fn xcb_request_check(connection: *Connection, cookie: VoidCookie) callconv(.c) ?*GenericError;
+pub extern "xcb" fn xcb_ungrab_pointer(connection: *Connection, time: u32) callconv(.c) VoidCookie;
 pub extern "xcb" fn xcb_change_property(connection: *Connection, mode: u8, window: Window, property: Atom, type: Atom, format: u8, data_len: u32, data: ?*const anyopaque) callconv(.c) VoidCookie;
 pub extern "xcb" fn xcb_intern_atom(connection: *Connection, only_if_exists: u8, name_len: u16, name: [*]const u8) callconv(.c) InternAtomCookie;
 pub extern "xcb" fn xcb_intern_atom_reply(connection: *Connection, cookie: InternAtomCookie, err: ?*?*GenericError) callconv(.c) ?*InternAtomReply;
@@ -460,11 +465,21 @@ pub const Atoms = struct {
     xdnd_selection: Atom = 0,
     xdnd_type_list: Atom = 0,
     xdnd_action_copy: Atom = 0,
+    wm_change_state: Atom = 0,
+    motif_wm_hints: Atom = 0,
+    net_supported: Atom = 0,
+    net_wm_moveresize: Atom = 0,
+    net_wm_state: Atom = 0,
+    net_wm_state_maximized_vert: Atom = 0,
+    net_wm_state_maximized_horz: Atom = 0,
+    net_frame_extents: Atom = 0,
+    gtk_show_window_menu: Atom = 0,
 
     const names: [std.meta.fields(Atoms).len][]const u8 = .{
-        "WM_PROTOCOLS", "WM_DELETE_WINDOW", "_NET_WM_NAME", "UTF8_STRING",   "CLIPBOARD",    "TARGETS",        "TEXT",         "text/plain;charset=utf-8",
-        "INCR",         "ZUI_CLIPBOARD",    "ZUI_DROP",     "text/uri-list", "XdndAware",    "XdndEnter",      "XdndPosition", "XdndStatus",
-        "XdndLeave",    "XdndDrop",         "XdndFinished", "XdndSelection", "XdndTypeList", "XdndActionCopy",
+        "WM_PROTOCOLS",   "WM_DELETE_WINDOW",   "_NET_WM_NAME",  "UTF8_STRING",                  "CLIPBOARD",                    "TARGETS",            "TEXT",                  "text/plain;charset=utf-8",
+        "INCR",           "ZUI_CLIPBOARD",      "ZUI_DROP",      "text/uri-list",                "XdndAware",                    "XdndEnter",          "XdndPosition",          "XdndStatus",
+        "XdndLeave",      "XdndDrop",           "XdndFinished",  "XdndSelection",                "XdndTypeList",                 "XdndActionCopy",     "WM_CHANGE_STATE",       "_MOTIF_WM_HINTS",
+        "_NET_SUPPORTED", "_NET_WM_MOVERESIZE", "_NET_WM_STATE", "_NET_WM_STATE_MAXIMIZED_VERT", "_NET_WM_STATE_MAXIMIZED_HORZ", "_NET_FRAME_EXTENTS", "_GTK_SHOW_WINDOW_MENU",
     };
 
     /// Asks for every atom at once, then waits for the answers, so the
@@ -495,6 +510,27 @@ pub fn internAtom(connection: *Connection, name: []const u8) Atom {
 pub fn sendClientMessage(connection: *Connection, destination: Window, message_type: Atom, data: [5]u32) void {
     const message: ClientMessageEvent = .{ .response_type = client_message, .format = 32, .sequence = 0, .window = destination, .type = message_type, .data32 = data };
     _ = xcb_send_event(connection, 0, destination, 0, @ptrCast(&message));
+}
+
+/// Sends a 32-bit client message about `window` to the window manager,
+/// which takes it from the root as a client that redirects its children's
+/// requests.
+pub fn sendToWindowManager(connection: *Connection, root: Window, window: Window, message_type: Atom, data: [5]u32) void {
+    const message: ClientMessageEvent = .{ .response_type = client_message, .format = 32, .sequence = 0, .window = window, .type = message_type, .data32 = data };
+    _ = xcb_send_event(connection, 0, root, event_mask_substructure_notify | event_mask_substructure_redirect, @ptrCast(&message));
+}
+
+/// The 32-bit values of `window`'s `property`, up to `values.len` of
+/// them: none when it is unset or of another format.
+pub fn readCardinals(connection: *Connection, window: Window, property: Atom, values: []u32) []const u32 {
+    const cookie = xcb_get_property(connection, 0, window, property, any_property_type, 0, @intCast(values.len));
+    const reply = xcb_get_property_reply(connection, cookie, null) orelse return values[0..0];
+    defer free(reply);
+    if (reply.format != 32) return values[0..0];
+    const count = @min(reply.value_len, values.len);
+    const bytes = xcb_get_property_value(reply) orelse return values[0..0];
+    @memcpy(std.mem.sliceAsBytes(values[0..count]), bytes[0 .. count * 4]);
+    return values[0..count];
 }
 
 /// The screen numbered `number`, or the first.

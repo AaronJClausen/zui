@@ -13,6 +13,7 @@ const DesktopSettings = session_module.DesktopSettings;
 const ReportedEnvironment = session_module.ReportedEnvironment;
 const Inbox = @import("inbox.zig").Inbox;
 const x11_selections = @import("x11_selections.zig");
+const x11_chrome = @import("x11_chrome.zig");
 
 /// zui's host contract on an X11 window, through Xlib's display and the
 /// xcb connection beneath it, on the thread that polls it: events are read
@@ -23,14 +24,23 @@ const x11_selections = @import("x11_selections.zig");
 /// size from `ConfigureNotify`, the pointer, the wheel by notch, keys
 /// through the server's XKB keymap with their modifiers, evdev codes and
 /// repeats, typed text, focus, files dropped through XDND and the close
-/// button; the desktop's
-/// environment over D-Bus; SIGINT, SIGTERM and SIGHUP as terminate
-/// requests and the system sleeping and waking as lifecycle events. It
-/// sets the cursor from the cursor theme, reads and writes the
-/// `CLIPBOARD` selection as text, watches directories, offers
+/// button; the desktop's environment over D-Bus; SIGINT, SIGTERM and
+/// SIGHUP as terminate requests and the system sleeping and waking as
+/// lifecycle events. It sets the cursor from the cursor theme, reads and
+/// writes the `CLIPBOARD` selection as text, watches directories, offers
 /// notifications, file dialogs and opening URLs over the session bus, and
 /// waits for `nextFrame` on the connection, the desktop's buses, its
 /// watches, a wake and a deadline.
+///
+/// A window opened with `title_bar = .custom` asks the window manager for
+/// no decorations through `_MOTIF_WM_HINTS`. Where the window manager
+/// moves windows through `_NET_WM_MOVERESIZE` and draws no frame of its
+/// own around it, presses on the frame's chrome regions go to the window
+/// manager: the title bar moves the window, a double click on it toggles
+/// maximize and a secondary press shows the window menu where
+/// `_GTK_SHOW_WINDOW_MENU` is offered, the edges resize it, and the host
+/// works the caption buttons itself; `custom_title_bar` reports it, and
+/// `window_maximized` follows `_NET_WM_STATE`.
 ///
 /// It opens one window, which `visible = false` leaves unmapped, so the
 /// server never shows it. `deinit` closes it, after the renderer's
@@ -39,7 +49,7 @@ const x11_selections = @import("x11_selections.zig");
 pub const X11Host = struct {
     const Host = X11Host;
     pub const zui_surfaces: zui.SurfaceKinds = .initOne(.x11);
-    pub const zui_capabilities: zui.HostCapabilities = .{};
+    pub const zui_capabilities: zui.HostCapabilities = .{ .custom_title_bar = true };
 
     /// The `CLIPBOARD` selection, as text. `write` owns it with up to
     /// `x11_selections.Clipboard.text_capacity` bytes of UTF-8, answering
@@ -112,6 +122,10 @@ pub const X11Host = struct {
     /// Answers services as a test says instead of handing them to the
     /// bus, so nothing shows or opens.
     service_fake: ?*services.ServiceFake = null,
+    /// What the window manager offers a custom title bar in place of the
+    /// root window's `_NET_SUPPORTED`, for tests that must not depend on
+    /// the window manager.
+    forced_window_manager_support: ?x11_chrome.WindowManagerSupport = null,
 
     display: *x11.Display,
     connection: *x11.Connection,
@@ -143,6 +157,8 @@ pub const X11Host = struct {
     modifiers: zui.Modifiers,
     /// In the window's physical pixels.
     pointer_position: [2]f32,
+    /// On the root window, as the last press or motion gave it.
+    pointer_root_position: [2]i32,
 
     window: Window,
     session: Session,
@@ -171,6 +187,7 @@ pub const X11Host = struct {
         surface_coordinates_per_unit: f32 = 1,
         requests: zui.HostRequests = .{},
         applied_cursor: ?zui.Cursor = null,
+        window_chrome: x11_chrome.WindowChrome = .{},
         /// Null until the window has reported the whole environment.
         reported_environment: ?ReportedEnvironment = null,
 
@@ -186,9 +203,12 @@ pub const X11Host = struct {
 
         /// Reports each setting that differs from what the window last
         /// reported, or every one the first time. The window shows no
-        /// material and keeps the window manager's title bar.
+        /// material.
         fn reportEnvironment(self: *Window, settings: DesktopSettings) void {
-            const current: ReportedEnvironment = .of(settings, .{});
+            const current: ReportedEnvironment = .of(settings, .{
+                .custom_title_bar = self.window_chrome.isCustom(),
+                .maximized = self.window_chrome.maximized,
+            });
             if (ReportedEnvironment.deliverChanges(self.reported_environment, current, &self.inbox)) self.input_arrived = true;
             self.reported_environment = current;
         }
@@ -203,11 +223,13 @@ pub const X11Host = struct {
         const forced_scale = self.forced_scale;
         const bus_addresses = self.bus_addresses;
         const service_fake = self.service_fake;
+        const forced_window_manager_support = self.forced_window_manager_support;
         self.* = .{
             .io = io,
             .forced_scale = forced_scale,
             .bus_addresses = bus_addresses,
             .service_fake = service_fake,
+            .forced_window_manager_support = forced_window_manager_support,
             .display = display,
             .connection = connection,
             .screen = screen,
@@ -227,6 +249,7 @@ pub const X11Host = struct {
             .keys_down = .initEmpty(),
             .modifiers = .{},
             .pointer_position = .{ 0, 0 },
+            .pointer_root_position = .{ 0, 0 },
             .window = .{},
             .session = undefined,
         };
@@ -256,7 +279,12 @@ pub const X11Host = struct {
         const connection = self.connection;
         const scale = self.forced_scale orelse self.resource_scale;
         const size: [2]u32 = .{ physicalLength(options.size[0], scale), physicalLength(options.size[1], scale) };
-        self.window = .{ .id = x11.xcb_generate_id(connection), .size = size };
+        self.window = .{
+            .id = x11.xcb_generate_id(connection),
+            .size = size,
+            .window_chrome = .{ .asked_for_custom = options.title_bar == .custom, .resizable = options.resizable },
+        };
+        _ = self.window.window_chrome.onSupport(self.windowManagerSupport());
         self.window.deliver(.{ .environment = .{ .window_focused = false } });
         const event_mask: u32 = x11.event_mask_key_press | x11.event_mask_key_release | x11.event_mask_button_press | x11.event_mask_button_release |
             x11.event_mask_enter_window | x11.event_mask_leave_window | x11.event_mask_pointer_motion | x11.event_mask_exposure |
@@ -270,6 +298,7 @@ pub const X11Host = struct {
         _ = x11.xcb_change_property(connection, x11.property_mode_replace, window, x11.atom_wm_class, x11.atom_string, 8, wm_class.len, wm_class);
         _ = x11.xcb_change_property(connection, x11.property_mode_replace, window, self.atoms.wm_protocols, x11.atom_atom, 32, 1, &self.atoms.wm_delete_window);
         x11_selections.Drop.advertise(self.selectionEndpoint());
+        self.window.window_chrome.askForNoDecorations(self.chromeEndpoint());
         if (!options.resizable) {
             const hints: x11.SizeHints = .{
                 .flags = x11.SizeHints.program_min_size | x11.SizeHints.program_max_size,
@@ -286,6 +315,16 @@ pub const X11Host = struct {
 
     fn selectionEndpoint(self: *Host) x11_selections.Endpoint {
         return .{ .connection = self.connection, .window = self.window.id, .atoms = &self.atoms };
+    }
+
+    fn chromeEndpoint(self: *Host) x11_chrome.Endpoint {
+        return .{ .connection = self.connection, .root = self.screen.root, .window = self.window.id, .atoms = &self.atoms };
+    }
+
+    fn windowManagerSupport(self: *Host) x11_chrome.WindowManagerSupport {
+        if (self.forced_window_manager_support) |forced| return forced;
+        var supported: [x11_chrome.WindowManagerSupport.supported_capacity]x11.Atom = undefined;
+        return .of(x11.readCardinals(self.connection, self.screen.root, self.atoms.net_supported, &supported), &self.atoms);
     }
 
     fn physicalLength(units: u32, scale: f32) u32 {
@@ -473,10 +512,12 @@ pub const X11Host = struct {
             x11.button_press, x11.button_release => {
                 const button: *const x11.InputEvent = @ptrCast(event);
                 self.latest_server_time = button.time;
+                self.pointer_root_position = .{ button.root_x, button.root_y };
                 if (button.event == window) self.onButton(button.detail, event.code() == x11.button_press, .{ @floatFromInt(button.event_x), @floatFromInt(button.event_y) });
             },
             x11.motion_notify => {
                 const motion: *const x11.InputEvent = @ptrCast(event);
+                self.pointer_root_position = .{ motion.root_x, motion.root_y };
                 if (motion.event == window) self.onPointerMotion(.{ @floatFromInt(motion.event_x), @floatFromInt(motion.event_y) });
             },
             x11.enter_notify => {
@@ -516,8 +557,15 @@ pub const X11Host = struct {
             },
             x11.property_notify => {
                 const property: *const x11.PropertyNotifyEvent = @ptrCast(event);
-                if (property.window == self.screen.root and property.atom == x11.atom_resource_manager) self.readResourceManager();
-                if (property.window == window and property.state == x11.property_new_value) self.onPropertyNewValue(property.atom);
+                if (property.window == self.screen.root) {
+                    if (property.atom == x11.atom_resource_manager) self.readResourceManager();
+                    if (property.atom == self.atoms.net_supported) self.onWindowManagerSupport(self.windowManagerSupport());
+                }
+                if (property.window == window) {
+                    if (property.state == x11.property_new_value) self.onPropertyNewValue(property.atom);
+                    if (property.atom == self.atoms.net_wm_state) self.readWindowState();
+                    if (property.atom == self.atoms.net_frame_extents) self.readFrameExtents();
+                }
             },
             else => |code| if (self.xkb_keyboard) |keyboard_device| if (code == keyboard_device.first_event) self.dispatchXkb(@ptrCast(event), keyboard_device),
         }
@@ -546,6 +594,16 @@ pub const X11Host = struct {
 
     /// The scale `Xft.dpi` gives in `resources`, the resource manager's
     /// lines, or null where it gives none.
+    fn readWindowState(self: *Host) void {
+        var states: [32]x11.Atom = undefined;
+        self.onWindowState(x11.readCardinals(self.connection, self.window.id, self.atoms.net_wm_state, &states));
+    }
+
+    fn readFrameExtents(self: *Host) void {
+        var extents: [4]u32 = undefined;
+        self.onFrameExtents(x11.readCardinals(self.connection, self.window.id, self.atoms.net_frame_extents, &extents));
+    }
+
     pub fn scaleFromResources(resources: []const u8) ?f32 {
         var lines = std.mem.splitScalar(u8, resources, '\n');
         while (lines.next()) |line| {
@@ -582,6 +640,53 @@ pub const X11Host = struct {
     pub fn close(self: *Host) void {
         self.window.closed = true;
         self.window.input_arrived = true;
+    }
+
+    /// Keeps up to `chrome.ChromeSnapshot.capacity` of `regions`, in
+    /// physical pixels, to hit-test presses against; the rest are cut from
+    /// the end and counted in `window.window_chrome.snapshot.dropped`. A
+    /// window without a custom title bar keeps none.
+    pub fn zuiChromeRegions(self: *Host, id: zui.WindowId, regions: []const zui.ChromeRegion) void {
+        if (id != .main) return;
+        self.window.window_chrome.publish(regions, self.window.surface_coordinates_per_unit);
+    }
+
+    /// What a press at `position`, in the window's physical pixels, would
+    /// be to the window manager, from the last frame's chrome regions:
+    /// null where it reaches zui.
+    pub fn chromeKindAt(self: *Host, id: zui.WindowId, position: [2]f32) ?zui.ChromeKind {
+        if (id != .main) return null;
+        return self.window.window_chrome.kindAt(position);
+    }
+
+    /// Asks the window manager to iconify the window, as its minimize
+    /// button does, for an application that works its drawn caption buttons
+    /// from `clicked`, as the keyboard and a screen reader press them.
+    pub fn minimize(self: *Host) void {
+        self.window.window_chrome.minimize(self.chromeEndpoint());
+        _ = x11.xcb_flush(self.connection);
+    }
+
+    /// Asks the window manager to maximize the window, or to restore it
+    /// when it is maximized.
+    pub fn toggleMaximized(self: *Host) void {
+        self.window.window_chrome.toggleMaximized(self.chromeEndpoint());
+        _ = x11.xcb_flush(self.connection);
+    }
+
+    fn workCaptionButton(self: *Host, kind: zui.ChromeKind) void {
+        switch (kind) {
+            .minimize_button => self.minimize(),
+            .maximize_button => self.toggleMaximized(),
+            .close_button => self.close(),
+            else => {},
+        }
+    }
+
+    /// Until the window reports the whole environment, a change waits for
+    /// it.
+    fn reportEnvironmentOnceReported(self: *Host) void {
+        if (self.window.reported_environment != null) self.window.reportEnvironment(self.session.settings);
     }
 
     fn applyCursor(self: *Host) void {
@@ -752,11 +857,30 @@ pub const X11Host = struct {
 
     /// In the window's physical pixels.
     pub fn onPointerEnter(self: *Host, position: [2]f32) void {
+        self.window.window_chrome.onPointerEnter();
         self.onPointerMotion(position);
     }
 
     pub fn onPointerLeave(self: *Host) void {
+        if (self.window.window_chrome.onPointerLeave()) self.window.deliver(.{ .pointer_cancel = .mouse });
         self.window.deliver(.{ .pointer_leave = .mouse });
+    }
+
+    /// The root window's `_NET_SUPPORTED` changed, as a window manager
+    /// starting or leaving changes it.
+    pub fn onWindowManagerSupport(self: *Host, support: x11_chrome.WindowManagerSupport) void {
+        if (self.window.window_chrome.onSupport(support)) self.reportEnvironmentOnceReported();
+    }
+
+    /// The window's `_NET_WM_STATE`, the atoms it holds.
+    pub fn onWindowState(self: *Host, states: []const x11.Atom) void {
+        if (self.window.window_chrome.onWindowState(states, &self.atoms)) self.reportEnvironmentOnceReported();
+    }
+
+    /// The window's `_NET_FRAME_EXTENTS`: left, right, top and bottom, or
+    /// none once removed.
+    pub fn onFrameExtents(self: *Host, extents: []const u32) void {
+        if (self.window.window_chrome.onFrameExtents(extents)) self.reportEnvironmentOnceReported();
     }
 
     /// In the window's physical pixels.
@@ -768,6 +892,12 @@ pub const X11Host = struct {
     /// X's buttons: 1 to 3 are the primary, middle and secondary buttons,
     /// and each press of 4 to 7 a wheel's notch up, down, left or right.
     /// Others, such as back and forward, have no zui button.
+    ///
+    /// A press on the title bar or an edge goes to the window manager, at
+    /// the root position the last press or motion gave, and neither it nor
+    /// its release reaches zui. A caption button's press does, and its
+    /// release arrives as `pointer_cancel`: the host works the button, so
+    /// zui shows the press and reports no click.
     pub fn onButton(self: *Host, x_button: u8, pressed: bool, position: [2]f32) void {
         self.pointer_position = position;
         if (wheelNotch(x_button)) |delta| {
@@ -781,6 +911,21 @@ pub const X11Host = struct {
             else => return,
         };
         const press: zui.PointerButton = .{ .pointer = self.mouseAt(self.now()), .button = button };
+        const window_chrome = &self.window.window_chrome;
+        if (pressed) {
+            if (window_chrome.press(button, position, self.pointer_root_position, x_button, press.pointer.at, self.chromeEndpoint()) == .handed_to_window_manager) {
+                _ = x11.xcb_flush(self.connection);
+                return;
+            }
+        } else switch (window_chrome.release(button, position)) {
+            .reaches_zui => {},
+            .swallowed => return,
+            .cancels_press => |worked| {
+                self.window.deliver(.{ .pointer_cancel = .mouse });
+                if (worked) |kind| self.workCaptionButton(kind);
+                return;
+            },
+        }
         self.window.deliver(if (pressed) .{ .pointer_down = press } else .{ .pointer_up = press });
     }
 

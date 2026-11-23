@@ -389,6 +389,12 @@ far it:
   `XdndFinished`; each `file://` URI on this machine is percent-decoded
   to its path and reported at the drop's position. Any other drag is
   refused, and its drop finished unaccepted;
+- leaves the title bar to the application for a window opened with
+  `.title_bar = .custom`, asking the window manager for no decorations
+  through `_MOTIF_WM_HINTS`, where the window manager moves windows
+  through `_NET_WM_MOVERESIZE` and draws no frame of its own; presses on
+  the frame's chrome regions go to the window manager, and the host
+  works the caption buttons; see *A custom title bar* below;
 - reports the desktop's environment, the lifecycle events and the
   services as the Wayland host does, through the same D-Bus clients, and
   watches directories through the same inotify watches;
@@ -398,9 +404,7 @@ far it:
 Not yet on X11, each answered as on a compositor without the protocol:
 the input method (XIM needs Xlib to own the event queue, which the host
 gives to xcb; IBus's D-Bus protocol, served by ibus-daemon and fcitx5,
-is `10-reach:07-x11-ibus`), a custom title bar (chrome regions are not
-kept, and `custom_title_bar` is false), `minimize` and `toggleMaximized`
-(which do nothing), many windows (`zuiOpenWindow` is
+is `10-reach:07-x11-ibus`), many windows (`zuiOpenWindow` is
 `error.TooManyWindows`) and the system material (`system_material` is
 false). It links libX11, libX11-xcb, libxcb, libxcb-xkb, libxcb-cursor
 and libxkbcommon-x11.
@@ -635,6 +639,27 @@ expecting the title bar, the three buttons and the grip and nothing over
 the search field and the content, and submits no frame, since a swap on
 a surface the compositor never shows waits for a frame callback that
 never comes.
+
+On X11 the window asks for no decorations through `_MOTIF_WM_HINTS`
+(decorations only, none). It reports `custom_title_bar` only where the
+root window's `_NET_SUPPORTED` lists `_NET_WM_MOVERESIZE`, without which
+the window could not be moved, and while the window's
+`_NET_FRAME_EXTENTS` gives it no border, which a window manager that
+ignores the hint and frames the window sets; otherwise the window
+manager keeps its title bar, as on a Wayland compositor that insists on
+drawing it. The host keeps up to 256 regions in physical pixels and
+hit-tests each press the same way, with the same double click: a primary
+press on the title bar or a resize edge ungrabs the pointer and sends
+`_NET_WM_MOVERESIZE` to the root window, at the press's root position,
+with the direction of the edge (8 for a move) and the X button; a
+secondary press on the title bar sends `_GTK_SHOW_WINDOW_MENU` where
+`_NET_SUPPORTED` lists it, and reaches zui where it does not. Maximize
+and restore are `_NET_WM_STATE` messages adding or removing
+`_NET_WM_STATE_MAXIMIZED_VERT` and `_HORZ`, minimize is
+`WM_CHANGE_STATE` with `IconicState`, as `XIconifyWindow` sends it, and
+`window_maximized` is true while the window's `_NET_WM_STATE` holds both
+maximized states. Without a window manager, as under a bare Xvfb, there
+is no custom title bar and `--check` fails saying so.
 
 ## Many windows
 

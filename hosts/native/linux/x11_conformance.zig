@@ -6,6 +6,9 @@ const X11Host = zui_host.linux.X11Host;
 const x11 = zui_host.linux.x11;
 const services = zui_host.linux.services;
 const desktop_bus = zui_host.linux.desktop_bus;
+const x11_chrome = zui_host.linux.x11_chrome;
+const WindowManagerSupport = x11_chrome.WindowManagerSupport;
+const WindowManagerRequest = x11_chrome.WindowManagerRequest;
 
 const testing = std.testing;
 
@@ -15,6 +18,9 @@ const no_buses: desktop_bus.Addresses = .{ .session = null, .system = null };
 const UnmappedWindow = struct {
     window_host: X11Host = undefined,
     service_fake: services.ServiceFake = .{},
+    title_bar: zui.TitleBar = .native,
+    /// Null reads the window manager's from the root window.
+    window_manager_support: ?WindowManagerSupport = null,
 
     /// With `forced_scale` set, a physical pixel is that many layout units
     /// at a zoom of 1. The window reads no bus, so its environment starts
@@ -23,7 +29,8 @@ const UnmappedWindow = struct {
         self.window_host.forced_scale = forced_scale;
         self.window_host.bus_addresses = no_buses;
         self.window_host.service_fake = &self.service_fake;
-        self.window_host.init(testing.io, .{ .title = "zui host suite on X11", .size = .{ 320, 240 }, .visible = false }) catch |err| switch (err) {
+        self.window_host.forced_window_manager_support = self.window_manager_support;
+        self.window_host.init(testing.io, .{ .title = "zui host suite on X11", .size = .{ 320, 240 }, .visible = false, .title_bar = self.title_bar }) catch |err| switch (err) {
             error.NoX11Display => return skipWithoutServer(),
             else => return err,
         };
@@ -463,6 +470,7 @@ test "zui_host.Host connects to the backend forced, or follows ZUI_HOST_BACKEND,
         }), std.meta.activeTag(host.zuiSurface(.main)));
         if (expected == .x11) {
             try testing.expectError(error.TooManyWindows, host.zuiOpenWindow(.{ .visible = false }));
+            try testing.expectEqual(@as(?WindowManagerSupport, null), host.backend.x11.forced_window_manager_support);
             host.zuiChromeRegions(.main, &.{});
             try testing.expectEqual(@as(?zui.ChromeKind, null), host.chromeKindAt(.main, .{ 1, 1 }));
         }
@@ -883,4 +891,420 @@ test "on X11 a drag that offers no URI list is refused and its drop finished una
     other.receive();
     try testing.expectEqual(@as(?zui.FilesDropped, null), dropOf(&polled, window_host));
     try testing.expectEqual(@as(u32, 0), other.requests_answered);
+}
+
+fn reportedEnvironment(polled: *const zui_testing.PolledRecord) zui.Environment {
+    var environment: zui.Environment = .{};
+    for (polled.builder.events()) |event| if (event == .environment) environment.apply(event.environment);
+    return environment;
+}
+
+const title_bar_height = 20;
+
+/// A title bar across the top, a search field in it, three caption buttons
+/// at its right and a resize grip in the bottom-right corner, in layout
+/// units for a viewport of `width` by `height`.
+fn titleBarRegions(width: f32, height: f32) [6]zui.ChromeRegion {
+    return .{
+        .{ .id = 1, .bounds = .{ .width = width, .height = title_bar_height }, .kind = .title_bar },
+        .{ .id = 2, .bounds = .{ .x = 20, .y = 2, .width = 40, .height = 16 }, .kind = .client },
+        .{ .id = 3, .bounds = .{ .x = width - 69, .width = 23, .height = title_bar_height }, .kind = .minimize_button },
+        .{ .id = 4, .bounds = .{ .x = width - 46, .width = 23, .height = title_bar_height }, .kind = .maximize_button },
+        .{ .id = 5, .bounds = .{ .x = width - 23, .width = 23, .height = title_bar_height }, .kind = .close_button },
+        .{ .id = 6, .bounds = .{ .x = width - 8, .y = height - 8, .width = 8, .height = 8 }, .kind = .resize_bottom_right },
+    };
+}
+
+const Part = enum(usize) { title_bar, search, minimize, maximize, close, grip };
+
+/// Where the tests' presses put the window's top-left on the root window.
+const window_on_root: [2]i16 = .{ 1000, 500 };
+
+fn rootPositionOf(point: [2]i16) [2]i32 {
+    return .{ @as(i32, point[0]) + window_on_root[0], @as(i32, point[1]) + window_on_root[1] };
+}
+
+fn pointerButtonEvent(code: u8, window: x11.Window, x_button: u8, point: [2]i16) x11.GenericEvent {
+    var event = std.mem.zeroes(x11.GenericEvent);
+    const input: *x11.InputEvent = @ptrCast(&event);
+    const root_position = rootPositionOf(point);
+    input.* = .{
+        .response_type = code,
+        .detail = x_button,
+        .sequence = 0,
+        .time = 0,
+        .root = 0,
+        .event = window,
+        .child = 0,
+        .root_x = @intCast(root_position[0]),
+        .root_y = @intCast(root_position[1]),
+        .event_x = point[0],
+        .event_y = point[1],
+        .state = 0,
+        .same_screen = 1,
+        .pad0 = 0,
+    };
+    return event;
+}
+
+/// A window with a custom title bar, polled once and handed
+/// `titleBarRegions` for its viewport from a buffer overwritten after the
+/// call. Its presses arrive as the server's button events, with root
+/// positions.
+const TitleBarWindow = struct {
+    window: UnmappedWindow = .{ .title_bar = .custom, .window_manager_support = .{ .move_resize = true, .window_menu = true } },
+    polled: zui_testing.PolledRecord = .{},
+    regions: [6]zui.ChromeRegion = undefined,
+
+    fn open(self: *TitleBarWindow, forced_scale: ?f32) !void {
+        try self.window.open(forced_scale);
+        self.polled.init();
+        _ = self.polled.poll(self.host());
+        const viewport = self.polled.builder.params.viewport;
+        self.regions = titleBarRegions(viewport[0], viewport[1]);
+        var handed = self.regions;
+        self.host().zuiChromeRegions(.main, &handed);
+        @memset(std.mem.sliceAsBytes(&handed), 0xaa);
+    }
+
+    fn close(self: *TitleBarWindow) void {
+        self.window.close();
+    }
+
+    fn host(self: *TitleBarWindow) *X11Host {
+        return self.window.host();
+    }
+
+    /// The middle of `part`, in the window's physical pixels.
+    fn pointIn(self: *TitleBarWindow, part: Part) [2]i16 {
+        const bounds = self.regions[@intFromEnum(part)].bounds;
+        const per_unit = self.host().surfaceCoordinatesPerUnit(.main);
+        return .{ @intFromFloat((bounds.x + bounds.width / 2) * per_unit), @intFromFloat((bounds.y + bounds.height / 2) * per_unit) };
+    }
+
+    fn kindAt(self: *TitleBarWindow, point: [2]i16) ?zui.ChromeKind {
+        return self.host().chromeKindAt(.main, .{ @floatFromInt(point[0]), @floatFromInt(point[1]) });
+    }
+
+    fn press(self: *TitleBarWindow, point: [2]i16, x_button: u8) void {
+        var event = pointerButtonEvent(x11.button_press, self.host().window.id, x_button, point);
+        self.host().dispatch(&event);
+    }
+
+    fn release(self: *TitleBarWindow, point: [2]i16, x_button: u8) void {
+        var event = pointerButtonEvent(x11.button_release, self.host().window.id, x_button, point);
+        self.host().dispatch(&event);
+    }
+
+    fn click(self: *TitleBarWindow, point: [2]i16) void {
+        self.press(point, 1);
+        self.release(point, 1);
+    }
+
+    fn windowChrome(self: *TitleBarWindow) *x11_chrome.WindowChrome {
+        return &self.host().window.window_chrome;
+    }
+
+    fn lastRequest(self: *TitleBarWindow) ?WindowManagerRequest {
+        return self.windowChrome().last_request;
+    }
+
+    /// Polls, waiting on the server between polls for at most 3 s, until a
+    /// poll reports `expected`.
+    fn pollUntilReported(self: *TitleBarWindow, expected: zui.EnvironmentChange) !void {
+        const window_host = self.host();
+        const deadline = window_host.now().addSeconds(3);
+        while (window_host.now().isBefore(deadline)) {
+            _ = self.polled.poll(window_host);
+            for (self.polled.builder.events()) |event| if (event == .environment and std.meta.eql(event.environment, expected)) return;
+            window_host.zuiWait(.{ .at = window_host.now().addSeconds(0.005) });
+        }
+        return error.Timeout;
+    }
+};
+
+test "on X11 a custom title bar asks the window manager for no decorations and is reported, and a native one asks for nothing and keeps no chrome" {
+    var titled: TitleBarWindow = .{};
+    try titled.open(2);
+    defer titled.close();
+    const titled_host = titled.host();
+    var hint: [5]u32 = undefined;
+    try testing.expectEqualSlices(u32, &x11_chrome.WindowChrome.no_decorations_hint, x11.readCardinals(titled_host.connection, titled_host.window.id, titled_host.atoms.motif_wm_hints, &hint));
+    const environment = reportedEnvironment(&titled.polled);
+    try testing.expect(environment.custom_title_bar);
+    try testing.expect(!environment.window_maximized);
+    try testing.expectEqual(zui.ChromeKind.title_bar, titled.kindAt(titled.pointIn(.title_bar)).?);
+    try testing.expectEqual(@as(?zui.ChromeKind, null), titled.kindAt(titled.pointIn(.search)));
+    try testing.expectEqual(zui.ChromeKind.close_button, titled.kindAt(titled.pointIn(.close)).?);
+    try testing.expectEqual(zui.ChromeKind.resize_bottom_right, titled.kindAt(titled.pointIn(.grip)).?);
+
+    var window: UnmappedWindow = .{ .window_manager_support = .{ .move_resize = true, .window_menu = true } };
+    try window.open(1);
+    defer window.close();
+    const window_host = window.host();
+    try testing.expectEqual(@as(usize, 0), x11.readCardinals(window_host.connection, window_host.window.id, window_host.atoms.motif_wm_hints, &hint).len);
+    var polled: zui_testing.PolledRecord = .{};
+    polled.init();
+    _ = polled.poll(window_host);
+    try testing.expect(!reportedEnvironment(&polled).custom_title_bar);
+    var regions = titleBarRegions(320, 240);
+    window_host.zuiChromeRegions(.main, &regions);
+    try testing.expectEqual(@as(usize, 0), window_host.window.window_chrome.snapshot.count);
+    var press = pointerButtonEvent(x11.button_press, window_host.window.id, 1, .{ 100, 10 });
+    window_host.dispatch(&press);
+    _ = polled.poll(window_host);
+    try testing.expect(polled.find(.pointer_down) != null);
+    try testing.expectEqual(@as(u32, 0), window_host.window.window_chrome.requests_sent);
+}
+
+test "on X11 a custom title bar is not reported where the window manager cannot move the window, or once it frames the window itself" {
+    var unmovable: TitleBarWindow = .{ .window = .{ .title_bar = .custom, .window_manager_support = .{ .window_menu = true } } };
+    try unmovable.open(1);
+    defer unmovable.close();
+    try testing.expect(!reportedEnvironment(&unmovable.polled).custom_title_bar);
+    try testing.expectEqual(@as(?zui.ChromeKind, null), unmovable.kindAt(unmovable.pointIn(.title_bar)));
+
+    var framed: TitleBarWindow = .{};
+    try framed.open(1);
+    defer framed.close();
+    framed.host().onFrameExtents(&.{ 0, 0, 0, 0 });
+    try testing.expect(framed.windowChrome().isCustom());
+    framed.host().onFrameExtents(&.{ 2, 2, 30, 2 });
+    _ = framed.polled.poll(framed.host());
+    try testing.expectEqual(false, framed.polled.find(.environment).?.custom_title_bar);
+    try testing.expectEqual(@as(?zui.ChromeKind, null), framed.kindAt(framed.pointIn(.title_bar)));
+    framed.click(framed.pointIn(.title_bar));
+    try testing.expectEqual(@as(u32, 0), framed.windowChrome().requests_sent);
+}
+
+test "on X11 a press on the title bar moves the window from its root position, one on an edge resizes it from that edge, and neither press nor release reaches zui" {
+    var titled: TitleBarWindow = .{};
+    try titled.open(1);
+    defer titled.close();
+    const window_host = titled.host();
+    _ = titled.polled.poll(window_host);
+
+    const title = titled.pointIn(.title_bar);
+    titled.click(title);
+    try testing.expectEqual(WindowManagerRequest{ .move_resize = .{ .direction = .move, .root_position = rootPositionOf(title), .x_button = 1 } }, titled.lastRequest().?);
+    _ = titled.polled.poll(window_host);
+    try testing.expectEqual(@as(?zui.PointerButton, null), titled.polled.find(.pointer_down));
+    try testing.expectEqual(@as(?zui.PointerButton, null), titled.polled.find(.pointer_up));
+
+    const edges = [_]struct { zui.ChromeKind, u32 }{
+        .{ .resize_top_left, 0 },     .{ .resize_top, 1 },    .{ .resize_top_right, 2 },   .{ .resize_right, 3 },
+        .{ .resize_bottom_right, 4 }, .{ .resize_bottom, 5 }, .{ .resize_bottom_left, 6 }, .{ .resize_left, 7 },
+    };
+    var regions: [edges.len]zui.ChromeRegion = undefined;
+    for (edges, &regions, 0..) |edge, *region, index| {
+        region.* = .{ .id = index + 1, .bounds = .{ .x = @floatFromInt(index * 20), .y = 100, .width = 10, .height = 10 }, .kind = edge[0] };
+    }
+    window_host.zuiChromeRegions(.main, &regions);
+    for (edges, 0..) |edge, index| {
+        const point: [2]i16 = .{ @intCast(index * 20 + 5), 105 };
+        titled.click(point);
+        const request = titled.lastRequest().?.move_resize;
+        try testing.expectEqual(edge[1], @intFromEnum(request.direction));
+        try testing.expectEqual(rootPositionOf(point), request.root_position);
+    }
+    _ = titled.polled.poll(window_host);
+    try testing.expectEqual(@as(?zui.PointerButton, null), titled.polled.find(.pointer_down));
+    try testing.expectEqual(@as(?zui.PointerButton, null), titled.polled.find(.pointer_up));
+}
+
+test "on X11 a secondary press on the title bar shows the window menu where the window manager offers one, and reaches zui where it does not" {
+    var titled: TitleBarWindow = .{};
+    try titled.open(1);
+    defer titled.close();
+    _ = titled.polled.poll(titled.host());
+    const title = titled.pointIn(.title_bar);
+    titled.press(title, 3);
+    titled.release(title, 3);
+    try testing.expectEqual(WindowManagerRequest{ .show_window_menu = rootPositionOf(title) }, titled.lastRequest().?);
+    _ = titled.polled.poll(titled.host());
+    try testing.expectEqual(@as(?zui.PointerButton, null), titled.polled.find(.pointer_down));
+
+    var without_menu: TitleBarWindow = .{ .window = .{ .title_bar = .custom, .window_manager_support = .{ .move_resize = true } } };
+    try without_menu.open(1);
+    defer without_menu.close();
+    _ = without_menu.polled.poll(without_menu.host());
+    without_menu.press(title, 3);
+    without_menu.release(title, 3);
+    try testing.expectEqual(@as(u32, 0), without_menu.windowChrome().requests_sent);
+    _ = without_menu.polled.poll(without_menu.host());
+    try testing.expectEqual(zui.Button.secondary, without_menu.polled.find(.pointer_down).?.button);
+    try testing.expectEqual(zui.Button.secondary, without_menu.polled.find(.pointer_up).?.button);
+}
+
+test "on X11 a caption button's press reaches zui and its release cancels it and works the button: minimize iconifies, maximize maximizes and close closes" {
+    var titled: TitleBarWindow = .{};
+    try titled.open(1);
+    defer titled.close();
+    const window_host = titled.host();
+    _ = titled.polled.poll(window_host);
+
+    titled.click(titled.pointIn(.minimize));
+    try testing.expectEqual(WindowManagerRequest.iconify, titled.lastRequest().?);
+    _ = titled.polled.poll(window_host);
+    try testing.expect(titled.polled.find(.pointer_down) != null);
+    try testing.expect(titled.polled.find(.pointer_cancel) != null);
+    try testing.expectEqual(@as(?zui.PointerButton, null), titled.polled.find(.pointer_up));
+
+    titled.click(titled.pointIn(.maximize));
+    try testing.expectEqual(WindowManagerRequest.set_maximized, titled.lastRequest().?);
+
+    titled.press(titled.pointIn(.minimize), 1);
+    titled.release(titled.pointIn(.search), 1);
+    try testing.expectEqual(@as(u32, 2), titled.windowChrome().requests_sent);
+    _ = titled.polled.poll(window_host);
+    try testing.expect(titled.polled.find(.pointer_cancel) != null);
+
+    try testing.expect(titled.polled.poll(window_host));
+    titled.click(titled.pointIn(.close));
+    try testing.expect(!titled.polled.poll(window_host));
+}
+
+test "on X11 a double click on the title bar maximizes the window, and once _NET_WM_STATE says it is maximized, restores it" {
+    var titled: TitleBarWindow = .{};
+    try titled.open(1);
+    defer titled.close();
+    const window_host = titled.host();
+    const title = titled.pointIn(.title_bar);
+
+    titled.click(title);
+    titled.click(title);
+    try testing.expectEqual(WindowManagerRequest.set_maximized, titled.lastRequest().?);
+    try testing.expectEqual(@as(u32, 2), titled.windowChrome().requests_sent);
+
+    const atoms = &window_host.atoms;
+    window_host.onWindowState(&.{ atoms.net_wm_state_maximized_horz, atoms.net_wm_state_maximized_vert });
+    _ = titled.polled.poll(window_host);
+    try testing.expect(titled.polled.find(.environment).?.window_maximized);
+
+    titled.click(title);
+    try testing.expectEqual(std.meta.Tag(WindowManagerRequest).move_resize, std.meta.activeTag(titled.lastRequest().?));
+    titled.click(title);
+    try testing.expectEqual(WindowManagerRequest.unset_maximized, titled.lastRequest().?);
+    try testing.expectEqual(@as(u32, 4), titled.windowChrome().requests_sent);
+}
+
+test "on X11 window_maximized follows the _NET_WM_STATE another client writes, and maximize then asks to restore" {
+    var titled: TitleBarWindow = .{};
+    try titled.open(1);
+    defer titled.close();
+    const window_host = titled.host();
+    const host_window = window_host.window.id;
+    var other = try OtherClient.open();
+    defer other.close();
+    const atoms = &other.atoms;
+
+    const maximized_states = [_]x11.Atom{ atoms.net_wm_state_maximized_vert, atoms.net_wm_state_maximized_horz };
+    _ = x11.xcb_change_property(other.connection, x11.property_mode_replace, host_window, atoms.net_wm_state, x11.atom_atom, 32, maximized_states.len, &maximized_states);
+    other.waitUntilServerApplied();
+    try titled.pollUntilReported(.{ .window_maximized = true });
+    window_host.toggleMaximized();
+    try testing.expectEqual(WindowManagerRequest.unset_maximized, titled.lastRequest().?);
+
+    _ = x11.xcb_delete_property(other.connection, host_window, atoms.net_wm_state);
+    other.waitUntilServerApplied();
+    try titled.pollUntilReported(.{ .window_maximized = false });
+    try testing.expect(!titled.windowChrome().maximized);
+}
+
+/// A window manager of the test's own, on a connection of its own: it
+/// redirects the root window's children, lists what it supports in the
+/// root's `_NET_SUPPORTED`, and reads the client messages sent to it.
+const StandInWindowManager = struct {
+    display: *x11.Display,
+    connection: *x11.Connection,
+    root: x11.Window,
+    atoms: x11.Atoms,
+
+    /// Skips where another client already redirects the root, as a running
+    /// window manager does.
+    fn open() !StandInWindowManager {
+        const display = x11.XOpenDisplay(null) orelse return skipWithoutServer();
+        errdefer _ = x11.XCloseDisplay(display);
+        const connection = x11.XGetXCBConnection(display).?;
+        x11.XSetEventQueueOwner(display, x11.xcb_owns_event_queue);
+        const root = x11.screenOf(connection, x11.XDefaultScreen(display)).?.root;
+        const event_mask: u32 = x11.event_mask_substructure_redirect | x11.event_mask_substructure_notify;
+        if (x11.xcb_request_check(connection, x11.xcb_change_window_attributes_checked(connection, root, x11.window_attribute_event_mask, &event_mask))) |refused| {
+            x11.free(refused);
+            std.debug.print("skipped: a window manager already redirects the root window (BadAccess), so the test cannot stand in for one\n", .{});
+            return error.SkipZigTest;
+        }
+        const atoms: x11.Atoms = .intern(connection);
+        const supported = [_]x11.Atom{ atoms.net_wm_moveresize, atoms.gtk_show_window_menu, atoms.net_wm_state };
+        _ = x11.xcb_change_property(connection, x11.property_mode_replace, root, atoms.net_supported, x11.atom_atom, 32, supported.len, &supported);
+        var applied: [1]u32 = undefined;
+        _ = x11.readCardinals(connection, root, atoms.net_supported, &applied);
+        return .{ .display = display, .connection = connection, .root = root, .atoms = atoms };
+    }
+
+    fn close(self: *StandInWindowManager) void {
+        _ = x11.xcb_delete_property(self.connection, self.root, self.atoms.net_supported);
+        _ = x11.xcb_flush(self.connection);
+        _ = x11.XCloseDisplay(self.display);
+    }
+
+    /// The data of the next client message of `message_type` about
+    /// `window`, waiting up to 3 s for it; others are dropped.
+    fn nextMessage(self: *StandInWindowManager, window: x11.Window, message_type: x11.Atom) ![5]u32 {
+        const pause: std.os.linux.timespec = .{ .sec = 0, .nsec = 5 * std.time.ns_per_ms };
+        var waited_ms: u32 = 0;
+        while (waited_ms < 3000) : (waited_ms += 5) {
+            while (x11.xcb_poll_for_event(self.connection)) |event| {
+                defer x11.free(event);
+                if (event.code() != x11.client_message) continue;
+                const message: *const x11.ClientMessageEvent = @ptrCast(event);
+                if (message.window == window and message.type == message_type) return message.data32;
+            }
+            _ = std.os.linux.nanosleep(&pause, null);
+        }
+        return error.Timeout;
+    }
+};
+
+test "on X11 the window manager is sent each request as EWMH and ICCCM name it, and a frame it draws takes the title bar back" {
+    var window_manager = try StandInWindowManager.open();
+    defer window_manager.close();
+    var titled: TitleBarWindow = .{ .window = .{ .title_bar = .custom } };
+    try titled.open(1);
+    defer titled.close();
+    try testing.expect(reportedEnvironment(&titled.polled).custom_title_bar);
+    const window_host = titled.host();
+    const host_window = window_host.window.id;
+    const atoms = &window_manager.atoms;
+    const source_application = 1;
+
+    const title = titled.pointIn(.title_bar);
+    const title_on_root: [2]u32 = @bitCast(rootPositionOf(title));
+    titled.click(title);
+    const move_direction = 8;
+    try testing.expectEqual([5]u32{ title_on_root[0], title_on_root[1], move_direction, 1, source_application }, try window_manager.nextMessage(host_window, atoms.net_wm_moveresize));
+
+    const grip = titled.pointIn(.grip);
+    const grip_on_root: [2]u32 = @bitCast(rootPositionOf(grip));
+    titled.click(grip);
+    const bottom_right_direction = 4;
+    try testing.expectEqual([5]u32{ grip_on_root[0], grip_on_root[1], bottom_right_direction, 1, source_application }, try window_manager.nextMessage(host_window, atoms.net_wm_moveresize));
+
+    titled.press(title, 3);
+    titled.release(title, 3);
+    try testing.expectEqual([5]u32{ 0, title_on_root[0], title_on_root[1], 0, 0 }, try window_manager.nextMessage(host_window, atoms.gtk_show_window_menu));
+
+    titled.click(titled.pointIn(.minimize));
+    const iconic_state = 3;
+    try testing.expectEqual([5]u32{ iconic_state, 0, 0, 0, 0 }, try window_manager.nextMessage(host_window, atoms.wm_change_state));
+
+    titled.click(titled.pointIn(.maximize));
+    const add_state = 1;
+    try testing.expectEqual([5]u32{ add_state, atoms.net_wm_state_maximized_vert, atoms.net_wm_state_maximized_horz, source_application, 0 }, try window_manager.nextMessage(host_window, atoms.net_wm_state));
+
+    const extents = [_]u32{ 2, 2, 30, 2 };
+    _ = x11.xcb_change_property(window_manager.connection, x11.property_mode_replace, host_window, atoms.net_frame_extents, x11.atom_cardinal, 32, extents.len, &extents);
+    _ = x11.xcb_flush(window_manager.connection);
+    try titled.pollUntilReported(.{ .custom_title_bar = false });
+    try testing.expectEqual(@as(?zui.ChromeKind, null), titled.kindAt(title));
 }

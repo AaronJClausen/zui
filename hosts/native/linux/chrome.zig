@@ -53,9 +53,133 @@ pub const ChromeSnapshot = struct {
         return null;
     }
 
+    /// What a window manager makes of `point`, in surface coordinates:
+    /// null where it is the application's, as outside any region, and on
+    /// an edge of a window that is not resizable.
+    pub fn windowManagerKindAt(self: *const ChromeSnapshot, resizable: bool, point: [2]f32) ?zui.ChromeKind {
+        const kind = self.kindAt(point) orelse return null;
+        if (!resizable and isResizeKind(kind)) return null;
+        return if (kind == .client) null else kind;
+    }
+
     pub fn clear(self: *ChromeSnapshot) void {
         self.count = 0;
         self.dropped = 0;
+    }
+};
+
+pub fn isResizeKind(kind: zui.ChromeKind) bool {
+    return switch (kind) {
+        .resize_top, .resize_bottom, .resize_left, .resize_right, .resize_top_left, .resize_top_right, .resize_bottom_left, .resize_bottom_right => true,
+        .title_bar, .minimize_button, .maximize_button, .close_button, .client => false,
+    };
+}
+
+/// What a press on a custom title bar's chrome asks of the window manager,
+/// whichever display server it runs on.
+pub const ChromeGesture = union(enum) {
+    move,
+    /// From the edge or corner this resize kind names.
+    resize: zui.ChromeKind,
+    /// At the press's point, in surface coordinates.
+    show_window_menu: [2]f32,
+    toggle_maximized,
+};
+
+/// The presses on a custom title bar's chrome, on any display server: which
+/// go to the window manager, which caption button is held, and the title
+/// bar's double click.
+pub const ChromePresses = struct {
+    pressed_caption_button: ?zui.ChromeKind = null,
+    /// Buttons whose press went to the window manager, so their release is
+    /// not zui's either.
+    handed_buttons: std.EnumSet(zui.Button) = .initEmpty(),
+    last_title_bar_press_at: ?zui.Instant = null,
+
+    /// From the first press to the second, as a press handed to the window
+    /// manager has no release the host sees.
+    pub const double_click_seconds = zui.Gestures.double_tap_seconds;
+
+    pub const Press = union(enum) {
+        reaches_zui,
+        handed_to_window_manager: ChromeGesture,
+    };
+
+    pub const Release = union(enum) {
+        reaches_zui,
+        /// The release of a press the window manager took.
+        swallowed,
+        /// The release of a press on a caption button: zui sees the press
+        /// cancelled, and the host works the button it names, null when the
+        /// pointer left the button it pressed.
+        cancels_press: ?zui.ChromeKind,
+    };
+
+    /// `kind_at_point` is what the window manager makes of `point`. A
+    /// primary press on the title bar moves the window, or, the second
+    /// within `double_click_seconds`, maximizes or restores it; on an edge
+    /// it resizes the window; a secondary press on the title bar opens the
+    /// window menu. Each goes to the window manager. A primary press on a
+    /// caption button reaches zui, which shows it, and the release works
+    /// the button.
+    pub fn press(self: *ChromePresses, button: zui.Button, kind_at_point: ?zui.ChromeKind, point: [2]f32, at: zui.Instant) Press {
+        self.handed_buttons.remove(button);
+        const kind = kind_at_point orelse return .reaches_zui;
+        switch (button) {
+            .primary => switch (kind) {
+                .title_bar => {
+                    if (self.last_title_bar_press_at) |last| if (at.isBefore(last.addSeconds(double_click_seconds))) {
+                        self.last_title_bar_press_at = null;
+                        return self.handed(button, .toggle_maximized);
+                    };
+                    self.last_title_bar_press_at = at;
+                    return self.handed(button, .move);
+                },
+                .minimize_button, .maximize_button, .close_button => {
+                    self.pressed_caption_button = kind;
+                    return .reaches_zui;
+                },
+                else => return self.handed(button, .{ .resize = kind }),
+            },
+            .secondary => if (kind == .title_bar) return self.handed(button, .{ .show_window_menu = point }),
+            .middle => {},
+        }
+        return .reaches_zui;
+    }
+
+    /// `kind_at_point` is what the window manager makes of the release's
+    /// point.
+    pub fn release(self: *ChromePresses, button: zui.Button, kind_at_point: ?zui.ChromeKind) Release {
+        if (self.handed_buttons.contains(button)) {
+            self.handed_buttons.remove(button);
+            return .swallowed;
+        }
+        if (button != .primary) return .reaches_zui;
+        const pressed = self.pressed_caption_button orelse return .reaches_zui;
+        self.pressed_caption_button = null;
+        return .{ .cancels_press = if (kind_at_point == pressed) pressed else null };
+    }
+
+    /// Returns whether a caption button's press was cancelled.
+    pub fn onPointerLeave(self: *ChromePresses) bool {
+        const cancelled = self.pressed_caption_button != null;
+        self.pressed_caption_button = null;
+        return cancelled;
+    }
+
+    /// A press handed to the window manager may end without a release the
+    /// window sees.
+    pub fn onPointerEnter(self: *ChromePresses) void {
+        self.handed_buttons = .initEmpty();
+    }
+
+    pub fn forget(self: *ChromePresses) void {
+        self.* = .{};
+    }
+
+    fn handed(self: *ChromePresses, button: zui.Button, gesture: ChromeGesture) Press {
+        self.handed_buttons.insert(button);
+        return .{ .handed_to_window_manager = gesture };
     }
 };
 
@@ -112,9 +236,9 @@ pub const WindowManager = struct {
     seat: ?*Proxy,
 };
 
-/// A window's custom title bar: what the compositor let it be, the regions
-/// of its last frame, the presses on them it handed the compositor, and
-/// whether the window is maximized.
+/// A Wayland window's custom title bar: what the compositor let it be, the
+/// regions of its last frame, the presses on them it handed the
+/// compositor, and whether the window is maximized.
 pub const WindowChrome = struct {
     /// The window was opened with `title_bar = .custom`.
     asked_for_custom: bool = false,
@@ -130,29 +254,12 @@ pub const WindowChrome = struct {
     /// As the last `xdg_toplevel.configure` said, applied by the
     /// `xdg_surface.configure` that ends it.
     configured_maximized: bool = false,
-    pressed_caption_button: ?zui.ChromeKind = null,
-    /// Buttons whose press went to the compositor, so their release is not
-    /// zui's either.
-    handed_buttons: std.EnumSet(zui.Button) = .initEmpty(),
-    last_title_bar_press_at: ?zui.Instant = null,
+    presses: ChromePresses = .{},
     last_request: ?WindowManagerRequest = null,
     requests_sent: u32 = 0,
 
-    /// From the first press to the second, as a press handed to the
-    /// compositor has no release the host sees.
-    pub const double_click_seconds = zui.Gestures.double_tap_seconds;
-
     pub const Press = enum { reaches_zui, handed_to_window_manager };
-
-    pub const Release = union(enum) {
-        reaches_zui,
-        /// The release of a press the compositor took.
-        swallowed,
-        /// The release of a press on a caption button: zui sees the press
-        /// cancelled, and the host works the button it names, null when the
-        /// pointer left the button it pressed.
-        cancels_press: ?zui.ChromeKind,
-    };
+    pub const Release = ChromePresses.Release;
 
     /// The application draws the title bar: it asked to, and the compositor
     /// did not insist on drawing its own.
@@ -180,7 +287,10 @@ pub const WindowChrome = struct {
     /// and the host stops answering presses on its chrome.
     pub fn onDecorationMode(self: *WindowChrome, mode: DecorationMode) void {
         self.decoration_mode = mode;
-        if (!self.isCustom()) self.forgetPresses();
+        if (!self.isCustom()) {
+            self.snapshot.clear();
+            self.presses.forget();
+        }
     }
 
     pub fn publish(self: *WindowChrome, regions: []const zui.ChromeRegion, surface_coordinates_per_unit: f32) void {
@@ -188,77 +298,39 @@ pub const WindowChrome = struct {
         self.snapshot.publish(regions, surface_coordinates_per_unit);
     }
 
-    /// What the window manager makes of a point, in surface coordinates:
-    /// null where it is the application's, as outside any region.
+    /// What the compositor makes of a point, in surface coordinates: null
+    /// where it is the application's, as outside any region.
     pub fn kindAt(self: *const WindowChrome, point: [2]f32) ?zui.ChromeKind {
         if (!self.isCustom()) return null;
-        const kind = self.snapshot.kindAt(point) orelse return null;
-        if (!self.resizable and ResizeEdge.of(kind) != null) return null;
-        return if (kind == .client) null else kind;
+        return self.snapshot.windowManagerKindAt(self.resizable, point);
     }
 
-    /// A primary press on the title bar moves the window, or, the second
-    /// within `double_click_seconds`, maximizes or restores it; on an edge
-    /// it resizes the window; a secondary press on the title bar opens the
-    /// window menu. Each goes to the compositor. A primary press on a
-    /// caption button reaches zui, which shows it, and the release works
-    /// the button.
+    /// See `ChromePresses.press`; each request carries `serial`.
     pub fn press(self: *WindowChrome, button: zui.Button, point: [2]f32, serial: u32, at: zui.Instant, window_manager: WindowManager) Press {
-        self.handed_buttons.remove(button);
-        const kind = self.kindAt(point) orelse return .reaches_zui;
-        switch (button) {
-            .primary => switch (kind) {
-                .title_bar => {
-                    if (self.last_title_bar_press_at) |last| if (at.isBefore(last.addSeconds(double_click_seconds))) {
-                        self.last_title_bar_press_at = null;
-                        self.toggleMaximized(window_manager);
-                        return self.handed(button);
-                    };
-                    self.last_title_bar_press_at = at;
-                    self.request(window_manager, .{ .move = serial });
-                    return self.handed(button);
-                },
-                .minimize_button, .maximize_button, .close_button => {
-                    self.pressed_caption_button = kind;
-                    return .reaches_zui;
-                },
-                else => {
-                    self.request(window_manager, .{ .resize = .{ .serial = serial, .edge = ResizeEdge.of(kind).? } });
-                    return self.handed(button);
-                },
-            },
-            .secondary => if (kind == .title_bar) {
-                const position: [2]i32 = .{ surfaceLocal(point[0]), surfaceLocal(point[1]) };
-                self.request(window_manager, .{ .show_window_menu = .{ .serial = serial, .position = position } });
-                return self.handed(button);
-            },
-            .middle => {},
+        const gesture = switch (self.presses.press(button, self.kindAt(point), point, at)) {
+            .reaches_zui => return .reaches_zui,
+            .handed_to_window_manager => |gesture| gesture,
+        };
+        switch (gesture) {
+            .move => self.request(window_manager, .{ .move = serial }),
+            .resize => |kind| self.request(window_manager, .{ .resize = .{ .serial = serial, .edge = ResizeEdge.of(kind).? } }),
+            .show_window_menu => |menu_point| self.request(window_manager, .{ .show_window_menu = .{ .serial = serial, .position = .{ surfaceLocal(menu_point[0]), surfaceLocal(menu_point[1]) } } }),
+            .toggle_maximized => self.toggleMaximized(window_manager),
         }
-        return .reaches_zui;
+        return .handed_to_window_manager;
     }
 
     pub fn release(self: *WindowChrome, button: zui.Button, point: [2]f32) Release {
-        if (self.handed_buttons.contains(button)) {
-            self.handed_buttons.remove(button);
-            return .swallowed;
-        }
-        if (button != .primary) return .reaches_zui;
-        const pressed = self.pressed_caption_button orelse return .reaches_zui;
-        self.pressed_caption_button = null;
-        return .{ .cancels_press = if (self.kindAt(point) == pressed) pressed else null };
+        return self.presses.release(button, self.kindAt(point));
     }
 
     /// Returns whether a caption button's press was cancelled.
     pub fn onPointerLeave(self: *WindowChrome) bool {
-        const cancelled = self.pressed_caption_button != null;
-        self.pressed_caption_button = null;
-        return cancelled;
+        return self.presses.onPointerLeave();
     }
 
-    /// A press handed to the compositor may end without a release the
-    /// window sees.
     pub fn onPointerEnter(self: *WindowChrome) void {
-        self.handed_buttons = .initEmpty();
+        self.presses.onPointerEnter();
     }
 
     pub fn toggleMaximized(self: *WindowChrome, window_manager: WindowManager) void {
@@ -274,18 +346,6 @@ pub const WindowChrome = struct {
         if (self.maximized == self.configured_maximized) return false;
         self.maximized = self.configured_maximized;
         return true;
-    }
-
-    fn handed(self: *WindowChrome, button: zui.Button) Press {
-        self.handed_buttons.insert(button);
-        return .handed_to_window_manager;
-    }
-
-    fn forgetPresses(self: *WindowChrome) void {
-        self.snapshot.clear();
-        self.pressed_caption_button = null;
-        self.handed_buttons = .initEmpty();
-        self.last_title_bar_press_at = null;
     }
 
     fn request(self: *WindowChrome, window_manager: WindowManager, sent: WindowManagerRequest) void {
@@ -358,4 +418,15 @@ test "the maximized state is found among a configure's states" {
     try std.testing.expect(statesHoldMaximized(&.{ 4, 1 }));
     try std.testing.expect(!statesHoldMaximized(&.{ 4, 5 }));
     try std.testing.expect(!statesHoldMaximized(&.{}));
+}
+
+test "the title bar's second press within the double click's time toggles maximize, and a third starts again with a move" {
+    var presses: ChromePresses = .{};
+    const at: zui.Instant = .zero;
+    try std.testing.expectEqual(ChromePresses.Press{ .handed_to_window_manager = .move }, presses.press(.primary, .title_bar, .{ 1, 1 }, at));
+    try std.testing.expectEqual(ChromePresses.Release.swallowed, presses.release(.primary, null));
+    try std.testing.expectEqual(ChromePresses.Press{ .handed_to_window_manager = .toggle_maximized }, presses.press(.primary, .title_bar, .{ 1, 1 }, at.addSeconds(0.1)));
+    try std.testing.expectEqual(ChromePresses.Press{ .handed_to_window_manager = .move }, presses.press(.primary, .title_bar, .{ 1, 1 }, at.addSeconds(0.2)));
+    const late = at.addSeconds(0.2 + ChromePresses.double_click_seconds);
+    try std.testing.expectEqual(ChromePresses.Press{ .handed_to_window_manager = .move }, presses.press(.primary, .title_bar, .{ 1, 1 }, late));
 }
