@@ -48,7 +48,7 @@ and each is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:33-pickers` Pickers | not started |
 | `11-polish:34-zui-widgets-views` `zui_widgets_views` | not started |
 | `11-polish:35-italics` Italics | not started |
-| `11-polish:36-motion-in-core` Motion in the core | not started |
+| `11-polish:36-motion-in-core` Motion in the core | done |
 
 ### The design system
 
@@ -2137,4 +2137,25 @@ to `core/src/`; `test-all` and `check-all`.
 
 **Spec.** §19.9.
 
-**Status.** Not started.
+**Status.** Done: `core/src/motion.zig`, exported as `zui.motion`, holds
+`Easing`, `TweenOptions`, `SpringOptions`, `tween` and `spring`, moved
+from `zui_motion` unchanged but for reaching `Id`, `Color`,
+`ExtendedColor` and `Instant` through their core files; `zui_motion`
+re-exports them, and its 12 tests and its compile-error case pass with
+`tests.zig` and the message untouched. `zui.design.Motion` holds the 13
+motion tokens and `press_scale`; the design owns it as `Design.motion`,
+and `Tokens.motion` defaults to `.{}` (`zui.motion`'s own options and a
+scale of 1), so every existing literal compiles; `zui_design.resolve`
+copies it as declared, since under reduced motion the tweens and springs
+land by themselves. `zui_design.default` carries the approved values.
+New tests: core's `tests/motion.zig` (`zui.motion` reached directly, and
+a token driving a tween), `zui_design`'s default motion reaching every
+token, a custom design's motion reaching the tokens in every theme, and
+`resolve` writing `motion` in the poisoned-tokens sweep;
+`core/tests/instantiate.zig` springs and tweens through `zui.motion`
+with the default design's tokens. `test` in Debug, ReleaseFast,
+ReleaseSafe and `x86-linux`, `check` for `wasm32-freestanding` and
+`powerpc-linux`, `test-all` and `check-all` pass. `counts -- --compare`
+against `2ba7904`: all 175 events +0.00% (4096 boxes at depth 8: declare
+438141, endFrame 1265648 instructions, unchanged), since nothing that
+does not animate calls the moved code.

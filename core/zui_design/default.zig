@@ -2,7 +2,8 @@ const zui = @import("zui");
 
 /// zui's default design, for consumer apps first: one accent on cool
 /// neutrals, Atkinson Hyperlegible at 16 on a 1.2 scale, smooth controls
-/// and soft containers with continuous corners. Its fonts are the
+/// and soft containers with continuous corners, and short eased tweens
+/// and springs that press a control to 97%. Its fonts are the
 /// application's to fill from its `FontId`s.
 ///
 /// ```zig
@@ -22,4 +23,20 @@ pub const default: zui.design.Design = .{
     .type = .{ .ratio = 1.2, .body_size = 16, .x_height = 6.4 },
     .shapes = .init(.{ .control = .smooth, .container = .soft, .popup = .soft, .chip = .bubble, .image = .smooth, .indicator = .bubble }),
     .corner_shape = .continuous,
+    .motion = .{
+        .state = .{ .duration = 0.12, .easing = .ease_out },
+        .press = .{ .duration = 0.08, .easing = .ease_out },
+        .toggle = .{ .angular_frequency = 28 },
+        .check = .{ .duration = 0.16, .easing = .ease_out },
+        .popover_enter = .{ .duration = 0.16, .easing = .ease_out },
+        .popover_exit = .{ .duration = 0.1, .easing = .ease_in },
+        .dialog_enter = .{ .duration = 0.22, .easing = .ease_out },
+        .dialog_exit = .{ .duration = 0.14, .easing = .ease_in },
+        .toast_enter = .{ .angular_frequency = 22 },
+        .toast_exit = .{ .duration = 0.16, .easing = .ease_in },
+        .drawer = .{ .angular_frequency = 20 },
+        .reorder = .{ .angular_frequency = 30 },
+        .disclosure = .{ .duration = 0.2, .easing = .ease_in_out },
+        .press_scale = 0.97,
+    },
 };

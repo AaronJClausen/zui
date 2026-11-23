@@ -131,6 +131,9 @@ pub const Repair = repairs_file.Repair;
 /// `lineHeightFor` and its letter spacing `trackingFor` its size. The
 /// measure is 66 characters of half the body size.
 ///
+/// The motion is the design's as it declares it: under reduced motion
+/// `zui.motion.tween` and `zui.motion.spring` land at once by themselves.
+///
 /// ```zig
 /// var tokens: zui.design.Tokens(Ui, void) = .{};
 /// _ = zui_design.resolve(app.design, .from(ui.environment(), app.choices), &tokens);
@@ -166,6 +169,7 @@ pub fn resolve(resolved_design: Design, preferences: Preferences, tokens: anytyp
     tokens.focus_ring_width = focus_ring_width;
     tokens.focus_ring_offset = focus_ring_offset;
     tokens.measure = measure_characters * average_character_width * tokens.text_styles.get(.body).size;
+    tokens.motion = resolved_design.motion;
     return repairs;
 }
 

@@ -159,6 +159,15 @@ pub const ChromeRegion = chrome.ChromeRegion;
 /// ```
 pub const design = @import("design.zig");
 
+/// Tweens and springs over `ui.state`, which ask for frames only while
+/// they move and land at once when the user asks for reduced motion.
+///
+/// ```zig
+/// const opacity = zui.motion.tween(ui, .of("toast"), f32, if (app.importing) 1 else 0, app.tokens.motion.toast_exit);
+/// const drawer_x = zui.motion.spring(ui, .of("drawer"), f32, if (app.drawer_open) 0 else -280, app.tokens.motion.drawer);
+/// ```
+pub const motion = @import("motion.zig");
+
 pub const Exit = exit.Exit;
 pub const ExitFade = exit.ExitFade;
 
@@ -273,6 +282,7 @@ test {
     _ = @import("tests/semantics.zig");
     _ = @import("tests/chrome.zig");
     _ = @import("tests/exit_animations.zig");
+    _ = @import("tests/motion.zig");
     _ = @import("tests/design.zig");
     _ = @import("tests/corners.zig");
 }

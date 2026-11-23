@@ -129,7 +129,10 @@ const MotionCard = struct { offset: [2]f32, background: zui.Color, glow: zui.Ext
 fn declareMotion(ui: *Ui, target: f32) void {
     const card = zui_motion.tween(ui, .of("motion card"), MotionCard, .{ .offset = .{ target, 0 }, .background = .white, .glow = .rgb(0x3366ff), .opacity = 1 }, .{ .duration = 0.3, .easing = .ease_in_out, .delay = 0.1 });
     const thumb = zui_motion.spring(ui, .of("motion thumb"), [2]f32, .{ target, target }, .{ .angular_frequency = 30 });
-    ui.box(.{ .layout = .{ .sizing = .{ .width = .fixed(thumb[0] + card.offset[0]), .height = .fixed(card.opacity) } }, .decoration = .{ .background = card.background } });
+    const design_motion = zui_design.default.motion;
+    const drawer_x = zui.motion.spring(ui, .of("motion drawer"), f32, target, design_motion.drawer);
+    const press_scale = zui.motion.tween(ui, .of("motion press"), f32, design_motion.press_scale, design_motion.press);
+    ui.box(.{ .layout = .{ .sizing = .{ .width = .fixed(thumb[0] + card.offset[0] + drawer_x), .height = .fixed(card.opacity * press_scale) } }, .decoration = .{ .background = card.background } });
 }
 
 const Settings = struct {

@@ -2460,6 +2460,7 @@ pub const design = struct {
     pub const FaceMetrics = struct { ascent: f32, descent: f32, x_height: f32, cap_height: f32 }; // font units
 
     pub const Design = struct { ... };                             // what an application or theme pack declares
+    pub const Motion = struct { ... };                             // a `zui.motion` option per kind of change, and the press scale
     pub fn Tokens(comptime Ui: type, comptime ExtraRoles: type) type // resolved values; `ExtraRoles` an enum or void
     pub fn Appearance(comptime Part: type, comptime parts: Parts(Part, void)) type
     pub fn AppearanceWith(comptime Part: type, comptime ExtraRoles: type, comptime parts: Parts(Part, ExtraRoles)) type
@@ -2495,22 +2496,38 @@ pub const design = struct {
   shorter side, a pill), is what a `ShapeRole` resolves to (§18.7).
 
 - **`Design`** holds the seeds, the type scale's inputs and fonts, each
-  shape role's size and the corner family, and the density table, a
-  length per `Space` at each `Density`. It is plain data, so a theme
-  pack imports only `zui`: its fonts are the integer values of the
-  application's `FontId`, and its seeds are OKLCH as `zui.design.Oklch`.
+  shape role's size and the corner family, the density table, a length
+  per `Space` at each `Density`, and its `motion`. It is plain data, so
+  a theme pack imports only `zui`: its fonts are the integer values of
+  the application's `FontId`, and its seeds are OKLCH as
+  `zui.design.Oklch`.
+
+- **`Motion`** is how each kind of change moves: a
+  `zui.motion.TweenOptions` for `state` (a part's colors changing),
+  `press`, `check`, `popover_enter` and `_exit`, `dialog_enter` and
+  `_exit`, `toast_exit` and `disclosure`, a `zui.motion.SpringOptions`
+  for `toggle`, `toast_enter`, `drawer` and `reorder`, and
+  `press_scale`, the scale a pressed control draws at. Its fields
+  default to `zui.motion`'s own options and a `press_scale` of 1. A
+  resolver copies it into the tokens as the design declares it: under
+  `reduced_motion` the tweens and springs land at once by themselves.
+
+  ```zig
+  const knob_x = zui.motion.spring(ui, knob_id, f32, if (on) track_width else 0, tokens.motion.toggle);
+  ```
 
 - **`Tokens`** holds a color per role in each `WidgetState`'s layer of
   the resolved theme, a length per tier, a `TextStyle` per type role, a
   `CornerRadius` and `CornerShape` per shape role, the target floors, a
   control's height and icon size per `ControlSize`, the outline and
   focus ring widths and the ring's offset, a `Lift` per `Elevation`
-  (§18.7), the factor a part that draws text pads by, and the body
-  text's measure; `tokens.space(.m)` reads a tier. Every field is empty
-  until a resolver writes it. `tokens.look(Component, part, state)`
-  answers a part's decoration, padding, gap, text style and minimum size
-  in one `WidgetState`, and checks the component's appearance the first
-  time it is read, so a component no tokens read costs nothing.
+  (§18.7), the factor a part that draws text pads by, the body text's
+  measure, and the design's `motion`; `tokens.space(.m)` reads a tier.
+  Every field but `motion` is empty until a resolver writes it.
+  `tokens.look(Component, part, state)` answers a part's decoration,
+  padding, gap, text style and minimum size in one `WidgetState`, and
+  checks the component's appearance the first time it is read, so a
+  component no tokens read costs nothing.
 
 ### 18.2 The appearance contract
 
@@ -3414,26 +3431,28 @@ comptime; icon names to codepoints in an icon font, drawn as text.
 
 ### 19.9 `zui_motion`
 
-Tweens and springs over `state(id, T)` and `dt()`, which ask for the
-next frame while they move, for a frame at the instant a delayed one
-starts, and for none at rest, and finish instantly under
-`reduced_motion`. Exit animations use the core's ghost buffer: an
-element with an `exit` keeps emitting its last commands for
-`exit.seconds` after it is last declared, taking no space and receiving
-no hits, from `limits.exit_ghost_commands` (0 compiles it out). The
-commands are those its subtree emitted in that frame, inside the clip
-and transforms around it, drawn at the end of their layers, a newer
-ghost over an older one; they do not follow a container that scrolls
-afterwards. A fade multiplies the alpha of every color they draw by an
-opacity from 1 to 0, linear or cubic as `zui_motion`'s easings; `.none`
-holds them unchanged and asks only for a frame at the instant it ends,
-and a fade asks for the next frame while it lasts. The fade is chosen
-once per ghost per frame, so `.none` runs no alpha code and `.linear` no
-easing, and no set of fades is declared. An element inside another that
-leaves with it is drawn only in the outer one's ghost. A ghost is
-dropped when its element is declared again, and every ghost at once
-under `reduced_motion`. A ghost whose commands or text do not fit is not
-kept, and reported as `exit_ghost_commands`.
+`Easing`, `TweenOptions`, `SpringOptions`, `tween` and `spring` live in
+the core as `zui.motion`, so a widget reaches them through `zui` alone
+(§3.3); `zui_motion` re-exports them under its own name. They are tweens
+and springs over `state(id, T)` and `dt()`, which ask for the next frame
+while they move, for a frame at the instant a delayed one starts, and
+for none at rest, and finish instantly under `reduced_motion`. Exit
+animations use the core's ghost buffer: an element with an `exit` keeps
+emitting its last commands for `exit.seconds` after it is last declared,
+taking no space and receiving no hits, from `limits.exit_ghost_commands`
+(0 compiles it out). The commands are those its subtree emitted in that
+frame, inside the clip and transforms around it, drawn at the end of
+their layers, a newer ghost over an older one; they do not follow a
+container that scrolls afterwards. A fade multiplies the alpha of every
+color they draw by an opacity from 1 to 0, linear or cubic as
+`zui_motion`'s easings; `.none` holds them unchanged and asks only for a
+frame at the instant it ends, and a fade asks for the next frame while
+it lasts. The fade is chosen once per ghost per frame, so `.none` runs
+no alpha code and `.linear` no easing, and no set of fades is declared.
+An element inside another that leaves with it is drawn only in the outer
+one's ghost. A ghost is dropped when its element is declared again, and
+every ghost at once under `reduced_motion`. A ghost whose commands or
+text do not fit is not kept, and reported as `exit_ghost_commands`.
 
 ### 19.10 `zui_tracy`
 
@@ -3459,9 +3478,12 @@ the verdict file and report the review writes (§18.8).
 `zui_design.default` is zui's own design: one accent (OKLCH L 0.55, C
 0.17, H 258) on cool neutrals of the same hue, Atkinson Hyperlegible's
 x-height at 16 on a 1.2 scale, `smooth` controls, `soft` containers and
-popups, pill chips and indicators, and `continuous` corners. Its fonts
-are left for the application to fill from its `FontId`s, and it resolves
-at comptime in every scheme with nothing repaired.
+popups, pill chips and indicators, and `continuous` corners. Its motion
+eases out over 0.08 s for a press and 0.12 s for a change of state,
+springs a switch, a toast, a drawer and a reordered item, and presses a
+control to 0.97 of its size. Its fonts are left for the application to
+fill from its `FontId`s, and it resolves at comptime in every scheme
+with nothing repaired.
 
 ---
 

@@ -2,6 +2,7 @@ const std = @import("std");
 const style = @import("style.zig");
 const interaction = @import("interaction.zig");
 const contracts = @import("contracts.zig");
+const motion = @import("motion.zig");
 
 const WidgetState = interaction.WidgetState;
 
@@ -132,6 +133,7 @@ pub const Design = struct {
     corner_shape: style.CornerShape = .round,
     /// The length of each tier at each density, in layout units.
     density: DensityTable = default_density,
+    motion: Motion = .{},
 
     /// Each becomes a tonal ramp, and every role is taken from a ramp.
     pub const Seeds = struct {
@@ -193,6 +195,39 @@ pub const Design = struct {
         .image = .smooth,
         .indicator = .bubble,
     });
+};
+
+/// How each kind of change moves, as a design declares it and its tokens
+/// carry it. Under reduced motion `zui.motion.tween` and `zui.motion.spring`
+/// land at once, so no token is zeroed for it.
+///
+/// ```zig
+/// const knob_x = zui.motion.spring(ui, knob_id, f32, if (on) track_width else 0, tokens.motion.toggle);
+/// const scale = zui.motion.tween(ui, button_id, f32, if (ui.pressed(button_id)) tokens.motion.press_scale else 1, tokens.motion.press);
+/// ```
+pub const Motion = struct {
+    /// A hover, focus or selection changing a part's colors.
+    state: motion.TweenOptions = .{},
+    /// A control shrinking under the pointer to `press_scale`.
+    press: motion.TweenOptions = .{},
+    /// A switch's knob.
+    toggle: motion.SpringOptions = .{},
+    /// A checkbox's mark or a radio's dot.
+    check: motion.TweenOptions = .{},
+    popover_enter: motion.TweenOptions = .{},
+    popover_exit: motion.TweenOptions = .{},
+    dialog_enter: motion.TweenOptions = .{},
+    dialog_exit: motion.TweenOptions = .{},
+    toast_enter: motion.SpringOptions = .{},
+    toast_exit: motion.TweenOptions = .{},
+    /// A drawer or sheet sliding in or out.
+    drawer: motion.SpringOptions = .{},
+    /// An item of a list moving to its new place.
+    reorder: motion.SpringOptions = .{},
+    /// A disclosure or accordion opening or closing.
+    disclosure: motion.TweenOptions = .{},
+    /// The scale a pressed control draws at; 1 draws it unscaled.
+    press_scale: f32 = 1,
 };
 
 /// A raw color a part draws as it is, outside every contrast check; the
@@ -486,6 +521,7 @@ pub fn Tokens(comptime Ui: type, comptime ExtraRoles: type) type {
         elevations: std.EnumArray(Elevation, Lift) = .initFill(.{}),
         /// The width of a column of body text, in layout units.
         measure: f32 = 0,
+        motion: Motion = .{},
 
         /// What a part at one `Elevation` draws beneath and around itself.
         pub const Lift = struct {

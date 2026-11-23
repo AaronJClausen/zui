@@ -169,3 +169,23 @@ test "reduced transparency leaves the shadow and the rim translucent" {
     try testing.expectEqual(expected.resolved.light.get(.rim)[0] & 0xff, colors.get(.rim).a);
     try testing.expect(colors.get(.scrim).a >= @as(u8, @intFromFloat(@floor(0.85 * 255))));
 }
+
+test "the default design's motion reaches every motion token" {
+    var tokens: Tokens = .{};
+    _ = zui_design.resolve(zui_design.default, .{}, &tokens);
+    const motion = tokens.motion;
+    try testing.expectEqual(zui.motion.TweenOptions{ .duration = 0.12, .easing = .ease_out }, motion.state);
+    try testing.expectEqual(zui.motion.TweenOptions{ .duration = 0.08, .easing = .ease_out }, motion.press);
+    try testing.expectEqual(zui.motion.SpringOptions{ .angular_frequency = 28 }, motion.toggle);
+    try testing.expectEqual(zui.motion.TweenOptions{ .duration = 0.16, .easing = .ease_out }, motion.check);
+    try testing.expectEqual(zui.motion.TweenOptions{ .duration = 0.16, .easing = .ease_out }, motion.popover_enter);
+    try testing.expectEqual(zui.motion.TweenOptions{ .duration = 0.1, .easing = .ease_in }, motion.popover_exit);
+    try testing.expectEqual(zui.motion.TweenOptions{ .duration = 0.22, .easing = .ease_out }, motion.dialog_enter);
+    try testing.expectEqual(zui.motion.TweenOptions{ .duration = 0.14, .easing = .ease_in }, motion.dialog_exit);
+    try testing.expectEqual(zui.motion.SpringOptions{ .angular_frequency = 22 }, motion.toast_enter);
+    try testing.expectEqual(zui.motion.TweenOptions{ .duration = 0.16, .easing = .ease_in }, motion.toast_exit);
+    try testing.expectEqual(zui.motion.SpringOptions{ .angular_frequency = 20 }, motion.drawer);
+    try testing.expectEqual(zui.motion.SpringOptions{ .angular_frequency = 30 }, motion.reorder);
+    try testing.expectEqual(zui.motion.TweenOptions{ .duration = 0.2, .easing = .ease_in_out }, motion.disclosure);
+    try testing.expectEqual(0.97, motion.press_scale);
+}

@@ -9,7 +9,7 @@ ROADMAP.md says when each part is built.
 
 | Layer | Holds | Rule that keeps it in bounds |
 |---|---|---|
-| **Core** (`zui`) | layout, interaction, state, the frame boundary, sources and demand, the vocabulary, every contract and its checks | no OS calls, no drawing, no threads but the `Io` it is given; the same behavior on every target |
+| **Core** (`zui`) | layout, interaction, state, the frame boundary, sources and demand, the vocabulary, tweens and springs, every contract and its checks | no OS calls, no drawing, no threads but the `Io` it is given; the same behavior on every target |
 | **Modules** (`zui_*`, in `core/`) | default sources, widgets, reflection, testing, tracing, the app runner, wire, debug, motion, color, icons | the public API only, enforced by the module boundary (SPEC.md §3.3) |
 | **Text** (`text/`) | what font systems and renderers share (`zui_glyphs`: the one layout of a run into positioned glyphs, the placement a renderer declares, the atlas), font systems (`zui_truetype`), typefaces (`zui_fonts`) | a font system implements the text contract and lays text out through `zui_glyphs`; it never imports a renderer, and core never imports it |
 | **Renderers** | drawing, images, materials, and text where `zui_glyphs` lays it out | implement the renderer contract; never import a host or a font system |
@@ -191,7 +191,7 @@ The stage is the one in SPEC.md §21 that builds it.
 | who owns the loop: one turn that never blocks, pulled, pushed or stepped, and surfaces a platform takes away | `zui_app.Session.step`; the host contract's loop half, `zuiWait` or `zuiRun` and `zui.Driver`, in the core; `zui_testing`'s suite for each loop half | 10 |
 | window decorations: a custom title bar the OS still moves, resizes and snaps | chrome regions in the core, beside the frame, behind `features.chrome_regions`; `zui_app` hands them to the host's `zuiChromeRegions`; each host answers its window manager | 10 |
 | host services: the clipboard, notifications, file dialogs, opening URLs, menus | the core's vocabulary and checks (`core/src/services.zig`); `zui_app.ServicesOf`'s guards; each host implements them, answering into a source the application chooses | 10 |
-| motion and exit animations | `zui_motion`'s tweens and springs, over `state` and `dt`; ghost buffer in the core, for exit animations | 11 |
+| motion and exit animations | tweens and springs in the core (`zui.motion`: `Easing`, `TweenOptions`, `SpringOptions`, `tween`, `spring`), over `state` and `dt`, so the widgets reach them, and re-exported by `zui_motion`; the design's motion in `Design.motion` and `Tokens.motion`, copied by `zui_design.resolve`; ghost buffer in the core, for exit animations | 11 |
 | text editing and IME | `zui_widgets`; composition events and the IME area from the core | 11 |
 | color spaces, palettes, icons | `zui_color`'s OKLab, OKLCH and HSL, mixing, ramps and lightness scales, gamut-mapped by chroma and usable at comptime; `zui_icons` | 11 |
 | the design vocabulary: roles, tiers, `Design`, `Tokens`, the appearance contract and its check | core (`zui.design`) | 11 |

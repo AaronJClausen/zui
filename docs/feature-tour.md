@@ -1512,12 +1512,12 @@ fn blinkCaret(ui: *Ui, app: *App) bool {
 
 <a id="zui-motion"></a>
 
-### `zui_motion`: tweens and springs · *shipped*
+### `zui.motion`: tweens and springs · *shipped*
 
-`zui_motion.tween(ui, id, T, target, options)` eases a value toward
+`zui.motion.tween(ui, id, T, target, options)` eases a value toward
 `target` over `duration` seconds with an `Easing` (`linear`, or cubic
 `ease_in`, `ease_out` and `ease_in_out`) and returns this frame's value.
-`zui_motion.spring` follows `target` with a critically damped spring
+`zui.motion.spring` follows `target` with a critically damped spring
 instead, keeping its velocity when the target moves, which suits a value
 chasing a drag. The value is an `f32`, a `[N]f32`, a `zui.Color` (mixed
 per sRGB channel, as `Color.mix` and CSS transitions do), a
@@ -1528,18 +1528,28 @@ from the current value. While it moves it asks for the next frame, a
 `delay` asks for the instant it starts, and at rest it asks for nothing,
 so the app still idles. Under the environment's `reduced_motion` it
 lands on the target in the frame the target changes. When the state
-table is full it reports `.state_slots` and returns the target.
+table is full it reports `.state_slots` and returns the target. They
+live in the core, so a widget reaches them through `zui` alone;
+`zui_motion` re-exports them under its own name.
+
+A design declares how each kind of change moves in `Design.motion`, and
+`zui_design.resolve` copies it into `tokens.motion`: a `TweenOptions`
+for `state`, `press`, `check`, `popover_enter`, `popover_exit`,
+`dialog_enter`, `dialog_exit`, `toast_exit` and `disclosure`, a
+`SpringOptions` for `toggle`, `toast_enter`, `drawer` and `reorder`, and
+`press_scale`. `zui_design.default` presses a control to 0.97 over 0.08
+s, eases out a change of state over 0.12 s and springs a drawer at 20
+radians a second.
 
 `src/ui/import_progress.zig`
 
 ```zig
-const zui_motion = @import("zui_motion");
-
 fn importToast(app: *App, ui: *Ui) void {
+    const motion = app.tokens.motion;
     // Every tween is called each frame, even while hidden, so none forgets where it was.
-    const opacity = zui_motion.tween(ui, .of("import_toast"), f32, if (app.importing) 1 else 0, .{ .duration = 0.25 });
-    const slide = zui_motion.spring(ui, .of("import_toast slide"), f32, if (app.importing) 0 else 24, .{});
-    const background = zui_motion.tween(ui, .of("import_toast color"), zui.Color, if (app.import_failed) .rgb(0x8a2030) else .rgb(0x262634), .{});
+    const opacity = zui.motion.tween(ui, .of("import_toast"), f32, if (app.importing) 1 else 0, motion.toast_exit);
+    const slide = zui.motion.spring(ui, .of("import_toast slide"), f32, if (app.importing) 0 else 24, motion.toast_enter);
+    const background = zui.motion.tween(ui, .of("import_toast color"), zui.Color, if (app.import_failed) .rgb(0x8a2030) else .rgb(0x262634), motion.state);
     if (opacity == 0) return;
 
     const alpha: u8 = @intFromFloat(opacity * 255);

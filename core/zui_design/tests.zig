@@ -40,6 +40,7 @@ fn poisonedTokens() Tokens {
         .outline_width = -1,
         .focus_ring_width = -1,
         .measure = -1,
+        .motion = .{ .press_scale = -1 },
     };
 }
 
@@ -56,6 +57,7 @@ fn expectEveryFieldWritten(tokens: *const Tokens) !void {
     try testing.expect(tokens.outline_width > 0);
     try testing.expect(tokens.focus_ring_width > 0);
     try testing.expect(tokens.measure > 0);
+    try testing.expect(tokens.motion.press_scale > 0);
 }
 
 test "Preferences.from takes the environment's settings and the user's choices" {
@@ -84,6 +86,18 @@ test "resolve writes every field in every theme and contrast at every density" {
                 try expectEveryFieldWritten(&tokens);
             }
         }
+    }
+}
+
+test "a design's own motion reaches the tokens in every theme" {
+    var springy = harbor;
+    springy.motion.state = .{ .duration = 0.3, .easing = .linear, .delay = 0.05 };
+    springy.motion.drawer = .{ .angular_frequency = 12, .rest_distance = 0.01 };
+    springy.motion.press_scale = 0.9;
+    for (every_theme) |theme| {
+        var tokens = poisonedTokens();
+        _ = zui_design.resolve(springy, .{ .theme = theme }, &tokens);
+        try testing.expectEqual(springy.motion, tokens.motion);
     }
 }
 
