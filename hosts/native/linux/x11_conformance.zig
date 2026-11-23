@@ -532,7 +532,7 @@ const OtherClient = struct {
 
     fn own(self: *OtherClient, selection: x11.Atom) void {
         _ = x11.xcb_set_selection_owner(self.connection, self.window, selection, x11.current_time);
-        _ = x11.xcb_flush(self.connection);
+        self.waitUntilServerApplied();
     }
 
     /// Watches the host's window's properties, as an `INCR` owner does to
@@ -540,7 +540,15 @@ const OtherClient = struct {
     fn watchPropertiesOf(self: *OtherClient, window: x11.Window) void {
         const event_mask: u32 = x11.event_mask_property_change;
         _ = x11.xcb_change_window_attributes(self.connection, window, x11.window_attribute_event_mask, &event_mask);
-        _ = x11.xcb_flush(self.connection);
+        self.waitUntilServerApplied();
+    }
+
+    /// A flush only sends: the host's next request, on its own connection,
+    /// can still reach the server first. A reply comes after every request
+    /// before it on this connection has been applied.
+    fn waitUntilServerApplied(self: *OtherClient) void {
+        const reply = x11.xcb_get_selection_owner_reply(self.connection, x11.xcb_get_selection_owner(self.connection, self.atoms.clipboard), null);
+        if (reply) |applied| x11.free(applied);
     }
 
     fn convert(self: *OtherClient, selection: x11.Atom, target: x11.Atom) void {

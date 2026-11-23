@@ -426,9 +426,10 @@ class Docker:
 def prepare_worktree(state, head):
     """A worktree of this repository's own, kept between runs so its build caches stay warm."""
     worktree = state / "worktree"
+    # An interrupted run leaves its legs' worktrees registered, which the next run's `git worktree add` refuses.
+    git("worktree", "prune")
     if not (worktree / ".git").exists():
         shutil.rmtree(worktree, ignore_errors=True)
-        git("worktree", "prune")
         git("worktree", "add", "--detach", str(worktree), head)
     git("checkout", "--detach", "--force", head, cwd=worktree)
     git("clean", "-ffdxq", "-e", ".zig-cache", "-e", "zig-pkg", cwd=worktree)

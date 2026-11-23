@@ -151,12 +151,26 @@ await evaluate(`(() => {
 const animationSettleMilliseconds = 1_000;
 const idleMilliseconds = 2_000;
 // The tour's heartbeat refreshes its strip each whole second, and a wait of
-// two seconds can span three.
+// two seconds can span three, and of one second two.
 const idleTurnsMost = 3;
+const quietMilliseconds = 1_000;
+const quietTurnsMost = 2;
 const animationFramesFewest = 30;
 
+// A frame drawn after a key proves nothing on a screen that runs live, so on
+// a busy machine the worker can take the last screen change, and animate it,
+// after the check has moved on. A worker that never sleeps never goes quiet,
+// and fails the measurement that follows.
+async function untilWorkerQuiet() {
+  for (let waited = 0; waited < settleMilliseconds; waited += quietMilliseconds) {
+    const before = await inWorker("zuiHost.turns");
+    await pause(quietMilliseconds);
+    if ((await inWorker("zuiHost.turns")) - before <= quietTurnsMost) return;
+  }
+}
+
 async function idleTurns(screen) {
-  await pause(animationSettleMilliseconds);
+  await untilWorkerQuiet();
   const counts = async () => ({ ...(await inWorker("({ turns: zuiHost.turns, drawn: zuiHost.framesDrawn })")), animation: await evaluate("animationFramesSeen") });
   const before = await counts();
   await pause(idleMilliseconds);

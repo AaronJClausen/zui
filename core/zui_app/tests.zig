@@ -688,7 +688,7 @@ test "contextConfig keeps a text contract the overrides name, even from a render
 const SemanticsHost = struct {
     pub const zui_surfaces = TestHost.zui_surfaces;
 
-    base: TestHost,
+    base: TestHost = .{ .window = undefined },
     lists_received: u32 = 0,
     last_node_count: usize = 0,
     last_label: [16]u8 = undefined,
@@ -699,7 +699,7 @@ const SemanticsHost = struct {
     reports_dropped: zui.SemanticsDropped = .{},
 
     pub fn init(self: *SemanticsHost, io: std.Io, window: zui.WindowOptions) !void {
-        self.* = .{ .base = undefined };
+        self.* = .{};
         try self.base.init(io, window);
     }
 
@@ -827,14 +827,14 @@ const TitleBarHost = struct {
     pub const zui_surfaces = TestHost.zui_surfaces;
     pub const zui_capabilities: zui.HostCapabilities = .{ .custom_title_bar = true };
 
-    base: TestHost,
+    base: TestHost = .{ .window = undefined },
     lists_received: u32 = 0,
     last_kinds: [4]zui.ChromeKind = undefined,
     last_count: usize = 0,
     thread_received_on: ?std.Thread.Id = null,
 
     pub fn init(self: *TitleBarHost, io: std.Io, window: zui.WindowOptions) !void {
-        self.* = .{ .base = undefined };
+        self.* = .{};
         try self.base.init(io, window);
     }
 
@@ -1564,10 +1564,10 @@ test "run returns as the host's zuiRun does, and never when it never returns" {
 const SteppedHost = struct {
     pub const zui_surfaces = TestHost.zui_surfaces;
 
-    base: TestHost,
+    base: TestHost = .{ .window = undefined },
 
     pub fn init(self: *SteppedHost, io: std.Io, window: zui.WindowOptions) !void {
-        self.* = .{ .base = undefined };
+        self.* = .{};
         try self.base.init(io, window);
     }
 
