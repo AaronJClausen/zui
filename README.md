@@ -34,8 +34,8 @@ Implemented so far:
   materials, and HDR and wide-gamut color.
 - **Stage 9:** `zui_debug`'s inspector, semantics and accessibility,
   safety sweeps, and the tour in a browser.
-- **Stage 10, begun:** the Linux host on Wayland, host services, custom
-  title bars, many windows, and who owns the loop.
+- **Stage 10:** the Linux host on Wayland and X11, the web host, host
+  services, custom title bars, many windows, and who owns the loop.
 
 [docs/feature-tour.html](docs/feature-tour.html) walks through every
 shipped feature in the code a consumer writes, with semantic

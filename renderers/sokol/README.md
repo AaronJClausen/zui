@@ -89,22 +89,26 @@ alpha configuration, a transparent surface is drawn opaque, and
 a native host's X11 window, through the same EGL device on Xlib's
 display (`EGL_PLATFORM_X11_KHR`), its EGL surface made on the window
 itself, which the X server sizes, so the host's reported size is the
-frame's; an `.x11` surface is always opaque. Every native window is
-drawn with four samples per pixel, which smooths the edges of shapes,
-wherever the GPU offers them, and with one otherwise: on Linux a
-multisampled EGL configuration; with D3D11 a multisampled target
-resolved into the swapchain's buffer each frame (an scRGB window's
-offscreen image is multisampled too); with `-Dgl=true` a multisampled
-pixel format chosen through `wglChoosePixelFormatARB`. It draws into
-many Wayland surfaces too: `zuiAttachSurface` makes a `wl_egl_window`
-and an EGL surface for each surface after the first (or, for an X11
-window, an EGL surface on it), on the first one's EGL display and
-context, which the renderer holds until `deinit`, so any window may
-close first; the context moves to the surface each frame is drawn into,
-and each window keeps its own backdrop-blur and offscreen targets. A
-frame drawn into a surface the compositor never shows waits in its swap
-for a frame callback that never comes, so a Wayland window the renderer
-draws must be shown:
+frame's. A `transparent` `.x11` surface, a window the host made with a
+32-bit visual, gets the alpha configuration whose `EGL_NATIVE_VISUAL_ID`
+is the window's visual, which the renderer asks Xlib for, since EGL
+refuses a window surface of another visual; where none matches it is
+drawn in the opaque configuration, and `presentsAlpha` says so. The
+renderer links libX11 on Linux for it. Every native window is drawn with
+four samples per pixel, which smooths the edges of shapes, wherever the
+GPU offers them, and with one otherwise: on Linux a multisampled EGL
+configuration; with D3D11 a multisampled target resolved into the
+swapchain's buffer each frame (an scRGB window's offscreen image is
+multisampled too); with `-Dgl=true` a multisampled pixel format chosen
+through `wglChoosePixelFormatARB`. It draws into many Wayland surfaces
+too: `zuiAttachSurface` makes a `wl_egl_window` and an EGL surface for
+each surface after the first (or, for an X11 window, an EGL surface on
+it), on the first one's EGL display and context, which the renderer
+holds until `deinit`, so any window may close first; the context moves
+to the surface each frame is drawn into, and each window keeps its own
+backdrop-blur and offscreen targets. A frame drawn into a surface the
+compositor never shows waits in its swap for a frame callback that never
+comes, so a Wayland window the renderer draws must be shown:
 
 ```zig
 var renderer: zui_sokol.Renderer = try .initForSurface(&text, host.zuiSurface(.main));

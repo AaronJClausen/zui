@@ -148,7 +148,7 @@ pub const Renderer = struct {
         var context = switch (surface) {
             .win32 => |window| if (comptime draws_into_win32) try native.Context.init(window.hwnd) else return error.UnsupportedSurface,
             .wayland => |window| if (comptime draws_through_egl) try native.Context.init(.{ .wayland = .{ .display = window.display, .surface = window.surface } }, window.transparent) else return error.UnsupportedSurface,
-            .x11 => |window| if (comptime draws_through_egl) try native.Context.init(.{ .x11 = .{ .display = window.display, .window = window.window } }, false) else return error.UnsupportedSurface,
+            .x11 => |window| if (comptime draws_through_egl) try native.Context.init(.{ .x11 = .{ .display = window.display, .window = window.window } }, window.transparent) else return error.UnsupportedSurface,
             else => return error.UnsupportedSurface,
         };
         errdefer context.deinit();
@@ -199,7 +199,7 @@ pub const Renderer = struct {
         } else return error.TooManySurfaces;
         const context = switch (surface) {
             .wayland => |wayland| if (comptime draws_through_egl) try native.Context.initSharing(.{ .wayland = .{ .display = wayland.display, .surface = wayland.surface } }, device, wayland.transparent) else unreachable,
-            .x11 => |x11| if (comptime draws_through_egl) try native.Context.initSharing(.{ .x11 = .{ .display = x11.display, .window = x11.window } }, device, false) else unreachable,
+            .x11 => |x11| if (comptime draws_through_egl) try native.Context.initSharing(.{ .x11 = .{ .display = x11.display, .window = x11.window } }, device, x11.transparent) else unreachable,
             else => if (comptime draws_into_win32) try native.Context.initSharing(@ptrFromInt(window), device) else unreachable,
         };
         slot.* = .{ .context = context };
@@ -225,10 +225,10 @@ pub const Renderer = struct {
     }
 
     /// Whether the window `surface` names presents alpha, which a
-    /// compositor blends over what is behind it: on Wayland, a surface
-    /// the host made `transparent` where the display has an alpha
-    /// configuration the context can draw into. False for a window the
-    /// renderer does not draw into.
+    /// compositor blends over what is behind it: a `.wayland` or `.x11`
+    /// surface the host made `transparent` where the display has an alpha
+    /// configuration the context can draw into, on X11 one of the window's
+    /// visual. False for a window the renderer does not draw into.
     pub fn presentsAlpha(self: *Renderer, surface: zui.Surface) bool {
         if (comptime !draws_through_egl) return false;
         const window = nativeWindowOf(surface) orelse return false;

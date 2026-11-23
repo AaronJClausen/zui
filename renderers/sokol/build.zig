@@ -106,7 +106,8 @@ fn linkThroughLlvmOnLinux(compile: *std.Build.Step.Compile) void {
 /// On Windows the renderer draws into a native host's window with a
 /// context of its own: OpenGL through opengl32 and gdi32, or Direct3D 11
 /// composed into the window through DirectComposition. On Linux it draws
-/// into a native host's Wayland surface with OpenGL through EGL.
+/// into a native host's Wayland surface or X11 window with OpenGL through
+/// EGL, asking Xlib for an X11 window's visual.
 fn addRendererOptions(b: *std.Build, module: *std.Build.Module, opengl: bool) void {
     const options = b.addOptions();
     options.addOption(bool, "opengl", opengl);
@@ -115,6 +116,7 @@ fn addRendererOptions(b: *std.Build, module: *std.Build.Module, opengl: bool) vo
     if (os == .linux) {
         module.linkSystemLibrary("EGL", .{});
         module.linkSystemLibrary("wayland-egl", .{});
+        module.linkSystemLibrary("X11", .{});
         return;
     }
     if (os != .windows) return;

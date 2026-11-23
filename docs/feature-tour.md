@@ -1196,15 +1196,16 @@ holds the current values: theme, contrast, reduced motion and
 transparency, text scale, locale, reading direction, HDR headroom,
 power, window focus, the user's accent color (`null` where the system
 has none), and whether the system material (Mica on Windows, a
-compositor's blur on Wayland) shows behind the window. the native
+compositor's blur on Wayland or X11) shows behind the window. the native
 Windows host reads them from the system, the accent from
 `DwmGetColorizationColor`, and the native Linux host reads the theme,
 contrast, reduced motion and accent from the XDG desktop portal and
 power from UPower and power-profiles-daemon, over D-Bus, and shows the
 material where the compositor offers `ext_background_effect_v1` or
-KWin's blur; where no portal answers, they stay at their defaults. The
-web host reads the theme, contrast, reduced motion and transparency from
-the page's media queries, the locale from `navigator.language`, the
+KWin's blur, on X11 through `_KDE_NET_WM_BLUR_BEHIND_REGION` on a 32-bit
+window; where no portal answers, they stay at their defaults. The web
+host reads the theme, contrast, reduced motion and transparency from the
+page's media queries, the locale from `navigator.language`, the
 direction from the document's, the window's focus, and the accent from
 the CSS `AccentColor`. `zui_design.Preferences.from` takes the
 environment's accent as the design's accent unless the application's

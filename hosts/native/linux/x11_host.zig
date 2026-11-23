@@ -14,6 +14,7 @@ const ReportedEnvironment = session_module.ReportedEnvironment;
 const Inbox = @import("inbox.zig").Inbox;
 const x11_selections = @import("x11_selections.zig");
 const x11_chrome = @import("x11_chrome.zig");
+const x11_material = @import("x11_material.zig");
 const ibus = @import("ibus.zig");
 const TextInput = @import("text_input.zig").TextInput;
 
@@ -52,6 +53,14 @@ const TextInput = @import("text_input.zig").TextInput;
 /// works the caption buttons itself; `custom_title_bar` reports it, and
 /// `window_maximized` follows `_NET_WM_STATE`.
 ///
+/// A window opened with a `material` other than `.none`, where the root
+/// window announces `_KDE_NET_WM_BLUR_BEHIND_REGION` and a compositing
+/// manager owns `_NET_WM_CM_S<screen>`, is made with the screen's 32-bit
+/// visual, so its surface is `transparent`, and its blur region covers
+/// the whole window; it reports `system_material` true unless reduced
+/// transparency is on, or the blur is no longer announced. Elsewhere the
+/// window stays on the root's visual, opaque, and reports it false.
+///
 /// Typed text goes through the session's input method over IBus's D-Bus
 /// protocol, where the portal `org.freedesktop.portal.IBus` answers, as
 /// ibus-daemon and fcitx5 do: while the focused window's last frame asks
@@ -74,7 +83,9 @@ const TextInput = @import("text_input.zig").TextInput;
 /// host.service_fake = null;
 /// host.forced_window_manager_support = null;
 /// host.input_method_bus = null;
-/// try host.init(io, .{ .title = "zui" });
+/// host.system_material_unavailable = false;
+/// host.forced_blur_offers = null;
+/// try host.init(io, .{ .title = "zui", .material = .window });
 /// defer host.deinit();
 /// const inspector = try host.zuiOpenWindow(.{ .title = "Inspector" });
 /// defer host.zuiCloseWindow(inspector);
@@ -82,7 +93,7 @@ const TextInput = @import("text_input.zig").TextInput;
 pub const X11Host = struct {
     const Host = X11Host;
     pub const zui_surfaces: zui.SurfaceKinds = .initOne(.x11);
-    pub const zui_capabilities: zui.HostCapabilities = .{ .windows = .many, .custom_title_bar = true };
+    pub const zui_capabilities: zui.HostCapabilities = .{ .windows = .many, .system_material = true, .custom_title_bar = true };
 
     /// The windows open at once, `.main` among them.
     pub const max_windows = 4;
@@ -167,6 +178,13 @@ pub const X11Host = struct {
     /// The bus the input method is reached on in place of the session's,
     /// for tests that play one there and read nothing else from it.
     input_method_bus: ?[]const u8 = null,
+    /// Behaves as on a desktop that blurs behind no window, so the
+    /// fallback can be seen where one does.
+    system_material_unavailable: bool = false,
+    /// What the desktop offers to blur through, in place of what the root
+    /// window and the compositing manager's selection say, for tests that
+    /// must not depend on the desktop.
+    forced_blur_offers: ?x11_material.BlurOffers = null,
 
     display: *x11.Display,
     connection: *x11.Connection,
@@ -181,6 +199,9 @@ pub const X11Host = struct {
     clipboard: x11_selections.Clipboard,
     /// Physical pixels per layout unit, from `Xft.dpi`.
     resource_scale: f32,
+    /// `_NET_WM_CM_S<screen>`.
+    compositing_manager_selection: x11.Atom,
+    blur_offers: x11_material.BlurOffers,
     cursor_context: ?*x11.CursorContext,
     /// Each cursor a window has shown, loaded from the theme once.
     loaded_cursors: [cursor_count]?u32,
@@ -247,6 +268,7 @@ pub const X11Host = struct {
         requests: zui.HostRequests = .{},
         applied_cursor: ?zui.Cursor = null,
         window_chrome: x11_chrome.WindowChrome = .{},
+        window_material: x11_material.WindowMaterial = .{},
         drop: x11_selections.Drop = .{},
         /// Its top-left corner on the root window, which the input method
         /// places its candidates by; null until asked for, and after the
@@ -270,15 +292,24 @@ pub const X11Host = struct {
         }
 
         /// Reports each setting that differs from what the window last
-        /// reported, or every one the first time. The window shows no
-        /// material.
+        /// reported, or every one the first time.
         fn reportEnvironment(self: *Window, settings: DesktopSettings) void {
             const current: ReportedEnvironment = .of(settings, .{
+                .shows_material = self.showsBlur(),
                 .custom_title_bar = self.window_chrome.isCustom(),
                 .maximized = self.window_chrome.maximized,
             });
             if (ReportedEnvironment.deliverChanges(self.reported_environment, current, &self.inbox)) self.input_arrived = true;
             self.reported_environment = current;
+        }
+
+        /// The window holds alpha and the desktop still blurs behind it.
+        fn showsBlur(self: *const Window) bool {
+            return self.window_material.holdsAlpha() and self.host.blur_offers.blurs();
+        }
+
+        fn coverWithBlur(self: *Window) void {
+            self.window_material.cover(self.host.connection, self.x_window, &self.host.atoms, self.size);
         }
 
         /// Until the window reports the whole environment, a change waits
@@ -410,6 +441,8 @@ pub const X11Host = struct {
         const service_fake = self.service_fake;
         const forced_window_manager_support = self.forced_window_manager_support;
         const input_method_bus = self.input_method_bus;
+        const system_material_unavailable = self.system_material_unavailable;
+        const forced_blur_offers = self.forced_blur_offers;
         self.* = .{
             .io = io,
             .forced_scale = forced_scale,
@@ -417,6 +450,8 @@ pub const X11Host = struct {
             .service_fake = service_fake,
             .forced_window_manager_support = forced_window_manager_support,
             .input_method_bus = input_method_bus,
+            .system_material_unavailable = system_material_unavailable,
+            .forced_blur_offers = forced_blur_offers,
             .display = display,
             .connection = connection,
             .screen = screen,
@@ -425,6 +460,8 @@ pub const X11Host = struct {
             .selection_window = 0,
             .clipboard = .{},
             .resource_scale = 1,
+            .compositing_manager_selection = x11.atom_none,
+            .blur_offers = forced_blur_offers orelse .{},
             .cursor_context = null,
             .loaded_cursors = @splat(null),
             .xkb_context = xkb.xkb_context_new(0) orelse return error.NoKeyboardContext,
@@ -452,6 +489,8 @@ pub const X11Host = struct {
         errdefer self.session.close();
 
         self.atoms = .intern(connection);
+        self.compositing_manager_selection = x11_material.compositingManagerSelection(connection, x11.XDefaultScreen(display));
+        self.blur_offers = self.blurOffers();
         const root_mask: u32 = x11.event_mask_property_change;
         _ = x11.xcb_change_window_attributes(connection, screen.root, x11.window_attribute_event_mask, &root_mask);
         self.readResourceManager();
@@ -505,6 +544,7 @@ pub const X11Host = struct {
             self.applyInputMethod();
         }
         _ = x11.xcb_destroy_window(self.connection, window.x_window);
+        window.window_material.deinit(self.connection);
         _ = x11.xcb_flush(self.connection);
     }
 
@@ -533,13 +573,17 @@ pub const X11Host = struct {
             .window_chrome = .{ .asked_for_custom = options.title_bar == .custom, .resizable = options.resizable },
         };
         errdefer window.in_use = false;
+        const offers: x11_material.BlurOffers = if (self.system_material_unavailable) .{} else self.blur_offers;
+        window.window_material = .choose(options.material, offers, self.screen);
+        errdefer window.window_material.deinit(connection);
         _ = window.window_chrome.onSupport(self.windowManagerSupport());
         window.deliver(.{ .environment = .{ .window_focused = false } });
         const event_mask: u32 = x11.event_mask_key_press | x11.event_mask_key_release | x11.event_mask_button_press | x11.event_mask_button_release |
             x11.event_mask_enter_window | x11.event_mask_leave_window | x11.event_mask_pointer_motion | x11.event_mask_exposure |
             x11.event_mask_structure_notify | x11.event_mask_focus_change | x11.event_mask_property_change;
         const x_window = window.x_window;
-        const created = x11.xcb_create_window_checked(connection, x11.copy_from_parent, x_window, self.screen.root, 0, 0, @intCast(size[0]), @intCast(size[1]), 0, x11.window_class_input_output, x11.copy_from_parent, x11.window_attribute_event_mask, &event_mask);
+        const creation = window.window_material.creation(connection, self.screen.root, event_mask);
+        const created = x11.xcb_create_window_checked(connection, creation.depth, x_window, self.screen.root, 0, 0, @intCast(size[0]), @intCast(size[1]), 0, x11.window_class_input_output, creation.visual, creation.value_mask, &creation.values);
         if (x11.xcb_request_check(connection, created)) |refused| {
             x11.free(refused);
             return error.WindowNotCreated;
@@ -563,12 +607,18 @@ pub const X11Host = struct {
             };
             _ = x11.xcb_change_property(connection, x11.property_mode_replace, x_window, x11.atom_wm_normal_hints, x11.atom_wm_size_hints, 32, @sizeOf(x11.SizeHints) / 4, &hints);
         }
+        window.coverWithBlur();
         if (options.visible) _ = x11.xcb_map_window(connection, x_window);
         if (x11.xcb_flush(connection) <= 0 or x11.xcb_connection_has_error(connection) != 0) return error.X11ServerUnreachable;
     }
 
     fn clipboardEndpoint(self: *Host) x11_selections.Endpoint {
         return .{ .connection = self.connection, .window = self.selection_window, .atoms = &self.atoms };
+    }
+
+    fn blurOffers(self: *Host) x11_material.BlurOffers {
+        if (self.forced_blur_offers) |forced| return forced;
+        return .read(self.connection, self.screen.root, &self.atoms, self.compositing_manager_selection);
     }
 
     fn windowManagerSupport(self: *Host) x11_chrome.WindowManagerSupport {
@@ -638,6 +688,7 @@ pub const X11Host = struct {
         self.releaseKeyboardAndCursors();
         for (&self.windows) |*window| if (window.in_use) {
             _ = x11.xcb_destroy_window(self.connection, window.x_window);
+            window.window_material.deinit(self.connection);
         };
         _ = x11.xcb_destroy_window(self.connection, self.selection_window);
         _ = x11.xcb_flush(self.connection);
@@ -655,6 +706,7 @@ pub const X11Host = struct {
         if (window.terminate_delivered) return false;
         self.readAvailableEvents();
         if (!window.in_use or window.closed) return false;
+        window.coverWithBlur();
 
         const scale = self.forced_scale orelse self.resource_scale;
         const surface_coordinates_per_unit = scale * record.params.zoom;
@@ -859,6 +911,7 @@ pub const X11Host = struct {
         if (property.window == self.screen.root) {
             if (property.atom == x11.atom_resource_manager) self.readResourceManager();
             if (property.atom == atoms.net_supported) self.onWindowManagerSupport(self.windowManagerSupport());
+            if (property.atom == atoms.net_supported or property.atom == atoms.kde_net_wm_blur_behind_region) self.onBlurOffers(self.blurOffers());
             return;
         }
         const new_value = property.state == x11.property_new_value;
@@ -912,7 +965,7 @@ pub const X11Host = struct {
     /// Asking for a window that is not open panics.
     pub fn zuiSurface(self: *Host, id: zui.WindowId) zui.Surface {
         const window = self.windowById(id) orelse std.debug.panic("zui_host: window {d} is not open", .{@intFromEnum(id)});
-        return .{ .x11 = .{ .display = self.display, .window = window.x_window } };
+        return .{ .x11 = .{ .display = self.display, .window = window.x_window, .transparent = window.window_material.holdsAlpha() } };
     }
 
     pub fn zuiApply(self: *Host, id: zui.WindowId, requests: zui.HostRequests) void {
@@ -1189,6 +1242,14 @@ pub const X11Host = struct {
     /// starting or leaving changes it.
     pub fn onWindowManagerSupport(self: *Host, support: x11_chrome.WindowManagerSupport) void {
         for (&self.windows) |*window| if (window.in_use and window.window_chrome.onSupport(support)) window.reportEnvironmentOnceReported();
+    }
+
+    /// What the desktop offers to blur through changed, as the blur
+    /// effect loading or unloading changes the root window's properties.
+    /// A window keeps the visual it opened with.
+    pub fn onBlurOffers(self: *Host, offers: x11_material.BlurOffers) void {
+        self.blur_offers = offers;
+        for (&self.windows) |*window| if (window.in_use) window.reportEnvironmentOnceReported();
     }
 
     /// In the physical pixels of the pointer's window.

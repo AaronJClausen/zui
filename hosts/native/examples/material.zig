@@ -1,5 +1,5 @@
 //! A window that lets the desktop show through it where the system has a
-//! material (Mica on Windows 11, a compositor's blur on Wayland), and
+//! material (Mica on Windows 11, a compositor's blur on Wayland or X11), and
 //! draws a solid background where it does not, with the same application
 //! code: `declare` reads only `Environment.system_material`.
 //!
@@ -97,6 +97,7 @@ pub fn main(init: std.process.Init) !void {
     switch (builtin.os.tag) {
         .windows => host.forced_display_color = null,
         .linux => {
+            host.forced_backend = null;
             host.bus_addresses = null;
             host.service_fake = null;
             host.forced_blur_offers = null;
@@ -155,7 +156,9 @@ pub fn main(init: std.process.Init) !void {
 /// drawing nothing, since a hidden Wayland surface's swap waits for a frame
 /// callback that never comes. On Linux it also checks that the renderer
 /// presents alpha exactly where the surface asks for it, on a second
-/// hidden window asked to be transparent whatever the compositor offers.
+/// hidden window asked to be transparent whatever the desktop offers: on
+/// X11, one the host makes with its 32-bit visual as if the desktop
+/// blurred.
 fn check(host: *Host, renderer: *Renderer, ui: *Ui, window_options: zui.WindowOptions) !void {
     var events: [Ui.limits.max_events_per_frame]zui.Event = undefined;
     var text_buffer: [Ui.limits.max_text_input_bytes + Ui.limits.max_dropped_path_bytes]u8 = undefined;
@@ -167,21 +170,35 @@ fn check(host: *Host, renderer: *Renderer, ui: *Ui, window_options: zui.WindowOp
     ui.release(frame);
     const system_material = ui.environment().system_material;
     std.debug.print("system material: {}\n", .{system_material});
-    if (builtin.os.tag == .linux and host.zuiSurface(.main) == .wayland) try checkAlpha(host, renderer, system_material or ui.environment().reduced_transparency, window_options);
+    if (builtin.os.tag == .linux) std.debug.print("backend: {t}\n", .{host.backendInUse()});
+    if (builtin.os.tag == .linux) try checkAlpha(host, renderer, system_material or ui.environment().reduced_transparency, window_options);
 }
 
 fn checkAlpha(host: *Host, renderer: *Renderer, blurred: bool, window_options: zui.WindowOptions) !void {
     const surface = host.zuiSurface(.main);
+    const transparent = switch (surface) {
+        .wayland => |wayland| wayland.transparent,
+        .x11 => |x11| x11.transparent,
+        else => unreachable,
+    };
     const presents_alpha = renderer.presentsAlpha(surface);
     std.debug.print("the window presents alpha: {}\n", .{presents_alpha});
-    if (surface.wayland.transparent != blurred or (!surface.wayland.transparent and presents_alpha)) return error.AlphaDisagreesWithMaterial;
+    if (transparent != blurred or (!transparent and presents_alpha)) return error.AlphaDisagreesWithMaterial;
 
-    var opaque_options = window_options;
-    opaque_options.material = .none;
-    const second = try host.zuiOpenWindow(opaque_options);
+    var second_options = window_options;
+    second_options.material = .none;
+    if (host.backend == .x11) {
+        host.backend.x11.onBlurOffers(.{ .blur_behind_region = true, .compositing_manager = true });
+        second_options.material = .window;
+    }
+    const second = try host.zuiOpenWindow(second_options);
     defer host.zuiCloseWindow(second);
     var transparent_surface = host.zuiSurface(second);
-    transparent_surface.wayland.transparent = true;
+    switch (transparent_surface) {
+        .wayland => |*wayland| wayland.transparent = true,
+        .x11 => |x11| if (!x11.transparent) return error.NoAlphaVisual,
+        else => unreachable,
+    }
     try renderer.zuiAttachSurface(transparent_surface);
     defer renderer.zuiDetachSurface(transparent_surface);
     std.debug.print("a transparent surface presents alpha: {}\n", .{renderer.presentsAlpha(transparent_surface)});

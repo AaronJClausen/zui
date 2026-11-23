@@ -408,6 +408,18 @@ it. So far it:
   through `_NET_WM_MOVERESIZE` and draws no frame of its own; presses on
   the frame's chrome regions go to the window manager, and the host
   works the caption buttons; see *A custom title bar* below;
+- shows what is behind a window opened with a `WindowOptions.material`
+  other than `.none`, blurred, where the root window announces
+  `_KDE_NET_WM_BLUR_BEHIND_REGION` (as KWin's blur effect does, or
+  `_NET_SUPPORTED` lists it) and a compositing manager owns
+  `_NET_WM_CM_S<screen>`: the window is made with the screen's 32-bit
+  TrueColor visual and a colormap of its own, its `.x11` surface is
+  `transparent`, and `_KDE_NET_WM_BLUR_BEHIND_REGION` covers the whole
+  window, written again only when its size changes. It reports
+  `Environment.system_material` as the Wayland host does, and again when
+  the root window's announcement changes. Elsewhere, or with
+  `system_material_unavailable`, the window stays on the root's visual,
+  opaque, and reports false;
 - types through the session's input method over IBus's D-Bus protocol,
   which ibus-daemon and fcitx5 both serve: at `init`, within its 250 ms,
   it connects to the session bus and asks the portal
@@ -437,11 +449,9 @@ it. So far it:
 - waits as `nextFrame` says, on the connection, the desktop's buses, the
   watches, the input method and the wake.
 
-Not yet on X11, answered as on a compositor without the protocol: the
-system material (`system_material` is false). XIM is not used: it needs
-Xlib to own the event queue, which the host gives to xcb. It links
-libX11, libX11-xcb, libxcb, libxcb-xkb, libxcb-cursor and
-libxkbcommon-x11.
+XIM is not used: it needs Xlib to own the event queue, which the host
+gives to xcb. It links libX11, libX11-xcb, libxcb, libxcb-xkb,
+libxcb-cursor and libxkbcommon-x11.
 
 It passes zui's host suite against a window that is never mapped, whose
 harness delivers what the server would to the host's own handlers, and
@@ -510,20 +520,21 @@ shown is exposed too.
 `zig build material` shows a window whose root draws no background while
 `ui.environment().system_material` is true, and the theme's background
 otherwise: the same code shows Mica on Windows 11 and a solid background
-on Windows 10, and on Wayland the compositor's blur behind a window
-whose surface holds alpha, or a solid background where the compositor
-offers no blur. `-- --no-system-material` makes the host behave as on
-Windows 10, `-- --transient` asks for Acrylic, and
+on Windows 10, and on Wayland or X11 the compositor's blur behind a
+window whose surface holds alpha, or a solid background where the
+compositor offers no blur. `-- --no-system-material` makes the host
+behave as on Windows 10, `-- --transient` asks for Acrylic, and
 `-- --screenshot file.bmp` (Windows) saves what the screen shows.
 `-- --check` opens the window hidden, polls it once, prints
 `system material: <bool>`, and on Linux checks that the renderer
 presents alpha exactly where the surface is `transparent`, also on a
-second hidden window asked to be, then quits without drawing;
-`-- --frames 120` draws 120 frames and quits. The renderer clears to
-transparent and must keep its alpha: the sokol renderer does, with
-D3D11, through a swapchain DirectComposition composes into the window;
-Windows ignores the alpha of an OpenGL window, so with `-Dgl=true` the
-backdrop would be added under every pixel.
+second hidden window asked to be (on X11, one the host makes with its
+32-bit visual as if the desktop blurred), then prints the backend and
+quits without drawing; `-- --frames 120` draws 120 frames and quits. The
+renderer clears to transparent and must keep its alpha: the sokol
+renderer does, with D3D11, through a swapchain DirectComposition
+composes into the window; Windows ignores the alpha of an OpenGL window,
+so with `-Dgl=true` the backdrop would be added under every pixel.
 
 ## HDR white
 

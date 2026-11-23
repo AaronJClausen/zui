@@ -2256,12 +2256,13 @@ compile error. The window is opened with `WindowOptions.output_formats`,
 the formats both declare (`zui.sharedOutputFormats(Host, Renderer)`);
 the host picks the best its display shows, and a native surface carries
 the one it chose, which the renderer reads with
-`surface.outputFormat()`. A `wayland` surface also carries
+`surface.outputFormat()`. A `wayland` or `x11` surface also carries
 `transparent`, true for a window that shows the system's material
 (§16.3): a Wayland compositor blends a surface over what is behind it by
-the alpha its buffer holds, so the renderer keeps alpha only there and
-presents every other surface opaque, whatever alpha its blended draws
-leave.
+the alpha its buffer holds, as an X11 compositing manager blends a
+window made with a 32-bit visual, so the renderer keeps alpha only there
+and presents every other surface opaque, whatever alpha its blended
+draws leave.
 
 ### 16.5 Tracer
 

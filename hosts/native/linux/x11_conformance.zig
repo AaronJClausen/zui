@@ -9,6 +9,8 @@ const desktop_bus = zui_host.linux.desktop_bus;
 const x11_chrome = zui_host.linux.x11_chrome;
 const WindowManagerSupport = x11_chrome.WindowManagerSupport;
 const WindowManagerRequest = x11_chrome.WindowManagerRequest;
+const x11_material = zui_host.linux.x11_material;
+const BlurOffers = x11_material.BlurOffers;
 
 const testing = std.testing;
 
@@ -23,6 +25,11 @@ const UnmappedWindow = struct {
     window_manager_support: ?WindowManagerSupport = null,
     /// The bus the input method is reached on; null reaches none.
     input_method_bus: ?[]const u8 = null,
+    material: zui.SystemMaterial = .none,
+    /// What the desktop is played to offer to blur through; null reads the
+    /// root window and the compositing manager's selection.
+    blur_offers: ?BlurOffers = .{},
+    system_material_unavailable: bool = false,
 
     /// With `forced_scale` set, a physical pixel is that many layout units
     /// at a zoom of 1. The window reads no bus but `input_method_bus`, so
@@ -33,7 +40,9 @@ const UnmappedWindow = struct {
         self.window_host.input_method_bus = self.input_method_bus;
         self.window_host.service_fake = &self.service_fake;
         self.window_host.forced_window_manager_support = self.window_manager_support;
-        self.window_host.init(testing.io, .{ .title = "zui host suite on X11", .size = .{ 320, 240 }, .visible = false, .title_bar = self.title_bar }) catch |err| switch (err) {
+        self.window_host.forced_blur_offers = self.blur_offers;
+        self.window_host.system_material_unavailable = self.system_material_unavailable;
+        self.window_host.init(testing.io, .{ .title = "zui host suite on X11", .size = .{ 320, 240 }, .visible = false, .title_bar = self.title_bar, .material = self.material }) catch |err| switch (err) {
             error.NoX11Display => return skipWithoutServer(),
             else => return err,
         };
@@ -2028,4 +2037,185 @@ test "on X11 each window keeps its own chrome regions, and a press on one window
     titled.click(on_title_bar);
     try testing.expectEqual(WindowManagerRequest{ .move_resize = .{ .direction = .move, .root_position = rootPositionOf(on_title_bar), .x_button = 1 } }, titled.lastRequest().?);
     try testing.expectEqual(@as(u32, 0), second_window.window_chrome.requests_sent);
+}
+
+const blurring: BlurOffers = .{ .blur_behind_region = true, .compositing_manager = true };
+
+fn systemMaterialOf(polled: *const zui_testing.PolledRecord) ?bool {
+    for (polled.builder.events()) |event| if (event == .environment and event.environment == .system_material) return event.environment.system_material;
+    return null;
+}
+
+fn holdsAlpha(window_host: *X11Host, id: zui.WindowId) bool {
+    return window_host.zuiSurface(id).x11.transparent;
+}
+
+fn depthOf(window_host: *X11Host, x_window: x11.Window) !u8 {
+    const reply = x11.xcb_get_geometry_reply(window_host.connection, x11.xcb_get_geometry(window_host.connection, x_window), null) orelse return error.NoGeometry;
+    defer x11.free(reply);
+    return reply.depth;
+}
+
+fn visualOf(window_host: *X11Host, x_window: x11.Window) !u32 {
+    const reply = x11.xcb_get_window_attributes_reply(window_host.connection, x11.xcb_get_window_attributes(window_host.connection, x_window), null) orelse return error.NoAttributes;
+    defer x11.free(reply);
+    return reply.visual;
+}
+
+/// The window's `_KDE_NET_WM_BLUR_BEHIND_REGION`, empty when unset.
+fn blurRegionOf(window_host: *X11Host, x_window: x11.Window, buffer: *[8]u32) []const u32 {
+    return x11.readCardinals(window_host.connection, x_window, window_host.atoms.kde_net_wm_blur_behind_region, buffer);
+}
+
+const MaterialWindow = struct {
+    window: UnmappedWindow,
+    polled: zui_testing.PolledRecord = .{},
+
+    /// Skips where the screen has no 32-bit visual to blend by.
+    fn open(self: *MaterialWindow) !void {
+        try self.window.open(1);
+        if (x11.alphaVisualOf(self.host().screen) == null) {
+            self.window.close();
+            std.debug.print("skipped: the X server's screen has no 32-bit TrueColor visual\n", .{});
+            return error.SkipZigTest;
+        }
+        self.polled.init();
+        _ = self.polled.poll(self.host());
+    }
+
+    fn close(self: *MaterialWindow) void {
+        self.window.close();
+    }
+
+    fn host(self: *MaterialWindow) *X11Host {
+        return self.window.host();
+    }
+
+    fn windowMaterial(self: *MaterialWindow) *const x11_material.WindowMaterial {
+        return &mainOf(self.host()).window_material;
+    }
+};
+
+test "on X11 a window with a material, where the desktop blurs, has a 32-bit visual, a transparent surface and a blur region of its size, resized with it" {
+    var window: MaterialWindow = .{ .window = .{ .material = .window, .blur_offers = blurring } };
+    try window.open();
+    defer window.close();
+    const window_host = window.host();
+    const x_window = mainOf(window_host).x_window;
+    try testing.expect(holdsAlpha(window_host, .main));
+    try testing.expectEqual(@as(u8, 32), try depthOf(window_host, x_window));
+    try testing.expectEqual(x11.alphaVisualOf(window_host.screen).?, try visualOf(window_host, x_window));
+    try testing.expectEqual(true, systemMaterialOf(&window.polled).?);
+    var region: [8]u32 = undefined;
+    try testing.expectEqualSlices(u32, &.{ 0, 0, 320, 240 }, blurRegionOf(window_host, x_window, &region));
+    try testing.expectEqual(@as(u32, 1), window.windowMaterial().blur_regions_sent);
+
+    const size = [_]u32{ 400, 300 };
+    _ = x11.xcb_configure_window(window_host.connection, x_window, x11.configure_width | x11.configure_height, &size);
+    window_host.zuiWait(.{ .at = window_host.now().addSeconds(2) });
+    try testing.expect(window.polled.poll(window_host));
+    try testing.expectEqual([2]f32{ 400, 300 }, window.polled.builder.params.viewport);
+    try testing.expectEqualSlices(u32, &.{ 0, 0, 400, 300 }, blurRegionOf(window_host, x_window, &region));
+    try testing.expectEqual(@as(u32, 2), window.windowMaterial().blur_regions_sent);
+
+    _ = window.polled.poll(window_host);
+    try testing.expectEqual(@as(u32, 2), window.windowMaterial().blur_regions_sent);
+    try testing.expectEqual(null, systemMaterialOf(&window.polled));
+}
+
+test "on X11 without blur and a compositing manager both, with the material unavailable, or without a material, the window stays opaque on the root's visual and reports none" {
+    const cases = [_]UnmappedWindow{
+        .{ .material = .window, .blur_offers = .{} },
+        .{ .material = .window, .blur_offers = .{ .blur_behind_region = true } },
+        .{ .material = .window, .blur_offers = .{ .compositing_manager = true } },
+        .{ .material = .window, .blur_offers = blurring, .system_material_unavailable = true },
+        .{ .material = .none, .blur_offers = blurring },
+    };
+    for (cases) |case| {
+        var window: MaterialWindow = .{ .window = case };
+        try window.open();
+        defer window.close();
+        const window_host = window.host();
+        const x_window = mainOf(window_host).x_window;
+        try testing.expect(!holdsAlpha(window_host, .main));
+        try testing.expectEqual(window_host.screen.root_depth, try depthOf(window_host, x_window));
+        try testing.expectEqual(window_host.screen.root_visual, try visualOf(window_host, x_window));
+        try testing.expectEqual(false, systemMaterialOf(&window.polled).?);
+        var region: [8]u32 = undefined;
+        try testing.expectEqual(@as(usize, 0), blurRegionOf(window_host, x_window, &region).len);
+        try testing.expectEqual(@as(u32, 0), window.windowMaterial().blur_regions_sent);
+    }
+}
+
+test "on X11 reduced transparency, or the blur no longer announced, turns the system material off, the window keeping its alpha, and its return turns it on" {
+    var window: MaterialWindow = .{ .window = .{ .material = .transient, .blur_offers = blurring } };
+    try window.open();
+    defer window.close();
+    const window_host = window.host();
+
+    window_host.onDesktopReport(.{ .reduced_transparency = true });
+    _ = window.polled.poll(window_host);
+    try testing.expectEqual(false, systemMaterialOf(&window.polled).?);
+    try testing.expect(reportedEnvironment(&window.polled).reduced_transparency);
+    try testing.expect(holdsAlpha(window_host, .main));
+    window_host.onDesktopReport(.{ .reduced_transparency = false });
+    _ = window.polled.poll(window_host);
+    try testing.expectEqual(true, systemMaterialOf(&window.polled).?);
+
+    window_host.onBlurOffers(.{ .compositing_manager = true });
+    _ = window.polled.poll(window_host);
+    try testing.expectEqual(false, systemMaterialOf(&window.polled).?);
+    try testing.expect(holdsAlpha(window_host, .main));
+    window_host.onBlurOffers(blurring);
+    _ = window.polled.poll(window_host);
+    try testing.expectEqual(true, systemMaterialOf(&window.polled).?);
+
+    var never: MaterialWindow = .{ .window = .{ .material = .window, .blur_offers = .{} } };
+    try never.open();
+    defer never.close();
+    never.host().onBlurOffers(blurring);
+    _ = never.polled.poll(never.host());
+    try testing.expectEqual(null, systemMaterialOf(&never.polled));
+    try testing.expect(!holdsAlpha(never.host(), .main));
+}
+
+test "on X11 each window chooses its own material when it opens" {
+    var window: MaterialWindow = .{ .window = .{ .material = .window, .blur_offers = blurring } };
+    try window.open();
+    defer window.close();
+    const window_host = window.host();
+    const opaque_window = try window_host.zuiOpenWindow(second_window_options);
+    var second_options = second_window_options;
+    second_options.material = .transient;
+    second_options.size = .{ 200, 100 };
+    const blurred_window = try window_host.zuiOpenWindow(second_options);
+
+    try testing.expect(holdsAlpha(window_host, .main));
+    try testing.expect(!holdsAlpha(window_host, opaque_window));
+    try testing.expect(holdsAlpha(window_host, blurred_window));
+    const blurred_x_window = window_host.windowById(blurred_window).?.x_window;
+    try testing.expectEqual(@as(u8, 32), try depthOf(window_host, blurred_x_window));
+    try testing.expectEqual(window_host.screen.root_depth, try depthOf(window_host, window_host.windowById(opaque_window).?.x_window));
+    var region: [8]u32 = undefined;
+    try testing.expectEqualSlices(u32, &.{ 0, 0, 200, 100 }, blurRegionOf(window_host, blurred_x_window, &region));
+    try testing.expectEqual(@as(u32, 0), window_host.windowById(opaque_window).?.window_material.blur_regions_sent);
+
+    var polled: zui_testing.PolledRecord = .{};
+    polled.init();
+    _ = polled.pollWindow(window_host, opaque_window);
+    try testing.expectEqual(false, systemMaterialOf(&polled).?);
+    _ = polled.pollWindow(window_host, blurred_window);
+    try testing.expectEqual(true, systemMaterialOf(&polled).?);
+    window_host.zuiCloseWindow(blurred_window);
+    window_host.zuiCloseWindow(opaque_window);
+}
+
+test "on X11, against the real desktop, a window with a material holds alpha exactly where the desktop blurs" {
+    var window: MaterialWindow = .{ .window = .{ .material = .window, .blur_offers = null } };
+    try window.open();
+    defer window.close();
+    const window_host = window.host();
+    const blurs = window_host.blur_offers.blurs();
+    try testing.expectEqual(blurs, holdsAlpha(window_host, .main));
+    try testing.expectEqual(blurs, systemMaterialOf(&window.polled).?);
 }

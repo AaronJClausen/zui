@@ -151,6 +151,7 @@ pub fn main(init: std.process.Init) !void {
             host.system_material_unavailable = false;
         },
         .linux => {
+            host.forced_backend = null;
             host.bus_addresses = null;
             host.service_fake = null;
             host.forced_blur_offers = null;

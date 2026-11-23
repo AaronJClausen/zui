@@ -30,7 +30,7 @@ decorations; many windows.
 
 | Item | Status |
 |---|---|
-| `10-reach:01-linux-host` Linux | in progress |
+| `10-reach:01-linux-host` Linux | done |
 | `10-reach:02-web-host` Web | done |
 | `10-reach:03-services` Services | done |
 | `10-reach:04-window-decorations` Window decorations | done |
@@ -768,7 +768,100 @@ runs no window manager. On Weston the tour's cycle, `showcase` and
 `check -Dtarget=aarch64-windows` pass, and natively on Windows 78 of 78
 tests and both checks. Not run: windows shown under a window manager,
 dragged or closed by hand, and tour idle on X11. The system material on
-X11 is next.
+X11 was last.
+
+Slice 9's sixth and last sub-slice, the system material on X11, is done
+in `hosts/native/`, `renderers/sokol/` and `core/src/surface.zig`
+(`hosts/native/linux/x11_material.zig`,
+`hosts/native/linux/x11_host.zig`, `hosts/native/linux/x11.zig`,
+`hosts/native/linux/host.zig`, `hosts/native/linux/x11_conformance.zig`,
+`hosts/native/examples/material.zig`, `hosts/native/examples/theme.zig`,
+`renderers/sokol/src/egl.zig`, `renderers/sokol/src/renderer.zig`,
+`renderers/sokol/build.zig`), in slice 8's shape. `zui.Surface.x11`
+carries `transparent`, as `.wayland` does (SPEC.md §16.4). `X11Host`
+declares `system_material`. Blur is offered where the root window
+announces `_KDE_NET_WM_BLUR_BEHIND_REGION`, as KWin's blur effect does
+by setting a property of that name on the root (KWindowSystem's
+`isEffectAvailable` looks there, not in `_NET_SUPPORTED`, so either is
+taken), and a compositing manager owns `_NET_WM_CM_S<screen>`;
+`x11_material.BlurOffers` holds the two, and
+`X11Host.forced_blur_offers` plays them in tests as
+`forced_window_manager_support` plays `_NET_SUPPORTED`. A window opened
+with `material` other than `.none` where both hold, and without
+`system_material_unavailable`, is made with the screen's first 32-bit
+TrueColor visual, a colormap of its own and `back_pixel` and
+`border_pixel` set, so the server does not refuse it with `BadMatch`;
+every other window keeps the root's visual, created as before.
+`zuiSurface` gives it as `.x11` with `transparent = true`, and
+`_KDE_NET_WM_BLUR_BEHIND_REGION` is written as the whole window
+(`0, 0, width, height` in its physical pixels) at open and again at a
+poll that finds the size changed. `system_material` is reported as on
+Wayland: true while the window holds alpha, the blur is still announced
+and reduced transparency is off, on the first record and on every
+change; a change of the root's announcement or of `_NET_SUPPORTED` reads
+the offers again (`X11Host.onBlurOffers`), and each window keeps the
+visual it opened with. Each window of many chooses its own at
+`zuiOpenWindow`, and its colormap is freed when it closes.
+`zui_host.Host` passes `system_material_unavailable` to X11 too. The
+sokol renderer draws a `transparent` `.x11` surface in the alpha
+configuration whose `EGL_NATIVE_VISUAL_ID` is the window's visual, asked
+of Xlib (`XGetWindowAttributes`), since EGL refuses a window surface of
+another visual with `EGL_BAD_MATCH`; where none matches, or the display
+lacks `EGL_KHR_no_config_context`, it falls back to the opaque
+configuration and `presentsAlpha` says false. The Wayland path is
+unchanged. `zui_sokol` now links libX11 on Linux, which every CI job
+building it already installs. The theme and material examples left
+`Host.forced_backend` undefined, which in Debug forced Wayland, so their
+`--check` never reached X11 whatever `ZUI_HOST_BACKEND` said; both now
+set it null, and the material check prints its backend. Under Hyprland's
+Xwayland (`DISPLAY=:0`, NVIDIA RTX 2060 SUPER), 167 of 170 tests pass in
+Debug and ReleaseSafe with `ZUI_HOST_BACKEND=x11` and on Wayland alike,
+two opt-in shown windows skipped and the stand-in window manager's test
+skipped since Hyprland redirects the root; the parent passed 161 of 164.
+The new tests: a `.window` window under forced offers has depth 32 and
+the screen's alpha visual, a `transparent` surface, the region 0, 0,
+320, 240, then 0, 0, 400, 300 after a `ConfigureWindow` resize and
+nothing more on an unchanged poll, and reports true; without either
+offer, with `system_material_unavailable`, or with `.none`, it keeps the
+root's depth and visual, writes no region and reports false; reduced
+transparency and an offer withdrawn turn it false and back, the alpha
+kept, and a window opened without offers stays opaque when they arrive;
+of three windows each keeps its own; against the real desktop, a window
+holds alpha exactly where the desktop blurs; and a unit test of the
+offers. The INCR clipboard test failed in two of the first cold Debug
+runs, each in the first run of a session with other builds competing,
+and passed in every run after (six), as it did three times at the
+parent; nothing here touches the clipboard. Xwayland offers no KDE blur,
+so `zig build material -- --check` with `ZUI_HOST_BACKEND=x11` prints
+`system material: false` and a second window the host makes with the
+32-bit visual as if the desktop blurred presents alpha, so NVIDIA's EGL
+has a configuration of that visual; on Wayland it prints true, as
+before. On both backends `services`, `theme` (X11 3.5 ms, Wayland 21.8
+ms after the rewrite), `many-windows`, `title-bar` (which passes on
+Xwayland, whose window manager moves windows) and `material`
+`-- --check` pass, and the tour's cycle draws 300 frames with 0 layer
+and 0 glyph atlas overflows and clean diagnostics. Tour idle: X11 5.0 ms
+of CPU over 10 s, Wayland 3.4 ms, 1 frame, no wakes. The host's checks
+pass for the host, `x86_64-windows` and `aarch64-windows`; the sokol
+renderer's 24 tests, its four checks and `zig build conformance` pass;
+core's tests in all three modes, its `wasm32-freestanding` and
+`powerpc-linux` checks, `test-all` and `check-all` pass, and
+`zig build counts` matches the parent in all 175 counts. The showcase
+was not run, as it is being removed from `main`. Not run: real blur,
+which needs KWin on X11 (or another compositing manager that honours the
+property) and waits on a person under KDE Plasma on X11,
+`zig build material` showing the blurred desktop through the window and
+`xprop` showing `_KDE_NET_WM_BLUR_BEHIND_REGION` on it; the material
+tests under CI's Xvfb, which run where its screen lists a 32-bit visual
+and skip with a message where it lists none; and CI on this commit,
+which is not pushed.
+
+With this sub-slice every part of slice 9 has landed, and the item is
+done: the host passes the conformance suites on Wayland and on X11 (CI's
+`native-linux` job runs them under a headless Weston and, with
+`ZUI_HOST_BACKEND=x11`, under `xvfb-run`), the tour runs on it unchanged
+and idles at 0% CPU, and the theme example restyles on a file change.
+What waits on a person is listed under each slice's *Not run*.
 
 Decided here:
 
@@ -858,8 +951,8 @@ Decided here:
   through it; a configuration without alpha cannot. One context draws
   into both kinds where the display has `EGL_KHR_no_config_context`, as
   Mesa and NVIDIA do; without it, a transparent surface is drawn opaque.
-  X11 will carry the same field on `.x11` and draw through the same
-  `Device`.
+  X11 carries the same field on `.x11` and draws through the same
+  `Device`, in the alpha configuration of the window's 32-bit visual.
 - **The input method on X11 is IBus's D-Bus protocol, not XIM, and
   compose is on both backends.** XIM opens its input context by waiting
   for the input method's client messages on Xlib's event queue, and

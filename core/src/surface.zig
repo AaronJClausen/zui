@@ -49,7 +49,10 @@ pub const Surface = union(SurfaceKind) {
     /// the window by the alpha it holds, so its renderer keeps alpha;
     /// otherwise every pixel it presents is opaque.
     wayland: struct { display: *anyopaque, surface: *anyopaque, format: OutputFormat = .sdr, transparent: bool = false },
-    x11: struct { display: *anyopaque, window: u64, format: OutputFormat = .sdr },
+    /// `transparent`, as on `.wayland`: the window was made with a 32-bit
+    /// visual, which a compositing manager blends by its alpha, so its
+    /// renderer draws it in a configuration of that visual that keeps alpha.
+    x11: struct { display: *anyopaque, window: u64, format: OutputFormat = .sdr, transparent: bool = false },
     /// The canvas the web host created, by the id it gave it.
     web: struct { canvas: u32, format: OutputFormat = .sdr },
     /// Physical pixels.

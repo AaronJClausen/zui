@@ -28,6 +28,7 @@ const EGL_DEPTH_SIZE = 0x3025;
 const EGL_STENCIL_SIZE = 0x3026;
 const EGL_SAMPLES = 0x3031;
 const EGL_SAMPLE_BUFFERS = 0x3032;
+const EGL_NATIVE_VISUAL_ID = 0x302E;
 const EGL_CONTEXT_MAJOR_VERSION = 0x3098;
 const EGL_CONTEXT_MINOR_VERSION = 0x30FB;
 const EGL_CONTEXT_OPENGL_PROFILE_MASK = 0x30FD;
@@ -48,6 +49,35 @@ extern "EGL" fn eglMakeCurrent(display: EGLDisplay, draw: ?EGLSurface, read: ?EG
 extern "EGL" fn eglGetCurrentSurface(which: EGLint) callconv(.c) ?EGLSurface;
 extern "EGL" fn eglSwapInterval(display: EGLDisplay, interval: EGLint) callconv(.c) EGLBoolean;
 extern "EGL" fn eglSwapBuffers(display: EGLDisplay, surface: EGLSurface) callconv(.c) EGLBoolean;
+
+const XWindowAttributes = extern struct {
+    x: c_int,
+    y: c_int,
+    width: c_int,
+    height: c_int,
+    border_width: c_int,
+    depth: c_int,
+    visual: ?*anyopaque,
+    root: c_ulong,
+    class: c_int,
+    bit_gravity: c_int,
+    win_gravity: c_int,
+    backing_store: c_int,
+    backing_planes: c_ulong,
+    backing_pixel: c_ulong,
+    save_under: c_int,
+    colormap: c_ulong,
+    map_installed: c_int,
+    map_state: c_int,
+    all_event_masks: c_long,
+    your_event_mask: c_long,
+    do_not_propagate_mask: c_long,
+    override_redirect: c_int,
+    screen: ?*anyopaque,
+};
+
+extern "X11" fn XGetWindowAttributes(display: *anyopaque, window: c_ulong, attributes: *XWindowAttributes) callconv(.c) c_int;
+extern "X11" fn XVisualIDFromVisual(visual: *anyopaque) callconv(.c) c_ulong;
 
 extern "wayland-egl" fn wl_egl_window_create(surface: *anyopaque, width: c_int, height: c_int) callconv(.c) ?*WaylandEglWindow;
 extern "wayland-egl" fn wl_egl_window_destroy(window: *WaylandEglWindow) callconv(.c) void;
@@ -106,7 +136,7 @@ pub const Context = struct {
 
     /// Makes the device on the window's display and the window's context on
     /// it, current on the calling thread; `transparent` as the `.wayland`
-    /// surface says.
+    /// or `.x11` surface says.
     pub fn init(native_window: NativeWindow, transparent: bool) error{ NoEglDisplay, NoEglConfig, NoOpenGlContext, NoWindowSurface }!Context {
         const display = switch (native_window) {
             .wayland => |wayland| eglGetPlatformDisplay(EGL_PLATFORM_WAYLAND_KHR, wayland.display, null),
@@ -116,12 +146,12 @@ pub const Context = struct {
         errdefer _ = eglTerminate(display);
         if (eglBindAPI(EGL_OPENGL_API) == 0) return error.NoOpenGlContext;
         var sample_count: i32 = wanted_sample_count;
-        const opaque_config = windowConfig(display, wanted_sample_count, .opaque_preferred) catch blk: {
+        const opaque_config = windowConfig(display, wanted_sample_count, .opaque_preferred, null) catch blk: {
             sample_count = 1;
-            break :blk try windowConfig(display, 1, .opaque_preferred);
+            break :blk try windowConfig(display, 1, .opaque_preferred, null);
         };
         const draws_without_config = hasExtension(display, "EGL_KHR_no_config_context");
-        const alpha_config: ?EGLConfig = if (draws_without_config) windowConfig(display, sample_count, .with_alpha) catch null else null;
+        const alpha_config: ?EGLConfig = if (draws_without_config) windowConfig(display, sample_count, .with_alpha, null) catch null else null;
 
         const context_attributes = [_]EGLint{
             EGL_CONTEXT_MAJOR_VERSION,       4,
@@ -138,10 +168,10 @@ pub const Context = struct {
 
     /// A window surface for `native_window`, on its display, on `device`,
     /// another context's, made current on the calling thread. A
-    /// `transparent` one holds alpha where the device has `alpha_config`,
-    /// and is opaque otherwise.
+    /// `transparent` one holds alpha where the device has an alpha
+    /// configuration for it, and is opaque otherwise.
     pub fn initSharing(native_window: NativeWindow, device: Device, transparent: bool) error{ NoWindowSurface, NoOpenGlContext }!Context {
-        if (transparent) if (device.alpha_config) |alpha_config| {
+        if (transparent) if (alphaConfigOf(native_window, device)) |alpha_config| {
             if (initIn(native_window, device, alpha_config)) |context| {
                 var transparent_context = context;
                 transparent_context.holds_alpha = true;
@@ -174,12 +204,30 @@ pub const Context = struct {
         return .{ .device = device, .native_window = native_window, .egl_surface = egl_surface, .wayland_window = wayland_window, .size = initial_size, .holds_alpha = false };
     }
 
+    /// An X11 window's surface is refused unless its configuration's
+    /// native visual is the window's, which for a window that blends by
+    /// its alpha is a 32-bit one, not the root's.
+    fn alphaConfigOf(native_window: NativeWindow, device: Device) ?EGLConfig {
+        const alpha_config = device.alpha_config orelse return null;
+        return switch (native_window) {
+            .wayland => alpha_config,
+            .x11 => |x11| windowConfig(device.display, device.sample_count, .with_alpha, visualOf(x11.display, x11.window) orelse return null) catch null,
+        };
+    }
+
+    fn visualOf(display: *anyopaque, window: u64) ?EGLint {
+        var attributes: XWindowAttributes = undefined;
+        if (XGetWindowAttributes(display, @intCast(window), &attributes) == 0) return null;
+        return @intCast(XVisualIDFromVisual(attributes.visual orelse return null));
+    }
+
     const Alpha = enum { opaque_preferred, with_alpha };
 
     /// A configuration with `sample_count` samples a pixel: for
     /// `.opaque_preferred` one without alpha where the display has one,
-    /// and for `.with_alpha` one with 8 bits of it.
-    fn windowConfig(display: EGLDisplay, sample_count: EGLint, alpha: Alpha) error{NoEglConfig}!EGLConfig {
+    /// and for `.with_alpha` one with 8 bits of it; of `native_visual`
+    /// where one is named.
+    fn windowConfig(display: EGLDisplay, sample_count: EGLint, alpha: Alpha, native_visual: ?EGLint) error{NoEglConfig}!EGLConfig {
         const multisampled = sample_count > 1;
         const alpha_bits: EGLint = if (alpha == .with_alpha) 8 else 0;
         const attributes = [_]EGLint{
@@ -200,6 +248,7 @@ pub const Context = struct {
         if (eglChooseConfig(display, &attributes, &configs, configs.len, &count) == 0 or count == 0) return error.NoEglConfig;
         const matching = configs[0..@intCast(count)];
         for (matching) |config| {
+            if (native_visual) |visual| if (configAttribute(display, config, EGL_NATIVE_VISUAL_ID) != visual) continue;
             if (configAttribute(display, config, EGL_ALPHA_SIZE) == alpha_bits and samplesOf(display, config) == sample_count) return config;
         }
         if (alpha == .with_alpha) return error.NoEglConfig;

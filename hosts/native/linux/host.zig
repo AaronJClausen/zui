@@ -13,6 +13,7 @@ pub const file_watch = @import("file_watch.zig");
 pub const services = @import("services.zig");
 pub const chrome = @import("chrome.zig");
 pub const x11_chrome = @import("x11_chrome.zig");
+pub const x11_material = @import("x11_material.zig");
 pub const material = @import("material.zig");
 pub const WaylandHost = @import("wayland_host.zig").WaylandHost;
 pub const X11Host = @import("x11_host.zig").X11Host;
@@ -29,9 +30,8 @@ pub const backend_variable = "ZUI_HOST_BACKEND";
 /// it. Each call is one switch on the backend chosen.
 ///
 /// Its declarations are the Wayland host's, and both backends open up to
-/// `max_windows` windows. On X11, which does not yet do all of them, a
-/// call answers as on a compositor without the protocol: the environment
-/// reports no system material.
+/// `max_windows` windows and show the system material where the desktop
+/// blurs behind them.
 ///
 /// ```zig
 /// const App = struct {
@@ -104,8 +104,8 @@ pub const Host = struct {
     forced_scale: ?f32 = null,
     bus_addresses: ?desktop_bus.Addresses = null,
     service_fake: ?*services.ServiceFake = null,
-    /// Wayland only: X11 shows no material yet.
     system_material_unavailable: bool = false,
+    /// Wayland only: an X11 backend reads the desktop's offers.
     forced_blur_offers: ?material.BlurOffers = null,
 
     backend: union(Backend) { wayland: WaylandHost, x11: X11Host },
@@ -158,6 +158,8 @@ pub const Host = struct {
         chosen.service_fake = self.service_fake;
         chosen.forced_window_manager_support = null;
         chosen.input_method_bus = null;
+        chosen.system_material_unavailable = self.system_material_unavailable;
+        chosen.forced_blur_offers = null;
         try chosen.init(io, options);
     }
 
@@ -292,6 +294,7 @@ test {
     _ = services;
     _ = chrome;
     _ = x11_chrome;
+    _ = x11_material;
     _ = material;
     _ = @import("x11_host.zig");
     _ = @import("x11_selections.zig");

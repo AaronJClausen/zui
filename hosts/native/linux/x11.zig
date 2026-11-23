@@ -18,6 +18,9 @@ pub const GetPropertyCookie = extern struct { sequence: c_uint };
 pub const PerClientFlagsCookie = extern struct { sequence: c_uint };
 pub const GetSelectionOwnerCookie = extern struct { sequence: c_uint };
 pub const TranslateCoordinatesCookie = extern struct { sequence: c_uint };
+pub const ListPropertiesCookie = extern struct { sequence: c_uint };
+pub const GetGeometryCookie = extern struct { sequence: c_uint };
+pub const GetWindowAttributesCookie = extern struct { sequence: c_uint };
 
 pub const Screen = extern struct {
     root: Window,
@@ -39,6 +42,28 @@ pub const Screen = extern struct {
 };
 
 pub const ScreenIterator = extern struct { data: ?*Screen, rem: c_int, index: c_int };
+
+pub const Depth = extern struct {
+    depth: u8,
+    pad0: u8,
+    visuals_len: u16,
+    pad1: [4]u8,
+};
+
+pub const DepthIterator = extern struct { data: ?*Depth, rem: c_int, index: c_int };
+
+pub const VisualType = extern struct {
+    visual_id: u32,
+    class: u8,
+    bits_per_rgb_value: u8,
+    colormap_entries: u16,
+    red_mask: u32,
+    green_mask: u32,
+    blue_mask: u32,
+    pad0: [4]u8,
+};
+
+pub const visual_class_true_color = 4;
 pub const Setup = opaque {};
 
 pub const GenericError = extern struct {
@@ -266,6 +291,51 @@ pub const TranslateCoordinatesReply = extern struct {
     dst_y: i16,
 };
 
+pub const ListPropertiesReply = extern struct {
+    response_type: u8,
+    pad0: u8,
+    sequence: u16,
+    length: u32,
+    atoms_len: u16,
+    pad1: [22]u8,
+};
+
+pub const GetGeometryReply = extern struct {
+    response_type: u8,
+    depth: u8,
+    sequence: u16,
+    length: u32,
+    root: Window,
+    x: i16,
+    y: i16,
+    width: u16,
+    height: u16,
+    border_width: u16,
+    pad0: [2]u8,
+};
+
+pub const GetWindowAttributesReply = extern struct {
+    response_type: u8,
+    backing_store: u8,
+    sequence: u16,
+    length: u32,
+    visual: u32,
+    class: u16,
+    bit_gravity: u8,
+    win_gravity: u8,
+    backing_planes: u32,
+    backing_pixel: u32,
+    save_under: u8,
+    map_is_installed: u8,
+    map_state: u8,
+    override_redirect: u8,
+    colormap: u32,
+    all_event_masks: u32,
+    your_event_mask: u32,
+    do_not_propagate_mask: u16,
+    pad0: [2]u8,
+};
+
 pub const PerClientFlagsReply = extern struct {
     response_type: u8,
     device_id: u8,
@@ -364,8 +434,12 @@ pub const event_mask_property_change = 4194304;
 pub const configure_width = 4;
 pub const configure_height = 8;
 
+pub const window_attribute_back_pixel = 2;
+pub const window_attribute_border_pixel = 8;
 pub const window_attribute_event_mask = 2048;
+pub const window_attribute_colormap = 8192;
 pub const window_attribute_cursor = 16384;
+pub const colormap_alloc_none = 0;
 pub const window_class_input_output = 1;
 pub const window_class_input_only = 2;
 pub const copy_from_parent = 0;
@@ -408,6 +482,20 @@ pub extern "X11-xcb" fn XSetEventQueueOwner(display: *Display, owner: c_int) cal
 pub extern "xcb" fn xcb_get_setup(connection: *Connection) callconv(.c) *const Setup;
 pub extern "xcb" fn xcb_setup_roots_iterator(setup: *const Setup) callconv(.c) ScreenIterator;
 pub extern "xcb" fn xcb_screen_next(iterator: *ScreenIterator) callconv(.c) void;
+pub extern "xcb" fn xcb_screen_allowed_depths_iterator(screen: *const Screen) callconv(.c) DepthIterator;
+pub extern "xcb" fn xcb_depth_next(iterator: *DepthIterator) callconv(.c) void;
+pub extern "xcb" fn xcb_depth_visuals(depth: *const Depth) callconv(.c) [*]const VisualType;
+pub extern "xcb" fn xcb_depth_visuals_length(depth: *const Depth) callconv(.c) c_int;
+pub extern "xcb" fn xcb_create_colormap(connection: *Connection, alloc: u8, colormap: u32, window: Window, visual: u32) callconv(.c) VoidCookie;
+pub extern "xcb" fn xcb_free_colormap(connection: *Connection, colormap: u32) callconv(.c) VoidCookie;
+pub extern "xcb" fn xcb_list_properties(connection: *Connection, window: Window) callconv(.c) ListPropertiesCookie;
+pub extern "xcb" fn xcb_list_properties_reply(connection: *Connection, cookie: ListPropertiesCookie, err: ?*?*GenericError) callconv(.c) ?*ListPropertiesReply;
+pub extern "xcb" fn xcb_list_properties_atoms(reply: *const ListPropertiesReply) callconv(.c) [*]const Atom;
+pub extern "xcb" fn xcb_list_properties_atoms_length(reply: *const ListPropertiesReply) callconv(.c) c_int;
+pub extern "xcb" fn xcb_get_geometry(connection: *Connection, drawable: Window) callconv(.c) GetGeometryCookie;
+pub extern "xcb" fn xcb_get_geometry_reply(connection: *Connection, cookie: GetGeometryCookie, err: ?*?*GenericError) callconv(.c) ?*GetGeometryReply;
+pub extern "xcb" fn xcb_get_window_attributes(connection: *Connection, window: Window) callconv(.c) GetWindowAttributesCookie;
+pub extern "xcb" fn xcb_get_window_attributes_reply(connection: *Connection, cookie: GetWindowAttributesCookie, err: ?*?*GenericError) callconv(.c) ?*GetWindowAttributesReply;
 pub extern "xcb" fn xcb_generate_id(connection: *Connection) callconv(.c) u32;
 pub extern "xcb" fn xcb_create_window(connection: *Connection, depth: u8, window: Window, parent: Window, x: i16, y: i16, width: u16, height: u16, border_width: u16, class: u16, visual: u32, value_mask: u32, values: ?*const anyopaque) callconv(.c) VoidCookie;
 pub extern "xcb" fn xcb_create_window_checked(connection: *Connection, depth: u8, window: Window, parent: Window, x: i16, y: i16, width: u16, height: u16, border_width: u16, class: u16, visual: u32, value_mask: u32, values: ?*const anyopaque) callconv(.c) VoidCookie;
@@ -489,12 +577,13 @@ pub const Atoms = struct {
     net_wm_state_maximized_horz: Atom = 0,
     net_frame_extents: Atom = 0,
     gtk_show_window_menu: Atom = 0,
+    kde_net_wm_blur_behind_region: Atom = 0,
 
     const names: [std.meta.fields(Atoms).len][]const u8 = .{
         "WM_PROTOCOLS",   "WM_DELETE_WINDOW",   "_NET_WM_NAME",  "UTF8_STRING",                  "CLIPBOARD",                    "TARGETS",            "TEXT",                  "text/plain;charset=utf-8",
         "INCR",           "ZUI_CLIPBOARD",      "ZUI_DROP",      "text/uri-list",                "XdndAware",                    "XdndEnter",          "XdndPosition",          "XdndStatus",
         "XdndLeave",      "XdndDrop",           "XdndFinished",  "XdndSelection",                "XdndTypeList",                 "XdndActionCopy",     "WM_CHANGE_STATE",       "_MOTIF_WM_HINTS",
-        "_NET_SUPPORTED", "_NET_WM_MOVERESIZE", "_NET_WM_STATE", "_NET_WM_STATE_MAXIMIZED_VERT", "_NET_WM_STATE_MAXIMIZED_HORZ", "_NET_FRAME_EXTENTS", "_GTK_SHOW_WINDOW_MENU",
+        "_NET_SUPPORTED", "_NET_WM_MOVERESIZE", "_NET_WM_STATE", "_NET_WM_STATE_MAXIMIZED_VERT", "_NET_WM_STATE_MAXIMIZED_HORZ", "_NET_FRAME_EXTENTS", "_GTK_SHOW_WINDOW_MENU", "_KDE_NET_WM_BLUR_BEHIND_REGION",
     };
 
     /// Asks for every atom at once, then waits for the answers, so the
@@ -546,6 +635,37 @@ pub fn readCardinals(connection: *Connection, window: Window, property: Atom, va
     const bytes = xcb_get_property_value(reply) orelse return values[0..0];
     @memcpy(std.mem.sliceAsBytes(values[0..count]), bytes[0 .. count * 4]);
     return values[0..count];
+}
+
+/// Whether `window` holds `property`, as a client announcing support
+/// for it sets it on the root window.
+pub fn holdsProperty(connection: *Connection, window: Window, property: Atom) bool {
+    if (property == atom_none) return false;
+    const reply = xcb_list_properties_reply(connection, xcb_list_properties(connection, window), null) orelse return false;
+    defer free(reply);
+    const count: usize = @intCast(@max(xcb_list_properties_atoms_length(reply), 0));
+    return std.mem.indexOfScalar(Atom, xcb_list_properties_atoms(reply)[0..count], property) != null;
+}
+
+/// Whether a client owns `selection`.
+pub fn selectionOwned(connection: *Connection, selection: Atom) bool {
+    if (selection == atom_none) return false;
+    const reply = xcb_get_selection_owner_reply(connection, xcb_get_selection_owner(connection, selection), null) orelse return false;
+    defer free(reply);
+    return reply.owner != 0;
+}
+
+/// The screen's first TrueColor visual of 32 bits, which holds alpha, or
+/// null where it has none.
+pub fn alphaVisualOf(screen: *const Screen) ?u32 {
+    var depths = xcb_screen_allowed_depths_iterator(screen);
+    while (depths.rem > 0) : (xcb_depth_next(&depths)) {
+        const depth = depths.data orelse return null;
+        if (depth.depth != 32) continue;
+        const count: usize = @intCast(@max(xcb_depth_visuals_length(depth), 0));
+        for (xcb_depth_visuals(depth)[0..count]) |visual| if (visual.class == visual_class_true_color) return visual.visual_id;
+    }
+    return null;
 }
 
 /// The screen numbered `number`, or the first.
