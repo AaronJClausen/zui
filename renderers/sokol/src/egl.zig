@@ -118,7 +118,8 @@ pub const Device = struct {
 const wanted_sample_count = 4;
 
 /// One Wayland surface's or X11 window's window surface, drawn by its
-/// device's context, presenting with vsync. An opaque window's
+/// device's context: an X11 window presents with vsync, and a Wayland
+/// surface swaps without waiting, paced by its host. An opaque window's
 /// configuration has no alpha where the display offers one without, since
 /// a compositor blends a surface by the alpha its buffer holds, so stray
 /// alpha below 1 from blended draws never shows what is behind the window.
@@ -199,8 +200,14 @@ pub const Context = struct {
         } orelse return error.NoWindowSurface;
         errdefer _ = eglDestroySurface(device.display, egl_surface);
         if (eglMakeCurrent(device.display, egl_surface, egl_surface, device.context) == 0) return error.NoOpenGlContext;
-        // The interval belongs to the surface current when it is set.
-        _ = eglSwapInterval(device.display, 1);
+        // The interval belongs to the surface current when it is set. A
+        // Wayland swap that waits blocks the calling thread for as long as
+        // the compositor withholds the last frame's presentation, which for
+        // a hidden window is until it is shown.
+        _ = eglSwapInterval(device.display, switch (native_window) {
+            .wayland => 0,
+            .x11 => 1,
+        });
         return .{ .device = device, .native_window = native_window, .egl_surface = egl_surface, .wayland_window = wayland_window, .size = initial_size, .holds_alpha = false };
     }
 
@@ -333,8 +340,8 @@ pub const Context = struct {
     }
 
     /// Presents the frame: on Wayland, attaches it to the surface and
-    /// commits it, waiting for the compositor's frame callback of the one
-    /// before.
+    /// commits it without waiting for the compositor; on X11, at the next
+    /// vertical blank.
     pub fn present(self: *const Context) void {
         _ = eglSwapBuffers(self.device.display, self.egl_surface);
     }

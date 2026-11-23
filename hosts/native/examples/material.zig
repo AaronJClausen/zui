@@ -19,6 +19,7 @@ const zui_sokol = @import("zui_sokol");
 const zui_app = @import("zui_app");
 const zui_truetype = @import("zui_truetype");
 const capture = if (builtin.os.tag == .windows) @import("capture.zig") else struct {};
+const check_watchdog = @import("check_watchdog.zig");
 const zui = @import("zui");
 const Host = zui_host.Host;
 const Renderer = zui_sokol.Renderer;
@@ -117,7 +118,10 @@ pub fn main(init: std.process.Init) !void {
     var ui: Ui = try .init(gpa, io, &text);
     defer ui.deinit(gpa);
 
-    if (checking) return check(host, &renderer, &ui, window_options);
+    if (checking) {
+        try check_watchdog.start(io, "material", 20);
+        return check(host, &renderer, &ui, window_options);
+    }
 
     var events: [Ui.limits.max_events_per_frame]zui.Event = undefined;
     var text_buffer: [Ui.limits.max_text_input_bytes + Ui.limits.max_dropped_path_bytes]u8 = undefined;
@@ -152,9 +156,8 @@ pub fn main(init: std.process.Init) !void {
     }
 }
 
-/// `--check`: polls the hidden window once and prints its material,
-/// drawing nothing, since a hidden Wayland surface's swap waits for a frame
-/// callback that never comes. On Linux it also checks that the renderer
+/// `--check`: draws the hidden window's frames for a few polls and prints
+/// its material. On Linux it also checks that the renderer
 /// presents alpha exactly where the surface asks for it, on a second
 /// hidden window asked to be transparent whatever the desktop offers: on
 /// X11, one the host makes with its 32-bit visual as if the desktop
@@ -163,11 +166,16 @@ fn check(host: *Host, renderer: *Renderer, ui: *Ui, window_options: zui.WindowOp
     var events: [Ui.limits.max_events_per_frame]zui.Event = undefined;
     var text_buffer: [Ui.limits.max_text_input_bytes + Ui.limits.max_dropped_path_bytes]u8 = undefined;
     var builder: zui.RecordBuilder = .init(&events, &text_buffer);
-    if (!host.zuiPoll(.main, &builder)) return error.WindowClosed;
-    ui.beginFrame(&builder.record());
-    declare(ui);
-    const frame = ui.endFrame();
-    ui.release(frame);
+    const checked_frames = 3;
+    for (0..checked_frames) |_| {
+        if (!host.zuiPoll(.main, &builder)) return error.WindowClosed;
+        ui.beginFrame(&builder.record());
+        declare(ui);
+        const frame = ui.endFrame();
+        try renderer.zuiSubmit(host.zuiSurface(.main), frame);
+        host.zuiApply(.main, frame.requests());
+        ui.release(frame);
+    }
     const system_material = ui.environment().system_material;
     std.debug.print("system material: {}\n", .{system_material});
     if (builtin.os.tag == .linux) std.debug.print("backend: {t}\n", .{host.backendInUse()});

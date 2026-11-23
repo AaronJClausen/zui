@@ -41,6 +41,15 @@ const Proxy = wayland.Proxy;
 /// display, the desktop's buses, its transfers and watches, a wake and a
 /// deadline.
 ///
+/// Each poll asks the compositor for a frame callback, which the next
+/// commit of the surface carries. Once a window has had one answered, a
+/// frame that is due waits for the answer to the callback its last frame
+/// carried: frames come at the display's rate, and a window the compositor
+/// hides draws only on input, without the renderer's swap ever having to
+/// wait. A window left unanswered for longer than an answer takes, as a
+/// hidden one is, stops holding the frames of the others, and one never
+/// answered, as a surface without a role, holds none.
+///
 /// `init` opens `.main`, and `zuiOpenWindow` up to `max_windows - 1` more,
 /// each a surface with its own events, scale, requests and chrome. The
 /// pointer's and the keyboard's events reach the window whose surface
@@ -288,6 +297,16 @@ pub const WaylandHost = struct {
         window_material: material.WindowMaterial = .{},
         /// Null until the window has reported the whole environment.
         reported_environment: ?ReportedEnvironment = null,
+        /// Asked for by a poll and carried by the surface's next commit;
+        /// null once the compositor has answered it.
+        frame_callback: ?*Proxy = null,
+        /// The compositor has answered a frame callback, so it paces this
+        /// window's frames; it never answers one for a surface it never
+        /// shows.
+        paced_by_compositor: bool = false,
+        /// When the first frame the compositor has not answered yet was
+        /// drawn; null once it has.
+        unanswered_frame_drawn_at: ?zui.Instant = null,
 
         fn deliver(self: *Window, event: zui.Event) void {
             self.inbox.push(event);
@@ -360,7 +379,31 @@ pub const WaylandHost = struct {
             self.window_material.cover(self.host.globals.compositor.?, self.surface_size);
         }
 
+        fn requestFrameCallback(self: *Window) void {
+            if (self.frame_callback != null) return;
+            const callback = wayland.create(self.surface, wayland.surface_frame, &wayland.wl_callback_interface, 1, .{wayland.no_id}) orelse return;
+            wayland.addListener(callback, &frame_callback_listener, self);
+            self.frame_callback = callback;
+        }
+
+        /// The surface's commit carried the frame callback the poll before
+        /// it asked for.
+        fn noteFrameDrawn(self: *Window, at: zui.Instant) void {
+            if (self.unanswered_frame_drawn_at == null) self.unanswered_frame_drawn_at = at;
+        }
+
+        /// The instant this window stops holding the frames of others
+        /// while the compositor has not answered its last one, or null when
+        /// it is not waiting.
+        fn waitsForCompositorUntil(self: *const Window) ?zui.Instant {
+            if (!self.paced_by_compositor) return null;
+            const drawn_at = self.unanswered_frame_drawn_at orelse return null;
+            return drawn_at.addNanoseconds(answer_expected_within_ns);
+        }
+
         fn destroyObjects(self: *Window) void {
+            if (self.frame_callback) |callback| wayland.wl_proxy_destroy(callback);
+            self.frame_callback = null;
             self.window_material.deinit();
             if (self.fractional_scale) |fractional_scale| wayland.destroy(fractional_scale, wayland.fractional_scale_destroy);
             if (self.viewport) |viewport| wayland.destroy(viewport, wayland.viewport_destroy);
@@ -405,6 +448,14 @@ pub const WaylandHost = struct {
         pub fn onClose(self: *Window) void {
             self.closed = true;
             self.input_arrived = true;
+        }
+
+        /// The compositor would show another frame.
+        pub fn onFrameDone(self: *Window) void {
+            if (self.frame_callback) |callback| wayland.wl_proxy_destroy(callback);
+            self.frame_callback = null;
+            self.paced_by_compositor = true;
+            self.unanswered_frame_drawn_at = null;
         }
 
         /// Ignored once the compositor has preferred a fractional scale.
@@ -675,6 +726,7 @@ pub const WaylandHost = struct {
         window.surface_coordinates_per_unit = surface_coordinates_per_unit;
         window.sizeViewport();
         window.coverWithBlur();
+        window.requestFrameCallback();
         record.begin(.{
             .now = self.now(),
             .viewport = .{ @as(f32, @floatFromInt(window.surface_size[0])) / surface_coordinates_per_unit, @as(f32, @floatFromInt(window.surface_size[1])) / surface_coordinates_per_unit },
@@ -710,14 +762,47 @@ pub const WaylandHost = struct {
         return false;
     }
 
+    /// Long enough for a compositor that shows a window to answer its
+    /// frame at the slowest display's rate; one that takes longer is taken
+    /// to hide it, and stops holding the frames of the others.
+    const answer_expected_within_ns = 100 * std.time.ns_per_ms;
+
+    const FrameHold = union(enum) {
+        released,
+        /// Until a window's frame is answered, or the instant comes.
+        until: zui.Instant,
+        until_answered,
+    };
+
+    /// A due frame waits while the compositor has not answered a window's
+    /// last frame within `answer_expected_within_ns`, or has answered no
+    /// window's.
+    fn frameHold(self: *const Host, now_instant: zui.Instant) FrameHold {
+        var soonest_release: ?zui.Instant = null;
+        var every_window_waits = true;
+        var any_open = false;
+        for (&self.windows) |*window| if (window.in_use) {
+            any_open = true;
+            const release_at = window.waitsForCompositorUntil() orelse {
+                every_window_waits = false;
+                continue;
+            };
+            if (now_instant.isBefore(release_at)) soonest_release = earlier(soonest_release, release_at);
+        };
+        if (soonest_release) |instant| return .{ .until = instant };
+        return if (any_open and every_window_waits) .until_answered else .released;
+    }
+
     /// Returns on a wake, input in any window, a key's repeat, a signal, or
-    /// a change of size, scale or environment, and for `.at` also at the
-    /// instant. The compositor's and the buses' other messages, such as a
-    /// buffer released after each frame, are dispatched without ending it.
+    /// a change of size, scale or environment, and for `.immediately` and
+    /// `.at` also once the instant has come and the frame is not held for
+    /// the compositor to answer the last one. The compositor's and the
+    /// buses' other messages, such as a ping or a buffer released after
+    /// each frame, are dispatched without ending it.
     pub fn zuiWait(self: *Host, next: zui.NextFrame) void {
         defer self.session.clearWake();
         const frame_at: ?zui.Instant = switch (next) {
-            .immediately => return,
+            .immediately => if (self.frameHold(self.now()) == .released) return else self.now(),
             .on_event => null,
             .at => |instant| instant,
         };
@@ -726,8 +811,14 @@ pub const WaylandHost = struct {
             self.deliverTerminationSignal();
             if (self.anyWindowAwaitsPoll()) return;
             const now_instant = self.now();
-            if (frame_at) |instant| if (!now_instant.isBefore(instant)) return;
-            const wake_at = earlier(earlier(frame_at, self.nextRepeatAt()), self.data_device.nextDeadline());
+            const hold = self.frameHold(now_instant);
+            if (frame_at) |instant| if (hold == .released and !now_instant.isBefore(instant)) return;
+            const frame_wake_at: ?zui.Instant = if (frame_at == null) null else switch (hold) {
+                .released => frame_at,
+                .until => |release_at| release_at,
+                .until_answered => null,
+            };
+            const wake_at = earlier(earlier(frame_wake_at, self.nextRepeatAt()), self.data_device.nextDeadline());
             const timeout_ns: ?u64 = if (wake_at) |instant| instant.nanoseconds -| now_instant.nanoseconds else null;
             if (self.waitForEvents(timeout_ns) == .woken) return;
         }
@@ -796,8 +887,10 @@ pub const WaylandHost = struct {
         return .{ .wayland = .{ .display = self.display, .surface = window.surface, .transparent = window.window_material.holdsAlpha() } };
     }
 
+    /// Follows each frame drawn into `id`'s surface.
     pub fn zuiApply(self: *Host, id: zui.WindowId, requests: zui.HostRequests) void {
         const window = self.windowById(id) orelse return;
+        window.noteFrameDrawn(self.now());
         window.requests = requests;
         if (self.pointer_window == window) self.applyCursor();
         if (self.text_input_window == window) self.applyTextInput();
@@ -1334,6 +1427,14 @@ pub const WaylandHost = struct {
                 windowFrom(data).onDecorationConfigure(@enumFromInt(mode));
             }
         }.configure,
+    };
+
+    const frame_callback_listener: wayland.CallbackListener = .{
+        .done = struct {
+            fn done(data: ?*anyopaque, _: ?*Proxy, _: u32) callconv(.c) void {
+                windowFrom(data).onFrameDone();
+            }
+        }.done,
     };
 
     const surface_listener: wayland.SurfaceListener = .{

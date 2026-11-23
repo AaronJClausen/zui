@@ -22,6 +22,7 @@ const zui_app = @import("zui_app");
 const zui_widgets = @import("zui_widgets");
 const zui_design = @import("zui_design");
 const zui = @import("zui");
+const check_watchdog = @import("check_watchdog.zig");
 const win32 = if (builtin.os.tag == .windows) zui_host.windows.win32 else struct {};
 
 const Ui = zui.Context(zui_app.contextConfig(zui_sokol.Renderer, .{ .Text = zui_truetype.Text, .features = .{ .semantics = true, .chrome_regions = true } }));
@@ -77,9 +78,7 @@ pub fn main(init: std.process.Init) !void {
     });
     defer session.stop();
     if (checking) {
-        // A Wayland surface the compositor never shows gets no frame
-        // callbacks, and a swap waits for the last frame's.
-        if (builtin.os.tag == .linux) session.renderer.draws = false;
+        try check_watchdog.start(init.io, "title-bar", 20);
         session.app.check = .{};
     }
     while (try session.frame()) {}
@@ -272,8 +271,6 @@ const SokolRenderer = struct {
     pub const ImageHandle = zui_sokol.Renderer.ImageHandle;
 
     sokol: zui_sokol.Renderer,
-    /// False submits nothing, for a window that is never shown.
-    draws: bool = true,
 
     pub fn init(self: *SokolRenderer, surface: zui.Surface, text: anytype) !void {
         self.* = .{ .sokol = try .initForSurface(text, surface) };
@@ -284,7 +281,7 @@ const SokolRenderer = struct {
     }
 
     pub fn zuiSubmit(self: *SokolRenderer, surface: zui.Surface, frame: anytype) !void {
-        if (self.draws) try self.sokol.zuiSubmit(surface, frame);
+        try self.sokol.zuiSubmit(surface, frame);
     }
 };
 

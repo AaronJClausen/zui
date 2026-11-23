@@ -308,10 +308,18 @@ sockets into fixed buffers, beside the display in the same wait, so it
 needs no libdbus and allocates nothing. `init` waits up to 250 ms for
 the desktop's current settings, so the first frame has them. A window
 opened with `visible = false` is a surface with no role, which the
-compositor never shows. The services have a connection to the session
-bus of their own, which reads nothing while no call waits for an answer.
-Low memory, reduced transparency from the desktop, the input method's
-composing text are still to come.
+compositor never shows. Each poll asks for a frame callback, which the
+renderer's next commit carries; once the compositor has answered one, a
+due frame (`.immediately`, or an `.at` that has come) waits in `zuiWait`
+for the answer to the last frame's, so a window animates at the
+display's rate, and while the compositor hides it, as on another
+workspace, it draws only on input and the wait goes on reading the
+display, answering the compositor's pings. A window left unanswered for
+longer than 100 ms stops holding the frames of the others, and a surface
+never answered, as one without a role, holds none. The services have a
+connection to the session bus of their own, which reads nothing while no
+call waits for an answer. Low memory, reduced transparency from the
+desktop, the input method's composing text are still to come.
 
 It passes zui's host suite (`zui_testing.expectHostConforms`) against
 windows the compositor never shows, two of them for its many-windows
@@ -622,9 +630,11 @@ often finds the clipboard held by clipboard history, and is answered
 `.failed = .unavailable`; the check presses Paste again, as a user
 would. Setting a menu bar shrinks the window's content by the bar's
 height. On Linux the check presses only the buttons of the services the
-host offers, the file dialogs, the notification and the URL, and draws
-nothing: a surface the compositor never shows gets no frame callbacks,
-which a renderer's swap waits for.
+host offers, the file dialogs, the notification and the URL, drawing
+every frame into a surface the compositor never shows. It, `title-bar`
+and `material`'s `--check` fail after 20 s, saying a frame or a wait
+blocked the host, should a frame's swap wait for a compositor that never
+answers it.
 
 ## A custom title bar
 
@@ -696,9 +706,7 @@ insists on drawing the decorations itself, as Hyprland does, gets them:
 the host hands no press to the compositor. Its `--check` hit-tests each
 part through `Host.chromeKindAt` in a window the compositor never shows,
 expecting the title bar, the three buttons and the grip and nothing over
-the search field and the content, and submits no frame, since a swap on
-a surface the compositor never shows waits for a frame callback that
-never comes.
+the search field and the content, drawing each frame.
 
 On X11 the window asks for no decorations through `_MOTIF_WM_HINTS`
 (decorations only, none). It reports `custom_title_bar` only where the
@@ -742,15 +750,13 @@ zig build many-windows -- --measure-animation  # frame rates of one, then two, w
 and exits 0 only when the second counts its own click, both show the
 shared count, the first counted none, and the first draws on after the
 second closes. On Windows its windows are hidden; on Linux they are
-shown for the moment the check takes, since a frame drawn into a surface
-the compositor never shows waits in its swap for a frame callback that
-never comes; with `ZUI_HOST_BACKEND=x11` it clicks through the X11
-host's handlers as through the Wayland host's. On a 144 Hz monitor on
-Windows, two windows animating at once each hold 143 frames a second, as
-one alone holds 144, and two idle windows use no CPU. On Linux under
-Hyprland at 144 Hz, one window alone and each of two draw 72 frames a
-second, as the one-window tour does there, and two idle windows use 0.9
-to 21 ms of CPU over 10 s.
+shown for the moment the check takes; with `ZUI_HOST_BACKEND=x11` it
+clicks through the X11 host's handlers as through the Wayland host's. On
+a 144 Hz monitor on Windows, two windows animating at once each hold 143
+frames a second, as one alone holds 144, and two idle windows use no
+CPU. On Linux under Hyprland at 144 Hz, one window alone and each of two
+draw 144 frames a second, as the one-window tour does there, and two
+idle windows use 0.9 to 21 ms of CPU over 10 s.
 
 ## The tour on a native host
 

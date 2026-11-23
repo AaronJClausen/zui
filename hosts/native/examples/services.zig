@@ -19,6 +19,7 @@ const zui_async = @import("zui_async");
 const zui_widgets = @import("zui_widgets");
 const zui_design = @import("zui_design");
 const zui = @import("zui");
+const check_watchdog = @import("check_watchdog.zig");
 const win32 = zui_host.windows.win32;
 const host_services = if (builtin.os.tag == .windows) zui_host.windows.services else zui_host.linux.services;
 
@@ -158,9 +159,7 @@ pub fn main(init: std.process.Init) !void {
     try session.start(.{ .gpa = init.gpa, .io = init.io, .process = init }, .{ .title = "zui: host services", .size = .{ 760, 560 }, .visible = !checking });
     defer session.stop();
     if (checking) {
-        // A Wayland surface the compositor never shows gets no frame
-        // callbacks, and a swap waits for the last frame's.
-        if (builtin.os.tag == .linux) session.renderer.draws = false;
+        try check_watchdog.start(init.io, "services", Check.deadline_ns / std.time.ns_per_s + 10);
         session.host.fakeServices(&session.app.service_fake);
         session.app.check = .{ .deadline = session.host.now().addNanoseconds(Check.deadline_ns) };
     }
@@ -494,8 +493,6 @@ const SokolRenderer = struct {
     pub const ImageHandle = zui_sokol.Renderer.ImageHandle;
 
     sokol: zui_sokol.Renderer,
-    /// False submits nothing, for a window that is never shown.
-    draws: bool = true,
 
     pub fn init(self: *SokolRenderer, surface: zui.Surface, text: anytype) !void {
         self.* = .{ .sokol = try .initForSurface(text, surface) };
@@ -506,7 +503,7 @@ const SokolRenderer = struct {
     }
 
     pub fn zuiSubmit(self: *SokolRenderer, surface: zui.Surface, frame: anytype) !void {
-        if (self.draws) try self.sokol.zuiSubmit(surface, frame);
+        try self.sokol.zuiSubmit(surface, frame);
     }
 };
 

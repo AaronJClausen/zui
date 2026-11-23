@@ -443,6 +443,97 @@ test "a held key repeats after the delay at the compositor's rate, typing each t
     try testing.expectEqual(@as(?zui.KeyEvent, null), findRepeat(&polled));
 }
 
+fn secondsWaitedFor(window_host: *Host, next: zui.NextFrame) f64 {
+    const started = window_host.now();
+    window_host.zuiWait(next);
+    return window_host.now().secondsSince(started);
+}
+
+/// The compositor's answer to `wl_display.sync`, which it sends once it
+/// has read every request before it, as it answers a ping.
+const SyncAnswer = struct {
+    answered: bool = false,
+
+    const display_sync = 0;
+
+    const listener: wayland.CallbackListener = .{
+        .done = struct {
+            fn done(data: ?*anyopaque, callback: ?*wayland.Proxy, _: u32) callconv(.c) void {
+                const self: *SyncAnswer = @ptrCast(@alignCast(data.?));
+                self.answered = true;
+                wayland.wl_proxy_destroy(callback.?);
+            }
+        }.done,
+    };
+
+    fn ask(self: *SyncAnswer, window_host: *Host) !void {
+        const callback = wayland.create(wayland.displayProxy(window_host.display), display_sync, &wayland.wl_callback_interface, 1, .{wayland.no_id}) orelse return error.NoCallback;
+        wayland.addListener(callback, &listener, self);
+    }
+};
+
+test "once the compositor answers a window's frames, a due frame waits for the answer to the last, the display still dispatched" {
+    var window: UnshownWindow = .{};
+    try window.open(1);
+    defer window.close();
+    const window_host = window.host();
+    var polled: zui_testing.PolledRecord = .{};
+    polled.init();
+    _ = polled.poll(window_host);
+    window.main().onFrameDone();
+    _ = polled.poll(window_host);
+    window_host.zuiApply(.main, .{});
+
+    var sync: SyncAnswer = .{};
+    try sync.ask(window_host);
+    const a = evdevCodeOf(window_host, .a).?;
+    window_host.onRepeatInfo(10, 100);
+    window_host.onKey(a, true);
+    _ = polled.poll(window_host);
+    try testing.expect(secondsWaitedFor(window_host, .immediately) >= 0.09);
+    try testing.expect(sync.answered);
+    _ = polled.poll(window_host);
+    try testing.expect(findRepeat(&polled) != null);
+
+    window_host.onKey(a, false);
+    window.main().onFrameDone();
+    try testing.expect(secondsWaitedFor(window_host, .immediately) < 0.05);
+}
+
+test "a window the compositor has never answered a frame of, as one it never shows, is not held" {
+    var window: UnshownWindow = .{};
+    try window.open(1);
+    defer window.close();
+    const window_host = window.host();
+    var polled: zui_testing.PolledRecord = .{};
+    polled.init();
+    _ = polled.poll(window_host);
+    window_host.zuiApply(.main, .{});
+    try testing.expect(secondsWaitedFor(window_host, .immediately) < 0.05);
+    const waited = secondsWaitedFor(window_host, .{ .at = window_host.now().addSeconds(0.05) });
+    try testing.expect(waited >= 0.04 and waited < 0.5);
+}
+
+test "a window whose frame goes unanswered, as a hidden one's does, holds another's frame no longer than an answer takes" {
+    var window: UnshownWindow = .{};
+    try window.open(1);
+    defer window.close();
+    const window_host = window.host();
+    const second = try window_host.zuiOpenWindow(second_window_options);
+    var polled: zui_testing.PolledRecord = .{};
+    polled.init();
+    for ([_]zui.WindowId{ .main, second }) |id| {
+        _ = polled.pollWindow(window_host, id);
+        window_host.windowById(id).?.onFrameDone();
+        _ = polled.pollWindow(window_host, id);
+        window_host.zuiApply(id, .{});
+    }
+    window_host.windowById(second).?.onFrameDone();
+    const waited = secondsWaitedFor(window_host, .immediately);
+    try testing.expect(waited >= 0.09 and waited < 1);
+    try testing.expect(secondsWaitedFor(window_host, .immediately) < 0.05);
+}
+
 test "a modifier pressed while a key is held leaves it repeating; losing focus, or a rate of 0, stops it" {
     var window: UnshownWindow = .{};
     try window.open(1);

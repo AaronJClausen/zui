@@ -863,6 +863,80 @@ done: the host passes the conformance suites on Wayland and on X11 (CI's
 and idles at 0% CPU, and the theme example restyles on a file change.
 What waits on a person is listed under each slice's *Not run*.
 
+A fix after the item, in `hosts/native/` and `renderers/sokol/`
+(`hosts/native/linux/wayland_host.zig`,
+`hosts/native/linux/wayland.zig`, `hosts/native/linux/conformance.zig`,
+`hosts/native/examples/check_watchdog.zig`,
+`hosts/native/examples/services.zig`,
+`hosts/native/examples/title_bar.zig`,
+`hosts/native/examples/material.zig`, `renderers/sokol/src/egl.zig`):
+the tour on a workspace Hyprland was not showing made Hyprland report it
+not responding. Its cause, shown by a backtrace under gdb with the
+window moved to a special workspace: the only thread waited in
+`eglSwapBuffers`, in NVIDIA's `libnvidia-egl-wayland2`, which with a
+swap interval of 1 dispatches its own queue until the compositor sends
+`wp_presentation_feedback.presented` for the frame before, and Hyprland
+withholds it while the window is hidden; `WAYLAND_DEBUG` showed 23 s
+without a dispatch of the default queue, then seven `xdg_wm_base.ping`s
+answered at once, and `hyprland-dialog` ("Application Not Responding")
+running meanwhile. Mesa waits the same way, for a frame callback, which
+is why the checks drew nothing into a surface without a role. The sokol
+renderer now gives a Wayland surface a swap interval of 0, so a swap
+never waits; an X11 window keeps 1. The Wayland host paces frames
+itself: each poll asks for `wl_surface.frame`, which the renderer's next
+commit carries, and once the compositor has answered one for a window,
+`zuiWait` holds a due frame (`.immediately`, or an `.at` that has come)
+until the compositor answers the callback the window's last frame
+carried, still reading and dispatching the display; a window left
+unanswered for more than 100 ms (`answer_expected_within_ns`), as a
+hidden one is, stops holding the others' frames, and a surface never
+answered, as one without a role, holds none. Swapping without waiting
+also ends the half rate slice 7 could not explain: NVIDIA's interval 1
+waited a refresh for the last frame's presentation and another on its
+FIFO barrier. Measured under Hyprland at 144 Hz, NVIDIA RTX 2060 SUPER,
+against `147639b` in the same hour: the tour's 600-frame cycle took 4.2
+and 4.3 s against 8.6 and 8.7 s; `many-windows` `--measure-animation`
+drew 144.0 frames a second for one window and 144.3 and 144.0 for two at
+once, against 72.0, 72.0 and 71.6; tour idle 3.1 to 7.9 ms of CPU over
+10 s, 1 frame, no wakes, against 4.6 to 5.6 ms; two idle windows 1.4 ms
+and no frames. With the tour's cycle running on a hidden special
+workspace for 30 to 40 s it answered every ping (one every 1.5 s, each
+within 0.03 ms), drew nothing and used no CPU, no `hyprland-dialog`
+opened, and it drew again at once when moved back; `147639b` opened the
+dialog within 30 s. Under Xwayland (`ZUI_HOST_BACKEND=x11`) the same
+experiment does not hang: Xwayland completes the hidden window's swaps
+about once a second, and the X11 host is not pinged, so X11 is
+unchanged. Tests: three in the host's suite, a window the compositor has
+answered holding `.immediately` until a key's repeat ends the wait while
+a `wl_display.sync` sent before it is answered, and not after an answer;
+a surface never answered not held; and of two windows, one unanswered
+holding the other's frame for 100 ms and no longer; the first and third
+fail with the hold taken out. `services`, `title-bar` and
+`material -- --check` now draw every frame into surfaces the compositor
+never shows (they drew none before), each under `check_watchdog`, which
+fails the process after 20 s with "a frame or a wait blocked the host"
+through `_exit`, since libc's `exit` waits in NVIDIA's handlers for the
+lock the blocked swap holds; with the interval of 1 put back, all three
+fail so after 20 s, and pass in about a second with it at 0, on NVIDIA
+and on Mesa's llvmpipe (`__EGL_VENDOR_LIBRARY_FILENAMES` naming Mesa's),
+whose buffers Hyprland releases for a surface without a role. 170 of 173
+tests pass in Debug and ReleaseSafe on Wayland and with
+`ZUI_HOST_BACKEND=x11`, the same three skipped as at the parent; the
+INCR clipboard test failed in the first two runs of the session, with
+other builds running, and passed in every run after, as before.
+`services`, `theme`, `title-bar`, `material` and
+`many-windows -- --check` pass, the tour's cycle draws 300 frames with 0
+layer and 0 glyph atlas overflows and clean diagnostics, the host's
+checks pass for the host, `x86_64-windows` and `aarch64-windows`, the
+sokol renderer's 24 tests, its four checks and `zig build conformance`
+pass, and `test-all` and `check-all` pass. The decision below that the
+Linux many-windows check shows its windows still holds for that check,
+but its reason no longer does: a surface without a role can now be
+drawn. Not run: CI's headless Weston, which must release the buffers of
+a surface without a role for Mesa's swaps at interval 0 not to wait for
+one; the owner's own workspace switch, which moves the workspace rather
+than the window.
+
 Decided here:
 
 - **libwayland-client, linked,** as sokol-zig links it, since the
@@ -922,14 +996,19 @@ Decided here:
   keyboard, text input and drag each on its own, since a Wayland seat
   reports which surface it entered and nothing per window after it; the
   seat's state stays on the host.
-- **The Linux many-windows check shows its windows.** A frame drawn into
-  a surface without a role waits in `eglSwapBuffers` for a frame
-  callback that never comes. A swap interval of 0 for such a surface
-  would need the renderer to know a surface is unshown, which
-  `zui.Surface` does not say, and would change the swap of every window
-  that is; a shown window needs neither, and CI's headless Weston shows
-  windows too. The host's own tests still use surfaces without a role,
-  and draw nothing.
+- **The Linux many-windows check shows its windows,** to measure what a
+  person sees. A frame drawn into a surface without a role no longer
+  waits: every Wayland surface swaps at an interval of 0, paced by the
+  host's frame callbacks, so the unshown checks (`services`,
+  `title-bar`, `material`) draw every frame and the host's tests may
+  submit frames to surfaces without a role.
+- **Wayland frames are paced by the host, not by a waiting swap.** A
+  swap at an interval of 1 blocks the only thread for as long as the
+  compositor withholds the last frame's presentation, which Hyprland
+  does for a hidden window, leaving pings unanswered; so the renderer
+  swaps a Wayland surface at 0 and the host holds a due frame until the
+  compositor answers the last one's `wl_surface.frame`, still
+  dispatching the display. X11 keeps vsync.
 - **A material is a blur behind an alpha surface, only where one is
   offered:** a window asks for `.window` or `.transient`, and gets an
   alpha surface and a blur region only where the compositor blurs

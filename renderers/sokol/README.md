@@ -74,17 +74,21 @@ closes, and `zui_app` calls both. With `-Dgl=true` it is an OpenGL 4.3
 context, whose alpha Windows ignores, and SDR only. On Linux the native
 surface is `.wayland`, a native host's Wayland surface, which the
 renderer draws into with an OpenGL 4.3 context made through EGL on a
-`wl_egl_window`, sized to each frame's viewport in physical pixels and
-presenting with vsync. A surface the host made `transparent` (a window
-showing the system's material) gets a configuration with 8 bits of
-alpha, which the compositor blends over the blur behind the window: the
-renderer then clears to `clear_color` and keeps the alpha it draws,
-premultiplied, since its blending adds alpha as the source over the
-destination. Every other surface gets one without alpha, so the
-compositor shows it opaque whatever alpha the frame draws. Both kinds
-are drawn by one context, made without a configuration through
-`EGL_KHR_no_config_context`; on a display without that extension or an
-alpha configuration, a transparent surface is drawn opaque, and
+`wl_egl_window`, sized to each frame's viewport in physical pixels, with
+a swap interval of 0: a swap never waits for the compositor, which for a
+window it hides, as on another workspace, would block the thread until
+the window is shown, so the host paces frames by the compositor's frame
+callbacks, as the native host does, and a surface the compositor never
+shows can be drawn too. An X11 window presents with vsync. A surface the
+host made `transparent` (a window showing the system's material) gets a
+configuration with 8 bits of alpha, which the compositor blends over the
+blur behind the window: the renderer then clears to `clear_color` and
+keeps the alpha it draws, premultiplied, since its blending adds alpha
+as the source over the destination. Every other surface gets one without
+alpha, so the compositor shows it opaque whatever alpha the frame draws.
+Both kinds are drawn by one context, made without a configuration
+through `EGL_KHR_no_config_context`; on a display without that extension
+or an alpha configuration, a transparent surface is drawn opaque, and
 `presentsAlpha(surface)` says which it got. It draws an `.x11` surface,
 a native host's X11 window, through the same EGL device on Xlib's
 display (`EGL_PLATFORM_X11_KHR`), its EGL surface made on the window
@@ -106,9 +110,7 @@ each surface after the first (or, for an X11 window, an EGL surface on
 it), on the first one's EGL display and context, which the renderer
 holds until `deinit`, so any window may close first; the context moves
 to the surface each frame is drawn into, and each window keeps its own
-backdrop-blur and offscreen targets. A frame drawn into a surface the
-compositor never shows waits in its swap for a frame callback that never
-comes, so a Wayland window the renderer draws must be shown:
+backdrop-blur and offscreen targets:
 
 ```zig
 var renderer: zui_sokol.Renderer = try .initForSurface(&text, host.zuiSurface(.main));

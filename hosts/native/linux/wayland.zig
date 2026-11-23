@@ -57,6 +57,7 @@ pub extern "wayland-client" fn wl_proxy_get_version(proxy: *Proxy) callconv(.c) 
 pub extern "wayland-client" const wl_registry_interface: Interface;
 pub extern "wayland-client" const wl_compositor_interface: Interface;
 pub extern "wayland-client" const wl_surface_interface: Interface;
+pub extern "wayland-client" const wl_callback_interface: Interface;
 pub extern "wayland-client" const wl_seat_interface: Interface;
 pub extern "wayland-client" const wl_pointer_interface: Interface;
 pub extern "wayland-client" const wl_keyboard_interface: Interface;
@@ -96,6 +97,7 @@ pub const compositor_create_region = 1;
 pub const region_destroy = 0;
 pub const region_add = 1;
 pub const surface_destroy = 0;
+pub const surface_frame = 3;
 pub const surface_commit = 6;
 pub const surface_set_buffer_scale = 8;
 pub const seat_get_pointer = 0;
@@ -445,6 +447,10 @@ pub const XdgSurfaceListener = extern struct {
 pub const XdgToplevelListener = extern struct {
     configure: *const fn (?*anyopaque, ?*Proxy, i32, i32, ?*Array) callconv(.c) void,
     close: *const fn (?*anyopaque, ?*Proxy) callconv(.c) void,
+};
+
+pub const CallbackListener = extern struct {
+    done: *const fn (?*anyopaque, ?*Proxy, u32) callconv(.c) void,
 };
 
 /// Through version 6.
