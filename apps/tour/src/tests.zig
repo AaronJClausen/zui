@@ -230,7 +230,8 @@ fn target(screen: tour.Screen) AuditCause {
 const focus_ring: AuditCause = .{ .check = .focus_ring_contrast };
 
 /// What the audit finds in the tour today. The text colors go with
-/// `11-polish:19-default-design`, which puts the tour on tokens; the focus
+/// `11-polish:19-default-design`, which puts the tour's own text on tokens
+/// as its widgets already are; the focus
 /// ring on the checked `1 Hz` box is `11-polish:25-focus-ring-on-fills`;
 /// the targets are `11-polish:26-small-targets`. A cause that no longer
 /// appears fails too, so this list shrinks as they land. The other theme's
@@ -238,11 +239,10 @@ const focus_ring: AuditCause = .{ .check = .focus_ring_contrast };
 /// white text, which is light's `on_accent`.
 const expected_causes = std.EnumArray(zui.Environment.Theme, []const AuditCause).init(.{
     .light = &.{
-        textIn(.muted),           textIn(.faint),             textIn(.accent),       textIn(.on_accent),
-        textIn(.good),            textIn(.warn),              textIn(.bad),          textIn(.spectacle),
-        otherThemeText(.muted),   otherThemeText(.on_accent), otherThemeText(.warn), focus_ring,
-        target(.x_ray),           target(.photo_cull),        target(.log_tail),     target(.settings_form),
-        target(.one_declaration),
+        textIn(.muted),         textIn(.faint),        textIn(.accent),        textIn(.on_accent),
+        textIn(.good),          textIn(.warn),         textIn(.bad),           textIn(.spectacle),
+        otherThemeText(.muted), otherThemeText(.warn), focus_ring,             target(.x_ray),
+        target(.photo_cull),    target(.log_tail),     target(.settings_form), target(.one_declaration),
     },
     .dark = &.{
         textIn(.muted),             textIn(.faint),        textIn(.accent),        textIn(.on_accent),
@@ -274,7 +274,13 @@ test "every screen audits as recorded, in light and dark, after Tab focuses a co
             const palette = tour.Palette.forEnvironment(harness.ui.environment());
             const findings = zui_design.audit(audited, .{ .page_background = palette.background, .focus_ring_color = palette.focus }, room);
             try testing.expectEqual(0, findings.dropped);
-            for (findings.slice()) |finding| {
+            const widget_rings = zui_design.audit(audited, .{
+                .checks = .initOne(.focus_ring_contrast),
+                .page_background = palette.background,
+                .focus_ring_color = harness.tour.appearance.tokens.colors.get(.focused).get(.focus),
+            }, room[findings.slice().len..]);
+            try testing.expectEqual(0, widget_rings.dropped);
+            for (room[0 .. findings.slice().len + widget_rings.slice().len]) |finding| {
                 const cause: AuditCause = .of(finding, screen, theme);
                 const index = indexOfCause(expected, cause) orelse {
                     std.debug.print("{t} {t}: an unrecorded finding, {any}\n", .{ theme, screen, finding });

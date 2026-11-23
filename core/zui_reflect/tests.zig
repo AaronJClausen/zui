@@ -2,6 +2,7 @@ const std = @import("std");
 const zui = @import("zui");
 const zui_testing = @import("zui_testing");
 const zui_widgets = @import("zui_widgets");
+const zui_design = @import("zui_design");
 const zui_reflect = @import("zui_reflect.zig");
 
 const testing = std.testing;
@@ -17,7 +18,13 @@ const Ui = zui.Context(.{
     },
     .Text = Text,
 });
-const widgets: zui_widgets.Widgets(Ui, zui_widgets.DefaultSkin(Ui)) = .{ .skin = .{} };
+const tokens = resolved: {
+    @setEvalBranchQuota(10_000_000);
+    var dark: zui.design.Tokens(Ui, void) = .{};
+    _ = zui_design.resolve(zui_design.default, .{ .theme = .dark }, &dark);
+    break :resolved dark;
+};
+const widgets: zui_widgets.Widgets(Ui, zui_widgets.DesignSkin(Ui)) = .{ .skin = .{ .tokens = &tokens } };
 
 const Audio = struct {
     volume: f32 = 0.8,

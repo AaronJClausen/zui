@@ -330,7 +330,7 @@ if (movingAgainTurns < movingTurnsFewest) await fail(`the worker took ${movingAg
 // Back on Settings, through its entry on the rail, a click in its Port
 // field gives it the focus, and the page its hidden field.
 const settingsOnTheRail = { x: 70, y: 348 };
-const portField = { x: 540, y: 450 };
+const portField = { x: 540, y: 434 };
 async function click({ x, y }) {
   await send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount: 1 });
   await send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount: 1 });

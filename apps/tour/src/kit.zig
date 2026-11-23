@@ -26,6 +26,7 @@ pub fn Kit(comptime spec: Spec) type {
     return struct {
         pub const zui = @import("zui");
         pub const zui_widgets = @import("zui_widgets");
+        pub const zui_design = @import("zui_design");
         pub const zui_reflect = @import("zui_reflect");
         pub const zui_async = @import("zui_async");
         pub const zui_motion = @import("zui_motion");
@@ -64,7 +65,7 @@ pub fn Kit(comptime spec: Spec) type {
         });
         pub const Ui = zui.Context(config);
         pub const Inspector = if (spec.inspector) zui_debug.Inspector(Ui) else void;
-        pub const Widgets = zui_widgets.Widgets(Ui, zui_widgets.DefaultSkin(Ui));
+        pub const Widgets = zui_widgets.Widgets(Ui, zui_widgets.DesignSkin(Ui));
         pub const TextStyle = Ui.TextStyle;
 
         pub const draws_frost = config.commands.contains(.backdrop_blur);
@@ -143,32 +144,39 @@ pub fn Kit(comptime spec: Spec) type {
             return true;
         }
 
-        fn widgetTheme(palette: Palette, text_scale: f32, fonts: Fonts) Widgets.Skin.Theme {
-            return .{
-                .text = .{ .size = 16 * text_scale, .color = palette.text, .font = fonts.body },
-                .muted_text_color = palette.muted,
-                .disabled_text_color = palette.faint,
-                .control = .init(.{
-                    .idle = palette.raised,
-                    .hovered = palette.hovered,
-                    .pressed = palette.accent,
-                    .focused = palette.raised,
-                    .disabled = palette.sunken,
-                }),
-                .field_background = palette.sunken,
-                .border_color = palette.border,
-                .accent = palette.accent,
-                .check_mark = palette.on_accent,
-                .track = palette.border,
-                .thumb = palette.text,
-                .caret = palette.text,
-                .focus_ring = palette.focus,
-                .popup_background = palette.surface,
-                .option_highlight = palette.hovered,
-                .selected_option = palette.accent.mix(palette.surface, 0.6),
-                .corner_radius = 6,
-                .control_height = @round(30 * text_scale),
-                .label_width = 150,
+        pub const Tokens = zui.design.Tokens(Ui, void);
+
+        /// The tokens the widgets are styled from, resolved again only when
+        /// the preferences they follow change.
+        pub const Appearance = struct {
+            tokens: Tokens = .{},
+            preferences: ?zui_design.Preferences = null,
+
+            pub fn follow(self: *Appearance, preferences: zui_design.Preferences, fonts: Fonts) void {
+                if (self.preferences) |current| if (std.meta.eql(current, preferences)) return;
+                self.preferences = preferences;
+                _ = zui_design.resolve(designWith(fonts), preferences, &self.tokens);
+            }
+        };
+
+        /// The environment's preferences, its text scale held where the
+        /// tour's layout still fits.
+        pub fn preferencesOf(environment: *const zui.Environment) zui_design.Preferences {
+            var preferences: zui_design.Preferences = .from(environment, .{});
+            preferences.text_scale = std.math.clamp(environment.text_scale, 0.5, 2);
+            return preferences;
+        }
+
+        fn designWith(fonts: Fonts) zui.design.Design {
+            var with_fonts = zui_design.default;
+            with_fonts.type.fonts = .{ .regular = fontIndex(fonts.body), .strong = fontIndex(fonts.bold), .monospace = fontIndex(fonts.mono) };
+            return with_fonts;
+        }
+
+        fn fontIndex(font: Ui.FontId) u32 {
+            return switch (@typeInfo(Ui.FontId)) {
+                .@"enum" => @intFromEnum(font),
+                else => font,
             };
         }
 
@@ -189,15 +197,14 @@ pub fn Kit(comptime spec: Spec) type {
             environment_changes: *EnvironmentQueue,
             requested_screen: *?Screen,
 
-            pub fn init(ui: *const Ui, io: std.Io, seconds: f64, fonts: Fonts, perf: *const Perf, sources: *Sources, waker: zui.Waker, environment_changes: *EnvironmentQueue, requested_screen: *?Screen) Shell {
+            pub fn init(ui: *const Ui, io: std.Io, seconds: f64, fonts: Fonts, tokens: *const Tokens, perf: *const Perf, sources: *Sources, waker: zui.Waker, environment_changes: *EnvironmentQueue, requested_screen: *?Screen) Shell {
                 const environment = ui.environment();
                 const palette: Palette = .forEnvironment(environment);
                 const text_scale = std.math.clamp(environment.text_scale, 0.5, 2);
-                const theme = widgetTheme(palette, text_scale, fonts);
                 return .{
                     .io = io,
                     .palette = palette,
-                    .widgets = .{ .skin = .{ .theme = theme, .dark_theme = theme } },
+                    .widgets = .{ .skin = .{ .tokens = tokens } },
                     .fonts = fonts,
                     .text_scale = text_scale,
                     .reduced_motion = environment.reduced_motion,

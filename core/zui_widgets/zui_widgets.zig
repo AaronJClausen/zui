@@ -1,7 +1,7 @@
 //! Reference widgets, built only on zui's public API and styled by a skin.
 //!
 //! ```zig
-//! const widgets: zui_widgets.Widgets(Ui, zui_widgets.DefaultSkin(Ui)) = .{ .skin = .{} };
+//! const widgets: zui_widgets.Widgets(Ui, zui_widgets.DesignSkin(Ui)) = .{ .skin = .{ .tokens = &app.tokens } };
 //!
 //! if (widgets.button(ui, .of("save"), "Save", .{})) save();
 //! _ = widgets.checkbox(ui, .of("autosave"), "Autosave", &settings.autosave, .{});
@@ -115,9 +115,17 @@ pub const Part = enum {
     disclosure_expanded,
     /// The header's indicator while collapsed: `glyph` and `text`.
     disclosure_collapsed,
-    /// `button`: `background`, `border`, `focus_ring`, `corner_radius`,
-    /// `size[1]`, `padding`, `gap` and `text`.
+    /// `button`, a primary action: `background`, `border`, `focus_ring`,
+    /// `corner_radius`, `size[1]`, `padding`, `gap` and `text`.
     button,
+    /// A button of `.variant = .secondary`, read as `button`.
+    button_secondary,
+    /// A button of `.variant = .tonal`, read as `button`.
+    button_tonal,
+    /// A button of `.variant = .tertiary`, read as `button`.
+    button_tertiary,
+    /// A button of `.variant = .danger`, read as `button`.
+    button_danger,
     /// `checkbox`'s row: `size[1]`, `gap` and its label's `text`.
     checkbox,
     /// The box while unchecked: `background`, `border`, `focus_ring`,
@@ -172,6 +180,9 @@ pub fn Style(comptime Ui: type) type {
         /// which it keeps while hovered or pressed.
         focus_ring: ?Ui.Border = null,
         corner_radius: zui.CornerRadius = .zero,
+        corner_shape: zui.CornerShape = .round,
+        /// Drawn beneath a popup.
+        shadow: ?Ui.Shadow = null,
         /// Always laid out on one line.
         text: Ui.TextStyle = .{},
         /// Width and height in layout units, where the part is a fixed size.
@@ -207,190 +218,280 @@ pub fn expectSkin(comptime Ui: type, comptime Skin: type) void {
         ", zui_widgets.Part, zui.WidgetState, *const zui.Environment) zui_widgets.Style(Ui), found " ++ @typeName(Found));
 }
 
-/// zui's own skin: `theme`, or `dark_theme` while the environment's theme
-/// is dark and it is set.
+/// zui's own skin, every part styled from `tokens`, which the application
+/// resolves again when a preference changes, so the widgets follow the
+/// theme, contrast, density, text scale and color vision it was resolved
+/// for.
 ///
 /// ```zig
-/// const widgets: zui_widgets.Widgets(Ui, zui_widgets.DefaultSkin(Ui)) = .{ .skin = .{ .theme = light, .dark_theme = dark } };
+/// var tokens: zui.design.Tokens(Ui, void) = .{};
+/// _ = zui_design.resolve(zui_design.default, .from(ui.environment(), choices), &tokens);
+/// const widgets: zui_widgets.Widgets(Ui, zui_widgets.DesignSkin(Ui)) = .{ .skin = .{ .tokens = &tokens } };
 /// ```
-pub fn DefaultSkin(comptime Ui: type) type {
+pub fn DesignSkin(comptime Ui: type) type {
+    return DesignSkinWith(Ui, void);
+}
+
+/// `DesignSkin` over tokens with the application's own `ExtraRoles`.
+pub fn DesignSkinWith(comptime Ui: type, comptime ExtraRoles: type) type {
     return struct {
         const Skin = @This();
 
-        /// The look while the environment's theme is light, and while it is
-        /// dark unless `dark_theme` is set.
-        theme: Theme = .{},
-        /// The look while the environment's theme is dark.
-        dark_theme: ?Theme = null,
+        tokens: *const zui.design.Tokens(Ui, ExtraRoles),
 
-        pub const Theme = struct {
-            text: Ui.TextStyle = .{ .color = .rgb(0xe8e8f0) },
-            muted_text_color: Ui.Color = .rgb(0x9a9aae),
-            disabled_text_color: Ui.Color = .rgb(0x5c5c6e),
-            control: std.EnumArray(zui.WidgetState, Ui.Color) = .init(.{
-                .idle = .rgb(0x2c2c3c),
-                .hovered = .rgb(0x3a3a50),
-                .pressed = .rgb(0x4a6ad0),
-                .focused = .rgb(0x2c2c3c),
-                .disabled = .rgb(0x24242e),
-            }),
-            field_background: Ui.Color = .rgb(0x15151b),
-            border_color: Ui.Color = .rgb(0x34344a),
-            accent: Ui.Color = .rgb(0x5b8cff),
-            check_mark: Ui.Color = .rgb(0xffffff),
-            track: Ui.Color = .rgb(0x34344a),
-            thumb: Ui.Color = .rgb(0xe8e8f0),
-            caret: Ui.Color = .rgb(0xe8e8f0),
-            focus_ring: Ui.Color = .rgb(0xffc65c),
-            popup_background: Ui.Color = .rgb(0x262634),
-            option_highlight: Ui.Color = .rgb(0x3a3a50),
-            selected_option: Ui.Color = .rgb(0x30406c),
-            corner_radius: f32 = 4,
-            control_height: f32 = 30,
-            horizontal_padding: f32 = 12,
-            gap: f32 = 8,
-            checkbox_size: f32 = 18,
-            slider_thumb_size: [2]f32 = .{ 12, 20 },
-            track_thickness: f32 = 4,
-            caret_width: f32 = 2,
-            label_width: f32 = 140,
-            /// Popups paint in this layer and the next one up.
-            popup_z: i16 = 100,
-            dropdown_indicator: []const u8 = "v",
-            expanded_indicator: []const u8 = "v",
-            collapsed_indicator: []const u8 = ">",
-        };
-
-        /// `dark_theme` while `environment.theme` is dark and it is set;
-        /// otherwise `theme`.
-        pub fn activeTheme(skin: *const Skin, environment: *const zui.Environment) *const Theme {
-            if (environment.theme == .dark) if (skin.dark_theme) |*dark| return dark;
-            return &skin.theme;
-        }
-
-        pub fn zuiStyle(skin: *const Skin, part: Part, state: zui.WidgetState, environment: *const zui.Environment) Style(Ui) {
-            const theme = skin.activeTheme(environment);
-            const rounded: zui.CornerRadius = .all(theme.corner_radius);
-            const focus_ring: Ui.Border = .{ .color = theme.focus_ring, .widths = .all(2) };
-            const outline: Ui.Border = .{ .color = theme.border_color, .widths = .all(1) };
-            const highlighted = state == .hovered or state == .pressed;
-            const text = textOf(theme, if (state == .disabled) .disabled else .normal);
-            const muted_text = textOf(theme, .muted);
-            const control: Style(Ui) = .{
-                .background = theme.control.get(state),
-                .focus_ring = focus_ring,
-                .corner_radius = rounded,
-                .text = text,
-                .size = .{ 0, theme.control_height },
-                .padding = .symmetric(theme.horizontal_padding, 0),
-                .gap = theme.gap,
-            };
-            const track: Style(Ui) = .{
-                .background = theme.track,
-                .corner_radius = .all(theme.track_thickness / 2),
-                .size = .{ 0, theme.track_thickness },
-            };
-            const box: Style(Ui) = .{
-                .background = theme.field_background,
-                .border = .{ .color = if (highlighted) theme.accent else theme.border_color, .widths = .all(1) },
-                .focus_ring = focus_ring,
-                .corner_radius = rounded,
-                .size = .{ theme.checkbox_size, theme.checkbox_size },
-            };
-            const option: Style(Ui) = .{
-                .background = if (highlighted) theme.option_highlight else null,
-                .focus_ring = focus_ring,
-                .corner_radius = rounded,
-                .text = textOf(theme, .normal),
-                .size = .{ 0, theme.control_height },
-                .padding = .symmetric(theme.horizontal_padding - 4, 0),
-            };
+        pub fn zuiStyle(skin: *const Skin, part: Part, state: zui.WidgetState, _: *const zui.Environment) Style(Ui) {
+            const tokens = skin.tokens;
+            const medium_height = tokens.control_heights.get(.medium);
             return switch (part) {
-                .label => .{ .text = text },
-                .muted_label, .text_field_placeholder => .{ .text = muted_text },
-                .row_label => .{ .text = muted_text, .size = .{ theme.label_width, 0 }, .gap = theme.gap },
-                .disclosure => control: {
-                    var header = control;
-                    header.background = if (highlighted) theme.control.get(state) else null;
-                    header.padding = .symmetric(theme.gap, 0);
-                    break :control header;
-                },
-                .disclosure_expanded => .{ .text = muted_text, .glyph = theme.expanded_indicator },
-                .disclosure_collapsed => .{ .text = muted_text, .glyph = theme.collapsed_indicator },
-                .button, .dropdown => control,
-                .checkbox => .{ .text = text, .size = .{ 0, theme.control_height }, .gap = theme.gap },
-                .checkbox_box => box,
-                .checkbox_box_checked => checked: {
-                    var checked_box = box;
-                    if (state != .disabled) checked_box.background = theme.accent;
-                    break :checked checked_box;
-                },
+                .label => skin.styled(.label, state),
+                .muted_label => skin.styled(.muted_label, state),
+                .row_label => sized(skin.styled(.row_label, state), .{ label_column_width * tokens.text_padding_scale, 0 }),
+                .disclosure => sized(skin.styled(.disclosure, state), .{ 0, medium_height }),
+                .disclosure_expanded => withGlyph(skin.styled(.disclosure_indicator, state), "v"),
+                .disclosure_collapsed => withGlyph(skin.styled(.disclosure_indicator, state), ">"),
+                .button => sized(skin.styled(.button, state), .{ 0, medium_height }),
+                .button_secondary => sized(skin.styled(.button_secondary, state), .{ 0, medium_height }),
+                .button_tonal => sized(skin.styled(.button_tonal, state), .{ 0, medium_height }),
+                .button_tertiary => sized(skin.styled(.button_tertiary, state), .{ 0, medium_height }),
+                .button_danger => sized(skin.styled(.button_danger, state), .{ 0, medium_height }),
+                .checkbox => sized(skin.styled(.checkbox, state), .{ 0, tokens.control_heights.get(.small) }),
+                .checkbox_box => skin.checkboxBox(.checkbox_box, state),
+                .checkbox_box_checked => skin.checkboxBox(.checkbox_box_checked, state),
                 .checkbox_mark => mark: {
-                    const mark_size = @round(theme.checkbox_size * 0.45);
-                    break :mark .{
-                        .background = if (state == .disabled) theme.disabled_text_color else theme.check_mark,
-                        .corner_radius = .all(2),
-                        .size = .{ mark_size, mark_size },
-                    };
+                    const side = @round(skin.checkboxSide() * check_mark_share);
+                    const icon = skin.styled(.checkbox_mark, state);
+                    break :mark .{ .background = icon.text.color, .corner_radius = .all(check_mark_corner_radius), .size = .{ side, side } };
                 },
-                .slider => .{ .size = .{ 0, theme.control_height } },
-                .slider_filled => filled: {
-                    var filled = track;
-                    if (state != .disabled) filled.background = theme.accent;
-                    break :filled filled;
+                .slider => .{ .size = .{ 0, medium_height } },
+                .slider_filled => sized(skin.styled(.slider_filled, state), .{ 0, slider_track_thickness }),
+                .slider_empty => sized(skin.styled(.slider_empty, state), .{ 0, slider_track_thickness }),
+                .slider_thumb => thumb: {
+                    var thumb = sized(skin.styled(.slider_thumb, state), @splat(slider_thumb_side));
+                    if (thumb.border) |*border| border.widths = .all(slider_thumb_border_width);
+                    break :thumb thumb;
                 },
-                .slider_empty => track,
-                .slider_thumb => .{
-                    .background = switch (state) {
-                        .pressed => theme.accent,
-                        .disabled => theme.disabled_text_color,
-                        else => theme.thumb,
-                    },
-                    .focus_ring = focus_ring,
-                    .corner_radius = rounded,
-                    .size = theme.slider_thumb_size,
+                .text_field => sized(skin.styled(.text_field, state), .{ 0, medium_height }),
+                .text_field_placeholder => skin.styled(.text_field_placeholder, state),
+                .text_field_caret => sized(skin.styled(.text_field_caret, state), .{ caret_width, 0 }),
+                .dropdown => sized(skin.styled(.dropdown, state), .{ 0, medium_height }),
+                .dropdown_indicator => withGlyph(skin.styled(.dropdown_indicator, state), "v"),
+                .dropdown_popup => popup: {
+                    var list = skin.styled(.dropdown_popup, state);
+                    const lift = tokens.elevations.get(.floating);
+                    list.background = tokens.colors.get(state).get(lift.surface);
+                    list.border = if (lift.rim) |rim| .{ .color = rim, .widths = .all(tokens.outline_width) } else null;
+                    list.shadow = lift.shadow;
+                    list.layer = popup_layer;
+                    break :popup list;
                 },
-                .text_field => .{
-                    .background = theme.field_background,
-                    .border = outline,
-                    .focus_ring = focus_ring,
-                    .corner_radius = rounded,
-                    .text = text,
-                    .size = .{ 0, theme.control_height },
-                    .padding = .symmetric(theme.gap, 0),
-                },
-                .text_field_caret => .{ .background = theme.caret, .size = .{ theme.caret_width, 0 } },
-                .dropdown_indicator => .{ .text = muted_text, .glyph = theme.dropdown_indicator },
-                .dropdown_popup => .{
-                    .background = theme.popup_background,
-                    .border = outline,
-                    .corner_radius = rounded,
-                    .padding = .all(4),
-                    .gap = 4,
-                    .layer = theme.popup_z,
-                },
-                .dropdown_option => option,
-                .dropdown_option_selected => selected: {
-                    var selected_option = option;
-                    if (!highlighted) selected_option.background = theme.selected_option;
-                    break :selected selected_option;
-                },
+                .dropdown_option => sized(skin.styled(.dropdown_option, state), .{ 0, medium_height }),
+                .dropdown_option_selected => sized(skin.styled(.dropdown_option_selected, state), .{ 0, medium_height }),
             };
         }
 
-        const TextTone = enum { normal, muted, disabled };
+        /// The approved checkbox is 16, 18 and 20 at the three densities.
+        fn checkboxSide(skin: *const Skin) f32 {
+            return skin.tokens.control_heights.get(.small) / 2 + 4;
+        }
 
-        fn textOf(theme: *const Theme, tone: TextTone) Ui.TextStyle {
-            var style = theme.text;
-            style.color = switch (tone) {
-                .normal => style.color,
-                .muted => theme.muted_text_color,
-                .disabled => theme.disabled_text_color,
+        fn checkboxBox(skin: *const Skin, comptime designed: Designed.Part, state: zui.WidgetState) Style(Ui) {
+            var box = sized(skin.styled(designed, state), @splat(skin.checkboxSide()));
+            box.corner_radius = .all(checkbox_corner_radius);
+            if (box.border) |*border| border.widths = .all(checkbox_border_width);
+            return box;
+        }
+
+        fn styled(skin: *const Skin, comptime designed: Designed.Part, state: zui.WidgetState) Style(Ui) {
+            const tokens = skin.tokens;
+            const look = tokens.look(Designed, designed, state);
+            const declared = comptime Designed.zuiAppearance.of(designed);
+            const resting = if (state == .focused) tokens.look(Designed, designed, .idle) else look;
+            return .{
+                .background = look.decoration.background,
+                .border = resting.decoration.border,
+                .focus_ring = if (declared.target == .none) null else focusRingOf(tokens.look(Designed, designed, .focused).decoration.border, tokens.focus_ring_width),
+                .corner_radius = look.decoration.corner_radius,
+                .corner_shape = look.decoration.corner_shape,
+                .text = look.text,
+                .padding = look.padding,
+                .gap = look.gap,
             };
-            return style;
+        }
+
+        fn focusRingOf(border: ?Ui.Border, width: f32) ?Ui.Border {
+            var ring = border orelse return null;
+            ring.widths = .all(width);
+            return ring;
+        }
+
+        fn sized(style: Style(Ui), size: [2]f32) Style(Ui) {
+            var with_size = style;
+            with_size.size = size;
+            return with_size;
+        }
+
+        fn withGlyph(style: Style(Ui), glyph: []const u8) Style(Ui) {
+            var with_glyph = style;
+            with_glyph.glyph = glyph;
+            return with_glyph;
         }
     };
 }
+
+const label_column_width = 160;
+const checkbox_corner_radius = 4;
+const checkbox_border_width = 1.5;
+const check_mark_share = 0.45;
+const check_mark_corner_radius = 2;
+const slider_track_thickness = 4;
+const slider_thumb_side = 20;
+const slider_thumb_border_width = 2;
+const caret_width = 2;
+/// Popups paint in this layer and the next one up.
+const popup_layer = 100;
+
+/// The roles and tiers each part of `DesignSkin` is drawn in. Text on the
+/// page is drawn `.on` `page`, the surface beneath every widget.
+const Designed = struct {
+    pub const Part = enum {
+        page,
+        label,
+        muted_label,
+        row_label,
+        disclosure,
+        disclosure_indicator,
+        button,
+        button_secondary,
+        button_tonal,
+        button_tertiary,
+        button_danger,
+        checkbox,
+        checkbox_box,
+        checkbox_box_checked,
+        checkbox_mark,
+        slider_filled,
+        slider_empty,
+        slider_thumb,
+        text_field,
+        text_field_placeholder,
+        text_field_caret,
+        dropdown,
+        dropdown_indicator,
+        dropdown_popup,
+        dropdown_option,
+        dropdown_option_selected,
+    };
+
+    const on_hover: zui.design.PartAppearance(void).Colors = .{ .surface = .secondary_container, .text = .on_secondary_container };
+
+    pub const zuiAppearance = zui.design.Appearance(@This().Part, .{
+        .page = .{ .surface = .surface },
+        .label = .{ .text = .on_surface, .type = .body, .on = .page },
+        .muted_label = .{ .text = .on_surface_muted, .type = .body, .on = .page },
+        .row_label = .{ .text = .on_surface, .type = .body, .on = .page, .gap = .l },
+        .disclosure = .{
+            .text = .on_surface,
+            .type = .body_strong,
+            .on = .page,
+            .shape = .control,
+            .padding = .{ .x = .s },
+            .gap = .s,
+            .target = .pointer,
+            .states = .{ .hovered = on_hover, .pressed = on_hover },
+        },
+        .disclosure_indicator = .{ .text = .on_surface_muted, .type = .body, .on = .page },
+        .button = filledButton(.accent, .on_accent),
+        .button_secondary = filledButton(.secondary_container, .on_secondary_container),
+        .button_tonal = filledButton(.accent_container, .on_accent_container),
+        .button_tertiary = .{
+            .text = .on_surface_accent,
+            .type = .body_strong,
+            .on = .page,
+            .shape = .control,
+            .padding = .{ .x = .l },
+            .gap = .s,
+            .target = .pointer,
+            .states = .{ .hovered = .{ .surface = .secondary_container }, .pressed = .{ .surface = .secondary_container } },
+        },
+        .button_danger = filledButton(.danger, .on_danger),
+        .checkbox = .{ .text = .on_surface, .type = .body, .on = .page, .gap = .s },
+        .checkbox_box = .{ .surface = .surface, .outline = .outline, .target = .pointer },
+        .checkbox_box_checked = .{ .surface = .accent, .target = .pointer, .cue = "its check mark" },
+        .checkbox_mark = .{ .icon = .on_accent, .on = .checkbox_box_checked },
+        .slider_filled = .{ .surface = .accent, .shape = .indicator },
+        .slider_empty = .{ .surface = .outline_muted, .shape = .indicator },
+        // Not `accent`, which high contrast draws in the focus ring's color,
+        // so a focused thumb would look like an idle one.
+        .slider_thumb = .{ .surface = .surface_raised, .outline = .outline, .shape = .indicator, .target = .pointer },
+        .text_field = .{
+            .surface = .surface_sunken,
+            .text = .on_surface,
+            .type = .body,
+            .on = .text_field,
+            .shape = .control,
+            .padding = .{ .x = .m },
+            .target = .pointer,
+            .states = .{ .hovered = .{ .outline = .outline_muted }, .focused = .{ .surface = .surface, .outline = .accent } },
+        },
+        .text_field_placeholder = .{ .text = .on_surface_muted, .type = .body, .on = .text_field },
+        .text_field_caret = .{ .surface = .accent },
+        .dropdown = .{ .surface = .surface_sunken, .text = .on_surface, .type = .body, .on = .dropdown, .shape = .control, .padding = .{ .x = .m }, .gap = .s, .target = .pointer },
+        .dropdown_indicator = .{ .text = .on_surface_muted, .type = .body, .on = .dropdown },
+        .dropdown_popup = .{ .surface = .surface_overlay, .shape = .popup, .padding = .{ .x = .xs, .y = .xs }, .gap = .xs },
+        .dropdown_option = option(.body),
+        .dropdown_option_selected = selected: {
+            var selected = option(.body_strong);
+            selected.cue = "its label in the strong font";
+            break :selected selected;
+        },
+    });
+
+    fn filledButton(comptime surface: zui.design.ColorChoice(void), comptime text: zui.design.ColorChoice(void)) zui.design.PartAppearance(void) {
+        return .{
+            .surface = surface,
+            .text = text,
+            .type = .body_strong,
+            .on = .button,
+            .shape = .control,
+            .padding = .{ .x = .l },
+            .gap = .s,
+            .target = .pointer,
+        };
+    }
+
+    fn option(comptime type_role: zui.design.TypeRole) zui.design.PartAppearance(void) {
+        return .{
+            .text = .on_surface,
+            .type = type_role,
+            .on = .dropdown_popup,
+            .shape = .control,
+            .padding = .{ .x = .m },
+            .target = .pointer,
+            .states = .{ .hovered = on_hover, .pressed = on_hover },
+        };
+    }
+};
+
+/// How much a button stands out: `primary` for the one main action,
+/// `secondary` and `tonal` for the others, `tertiary` with no fill until
+/// hovered, and `danger` for one that destroys.
+pub const ButtonVariant = enum {
+    primary,
+    secondary,
+    tonal,
+    tertiary,
+    danger,
+
+    pub fn part(variant: ButtonVariant) Part {
+        return switch (variant) {
+            .primary => .button,
+            .secondary => .button_secondary,
+            .tonal => .button_tonal,
+            .tertiary => .button_tertiary,
+            .danger => .button_danger,
+        };
+    }
+};
 
 /// Controls declared into a `*Ui` and styled by `Skin`, any type that
 /// implements the skin contract (`expectSkin`).
@@ -474,12 +575,13 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
         pub const ButtonOptions = struct {
             disabled: bool = false,
             width: zui.Sizing = .fit,
+            variant: ButtonVariant = .primary,
         };
 
         /// True in the frame the button is clicked, or activated with Enter
         /// or Space while focused.
         pub fn button(self: Self, ui: *Ui, id: zui.Id, content: []const u8, options: ButtonOptions) bool {
-            const look = self.style(ui, .button, stateOf(ui, id, options.disabled));
+            const look = self.style(ui, options.variant.part(), stateOf(ui, id, options.disabled));
             ui.open(.{
                 .id = id,
                 .focusable = true,
@@ -904,8 +1006,10 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                 .layout = .{ .sizing = .{ .width = .fixed(viewport[0]), .height = .fixed(viewport[1]) } },
             });
             const button_width = if (ui.rectOf(id)) |rect| rect.width else 0;
+            const effects: Ui.Effects = .{ .shadow = list.shadow };
             ui.open(.{
                 .id = id.child("popup"),
+                .effects = if (list.shadow != null) &effects else null,
                 .focus_scope = true,
                 .semantics = .{ .role = .list_box, .actions = .initOne(.dismiss) },
                 .floating = .{ .attach_to = .{ .element = id }, .attach_point = .bottom_left, .offset = .{ 0, list.gap }, .z = list.layer + 1 },
@@ -976,6 +1080,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                 .background = look.background,
                 .border = if (focused) look.focus_ring else look.border,
                 .corner_radius = look.corner_radius,
+                .corner_shape = look.corner_shape,
             };
         }
 

@@ -17,6 +17,7 @@ const zui_truetype = @import("zui_truetype");
 const zui_app = @import("zui_app");
 const zui_async = @import("zui_async");
 const zui_widgets = @import("zui_widgets");
+const zui_design = @import("zui_design");
 const zui = @import("zui");
 const win32 = zui_host.windows.win32;
 const host_services = if (builtin.os.tag == .windows) zui_host.windows.services else zui_host.linux.services;
@@ -26,7 +27,7 @@ const ServiceSources = struct {
     replies: zui_async.Stream(ServiceReply, .{ .capacity = 4 }) = .{},
 };
 const Ui = zui.Context(zui_app.contextConfig(zui_sokol.Renderer, .{ .Text = zui_truetype.Text, .Sources = ServiceSources }));
-const Widgets = zui_widgets.Widgets(Ui, zui_widgets.DefaultSkin(Ui));
+const Widgets = zui_widgets.Widgets(Ui, zui_widgets.DesignSkin(Ui));
 const services = zui_app.ServicesOf(zui_host.Host);
 
 const Action = enum {
@@ -174,7 +175,7 @@ const ServicesApp = struct {
 
     sources: ServiceSources = .{},
     host: *Host = undefined,
-    widgets: Widgets = .{ .skin = .{} },
+    widgets: Widgets = .{ .skin = .{ .tokens = &widget_tokens } },
     /// Asked for by declaration; the loader makes the calls.
     wanted: std.EnumSet(Action) = .initEmpty(),
     answers: std.EnumArray(Action, AnswerLine) = .initFill(.{}),
@@ -487,4 +488,12 @@ const SokolRenderer = struct {
     pub fn zuiSubmit(self: *SokolRenderer, surface: zui.Surface, frame: anytype) !void {
         if (self.draws) try self.sokol.zuiSubmit(surface, frame);
     }
+};
+
+/// zui's default design in dark, resolved during the build.
+const widget_tokens: zui.design.Tokens(Ui, void) = resolved: {
+    @setEvalBranchQuota(10_000_000);
+    var dark: zui.design.Tokens(Ui, void) = .{};
+    _ = zui_design.resolve(zui_design.default, .{ .theme = .dark }, &dark);
+    break :resolved dark;
 };

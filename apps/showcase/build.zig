@@ -31,6 +31,7 @@ fn showcaseModuleOptions(b: *std.Build, target: std.Build.ResolvedTarget, optimi
     const imports = b.allocator.dupe(std.Build.Module.Import, &.{
         .{ .name = "zui", .module = core.module("zui") },
         .{ .name = "zui_widgets", .module = core.module("zui_widgets") },
+        .{ .name = "zui_design", .module = core.module("zui_design") },
         .{ .name = "zui_app", .module = core.module("zui_app") },
         .{ .name = "zui_glyphs", .module = b.dependency("zui_glyphs", .{ .target = target, .optimize = optimize }).module("zui_glyphs") },
     }) catch @panic("out of memory");

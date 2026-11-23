@@ -118,7 +118,8 @@ is in the file its group names.
 | `10-reach:04-window-decorations` | `core/src/chrome.zig`, `core/src/context.zig`, `core/zui_app/`, `hosts/native/` | | waiting on a person: the checklist under its *Status*, on `zig build title-bar` in `hosts/native/` |
 | `10-reach:07-x11-ibus` | `hosts/native/linux/` | | not started |
 | `11-polish:18-system-accent` | `core/src/input.zig`, `hosts/` | | waiting on CI: the Windows host's accent, in `hosts/native/`'s Windows conformance tests |
-| `11-polish:19-default-design` | `core/zui_design/`, `core/zui_widgets/`, `apps/` | `11-polish:14-zui-design`, `11-polish:15-type-scale` | in progress; slice 2, `DesignSkin`, next |
+| `11-polish:19-default-design` | `core/zui_design/`, `core/zui_widgets/`, `apps/` | `11-polish:14-zui-design`, `11-polish:15-type-scale` | in progress; slice 3, the tour and the showcase on tokens, next |
+| `10-reach:08-ring-edges-agree` | `renderers/webgl/`, `renderers/sokol/` | | not started; `hosts/web`'s `test-draw` fails on one frame until it lands |
 | `11-polish:22-appearance-review` | `apps/review/` | `11-polish:20-appearance-audit`, `11-polish:21-permutations` | |
 | `11-polish:08-zui-themes` | `themes/` | `11-polish:19-default-design` | |
 | `11-polish:23-design-workbench` | `apps/review/` | `11-polish:22-appearance-review` | |

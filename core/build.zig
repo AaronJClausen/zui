@@ -301,6 +301,9 @@ pub fn build(b: *std.Build) void {
     for ([_]*std.Build.Module{ async_module, widgets_module, reflect_module, tracy_module, wire_module, debug_module, motion_module }) |module_with_driven_tests| {
         module_with_driven_tests.addImport("zui_testing", testing_module);
     }
+    for ([_]*std.Build.Module{ widgets_module, reflect_module }) |module_with_designed_tests| {
+        module_with_designed_tests.addImport("zui_design", design_module);
+    }
     wire_module.addImport("zui_async", async_module);
     wire_module.addImport("zui_app", app_module);
     debug_module.addImport("zui_async", async_module);

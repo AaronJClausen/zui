@@ -79,6 +79,7 @@ pub fn Tour(comptime kit: type) type {
         host_waker: ?zui.Waker = null,
         started_at: zui.Instant,
         fonts: kit.Fonts,
+        appearance: kit.Appearance = .{},
 
         zoom: f32 = 1,
         /// Refreshes the strip once a second through `requestFrameAt`, so an
@@ -132,7 +133,8 @@ pub fn Tour(comptime kit: type) type {
 
         fn shell(tour: *Self, ui: *const Ui) Shell {
             const seconds: f64 = ui.now().secondsSince(tour.started_at);
-            return .init(ui, tour.io, seconds, tour.fonts, &tour.perf, &tour.sources, tour.waker(), &tour.environment_changes, &tour.requested_screen);
+            tour.appearance.follow(kit.preferencesOf(ui.environment()), tour.fonts);
+            return .init(ui, tour.io, seconds, tour.fonts, &tour.appearance.tokens, &tour.perf, &tour.sources, tour.waker(), &tour.environment_changes, &tour.requested_screen);
         }
 
         pub fn declare(tour: *Self, ui: *Ui) void {

@@ -8,6 +8,7 @@ const zui = @import("zui");
 const zui_testing = @import("zui_testing");
 const zui_async = @import("zui_async");
 const zui_widgets = @import("zui_widgets");
+const zui_design = @import("zui_design");
 const Host = zui_host.Host;
 const win32 = zui_host.windows.win32;
 const keys = zui_host.windows.keys;
@@ -1038,7 +1039,7 @@ const ControlsWindow = struct {
     events: [64]zui.Event = undefined,
     text_buffer: [ControlsUi.limits.max_text_input_bytes + ControlsUi.limits.max_dropped_path_bytes]u8 = undefined,
     builder: zui.RecordBuilder = undefined,
-    widgets: zui_widgets.Widgets(ControlsUi, zui_widgets.DefaultSkin(ControlsUi)) = .{ .skin = .{} },
+    widgets: zui_widgets.Widgets(ControlsUi, zui_widgets.DesignSkin(ControlsUi)) = .{ .skin = .{ .tokens = &widget_tokens } },
     saves: u32 = 0,
     autosave: bool = true,
     volume: f32 = 0.5,
@@ -1608,3 +1609,11 @@ test "with the main window closed, the clipboard still round-trips, and a dialog
     try testing.expectEqual(second, chosen.window);
     try testing.expectEqual(.files_chosen, chosen.kind);
 }
+
+/// zui's default design in dark, resolved during the build.
+const widget_tokens: zui.design.Tokens(ControlsUi, void) = resolved: {
+    @setEvalBranchQuota(10_000_000);
+    var dark: zui.design.Tokens(ControlsUi, void) = .{};
+    _ = zui_design.resolve(zui_design.default, .{ .theme = .dark }, &dark);
+    break :resolved dark;
+};

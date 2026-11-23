@@ -19,6 +19,7 @@ const zui_truetype = @import("zui_truetype");
 const zui_app = @import("zui_app");
 const zui_async = @import("zui_async");
 const zui_widgets = @import("zui_widgets");
+const zui_design = @import("zui_design");
 const zui = @import("zui");
 const win32 = zui_host.windows.win32;
 
@@ -29,7 +30,7 @@ const check_windows_shown = builtin.os.tag != .windows;
 
 const WindowSources = struct { shared_count: zui_async.Latest(u32) = .{} };
 const Ui = zui.Context(zui_app.contextConfig(zui_sokol.Renderer, .{ .Text = zui_truetype.Text, .Sources = WindowSources }));
-const Widgets = zui_widgets.Widgets(Ui, zui_widgets.DefaultSkin(Ui));
+const Widgets = zui_widgets.Widgets(Ui, zui_widgets.DesignSkin(Ui));
 const ids = zui.ids(.{ "root", "add_here", "add_everywhere", "open", "close" });
 
 pub fn main(init: std.process.Init) !void {
@@ -78,7 +79,7 @@ const ManyWindowsApp = struct {
     host: *Host = undefined,
     windows: zui_app.Windows(ManyWindowsApp) = undefined,
     waker: zui.Waker = undefined,
-    widgets: Widgets = .{ .skin = .{} },
+    widgets: Widgets = .{ .skin = .{ .tokens = &widget_tokens } },
     slots: [Host.max_windows]Slot = @splat(.{}),
     shared_count: u32 = 0,
     publish_shared: bool = false,
@@ -382,4 +383,12 @@ const SokolRenderer = struct {
     pub fn zuiDetachSurface(self: *SokolRenderer, surface: zui.Surface) void {
         self.sokol.zuiDetachSurface(surface);
     }
+};
+
+/// zui's default design in dark, resolved during the build.
+const widget_tokens: zui.design.Tokens(Ui, void) = resolved: {
+    @setEvalBranchQuota(10_000_000);
+    var dark: zui.design.Tokens(Ui, void) = .{};
+    _ = zui_design.resolve(zui_design.default, .{ .theme = .dark }, &dark);
+    break :resolved dark;
 };

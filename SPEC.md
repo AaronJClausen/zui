@@ -2332,9 +2332,10 @@ instantiated. A skin is a struct that declares `zuiStyle` and no other
 - **`environment`** is the context's (§7.2). A skin follows the theme,
   the contrast and `text_scale` by reading it, so no widget reads them.
 - **`Style(Ui)`** holds the background, the border, the focus ring, the
-  corner radius, the text style, a fixed size, the padding, the gap, an
-  indicator glyph and a popup's layer, in the context's color and font
-  types. Each `Part` reads only the fields its doc comment lists.
+  corner radius and shape, a popup's shadow, the text style, a fixed
+  size, the padding, the gap, an indicator glyph and a popup's layer, in
+  the context's color and font types. Each `Part` reads only the fields
+  its doc comment lists.
 - **The focus ring is `Style.focus_ring`.** It is drawn in place of the
   border while the element has keyboard focus, which it keeps while
   hovered or pressed, so it is a field and not a state.
@@ -2348,7 +2349,11 @@ instantiated. A skin is a struct that declares `zuiStyle` and no other
   vtable.
 - **`zui_widgets.DesignSkin(Ui)`** is zui's own skin (§19.2): each
   `Part` declares its appearance (§18.2), and `zuiStyle` answers from
-  the `Tokens` (§18.1) it holds.
+  the `Tokens` (§18.1) it points at, which the application resolves
+  again when a preference changes; `DesignSkinWith(Ui, ExtraRoles)`
+  points at tokens with the application's own roles. A button's variant,
+  `primary`, `secondary`, `tonal`, `tertiary` or `danger`, is a `Part`
+  of its own, `button` and `button_<variant>`.
 
 The messages: `"zui_widgets: a skin must be a struct type, got u32"`;
 `` "zui_widgets: demo.Skin does not implement the skin contract: missing `zuiStyle`" ``;

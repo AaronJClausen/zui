@@ -34,7 +34,9 @@ fn dumpFrames(init: std.process.Init) !void {
     var text: zui_truetype.Text = .{ .placement = zui_terminal.Renderer.glyph_placement };
     var ui: App.Ui = try .init(init.gpa, init.io, &text);
     defer ui.deinit(init.gpa);
-    var showcase = App.newShowcase();
+    var tokens: zui_showcase.Tokens(App.Ui) = .{};
+    App.resolveTokens(&tokens);
+    var showcase = App.newShowcase(&tokens);
     var cells: dump.Cells = try .init(init.gpa, .{ 100, 30 });
     defer cells.deinit(init.gpa);
 

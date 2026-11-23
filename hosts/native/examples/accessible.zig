@@ -12,10 +12,11 @@ const zui_sokol = @import("zui_sokol");
 const zui_truetype = @import("zui_truetype");
 const zui_app = @import("zui_app");
 const zui_widgets = @import("zui_widgets");
+const zui_design = @import("zui_design");
 const zui = @import("zui");
 
 const Ui = zui.Context(zui_app.contextConfig(zui_sokol.Renderer, .{ .Text = zui_truetype.Text, .features = .{ .semantics = true } }));
-const Widgets = zui_widgets.Widgets(Ui, zui_widgets.DefaultSkin(Ui));
+const Widgets = zui_widgets.Widgets(Ui, zui_widgets.DesignSkin(Ui));
 const qualities = [_][]const u8{ "Low", "Medium", "High" };
 const log_lines = [_][]const u8{ "Opened settings", "Loaded the theme", "Found 3 displays", "Autosave is on", "Volume at half", "Ready" };
 
@@ -29,7 +30,7 @@ const AccessibleApp = struct {
     pub const Text = zui_truetype.Text;
 
     host: *Host = undefined,
-    widgets: Widgets = .{ .skin = .{} },
+    widgets: Widgets = .{ .skin = .{ .tokens = &widget_tokens } },
     saves: u32 = 0,
     autosave: bool = true,
     volume: f32 = 0.5,
@@ -108,4 +109,12 @@ const SokolRenderer = struct {
     pub fn zuiSubmit(self: *SokolRenderer, surface: zui.Surface, frame: anytype) !void {
         try self.sokol.zuiSubmit(surface, frame);
     }
+};
+
+/// zui's default design in dark, resolved during the build.
+const widget_tokens: zui.design.Tokens(Ui, void) = resolved: {
+    @setEvalBranchQuota(10_000_000);
+    var dark: zui.design.Tokens(Ui, void) = .{};
+    _ = zui_design.resolve(zui_design.default, .{ .theme = .dark }, &dark);
+    break :resolved dark;
 };

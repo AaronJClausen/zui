@@ -58,6 +58,9 @@ pub fn Using(comptime kit: type) type {
             paid_cents: u32 = deposit_cents,
             autopay: bool = true,
             receipts: bool = false,
+            /// Each view's widgets' tokens, for its theme, contrast, text
+            /// size and density.
+            appearances: [variants.len]kit.Appearance = @splat(.{}),
 
             pub fn declare(self: *OneDeclaration, ui: *Ui, shell: *const Shell) void {
                 environmentBar(ui, shell);
@@ -89,7 +92,8 @@ pub fn Using(comptime kit: type) type {
                     shell.spacer(ui);
                     ui.text(variant.parameter, .{ .font = shell.fonts.mono, .size = 12 * shell.text_scale, .color = palette.faint, .wrap = .none });
                 }
-                const look: Look = .of(ui.environment(), variant, shell);
+                const appearance = &self.appearances[variant_index];
+                const look: Look = .of(ui.environment(), variant, shell, appearance);
                 ui.open(.{
                     .id = .indexed("one_declaration.view", variant_index),
                     .layout = .{ .direction = .top_to_bottom, .sizing = .grow_both, .padding = .all(look.gap), .mirrored = if (variant.mirrored) .yes else .inherit },
@@ -157,14 +161,20 @@ pub fn Using(comptime kit: type) type {
             gap: f32,
             control_height: f32,
             fonts: kit.Fonts,
+            tokens: *const kit.Tokens,
 
-            fn of(environment: *const zui.Environment, variant: Variant, shell: *const Shell) Look {
+            fn of(environment: *const zui.Environment, variant: Variant, shell: *const Shell, appearance: *kit.Appearance) Look {
                 var variant_environment = environment.*;
                 if (variant.theme) |theme| variant_environment.theme = theme;
                 if (variant.contrast) |contrast| variant_environment.contrast = contrast;
                 const compact = variant.density == .compact;
                 const text_scale = shell.text_scale * variant.text_factor;
+                var preferences = kit.preferencesOf(&variant_environment);
+                preferences.text_scale = text_scale;
+                preferences.density = if (compact) .compact else .comfortable;
+                appearance.follow(preferences, shell.fonts);
                 return .{
+                    .tokens = &appearance.tokens,
                     .palette = .forEnvironment(&variant_environment),
                     .text_scale = text_scale,
                     .padding = if (compact) 8 else 14,
@@ -250,33 +260,7 @@ pub fn Using(comptime kit: type) type {
             }
 
             fn widgets(look: Look) Widgets {
-                const palette = look.palette;
-                const theme: Widgets.Skin.Theme = .{
-                    .text = .{ .size = 15 * look.text_scale, .color = palette.on_accent, .font = look.fonts.bold },
-                    .muted_text_color = palette.muted,
-                    .disabled_text_color = palette.faint,
-                    .control = .init(.{
-                        .idle = palette.accent,
-                        .hovered = palette.accent.mix(palette.text, 0.15),
-                        .pressed = palette.accent.mix(palette.background, 0.25),
-                        .focused = palette.accent,
-                        .disabled = palette.sunken,
-                    }),
-                    .field_background = palette.sunken,
-                    .border_color = palette.border,
-                    .accent = palette.accent,
-                    .check_mark = palette.on_accent,
-                    .track = palette.border,
-                    .thumb = palette.text,
-                    .caret = palette.text,
-                    .focus_ring = palette.focus,
-                    .popup_background = palette.surface,
-                    .option_highlight = palette.hovered,
-                    .selected_option = palette.accent.mix(palette.surface, 0.6),
-                    .corner_radius = 6,
-                    .control_height = look.control_height,
-                };
-                return .{ .skin = .{ .theme = theme, .dark_theme = theme } };
+                return .{ .skin = .{ .tokens = look.tokens } };
             }
         };
 

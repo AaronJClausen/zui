@@ -152,7 +152,9 @@ exe.root_module.addImport("zui_truetype", zui_truetype.module("zui_truetype"));
 ```
 
 ```zig
-const widgets: zui_widgets.Widgets(Ui, zui_widgets.DefaultSkin(Ui)) = .{ .skin = .{} };
+var tokens: zui.design.Tokens(Ui, void) = .{};
+_ = zui_design.resolve(zui_design.default, .from(ui.environment(), .{}), &tokens);
+const widgets: zui_widgets.Widgets(Ui, zui_widgets.DesignSkin(Ui)) = .{ .skin = .{ .tokens = &tokens } };
 
 if (widgets.button(ui, .of("save"), "Save", .{})) save();
 _ = widgets.slider(ui, .of("volume"), &settings.volume, .{ .max = 100 });

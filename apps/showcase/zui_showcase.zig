@@ -15,15 +15,21 @@
 //!
 //! ```zig
 //! const Showcase = zui_showcase.Showcase(Ui);
-//! var showcase: Showcase = .{ .title = "zui + raylib", .widgets = .{ .skin = .{} } };
+//! var showcase: Showcase = .{ .title = "zui + raylib", .widgets = .{ .skin = .{ .tokens = &tokens } } };
 //! showcase.declare(&ui);
 //! ```
 
 const std = @import("std");
 const zui = @import("zui");
 const zui_widgets = @import("zui_widgets");
+const zui_design = @import("zui_design");
 const zui_app = @import("zui_app");
 const zui_glyphs = @import("zui_glyphs");
+
+/// The tokens the showcase's widgets are styled from.
+pub fn Tokens(comptime Ui: type) type {
+    return zui.design.Tokens(Ui, void);
+}
 
 /// The showcase's colors, dark by default.
 pub const Palette = struct {
@@ -65,7 +71,7 @@ pub fn Showcase(comptime Ui: type) type {
         title: []const u8,
         palette: Palette = .{},
         metrics: Metrics = .{},
-        widgets: zui_widgets.Widgets(Ui, zui_widgets.DefaultSkin(Ui)),
+        widgets: zui_widgets.Widgets(Ui, zui_widgets.DesignSkin(Ui)),
 
         clicks: u32 = 0,
         last_action: []const u8 = "nothing yet",
@@ -273,6 +279,7 @@ pub fn App(comptime config: Config) type {
         const draws_in_cells = zui_glyphs.placementOf(Renderer) == .cells;
 
         showcase: ShowcaseOnUi,
+        tokens: Tokens(Ui) = .{},
         host: *Host,
         options: Options,
         frames: u64 = 0,
@@ -284,7 +291,9 @@ pub fn App(comptime config: Config) type {
                 return err;
             } else .{};
             if (config.Text != void and @hasField(config.Text, "placement")) start.text.placement = zui_glyphs.placementOf(Renderer);
-            app.* = .{ .showcase = newShowcase(), .host = start.host, .options = options };
+            app.* = .{ .showcase = undefined, .host = start.host, .options = options };
+            resolveTokens(&app.tokens);
+            app.showcase = newShowcase(&app.tokens);
             if (@hasField(Renderer, "background")) start.renderer.background = app.showcase.palette.background;
             if (@hasField(Renderer, "clear_color")) start.renderer.clear_color = app.showcase.palette.background;
         }
@@ -293,23 +302,16 @@ pub fn App(comptime config: Config) type {
             if (app.options.frame_limit != null) std.log.info("drew {d} frames, diagnostics ok: {}", .{ app.frames, app.diagnostics_ok });
         }
 
-        /// The showcase as it starts, titled and sized for the renderer.
-        pub fn newShowcase() ShowcaseOnUi {
-            if (!draws_in_cells) return .{ .title = config.title, .widgets = .{ .skin = .{} } };
-            return .{
-                .title = config.title,
-                .metrics = cell_metrics,
-                .widgets = .{ .skin = .{ .theme = .{
-                    .corner_radius = 0,
-                    .control_height = 16,
-                    .horizontal_padding = 8,
-                    .gap = 8,
-                    .checkbox_size = 16,
-                    .slider_thumb_size = .{ 8, 16 },
-                    .track_thickness = 16,
-                    .label_width = 112,
-                } } },
-            };
+        /// Writes the showcase's tokens: zui's default design in dark, as
+        /// its palette is, and compact where it draws in cells.
+        pub fn resolveTokens(tokens: *Tokens(Ui)) void {
+            _ = zui_design.resolve(zui_design.default, .{ .theme = .dark, .density = if (draws_in_cells) .compact else .comfortable }, tokens);
+        }
+
+        /// The showcase as it starts, titled, its widgets styled by
+        /// `tokens`.
+        pub fn newShowcase(tokens: *const Tokens(Ui)) ShowcaseOnUi {
+            return .{ .title = config.title, .metrics = if (draws_in_cells) cell_metrics else .{}, .widgets = .{ .skin = .{ .tokens = tokens } } };
         }
 
         pub fn zuiDeclare(app: *Self, ui: *Ui) void {
@@ -344,7 +346,9 @@ test "the showcase declares within its limits, with and without its dialog" {
     const io = if (@import("builtin").os.tag == .freestanding) std.Io.failing else std.testing.io;
     var ui: Ui = try .init(std.testing.allocator, io, &text);
     defer ui.deinit(std.testing.allocator);
-    var showcase: Showcase(Ui) = .{ .title = "zui + test", .widgets = .{ .skin = .{} } };
+    var tokens: Tokens(Ui) = .{};
+    _ = zui_design.resolve(zui_design.default, .{ .theme = .dark }, &tokens);
+    var showcase: Showcase(Ui) = .{ .title = "zui + test", .widgets = .{ .skin = .{ .tokens = &tokens } } };
     for ([_]bool{ false, true }) |about_open| {
         showcase.about_open = about_open;
         ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 1280, 720 } } });

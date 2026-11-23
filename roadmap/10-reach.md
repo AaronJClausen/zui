@@ -37,6 +37,7 @@ decorations; many windows.
 | `10-reach:05-many-windows` Many windows | done |
 | `10-reach:06-platform-owned-loop` Hosts whose platform owns the loop | done |
 | `10-reach:07-x11-ibus` The input method on X11 over IBus's D-Bus protocol | not started |
+| `10-reach:08-ring-edges-agree` WebGL and sokol agree on a ring's inner edge | not started |
 
 ---
 
@@ -2122,5 +2123,35 @@ pass in Debug and ReleaseSafe here and in CI under Xvfb; and the tour's
 cycle passes on X11.
 
 **Spec.** §7, §16.3, §16.6.
+
+**Status.** Not started.
+
+## 10-reach:08-ring-edges-agree — WebGL and sokol agree on a ring's inner edge
+
+**Grounding** (at the commit of `11-polish:19-default-design`'s slice
+2). `hosts/web`'s `test-draw` compares each frame the page draws with
+WebGL against `zui_sokol`'s, and fails on frame 60, Harbor X-ray, on
+NVIDIA here: 26 pixels differ by more than 2, 2 of them matching no
+pixel of the other image within 1, where 1 is allowed. All are on the
+inner edge of the numbered dots' rings
+(`apps/tour/src/screens/harbor.zig`, 18 units tall, a 2-unit border,
+radius 9), four to a ring at its diagonals, where sokol draws the dot's
+fill and WebGL the ring. Both renderers build the ring from the same
+outlines (`renderers/webgl/src/draw_list.zig`, `strokeBorder`;
+`renderers/sokol/src/renderer.zig`, `strokeBorder`), so the two GPU
+paths rasterize a triangle edge through a pixel's center differently.
+The parent commit passes only because the dots sat at other fractional
+positions before slice 2 made the controls taller.
+
+**Plan.** Find where the two disagree, whether the corner's segment
+count, the outline's points or the rasterizer's rule for an edge through
+a pixel's center, and make them agree without relaxing `check_draw`'s
+tolerance: draw a border's inner outline from the same points in both,
+or snap its vertices as both rasterize them alike.
+
+**Done when.** `test-draw` passes here, and in CI, at the tour's current
+layout and with the dots moved by a quarter unit each way.
+
+**Spec.** §13.
 
 **Status.** Not started.

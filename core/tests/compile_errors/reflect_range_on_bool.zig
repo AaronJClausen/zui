@@ -9,7 +9,8 @@ const Text = struct {
 };
 
 const Ui = zui.Context(.{ .Text = Text });
-const widgets: zui_widgets.Widgets(Ui, zui_widgets.DefaultSkin(Ui)) = .{ .skin = .{} };
+var tokens: zui.design.Tokens(Ui, void) = .{};
+const widgets: zui_widgets.Widgets(Ui, zui_widgets.DesignSkin(Ui)) = .{ .skin = .{ .tokens = &tokens } };
 
 const Settings = struct {
     fullscreen: bool = false,

@@ -156,7 +156,8 @@ const FlatSkin = struct {
 };
 
 fn declareWidgets(ui: *Ui) void {
-    declareWidgetsWith(zui_widgets.Widgets(Ui, zui_widgets.DefaultSkin(Ui)){ .skin = .{ .dark_theme = .{} } }, ui, .of("default_skin"));
+    declareWidgetsWith(zui_widgets.Widgets(Ui, zui_widgets.DesignSkin(Ui)){ .skin = .{ .tokens = &resolved_tokens } }, ui, .of("design_skin"));
+    declareWidgetsWith(zui_widgets.Widgets(Ui, zui_widgets.DesignSkinWith(Ui, CheckRoles)){ .skin = .{ .tokens = &check_tokens } }, ui, .of("design_skin_with_roles"));
     declareWidgetsWith(zui_widgets.Widgets(Ui, FlatSkin){ .skin = .{} }, ui, .of("flat_skin"));
 }
 

@@ -31,7 +31,7 @@ and each is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:16-corner-shapes` Corner shapes | done |
 | `11-polish:17-nested-corners` Nested corners | done |
 | `11-polish:18-system-accent` The system's accent color | done; the Windows host's part waiting on CI |
-| `11-polish:19-default-design` The default design | in progress; slice 1, `zui_design.default`, done; slice 2, `DesignSkin`, next |
+| `11-polish:19-default-design` The default design | in progress; slices 1 and 2 done; slice 3, the tour and the showcase, next |
 | `11-polish:20-appearance-audit` The appearance audit | done |
 | `11-polish:21-permutations` Every permutation of a component | done |
 | `11-polish:22-appearance-review` The appearance review | not started |
@@ -1403,7 +1403,37 @@ and pressed layers of `surface_sunken` in light and of every surface but
 check `on_surface` and its full layers would take it below its target;
 `outline_muted` disabled, which the port left unfaded; and `danger`,
 darkened by the owner's choice (`roadmap/decisions.md`). The text styles
-match at text scale 1 and 1.5. Slice 2, `DesignSkin`, is next.
+match at text scale 1 and 1.5.
+
+Slice 2 is done: `zui_widgets.DesignSkin(Ui)`, and
+`DesignSkinWith(Ui, ExtraRoles)`, style every part from the tokens they
+point at, through one component whose `zuiAppearance` declares each
+part's roles, tiers and shapes from the plan's `components`; sizes come
+from the tokens' control heights, and the spec's literals (a 2-unit
+caret, a 4-unit track, a 20-unit thumb, a checkbox of 16, 18 and 20 by
+density) are constants of the skin. A button takes the spec's five
+variants, each a `Part` of its own. `Style` gains the corner's shape and
+a popup's shadow, which the dropdown's list draws at the `floating`
+elevation. Every widget passes the audit, text and focus ring contrast,
+target floors and overlap, in all four schemes and all three densities
+(`core/zui_widgets/tests.zig`). `DefaultSkin` is gone: the tour resolves
+its widgets' tokens when the environment's preferences change, and One
+Declaration one set per view; the showcase and the native host's
+examples resolve the default design in dark, as their palettes are.
+Where the spec could not be kept: the slider's thumb is ringed in
+`outline`, not `accent`, since light high contrast draws `accent` and
+`focus` alike, so a focused thumb would look idle; the focus ring is not
+yet offset from the part (`11-polish:25-focus-ring-on-fills`); button
+sizes, and the toggle, the text area, the progress bar and the image,
+which `zui_widgets` does not have yet, wait for their items. The tour's
+test now also audits focus rings in the tokens' color, and no longer
+finds dark's `on_accent` in light, which One Declaration's dark button
+drew. `hosts/web`'s `test-draw` fails on one frame
+(`10-reach:08-ring-edges-agree`); every other check listed for the
+packages it touches passes. Slice 3, the tour's own text and the
+showcase on tokens and the preferences screen, is next; it should give
+the tour's secondary actions, such as its header's, the `secondary`
+variant.
 
 ## 11-polish:20-appearance-audit — The appearance audit
 

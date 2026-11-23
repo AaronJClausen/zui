@@ -416,6 +416,7 @@ pub fn checkAppearance(comptime Component: type, comptime ExtraRoles: type) void
     if (!@hasDecl(Component, "Part")) @compileError("zui: " ++ name ++ " declares no `Part`, the enum of its parts");
     if (!@hasDecl(Component, "zuiAppearance")) @compileError("zui: " ++ name ++ " declares no `zuiAppearance`");
     const Part = Component.Part;
+    @setEvalBranchQuota(2000 * (std.meta.fields(Part).len + 1));
     const Declared = Component.zuiAppearance;
     const declares_appearance = @TypeOf(Declared) == type and @typeInfo(Declared) == .@"struct" and
         @hasDecl(Declared, "parts") and @hasDecl(Declared, "Part") and @hasDecl(Declared, "ExtraRoles") and Declared.Part == Part;

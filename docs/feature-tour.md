@@ -2067,7 +2067,8 @@ returns what changed this frame.
 ```zig
 const zui_widgets = @import("zui_widgets");
 
-pub const widgets: zui_widgets.Widgets(Ui, zui_widgets.DefaultSkin(Ui)) = .{ .skin = .{} };
+pub var tokens: zui.design.Tokens(Ui, void) = .{};
+pub const widgets: zui_widgets.Widgets(Ui, zui_widgets.DesignSkin(Ui)) = .{ .skin = .{ .tokens = &tokens } };
 
 pub const Settings = struct {
     grid_columns: u8 = 5,
@@ -2126,33 +2127,33 @@ restyles every widget without forking it. The skin reads the
 environment, so it follows dark mode, contrast and text size, and the
 style's `focus_ring` is drawn while a control has focus. A mistake in a
 skin fails to compile with a message naming it.
-`zui_widgets.DefaultSkin(Ui)` is zui's own skin: a `Theme` and an
-optional `dark_theme`, chosen from the environment each frame.
+`zui_widgets.DesignSkin(Ui)` is zui's own skin: every part drawn in the
+roles, tiers and shapes of the default design, from `zui.design.Tokens`
+you resolve again when a preference changes, so the widgets follow the
+theme, contrast, density, text size and color vision. A button takes a
+variant, `primary`, `secondary`, `tonal`, `tertiary` or `danger`.
 
 `src/ui/settings.zig`
 
 ```zig
-const Widgets = zui_widgets.Widgets(Ui, zui_widgets.DefaultSkin(Ui));
+const Widgets = zui_widgets.Widgets(Ui, zui_widgets.DesignSkin(Ui));
 
-const light: Widgets.Skin.Theme = .{
-    .text = .{ .color = .rgb(0x23232b) },
-    .muted_text_color = .rgb(0x6a6a7a),
-    .control = .init(.{
-        .idle = .rgb(0xe8e8ee),
-        .hovered = .rgb(0xdcdce6),
-        .pressed = .rgb(0x4a6ad0),
-        .focused = .rgb(0xe8e8ee),
-        .disabled = .rgb(0xf0f0f3),
-    }),
-    .field_background = .white,
-    .border_color = .rgb(0xc8c8d4),
-    .popup_background = .white,
-    .corner_radius = 6,
-    .control_height = 32,
-    .label_width = 120,
+pub const Settings = struct {
+    tokens: zui.design.Tokens(Ui, void) = .{},
+    preferences: ?zui_design.Preferences = null,
+
+    /// Called before each frame; resolves only when a preference changed.
+    pub fn widgets(self: *Settings, ui: *const Ui) Widgets {
+        const preferences: zui_design.Preferences = .from(ui.environment(), .{ .density = .compact });
+        if (self.preferences == null or !std.meta.eql(self.preferences.?, preferences)) {
+            self.preferences = preferences;
+            _ = zui_design.resolve(zui_design.default, preferences, &self.tokens);
+        }
+        return .{ .skin = .{ .tokens = &self.tokens } };
+    }
 };
 
-pub const widgets: Widgets = .{ .skin = .{ .theme = light, .dark_theme = .{} } };
+if (settings.widgets(ui).button(ui, .of("delete"), "Delete album", .{ .variant = .danger })) deleteAlbum();
 ```
 
 Or bring your own look:
