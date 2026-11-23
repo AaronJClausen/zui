@@ -882,6 +882,8 @@ export fn zuiCheckDesignResolve() f32 {
     const preferences: zui_design.Preferences = .from(&resolved_environment, .{ .accent = .rgb(0xff8800), .color_vision = .deutan });
     var design_with_faces = resolved_design;
     design_with_faces.type.faces.regular = .of(measured_body_face);
+    design_with_faces.type.faces.italic = .of(measured_body_face);
+    design_with_faces.type.fonts.italic = 1;
     const repairs = zui_design.resolve(design_with_faces, preferences, &resolved_tokens);
     _ = zui_design.resolve(resolved_design, preferences, &resolved_extended_tokens);
     var audit_room: [4]zui_design.Finding = undefined;
@@ -889,7 +891,8 @@ export fn zuiCheckDesignResolve() f32 {
     zui_design.auditDistinguished(&resolved_extended_tokens, .{StatusBadge}, &findings);
     const audit_options: zui_design.AuditOptions = .fromTokens(&resolved_extended_tokens, .high);
     const repaired: f32 = @floatFromInt(repairs.slice().len + repairs.dropped + findings.slice().len);
-    return audit_options.target_floor + resolved_tokens.space(.m) + resolved_extended_tokens.space(.m) + tokens_resolved_at_comptime.measure + repaired;
+    const italic_size = resolved_tokens.italic_text_styles.get(.body).size + tokens_resolved_at_comptime.italic_text_styles.get(.title).size;
+    return audit_options.target_floor + resolved_tokens.space(.m) + resolved_extended_tokens.space(.m) + tokens_resolved_at_comptime.measure + repaired + italic_size;
 }
 
 const CheckPanelTheme = zui_debug.PanelTheme(u16, zui.Color);

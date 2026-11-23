@@ -214,6 +214,8 @@ const tour_fonts = [_][]const u8{
     "AtkinsonHyperlegible-Regular.ttf",
     "AtkinsonHyperlegible-Bold.ttf",
     "LiberationMono-Regular.ttf",
+    "AtkinsonHyperlegible-Italic.ttf",
+    "AtkinsonHyperlegible-BoldItalic.ttf",
 };
 
 /// The licences of `tour_fonts`, which the tour target embeds, published

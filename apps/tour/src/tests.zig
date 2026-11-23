@@ -331,7 +331,7 @@ test "the tour's fonts come from adding them, and measure proportionally or mono
     const Text = KitFor(FakeRenderer(true, .pixel_grid)).Text;
     var text: Text = .{};
     try text.init();
-    try testing.expectEqual(@as(u8, 3), text.font_system.face_count);
+    try testing.expectEqual(std.enums.values(tour.Typeface).len, text.font_system.face_count);
     for ([_]u16{ text.fonts.body, text.fonts.bold }) |font| {
         const narrow = text.zuiMeasure("iiii", .{ .font = font, .size = 16, .letter_spacing = 0 });
         const wide = text.zuiMeasure("WWWW", .{ .font = font, .size = 16, .letter_spacing = 0 });

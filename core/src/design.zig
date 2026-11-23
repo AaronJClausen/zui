@@ -169,14 +169,33 @@ pub const Design = struct {
         regular: ?FaceMetrics = null,
         strong: ?FaceMetrics = null,
         monospace: ?FaceMetrics = null,
+        /// Null takes `regular`'s, as an italic is cut on its upright's
+        /// metrics.
+        italic: ?FaceMetrics = null,
+        /// Null takes `strong`'s.
+        strong_italic: ?FaceMetrics = null,
     };
 
     /// Each the integer value of the application's `FontId`, so a design
     /// names its fonts without knowing that type.
+    ///
+    /// ```zig
+    /// app_design.type.fonts = .{
+    ///     .regular = @intFromEnum(FontId.atkinson_regular),
+    ///     .strong = @intFromEnum(FontId.atkinson_bold),
+    ///     .monospace = @intFromEnum(FontId.liberation_mono),
+    ///     .italic = @intFromEnum(FontId.atkinson_italic),
+    ///     .strong_italic = @intFromEnum(FontId.atkinson_bold_italic),
+    /// };
+    /// ```
     pub const Fonts = struct {
         regular: u32 = 0,
         strong: u32 = 0,
         monospace: u32 = 0,
+        /// The slanted `regular`; null sets emphasis in `regular` itself.
+        italic: ?u32 = null,
+        /// The slanted `strong`; null sets emphasis in `strong` itself.
+        strong_italic: ?u32 = null,
     };
 
     pub const DensityTable = std.EnumArray(Density, std.EnumArray(Space, f32));
@@ -507,6 +526,10 @@ pub fn Tokens(comptime Ui: type, comptime ExtraRoles: type) type {
         /// text has room.
         text_padding_scale: f32 = 1,
         text_styles: std.EnumArray(TypeRole, Ui.TextStyle) = .initFill(.{}),
+        /// Each type role's style for emphasis: its own in the italic of
+        /// its font, sized by that italic's face. `code` and `numeric`
+        /// keep the monospace font, which has no italic.
+        italic_text_styles: std.EnumArray(TypeRole, Ui.TextStyle) = .initFill(.{}),
         corner_radii: std.EnumArray(ShapeRole, style.CornerRadius) = .initFill(.zero),
         corner_shapes: std.EnumArray(ShapeRole, style.CornerShape) = .initFill(.round),
         /// The least width and height of a part with each target.

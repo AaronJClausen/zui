@@ -724,15 +724,15 @@ pub const Fonts = struct {
 on stb_truetype, laid out through `zui_glyphs`, whose one layout both
 measures a run and tells every renderer where to draw each glyph, so
 text is drawn where it was measured. Given no fonts it draws in Atkinson
-Hyperlegible Regular as font 0; `zui_fonts` bundles that, its bold and
-Liberation Mono, and only the ones you reference are embedded. Each
-renderer declares how it places glyphs, on the pixel grid or one per
-terminal cell, and the text lays out for it; a renderer has no fonts of
-its own, so the same typefaces draw on raylib, sokol, the browser and
-the terminal, and text in a font the text lacks is not drawn. Its
-fingerprint covers its fonts and placement, so a remote renderer with
-other fonts refuses your stream. Reach it through the `zui` dependency:
-`zui.builder.dependency("zui_truetype", .{})`.
+Hyperlegible Regular as font 0; `zui_fonts` bundles that, its bold,
+italic and bold italic, and Liberation Mono, and only the ones you
+reference are embedded. Each renderer declares how it places glyphs, on
+the pixel grid or one per terminal cell, and the text lays out for it; a
+renderer has no fonts of its own, so the same typefaces draw on raylib,
+sokol, the browser and the terminal, and text in a font the text lacks
+is not drawn. Its fingerprint covers its fonts and placement, so a
+remote renderer with other fonts refuses your stream. Reach it through
+the `zui` dependency: `zui.builder.dependency("zui_truetype", .{})`.
 
 `src/typefaces.zig`
 
@@ -2300,17 +2300,20 @@ draws text pads by half of the user's text scale past 1, so large text
 has room. Each type role is a step of the design's scale, sized by its
 font's x-height when the design is given the face's metrics
 (`.faces.regular = .of(text.fontMetrics(body).?)`), so two faces look
-one size; its line height sits on the 4-unit grid, its tracking tightens
-as it grows, and at twice the text size body text doubles while display
-grows by √2. Your own roles take the colors of the roles their pairs
-name. `resolve` allocates nothing, and runs at comptime as well as at
-run time, so a design's dark high-contrast tokens can be a constant.
-Every pair of a role on its partner is held to APCA's lightness contrast
-and WCAG 2's ratio at once: Lc 75 and 4.5:1 for text, Lc 45 and 3:1 for
-outlines and the focus ring, more under high contrast, in every state's
-layer. A design whose own seeds miss a target fails to compile with a
-message naming the pair, the scheme and the lightness that would pass; a
-color that arrives at run time, such as the user's accent, keeps its own
+one size, and each has an italic for emphasis in `italic_text_styles`,
+set in the design's `italic` or `strong_italic` font and sized by that
+face, or the role's upright style where the design gives no italic; its
+line height sits on the 4-unit grid, its tracking tightens as it grows,
+and at twice the text size body text doubles while display grows by √2.
+Your own roles take the colors of the roles their pairs name. `resolve`
+allocates nothing, and runs at comptime as well as at run time, so a
+design's dark high-contrast tokens can be a constant. Every pair of a
+role on its partner is held to APCA's lightness contrast and WCAG 2's
+ratio at once: Lc 75 and 4.5:1 for text, Lc 45 and 3:1 for outlines and
+the focus ring, more under high contrast, in every state's layer. A
+design whose own seeds miss a target fails to compile with a message
+naming the pair, the scheme and the lightness that would pass; a color
+that arrives at run time, such as the user's accent, keeps its own
 lightness and is moved until it passes, and `resolve` returns each
 repair. Under simulated protanopia, deuteranopia, tritanopia and
 achromatopsia, the danger, warning and success fills stay at least 0.15
@@ -2388,7 +2391,13 @@ showcase draw every color this way.
 ```zig
 pub const app_design: zui.design.Design = design: {
     var with_fonts = zui_design.default;
-    with_fonts.type.fonts = .{ .regular = @intFromEnum(FontId.body), .strong = @intFromEnum(FontId.body_bold), .monospace = @intFromEnum(FontId.mono) };
+    with_fonts.type.fonts = .{
+        .regular = @intFromEnum(FontId.body),
+        .strong = @intFromEnum(FontId.body_bold),
+        .monospace = @intFromEnum(FontId.mono),
+        .italic = @intFromEnum(FontId.body_italic),
+        .strong_italic = @intFromEnum(FontId.body_bold_italic),
+    };
     break :design with_fonts;
 };
 
@@ -2401,6 +2410,10 @@ pub fn statusPill(ui: *Ui, tokens: *const zui.design.Tokens(Ui, void), content: 
     ui.open(.{ .layout = .{ .padding = .symmetric(8, 2) }, .decoration = .{ .background = colors.get(.success_container), .corner_radius = .all(9) } });
     ui.text(content, .{ .size = 13, .color = colors.get(.on_success_container) });
     ui.close();
+}
+
+pub fn emphasized(ui: *Ui, tokens: *const zui.design.Tokens(Ui, void), content: []const u8) void {
+    ui.text(content, tokens.italic_text_styles.get(.body));
 }
 ```
 

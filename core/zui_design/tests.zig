@@ -11,7 +11,7 @@ const design = zui.design;
 
 const Ui = zui.Context(.{ .limits = .{ .max_elements = 8 } });
 const FontIdUi = zui.Context(.{ .limits = .{ .max_elements = 8 }, .FontId = FontId });
-const FontId = enum(u8) { regular, strong, monospace };
+const FontId = enum(u8) { regular, strong, monospace, italic, strong_italic };
 const ExtendedUi = zui.Context(.{ .limits = .{ .max_elements = 8 }, .Color = zui.ExtendedColor });
 const Tokens = design.Tokens(Ui, void);
 
@@ -34,6 +34,7 @@ fn poisonedTokens() Tokens {
         .spacing = .initFill(-1),
         .text_padding_scale = -1,
         .text_styles = .initFill(.{ .size = -1 }),
+        .italic_text_styles = .initFill(.{ .size = -1 }),
         .corner_radii = .initFill(.all(-1)),
         .corner_shapes = .initFill(.chamfer),
         .target_floors = .initFill(-1),
@@ -51,6 +52,7 @@ fn expectEveryFieldWritten(tokens: *const Tokens) !void {
     for (tokens.spacing.values) |length| try testing.expect(length >= 0);
     try testing.expect(tokens.text_padding_scale > 0);
     for (tokens.text_styles.values) |text_style| try testing.expect(text_style.size > 0);
+    for (tokens.italic_text_styles.values) |text_style| try testing.expect(text_style.size > 0);
     for (tokens.corner_radii.values) |radius| try testing.expect(radius.top_left >= 0 and radius.bottom_right >= 0);
     for (tokens.corner_shapes.values) |shape| try testing.expectEqual(harbor.corner_shape, shape);
     for (tokens.target_floors.values) |floor| try testing.expect(floor >= 0);
@@ -290,7 +292,7 @@ test "a part that draws text pads by its tiers times half of text scale past 1, 
 const atkinson_hyperlegible_regular: design.FaceMetrics = .{ .ascent = 950, .descent = -290, .x_height = 496, .cap_height = 668 };
 const liberation_mono_regular: design.FaceMetrics = .{ .ascent = 1705, .descent = -615, .x_height = 1082, .cap_height = 1349 };
 
-fn xHeightOf(text_style: Ui.TextStyle, face: design.FaceMetrics) f32 {
+fn xHeightOf(text_style: anytype, face: design.FaceMetrics) f32 {
     return text_style.size * face.xHeightPerSize();
 }
 
@@ -405,6 +407,47 @@ test "text styles take the design's fonts in the context's FontId" {
     try testing.expectEqual(FontId.regular, tokens.text_styles.get(.body).font);
     try testing.expectEqual(FontId.strong, tokens.text_styles.get(.body_strong).font);
     try testing.expectEqual(FontId.monospace, tokens.text_styles.get(.code).font);
+}
+
+test "every type role's italic is its upright style when the design gives no italics" {
+    var with_fonts = harbor;
+    with_fonts.type.fonts = .{ .regular = 0, .strong = 1, .monospace = 2 };
+    for ([_]design.Design.Faces{ .{}, .{ .regular = atkinson_hyperlegible_regular, .strong = atkinson_hyperlegible_regular, .monospace = liberation_mono_regular } }) |faces| {
+        with_fonts.type.faces = faces;
+        var tokens: design.Tokens(FontIdUi, void) = .{};
+        _ = zui_design.resolve(with_fonts, .{ .text_scale = 1.5 }, &tokens);
+        for (std.enums.values(design.TypeRole)) |role| {
+            try testing.expectEqual(tokens.text_styles.get(role), tokens.italic_text_styles.get(role));
+        }
+    }
+}
+
+test "every type role's italic is set in its font's italic, sized by the italic's own face" {
+    const narrower_italic: design.FaceMetrics = .{ .ascent = 950, .descent = -290, .x_height = 470, .cap_height = 668 };
+    var with_italics = harbor;
+    with_italics.type.fonts = .{ .regular = 0, .strong = 1, .monospace = 2, .italic = 3, .strong_italic = 4 };
+    with_italics.type.faces = .{ .regular = atkinson_hyperlegible_regular, .strong = atkinson_hyperlegible_regular, .monospace = liberation_mono_regular, .italic = narrower_italic };
+    var tokens: design.Tokens(FontIdUi, void) = .{};
+    _ = zui_design.resolve(with_italics, .{}, &tokens);
+    for (std.enums.values(design.TypeRole)) |role| {
+        const upright = tokens.text_styles.get(role);
+        const italic = tokens.italic_text_styles.get(role);
+        switch (upright.font) {
+            .regular => {
+                try testing.expectEqual(FontId.italic, italic.font);
+                try testing.expectApproxEqAbs(xHeightOf(upright, atkinson_hyperlegible_regular), xHeightOf(italic, narrower_italic), 0.001);
+                try testing.expect(italic.size > upright.size);
+            },
+            .strong => {
+                try testing.expectEqual(FontId.strong_italic, italic.font);
+                try testing.expectEqual(upright.size, italic.size);
+            },
+            .monospace => try testing.expectEqual(upright, italic),
+            .italic, .strong_italic => return error.TestUnexpectedResult,
+        }
+        try testing.expectEqual(zui_design.lineHeightFor(italic.size), italic.line_height);
+        try testing.expectEqual(zui_design.trackingFor(italic.size), italic.letter_spacing);
+    }
 }
 
 test "resolve runs at comptime in every theme and contrast" {

@@ -112,12 +112,14 @@ pub const DemandedProducer = struct {
     }
 };
 
-/// The three typefaces the tour's text is set in, each given to the font
-/// system once.
+/// The typefaces the tour's text is set in, each given to the font system
+/// once, in this order.
 pub const Typeface = enum {
     body,
     bold,
     mono,
+    italic,
+    bold_italic,
 
     /// The typeface's family name, as a screen shows it.
     pub fn name(typeface: Typeface) []const u8 {
@@ -125,6 +127,8 @@ pub const Typeface = enum {
             .body => "Atkinson Hyperlegible",
             .bold => "Atkinson Hyperlegible Bold",
             .mono => "Liberation Mono",
+            .italic => "Atkinson Hyperlegible Italic",
+            .bold_italic => "Atkinson Hyperlegible Bold Italic",
         };
     }
 
@@ -133,6 +137,8 @@ pub const Typeface = enum {
             .body => zui_fonts.atkinson_hyperlegible_regular,
             .bold => zui_fonts.atkinson_hyperlegible_bold,
             .mono => zui_fonts.liberation_mono_regular,
+            .italic => zui_fonts.atkinson_hyperlegible_italic,
+            .bold_italic => zui_fonts.atkinson_hyperlegible_bold_italic,
         };
     }
 };
@@ -143,7 +149,7 @@ pub fn FontIdOf(comptime Renderer: type) type {
 }
 
 /// The tour's text contract: `FontSystem`, a font system's text such as
-/// `zui_truetype.Text`, given the three `Typeface`s by `init` and laid out
+/// `zui_truetype.Text`, given every `Typeface` by `init` and laid out
 /// for the placement `Renderer` draws. Its `fonts` are the ids adding them
 /// returned.
 pub fn Text(comptime FontSystem: type, comptime Renderer: type) type {

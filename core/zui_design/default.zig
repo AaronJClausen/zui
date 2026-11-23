@@ -8,7 +8,13 @@ const zui = @import("zui");
 ///
 /// ```zig
 /// var app_design = zui_design.default;
-/// app_design.type.fonts = .{ .regular = @intFromEnum(FontId.atkinson_regular), .strong = @intFromEnum(FontId.atkinson_bold), .monospace = @intFromEnum(FontId.liberation_mono) };
+/// app_design.type.fonts = .{
+///     .regular = @intFromEnum(FontId.atkinson_regular),
+///     .strong = @intFromEnum(FontId.atkinson_bold),
+///     .monospace = @intFromEnum(FontId.liberation_mono),
+///     .italic = @intFromEnum(FontId.atkinson_italic),
+///     .strong_italic = @intFromEnum(FontId.atkinson_bold_italic),
+/// };
 /// app_design.type.faces.regular = .of(text.fontMetrics(fonts.atkinson_regular).?);
 /// ```
 pub const default: zui.design.Design = .{

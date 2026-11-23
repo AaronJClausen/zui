@@ -11,6 +11,8 @@
         "freestanding_test_runner.zig",
         "AtkinsonHyperlegible-Regular.ttf",
         "AtkinsonHyperlegible-Bold.ttf",
+        "AtkinsonHyperlegible-Italic.ttf",
+        "AtkinsonHyperlegible-BoldItalic.ttf",
         "LiberationMono-Regular.ttf",
         "OFL.txt",
         "LiberationMono-LICENSE.txt",

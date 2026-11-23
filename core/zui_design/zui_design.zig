@@ -522,24 +522,50 @@ fn fontSlotOf(role: TypeRole) FontSlot {
     };
 }
 
+const FontAndFace = struct { font_index: u32, face: ?design.FaceMetrics };
+
+fn uprightFontOf(scale: Design.TypeScale, slot: FontSlot) FontAndFace {
+    return switch (slot) {
+        .regular => .{ .font_index = scale.fonts.regular, .face = scale.faces.regular },
+        .strong => .{ .font_index = scale.fonts.strong, .face = scale.faces.strong },
+        .monospace => .{ .font_index = scale.fonts.monospace, .face = scale.faces.monospace },
+    };
+}
+
+/// The italic of `slot`'s font, or the upright font where the design gives
+/// none; an italic whose face is not given is sized by its upright's.
+fn italicFontOf(scale: Design.TypeScale, slot: FontSlot) FontAndFace {
+    const upright = uprightFontOf(scale, slot);
+    const italic_index, const italic_face = switch (slot) {
+        .regular => .{ scale.fonts.italic, scale.faces.italic },
+        .strong => .{ scale.fonts.strong_italic, scale.faces.strong_italic },
+        .monospace => return upright,
+    };
+    const font_index = italic_index orelse return upright;
+    return .{ .font_index = font_index, .face = italic_face orelse upright.face };
+}
+
 fn writeTextStyles(scale: Design.TypeScale, text_scale: f32, tokens: anytype) void {
     @setEvalBranchQuota(100_000);
     const TextStyle = @TypeOf(tokens.text_styles).Value;
+    const text_color = tokens.colors.get(.idle).get(.on_surface);
     for (std.enums.values(TypeRole)) |role| {
-        const font_index, const face = switch (fontSlotOf(role)) {
-            .regular => .{ scale.fonts.regular, scale.faces.regular },
-            .strong => .{ scale.fonts.strong, scale.faces.strong },
-            .monospace => .{ scale.fonts.monospace, scale.faces.monospace },
-        };
-        const size = bodySizeIn(scale, face) * std.math.pow(f32, scale.ratio, scaleStepOf(role)) * std.math.pow(f32, text_scale, textScalePowerOf(role));
-        tokens.text_styles.set(role, .{
-            .font = fontIdOf(@FieldType(TextStyle, "font"), font_index),
-            .size = size,
-            .letter_spacing = trackingFor(size),
-            .line_height = lineHeightFor(size),
-            .color = tokens.colors.get(.idle).get(.on_surface),
-        });
+        const role_scale = std.math.pow(f32, scale.ratio, scaleStepOf(role)) * std.math.pow(f32, text_scale, textScalePowerOf(role));
+        const slot = fontSlotOf(role);
+        tokens.text_styles.set(role, textStyleIn(TextStyle, scale, uprightFontOf(scale, slot), role_scale, text_color));
+        tokens.italic_text_styles.set(role, textStyleIn(TextStyle, scale, italicFontOf(scale, slot), role_scale, text_color));
     }
+}
+
+fn textStyleIn(comptime TextStyle: type, scale: Design.TypeScale, font: FontAndFace, role_scale: f32, color: @FieldType(TextStyle, "color")) TextStyle {
+    const size = bodySizeIn(scale, font.face) * role_scale;
+    return .{
+        .font = fontIdOf(@FieldType(TextStyle, "font"), font.font_index),
+        .size = size,
+        .letter_spacing = trackingFor(size),
+        .line_height = lineHeightFor(size),
+        .color = color,
+    };
 }
 
 fn fontIdOf(comptime FontId: type, index: u32) FontId {

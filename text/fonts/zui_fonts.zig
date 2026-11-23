@@ -17,6 +17,14 @@ pub const atkinson_hyperlegible_regular: []const u8 = @embedFile("AtkinsonHyperl
 /// Open Font License 1.1 (`OFL.txt`).
 pub const atkinson_hyperlegible_bold: []const u8 = @embedFile("AtkinsonHyperlegible-Bold.ttf");
 
+/// Atkinson Hyperlegible Italic, from the Braille Institute, under the SIL
+/// Open Font License 1.1 (`OFL.txt`).
+pub const atkinson_hyperlegible_italic: []const u8 = @embedFile("AtkinsonHyperlegible-Italic.ttf");
+
+/// Atkinson Hyperlegible Bold Italic, from the Braille Institute, under the
+/// SIL Open Font License 1.1 (`OFL.txt`).
+pub const atkinson_hyperlegible_bold_italic: []const u8 = @embedFile("AtkinsonHyperlegible-BoldItalic.ttf");
+
 /// Liberation Mono Regular, from Red Hat, under the SIL Open Font License
 /// 1.1 (`LiberationMono-LICENSE.txt`).
 pub const liberation_mono_regular: []const u8 = @embedFile("LiberationMono-Regular.ttf");
@@ -30,9 +38,25 @@ pub const licences = struct {
 
 test "every font is a TrueType file" {
     const true_type_version = [_]u8{ 0, 1, 0, 0 };
-    for ([_][]const u8{ atkinson_hyperlegible_regular, atkinson_hyperlegible_bold, liberation_mono_regular }) |font| {
+    for ([_][]const u8{ atkinson_hyperlegible_regular, atkinson_hyperlegible_bold, atkinson_hyperlegible_italic, atkinson_hyperlegible_bold_italic, liberation_mono_regular }) |font| {
         try std.testing.expectEqualSlices(u8, &true_type_version, font[0..4]);
     }
     try std.testing.expect(std.mem.indexOf(u8, licences.atkinson_hyperlegible, "SIL OPEN FONT LICENSE") != null);
     try std.testing.expect(std.mem.indexOf(u8, licences.liberation_mono, "Red Hat") != null);
+}
+
+test "the italics are Atkinson Hyperlegible's, under its licence" {
+    inline for (.{ atkinson_hyperlegible_italic, atkinson_hyperlegible_bold_italic }, .{ "Atkinson Hyperlegible Italic", "Atkinson Hyperlegible Bold Italic" }) |font, full_name| {
+        try std.testing.expect(containsUtf16BigEndian(font, full_name));
+    }
+    try std.testing.expect(std.mem.indexOf(u8, licences.atkinson_hyperlegible, "Braille Institute") != null);
+}
+
+fn containsUtf16BigEndian(haystack: []const u8, comptime ascii: []const u8) bool {
+    const encoded = comptime encoded: {
+        var bytes: [ascii.len * 2]u8 = undefined;
+        for (ascii, 0..) |character, index| bytes[2 * index ..][0..2].* = .{ 0, character };
+        break :encoded bytes;
+    };
+    return std.mem.indexOf(u8, haystack, &encoded) != null;
 }

@@ -47,7 +47,7 @@ and each is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:32-zui-widgets-data` `zui_widgets_data` | not started |
 | `11-polish:33-pickers` Pickers | not started |
 | `11-polish:34-zui-widgets-views` `zui_widgets_views` | not started |
-| `11-polish:35-italics` Italics | not started |
+| `11-polish:35-italics` Italics | done |
 | `11-polish:36-motion-in-core` Motion in the core | done |
 
 ### The design system
@@ -2237,11 +2237,11 @@ adds its module.
 Italic text, which the owner chose to bundle rather than draw emphasis
 as weight.
 
-**Grounding** (at `1aa1061`). `zui_fonts` embeds Atkinson Hyperlegible
+**Grounding** (at `b3399bb`). `zui_fonts` embeds Atkinson Hyperlegible
 Regular and Bold and Liberation Mono (`text/fonts/zui_fonts.zig:14`,
 `:18`, `:22`), under the OFL and Liberation's licence. A design names
 three fonts, `regular`, `strong` and `monospace`, in `Design.Fonts` and
-`Design.Faces` (`core/src/design.zig:174`, `:166`).
+`Design.Faces` (`core/src/design.zig:176`, `:168`).
 
 **Plan.** Atkinson Hyperlegible Italic and Bold Italic join `zui_fonts`,
 under the same OFL, in `.paths`; `Design.Fonts` and `Design.Faces` gain
@@ -2257,7 +2257,39 @@ one when none is given; the text packages' `test` and `check`, and
 
 **Spec.** §18.6.
 
-**Status.** Not started.
+**Status.** Done: `zui_fonts` bundles Atkinson Hyperlegible Italic and
+Bold Italic (version 1.006, from `googlefonts/atkinson-hyperlegible`,
+whose `OFL.txt` is the one already bundled) as
+`atkinson_hyperlegible_italic` and `atkinson_hyperlegible_bold_italic`,
+both in `.paths`; its new test finds each one's full name in its name
+table and the Braille Institute in its licence. `Design.Fonts` gains
+`italic` and `strong_italic`, `?u32` and null by default, and
+`Design.Faces` the same two faces, a null face taking its upright's.
+`Tokens` gives each type role its italic as a whole `TextStyle`, in
+`italic_text_styles`, rather than an italic font alone, since an italic
+with a face of its own is sized differently from its upright;
+`zui_design.resolve` writes it beside `text_styles`, in `italic` for a
+role in the regular font, `strong_italic` for one in the strong font,
+and monospace for `code` and `numeric`, sized by the italic's face.
+`zui_design`'s new tests resolve every role's italic as its upright
+style when the design gives none, with faces and without, and in its
+font's italic at the upright's x-height when the design gives both; the
+poisoned-tokens test covers `italic_text_styles`, and
+`core/tests/instantiate.zig` resolves an italic at run time and at
+comptime. The tour adds both italics after Liberation Mono and names
+them in `designWith`, and `hosts/web/build.zig`'s `tour_fonts` lists
+them in that order; the tour's font test counts `Typeface`'s cases. The
+showcase loads no fonts of its own, drawing in font 0, so it takes no
+italics and its italics are its upright styles, which differs from the
+Plan's "the tour and the showcase load them". `counts` against the
+parent: every scenario +0.00%. Passed: the text packages' `test` in
+three modes and `check`; core's `test` in three modes, on `x86-linux`,
+and `check` for `wasm32-freestanding` and `powerpc-linux`; the tour's
+and the showcase's `test` in three modes and `check`, also for
+`x86_64-windows`; the terminal's `tour -- --dump --every-screen`;
+`hosts/web`'s `test`, `check`, `test-demo` and `test-draw` (on NVIDIA);
+`test-all` and `check-all`. Drawing emphasis is
+`11-polish:31-rich-text-and-reordering`'s.
 
 ## 11-polish:36-motion-in-core — Motion in the core
 

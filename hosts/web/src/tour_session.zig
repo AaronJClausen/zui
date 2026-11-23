@@ -10,7 +10,7 @@ pub const SteppedIo = @import("stepped_io.zig").SteppedIo;
 pub const Stopwatch = zui_tour.Stopwatch;
 
 /// The tour as the browser draws it: declared for `zui_webgl.Renderer`, in
-/// `zui_truetype`'s layout of the three fonts it adds, which the page hands
+/// `zui_truetype`'s layout of the fonts it adds, which the page hands
 /// the client in the same order.
 pub const kit = zui_tour.Kit(.{ .Renderer = zui_webgl.Renderer, .FontSystem = zui_truetype.Text, .inspector = false, .renderer_name = "the browser" });
 pub const Ui = kit.Ui;

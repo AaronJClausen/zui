@@ -222,7 +222,8 @@ not affiliated with or endorsed by the Zig Software Foundation.
 
 The fonts `zui_fonts` bundles, which `zui_truetype` draws in by default
 and the tours use, are under the SIL Open Font License 1.1: Atkinson
-Hyperlegible, copyright 2020 Braille Institute of America, Inc. (see
+Hyperlegible, in regular, bold, italic and bold italic, copyright 2020
+Braille Institute of America, Inc. (see
 [text/fonts/OFL.txt](text/fonts/OFL.txt)), and Liberation Mono,
 copyright 2010 Google Corporation and 2012 Red Hat, Inc. (see
 [text/fonts/LiberationMono-LICENSE.txt](text/fonts/LiberationMono-LICENSE.txt)).

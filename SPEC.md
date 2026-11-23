@@ -2789,12 +2789,18 @@ if (!std.meta.eql(preferences, app.preferences)) {
 ### 18.6 Typography
 
 - **Sizes from a scale.** `Design.type` gives a ratio (1.2 by default),
-  the body size (15), and a font for regular, strong and monospace text.
-  Each `TypeRole` is a step of the scale: `caption` −2, `label` and
-  `label_strong` −1, `body` 0, `title` 1, `headline` 2, `display` 4.
-  `label_strong`, `body_strong` and the headings from `title` up are in
-  the strong font; `code` and `numeric` are body in monospace and
-  tabular figures.
+  the body size (15), and a font for regular, strong and monospace text,
+  and optionally an `italic` and a `strong_italic`. Each `TypeRole` is a
+  step of the scale: `caption` −2, `label` and `label_strong` −1, `body`
+  0, `title` 1, `headline` 2, `display` 4. `label_strong`, `body_strong`
+  and the headings from `title` up are in the strong font; `code` and
+  `numeric` are body in monospace and tabular figures.
+- **Italics for emphasis.** `Tokens.italic_text_styles` gives each role
+  its style in the italic of its font: `italic` for a role in the
+  regular font, `strong_italic` for one in the strong font, and the
+  monospace font itself for `code` and `numeric`. Where the design gives
+  no italic font, a role's italic is its upright style; an italic whose
+  face is not given is sized by its upright font's face.
 - **Set by the face.** Sizes are scaled so the body face's x-height
   (`zui_glyphs.FontMetrics.x_height`) is the design's, so two faces at
   the same role look the same size. `Design.type.x_height` is body

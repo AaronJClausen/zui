@@ -197,7 +197,13 @@ pub fn Kit(comptime spec: Spec) type {
 
         fn designWith(fonts: Fonts) zui.design.Design {
             var with_fonts = zui_design.default;
-            with_fonts.type.fonts = .{ .regular = fontIndex(fonts.body), .strong = fontIndex(fonts.bold), .monospace = fontIndex(fonts.mono) };
+            with_fonts.type.fonts = .{
+                .regular = fontIndex(fonts.body),
+                .strong = fontIndex(fonts.bold),
+                .monospace = fontIndex(fonts.mono),
+                .italic = fontIndex(fonts.italic),
+                .strong_italic = fontIndex(fonts.bold_italic),
+            };
             return with_fonts;
         }
 
