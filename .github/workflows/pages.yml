@@ -41,7 +41,14 @@ jobs:
             publish=true
           else
             site_check="hosts/web: test-site (headless Chrome)"
-            conclusion=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN/jobs" --paginate --jq ".jobs[] | select(.name == \"$site_check\") | .conclusion")
+            # GitHub answers 502 for pages of a large run's jobs, so the pages are small and retried.
+            for attempt in 1 2 3 4 5; do
+              if conclusion=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN/jobs?filter=latest&per_page=20" --paginate --jq ".jobs[] | select(.name == \"$site_check\") | .conclusion"); then
+                break
+              fi
+              if [ "$attempt" = 5 ]; then exit 1; fi
+              sleep $((attempt * 10))
+            done
             # A skipped job is still listed, so a missing one was renamed.
             if [ -z "$conclusion" ]; then
               echo "::error::CI has no job named \"$site_check\"; rename it here too"
