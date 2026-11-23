@@ -39,6 +39,16 @@ and each is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:24-the-tour` The tour, redone | done |
 | `11-polish:25-focus-ring-on-fills` A focus ring that shows on a filled control | not started |
 | `11-polish:26-small-targets` Targets of at least 24 units in the tour | not started |
+| `11-polish:27-essential-inputs` Essential inputs | not started |
+| `11-polish:28-containers-and-navigation` Containers and navigation | not started |
+| `11-polish:29-overlays` Overlays | not started |
+| `11-polish:30-feedback-and-media` Feedback and media | not started |
+| `11-polish:31-rich-text-and-reordering` Rich text and the reorderable list | not started |
+| `11-polish:32-zui-widgets-data` `zui_widgets_data` | not started |
+| `11-polish:33-pickers` Pickers | not started |
+| `11-polish:34-zui-widgets-views` `zui_widgets_views` | not started |
+| `11-polish:35-italics` Italics | not started |
+| `11-polish:36-motion-in-core` Motion in the core | not started |
 
 ### The design system
 
@@ -64,6 +74,42 @@ How the pieces divide, given that modules cannot import one another
   `DesignSkin`, without importing `zui_design`.
 - **`apps/review/`** is the review tool, an app that can import them
   all.
+
+**The default design's components.** Items 27 to 34 build the 57
+components of the default design, steps D4 to D11 of
+`docs/plans/default-ui-designs/README.md`. Each component's approved
+spec is its entry in `components` of
+`docs/plans/default-ui-designs/exports/zui-default-design.json`: its
+`api` is the starting signature, its `parts` the appearance each part
+declares in roles, tiers and shapes, and its `variants`, `states` and
+`keyboard` the behavior. A value the spec names as a role, a tier, a
+control height, an icon size, a shape role or an elevation is read from
+`Tokens`; a literal is a named constant of the skin. Every item:
+
+- adds its widgets to `Widgets(Ui, Skin)`, with `Part` tags and
+  `DesignSkin`'s appearance for each, or to its module's equivalent,
+  with semantics, keyboard operation and accessibility actions, as
+  SPEC.md §19.2 requires of every control;
+- declares a `zuiPreviews` for each component, so `Permutations` and the
+  review app see it, and exercises each generic API in
+  `core/tests/instantiate.zig`;
+- puts a screen, or a section of one, in the tour where a user would
+  meet it;
+- adds its widgets to SPEC.md §19.2's table and an entry for each group
+  to the feature tour, with an example in an app's own code.
+
+Each is **done when** `zui_testing.Driver` tests cover every state and
+key its specs list; the audit is clean for each component's `glance`
+permutations in every scheme and density; nothing is allocated after
+`init`; `counts` stays within 2% of the parent commit for the scenarios
+that use none of its widgets; and `test-all` and `check-all` pass.
+`zui_widgets_data` and `zui_widgets_views` are modules, so each also
+follows CLAUDE.md's row for a module, and since modules cannot import
+one another (SPEC.md §3.3), each takes a `Widgets` value as `anytype`
+rather than importing `zui_widgets`. The two other personalities the
+design sketched, in `docs/plans/default-ui-designs/personalities/`, are
+reference for `11-polish:08-zui-themes` and `11-polish:10-samples`, not
+items.
 
 ---
 
@@ -569,7 +615,23 @@ is `11-polish:19-default-design`'s, made from tokens instead of tables.
 Selection, word movement, the clipboard through the host, multiple
 lines, and IME composition with the IME area in `HostRequests`.
 
+Multiple lines include `textArea`, as its entry in `components` of
+`docs/plans/default-ui-designs/exports/zui-default-design.json` gives
+it: a text field's container, padded `m` by `s`, that grows with its
+lines from `min_lines` to `max_lines` and then scrolls, with a caption
+counter at its bottom trailing corner; and the text field's `selection`
+part, `selection` behind `on_selection` text.
+
 ## 11-polish:07-zui-icons — `zui_icons`
+
+The default design's components need, at `icon_sizes` of each
+`ControlSize`: a chevron down and right (dropdown, disclosure), a check
+(checkbox, menu items, the selected option), close (chip, dialog,
+toast), search, an alert (a field's error, the banner), the four status
+glyphs (info, success, warning, danger), arrows up and down (a table's
+sort), a broken image (`asyncImage`'s failure) and a spinner's arc.
+`11-polish:27-essential-inputs` and `11-polish:30-feedback-and-media`
+wait for them.
 
 ## 11-polish:08-zui-themes — `zui_themes`
 
@@ -585,6 +647,12 @@ contrast, as every design is checked. macOS's is set aside as
 **Waits for** `11-polish:19-default-design`, whose design is the
 template each language starts from.
 
+Each language changes seeds, shapes, type and density, never a tone,
+which the resolver keeps for every design (`roadmap/decisions.md`). The
+plan's personalities, `quiet-instrument` and `crisp-technical`
+(`docs/plans/default-ui-designs/personalities/`), show how far that
+reaches from `zui_design.default`.
+
 ## 11-polish:09-template-project — The template project
 
 In `examples/template/`.
@@ -593,6 +661,11 @@ In `examples/template/`.
 
 A settings screen with `zui_reflect` and ZON, a data feed, a
 multi-window tool, a remote session.
+
+One sample can show one app in two designs: the plan's personalities,
+`quiet-instrument` and `crisp-technical`
+(`docs/plans/default-ui-designs/personalities/`), each a `Design`
+fragment with its preferences and skin choices.
 
 ## 11-polish:11-profiling-guide — A profiling guide
 
@@ -1377,7 +1450,19 @@ approved design:
    is removed, and its callers move.
 3. The tour and the showcase resolve tokens on a change of preferences,
    and the tour gains a screen of density, color vision, contrast and
-   text scale for the user to choose.
+   text scale for the user to choose. The tour's `Palette`
+   (`apps/tour/src/shared.zig:218`) gives way to tokens, each entry by
+   its use, as the owner chose (`roadmap/decisions.md`): `background`,
+   `surface`, `raised` and `sunken` the surfaces; `hovered` is
+   `secondary_container`; `border` is `outline_muted`, or `outline`
+   where it shows a state; `overlay` is `scrim`; `text` is `on_surface`;
+   `muted` and `faint` are `on_surface_muted`; `accent` is the `accent`
+   fill, or `on_surface_accent` as text; `on_accent` is `on_accent`;
+   `good`, `warn` and `bad` are `success`, `warning` and `danger` as
+   fills, and their containers' text as text; `focus` is `focus`; and
+   `spectacle` is dropped, the Spectacle lane taking the accent. Its
+   secondary actions, such as the header's, take the `secondary` button
+   variant. The showcase's palette moves the same way.
 
 **Done when.** `test-all`, `check-all`; every widget meets SPEC.md §18.4
 in every theme, contrast and density, by `11-polish:20-appearance-audit`
@@ -1728,3 +1813,328 @@ area around what it draws, so the look need not grow.
 finding, in light or dark; `test-all`, `check-all`.
 
 **Spec.** §18.5.
+
+## 11-polish:27-essential-inputs — Essential inputs
+
+The inputs a consumer app reaches for first, and the rest of the
+existing widgets' specs: D4 of the default design's plan.
+
+**Grounding** (at `1aa1061`). `zui_widgets` declares `label`,
+`mutedLabel`, `labeledRow`, `disclosure`, `button`, `checkbox`, `lasso`,
+`slider`, `textField` and `dropdown`
+(`core/zui_widgets/zui_widgets.zig:498`), styled by `DesignSkin`
+(`:236`) through one component, `Designed` (`:355`), whose `Part`s map
+from `zui_widgets.Part` (`:103`). A button takes a `ButtonVariant`
+(`:478`) but no size or icon. Its specs are the entries `radio_group`,
+`segmented_control`, `number_stepper`, `search_field`, `icon_button`,
+`link`, `chip` and `toggle` of `components` in
+`docs/plans/default-ui-designs/exports/zui-default-design.json`, and,
+for the existing widgets, `button`, `text_field`, `label`,
+`labeled_row`, `slider`, `dropdown` and `disclosure`.
+
+**Plan.**
+
+1. New widgets: `radioGroup` and `segmented` over an enum,
+   `numberStepper` over any integer or float, `searchField` with its
+   shortcut hint, `iconButton` with a required accessible label, `link`,
+   which returns true when activated and leaves opening the URL to the
+   application's `open_url` service, `chip` (selectable or closable) and
+   `toggle`.
+2. The existing widgets' remaining spec: `button`'s `size` (a
+   `ControlSize`) and `leading_icon`; `textField`'s `label`, `help`,
+   `error`, `leading_icon` and `trailing`; `label`'s type role and tone
+   (`default`, `muted`, `accent`); `labeledRow`'s description and its
+   divider, rows on one card; the slider's value bubble while dragging
+   and its ticks; the dropdown's check on the selected option; the
+   disclosure's chevron, turning with `motion.disclosure`.
+3. Motion from `Tokens.motion`: the press scale, the toggle's spring,
+   the checkbox's check.
+
+**Done when.** The components' common Done when (*The design system*).
+
+**Waits for** `11-polish:19-default-design`, `11-polish:07-zui-icons`,
+`11-polish:36-motion-in-core`.
+
+**Spec.** §18, §19.2.
+
+**Status.** Not started.
+
+## 11-polish:28-containers-and-navigation — Containers and navigation
+
+What holds and moves between content: D5 of the default design's plan.
+
+**Grounding** (at `1aa1061`). `Tokens.elevations`
+(`core/src/design.zig:486`) gives the `raised` level a card stands at,
+its shadow, rim and surface role. Scrolling is the core's
+(`Element.scroll`, `core/src/context.zig:218`; `scrollOffset` and
+`setScrollOffset`, `:2771`, `:2777`). The specs are `card`, `divider`,
+`scroll_area`, `group_box`, `tabs`, `navigation_list` and `breadcrumbs`
+in `docs/plans/default-ui-designs/exports/zui-default-design.json`, with
+the scrollbar's metrics in its `metrics.scrollbar`.
+
+**Plan.** `card` (open and closed, at the `raised` elevation, optionally
+interactive), `divider` (an axis, an inset, an optional label),
+`scrollArea` with the design's scrollbar, thin at rest and wider while
+hovered, fading when idle, `groupBox`, `tabs` over an enum (underline
+and pill styles, arrow keys moving the selection), `navigationList`, the
+sidebar's list, whose rows hover in `secondary_container`, and
+`breadcrumbs`, which return the crumb chosen.
+
+**Done when.** The components' common Done when (*The design system*).
+
+**Waits for** `11-polish:19-default-design`.
+
+**Spec.** §18, §19.2.
+
+**Status.** Not started.
+
+## 11-polish:29-overlays — Overlays
+
+What floats over the page: D6 of the default design's plan.
+
+**Grounding** (at `1aa1061`). The dropdown's list
+(`core/zui_widgets/zui_widgets.zig:999`) is the pattern: a backdrop
+attached to the root, a `floating` element attached to its anchor, a
+`focus_scope`, and the `dismiss` action read by `ui.dismissed`
+(`core/src/context.zig:2604`), at the `floating` elevation. The specs
+are `tooltip`, `menu`, `popover`, `dialog` and `toast` in
+`docs/plans/default-ui-designs/exports/zui-default-design.json`, with
+the tooltip's delay, the toast's seconds and each overlay's greatest
+width in its `metrics`.
+
+**Plan.** `tooltip` after the hover delay, or at once on keyboard focus;
+`menu` and its items (shortcuts, icons, checked and danger items), also
+as a context menu at the pointer; `popover` placed below, above or
+beside its anchor and flipped to stay on screen; `dialog` over the
+`scrim`, at the `modal` elevation, trapping focus and returning it to
+its opener; `toast`, queued, with an action, dismissed after its
+seconds. Each enters and exits with `Tokens.motion`, and at once under
+reduced motion.
+
+**Done when.** The components' common Done when (*The design system*),
+and focus returns to an overlay's opener when it closes.
+
+**Waits for** `11-polish:28-containers-and-navigation`,
+`11-polish:36-motion-in-core`.
+
+**Spec.** §18, §19.2.
+
+**Status.** Not started.
+
+## 11-polish:30-feedback-and-media — Feedback and media
+
+What tells the user how things stand, and the images that show who and
+what: D7 of the default design's plan.
+
+**Grounding** (at `1aa1061`). The status containers and their text,
+`danger_container` to `on_success_container`, are roles since slice 1 of
+`11-polish:19-default-design` (`core/src/design.zig:10`). An avatar
+without an image takes `accent_container` at a hue hashed from the name,
+from the eight accent presets, and a chart's series take the presets
+too: neither is a role, and `zui_widgets` cannot resolve a palette. The
+specs are `banner`, `badge`, `spinner`, `skeleton`, `empty_state`,
+`avatar`, `progress_bar` and `async_image` in
+`docs/plans/default-ui-designs/exports/zui-default-design.json`.
+
+**Plan.**
+
+1. `Tokens` gains a categorical palette: for each of the eight accent
+   presets in `accents` of the JSON, its fill, its container and their
+   text, resolved and checked by `zui_design.resolve` as the built-in
+   roles are.
+2. `banner` and `badge` in each tone, `spinner` (still under reduced
+   motion, its arc shown), `skeleton` (lines, a block, a circle;
+   shimmering unless motion is reduced), `emptyState`, `avatar` with its
+   initials, presence and stacks, `progressBar` (determinate, and
+   indeterminate sliding, or pulsing under reduced motion), and
+   `asyncImage`, which takes its source as `anytype` with a status, so
+   `zui_widgets` need not import `zui_async`.
+
+**Done when.** The components' common Done when (*The design system*),
+and every categorical color meets its text's target in every scheme.
+
+**Waits for** `11-polish:19-default-design`, `11-polish:07-zui-icons`,
+`11-polish:36-motion-in-core`.
+
+**Spec.** §18.4, §19.2.
+
+**Status.** Not started.
+
+## 11-polish:31-rich-text-and-reordering — Rich text and the reorderable list
+
+Text with structure, and lists the user rearranges: D8 of the default
+design's plan.
+
+**Grounding** (at `1aa1061`). Drag and drop is the core's:
+`ui.startDrag(source, payload)` and `ui.draggedOver(target, Payload)`
+(`core/src/context.zig:2545`, `:2580`), as the tour's Kanban moves cards
+(`apps/tour/src/screens/kanban.zig:420`). The specs are `rich_text` and
+`reorderable_list` in
+`docs/plans/default-ui-designs/exports/zui-default-design.json`; the
+spec's emphasis, body_strong in the accent text, gives way to italic,
+since the owner chose to bundle italics.
+
+**Plan.**
+
+1. `richText` over a Markdown subset: paragraphs at the measure, two
+   heading levels, strong, emphasis in italic, links (the `link`
+   widget), inline code and code blocks, quotes and lists, laid out from
+   a caller's buffer without allocating; selecting its text once
+   `11-polish:06-text-editing` gives selection.
+2. `reorderableList`: a row dragged at the `topmost` elevation, the
+   others moving aside with `motion.reorder`, and Alt+Up and Alt+Down
+   moving the focused row; it returns the move for the application to
+   apply.
+
+**Done when.** The components' common Done when (*The design system*).
+
+**Waits for** `11-polish:28-containers-and-navigation`,
+`11-polish:35-italics`, `11-polish:36-motion-in-core`;
+`11-polish:06-text-editing` for selection in rich text.
+
+**Spec.** §18.6, §19.2.
+
+**Status.** Not started.
+
+## 11-polish:32-zui-widgets-data — `zui_widgets_data`
+
+A module of the components for data-heavy tools: D9 of the default
+design's plan.
+
+**Grounding** (at `1aa1061`). Modules cannot import one another (SPEC.md
+§3.3), so the module takes a `Widgets` value as `anytype`, as
+`zui_reflect.inspector` does (`core/zui_reflect/zui_reflect.zig:70`).
+The tour's Harbor declares only the rows in view
+(`apps/tour/src/screens/harbor.zig:284`). The specs are `table`, `tree`,
+`split_pane`, `toolbar`, `status_bar`, `command_palette` and
+`property_grid` in
+`docs/plans/default-ui-designs/exports/zui-default-design.json`.
+
+**Plan.** The module, registered at every point CLAUDE.md's row for a
+module names, with `table` (sticky header, sort, selection, resizable
+columns, numeric cells, only the visible rows declared), `tree`
+(expansion and selection sets, arrow keys), `splitPane`, `toolbar`,
+`statusBar`, `commandPalette` (filtered as typed, at the `topmost`
+elevation) and `propertyGrid`, whose look `zui_reflect.inspector` takes
+too. SPEC.md gains a section for the module after §19.2, its row among
+§3's modules and §21's stage 11 scope; ARCHITECTURE.md's package table
+names it.
+
+**Done when.** The components' common Done when (*The design system*),
+and a table of a million rows declares as fast as one of a hundred.
+
+**Waits for** `11-polish:29-overlays`.
+
+**Spec.** §3.3, §18, §19.
+
+**Status.** Not started.
+
+## 11-polish:33-pickers — Pickers
+
+Choosing a color, a date, a time or a file: D10 of the default design's
+plan.
+
+**Grounding** (at `1aa1061`). Dropped files arrive as an event
+(`files_dropped`, `core/src/input.zig:239`), and dragged payloads
+through `ui.draggedOver`. Formatting dates for a locale is out of scope
+(ARCHITECTURE.md §6), so the pickers take their month and weekday names
+from the application. The specs are `color_picker`, `calendar`,
+`date_picker`, `time_picker` and `drop_zone` in
+`docs/plans/default-ui-designs/exports/zui-default-design.json`.
+
+**Plan.** In `zui_widgets_data`: `colorPicker` (a field of lightness and
+chroma, a hue strip, alpha, swatches), `calendar` and `datePicker` over
+a plain date the module defines, with ranges, `timePicker` stepped by
+minutes, and `dropZone`, which accepts files and payloads by type.
+
+**Done when.** The components' common Done when (*The design system*).
+
+**Waits for** `11-polish:32-zui-widgets-data`.
+
+**Spec.** §18, §19.
+
+**Status.** Not started.
+
+## 11-polish:34-zui-widgets-views — `zui_widgets_views`
+
+A module of views that show data rather than edit it: D11 of the default
+design's plan.
+
+**Grounding** (at `1aa1061`). The tour's Log Tail follows a busy log and
+Harbor draws sparklines, each by hand. A chart's series take the
+categorical palette of `11-polish:30-feedback-and-media`. The specs are
+`code_view`, `sparkline`, `chart`, `timeline`, `node_graph` and
+`minimap` in
+`docs/plans/default-ui-designs/exports/zui-default-design.json`.
+
+**Plan.** The module, registered as a module is, with `codeView` (line
+numbers, highlights, following the tail, only visible lines declared),
+`sparkline`, `chart` (bars and lines, at most six series, grid and axis
+labels, a tooltip per point), `timeline` (a playhead, markers, ranges),
+`nodeGraph` (pan and zoom, nodes, ports and curved edges) and `minimap`.
+SPEC.md and ARCHITECTURE.md gain it as `11-polish:32-zui-widgets-data`
+adds its module.
+
+**Done when.** The components' common Done when (*The design system*).
+
+**Waits for** `11-polish:19-default-design`,
+`11-polish:30-feedback-and-media`.
+
+**Spec.** §3.3, §18, §19.
+
+**Status.** Not started.
+
+## 11-polish:35-italics — Italics
+
+Italic text, which the owner chose to bundle rather than draw emphasis
+as weight.
+
+**Grounding** (at `1aa1061`). `zui_fonts` embeds Atkinson Hyperlegible
+Regular and Bold and Liberation Mono (`text/fonts/zui_fonts.zig:14`,
+`:18`, `:22`), under the OFL and Liberation's licence. A design names
+three fonts, `regular`, `strong` and `monospace`, in `Design.Fonts` and
+`Design.Faces` (`core/src/design.zig:174`, `:166`).
+
+**Plan.** Atkinson Hyperlegible Italic and Bold Italic join `zui_fonts`,
+under the same OFL, in `.paths`; `Design.Fonts` and `Design.Faces` gain
+`italic` and `strong_italic`, each the upright font when not given; the
+resolver sizes them by their faces as the others; `Tokens` gives each
+type role's italic, so a part that draws emphasis takes its role's
+italic; the tour and the showcase load them.
+
+**Done when.** `zui_fonts`' test finds both, with their licence;
+`zui_design`'s tests resolve an italic for every type role, the upright
+one when none is given; the text packages' `test` and `check`, and
+`test-all` and `check-all`.
+
+**Spec.** §18.6.
+
+**Status.** Not started.
+
+## 11-polish:36-motion-in-core — Motion in the core
+
+Tweens and springs the widgets can reach, with the design's motion in
+its tokens, as the owner chose.
+
+**Grounding** (at `1aa1061`). `zui_motion` holds `Easing`, `tween` and
+`spring` (`core/zui_motion/zui_motion.zig:15`, `:65`, `:115`), built on
+`ui.state` and `ui.dt`; `zui_widgets` cannot import it (SPEC.md §3.3).
+The design's motion tokens, from press to reorder, are in
+`docs/plans/default-ui-designs/exports/tokens.zig.txt`.
+
+**Plan.** `Easing`, `TweenOptions`, `SpringOptions`, `tween` and
+`spring` move to `core/src/motion.zig`, exported as `zui.motion`;
+`zui_motion` re-exports them, so its callers do not change. `Tokens`
+gains `motion`, each token a `TweenOptions` or `SpringOptions` and the
+press scale, which `zui_design.resolve` writes from the default design.
+ARCHITECTURE.md §6's motion row and SPEC.md §19.9 say where motion
+lives.
+
+**Done when.** `zui_motion`'s tests pass unchanged through the
+re-export; `counts` is within 2% of the parent commit, since nothing
+that does not animate calls the moved code; core's checks for a change
+to `core/src/`; `test-all` and `check-all`.
+
+**Spec.** §19.9.
+
+**Status.** Not started.

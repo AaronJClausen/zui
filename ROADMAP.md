@@ -120,6 +120,16 @@ is in the file its group names.
 | `11-polish:18-system-accent` | `core/src/input.zig`, `hosts/` | | waiting on CI: the Windows host's accent, in `hosts/native/`'s Windows conformance tests |
 | `11-polish:19-default-design` | `core/zui_design/`, `core/zui_widgets/`, `apps/` | `11-polish:14-zui-design`, `11-polish:15-type-scale` | in progress; slice 3, the tour and the showcase on tokens, next |
 | `10-reach:08-ring-edges-agree` | `renderers/webgl/`, `renderers/sokol/` | | not started; `hosts/web`'s `test-draw` fails on one frame until it lands |
+| `11-polish:36-motion-in-core` | `core/src/motion.zig`, `core/zui_motion/`, `core/src/design.zig` | | |
+| `11-polish:27-essential-inputs` | `core/zui_widgets/` | `11-polish:19-default-design`, `11-polish:07-zui-icons`, `11-polish:36-motion-in-core` | |
+| `11-polish:28-containers-and-navigation` | `core/zui_widgets/` | `11-polish:19-default-design` | |
+| `11-polish:29-overlays` | `core/zui_widgets/` | `11-polish:28-containers-and-navigation`, `11-polish:36-motion-in-core` | |
+| `11-polish:30-feedback-and-media` | `core/zui_widgets/`, `core/zui_design/` | `11-polish:19-default-design`, `11-polish:07-zui-icons`, `11-polish:36-motion-in-core` | |
+| `11-polish:35-italics` | `text/fonts/`, `core/src/design.zig`, `core/zui_design/` | | |
+| `11-polish:31-rich-text-and-reordering` | `core/zui_widgets/` | `11-polish:28-containers-and-navigation`, `11-polish:35-italics`, `11-polish:36-motion-in-core`, `11-polish:06-text-editing` | |
+| `11-polish:32-zui-widgets-data` | `core/zui_widgets_data/` | `11-polish:29-overlays` | |
+| `11-polish:33-pickers` | `core/zui_widgets_data/` | `11-polish:32-zui-widgets-data` | |
+| `11-polish:34-zui-widgets-views` | `core/zui_widgets_views/` | `11-polish:19-default-design`, `11-polish:30-feedback-and-media` | |
 | `11-polish:22-appearance-review` | `apps/review/` | `11-polish:20-appearance-audit`, `11-polish:21-permutations` | |
 | `11-polish:08-zui-themes` | `themes/` | `11-polish:19-default-design` | |
 | `11-polish:23-design-workbench` | `apps/review/` | `11-polish:22-appearance-review` | |
@@ -133,8 +143,11 @@ is in the file its group names.
 
 Stage 11's rows follow stage 10's, in dependency order, the design
 system's first (`roadmap/11-polish.md`, *The design system*), by the
-owner's choice. The design system's items have their Grounding, Plan and
-Done when; each of stage 11's other items is given them as it is taken.
+owner's choice. The default design's components follow it, items 27 to
+36, from the plan in `docs/plans/default-ui-designs/`, whose `exports/`
+hold each component's approved spec. The design system's items have
+their Grounding, Plan and Done when; each of stage 11's other items is
+given them as it is taken.
 
 The font system
 ([`roadmap/12-font-system.md`](roadmap/12-font-system.md)) has no rows

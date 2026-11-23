@@ -3,10 +3,31 @@
 zui's own look, its colors in light, dark and high contrast, its type,
 spacing, shape, elevation and motion, and the built-in components it
 styles, as the owner approved them from the showcase at
-<https://claude.ai/artifact/TR8QmQsFoHdqBdu58p7ryP>. This plan says how
-it lands in zui, step by step, and what to update in the documents as
-each step does. Its steps, D1 to D11, become items in
-`roadmap/11-polish.md` once the owner orders them into the queue.
+<https://claude.ai/artifact/TR8QmQsFoHdqBdu58p7ryP>. This plan said how
+it lands in zui, step by step. Every step is now an item of
+`roadmap/11-polish.md`, in the queue of `ROADMAP.md`, and each item's
+entry is where its plan, its Done when and its status are kept; this
+file is the record of how they were made, and `exports/` stays the
+reference the components are built from and the tests compare against.
+
+| Step | Item |
+|---|---|
+| D1 | `11-polish:19-default-design`, slice 1, done |
+| D2 | `11-polish:19-default-design`, slice 2, done |
+| D3 | `11-polish:19-default-design`, slice 3 |
+| D4 | `11-polish:27-essential-inputs`, with the toggle and the existing widgets' remaining spec |
+| D5 | `11-polish:28-containers-and-navigation` |
+| D6 | `11-polish:29-overlays` |
+| D7 | `11-polish:30-feedback-and-media`, with the progress bar, the async image and a categorical palette |
+| D8 | `11-polish:31-rich-text-and-reordering` |
+| D9 | `11-polish:32-zui-widgets-data` |
+| D10 | `11-polish:33-pickers` |
+| D11 | `11-polish:34-zui-widgets-views` |
+| — | `11-polish:35-italics`, for rich text's emphasis |
+| — | `11-polish:36-motion-in-core`, so the widgets reach the motion tokens |
+| — | the text area, in `11-polish:06-text-editing` |
+| — | the icons the components need, listed in `11-polish:07-zui-icons` |
+| — | the personalities, reference for `11-polish:08-zui-themes` and `11-polish:10-samples` |
 
 ## The files here
 
@@ -216,37 +237,21 @@ take a `Widgets` value as `anytype` rather than importing `zui_widgets`.
 
 ## Decisions for the owner
 
-These came up while designing and are not settled by the showcase:
-
-1. **Muted text in dark** is L 0.875 against body text's 0.965, since
-   the audit holds muted text at body size to Lc 75 too. If it should
-   read as clearly dimmer, the choices are a lower target for small
-   secondary text, or difference by size and weight alone.
-2. **Hover on the page's surfaces.** In light, `surface`'s pressed layer
-   would take muted text below Lc 75, so the resolver gives it a share
-   of −1, toward white, which leaves white unchanged. The design hovers
-   rows in `secondary_container` instead; the alternative is a resolver
-   rule for surfaces.
-3. **Tones are the resolver's, shared by every design.** A personality
-   changes seeds, shapes, type and density, never a tone. If a theme
-   pack should move tones, `Design` would need to carry them.
-4. **One shadow per element.** The levels are tuned as one shadow. Two
-   shadows, a tight one and a soft one, would need `Effects` to hold a
-   second.
-5. **No italic.** The bundled fonts have none, so rich text draws
-   emphasis as `body_strong` in `on_surface_accent`.
-6. **`label_strong` as a type role** rather than a weight on any role.
-
-None blocks D1; each is listed so the item that meets it asks.
+The six questions the design left open are settled, with the queue's
+order, the home of the motion tokens and the tour's colors, under *Made*
+in `roadmap/decisions.md`: muted text keeps Lc 75; rows hover in
+`secondary_container`; tones stay the resolver's; one shadow per
+element; italics are bundled (`11-polish:35-italics`), so rich text's
+emphasis is italic, not `body_strong` in `on_surface_accent`;
+`label_strong` stays a type role.
 
 ## When a step lands
 
 In each step's commit, besides CLAUDE.md's checklist:
 
-- **`ROADMAP.md`, the queue.** Before D4, the owner orders items 27 to
-  34 into the queue; their rows go after `11-polish:19-default-design`,
-  in this plan's order, each with its *Where* and *Waits for*. A row
-  leaves the queue when its item is done.
+- **`ROADMAP.md`, the queue.** Items 27 to 36 are in the queue after
+  `11-polish:19-default-design`, in this plan's order, each with its
+  *Where* and *Waits for*. A row leaves the queue when its item is done.
 - **`roadmap/11-polish.md`.** Each new item gets its row in *Items* and
   its entry under *The design system*, with Grounding, Plan, Done when,
   Waits for and Spec from this plan, and a **Status** as it lands.
