@@ -15,14 +15,17 @@
 //
 // and the worker answers `{ type: "started" }` once the canvas is
 // attached, `{ type: "cursor", cursor }` with each CSS cursor the
-// application asks for, and `{ type: "failed", error }`, after which it
-// takes no more turns.
+// application asks for, `{ type: "textInput", caret }` with each caret the
+// page's text field goes to, `[x, y, width, height]` in CSS pixels or null,
+// `{ type: "clipboardWrite", text }`, `{ type: "clipboardRead", id }`,
+// which the page answers as a sink call, `{ type: "openUrl", url }`, and
+// `{ type: "failed", error }`, after which it takes no more turns.
 //
 // The module's `zuiWebRun` runs the application through `zui_app`, whose
 // host yields to this event loop by throwing from an import; from then
 // on, each turn is `zuiWebHostTurn`, from an animation frame or a timer as
 // the host schedules it. `globalThis.zuiHost` counts the turns and the
-// frames drawn, holds the drawers and the module's exports, keeps the
+// frames drawn, holds the drawers, the module's exports and memory, keeps the
 // page's settings and visibility as last delivered, and calls its
 // `onSchedule`, if set, with each turn the host schedules, for a check:
 //
@@ -39,7 +42,7 @@ const scheduleKinds = { animationFrame: 0, timer: 1, input: 2, ended: 3 };
 const textDecoder = new TextDecoder();
 
 const drawers = new Map();
-const progress = { turns: 0, framesDrawn: 0, contextsLost: 0, contextsRestored: 0, measured: null, settings: {}, pageShown: true, drawers, module: null, onSchedule: null };
+const progress = { turns: 0, framesDrawn: 0, contextsLost: 0, contextsRestored: 0, measured: null, settings: {}, pageShown: true, drawers, module: null, memory: null, onSchedule: null };
 globalThis.zuiHost = progress;
 
 let wasm = null;
@@ -122,6 +125,10 @@ function hostImports() {
     zuiWebHostYield: () => {
       throw yieldedToEventLoop;
     },
+    zuiWebHostShowTextInput: (shown, x, y, width, height) => parent.post({ type: "textInput", caret: shown ? [x, y, width, height] : null }),
+    zuiWebHostWriteClipboard: (text, length) => parent.post({ type: "clipboardWrite", text: stringAt(text, length) }),
+    zuiWebHostReadClipboard: (id) => parent.post({ type: "clipboardRead", id }),
+    zuiWebHostOpenUrl: (url, length) => parent.post({ type: "openUrl", url: stringAt(url, length) }),
   };
 }
 
@@ -154,6 +161,7 @@ async function start({ moduleUrl, canvas, canvasId, cssSize, devicePixelRatio, e
   const bytes = new Uint8Array(await (await fetch(moduleUrl)).arrayBuffer());
   const module = await WebAssembly.compile(bytes);
   memory = new WebAssembly.Memory(importedMemoryLimits(bytes));
+  progress.memory = memory;
   const instance = await WebAssembly.instantiate(module, { env: { memory }, zui_web_host: hostImports(), ...drawingImports() });
   wasm = instance.exports;
   progress.module = wasm;

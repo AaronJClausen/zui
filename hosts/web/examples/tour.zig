@@ -38,6 +38,75 @@ export fn zuiTourNewestFrameMicroseconds() f64 {
     return tour.tour.perf.latest().totalMicroseconds();
 }
 
+/// The text the tour's records carried, in order, for a check to read:
+/// what fits of it.
+var text_received: [256]u8 = undefined;
+var text_received_len: usize = 0;
+
+export fn zuiTourTextReceived() usize {
+    return @intFromPtr(&text_received);
+}
+
+export fn zuiTourTextReceivedBytes() usize {
+    return text_received_len;
+}
+
+fn keepTextReceived(record: *const zui.RecordBuilder) void {
+    for (record.events()) |event| switch (event) {
+        .text => |typed| {
+            const kept = @min(typed.len, text_received.len - text_received_len);
+            @memcpy(text_received[text_received_len..][0..kept], typed[0..kept]);
+            text_received_len += kept;
+        },
+        else => {},
+    };
+}
+
+const PastedForCheck = zui.ServiceReply(256);
+
+/// The answers to `zuiTourPasteForCheck`, for a check to read.
+const PastesForCheck = struct {
+    newest: ?PastedForCheck = null,
+
+    pub fn publish(self: *PastesForCheck, reply: PastedForCheck) zui.Wake {
+        self.newest = reply;
+        return .needed;
+    }
+};
+
+var pastes_for_check: PastesForCheck = .{};
+const text_copied_for_check = "zui \u{2713} copied from the worker";
+
+/// Copies `text_copied_for_check` through the host, as a check asks: false
+/// if the host refused.
+export fn zuiTourCopyForCheck() bool {
+    const tour = running_tour orelse return false;
+    Tour.Host.zuiClipboard.write(tour.host, text_copied_for_check) catch return false;
+    return true;
+}
+
+/// Reads the clipboard through the host, as a check asks; its answer
+/// arrives later, as `zuiTourPastedForCheck` says.
+export fn zuiTourPasteForCheck() bool {
+    const tour = running_tour orelse return false;
+    pastes_for_check.newest = null;
+    Tour.Host.zuiClipboard.read(tour.host, .of("check paste"), .of(&pastes_for_check)) catch return false;
+    return true;
+}
+
+/// The newest paste's text, as a C string, its kind's name if it is not
+/// text, or an empty string before it arrives.
+export fn zuiTourPastedForCheck() [*:0]const u8 {
+    const State = struct {
+        var text: [PastedForCheck.capacity + 1]u8 = undefined;
+    };
+    const pasted = pastes_for_check.newest orelse return "";
+    if (pasted.kind != .clipboard_text) return if (pasted.kind == .failed) @tagName(pasted.failure) else @tagName(pasted.kind);
+    @memcpy(State.text[0..pasted.len], pasted.text());
+    State.text[pasted.len] = 0;
+    return State.text[0..pasted.len :0];
+}
+
 /// The tour, its frames timed on the worker's clock: the `SteppedIo`'s
 /// stands still for all of a turn, so the strip would show 0 µs.
 const TourInWorker = struct {
@@ -61,6 +130,7 @@ const TourInWorker = struct {
     }
 
     pub fn zuiRecord(app: *TourInWorker, record: *zui.RecordBuilder) void {
+        keepTextReceived(record);
         app.tour.zuiRecord(record);
     }
 

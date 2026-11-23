@@ -58,6 +58,8 @@ const expected_records = [_]ExpectedRecord{
         .screen_after = .photo_cull,
     },
     .{ .events = &.{ .{ .key_down = key(.a, .{}) }, .{ .text = "a" }, .{ .key_up = key(.a, .{}) }, .{ .key_down = key(.digit_2, .{}) }, .{ .text = "é" }, .{ .key_up = key(.digit_2, .{}) } } },
+    .{ .events = &.{ .{ .key_down = key(.b, .{}) }, .{ .text = "b" }, .{ .key_up = key(.b, .{}) } } },
+    .{ .events = &.{.{ .text = "日本語" }} },
     .{ .events = &.{.{ .wheel = .{ .position = wheeled_at, .delta = .{ 0, 120 }, .at = .zero } }} },
     .{ .events = &.{ .{ .pointer_down = .{ .pointer = touch(tapped_at, 1) } }, .{ .pointer_up = .{ .pointer = touch(tapped_at, 0) } } } },
     .{ .viewport = .{ 1024, 768 }, .scale = 2 },

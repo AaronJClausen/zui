@@ -29,7 +29,7 @@ decorations; many windows.
 | Item | Status |
 |---|---|
 | `10-reach:01-linux-host` Linux | in progress |
-| `10-reach:02-web-host` Web | in progress |
+| `10-reach:02-web-host` Web | done |
 | `10-reach:03-services` Services | done |
 | `10-reach:04-window-decorations` Window decorations | waiting on a person |
 | `10-reach:05-many-windows` Many windows | done |
@@ -1024,6 +1024,64 @@ has not run on a runner yet, whose software GPU may draw Clickable
 Chaos's wall more slowly than its check allows. `pages.yml` still builds
 the site in ReleaseSmall and runs `test-site` on it before publishing.
 Slice 6, text input and services, is next.
+
+Slice 6 is done, and with it the item. While a frame asks for text
+input, `HostOn.zuiApply` hands the platform the caret in CSS pixels, at
+the last poll's zoom, only when it changes (`showTextInput`, one of four
+new platform calls, checked after `run`, so the compile errors pinned
+before keep their messages), and the worker posts it to the page, which
+places a transparent `<textarea>` over it (`web/page_text_field.mjs`,
+`HiddenTextField`) and focuses it, giving the canvas the focus back when
+the frame stops asking; a press on the canvas gives the field the focus
+again while a caret is placed. Decided here: while the field has the
+focus the canvas hears no keys, and the field sends each key but takes a
+key's text only from its `input` (an IME's from `compositionend`, its
+steps left out, since the record has no place for a composition in
+progress), so a printable key's text reaches the record once. The host
+declares `zuiClipboard` (`write` through
+`navigator.clipboard.writeText`, refusing more than 64 KiB with
+`TooLarge` and text that is not UTF-8; `read` posted with an id, one at
+a time, a second `Busy`, the page answering with the sink calls
+`clipboardText` or `clipboardFailed`, and the host publishing into the
+read's sink, `denied` when the browser refuses, with text past its 64
+KiB buffer counted as left out) and `zuiOpenUrl` (refusing what
+`zui.isOpenableUrl` refuses, then
+`window.open(url, "_blank", "noopener")` on the page). The pushed host
+suite has no service steps, so six new host tests take their place: a
+clipboard round trip answered on a later turn, `Busy`, a denied read and
+an answer to no read, text left out, a copy refused as too large or not
+UTF-8, URLs refused and opened, and the caret placed and taken away; the
+scripted platform answers reads before each turn, so
+`expectPushedHostConforms` runs with both services declared. `test`
+passes, 61 tests, in Debug, ReleaseFast and ReleaseSafe and under
+ThreadSanitizer. `test-input` now places the field and checks that a
+typed `b` and an IME's `日本語` (`Input.imeSetComposition`,
+`Input.insertText`) each reach a record once, which `replay-input` runs
+the tour on. `test-host` clicks Settings' Port field, checks the field
+sits at its caret, that `7日本語` reached the tour's records once (the tour
+target keeps the text its records carried for the check), and, with
+`Browser.grantPermissions`, that what the module copies reaches the
+page's clipboard and what the page copies answers the module's read,
+through the tour target's check-only `zuiTourCopyForCheck` and
+`zuiTourPasteForCheck`, since the tour uses no clipboard. It passed in 3
+of 5 runs; both failures were the idle check on Settings ("the worker
+took 7 turns in 2 s idle on Settings, of the display's 104 frames" and 9
+of 103) at a load average of 8 to 11 from other builds. `check`,
+`test-demo` in Debug and ReleaseSafe, `test-draw`, and `test-site` in
+Debug and ReleaseSmall (`zui-tour.wasm` 2.70 MB, the site 2.77 MB) pass.
+
+The item's *Done when* holds: `zui_web.Host` passes
+`expectPushedHostConforms` on a scripted platform natively, and
+`test-host` runs it on the browser's in headless Chromium;
+`zui_webgl.Renderer` passes `expectRendererConforms`, and `test-draw`
+checks its drawing against the sokol renderer's; the tour runs unchanged
+on `zui_web.Host`, `zui_webgl.Renderer` and `zui_truetype.Text`, named
+in one line, and the published page runs it, `test-host` and `test-site`
+(also in ReleaseSmall) passing with its environment, lifecycle, lost
+context, cursor, text input and clipboard reaching it; `test-demo`,
+`test-draw` and `test-input` pass; `check` compiles all the browser runs
+for `wasm32-freestanding`; and each check fits its limit, `test-host` in
+about 30 s.
 
 Decided here:
 

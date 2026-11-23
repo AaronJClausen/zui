@@ -25,6 +25,10 @@ pub const BrowserPlatform = struct {
     extern "zui_web_host" fn zuiWebHostWake() void;
     extern "zui_web_host" fn zuiWebHostShowCursor(name: [*]const u8, length: usize) void;
     extern "zui_web_host" fn zuiWebHostYield() noreturn;
+    extern "zui_web_host" fn zuiWebHostShowTextInput(shown: bool, x: f32, y: f32, width: f32, height: f32) void;
+    extern "zui_web_host" fn zuiWebHostWriteClipboard(text: [*]const u8, length: usize) void;
+    extern "zui_web_host" fn zuiWebHostReadClipboard(id: u32) void;
+    extern "zui_web_host" fn zuiWebHostOpenUrl(url: [*]const u8, length: usize) void;
 
     /// The worker's `performance.now()`.
     pub fn now(_: *BrowserPlatform) zui.Instant {
@@ -53,6 +57,27 @@ pub const BrowserPlatform = struct {
         zuiWebHostShowCursor(name.ptr, name.len);
     }
 
+    /// Posts the caret to the page, which places its hidden text field
+    /// there, or takes it away.
+    pub fn showTextInput(_: *BrowserPlatform, caret: ?[4]f32) void {
+        const area = caret orelse return zuiWebHostShowTextInput(false, 0, 0, 0, 0);
+        zuiWebHostShowTextInput(true, area[0], area[1], area[2], area[3]);
+    }
+
+    pub fn writeClipboard(_: *BrowserPlatform, text: []const u8) void {
+        zuiWebHostWriteClipboard(text.ptr, text.len);
+    }
+
+    /// The page answers with `zuiWebClipboardText` or
+    /// `zuiWebClipboardFailed`, naming `id`.
+    pub fn readClipboard(_: *BrowserPlatform, id: u32) void {
+        zuiWebHostReadClipboard(id);
+    }
+
+    pub fn openUrl(_: *BrowserPlatform, url: []const u8) void {
+        zuiWebHostOpenUrl(url.ptr, url.len);
+    }
+
     /// Keeps the turns for the exports and yields to the worker's event
     /// loop, abandoning the frames below, which the WebAssembly stack keeps
     /// unused from then on.
@@ -67,6 +92,7 @@ var last_error: ?anyerror = null;
 const key_name_bytes_most = 64;
 var key_names: [2 * key_name_bytes_most]u8 = undefined;
 var typed_text: [Host.inbox_text_capacity]u8 = undefined;
+var clipboard_text: [Host.clipboard_text_capacity]u8 = undefined;
 const setting_word_bytes_most = 64;
 var setting_words: [2 * setting_word_bytes_most]u8 = undefined;
 
@@ -197,6 +223,29 @@ const exports = struct {
         const name = setting_words[0..@min(name_bytes, setting_word_bytes_most)];
         const value = setting_words[setting_word_bytes_most..][0..@min(value_bytes, setting_word_bytes_most)];
         if (running()) |web_host| web_host.changeSetting(name, value);
+    }
+
+    /// Where to write up to `zuiWebClipboardTextBytesMost` bytes of the
+    /// clipboard's UTF-8 before `zuiWebClipboardText`.
+    export fn zuiWebClipboardTextBuffer() usize {
+        return @intFromPtr(&clipboard_text);
+    }
+
+    export fn zuiWebClipboardTextBytesMost() usize {
+        return clipboard_text.len;
+    }
+
+    /// The clipboard's text for read `id`: `kept_bytes` written, of
+    /// `whole_bytes` it held.
+    export fn zuiWebClipboardText(id: u32, kept_bytes: usize, whole_bytes: usize) void {
+        const kept = clipboard_text[0..@min(kept_bytes, clipboard_text.len)];
+        if (running()) |web_host| web_host.answerClipboardRead(id, kept, whole_bytes);
+    }
+
+    /// Read `id` failed: `failure` numbered as `zui.ServiceFailure`.
+    export fn zuiWebClipboardFailed(id: u32, failure: u32) void {
+        const why = std.enums.fromInt(zui.ServiceFailure, failure) orelse .unavailable;
+        if (running()) |web_host| web_host.failClipboardRead(id, why);
     }
 
     /// `document.visibilityState` is `"visible"`, or it is not.

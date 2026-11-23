@@ -8,6 +8,7 @@
 <canvas id="frame"></canvas>
 <script type="module">
   import { InputRecorder } from "./input_recorder.mjs";
+  import { HiddenTextField } from "./page_text_field.mjs";
 
   // The check draws nothing, so the client is given no canvases.
   const nothingDrawn = { zui_webgl: { zuiWebglBlursBackdrops: () => false, zuiWebglDraw: () => {} } };
@@ -16,6 +17,7 @@
   if (!wasm.zuiWebInit()) throw new Error("the client could not reserve its memory");
   const canvas = document.getElementById("frame");
   const recorder = new InputRecorder(canvas, wasm);
+  window.textField = new HiddenTextField(canvas, recorder.sink);
   canvas.focus();
 
   // The record the page would send now, in base64, or null.

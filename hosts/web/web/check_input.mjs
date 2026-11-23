@@ -1,7 +1,9 @@
 // node check_input.mjs <chromium> <client wasm> <replay-input>
 //
-// Gives the page input through Chromium, as a user would, takes the
-// records the client writes of it, and runs zui-sokol's tour on them with
+// Gives the page input through Chromium, as a user would, also through the
+// hidden text field the page places at a caret, where a key's text and an
+// IME's composition must each be written once, takes the records the
+// client writes of it, and runs zui-sokol's tour on them with
 // `replay-input`, which checks each record and what the tour did with it.
 // The frames the tour drew then come back to the page, which must show
 // the cursor each asks for.
@@ -37,6 +39,7 @@ try {
   page = await openHeadlessPage(chromiumPath, {
     "/": { path: join(webDirectory, "check_input.html"), type: "text/html" },
     "/input_recorder.mjs": { path: join(webDirectory, "input_recorder.mjs"), type: "text/javascript" },
+    "/page_text_field.mjs": { path: join(webDirectory, "page_text_field.mjs"), type: "text/javascript" },
     "/zui-web.wasm": { path: wasmPath, type: "application/wasm" },
   });
 } catch (error) {
@@ -62,6 +65,7 @@ const keys = {
   3: { code: "Digit3", windowsVirtualKeyCode: 51 },
   PageDown: { code: "PageDown", windowsVirtualKeyCode: 34 },
   a: { code: "KeyA", windowsVirtualKeyCode: 65, text: "a" },
+  b: { code: "KeyB", windowsVirtualKeyCode: 66, text: "b" },
   // On a French layout, the key that types 2 with Shift.
   é: { code: "Digit2", windowsVirtualKeyCode: 50, text: "é" },
 };
@@ -104,6 +108,19 @@ await key("a", "keyUp");
 await key("é", "keyDown");
 await key("é", "keyUp");
 await takeRecord("typing");
+
+await evaluate("(textField.place([100, 100, 2, 16]), true)");
+if ((await evaluate("document.activeElement?.tagName")) !== "TEXTAREA") await fail("the page did not focus its hidden text field at the caret");
+await expectNoRecord("the text field was placed");
+await key("b", "keyDown");
+await key("b", "keyUp");
+await takeRecord("typing into the text field");
+await send("Input.imeSetComposition", { text: "日本", selectionStart: 2, selectionEnd: 2 });
+await send("Input.insertText", { text: "日本語" });
+await takeRecord("an IME's composition in the text field");
+await evaluate("(textField.place(null), true)");
+if ((await evaluate("document.activeElement?.id")) !== "frame") await fail("the canvas did not take the focus back from the text field");
+await expectNoRecord("the text field was taken away");
 
 // The protocol's deltas are in device pixels, the page's in CSS pixels.
 await mouse("mouseWheel", 640, 400, { deltaX: 0, deltaY: 120 * 1.25 });

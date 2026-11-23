@@ -31,11 +31,14 @@ const textDecoder = new TextDecoder();
 //   key(down, key, code, modifierBits, repeat, timeStamp)
 //   typed(text)
 //
-// and, from `followPageEnvironment`, which only the web host's exports take:
+// and, from `followPageEnvironment` and the page's answers to the clipboard
+// reads it was asked for, which only the web host's exports take:
 //
 //   setting(name, value)
 //   pageShown(shown)
-export const sinkCalls = ["pointerDown", "pointerUp", "pointerMove", "pointerCancel", "pointerLeave", "wheel", "key", "typed", "setting", "pageShown"];
+//   clipboardText(id, text)
+//   clipboardFailed(id, failure) // `zui.ServiceFailure`'s number: 0 unavailable, 1 denied
+export const sinkCalls = ["pointerDown", "pointerUp", "pointerMove", "pointerCancel", "pointerLeave", "wheel", "key", "typed", "setting", "pageShown", "clipboardText", "clipboardFailed"];
 // The calls whose last argument is an `Event.timeStamp`.
 export const timedSinkCalls = ["pointerDown", "pointerUp", "pointerMove", "wheel", "key"];
 
@@ -70,6 +73,12 @@ export function exportsSink(wasm, memoryOf = () => wasm.memory) {
       wasm.zuiWebSetting(encodeInto(name, words, most), encodeInto(value, words + most, most));
     },
     pageShown: (shown) => wasm.zuiWebPageShown(shown),
+    clipboardText(id, text) {
+      const most = wasm.zuiWebClipboardTextBytesMost() >>> 0;
+      const wholeBytes = textEncoder.encode(text).length;
+      wasm.zuiWebClipboardText(id, encodeInto(text, wasm.zuiWebClipboardTextBuffer() >>> 0, Math.min(most, wholeBytes)), wholeBytes);
+    },
+    clipboardFailed: (id, failure) => wasm.zuiWebClipboardFailed(id, failure),
   };
 }
 
@@ -89,7 +98,7 @@ export function messageSink(send) {
   return sink;
 }
 
-function modifiersOf(event) {
+export function modifiersOf(event) {
   let bits = 0;
   for (const [held, bit] of Object.entries(modifierBits)) if (event[held]) bits |= bit;
   return bits;

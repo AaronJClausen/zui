@@ -112,7 +112,14 @@ pub const PageEnvironment = struct {
 /// - `wake(*Platform) void`, from any thread: take a turn at once;
 /// - `showCursor(*Platform, zui.Cursor) void`, the canvas's cursor;
 /// - `run(*Platform, zui_web.Turns) !void`, or `noreturn`: the event
-///   loop, taking each turn as scheduled until the run is over.
+///   loop, taking each turn as scheduled until the run is over;
+/// - `showTextInput(*Platform, ?[4]f32) void`: the caret's x, y, width
+///   and height in CSS pixels from the canvas's top-left, where the page
+///   places the field its IME composes in, or null to take it away;
+/// - `writeClipboard(*Platform, []const u8) void`, UTF-8 to copy;
+/// - `readClipboard(*Platform, u32) void`: read the clipboard, answering
+///   `answerClipboardRead` or `failClipboardRead` with that id later;
+/// - `openUrl(*Platform, []const u8) void`, a URL `zui.isOpenableUrl` took.
 ///
 /// ```zig
 /// const Host = zui_web.HostOn(WorkerPlatform);
@@ -135,6 +142,10 @@ pub fn HostOn(comptime Platform: type) type {
         pub const inbox_event_capacity = 256;
         /// Bytes of typed text the page can deliver between two polls.
         pub const inbox_text_capacity = 1024;
+        /// The most UTF-8 copied to the clipboard, or read from it whole.
+        pub const clipboard_text_capacity = 64 * 1024;
+        /// The longest URL handed to the page.
+        pub const url_capacity = 8 * 1024;
 
         platform: Platform = .{},
         canvas: ?u32 = null,
@@ -142,6 +153,11 @@ pub fn HostOn(comptime Platform: type) type {
         device_pixel_ratio: f32 = 1,
         inbox: Inbox = .{},
         shown_cursor: ?zui.Cursor = null,
+        shown_text_input: ?[4]f32 = null,
+        /// The zoom of the last poll, which places the caret in CSS pixels.
+        css_pixels_per_unit: f32 = 1,
+        pending_clipboard_read: ?PendingClipboardRead = null,
+        clipboard_reads: u32 = 0,
         context_lost: bool = false,
         page_shown: bool = true,
         surfaces_suspended: bool = false,
@@ -155,6 +171,61 @@ pub fn HostOn(comptime Platform: type) type {
         driver: zui.Driver = undefined,
 
         const Phase = enum { not_running, awaiting_start, running, ended };
+
+        const PendingClipboardRead = struct { id: u32, request: zui.ServiceRequest, sink: zui.ServiceSink };
+
+        /// Copies through the page's `navigator.clipboard`, and reads from
+        /// it, the answer published into the sink on a later turn. One read
+        /// at a time: another while one waits is `Busy`.
+        pub const zuiClipboard = struct {
+            pub fn write(host: *Self, text: []const u8) zui.ServiceError!void {
+                if (text.len > clipboard_text_capacity) return error.TooLarge;
+                if (!std.unicode.utf8ValidateSlice(text)) return error.InvalidUtf8;
+                host.platform.writeClipboard(text);
+            }
+
+            pub fn read(host: *Self, request: zui.ServiceRequest, sink: zui.ServiceSink) zui.ServiceError!void {
+                if (host.pending_clipboard_read != null) return error.Busy;
+                host.clipboard_reads +%= 1;
+                host.pending_clipboard_read = .{ .id = host.clipboard_reads, .request = request, .sink = sink };
+                host.platform.readClipboard(host.clipboard_reads);
+            }
+        };
+
+        /// Opens a URL in a new tab, through the page.
+        pub const zuiOpenUrl = struct {
+            pub fn open(host: *Self, url: []const u8) zui.ServiceError!void {
+                if (url.len > url_capacity) return error.TooLarge;
+                if (!std.unicode.utf8ValidateSlice(url)) return error.InvalidUtf8;
+                if (!zui.isOpenableUrl(url)) return error.InvalidUrl;
+                host.platform.openUrl(url);
+            }
+        };
+
+        /// The page read the clipboard for read `id`: `text` is what fit
+        /// the module's buffer, of `whole_bytes` the clipboard held.
+        pub fn answerClipboardRead(self: *Self, id: u32, text: []const u8, whole_bytes: usize) void {
+            const pending = self.takeClipboardRead(id) orelse return;
+            self.publish(pending, .{ .clipboard_text = text }, std.math.lossyCast(u32, whole_bytes -| text.len));
+        }
+
+        /// The page could not read the clipboard for read `id`.
+        pub fn failClipboardRead(self: *Self, id: u32, failure: zui.ServiceFailure) void {
+            const pending = self.takeClipboardRead(id) orelse return;
+            self.publish(pending, .{ .failed = failure }, 0);
+        }
+
+        fn takeClipboardRead(self: *Self, id: u32) ?PendingClipboardRead {
+            const pending = self.pending_clipboard_read orelse return null;
+            if (pending.id != id) return null;
+            self.pending_clipboard_read = null;
+            return pending;
+        }
+
+        fn publish(self: *Self, pending: PendingClipboardRead, outcome: zui.ServiceAnswer.Outcome, left_out_bytes: u32) void {
+            const answer: zui.ServiceAnswer = .{ .request = pending.request, .outcome = outcome, .left_out_bytes = left_out_bytes };
+            self.zuiWaker().wakeIf(pending.sink.publish(&answer));
+        }
 
         const Run = @typeInfo(@TypeOf(Platform.run)).@"fn".return_type.?;
         const runs_forever = Run == noreturn;
@@ -430,6 +501,7 @@ pub fn HostOn(comptime Platform: type) type {
         pub fn zuiPoll(self: *Self, window: zui.WindowId, record: *zui.RecordBuilder) bool {
             std.debug.assert(window == .main);
             const css_pixels_per_unit = record.params.zoom;
+            self.css_pixels_per_unit = css_pixels_per_unit;
             record.begin(.{
                 .now = self.platform.now(),
                 .viewport = .{ self.canvas_css_size[0] / css_pixels_per_unit, self.canvas_css_size[1] / css_pixels_per_unit },
@@ -502,13 +574,24 @@ pub fn HostOn(comptime Platform: type) type {
             return .{ .web = .{ .canvas = self.canvas.? } };
         }
 
-        /// Shows the cursor the frame asks for, telling the platform only
-        /// when it changes.
+        /// Shows the cursor the frame asks for, and the text field at its
+        /// caret, telling the platform only of what changed.
         pub fn zuiApply(self: *Self, window: zui.WindowId, requests: zui.HostRequests) void {
             std.debug.assert(window == .main);
-            if (self.shown_cursor == requests.cursor) return;
-            self.shown_cursor = requests.cursor;
-            self.platform.showCursor(requests.cursor);
+            if (self.shown_cursor != requests.cursor) {
+                self.shown_cursor = requests.cursor;
+                self.platform.showCursor(requests.cursor);
+            }
+            const text_input: ?[4]f32 = if (requests.text_input) |area| .{
+                area.caret.x * self.css_pixels_per_unit,
+                area.caret.y * self.css_pixels_per_unit,
+                area.caret.width * self.css_pixels_per_unit,
+                area.caret.height * self.css_pixels_per_unit,
+            } else null;
+            if (!std.meta.eql(self.shown_text_input, text_input)) {
+                self.shown_text_input = text_input;
+                self.platform.showTextInput(text_input);
+            }
         }
     };
 }
@@ -534,6 +617,16 @@ fn checkPlatform(comptime Platform: type) void {
         else => false,
     };
     if (!runs_turns) @compileError("zui_web: " ++ name ++ ".run must be " ++ run_name ++ ", found " ++ @typeName(@TypeOf(Platform.run)));
+    const page_calls = [_]struct { name: []const u8, Expected: type, expected_name: []const u8 }{
+        .{ .name = "showTextInput", .Expected = fn (*Platform, ?[4]f32) void, .expected_name = "fn (*" ++ name ++ ", ?[4]f32) void" },
+        .{ .name = "writeClipboard", .Expected = fn (*Platform, []const u8) void, .expected_name = "fn (*" ++ name ++ ", []const u8) void" },
+        .{ .name = "readClipboard", .Expected = fn (*Platform, u32) void, .expected_name = "fn (*" ++ name ++ ", u32) void" },
+        .{ .name = "openUrl", .Expected = fn (*Platform, []const u8) void, .expected_name = "fn (*" ++ name ++ ", []const u8) void" },
+    };
+    for (page_calls) |call| {
+        if (!@hasDecl(Platform, call.name)) @compileError("zui_web: " ++ name ++ " is not a web host's platform: missing `" ++ call.name ++ "`, which must be " ++ call.expected_name);
+        if (@TypeOf(@field(Platform, call.name)) != call.Expected) @compileError("zui_web: " ++ name ++ "." ++ call.name ++ " must be " ++ call.expected_name ++ ", found " ++ @typeName(@TypeOf(@field(Platform, call.name))));
+    }
 }
 
 const testing = std.testing;
@@ -550,6 +643,14 @@ const ScriptedPlatform = struct {
     schedules: u32 = 0,
     cursors: [8]zui.Cursor = undefined,
     cursor_count: usize = 0,
+    text_inputs: [8]?[4]f32 = undefined,
+    text_input_count: usize = 0,
+    clipboard: [64 * 1024]u8 = undefined,
+    clipboard_len: usize = 0,
+    clipboard_denied: bool = false,
+    clipboard_read: ?u32 = null,
+    opened_url: [64]u8 = undefined,
+    opened_url_len: usize = 0,
     woken: std.Io.Event = .unset,
     quitting: std.atomic.Value(bool) = .init(false),
     /// Delivered before the next turn.
@@ -577,6 +678,36 @@ const ScriptedPlatform = struct {
         self.cursor_count += 1;
     }
 
+    pub fn showTextInput(self: *ScriptedPlatform, caret: ?[4]f32) void {
+        self.text_inputs[self.text_input_count] = caret;
+        self.text_input_count += 1;
+    }
+
+    /// The page's clipboard, which the scripted page reads back as it was
+    /// written.
+    pub fn writeClipboard(self: *ScriptedPlatform, text: []const u8) void {
+        @memcpy(self.clipboard[0..text.len], text);
+        self.clipboard_len = text.len;
+    }
+
+    pub fn readClipboard(self: *ScriptedPlatform, id: u32) void {
+        self.clipboard_read = id;
+    }
+
+    pub fn openUrl(self: *ScriptedPlatform, url: []const u8) void {
+        @memcpy(self.opened_url[0..url.len], url);
+        self.opened_url_len = url.len;
+    }
+
+    /// What the page answers the read it was asked for, as the browser's
+    /// does on a later message.
+    fn answerClipboardRead(self: *ScriptedPlatform, host: *ScriptedHost) void {
+        const id = self.clipboard_read orelse return;
+        self.clipboard_read = null;
+        if (self.clipboard_denied) return host.failClipboardRead(id, .denied);
+        host.answerClipboardRead(id, self.clipboard[0..self.clipboard_len], self.clipboard_len);
+    }
+
     /// From any thread: the loop ends before its next turn.
     fn quit(self: *ScriptedPlatform) void {
         self.quitting.store(true, .release);
@@ -602,6 +733,7 @@ const ScriptedPlatform = struct {
                 .input => self.waitUntil(self.now().addNanoseconds(longest_wait_ns)),
             }
             if (self.quitting.load(.acquire)) return;
+            self.answerClipboardRead(host);
             self.woken.reset();
             try host_turns.take();
         }
@@ -1066,4 +1198,94 @@ test "a page shown while its context is lost resumes its surfaces only once the 
     host.restoreContext();
     try host.turns().take();
     try testing.expectEqual(1, driver.resumes);
+}
+
+const SuiteReply = zui.ServiceReply(64);
+
+const Replies = struct {
+    replies: [4]SuiteReply = undefined,
+    count: usize = 0,
+
+    pub fn publish(self: *Replies, reply: SuiteReply) zui.Wake {
+        self.replies[self.count] = reply;
+        self.count += 1;
+        return .needed;
+    }
+};
+
+test "a clipboard read is answered into its sink on a later turn, with what the page copied" {
+    var host = scriptedHost();
+    var driver: ScriptedDriver = .{ .host = &host };
+    try startedHost(&driver);
+    const copied = "zui \u{2713} clipboard";
+    try ScriptedHost.zuiClipboard.write(&host, copied);
+    var replies: Replies = .{};
+    const paste: zui.ServiceRequest = .of("paste");
+    try ScriptedHost.zuiClipboard.read(&host, paste, .of(&replies));
+    try testing.expectError(error.Busy, ScriptedHost.zuiClipboard.read(&host, paste, .of(&replies)));
+    try testing.expectEqual(0, replies.count);
+
+    host.platform.answerClipboardRead(&host);
+    try testing.expectEqual(1, replies.count);
+    try testing.expectEqual(paste, replies.replies[0].request);
+    try testing.expectEqual(.clipboard_text, replies.replies[0].kind);
+    try testing.expectEqualStrings(copied, replies.replies[0].text());
+    host.answerWake();
+    try testing.expectEqual(Schedule.animation_frame, host.platform.scheduled);
+    try ScriptedHost.zuiClipboard.read(&host, paste, .of(&replies));
+}
+
+test "a clipboard read the page is refused fails as denied, and an answer to no read is left out" {
+    var host = scriptedHost();
+    var driver: ScriptedDriver = .{ .host = &host };
+    try startedHost(&driver);
+    var replies: Replies = .{};
+    host.platform.clipboard_denied = true;
+    try ScriptedHost.zuiClipboard.read(&host, .of("paste"), .of(&replies));
+    host.answerClipboardRead(host.clipboard_reads +% 1, "stale", 5);
+    try testing.expectEqual(0, replies.count);
+    host.platform.answerClipboardRead(&host);
+    try testing.expectEqual(1, replies.count);
+    try testing.expectEqual(.failed, replies.replies[0].kind);
+    try testing.expectEqual(zui.ServiceFailure.denied, replies.replies[0].failure);
+}
+
+test "clipboard text that does not fit the read's buffer is counted as left out" {
+    var host = scriptedHost();
+    var replies: Replies = .{};
+    try ScriptedHost.zuiClipboard.read(&host, .of("paste"), .of(&replies));
+    host.answerClipboardRead(host.clipboard_reads, "kept", 4 + 10);
+    try testing.expectEqual(10, replies.replies[0].left_out_bytes);
+}
+
+test "copying text past the clipboard's room, or not UTF-8, is refused" {
+    var host = scriptedHost();
+    const too_long: [ScriptedHost.clipboard_text_capacity + 1]u8 = @splat('a');
+    try testing.expectError(error.TooLarge, ScriptedHost.zuiClipboard.write(&host, &too_long));
+    try testing.expectError(error.InvalidUtf8, ScriptedHost.zuiClipboard.write(&host, "\xff"));
+    try testing.expectEqual(0, host.platform.clipboard_len);
+}
+
+test "a URL is handed to the page, and one zui.isOpenableUrl refuses is not" {
+    var host = scriptedHost();
+    for ([_][]const u8{ "C:\\Windows\\notepad.exe", "file:///C:/Windows/notepad.exe", "notepad" }) |not_a_url| {
+        try testing.expectError(error.InvalidUrl, ScriptedHost.zuiOpenUrl.open(&host, not_a_url));
+    }
+    try testing.expectEqual(0, host.platform.opened_url_len);
+    try ScriptedHost.zuiOpenUrl.open(&host, "https://ziglang.org/");
+    try testing.expectEqualStrings("https://ziglang.org/", host.platform.opened_url[0..host.platform.opened_url_len]);
+}
+
+test "a frame asking for text input places the field at its caret in CSS pixels, and one that stops takes it away" {
+    var host = scriptedHost();
+    var driver: ScriptedDriver = .{ .host = &host, .zoom = 1.5 };
+    try startedHost(&driver);
+    const caret: zui.TextInputArea = .{ .caret = .{ .x = 10, .y = 20, .width = 2, .height = 16 } };
+    host.zuiApply(.main, .{ .text_input = caret });
+    host.zuiApply(.main, .{ .text_input = caret });
+    host.zuiApply(.main, .{});
+    host.zuiApply(.main, .{});
+    try testing.expectEqual(2, host.platform.text_input_count);
+    try testing.expectEqualDeep(@as(?[4]f32, .{ 15, 30, 3, 24 }), host.platform.text_inputs[0]);
+    try testing.expectEqual(@as(?[4]f32, null), host.platform.text_inputs[1]);
 }

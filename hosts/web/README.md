@@ -31,11 +31,11 @@ the sokol renderer's OpenGL window (CI runs it under `xvfb-run`):
 | `zig build check` | compile without running: the client, the tour on the web host and the tour's worker for `wasm32-freestanding`, and the native tools that run the tour |
 | `zig build test-demo` | stream the tour to the client under Node, and check every frame decodes to what was drawn; run the tour in a worker under Node, and check every frame is the one the tour draws natively |
 | `zig build test-draw` | draw a frame of each of the tour's screens in headless Chromium, with one sample per pixel and with four, and check each against the sokol renderer drawing it alike |
-| `zig build test-input` | give the page input in headless Chromium, run the tour on the records the client wrote of it, and check the tour took them and the page shows the cursor it asks for |
+| `zig build test-input` | give the page input in headless Chromium, also through the hidden text field an IME composes in, run the tour on the records the client wrote of it, and check the tour took them and the page shows the cursor it asks for |
 | `zig build site` | write the published page, the tour on the web host, to `zig-out/site`: its page, the scripts of its page and worker, the frame drawer, `zui-tour.wasm` and its fonts' licences; serve that directory over HTTP (or HTTPS, off `localhost`) to run the tour in a browser |
 | `zig build test-site` | serve the site without isolation headers, open it in headless Chromium, and check its service worker isolates it, the tour draws and times its frames, sleeps while idle, and its input wakes it and reaches the tour, whose tasks run without input |
 | `zig build tour` | write the same page to `zig-out/tour`; serve that directory cross-origin isolated (`Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`), or over HTTPS, where its service worker isolates it, to run the tour |
-| `zig build test-host` | serve the tour on the web host cross-origin isolated, open it in headless Chromium without a display, and check its worker draws the tour, sleeps while idle, takes the page's input, shows the cursor the tour asks for on the page's canvas, draws the same screen again after its WebGL context is lost and restored, hears the page's settings, the tour restyled as the emulated media queries and the document's direction change, and draws nothing while another tab hides the page |
+| `zig build test-host` | serve the tour on the web host cross-origin isolated, open it in headless Chromium without a display, and check its worker draws the tour, sleeps while idle, takes the page's input, shows the cursor the tour asks for on the page's canvas, draws the same screen again after its WebGL context is lost and restored, hears the page's settings, the tour restyled as the emulated media queries and the document's direction change, draws nothing while another tab hides the page, takes typed and composed text once through the hidden text field at the Port field's caret, and copies to and reads from the page's clipboard |
 
 When `test-draw` fails, it prints each failing frame's numbers and
 writes the frame drawn and its reference as PPM images to a new
@@ -248,9 +248,40 @@ tour's frames on the worker's `performance.now()`
 still for all of a turn, and exports what its strip shows
 (`zuiTourNewestFrameMicroseconds`); `zui_web.worker` exports the tasks
 started and finished (`zuiWebTasksStarted`, `zuiWebTasksFinished`), for
-the checks. Limits: there is no text input, clipboard or opened URL, and
+the checks.
+
+**Text input and services.** While a frame asks for text input, the host
+posts the caret, in CSS pixels, to the page, which places a hidden text
+field there (`web/page_text_field.mjs`, `HiddenTextField`), transparent
+rather than hidden from layout, so it keeps the focus and the browser's
+IME composes in it; a frame that stops asking takes it away and gives
+the canvas the focus back. While the field has the focus the canvas
+hears no keys: the field sends each key as the canvas would, but a key's
+text comes only from what the field took, its `input` or, for an IME,
+`compositionend`, so a printable key's text reaches the record once. The
+record has no place for a composition in progress, so only committed
+text is sent. `zuiClipboard` copies through the page's
+`navigator.clipboard.writeText`, refusing more than 64 KiB or text that
+is not UTF-8, and reads through `readText`, one read at a time (another
+is `Busy`): the page answers with a sink call, the text or the failure
+(`denied` when the browser refuses, `unavailable` otherwise), and the
+host publishes it into the read's sink, with what did not fit its 64 KiB
+counted as left out. `zuiOpenUrl` refuses what `zui.isOpenableUrl`
+refuses and hands the rest to the page, which opens it in a new tab
+(`window.open(url, "_blank", "noopener")`). `test-input` places the
+field and checks that a key typed into it and an IME's composition
+(`Input.imeSetComposition`, `Input.insertText`) each reach the records
+once; `test-host` clicks Settings' Port field, checks the field is
+placed at its caret, that a typed key's and a composition's text reach
+the tour once each, and, with the clipboard's permission granted
+(`Browser.grantPermissions`), that what the module copies reaches the
+page's clipboard and what the page copies answers the module's read. The
+tour does not use the clipboard, so the tour target exports calls for
+the check alone (`zuiTourCopyForCheck`, `zuiTourPasteForCheck`). Limits:
 `navigator.language` is read but not mapped to a direction when the
-document gives none.
+document gives none; the browser may block a new tab opened without the
+user's gesture, and allows clipboard reads only with the user's
+permission.
 
 **The published page** is the tour target's, `web/index.html`, the tour
 on the web host. GitHub Pages cannot send the headers that make a page

@@ -163,7 +163,7 @@ export async function openHeadlessPage(chromiumPath, served, { headers = {}, att
       if (waited >= loadMilliseconds) throw new Error(`the page did not load within ${loadMilliseconds / 1000} s`);
       await new Promise((resolve) => setTimeout(resolve, pollMilliseconds));
     }
-    return { evaluate, evaluateInWorker, send, pageErrors, close };
+    return { evaluate, evaluateInWorker, send, sendToBrowser, pageUrl, pageErrors, close };
   } catch (error) {
     await close();
     throw error;

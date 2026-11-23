@@ -12,7 +12,10 @@
 // the page's settings first, then each change: an emulated dark scheme
 // darkens the canvas and a light one lightens it, more contrast and a
 // right-to-left document change it, and reduced motion stills Clickable
-// Chaos's wall; and, while another tab hides the page, draw nothing.
+// Chaos's wall; while another tab hides the page, draw nothing; place the
+// page's hidden text field at the caret of Settings' Port field, through
+// which a typed key and an IME's composition reach the tour once each; and
+// copy to and read from the page's clipboard, with the permission granted.
 
 import { readdir } from "node:fs/promises";
 import { extname, join, relative, sep } from "node:path";
@@ -58,6 +61,7 @@ try {
   await fail(error.message);
 }
 const { evaluate, send } = page;
+const sendToBrowserOrFail = (method, params) => page.sendToBrowser(method, params).catch((error) => fail(`${method}: ${error.message}`));
 const inWorkerOrNot = (expression) => page.evaluateInWorker("host_worker.mjs", expression);
 const inWorker = (expression) => inWorkerOrNot(expression).catch((error) => fail(`the worker: ${[error.message, ...page.pageErrors].join("\n")}`));
 
@@ -301,6 +305,52 @@ await expectSetting("reduced_motion", "false", () => emulateMedia({ "prefers-red
 const movingAgainTurns = await turnsInIdleTime();
 if (movingAgainTurns < movingTurnsFewest) await fail(`the worker took ${movingAgainTurns} turns in ${idleMilliseconds / 1000} s on Clickable Chaos once motion was no longer reduced`);
 
+// Back on Settings, through its entry on the rail, a click in its Port
+// field gives it the focus, and the page its hidden field.
+const settingsOnTheRail = { x: 70, y: 348 };
+const portField = { x: 540, y: 450 };
+async function click({ x, y }) {
+  await send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount: 1 });
+  await send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount: 1 });
+}
+await expectDrawnAfter("a click on Settings in the rail", () => click(settingsOnTheRail));
+await pause(animationSettleMilliseconds);
+await expectDrawnAfter("a click in the Port field", () => click(portField));
+await waitUntil(() => evaluate(`document.activeElement?.tagName === "TEXTAREA"`), "the page did not focus its hidden text field after a click in the Port field");
+const placedField = await evaluate(`(({ left, top }, bounds) => [parseFloat(left) - bounds.left, parseFloat(top) - bounds.top])(document.activeElement.style, host.canvas.getBoundingClientRect())`);
+const portFieldReach = 200;
+if (Math.abs(placedField[0] - portField.x) > portFieldReach || Math.abs(placedField[1] - portField.y) > 20) await fail(`the hidden text field is at ${placedField}, not at the Port field's caret near ${[portField.x, portField.y]}`);
+
+const textReceived = () =>
+  inWorker(`new TextDecoder().decode(new Uint8Array(zuiHost.memory.buffer, zuiHost.module.zuiTourTextReceived() >>> 0, zuiHost.module.zuiTourTextReceivedBytes() >>> 0).slice())`);
+const receivedBefore = await textReceived();
+await send("Input.dispatchKeyEvent", { type: "keyDown", key: "7", code: "Digit7", windowsVirtualKeyCode: 55, text: "7" });
+await send("Input.dispatchKeyEvent", { type: "keyUp", key: "7", code: "Digit7", windowsVirtualKeyCode: 55 });
+const composed = "日本語";
+await send("Input.imeSetComposition", { text: "日本", selectionStart: 2, selectionEnd: 2 });
+await send("Input.insertText", { text: composed });
+const expectedText = `${receivedBefore}7${composed}`;
+await waitUntil(async () => (await textReceived()).length >= expectedText.length, "the tour did not receive the typed key's and the composition's text");
+await pause(500);
+const receivedText = await textReceived();
+if (receivedText !== expectedText) await fail(`the tour received the text ${JSON.stringify(receivedText)}, not ${JSON.stringify(expectedText)}, once each`);
+
+await sendToBrowserOrFail("Browser.grantPermissions", { origin: new URL(page.pageUrl).origin, permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"] });
+const copiedByTheWorker = "zui \u2713 copied from the worker";
+if (!(await inWorker("zuiHost.module.zuiTourCopyForCheck()"))) await fail("the host refused to copy to the clipboard");
+await waitUntil(async () => (await evaluate("navigator.clipboard.readText()")) === copiedByTheWorker, "the page's clipboard did not hold what the worker copied");
+const copiedByThePage = "zui \u2713 copied by the page";
+await evaluate(`navigator.clipboard.writeText(${JSON.stringify(copiedByThePage)}).then(() => true)`);
+const pasted = () => inWorker(`(() => {
+  const at = zuiHost.module.zuiTourPastedForCheck() >>> 0;
+  const bytes = new Uint8Array(zuiHost.memory.buffer);
+  return new TextDecoder().decode(bytes.slice(at, bytes.indexOf(0, at)));
+})()`);
+if (!(await inWorker("zuiHost.module.zuiTourPasteForCheck()"))) await fail("the host refused to read the clipboard");
+await waitUntil(async () => (await pasted()) !== "", "the host did not answer the clipboard read");
+const pastedText = await pasted();
+if (pastedText !== copiedByThePage) await fail(`the clipboard read answered ${JSON.stringify(pastedText)}, not what the page copied, ${JSON.stringify(copiedByThePage)}`);
+
 const failed = await failures();
 if (failed.length > 0) await fail(`the page failed: ${failed.join("\n")}`);
 
@@ -313,5 +363,6 @@ console.log(
     `after a lost context came back, ${(restoredChange * 100).toFixed(2)}% of Settings differs from before; ` +
     `the canvas's luminance went from ${darkLuminance.toFixed(0)} dark to ${lightLuminance.toFixed(0)} light, more contrast changed ${(contrastChange * 100).toFixed(1)}% of it ` +
     `and right to left ${(mirroredChange * 100).toFixed(0)}%; hidden, the worker drew no frame and took ${turnsWhileHidden} turns in ${hiddenMilliseconds / 1000} s; ` +
-    `on Clickable Chaos it took ${movingTurns} turns in ${idleMilliseconds / 1000} s, ${reducedMotionIdle.turns} with reduced motion and ${movingAgainTurns} after`,
+    `on Clickable Chaos it took ${movingTurns} turns in ${idleMilliseconds / 1000} s, ${reducedMotionIdle.turns} with reduced motion and ${movingAgainTurns} after; ` +
+    `the Port field's hidden text field took ${JSON.stringify(receivedText.slice(receivedBefore.length))} once, and the clipboard went both ways`,
 );

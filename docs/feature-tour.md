@@ -1265,7 +1265,9 @@ pointer shape comes from the hot element's `cursor`. The text-input area
 comes from `requestTextInput`, which an editable calls each frame with
 the element it draws as its caret, so the host can place the IME window
 and show an on-screen keyboard. The host reads them with
-`frame.requests()`.
+`frame.requests()`. The web host places a hidden text field over the
+caret, so the browser's IME composes there and its committed text
+reaches the record.
 
 `src/ui/search.zig`
 
@@ -1998,8 +2000,11 @@ answering the item chosen. The native Linux host reads and writes the
 clipboard through the compositor's selection, shows notifications
 through the desktop's notification daemon, shows the desktop portal's
 file dialogs and hands URLs to the portal; Wayland has no native menus,
-so it declares none. the native hosts'`zig build services` calls every
-one of them from a button and shows each answer beside it.
+so it declares none. The web host reads and writes the clipboard through
+the page's `navigator.clipboard`, a read answered once the page has it,
+and opens URLs in a new tab, refusing what `zui.isOpenableUrl` refuses.
+the native hosts'`zig build services` calls every one of them from a
+button and shows each answer beside it.
 
 `src/app.zig`
 
@@ -2696,8 +2701,11 @@ the same pointer, wheel, keys, repeats, focus, cursor, scale from
 `Xft.dpi`, clipboard through `CLIPBOARD`, files dropped through XDND,
 environment, services and watching, drawn by the sokol renderer through
 EGL; and, in `hosts/web/`, the web host, which runs an application in a
-Web Worker and draws its frames over `zui_wire` through the WebGL
-renderer in `renderers/webgl/`.
+dedicated Web Worker drawing on the page's canvas through the WebGL
+renderer in `renderers/webgl/` (pointer, wheel, keys, text through a
+hidden field the IME composes in, cursor, the page's environment,
+visibility as lifecycle, a lost WebGL context, the clipboard and opening
+URLs).
 
 <a id="renderer"></a>
 
