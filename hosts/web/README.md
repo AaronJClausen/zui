@@ -34,7 +34,7 @@ the sokol renderer's OpenGL window (CI runs it under `xvfb-run`):
 | `zig build site` | write the published page, the client, the frame drawer, the tour's worker and its fonts to `zig-out/site`; serve that directory over HTTP (or HTTPS, off `localhost`) to run the tour in a browser |
 | `zig build test-site` | serve the site without isolation headers, open it in headless Chromium, and check its service worker isolates it, it draws the tour's frames, sleeps while idle, and its input wakes it and reaches the tour |
 | `zig build tour` | write the tour on the web host to `zig-out/tour`: its page, the scripts of its page and worker, and `zui-tour.wasm`; serve that directory cross-origin isolated (`Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`), or over HTTPS, where its service worker isolates it, to run the tour |
-| `zig build test-host` | serve the tour on the web host cross-origin isolated, open it in headless Chromium without a display, and check its worker draws the tour, sleeps while idle, takes the page's input, shows the cursor the tour asks for on the page's canvas, and draws the same screen again after its WebGL context is lost and restored |
+| `zig build test-host` | serve the tour on the web host cross-origin isolated, open it in headless Chromium without a display, and check its worker draws the tour, sleeps while idle, takes the page's input, shows the cursor the tour asks for on the page's canvas, draws the same screen again after its WebGL context is lost and restored, hears the page's settings, the tour restyled as the emulated media queries and the document's direction change, and draws nothing while another tab hides the page |
 
 When `test-draw` fails, it prints each failing frame's numbers and
 writes the frame drawn and its reference as PPM images to a new
@@ -151,12 +151,22 @@ during the step, or input, makes it due at once. The driver starts on
 the first turn after the canvas arrives, its surface is `.web` with that
 id, a lost context suspends the surfaces on the next turn and its return
 resumes them, and the cursor goes to the platform only when it changes.
-Input waits in an inbox of 256 events and 1,024 bytes of text, in CSS
-pixels until a poll converts them to layout units over the application's
-zoom; what does not fit is dropped and counted in the record.
-`zig build test` runs `zui_testing.expectPushedHostConforms` on it over
-a scripted platform whose loop waits on the real clock, and `check`
-compiles it for the browser as the tour target's host.
+The page's settings arrive as text, `changeSetting(name, value)`, each
+named as the field of `PageEnvironment` (theme, contrast, reduced motion
+and transparency, locale, direction and window focus) and the
+`zui.EnvironmentChange` it becomes; until the page says otherwise each
+is `zui.Environment`'s default, the first record reports them all, and a
+record after reports only those that changed. A locale longer than
+`zui.Locale` holds keeps the whole subtags that fit. `showPage(false)`,
+the page hidden, is `suspend` in the next record, after which the
+surfaces are suspended and nothing is drawn; `showPage(true)` is
+`resume`, and the surfaces resume unless the context is lost. Input
+waits in an inbox of 256 events and 1,024 bytes of text, in CSS pixels
+until a poll converts them to layout units over the application's zoom;
+what does not fit is dropped and counted in the record. `zig build test`
+runs `zui_testing.expectPushedHostConforms` on it over a scripted
+platform whose loop waits on the real clock, and `check` compiles it for
+the browser as the tour target's host.
 
 **The browser's host** is `Host` (`src/browser_host.zig`), `HostOn` the
 imports of the dedicated worker it runs in, `web/host_worker.mjs`. The
@@ -166,7 +176,16 @@ transfers the canvas to it as an `OffscreenCanvas`; `input_recorder.mjs`
 reads the canvas's events into `messageSink`, which posts the calls each
 event made as one message, and the page measures the canvas's CSS size
 and `devicePixelRatio` on the animation frame after a resize or a change
-of scale, and sets the cursor the worker posts back. The worker
+of scale, and sets the cursor the worker posts back.
+`web/page_environment.mjs`'s `followPageEnvironment` reads the page's
+settings into the same sink, once at the start and again on each change:
+`prefers-color-scheme`, `prefers-contrast: more` or
+`forced-colors: active` as high contrast, `prefers-reduced-motion`,
+`prefers-reduced-transparency`, `navigator.language` and
+`languagechange`, the document's computed `direction`, watched for
+changes of the root's `dir` and `lang`, `focus` and `blur`, and
+`visibilitychange`. The worker delivers the first settings before it
+attaches the canvas, so the first record carries them. The worker
 instantiates the module on shared memory and calls its `zuiWebRun`,
 which runs the application through `zui_app.runWith`; the host's
 `zuiRun` keeps its turns and calls `zuiWebHostYield`, which throws,
@@ -211,10 +230,20 @@ alone, while the page sees at least 30 animation frames; show the
 pointer cursor on the page's canvas with the mouse over the rail, and
 change the canvas on Ctrl+PageDown; and, after `WEBGL_lose_context`
 loses and restores its context on Settings, draw Settings again, at most
-2% of its pixels changed. Limits: no environment, lifecycle or window
-focus is reported yet, there is no text input, clipboard or opened URL,
-and the tour's strip times its frames on the `SteppedIo`'s clock, so it
-shows 0 µs.
+2% of its pixels changed. Then, through `Emulation.setEmulatedMedia`,
+the worker must hear the page's first settings; an emulated dark scheme
+must darken the canvas's mean luminance and a light one lighten it, each
+by at least 20 of 255; more contrast must change at least 0.5% of
+Settings and a right-to-left document at least 5%, each back within 2%
+when undone; reduced transparency and a changed `navigator.language`,
+which the tour does not show, must reach the worker; another tab in
+front must hide the page and take its focus, and the worker draw no
+frame in 1.5 s, and the page brought to the front again draw Settings as
+before; and on Clickable Chaos, whose wall moves, reduced motion must
+leave the worker at most 3 turns in 2 s. Limits: there is no text input,
+clipboard or opened URL, `navigator.language` is read but not mapped to
+a direction when the document gives none, and the tour's strip times its
+frames on the `SteppedIo`'s clock, so it shows 0 µs.
 
 **The published page** puts it all together: `web/index.html` starts the
 tour's worker, draws each frame it sends on the canvas, and sends it the

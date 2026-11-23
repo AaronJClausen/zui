@@ -51,7 +51,7 @@ pub fn build(b: *std.Build) void {
     const test_input = b.step("test-input", "Give the client input in headless Chromium, run the tour on the records it writes, and check the tour took them and the page shows its cursor");
     const site_step = b.step("site", "Write the published page, the client, the tour's worker and the tour's fonts to zig-out/site");
     const tour_step = b.step("tour", "Write the tour on the web host, its page, its worker's scripts and its module, to zig-out/tour");
-    const test_host = b.step("test-host", "Open the tour on the web host in headless Chromium, and check it draws the tour, sleeps while idle, its input reaches the tour, it shows the cursor the tour asks for, and a lost WebGL context comes back with the tour's screen kept");
+    const test_host = b.step("test-host", "Open the tour on the web host in headless Chromium, and check it draws the tour, sleeps while idle, its input reaches the tour, it shows the cursor the tour asks for, a lost WebGL context comes back with the tour's screen kept, the page's settings restyle it, and a hidden page draws nothing");
     const test_site = b.step("test-site", "Serve the published page without isolation headers, open it in headless Chromium, and check its service worker isolates it, it draws the tour's frames, sleeps while idle, and its input wakes it and reaches the tour");
     const browser = b.option([]const u8, "browser", "The Chromium that `test-draw` runs headless (default: chromium)") orelse "chromium";
     const worker_target = b.resolveTargetQuery(.{
@@ -296,6 +296,7 @@ const tour_page_scripts = [_][]const u8{
     "host_page.mjs",
     "host_worker.mjs",
     "input_recorder.mjs",
+    "page_environment.mjs",
     "worker_port.mjs",
     "shared_module.mjs",
     "tour_thread.mjs",

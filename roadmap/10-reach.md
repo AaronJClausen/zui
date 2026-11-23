@@ -786,6 +786,62 @@ its frames on the `SteppedIo`'s clock here, which stands still within a
 turn, so it shows 0 µs until slice 5 gives it the worker's
 `performance.now()`. Slice 4, the environment, is next.
 
+Slice 4 is done: the page reports its settings, its focus and its
+visibility, and the host turns them into the record's environment and
+lifecycle. `web/page_environment.mjs`'s `followPageEnvironment` reads
+`prefers-color-scheme`, `prefers-contrast: more` or
+`forced-colors: active` (high contrast, `Environment.Contrast` having no
+low), `prefers-reduced-motion`, `prefers-reduced-transparency`,
+`navigator.language` with `languagechange`, the root's computed
+`direction` under a `MutationObserver` on `dir` and `lang`, `focus` and
+`blur`, and `visibilitychange`, each a table entry of a name and how it
+is read and watched, into two new sink calls, `setting(name, value)` and
+`pageShown(shown)`; `web/host_page.mjs` sends the first readings with
+`start`, and the worker delivers them before it attaches the canvas, so
+the first record carries what the page measured. In the module,
+`zuiWebSetting` and `zuiWebPageShown` reach `HostOn.changeSetting` and
+`showPage`. A setting is text, named as a field of
+`zui_web.PageEnvironment`, whose defaults are `zui.Environment`'s and
+whose fields are named as the `zui.EnvironmentChange` each becomes: a
+poll reports every field the first time and then only those that differ
+from what it last reported, so a value unchanged, or changed and changed
+back between polls, sends nothing. A locale longer than `zui.Locale`
+holds keeps its whole subtags that fit. A hidden page is `suspend` in
+the next record, and the surfaces are suspended after that step, so the
+application polls the `suspend` before it stops drawing; shown again, it
+is `resume`, and the surfaces resume unless the context is lost. Input
+the inbox holds while the surfaces are suspended no longer asks for
+animation frames, which a lost context did before. The accent,
+`11-polish:18-system-accent`, is one field of `PageEnvironment` (with
+its parsing, as text, beside the others) and one line of `pageSettings`
+on the page. Natively, eight new tests check the first record's
+settings, each of the seven fields reaching the next record once and an
+unchanged one sending nothing, a change undone between polls, unknown
+names and values, a long locale, `suspend` and `resume` with no
+animation frames for input while hidden, and a page shown while its
+context is lost; `expectPushedHostConforms` runs a second time with
+hiding the page as the platform taking the surface away. `test` passes,
+55 tests, in Debug, ReleaseFast and ReleaseSafe and under
+ThreadSanitizer, and `check`, `test-input` and `test-demo` in Debug and
+ReleaseSafe pass. `test-host` now also checks, through the DevTools
+protocol, that the worker heard the page's first settings; that an
+emulated dark scheme darkened the canvas's mean luminance to 25 of 255
+and a light one lightened it to 247; that more contrast changed 4.1% of
+Settings and a right-to-left root 29%, each undone within 2%; that
+reduced transparency and a `navigator.language` replaced on the page,
+which the tour does not show and the protocol cannot change in a loaded
+page, reached the worker; that another tab in front
+(`Target.createTarget`) hid the page and took its focus, and the worker
+drew no frame and took 0 turns in 1.5 s, and `Page.bringToFront` drew
+Settings again as before; and that on Clickable Chaos, whose wall took
+37 or 38 turns in 2 s (14 with other builds on the machine), reduced
+motion left 2. It takes about 26 s. Its existing idle check on Settings,
+which this slice leaves as it was, failed in 4 of 14 runs here, and in 2
+of 6 of `main`'s own, with 4 to 10 turns in 2 s while other builds
+loaded the machine (a load average of 6 to 10). Not run: `test-host` in
+CI, which has no job for it yet. Slice 5, the published page on the
+host, is next.
+
 Decided here:
 
 - **A task's worker wakes the host's by message.** Tasks run only inside
@@ -808,6 +864,13 @@ Decided here:
 - **Exports, not a ring of shared memory,** carry the page's events into
   the module: the worker is the only caller, between turns, and the
   module's inbox already bounds them.
+- **Settings cross as text,** a field name and a value, so the page and
+  the host each name one more setting in one place; the host keeps the
+  page's settings and reports what differs at each poll, as the Linux
+  host does, rather than queueing each change.
+- **A hidden page suspends the surfaces,** after the step that polls its
+  `suspend`, so nothing is drawn while no one sees it, whether or not
+  the browser still gives the worker animation frames.
 
 ## 10-reach:03-services — Services
 

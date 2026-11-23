@@ -41,6 +41,64 @@ pub const BrowserPointer = struct {
     at_milliseconds: f64,
 };
 
+/// The settings the page reads from its media queries, `navigator.language`,
+/// the document's direction and the window's focus, each field named as the
+/// `zui.EnvironmentChange` it becomes. Until the page says otherwise, each
+/// is `zui.Environment`'s default; the first record reports every field.
+///
+/// The page sends each as text: a `bool` as `"true"` or `"false"`, an enum
+/// by its tag name, a locale as its BCP 47 tag.
+///
+/// ```zig
+/// host.changeSetting("theme", "dark");
+/// host.changeSetting("locale", "fr-CA");
+/// ```
+pub const PageEnvironment = struct {
+    theme: zui.Environment.Theme = .light,
+    contrast: zui.Environment.Contrast = .normal,
+    reduced_motion: bool = false,
+    reduced_transparency: bool = false,
+    locale: zui.Locale = .default,
+    direction: zui.ReadingDirection = .left_to_right,
+    window_focused: bool = true,
+
+    const Setting = std.meta.FieldEnum(PageEnvironment);
+
+    /// Sets the setting `name` to the value `text` names; false, and
+    /// nothing changed, when it names no setting or no value of it.
+    pub fn set(self: *PageEnvironment, name: []const u8, text: []const u8) bool {
+        const setting = std.meta.stringToEnum(Setting, name) orelse return false;
+        switch (setting) {
+            inline else => |field| {
+                const Value = @FieldType(PageEnvironment, @tagName(field));
+                @field(self, @tagName(field)) = parseSetting(Value, text) orelse return false;
+            },
+        }
+        return true;
+    }
+
+    fn parseSetting(comptime Value: type, text: []const u8) ?Value {
+        if (Value == bool) {
+            if (std.mem.eql(u8, text, "true")) return true;
+            if (std.mem.eql(u8, text, "false")) return false;
+            return null;
+        }
+        if (Value == zui.Locale) return localeKeepingWholeSubtags(text);
+        return std.meta.stringToEnum(Value, text);
+    }
+
+    /// A tag longer than `zui.Locale` holds keeps the subtags that fit,
+    /// so `"en-US-x-twain"` cut short is still `"en-US"`, never `"en-US-x-tw"`.
+    fn localeKeepingWholeSubtags(language_tag: []const u8) ?zui.Locale {
+        if (language_tag.len == 0) return null;
+        var kept = language_tag;
+        while (kept.len > zui.Locale.capacity) {
+            kept = kept[0 .. std.mem.lastIndexOfScalar(u8, kept, '-') orelse return null];
+        }
+        return zui.Locale.parse(kept) catch unreachable;
+    }
+};
+
 /// The browser's host: a pushed host, whose loop is the page's event loop,
 /// with its window half over a platform that `Platform` is. The platform
 /// hands the host the canvas, its size and its events, and takes the
@@ -62,6 +120,8 @@ pub const BrowserPointer = struct {
 /// host.attachCanvas(canvas_id, .{ css_width, css_height }, device_pixel_ratio);
 /// host.pointerMove(.{ .id = 1, .kind = 0, .position = .{ x, y }, .at_milliseconds = event_time });
 /// host.loseContext();
+/// host.changeSetting("theme", "dark");
+/// host.showPage(false);
 /// ```
 pub fn HostOn(comptime Platform: type) type {
     comptime checkPlatform(Platform);
@@ -83,7 +143,11 @@ pub fn HostOn(comptime Platform: type) type {
         inbox: Inbox = .{},
         shown_cursor: ?zui.Cursor = null,
         context_lost: bool = false,
+        page_shown: bool = true,
         surfaces_suspended: bool = false,
+        page_environment: PageEnvironment = .{},
+        /// Null until the first poll reports every setting.
+        reported_environment: ?PageEnvironment = null,
         woken: std.atomic.Value(bool) = .init(false),
         scheduled: Schedule = .input,
         phase: Phase = .not_running,
@@ -177,8 +241,11 @@ pub fn HostOn(comptime Platform: type) type {
             }
             const stepped = SteppedIo.behind(self.io);
             if (stepped) |stepped_io| stepped_io.step(self.platform.now().nanoseconds);
-            try self.followContext();
+            if (!self.context_lost and self.page_shown) try self.resumeSurfaces();
+            if (self.context_lost) self.suspendSurfaces();
             const next = try self.driver.step() orelse return self.end();
+            // After the step, so the application polled the `suspend` first.
+            if (!self.page_shown) self.suspendSurfaces();
             self.scheduleTurn(self.scheduleAfter(next, stepped));
         }
 
@@ -191,7 +258,8 @@ pub fn HostOn(comptime Platform: type) type {
                     sooner = sooner.sooner(.{ .at = .fromNanoseconds(std.math.lossyCast(u64, wake_nanoseconds)) });
                 }
             }
-            if (self.woken.load(.acquire) or self.inbox.event_count > 0) sooner = .immediately;
+            const inbox_waits_for_a_poll = self.inbox.event_count > 0 and !self.surfaces_suspended;
+            if (self.woken.load(.acquire) or inbox_waits_for_a_poll) sooner = .immediately;
             return switch (sooner) {
                 .immediately => .animation_frame,
                 .at => |instant| .{ .timer = instant },
@@ -199,14 +267,16 @@ pub fn HostOn(comptime Platform: type) type {
             };
         }
 
-        fn followContext(self: *Self) !void {
-            if (self.context_lost and !self.surfaces_suspended) {
-                self.driver.suspendSurfaces();
-                self.surfaces_suspended = true;
-            } else if (!self.context_lost and self.surfaces_suspended) {
-                try self.driver.resumeSurfaces();
-                self.surfaces_suspended = false;
-            }
+        fn suspendSurfaces(self: *Self) void {
+            if (self.surfaces_suspended) return;
+            self.driver.suspendSurfaces();
+            self.surfaces_suspended = true;
+        }
+
+        fn resumeSurfaces(self: *Self) !void {
+            if (!self.surfaces_suspended) return;
+            try self.driver.resumeSurfaces();
+            self.surfaces_suspended = false;
         }
 
         fn end(self: *Self) void {
@@ -259,6 +329,24 @@ pub fn HostOn(comptime Platform: type) type {
         pub fn restoreContext(self: *Self) void {
             self.context_lost = false;
             self.needTurn();
+        }
+
+        /// One of the page's settings, `PageEnvironment.set`'s `name` and
+        /// `text`, reported in the next record when it changed. One the
+        /// host does not know is left out.
+        pub fn changeSetting(self: *Self, name: []const u8, text: []const u8) void {
+            const before = self.page_environment;
+            if (!self.page_environment.set(name, text)) return;
+            if (!std.meta.eql(before, self.page_environment)) self.needTurn();
+        }
+
+        /// `document.visibilityState`: a page hidden is `suspend` in the
+        /// next record, after which the surfaces are suspended and nothing
+        /// is drawn, and one shown again is `resume`, its surfaces resumed.
+        pub fn showPage(self: *Self, shown: bool) void {
+            if (shown == self.page_shown) return;
+            self.page_shown = shown;
+            self.deliver(.{ .lifecycle = if (shown) .@"resume" else .@"suspend" });
         }
 
         /// A button pressed, `MouseEvent.button`; one zui has no
@@ -335,9 +423,10 @@ pub fn HostOn(comptime Platform: type) type {
             };
         }
 
-        /// The page's events since the last poll, in layout units: CSS
-        /// pixels over the application's zoom. The scale is
-        /// `devicePixelRatio`.
+        /// The settings that changed since the last poll, every one the
+        /// first time, then the page's events since the last poll, in
+        /// layout units: CSS pixels over the application's zoom. The scale
+        /// is `devicePixelRatio`.
         pub fn zuiPoll(self: *Self, window: zui.WindowId, record: *zui.RecordBuilder) bool {
             std.debug.assert(window == .main);
             const css_pixels_per_unit = record.params.zoom;
@@ -346,6 +435,7 @@ pub fn HostOn(comptime Platform: type) type {
                 .viewport = .{ self.canvas_css_size[0] / css_pixels_per_unit, self.canvas_css_size[1] / css_pixels_per_unit },
                 .scale = self.device_pixel_ratio,
             });
+            self.reportEnvironment(record);
             for (self.inbox.events[0..self.inbox.event_count]) |queued| {
                 const converted = inLayoutUnits(queued, css_pixels_per_unit);
                 switch (converted) {
@@ -357,6 +447,17 @@ pub fn HostOn(comptime Platform: type) type {
             record.dropped_text_bytes +|= self.inbox.dropped_text_bytes;
             self.inbox.clear();
             return true;
+        }
+
+        fn reportEnvironment(self: *Self, record: *zui.RecordBuilder) void {
+            const reported = self.reported_environment;
+            inline for (std.meta.fields(PageEnvironment)) |field| {
+                const value = @field(self.page_environment, field.name);
+                if (reported == null or !std.meta.eql(@field(reported.?, field.name), value)) {
+                    record.append(.{ .environment = @unionInit(zui.EnvironmentChange, field.name, value) });
+                }
+            }
+            self.reported_environment = self.page_environment;
         }
 
         fn inLayoutUnits(queued: zui.Event, css_pixels_per_unit: f32) zui.Event {
@@ -451,8 +552,10 @@ const ScriptedPlatform = struct {
     cursor_count: usize = 0,
     woken: std.Io.Event = .unset,
     quitting: std.atomic.Value(bool) = .init(false),
-    /// A change of the WebGL context, delivered before the next turn.
-    context_change: ?enum { lost, restored } = null,
+    /// Delivered before the next turn.
+    surface_change: ?SurfaceChange = null,
+
+    const SurfaceChange = enum { context_lost, context_restored, page_hidden, page_shown };
 
     const longest_wait_ns = 10 * std.time.ns_per_s;
 
@@ -483,11 +586,13 @@ const ScriptedPlatform = struct {
     pub fn run(self: *ScriptedPlatform, host_turns: Turns) !void {
         const host: *ScriptedHost = @ptrCast(@alignCast(host_turns.host));
         while (!self.quitting.load(.acquire)) {
-            if (self.context_change) |change| {
-                self.context_change = null;
+            if (self.surface_change) |change| {
+                self.surface_change = null;
                 switch (change) {
-                    .lost => host.loseContext(),
-                    .restored => host.restoreContext(),
+                    .context_lost => host.loseContext(),
+                    .context_restored => host.restoreContext(),
+                    .page_hidden => host.showPage(false),
+                    .page_shown => host.showPage(true),
                 }
             }
             switch (self.scheduled) {
@@ -514,17 +619,24 @@ const ScriptedHost = HostOn(ScriptedPlatform);
 
 const ConformanceHarness = struct {
     web_host: ScriptedHost,
+    surface_taken_by: enum { losing_the_context, hiding_the_page },
 
     pub fn host(self: *ConformanceHarness) *ScriptedHost {
         return &self.web_host;
     }
 
     pub fn takeSurfaceAway(self: *ConformanceHarness) void {
-        self.web_host.platform.context_change = .lost;
+        self.web_host.platform.surface_change = switch (self.surface_taken_by) {
+            .losing_the_context => .context_lost,
+            .hiding_the_page => .page_hidden,
+        };
     }
 
     pub fn giveSurfaceBack(self: *ConformanceHarness) void {
-        self.web_host.platform.context_change = .restored;
+        self.web_host.platform.surface_change = switch (self.surface_taken_by) {
+            .losing_the_context => .context_restored,
+            .hiding_the_page => .page_shown,
+        };
     }
 
     pub fn quit(self: *ConformanceHarness) void {
@@ -533,7 +645,13 @@ const ConformanceHarness = struct {
 };
 
 test "the web host's logic, on a scripted page, keeps the pushed host's contract" {
-    var harness: ConformanceHarness = .{ .web_host = .{ .platform = .{ .io = testing.io } } };
+    var harness: ConformanceHarness = .{ .web_host = .{ .platform = .{ .io = testing.io } }, .surface_taken_by = .losing_the_context };
+    harness.web_host.attachCanvas(1, .{ 800, 600 }, 1);
+    try zui_testing.expectPushedHostConforms(ScriptedHost, &harness, .{ .io = testing.io });
+}
+
+test "the web host's logic keeps the pushed host's contract when hiding the page takes its surface away" {
+    var harness: ConformanceHarness = .{ .web_host = .{ .platform = .{ .io = testing.io } }, .surface_taken_by = .hiding_the_page };
     harness.web_host.attachCanvas(1, .{ 800, 600 }, 1);
     try zui_testing.expectPushedHostConforms(ScriptedHost, &harness, .{ .io = testing.io });
 }
@@ -548,6 +666,7 @@ const ScriptedDriver = struct {
     stops: u32 = 0,
     suspends: u32 = 0,
     resumes: u32 = 0,
+    suspended: bool = false,
     wake_while_stepping: bool = false,
     event_buffer: [ScriptedHost.inbox_event_capacity + 8]zui.Event = undefined,
     text_buffer: [ScriptedHost.inbox_text_capacity]u8 = undefined,
@@ -576,6 +695,10 @@ const ScriptedDriver = struct {
 
     fn step(context: *anyopaque) anyerror!?zui.NextFrame {
         const self = of(context);
+        if (self.suspended) {
+            self.steps += 1;
+            return .on_event;
+        }
         if (self.builder == null) self.builder = .init(&self.event_buffer, &self.text_buffer);
         self.builder.?.params.zoom = self.zoom;
         _ = self.host.zuiPoll(.main, &self.builder.?);
@@ -587,10 +710,12 @@ const ScriptedDriver = struct {
 
     fn suspendSurfaces(context: *anyopaque) void {
         of(context).suspends += 1;
+        of(context).suspended = true;
     }
 
     fn resumeSurfaces(context: *anyopaque) anyerror!void {
         of(context).resumes += 1;
+        of(context).suspended = false;
     }
 
     fn stop(context: *anyopaque) void {
@@ -631,6 +756,7 @@ test "an input batch becomes the next record's events in layout units at the pag
     var driver: ScriptedDriver = .{ .host = &host, .zoom = 1.5 };
     host.attachCanvas(1, .{ 600, 300 }, 2);
     host.begin(testing.io, driver.driver());
+    try host.turns().take();
     host.pointerMove(.{ .id = 1, .kind = 0, .position = .{ 30, 60 }, .at_milliseconds = 10 });
     host.pointerDown(.{ .id = 4, .kind = 1, .position = .{ 15, 15 }, .pressure = 0.5, .at_milliseconds = 11 }, 0);
     host.pointerDown(.{ .id = 1, .kind = 0, .position = .{ 30, 60 }, .at_milliseconds = 11 }, 3);
@@ -790,6 +916,7 @@ test "input past the inbox's room is dropped and counted, keeping what came firs
     var driver: ScriptedDriver = .{ .host = &host };
     host.attachCanvas(1, .{ 800, 600 }, 1);
     host.begin(testing.io, driver.driver());
+    try host.turns().take();
     host.typed("first");
     for (0..ScriptedHost.inbox_event_capacity + 4) |index| {
         host.pointerMove(.{ .id = 1, .kind = 0, .position = .{ @floatFromInt(index), 0 }, .at_milliseconds = 1 });
@@ -809,4 +936,134 @@ test "input past the inbox's room is dropped and counted, keeping what came firs
     try testing.expectEqual(1, driver.events().len);
     try testing.expectEqualStrings("again", driver.events()[0].text);
     try testing.expectEqual(0, driver.builder.?.dropped_events);
+}
+
+fn startedHost(driver: *ScriptedDriver) !void {
+    driver.host.attachCanvas(1, .{ 800, 600 }, 1);
+    driver.host.begin(testing.io, driver.driver());
+    try driver.host.turns().take();
+}
+
+test "the first record reports every setting, as the page measured it before the canvas arrived" {
+    var host = scriptedHost();
+    var driver: ScriptedDriver = .{ .host = &host };
+    host.changeSetting("theme", "dark");
+    host.changeSetting("locale", "fr-CA");
+    host.changeSetting("direction", "right_to_left");
+    try startedHost(&driver);
+
+    var reported: zui.Environment = .{};
+    const events = driver.events();
+    try testing.expectEqual(std.meta.fields(PageEnvironment).len, events.len);
+    for (events) |event| reported.apply(event.environment);
+    try testing.expectEqual(zui.Environment.Theme.dark, reported.theme);
+    try testing.expectEqualStrings("fr-CA", reported.locale.tag());
+    try testing.expectEqual(zui.ReadingDirection.right_to_left, reported.direction);
+    try testing.expectEqual(zui.Environment.Contrast.normal, reported.contrast);
+    try testing.expect(reported.window_focused);
+}
+
+test "each setting the page changes reaches the next record once, and an unchanged one sends nothing" {
+    var host = scriptedHost();
+    var driver: ScriptedDriver = .{ .host = &host };
+    try startedHost(&driver);
+
+    const changes = [_]struct { name: []const u8, text: []const u8, expected: zui.EnvironmentChange }{
+        .{ .name = "theme", .text = "dark", .expected = .{ .theme = .dark } },
+        .{ .name = "contrast", .text = "high", .expected = .{ .contrast = .high } },
+        .{ .name = "reduced_motion", .text = "true", .expected = .{ .reduced_motion = true } },
+        .{ .name = "reduced_transparency", .text = "true", .expected = .{ .reduced_transparency = true } },
+        .{ .name = "locale", .text = "ar-EG", .expected = .{ .locale = try .parse("ar-EG") } },
+        .{ .name = "direction", .text = "right_to_left", .expected = .{ .direction = .right_to_left } },
+        .{ .name = "window_focused", .text = "false", .expected = .{ .window_focused = false } },
+    };
+    comptime std.debug.assert(changes.len == std.meta.fields(PageEnvironment).len);
+    for (changes) |change| {
+        host.changeSetting(change.name, change.text);
+        try testing.expectEqual(Schedule.animation_frame, host.platform.scheduled);
+        try host.turns().take();
+        try testing.expectEqual(1, driver.events().len);
+        try testing.expect(std.meta.eql(change.expected, driver.events()[0].environment));
+
+        const schedules = host.platform.schedules;
+        host.changeSetting(change.name, change.text);
+        try testing.expectEqual(schedules, host.platform.schedules);
+        try host.turns().take();
+        try testing.expectEqual(0, driver.events().len);
+    }
+}
+
+test "a setting changed and changed back between two polls sends nothing" {
+    var host = scriptedHost();
+    var driver: ScriptedDriver = .{ .host = &host };
+    try startedHost(&driver);
+    host.changeSetting("theme", "dark");
+    host.changeSetting("theme", "light");
+    try host.turns().take();
+    try testing.expectEqual(0, driver.events().len);
+}
+
+test "a setting or a value the host does not know is left out" {
+    var host = scriptedHost();
+    var driver: ScriptedDriver = .{ .host = &host };
+    try startedHost(&driver);
+    const schedules = host.platform.schedules;
+    host.changeSetting("accent_color", "dark");
+    host.changeSetting("theme", "sepia");
+    host.changeSetting("reduced_motion", "yes");
+    host.changeSetting("locale", "");
+    try testing.expectEqual(schedules, host.platform.schedules);
+    try testing.expectEqual(PageEnvironment{}, host.page_environment);
+}
+
+test "a language tag longer than a locale holds keeps the whole subtags that fit" {
+    var environment: PageEnvironment = .{};
+    try testing.expect(environment.set("locale", "en-US-x-twain-and-tom-sawyer"));
+    try testing.expectEqualStrings("en-US-x-twain-and-tom", environment.locale.tag());
+    try testing.expect(!environment.set("locale", "x" ** (zui.Locale.capacity + 1) ++ "-US"));
+    try testing.expectEqualStrings("en-US-x-twain-and-tom", environment.locale.tag());
+}
+
+test "a hidden page is suspend in the next record, then draws nothing, and shown again is resume" {
+    var host = scriptedHost();
+    var driver: ScriptedDriver = .{ .host = &host };
+    try startedHost(&driver);
+
+    host.showPage(false);
+    try testing.expectEqual(Schedule.animation_frame, host.platform.scheduled);
+    try host.turns().take();
+    try testing.expectEqual(1, driver.events().len);
+    try testing.expectEqual(zui.Lifecycle.@"suspend", driver.events()[0].lifecycle);
+    try testing.expectEqual(1, driver.suspends);
+    try testing.expectEqual(Schedule.input, host.platform.scheduled);
+
+    host.showPage(false);
+    host.pointerMove(.{ .id = 1, .kind = 0, .position = .{ 5, 5 }, .at_milliseconds = 1 });
+    try host.turns().take();
+    try testing.expectEqual(Schedule.input, host.platform.scheduled);
+    try testing.expectEqual(1, driver.suspends);
+
+    host.showPage(true);
+    try host.turns().take();
+    try testing.expectEqual(1, driver.resumes);
+    const events = driver.events();
+    try testing.expectEqual(2, events.len);
+    try testing.expectEqual(zui.PointerId.mouse, events[0].pointer_move.pointer.id);
+    try testing.expectEqual(zui.Lifecycle.@"resume", events[1].lifecycle);
+}
+
+test "a page shown while its context is lost resumes its surfaces only once the context returns" {
+    var host = scriptedHost();
+    var driver: ScriptedDriver = .{ .host = &host };
+    try startedHost(&driver);
+    host.showPage(false);
+    host.loseContext();
+    try host.turns().take();
+    host.showPage(true);
+    try host.turns().take();
+    try testing.expectEqual(1, driver.suspends);
+    try testing.expectEqual(0, driver.resumes);
+    host.restoreContext();
+    try host.turns().take();
+    try testing.expectEqual(1, driver.resumes);
 }

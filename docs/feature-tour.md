@@ -1198,7 +1198,10 @@ Windows host reads them from the system, and the native Linux host reads
 the theme, contrast and reduced motion from the XDG desktop portal and
 power from UPower and power-profiles-daemon, over D-Bus, and shows the
 material where the compositor offers `ext_background_effect_v1` or
-KWin's blur; where no portal answers, they stay at their defaults.
+KWin's blur; where no portal answers, they stay at their defaults. The
+web host reads the theme, contrast, reduced motion and transparency from
+the page's media queries, the locale from `navigator.language`, the
+direction from the document's, and the window's focus.
 
 `src/ui/palette.zig`
 
@@ -1232,7 +1235,8 @@ Lifecycle events cover suspend, resume, a termination request (Ctrl+C, a
 closing console, the session ending) and low memory. the native Windows
 host reports all of them; the native Linux host reports dropped files,
 SIGINT, SIGTERM and SIGHUP as termination requests, and the system
-sleeping and waking as suspend and resume.
+sleeping and waking as suspend and resume; the web host reports the page
+hidden as suspend, and draws nothing until it is shown again, as resume.
 
 `src/ui/system.zig`
 

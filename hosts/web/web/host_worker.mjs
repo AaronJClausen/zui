@@ -4,8 +4,10 @@
 //
 //   { type: "start", moduleUrl, canvas,      the module, the canvas as an
 //     canvasId, cssSize, devicePixelRatio,   OffscreenCanvas with the id it
-//     pageTimeOrigin }                       is drawn by, its size in CSS
-//                                            pixels and ratio, and the
+//     environmentEvents, pageTimeOrigin }    is drawn by, its size in CSS
+//                                            pixels and ratio, the sink
+//                                            calls of the page's settings
+//                                            and visibility, and the
 //                                            page's `performance.timeOrigin`
 //   { type: "events", events }               `InputRecorder`'s sink calls,
 //                                            `[name, ...arguments]`, in order
@@ -20,7 +22,8 @@
 // host yields to this event loop by throwing from an import; from then
 // on, each turn is `zuiWebHostTurn`, from an animation frame or a timer as
 // the host schedules it. `globalThis.zuiHost` counts the turns and the
-// frames drawn, and holds the drawers, for a check to read.
+// frames drawn, holds the drawers, and keeps the page's settings and
+// visibility as last delivered, for a check to read.
 
 import { FrameDrawer, frameDrawerImports } from "./frame_drawer.mjs";
 import { exportsSink, sinkCalls, timedSinkCalls } from "./input_recorder.mjs";
@@ -33,7 +36,7 @@ const scheduleKinds = { animationFrame: 0, timer: 1, input: 2, ended: 3 };
 const textDecoder = new TextDecoder();
 
 const drawers = new Map();
-const progress = { turns: 0, framesDrawn: 0, contextsLost: 0, contextsRestored: 0, measured: null, drawers };
+const progress = { turns: 0, framesDrawn: 0, contextsLost: 0, contextsRestored: 0, measured: null, settings: {}, pageShown: true, drawers };
 globalThis.zuiHost = progress;
 
 let wasm = null;
@@ -143,7 +146,7 @@ function followContext(canvas, canvasId) {
   });
 }
 
-async function start({ moduleUrl, canvas, canvasId, cssSize, devicePixelRatio, pageTimeOrigin }) {
+async function start({ moduleUrl, canvas, canvasId, cssSize, devicePixelRatio, environmentEvents, pageTimeOrigin }) {
   const bytes = new Uint8Array(await (await fetch(moduleUrl)).arrayBuffer());
   const module = await WebAssembly.compile(bytes);
   memory = new WebAssembly.Memory(importedMemoryLimits(bytes));
@@ -171,6 +174,8 @@ async function start({ moduleUrl, canvas, canvasId, cssSize, devicePixelRatio, p
     onFailure: fail,
   });
 
+  // Before the canvas, so the first record carries what the page measured.
+  deliver(environmentEvents);
   drawers.set(canvasId, new FrameDrawer(canvas));
   followContext(canvas, canvasId);
   wasm.zuiWebHostAttachCanvas(canvasId, cssSize[0], cssSize[1], devicePixelRatio);
@@ -188,6 +193,8 @@ function deliver(events) {
   for (const [name, ...call] of events) {
     if (!sinkCalls.includes(name)) throw new Error(`the page sent an event "${name}", which no sink takes`);
     if (timedSinkCalls.includes(name)) call[call.length - 1] += pageToWorkerClock;
+    if (name === "setting") progress.settings[call[0]] = call[1];
+    if (name === "pageShown") progress.pageShown = call[0];
     sink[name](...call);
   }
 }

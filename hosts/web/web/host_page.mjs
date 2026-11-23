@@ -1,14 +1,16 @@
 // The page's side of an application on `zui_web.Host`: it starts the
 // application's worker (`host_worker.mjs`), transfers the canvas to it,
 // sends it the canvas's events, one message for each event the page
-// hears, and its size and `devicePixelRatio` when they change, and shows
-// the cursor the application asks for. The page must be cross-origin
+// hears, the page's settings and visibility (`page_environment.mjs`), its
+// size and `devicePixelRatio` when they change, and shows the cursor the
+// application asks for. The page must be cross-origin
 // isolated, so the worker can share the module's memory with its threads.
 //
 //   const host = await runOnHost(canvas, new URL("zui-tour.wasm", location.href), (error) => show(error));
 //   host.stop(); // ends the worker
 
 import { InputRecorder, messageSink } from "./input_recorder.mjs";
+import { followPageEnvironment } from "./page_environment.mjs";
 import { Inbox, startWorker } from "./worker_port.mjs";
 
 const canvasId = 0;
@@ -29,7 +31,9 @@ export async function runOnHost(canvas, moduleUrl, stopped) {
 
   let measured = measure(canvas);
   const offscreen = canvas.transferControlToOffscreen();
-  worker.post({ type: "start", moduleUrl: String(moduleUrl), canvas: offscreen, canvasId, ...measured, pageTimeOrigin: performance.timeOrigin }, [offscreen]);
+  const environment = followPageEnvironment(sink, () => sink.flush());
+  const environmentEvents = sink.take();
+  worker.post({ type: "start", moduleUrl: String(moduleUrl), canvas: offscreen, canvasId, ...measured, environmentEvents, pageTimeOrigin: performance.timeOrigin }, [offscreen]);
 
   function resized() {
     const now = measure(canvas);
@@ -68,6 +72,7 @@ export async function runOnHost(canvas, moduleUrl, stopped) {
     resizes.disconnect();
     scaleQuery.removeEventListener("change", scaleChanged);
     recorder.detach();
+    environment.stop();
     worker.terminate();
   }
 

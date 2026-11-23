@@ -1188,7 +1188,7 @@ fn wasEverOpened(ui: *Ui) bool {
 
       <article class="feature" id="environment" data-title="Environment">
         <div class="feature-head"><h3>The environment</h3><span class="pill shipped">Shipped</span></div>
-        <p>The host reports the user's settings as events, and <code class="z">ui.environment()</code> holds the current values: theme, contrast, reduced motion and transparency, text scale, locale, reading direction, HDR headroom, power, window focus, and whether the system material (Mica on Windows, a compositor's blur on Wayland) shows behind the window. the native Windows host reads them from the system, and the native Linux host reads the theme, contrast and reduced motion from the XDG desktop portal and power from UPower and power-profiles-daemon, over D-Bus, and shows the material where the compositor offers <code class="z">ext_background_effect_v1</code> or KWin's blur; where no portal answers, they stay at their defaults.</p>
+        <p>The host reports the user's settings as events, and <code class="z">ui.environment()</code> holds the current values: theme, contrast, reduced motion and transparency, text scale, locale, reading direction, HDR headroom, power, window focus, and whether the system material (Mica on Windows, a compositor's blur on Wayland) shows behind the window. the native Windows host reads them from the system, and the native Linux host reads the theme, contrast and reduced motion from the XDG desktop portal and power from UPower and power-profiles-daemon, over D-Bus, and shows the material where the compositor offers <code class="z">ext_background_effect_v1</code> or KWin's blur; where no portal answers, they stay at their defaults. The web host reads the theme, contrast, reduced motion and transparency from the page's media queries, the locale from <code class="z">navigator.language</code>, the direction from the document's, and the window's focus.</p>
 <script type="text/x-zig" data-file="src/ui/palette.zig">
 const Palette = struct { window: ?zui.Color, panel: zui.Color, text: zui.Color, accent: zui.Color };
 
@@ -1213,7 +1213,7 @@ fn shouldAnimate(ui: *const Ui) bool {
 
       <article class="feature" id="drops" data-title="Dropped files and lifecycle">
         <div class="feature-head"><h3>Dropped files and lifecycle events</h3><span class="pill shipped">Shipped</span></div>
-        <p>Files dropped onto the window arrive with their drop position and paths. Lifecycle events cover suspend, resume, a termination request (Ctrl+C, a closing console, the session ending) and low memory. the native Windows host reports all of them; the native Linux host reports dropped files, SIGINT, SIGTERM and SIGHUP as termination requests, and the system sleeping and waking as suspend and resume.</p>
+        <p>Files dropped onto the window arrive with their drop position and paths. Lifecycle events cover suspend, resume, a termination request (Ctrl+C, a closing console, the session ending) and low memory. the native Windows host reports all of them; the native Linux host reports dropped files, SIGINT, SIGTERM and SIGHUP as termination requests, and the system sleeping and waking as suspend and resume; the web host reports the page hidden as suspend, and draws nothing until it is shown again, as resume.</p>
 <script type="text/x-zig" data-file="src/ui/system.zig">
 fn handleSystemEvents(app: *App, ui: *Ui) void {
     for (ui.filesDropped()) |drop| {

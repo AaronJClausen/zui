@@ -30,7 +30,12 @@ const textDecoder = new TextDecoder();
 //   wheel(x, y, deltaX, deltaY, deltaMode, timeStamp)
 //   key(down, key, code, modifierBits, repeat, timeStamp)
 //   typed(text)
-export const sinkCalls = ["pointerDown", "pointerUp", "pointerMove", "pointerCancel", "pointerLeave", "wheel", "key", "typed"];
+//
+// and, from `followPageEnvironment`, which only the web host's exports take:
+//
+//   setting(name, value)
+//   pageShown(shown)
+export const sinkCalls = ["pointerDown", "pointerUp", "pointerMove", "pointerCancel", "pointerLeave", "wheel", "key", "typed", "setting", "pageShown"];
 // The calls whose last argument is an `Event.timeStamp`.
 export const timedSinkCalls = ["pointerDown", "pointerUp", "pointerMove", "wheel", "key"];
 
@@ -59,19 +64,27 @@ export function exportsSink(wasm, memoryOf = () => wasm.memory) {
     typed(text) {
       wasm.zuiWebTyped(encodeInto(text, wasm.zuiWebTypedText() >>> 0, wasm.zuiWebTypedTextBytesMost() >>> 0));
     },
+    setting(name, value) {
+      const words = wasm.zuiWebSettingWords() >>> 0;
+      const most = wasm.zuiWebSettingWordBytesMost() >>> 0;
+      wasm.zuiWebSetting(encodeInto(name, words, most), encodeInto(value, words + most, most));
+    },
+    pageShown: (shown) => wasm.zuiWebPageShown(shown),
   };
 }
 
 // A sink that keeps its calls, as `[name, ...arguments]`, until `flush`
-// hands any it kept to `send` as one list, in order.
+// hands any it kept to `send` as one list, in order, or `take` returns them.
 export function messageSink(send) {
   let kept = [];
   const sink = Object.fromEntries(sinkCalls.map((name) => [name, (...call) => kept.push([name, ...call])]));
-  sink.flush = () => {
-    if (kept.length === 0) return;
+  sink.take = () => {
     const events = kept;
     kept = [];
-    send(events);
+    return events;
+  };
+  sink.flush = () => {
+    if (kept.length > 0) send(sink.take());
   };
   return sink;
 }

@@ -11,6 +11,7 @@ pub const HostOn = host.HostOn;
 pub const Schedule = host.Schedule;
 pub const Turns = host.Turns;
 pub const BrowserPointer = host.BrowserPointer;
+pub const PageEnvironment = host.PageEnvironment;
 const browser_host = @import("browser_host.zig");
 pub const Host = browser_host.Host;
 pub const ScheduleKind = browser_host.ScheduleKind;

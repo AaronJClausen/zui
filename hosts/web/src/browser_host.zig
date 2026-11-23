@@ -66,6 +66,8 @@ var last_error: ?anyerror = null;
 const key_name_bytes_most = 64;
 var key_names: [2 * key_name_bytes_most]u8 = undefined;
 var typed_text: [Host.inbox_text_capacity]u8 = undefined;
+const setting_word_bytes_most = 64;
+var setting_words: [2 * setting_word_bytes_most]u8 = undefined;
 
 /// Keeps `err` for `zuiWebErrorName`, for the worker to report.
 pub fn fail(err: anyerror) void {
@@ -177,6 +179,28 @@ const exports = struct {
 
     export fn zuiWebTyped(count: usize) void {
         if (running()) |web_host| web_host.typed(typed_text[0..@min(count, typed_text.len)]);
+    }
+
+    /// Where to write a setting's name in UTF-8, and its value as text
+    /// `zuiWebSettingWordBytesMost` bytes after it, before `zuiWebSetting`.
+    export fn zuiWebSettingWords() usize {
+        return @intFromPtr(&setting_words);
+    }
+
+    export fn zuiWebSettingWordBytesMost() usize {
+        return setting_word_bytes_most;
+    }
+
+    /// One of the page's settings, as `zui_web.PageEnvironment.set` reads it.
+    export fn zuiWebSetting(name_bytes: usize, value_bytes: usize) void {
+        const name = setting_words[0..@min(name_bytes, setting_word_bytes_most)];
+        const value = setting_words[setting_word_bytes_most..][0..@min(value_bytes, setting_word_bytes_most)];
+        if (running()) |web_host| web_host.changeSetting(name, value);
+    }
+
+    /// `document.visibilityState` is `"visible"`, or it is not.
+    export fn zuiWebPageShown(shown: bool) void {
+        if (running()) |web_host| web_host.showPage(shown);
     }
 
     fn pointer(browser_pointer_id: u32, browser_kind: u32, x: f32, y: f32, pressure: f32, tilt_x: f32, tilt_y: f32, at_milliseconds: f64) host.BrowserPointer {
