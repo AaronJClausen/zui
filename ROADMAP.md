@@ -114,8 +114,9 @@ is in the file its group names.
 
 | Item | Where | Waits for | Status |
 |---|---|---|---|
-| `10-reach:01-linux-host` | `hosts/native/`, `renderers/sokol/` | | in progress; slice 9, X11, continues with the IME |
+| `10-reach:01-linux-host` | `hosts/native/`, `renderers/sokol/` | | in progress; slice 9, X11, continues with the custom title bar |
 | `10-reach:04-window-decorations` | `core/src/chrome.zig`, `core/src/context.zig`, `core/zui_app/`, `hosts/native/` | | waiting on a person: the checklist under its *Status*, on `zig build title-bar` in `hosts/native/` |
+| `10-reach:07-x11-ibus` | `hosts/native/linux/` | | not started |
 | `11-polish:18-system-accent` | `core/src/input.zig`, `hosts/` | | |
 | `11-polish:19-default-design` | `core/zui_design/`, `core/zui_widgets/`, `apps/` | `11-polish:14-zui-design`, `11-polish:15-type-scale` | |
 | `11-polish:20-appearance-audit` | `core/zui_design/` | `11-polish:14-zui-design` | |

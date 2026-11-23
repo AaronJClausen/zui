@@ -32,3 +32,21 @@ pub extern "xkbcommon" fn xkb_state_update_mask(state: *State, depressed: u32, l
 pub extern "xkbcommon" fn xkb_state_key_get_layout(state: *State, key: u32) callconv(.c) u32;
 pub extern "xkbcommon" fn xkb_state_key_get_utf8(state: *State, key: u32, buffer: ?[*]u8, size: usize) callconv(.c) c_int;
 pub extern "xkbcommon" fn xkb_state_mod_name_is_active(state: *State, name: [*:0]const u8, kind: c_int) callconv(.c) c_int;
+pub extern "xkbcommon" fn xkb_state_key_get_one_sym(state: *State, key: u32) callconv(.c) Keysym;
+
+pub const ComposeTable = opaque {};
+pub const ComposeState = opaque {};
+pub const compose_format_text_v1 = 1;
+
+pub const ComposeStatus = enum(c_int) { nothing, composing, composed, cancelled, _ };
+pub const ComposeFeedResult = enum(c_int) { ignored, accepted, _ };
+
+pub extern "xkbcommon" fn xkb_compose_table_new_from_locale(context: *Context, locale: [*:0]const u8, flags: c_int) callconv(.c) ?*ComposeTable;
+pub extern "xkbcommon" fn xkb_compose_table_new_from_buffer(context: *Context, buffer: [*]const u8, length: usize, locale: [*:0]const u8, format: c_int, flags: c_int) callconv(.c) ?*ComposeTable;
+pub extern "xkbcommon" fn xkb_compose_table_unref(table: *ComposeTable) callconv(.c) void;
+pub extern "xkbcommon" fn xkb_compose_state_new(table: *ComposeTable, flags: c_int) callconv(.c) ?*ComposeState;
+pub extern "xkbcommon" fn xkb_compose_state_unref(state: *ComposeState) callconv(.c) void;
+pub extern "xkbcommon" fn xkb_compose_state_feed(state: *ComposeState, keysym: Keysym) callconv(.c) ComposeFeedResult;
+pub extern "xkbcommon" fn xkb_compose_state_reset(state: *ComposeState) callconv(.c) void;
+pub extern "xkbcommon" fn xkb_compose_state_get_status(state: *ComposeState) callconv(.c) ComposeStatus;
+pub extern "xkbcommon" fn xkb_compose_state_get_utf8(state: *ComposeState, buffer: ?[*]u8, size: usize) callconv(.c) c_int;

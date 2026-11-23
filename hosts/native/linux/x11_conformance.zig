@@ -174,6 +174,17 @@ test "on X11 a key reports its key, its evdev code and the modifiers XKB reports
     try testing.expectEqualStrings("s", typedText(&polled, &buffer));
 }
 
+test "on X11 a dead acute and e type é once, Multi_key o c types ©, and a cancelled sequence types nothing, each press still a key" {
+    var window: UnmappedWindow = .{};
+    try window.open(1);
+    defer window.close();
+    try @import("compose_testing.zig").expectComposes(window.host(), struct {
+        fn press(window_host: *X11Host, evdev_code: u32, pressed: bool) void {
+            window_host.onKey(@intCast(evdev_code + 8), pressed);
+        }
+    }.press);
+}
+
 test "on X11 a key the server repeats arrives as presses, each after the first a repeat that types again, until it is released or focus leaves" {
     var window: UnmappedWindow = .{};
     try window.open(1);

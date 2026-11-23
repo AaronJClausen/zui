@@ -17,6 +17,8 @@ decorations; many windows.
 - **`10-reach:06-platform-owned-loop`:** the browser's main thread,
   macOS, iOS and Android, driving `zui_app` from their own callbacks,
   and a surface the platform takes away and gives back.
+- **`10-reach:07-x11-ibus`:** the input method on X11, over IBus's D-Bus
+  protocol.
 
 **Done when (each):** the host passes
 `03-contracts:03-conformance-suites`, and the demo runs on it unchanged.
@@ -34,6 +36,7 @@ decorations; many windows.
 | `10-reach:04-window-decorations` Window decorations | waiting on a person |
 | `10-reach:05-many-windows` Many windows | done |
 | `10-reach:06-platform-owned-loop` Hosts whose platform owns the loop | done |
+| `10-reach:07-x11-ibus` The input method on X11 over IBus's D-Bus protocol | not started |
 
 ---
 
@@ -585,6 +588,39 @@ no wakes. Not run: a drag from a real file manager, and pasting into
 another X application by hand. The services, checked on X11 by
 `zig build services`, need no sub-slice of their own; the IME is next.
 
+Slice 9's third sub-slice, the IME, is done as none, with compose, in
+`hosts/native/` alone (`hosts/native/linux/keyboard.zig`,
+`hosts/native/linux/xkb.zig`, `hosts/native/linux/wayland_host.zig`,
+`hosts/native/linux/x11_host.zig`,
+`hosts/native/linux/compose_testing.zig`): X11 reports no input method
+yet, and typed text on both backends now goes through xkbcommon's
+compose sequences. This session runs fcitx5, with `XMODIFIERS=@im=fcitx`
+and the root window's `XIM_SERVERS` naming it, so XIM could be tried
+here; it was not built, for the reason under *Decided here*. fcitx5 also
+owns `org.freedesktop.IBus` and `org.freedesktop.portal.IBus` on the
+session bus, so IBus's D-Bus protocol reaches both ibus-daemon and
+fcitx5; that path is `10-reach:07-x11-ibus`. `keyboard.Compose` holds
+one table and one `xkb_compose_state` for each host, from the locale
+`LC_ALL`, `LC_CTYPE` or `LANG` names, or "C", made at `init` and freed
+at `deinit`; `composedText` feeds each press's keysym (not its repeats):
+a key that starts or continues a sequence types nothing, the key that
+completes one types its UTF-8 once, a cancelled sequence types nothing,
+and a key the table ignores types as before. Without a table, typing is
+as it was. Ctrl, Alt or Super held still type nothing and feed nothing;
+losing the keyboard's focus forgets a sequence in progress. Each press
+still reaches the record as a `key_down`. 128 of 129 tests pass in Debug
+and ReleaseSafe, on Wayland and with `ZUI_HOST_BACKEND=x11 DISPLAY=:0`,
+the opt-in one skipped: one test on each backend gives the host a US
+international keymap with right Alt as `Multi_key` and a two-sequence
+table from text (`Compose.fromText`), so it depends on neither the
+machine's keymap nor its locale, and checks that a dead acute and `e`
+type "é" once, `Multi_key` `o` `c` types "©", a dead acute and `q` type
+nothing, every press is a key, and `e` then types "e". `services` and
+`theme` `-- --check` pass on both backends, the tour's cycle on both,
+and `showcase -- --frames 60` on X11. Not run: typing through fcitx5
+into the tour on X11, which this sub-slice does not reach. The custom
+title bar on X11 is next.
+
 Decided here:
 
 - **libwayland-client, linked,** as sokol-zig links it, since the
@@ -675,6 +711,16 @@ Decided here:
   Mesa and NVIDIA do; without it, a transparent surface is drawn opaque.
   X11 will carry the same field on `.x11` and draw through the same
   `Device`.
+- **No input method on X11 yet, and compose on both backends.** XIM
+  opens its input context by waiting for the input method's client
+  messages on Xlib's event queue, and filters Xlib `XEvent`s, so it
+  needs Xlib to own the queue. The X11 host hands the queue to xcb,
+  which its event loop and the EGL path on `Surface.x11` rely on, so XIM
+  would mean rebuilding the host's loop around Xlib. IBus's D-Bus
+  protocol, served by ibus-daemon and by fcitx5, needs no change to the
+  queue and reaches the most input methods, so it is the path, queued as
+  `10-reach:07-x11-ibus`. Until then typed text comes through xkb, now
+  with xkbcommon's compose sequences, shared by both backends.
 
 ## 10-reach:02-web-host — Web
 
@@ -2013,3 +2059,68 @@ never blocks and that posted events arrive in order. Each passes a fake
 host that keeps its rules and fails one that breaks each,
 ThreadSanitizer included. `10-reach:06-platform-owned-loop` is done;
 counts were unchanged by every slice.
+
+## 10-reach:07-x11-ibus — The input method on X11 over IBus's D-Bus protocol
+
+**Grounding** (at `6c188d9`). The X11 host reports typed text through
+xkb only, with compose sequences (`hosts/native/linux/keyboard.zig`,
+`Compose` and `composedText`), and declares no input method; why XIM
+does not fit its xcb-owned event queue is under *Decided here* in
+`10-reach:01-linux-host`. In this session fcitx5 owns
+`org.freedesktop.IBus`, `org.freedesktop.portal.IBus`,
+`org.fcitx.Fcitx5` and `org.freedesktop.portal.Fcitx` on the session
+bus, so the IBus protocol reaches fcitx5 as it reaches ibus-daemon. The
+portal's `org.freedesktop.IBus.Portal.CreateInputContext(s) → o` makes
+an `org.freedesktop.IBus.InputContext` with `FocusIn`, `FocusOut`,
+`Reset`, `SetCapabilities(u)`, `SetCursorLocation(iiii)` and
+`ProcessKeyEvent(uuu) → b`, and the signals `CommitText(v)`,
+`UpdatePreeditText(vub)`, `HidePreeditText` and `ForwardKeyEvent(uuu)`.
+Text arrives as an `IBusText`, a variant holding the struct
+`(sa{sv}sv)`: its name, its attachments, the text and its attributes.
+The host's own D-Bus client (`hosts/native/linux/dbus.zig`), which the
+desktop's settings and the services use over `session.zig`, reads
+strings, integers, arrays and variants of those, but not a struct inside
+a variant. Keys reach the window as the server sends them
+(`X11Host.onKey`), typing at once, so nothing holds a key until an input
+method has answered for it.
+
+**Plan.**
+
+1. **The context:** on the session bus the services use, ask the portal
+   for an input context at `init`, without waiting past `init`'s 250 ms
+   bound, and set its capabilities (preedit text, focus). While a
+   frame's `HostRequests.text_input` names a caret and the window has
+   focus, `FocusIn` and `SetCursorLocation` at the caret in root
+   coordinates; otherwise `FocusOut`, each sent only when it changes, as
+   the Wayland host's text input does.
+2. **Keys held until answered:** a press, while the context is focused,
+   goes to `ProcessKeyEvent` with its keysym, key code and state, and is
+   held, in order, until the reply: consumed, it reaches the record as a
+   key but types nothing; not consumed, it types through xkb and compose
+   as today. A reply later than a bound (100 ms, to be measured)
+   releases the keys held, typed through xkb, and the input method is
+   then ignored until it answers again. `ForwardKeyEvent` types the key
+   it names.
+3. **Text:** `CommitText` as `text`, through the window's inbox, once;
+   `UpdatePreeditText` kept as the Wayland host keeps preedit, for
+   `11-polish:06-text-editing`; `IBusText` read by a struct-in-variant
+   reader added to `dbus.zig`.
+4. **Tests:** a harness plays the input method on the private test bus
+   (`ZUI_HOST_TEST_SESSION_BUS`), as the services' tests play the
+   portal: the context's creation, focus and cursor location following
+   frames, a consumed key typing nothing, an unconsumed one typing, a
+   late reply releasing the keys in order, a commit typed once, and an
+   input method that never answers or leaves the bus leaving typing to
+   xkb. An opt-in test types through the session's real input method
+   into a shown window.
+
+**Done when:** on X11, a frame asking for text input focuses an input
+context at the caret, committed text reaches the record once, consumed
+keys type nothing, and typing falls back to xkb within the bound when
+the input method is slow or gone; the host suite and the tests above
+pass in Debug and ReleaseSafe here and in CI under Xvfb; and the tour's
+cycle passes on X11.
+
+**Spec.** §7, §16.3, §16.6.
+
+**Status.** Not started.

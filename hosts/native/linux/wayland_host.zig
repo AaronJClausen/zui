@@ -183,6 +183,8 @@ pub const WaylandHost = struct {
     xkb_context: *xkb.Context,
     keymap: ?*xkb.Keymap,
     key_state: ?*xkb.State,
+    /// The locale's compose sequences, which typed text goes through.
+    compose: key_translation.Compose,
 
     windows: [max_windows]Window,
     /// The id the next window opens with; ids are never given twice.
@@ -450,6 +452,7 @@ pub const WaylandHost = struct {
             .xkb_context = xkb.xkb_context_new(0) orelse return error.NoKeyboardContext,
             .keymap = null,
             .key_state = null,
+            .compose = .{},
             .windows = @splat(.{ .host = self }),
             .next_window_id = @intFromEnum(zui.WindowId.main) + 1,
             .pointer_window = null,
@@ -468,6 +471,8 @@ pub const WaylandHost = struct {
             .session = undefined,
         };
         errdefer xkb.xkb_context_unref(self.xkb_context);
+        self.compose = .fromLocale(self.xkb_context);
+        errdefer self.compose.deinit();
         try self.session.open(io, service_fake);
         errdefer self.session.close();
 
@@ -649,6 +654,7 @@ pub const WaylandHost = struct {
         _ = wayland.wl_display_flush(self.display);
         if (self.key_state) |state| xkb.xkb_state_unref(state);
         if (self.keymap) |keymap| xkb.xkb_keymap_unref(keymap);
+        self.compose.deinit();
         xkb.xkb_context_unref(self.xkb_context);
         wayland.wl_display_disconnect(self.display);
     }
@@ -1038,6 +1044,7 @@ pub const WaylandHost = struct {
     }
 
     pub fn onKeyboardLeave(self: *Host) void {
+        self.compose.reset();
         self.modifiers = .{};
         self.key_repeat.held = null;
         const window = self.keyboard_window orelse return;
@@ -1083,7 +1090,7 @@ pub const WaylandHost = struct {
         const window = self.keyboard_window orelse return;
         const key_event: zui.KeyEvent = .{ .key = self.keyOf(evdev_code), .modifiers = self.modifiers, .repeat = repeat, .scancode = evdev_code, .at = at };
         window.deliver(if (pressed) .{ .key_down = key_event } else .{ .key_up = key_event });
-        if (pressed) self.typeKey(window, evdev_code);
+        if (pressed) self.typeKey(window, evdev_code, repeat);
     }
 
     fn keyRepeats(self: *const Host, evdev_code: u32) bool {
@@ -1112,10 +1119,10 @@ pub const WaylandHost = struct {
         return key_translation.keyOf(self.keymap, self.key_state, evdev_code);
     }
 
-    fn typeKey(self: *Host, window: *Window, evdev_code: u32) void {
+    fn typeKey(self: *Host, window: *Window, evdev_code: u32, repeat: bool) void {
         const state = self.key_state orelse return;
         var utf8: [64]u8 = undefined;
-        if (key_translation.typedText(state, self.modifiers, evdev_code, &utf8)) |typed| window.deliverText(typed);
+        if (key_translation.composedText(state, &self.compose, self.modifiers, evdev_code, repeat, &utf8)) |typed| window.deliverText(typed);
     }
 
     /// What the desktop reports, to every window; a harness calls this as

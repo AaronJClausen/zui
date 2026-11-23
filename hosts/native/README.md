@@ -206,7 +206,10 @@ Wayland client has no modal loop to escape. So far it:
 - reports the mouse, the wheel (40 layout units a notch, a touchpad's
   distance as it is), keys through the compositor's keymap with their
   modifiers and evdev codes, typed text, and whether the window has
-  focus;
+  focus; typed text goes through the locale's compose sequences
+  (xkbcommon's, from `LC_ALL`, `LC_CTYPE` or `LANG`), so a dead acute
+  and `e` type "é" and `Multi_key` `o` `c` types "©", a key inside a
+  sequence typing nothing, as on X11;
 - repeats a held key at the rate and after the delay the compositor
   gives (`wl_keyboard.repeat_info`), each repeat a `key_down` with
   `repeat` set and its text typed again; a modifier pressed meanwhile
@@ -350,8 +353,9 @@ far it:
   secondary buttons; back and forward have no zui button), the wheel (a
   notch of buttons 4 to 7 is 40 layout units), keys through the server's
   XKB keymap (`xkbcommon-x11`) with the modifiers XKB's state events
-  report, their evdev codes (the X key code less 8) and typed text, the
-  pointer leaving, and whether the window has focus (a grab's moving the
+  report, their evdev codes (the X key code less 8) and typed text
+  through the locale's compose sequences, as on Wayland, the pointer
+  leaving, and whether the window has focus (a grab's moving the
   keyboard aside is not a change of focus);
 - reports a held key's repeats as the server makes them, each a
   `key_down` with `repeat` set that types again: it asks XKB for
@@ -388,11 +392,14 @@ far it:
   watches and the wake.
 
 Not yet on X11, each answered as on a compositor without the protocol:
-the input method, a custom title bar (chrome regions are not kept, and
-`custom_title_bar` is false), `minimize` and `toggleMaximized` (which do
-nothing), many windows (`zuiOpenWindow` is `error.TooManyWindows`) and
-the system material (`system_material` is false). It links libX11,
-libX11-xcb, libxcb, libxcb-xkb, libxcb-cursor and libxkbcommon-x11.
+the input method (XIM needs Xlib to own the event queue, which the host
+gives to xcb; IBus's D-Bus protocol, served by ibus-daemon and fcitx5,
+is `10-reach:07-x11-ibus`), a custom title bar (chrome regions are not
+kept, and `custom_title_bar` is false), `minimize` and `toggleMaximized`
+(which do nothing), many windows (`zuiOpenWindow` is
+`error.TooManyWindows`) and the system material (`system_material` is
+false). It links libX11, libX11-xcb, libxcb, libxcb-xkb, libxcb-cursor
+and libxkbcommon-x11.
 
 It passes zui's host suite against a window that is never mapped, whose
 harness delivers what the server would to the host's own handlers, and

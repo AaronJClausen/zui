@@ -1824,6 +1824,19 @@ test "under the real compositor, a window with a material is blurred and holds a
     if (window_host.globals.kde_blur_manager == null and window_host.globals.background_effect_manager == null) try testing.expect(!blurs);
 }
 
+test "a dead acute and e type é once, Multi_key o c types ©, and a cancelled sequence types nothing, each press still a key" {
+    var window: UnshownWindow = .{};
+    try window.open(1);
+    defer window.close();
+    try compose_testing.expectComposes(window.host(), struct {
+        fn press(window_host: *Host, evdev_code: u32, pressed: bool) void {
+            window_host.onKey(evdev_code, pressed);
+        }
+    }.press);
+}
+
+const compose_testing = @import("compose_testing.zig");
+
 test {
     _ = @import("x11_conformance.zig");
 }

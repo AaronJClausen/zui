@@ -131,6 +131,8 @@ pub const X11Host = struct {
     xkb_context: *xkb.Context,
     keymap: ?*xkb.Keymap,
     key_state: ?*xkb.State,
+    /// The locale's compose sequences, which typed text goes through.
+    compose: key_translation.Compose,
     /// Null where the server lacks XKB, whose keymap and events the host
     /// then goes without.
     xkb_keyboard: ?XkbKeyboard,
@@ -219,6 +221,7 @@ pub const X11Host = struct {
             .xkb_context = xkb.xkb_context_new(0) orelse return error.NoKeyboardContext,
             .keymap = null,
             .key_state = null,
+            .compose = .{},
             .xkb_keyboard = null,
             .detectable_repeat = false,
             .keys_down = .initEmpty(),
@@ -228,6 +231,8 @@ pub const X11Host = struct {
             .session = undefined,
         };
         errdefer xkb.xkb_context_unref(self.xkb_context);
+        self.compose = .fromLocale(self.xkb_context);
+        errdefer self.compose.deinit();
         try self.session.open(io, service_fake);
         errdefer self.session.close();
 
@@ -343,6 +348,7 @@ pub const X11Host = struct {
         self.releaseKeyboardAndCursors();
         if (self.window.id != 0) _ = x11.xcb_destroy_window(self.connection, self.window.id);
         _ = x11.xcb_flush(self.connection);
+        self.compose.deinit();
         xkb.xkb_context_unref(self.xkb_context);
         _ = x11.XCloseDisplay(self.display);
     }
@@ -732,9 +738,13 @@ pub const X11Host = struct {
     }
 
     /// The window gained or lost the keyboard's focus; losing it forgets
-    /// the keys held, whose releases go elsewhere.
+    /// the keys held, whose releases go elsewhere, and a compose sequence
+    /// in progress.
     pub fn onFocus(self: *Host, focused: bool) void {
-        if (!focused) self.keys_down = .initEmpty();
+        if (!focused) {
+            self.keys_down = .initEmpty();
+            self.compose.reset();
+        }
         if (self.window.focused == focused) return;
         self.window.focused = focused;
         self.window.deliver(.{ .environment = .{ .window_focused = focused } });
@@ -809,7 +819,7 @@ pub const X11Host = struct {
         if (!pressed) return;
         const state = self.key_state orelse return;
         var utf8: [64]u8 = undefined;
-        if (key_translation.typedText(state, self.modifiers, evdev_code, &utf8)) |typed| self.window.deliverText(typed);
+        if (key_translation.composedText(state, &self.compose, self.modifiers, evdev_code, repeat, &utf8)) |typed| self.window.deliverText(typed);
     }
 
     /// The logical key at an evdev code in the server's keymap.
