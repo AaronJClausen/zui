@@ -94,7 +94,7 @@ Stop and ask the user instead of guessing when:
 | what only a check needs in the browser | `hosts/web/src/browser_wire_check.zig`, which adds exports to the client's for `zig build test-demo`; `hosts/web/web/check_*`, the pages and Node scripts the checks run |
 | native programs the web checks run, such as the tour's stream | `hosts/web/tools/` |
 | JavaScript and HTML glue | `hosts/web/web/` |
-| the published page | `hosts/web/web/index.html` and what it loads, listed in `site_scripts` in `hosts/web/build.zig`, which `zig build site` writes with the client, the frame drawer, the worker and the fonts |
+| the published page | `hosts/web/web/index.html` and what it loads, listed in `site_scripts` in `hosts/web/build.zig`, which `zig build site` and `zig build tour` write with the frame drawer, the tour's module on the web host and the fonts' licences |
 
 Everything under `renderers/webgl/src/` and `hosts/web/src/` that the
 browser runs must compile for `wasm32-freestanding`: no `std.fs`,
@@ -224,13 +224,13 @@ or the page reads input or applies host requests; it needs Node and
 Chromium, run headless, and no display. `zig build test-site`, and
 `zig build site -Doptimize=ReleaseSmall` with `test-site` in
 ReleaseSmall, after any change to the published page, its service
-worker, `hosts/web/web/tour_page.mjs` or what it loads, or
+worker, `hosts/web/web/page_*.mjs` or anything else it loads, or
 `site_scripts`; it needs Node and Chromium, run headless, and no
 display, and the Pages workflow runs it before publishing.
 `zig build test-host` after any change to the web host
 (`hosts/web/src/host.zig`, `browser_host.zig`, `worker.zig`,
 `shared_memory.zig`), its worker and page (`hosts/web/web/host_*.mjs`,
-`tour.html`, `input_recorder.mjs`, `tour_thread.mjs`,
+`page_*.mjs`, `index.html`, `input_recorder.mjs`, `tour_thread.mjs`,
 `shared_module.mjs`), `hosts/web/examples/`, `renderers/webgl/`, core or
 `apps/tour/`; it needs Node and Chromium, run headless, and no display.
 Chromium runs headless here, under `timeout`, and must leave no Chromium
