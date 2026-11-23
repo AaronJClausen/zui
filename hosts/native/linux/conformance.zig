@@ -2,13 +2,13 @@
 //! the compositor never shows: a surface without a role. Events are
 //! delivered to the host's handlers as the compositor's would be, so each
 //! one has reached the host before the test polls. Without a Wayland
-//! compositor to connect to, every test is skipped.
+//! compositor to connect to, every Wayland test is skipped.
 
 const std = @import("std");
 const zui_host = @import("zui_host");
 const zui = @import("zui");
 const zui_testing = @import("zui_testing");
-const Host = zui_host.Host;
+const Host = zui_host.linux.WaylandHost;
 const keys = zui_host.linux.keys;
 const desktop_bus = zui_host.linux.desktop_bus;
 const services = zui_host.linux.services;
@@ -1822,4 +1822,8 @@ test "under the real compositor, a window with a material is blurred and holds a
     try testing.expectEqual(blurs, window.windowMaterial().effect != null);
     try testing.expectEqual(blurs, systemMaterialOf(&window.polled).?);
     if (window_host.globals.kde_blur_manager == null and window_host.globals.background_effect_manager == null) try testing.expect(!blurs);
+}
+
+test {
+    _ = @import("x11_conformance.zig");
 }

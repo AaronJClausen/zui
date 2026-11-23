@@ -2683,15 +2683,20 @@ host in `renderers/raylib/`, the sokol renderer in `renderers/sokol/`,
 the terminal renderer and host in `renderers/terminal/`, and, in
 `hosts/native/`, the native Windows host (message loop on its own
 thread, per-monitor DPI, Mica, IME, clipboard, opening URLs, dropped
-files, file watching), and the native Linux host, on Wayland so far
-(many windows, fractional and buffer scale, pointer, wheel, keys through
-the compositor's keymap with their repeats, typed text, focus, cursor
+files, file watching), and the native Linux host, which connects to
+Wayland where a compositor answers and to X11 otherwise
+(`ZUI_HOST_BACKEND=x11` or `wayland` forces one); on Wayland (many
+windows, fractional and buffer scale, pointer, wheel, keys through the
+compositor's keymap with their repeats, typed text, focus, cursor
 shapes, clipboard, dropped files, file watching through inotify,
 notifications, the portal's file dialogs and opening URLs, the
 environment from the desktop portal and UPower over D-Bus, and signals,
-sleep and waking as lifecycle events); and, in `hosts/web/`, the web
-host, which runs an application in a Web Worker and draws its frames
-over `zui_wire` through the WebGL renderer in `renderers/webgl/`.
+sleep and waking as lifecycle events), and on X11 so far one window with
+the same pointer, wheel, keys, repeats, focus, cursor, scale from
+`Xft.dpi`, environment, services and watching, drawn by the sokol
+renderer through EGL; and, in `hosts/web/`, the web host, which runs an
+application in a Web Worker and draws its frames over `zui_wire` through
+the WebGL renderer in `renderers/webgl/`.
 
 <a id="renderer"></a>
 

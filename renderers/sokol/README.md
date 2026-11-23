@@ -85,15 +85,20 @@ compositor shows it opaque whatever alpha the frame draws. Both kinds
 are drawn by one context, made without a configuration through
 `EGL_KHR_no_config_context`; on a display without that extension or an
 alpha configuration, a transparent surface is drawn opaque, and
-`presentsAlpha(surface)` says which it got. Every native window is drawn
-with four samples per pixel, which smooths the edges of shapes, wherever
-the GPU offers them, and with one otherwise: on Linux a multisampled EGL
-configuration; with D3D11 a multisampled target resolved into the
-swapchain's buffer each frame (an scRGB window's offscreen image is
-multisampled too); with `-Dgl=true` a multisampled pixel format chosen
-through `wglChoosePixelFormatARB`. It draws into many Wayland surfaces
-too: `zuiAttachSurface` makes a `wl_egl_window` and an EGL surface for
-each surface after the first, on the first one's EGL display and
+`presentsAlpha(surface)` says which it got. It draws an `.x11` surface,
+a native host's X11 window, through the same EGL device on Xlib's
+display (`EGL_PLATFORM_X11_KHR`), its EGL surface made on the window
+itself, which the X server sizes, so the host's reported size is the
+frame's; an `.x11` surface is always opaque. Every native window is
+drawn with four samples per pixel, which smooths the edges of shapes,
+wherever the GPU offers them, and with one otherwise: on Linux a
+multisampled EGL configuration; with D3D11 a multisampled target
+resolved into the swapchain's buffer each frame (an scRGB window's
+offscreen image is multisampled too); with `-Dgl=true` a multisampled
+pixel format chosen through `wglChoosePixelFormatARB`. It draws into
+many Wayland surfaces too: `zuiAttachSurface` makes a `wl_egl_window`
+and an EGL surface for each surface after the first (or, for an X11
+window, an EGL surface on it), on the first one's EGL display and
 context, which the renderer holds until `deinit`, so any window may
 close first; the context moves to the surface each frame is drawn into,
 and each window keeps its own backdrop-blur and offscreen targets. A

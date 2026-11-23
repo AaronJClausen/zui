@@ -406,7 +406,7 @@ jobs:
       - run: zig build check
 
   native-linux:
-    name: "hosts/native: test and check, and check aarch64-windows (ubuntu-latest, Weston)"
+    name: "hosts/native: test and check, and check aarch64-windows (ubuntu-latest, Weston and Xvfb)"
     needs: changes
     if: needs.changes.outputs.hosts-native == 'true'
     runs-on: ubuntu-latest
@@ -420,6 +420,8 @@ jobs:
       - uses: ./.github/actions/wayland-session
       - name: Run the unit tests and zui's host suite against a window the user never sees
         run: zig build test --summary all
+      - name: Run them again with an X server, so the X11 host's own run too, and zui_host.Host is forced to X11
+        run: xvfb-run --auto-servernum env ZUI_HOST_BACKEND=x11 zig build test --summary all
       - run: zig build test -Doptimize=ReleaseSafe
       - run: zig build check
       - run: zig build check -Dtarget=aarch64-windows

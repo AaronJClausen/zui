@@ -445,6 +445,85 @@ do the sokol renderer's tests, its four checks and
 `zig build conformance`. Not run: KWin, and a compositor that blurs
 through `ext_background_effect_v1` by default. Slice 9, X11, is next.
 
+Slice 9 is in sub-slices. The first is done in `hosts/native/` and
+`renderers/sokol/` (`hosts/native/linux/x11.zig`,
+`hosts/native/linux/x11_host.zig`, `hosts/native/linux/host.zig`,
+`hosts/native/linux/session.zig`, `hosts/native/linux/inbox.zig`,
+`hosts/native/linux/keyboard.zig`,
+`hosts/native/linux/x11_conformance.zig`, `renderers/sokol/src/egl.zig`,
+`renderers/sokol/src/renderer.zig`): an X11 window with slices 1 and 2's
+reports, and the choice. The Wayland host is now
+`zui_host.linux.WaylandHost` (`linux/host.zig` moved to
+`linux/wayland_host.zig`), and `zui_host.linux.Host` chooses at `init`:
+Wayland where `wl_display_connect` answers, X11 otherwise where
+`DISPLAY` is set; `ZUI_HOST_BACKEND=x11` or `wayland` forces one, and
+`Host.forced_backend` wins over it. It holds the two hosts in a tagged
+union, each call one switch on it, and its declarations are the Wayland
+host's: on X11 `zuiClipboard` is `error.Unavailable`, `zuiOpenWindow`
+`error.TooManyWindows`, `zuiChromeRegions` keeps nothing, `chromeKindAt`
+is null, `minimize` and `toggleMaximized` do nothing, and
+`system_material`, `custom_title_bar` and `window_maximized` report
+false. What does not depend on the display moved out of the Wayland host
+and is shared: `Session` (the eventfd wake, SIGINT, SIGTERM and SIGHUP,
+the desktop's buses and settings, the services, the watches), `Inbox`
+with the conversion to layout units, the environment's diffing, and the
+xkb translation of keys, modifiers and text. `X11Host` opens the display
+with `XOpenDisplay`, hands its event queue to xcb
+(`XSetEventQueueOwner`), and speaks the protocol through libxcb with its
+functions declared in Zig: one window, of the requested size times the
+scale, `_NET_WM_NAME`, `WM_NAME`, `WM_CLASS`, `WM_PROTOCOLS` with
+`WM_DELETE_WINDOW` as the close button, `WM_NORMAL_HINTS` for one that
+is not resizable, unmapped for `visible = false`; its size from
+`ConfigureNotify`; the scale from `Xft.dpi` in the root window's
+`RESOURCE_MANAGER` (96 is 1), read again on its `PropertyNotify`, 1
+without it; buttons 1 to 3 as zui's, 4 to 7 as wheel notches of 40
+units, 8 and 9 dropped, since `zui.Button` has no back or forward, as on
+Wayland; keys through `xkbcommon-x11`'s keymap and state from the core
+keyboard, the modifiers from XKB's `StateNotify`, the keymap reloaded on
+`NewKeyboardNotify` and `MapNotify`, the evdev code as the key code less
+8; detectable auto-repeat asked through XKB's `PerClientFlags`, so a
+press of a key already down is a repeat; `FocusIn` and `FocusOut` as
+`window_focused`, those a grab causes ignored; the cursor from
+`xcb-cursor`'s theme by its CSS name or the cursor font's, each loaded
+once; and the wait on the connection's descriptor beside the session's,
+the events xcb queued while waiting for a reply dispatched first. The
+sokol renderer draws `.x11`: `egl.NativeWindow` is a Wayland surface or
+an X11 window, the device's display `EGL_PLATFORM_X11_KHR` on Xlib's
+`Display`, the EGL surface made on the window's id and sized by the
+server, `zuiAttachSurface` too; it links nothing new, and the host links
+`X11`, `X11-xcb`, `xcb`, `xcb-xkb`, `xcb-cursor` and `xkbcommon-x11`.
+119 of 120 tests pass in Debug and ReleaseSafe, with and without
+`ZUI_HOST_BACKEND=x11`, the opt-in one skipped: the Wayland ones as
+before, the host suite on an X11 window never mapped, under Hyprland's
+Xwayland on `DISPLAY=:0`, and tests of the keys with their evdev codes
+and XKB's Control, a repeat, the four notches and three buttons, a
+resize the server makes through `ConfigureWindow`, `Xft.dpi` at 96, 144
+and none, focus with a grab's ignored, `WM_DELETE_WINDOW`, the pointer
+leaving and a cursor loaded once, SIGINT, a desktop report, and the
+chooser forced to each backend and following the variable, its surface
+`.x11` or `.wayland`, a second window and the clipboard refused on X11;
+without `DISPLAY` the 12 X11 tests and the chooser's X11 case skip with
+a message. CI's `native-linux` job runs the Debug tests again under
+`xvfb-run` with `ZUI_HOST_BACKEND=x11`, and the Wayland session's
+packages gain the X11 ones and Xvfb. With `ZUI_HOST_BACKEND=x11`, the
+tour's cycle drew 300 frames with no layer or glyph atlas overflow and
+clean diagnostics, `xprop` showing its X11 window and properties;
+`showcase -- --frames 60` and `theme -- --check` (18.4 ms) pass, and
+`services -- --check` fails at Copy, as the clipboard is unavailable.
+Tour idle on X11: 2.9 to 10.3 ms of CPU over 10 s, 1 or 2 frames, no
+wakes, in four runs; on Wayland in the same hour 4.2 to 13.1 ms, 1 or 2
+frames, at a load average of 5 to 6 with other builds running. On
+Wayland the tour's cycle, `showcase`, `services`, `theme`, `title-bar`,
+`material` and `many-windows` `-- --check` pass, as do the sokol
+renderer's tests, its four checks and `zig build conformance`. Remaining
+sub-slices of slice 9, in order: the clipboard and drops (`CLIPBOARD`
+and XDND), file watching already shared; the services, already shared,
+checked by `zig build services` on X11 once the clipboard answers; the
+IME, through XIM or none, to be decided then; a custom title bar through
+`_NET_WM_MOVERESIZE`, with minimize and maximize; many windows; the
+material through `_KDE_NET_WM_BLUR_BEHIND_REGION` and an ARGB visual,
+with `transparent` on `.x11`. The clipboard and drops are next.
+
 Decided here:
 
 - **libwayland-client, linked,** as sokol-zig links it, since the

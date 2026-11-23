@@ -213,21 +213,26 @@ const ManyWindowsApp = struct {
     /// A press and release at the centre of `rect`, reported to the window
     /// as Windows or the compositor would.
     fn clickAt(app: *ManyWindowsApp, window: zui.WindowId, rect: zui.Rect) !void {
-        const target = app.host.windowById(window) orelse return error.WindowNotOpen;
         const center: [2]f32 = .{ rect.x + rect.width / 2, rect.y + rect.height / 2 };
         if (comptime builtin.os.tag == .windows) {
+            const target = app.host.windowById(window) orelse return error.WindowNotOpen;
             const pixels_per_unit = app.host.pixelsPerUnit(window);
             const point = win32.lparamFromPoint(@intFromFloat(center[0] * pixels_per_unit), @intFromFloat(center[1] * pixels_per_unit));
             for ([_]win32.UINT{ win32.WM_MOUSEMOVE, win32.WM_LBUTTONDOWN, win32.WM_LBUTTONUP }) |message| {
                 _ = win32.SendMessageW(target.hwnd, message, if (message == win32.WM_LBUTTONDOWN) win32.MK_LBUTTON else 0, point);
             }
         } else {
-            const per_unit = app.host.surfaceCoordinatesPerUnit(window);
+            const wayland_host = switch (app.host.backend) {
+                .wayland => |*wayland_host| wayland_host,
+                .x11 => return error.ManyWindowsNeedWayland,
+            };
+            const target = wayland_host.windowById(window) orelse return error.WindowNotOpen;
+            const per_unit = wayland_host.surfaceCoordinatesPerUnit(window);
             const left_button = zui_host.linux.keys.evdev_button_left;
-            app.host.onPointerLeave();
-            app.host.onPointerEnter(target.surface, 0, .{ center[0] * per_unit, center[1] * per_unit });
-            app.host.onPointerButton(left_button, true);
-            app.host.onPointerButton(left_button, false);
+            wayland_host.onPointerLeave();
+            wayland_host.onPointerEnter(target.surface, 0, .{ center[0] * per_unit, center[1] * per_unit });
+            wayland_host.onPointerButton(left_button, true);
+            wayland_host.onPointerButton(left_button, false);
         }
     }
 

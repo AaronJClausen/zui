@@ -22,7 +22,7 @@ pub fn build(b: *std.Build) void {
     }
     if (linux) {
         host_module.link_libc = true;
-        for ([_][]const u8{ "wayland-client", "xkbcommon" }) |library| host_module.linkSystemLibrary(library, .{});
+        for ([_][]const u8{ "wayland-client", "xkbcommon", "X11", "X11-xcb", "xcb", "xcb-xkb", "xcb-cursor", "xkbcommon-x11" }) |library| host_module.linkSystemLibrary(library, .{});
     }
 
     const unit_tests = b.addTest(.{ .root_module = host_module });
@@ -43,7 +43,7 @@ pub fn build(b: *std.Build) void {
         },
     }) });
     linkThroughLlvmOnLinux(conformance_tests);
-    const conformance_step = b.step("conformance", "Run zui's host suite and the host's own tests against a window the user never sees (Linux: skipped without a Wayland compositor)");
+    const conformance_step = b.step("conformance", "Run zui's host suite and the host's own tests against a window the user never sees (Linux: Wayland, or X11 with ZUI_HOST_BACKEND=x11; skipped without the display server)");
     conformance_step.dependOn(&b.addRunArtifact(conformance_tests).step);
     if (has_host) test_step.dependOn(conformance_step);
 

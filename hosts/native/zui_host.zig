@@ -1,6 +1,7 @@
 const builtin = @import("builtin");
 
-/// The native host for the target's OS: Win32 on Windows, Wayland on Linux.
+/// The native host for the target's OS: Win32 on Windows, Wayland or X11 on
+/// Linux, chosen when it starts.
 pub const Host = switch (builtin.os.tag) {
     .windows => windows.Host,
     .linux => linux.Host,

@@ -167,7 +167,7 @@ fn check(host: *Host, renderer: *Renderer, ui: *Ui, window_options: zui.WindowOp
     ui.release(frame);
     const system_material = ui.environment().system_material;
     std.debug.print("system material: {}\n", .{system_material});
-    if (builtin.os.tag == .linux) try checkAlpha(host, renderer, system_material or ui.environment().reduced_transparency, window_options);
+    if (builtin.os.tag == .linux and host.zuiSurface(.main) == .wayland) try checkAlpha(host, renderer, system_material or ui.environment().reduced_transparency, window_options);
 }
 
 fn checkAlpha(host: *Host, renderer: *Renderer, blurred: bool, window_options: zui.WindowOptions) !void {

@@ -3,9 +3,9 @@ description: Install what the native host links on Linux, and start a headless W
 runs:
   using: composite
   steps:
-    - name: Install Wayland, xkbcommon, EGL, sokol's X11, OpenGL and PulseAudio dependencies, Weston and a D-Bus daemon
+    - name: Install Wayland, xkbcommon, X11 and xcb, EGL, sokol's X11, OpenGL and PulseAudio dependencies, Weston, Xvfb and a D-Bus daemon
       shell: bash
-      run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libwayland-dev libxkbcommon-dev libegl-dev libx11-dev libxi-dev libxcursor-dev libgl1-mesa-dev libpulse-dev weston dbus-daemon
+      run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libx11-xcb-dev libxcb1-dev libxcb-xkb-dev libxcb-cursor-dev libegl-dev libx11-dev libxi-dev libxcursor-dev libgl1-mesa-dev libpulse-dev weston xvfb xauth dbus-daemon
     - name: Start a headless Weston
       shell: bash
       run: |

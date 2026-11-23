@@ -3,8 +3,9 @@
 `zui_host` holds the native hosts: each owns its OS's windows and event
 loop, and implements zui's host contract, so any renderer that draws
 into the same kind of surface can draw for it. One directory per OS,
-chosen by the target: Windows, and Linux on Wayland. On Linux it needs
-`libwayland-dev libxkbcommon-dev libegl-dev`.
+chosen by the target: Windows, and Linux on Wayland or X11. On Linux it
+needs `libwayland-dev libxkbcommon-dev libegl-dev` and
+`libx11-dev libx11-xcb-dev libxcb1-dev libxcb-xkb-dev libxcb-cursor-dev libxkbcommon-x11-dev`.
 
 ```zig
 // build.zig, with `zui` the dependency from the main README
@@ -22,7 +23,7 @@ With `zui_app`, name it as the application's host:
 ```zig
 const App = struct {
     pub const Host = zui_host.Host;
-    pub const Renderer = MyRenderer; // one that draws into .win32, or .wayland on Linux
+    pub const Renderer = MyRenderer; // one that draws into .win32, or .wayland and .x11 on Linux
     // ...
 };
 ```
@@ -30,11 +31,11 @@ const App = struct {
 The host must not move between `init` and `deinit`, since its window
 thread (on Windows) and the compositor's listeners (on Linux) hold a
 pointer to it, as does the Linux host's signal handler. `forced_scale`,
-`system_material_unavailable`, and on Linux `bus_addresses` and
-`forced_blur_offers`, may be set before `init`, which keeps them;
-`zui_app` starts each field at its default. `service_fake` may be set
-before `init` too, or after it with `Host.fakeServices(fake)`, before
-the first service call.
+`system_material_unavailable`, and on Linux `forced_backend`,
+`bus_addresses` and `forced_blur_offers`, may be set before `init`,
+which keeps them; `zui_app` starts each field at its default.
+`service_fake` may be set before `init` too, or after it with
+`Host.fakeServices(fake)`, before the first service call.
 
 The examples below are each drawn by the sokol renderer.
 
@@ -42,16 +43,17 @@ The examples below are each drawn by the sokol renderer.
 
 Run from `hosts/native/`; the examples fetch sokol-zig and stb for the
 sokol renderer that draws them, and on Linux the build needs
-`libwayland-dev libxkbcommon-dev libegl-dev`, and for the examples
-sokol's
+`libwayland-dev libxkbcommon-dev libegl-dev`, X11's
+`libx11-dev libx11-xcb-dev libxcb1-dev libxcb-xkb-dev libxcb-cursor-dev libxkbcommon-x11-dev`,
+and for the examples sokol's
 `libx11-dev libxi-dev libxcursor-dev libgl1-mesa-dev libpulse-dev`:
 
 | Command | What it does |
 |---|---|
-| `zig build test` | the unit tests, and zui's host suite and the host's own tests against a window the user never sees (on Linux, skipped without a Wayland compositor) |
+| `zig build test` | the unit tests, and zui's host suite and the host's own tests against a window the user never sees (on Linux, on Wayland and on X11, each skipped without its display server) |
 | `zig build conformance` | only the host suite and the host's own tests |
 | `zig build check` | compile the host, its tests and the examples; add `-Dtarget=x86_64-windows` or `aarch64-windows` to cross-compile |
-| `zig build tour` | run the tour, drawn by the sokol renderer (Windows, Direct3D 11; Linux, OpenGL through EGL on Wayland); `-- --frames 300 --cycle 30` visits every screen and quits, `-- --measure-idle` reports the CPU used over 10 idle seconds |
+| `zig build tour` | run the tour, drawn by the sokol renderer (Windows, Direct3D 11; Linux, OpenGL through EGL on Wayland or X11); `-- --frames 300 --cycle 30` visits every screen and quits, `-- --measure-idle` reports the CPU used over 10 idle seconds |
 | `zig build showcase` | run the showcase, drawn by the sokol renderer; `-- --frames 60` quits after 60 frames |
 | `zig build material` | show the system material, or its fallback; `-- --check` reports a hidden window's material and quits, `-- --frames 120` quits after 120 frames |
 | `zig build hdr` | show HDR white beside SDR white (Windows) |
@@ -62,13 +64,13 @@ sokol's
 | `zig build title-bar` | a title bar the application draws, which the OS still drags, maximizes and resizes (Windows also snaps it); `-- --check` hit-tests it hidden |
 | `zig build many-windows` | one application in two windows, each with its own UI; `-- --check` clicks and closes them, hidden on Windows and shown on Linux |
 
-The tests and examples need a Wayland compositor on Linux (CI runs a
-headless Weston), and an example without `--check`, `--frames` or
-`--measure-idle` keeps its window open until it is closed. The tests
-that play the desktop portal and the notification daemon need a session
-bus of their own, named by `ZUI_HOST_TEST_SESSION_BUS` (see *The Linux
-host*). Its links on Linux print `warning(link): unexpected LLD stderr`
-and still succeed.
+The tests and examples need a Wayland compositor or an X server on Linux
+(CI runs a headless Weston and Xvfb), and an example without `--check`,
+`--frames` or `--measure-idle` keeps its window open until it is closed.
+The tests that play the desktop portal and the notification daemon need
+a session bus of their own, named by `ZUI_HOST_TEST_SESSION_BUS` (see
+*The Linux host*). Its links on Linux print
+`warning(link): unexpected LLD stderr` and still succeed.
 
 ## The Windows host
 
@@ -162,7 +164,21 @@ sends each window the messages Windows would.
 
 ## The Linux host
 
-On Linux, `zui_host.Host` opens Wayland windows through
+On Linux, `zui_host.Host` is `zui_host.linux.Host`, which chooses its
+display server at `init`: Wayland where a compositor answers, and X11
+otherwise, where `DISPLAY` names a server. `ZUI_HOST_BACKEND=x11` or
+`ZUI_HOST_BACKEND=wayland` forces one, and `Host.forced_backend` set
+before `init` wins over the variable; `host.backendInUse()` says which
+it chose. Each call is one switch on it. The Wayland host and the X11
+host are also `zui_host.linux.WaylandHost` and `zui_host.linux.X11Host`.
+
+```sh
+ZUI_HOST_BACKEND=x11 zig build tour    # the tour on X11, under Xwayland too
+```
+
+### On Wayland
+
+`zui_host.linux.WaylandHost` opens Wayland windows through
 libwayland-client and xdg-shell, and gives renderers each one's
 `wayland` surface (the `wl_display` and its `wl_surface`). It reads and
 dispatches the compositor's events on the thread that polls it, since a
@@ -289,7 +305,7 @@ opened with `visible = false` is a surface with no role, which the
 compositor never shows. The services have a connection to the session
 bus of their own, which reads nothing while no call waits for an answer.
 Low memory, reduced transparency from the desktop, the input method's
-composing text and X11 are still to come.
+composing text are still to come.
 
 It passes zui's host suite (`zui_testing.expectHostConforms`) against
 windows the compositor never shows, two of them for its many-windows
@@ -313,6 +329,57 @@ notification with no daemon fails without blocking.
 dbus-daemon --session --nofork --address=unix:abstract=/zui-host-test --print-address
 ZUI_HOST_TEST_SESSION_BUS=unix:abstract=/zui-host-test zig build test
 ```
+
+### On X11
+
+`zui_host.linux.X11Host` opens an X11 window through Xlib's display,
+which EGL's X11 platform takes, and speaks the protocol through the xcb
+connection beneath it, which owns its event queue. It gives renderers
+the window's `x11` surface (the Xlib `Display` and the window's id), and
+reads and dispatches the server's events on the thread that polls it. So
+far it:
+
+- opens one window of the requested size in layout units, titled through
+  `_NET_WM_NAME` and `WM_NAME`, of class `zui`, with min and max sizes
+  for one that is not resizable, and unmapped for `visible = false`, so
+  the server never shows it; its size follows `ConfigureNotify`;
+- reports the scale `Xft.dpi` gives in the resource manager's string (96
+  is 1, 144 is 1.5), read at `init` and again whenever the root window's
+  `RESOURCE_MANAGER` changes; without it the scale is 1;
+- reports the mouse (buttons 1 to 3 as zui's primary, middle and
+  secondary buttons; back and forward have no zui button), the wheel (a
+  notch of buttons 4 to 7 is 40 layout units), keys through the server's
+  XKB keymap (`xkbcommon-x11`) with the modifiers XKB's state events
+  report, their evdev codes (the X key code less 8) and typed text, the
+  pointer leaving, and whether the window has focus (a grab's moving the
+  keyboard aside is not a change of focus);
+- reports a held key's repeats as the server makes them, each a
+  `key_down` with `repeat` set that types again: it asks XKB for
+  detectable auto-repeat, so a repeat is a press alone;
+- closes when the window manager sends `WM_DELETE_WINDOW`;
+- sets the cursor a frame asks for from the cursor theme (`xcb-cursor`),
+  by its CSS name or the X cursor font's;
+- reports the desktop's environment, the lifecycle events and the
+  services as the Wayland host does, through the same D-Bus clients, and
+  watches directories through the same inotify watches;
+- waits as `nextFrame` says, on the connection, the desktop's buses, the
+  watches and the wake.
+
+Not yet on X11, each answered as on a compositor without the protocol:
+the clipboard (`zuiClipboard` is `error.Unavailable`), drops, the input
+method, a custom title bar (chrome regions are not kept, and
+`custom_title_bar` is false), `minimize` and `toggleMaximized` (which do
+nothing), many windows (`zuiOpenWindow` is `error.TooManyWindows`) and
+the system material (`system_material` is false). It links libX11,
+libX11-xcb, libxcb, libxcb-xkb, libxcb-cursor and libxkbcommon-x11.
+
+It passes zui's host suite against a window that is never mapped, whose
+harness delivers what the server would to the host's own handlers, and
+its own tests drive the keys, a repeat, the wheel, a resize the server
+makes, `Xft.dpi`, focus, the close button and the cursor. Without an X
+server to connect to, they are skipped with a message. Under Wayland
+they run against Xwayland when `DISPLAY` is set, and CI runs them under
+Xvfb.
 
 ## Accessibility
 
