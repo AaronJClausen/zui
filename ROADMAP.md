@@ -122,6 +122,13 @@ is in the file its group names.
 | `11-polish:32-zui-widgets-data` | `core/zui_widgets_data/` | `11-polish:29-overlays` | |
 | `11-polish:33-pickers` | `core/zui_widgets_data/` | `11-polish:32-zui-widgets-data` | |
 | `11-polish:34-zui-widgets-views` | `core/zui_widgets_views/` | `11-polish:30-feedback-and-media` | |
+| `11-polish:38-test-card` | `apps/test_card/`, `renderers/raylib/`, `renderers/terminal/`, `hosts/native/` | | |
+| `11-polish:39-frame-snapshots` | `core/zui_testing/`, `apps/test_card/` | `11-polish:38-test-card` | |
+| `11-polish:40-terminal-snapshots` | `renderers/terminal/`, `apps/test_card/` | `11-polish:39-frame-snapshots` | |
+| `11-polish:41-pixel-hashes` | `apps/test_card/`, `renderers/raylib/`, `hosts/native/`, `.github/`, `tools/ci/` | `11-polish:39-frame-snapshots` | |
+| `11-polish:42-scripted-input` | `apps/test_card/`, `renderers/raylib/`, `renderers/terminal/`, `hosts/native/` | `11-polish:39-frame-snapshots` | |
+| `11-polish:43-test-card-review` | `apps/test_card/` | `11-polish:41-pixel-hashes` | |
+| `11-polish:44-test-card-on-the-web` | `hosts/web/`, `apps/test_card/` | `11-polish:39-frame-snapshots` | |
 | `11-polish:22-appearance-review` | `apps/review/` | `11-polish:20-appearance-audit`, `11-polish:21-permutations` | |
 | `11-polish:23-design-workbench` | `apps/review/` | `11-polish:22-appearance-review` | |
 | `11-polish:06-text-editing` | `core/src/`, `core/zui_widgets/`, `hosts/native/` | | |
@@ -133,9 +140,12 @@ Stage 11's rows follow stage 10's, in dependency order, the design
 system's first (`roadmap/11-polish.md`, *The design system*), by the
 owner's choice. The default design's components follow it, items 27 to
 36, from the plan in `docs/plans/default-ui-designs/`, whose `exports/`
-hold each component's approved spec. The design system's items have
-their Grounding, Plan and Done when; each of stage 11's other items is
-given them as it is taken.
+hold each component's approved spec. The test card's items, 38 to 44,
+from `docs/plans/test-card.md`, follow the components, by the owner's
+choice, ahead of the appearance review, whose permutations the card's
+review mode may later show. The design system's items have their
+Grounding, Plan and Done when; each of stage 11's other items is given
+them as it is taken.
 
 The font system
 ([`roadmap/12-font-system.md`](roadmap/12-font-system.md)) has no rows

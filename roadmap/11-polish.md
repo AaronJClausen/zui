@@ -50,6 +50,13 @@ and each is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:35-italics` Italics | done |
 | `11-polish:36-motion-in-core` Motion in the core | done |
 | `11-polish:37-tour-preferences-menu` The tour's preferences in a menu on the top bar | not started |
+| `11-polish:38-test-card` The test card | not started |
+| `11-polish:39-frame-snapshots` Frame snapshots | not started |
+| `11-polish:40-terminal-snapshots` Terminal snapshots | not started |
+| `11-polish:41-pixel-hashes` Pixel hashes per rasterizer | not started |
+| `11-polish:42-scripted-input` Scripted input on the test card | not started |
+| `11-polish:43-test-card-review` The test card's review mode | not started |
+| `11-polish:44-test-card-on-the-web` The test card in the web checks | not started |
 
 ### The design system
 
@@ -2628,5 +2635,221 @@ screen is open, and the keyboard reaching every setting.
 **Waits for** `11-polish:29-overlays`.
 
 **Spec.** §18, §19.2.
+
+**Status.** Not started.
+
+## 11-polish:38-test-card — The test card
+
+T1 of `docs/plans/test-card.md`: a small, fixed application every
+backend draws, built for the checks that run it, in place of the
+showcase removed in `069ab16`.
+
+**Grounding** (at `cddd4a1`). The showcase's targets proved only that 60
+frames drew with clean diagnostics, and its terminal dump that its title
+printed; nothing compared its frames. The tour (`apps/tour/`) is large
+and is redesigned (`11-polish:24-the-tour`), so it cannot be a
+reference. A target is `examples/<app>.zig` in `renderers/raylib/`,
+`renderers/terminal/` and `hosts/native/`, built in each package's
+`build.zig` beside `tour`. The terminal's dump is
+`renderers/terminal/examples/dump.zig`.
+
+**Plan.** `apps/test_card/`, the package and module `zui_test_card`,
+which the root re-exports: the card of the plan's *The card*, its seven
+regions each with an id, at 640×384 units, which is 80×24 cells of 8×16,
+in six scenes, each a pure function of its state, with no clock.
+`App(.{ .Host, .Renderer, .Text, .renderer_name })` for `zui_app`, in
+`zui_fonts`' typefaces; `--scene <name>`, `--frames <count>` and
+`--hidden`. A `test-card` target in each of the three packages, where
+the showcase's were, with its CI steps; its headless test declares every
+scene on renderers that draw every optional command and none, in pixels
+and in cells, with clean diagnostics and the contrast audit clean. The
+package's rows in CLAUDE.md, ARCHITECTURE.md, SPEC.md §3, README.md and
+`docs/development.md`, as the showcase's were.
+
+**Done when.** The headless test passes in all three optimize modes and
+compiles for `wasm32-freestanding`; each backend's
+`test-card -- --frames 6` draws every scene once and prints
+`diagnostics ok: true`, raylib and the native host under CI's display,
+the terminal with `--dump`.
+
+**Spec.** §3, §20.1.
+
+**Status.** Not started.
+
+## 11-polish:39-frame-snapshots — Frame snapshots
+
+T2 of `docs/plans/test-card.md`: each scene's frame as committed text,
+compared exactly on every OS.
+
+**Grounding** (at `cddd4a1`). `Frame.commands()`
+(`core/src/context.zig:594`) is every command a frame draws.
+`zui_truetype.Text.zuiFingerprint` (`text/truetype/src/root.zig:56`)
+names the fonts and the placement. stb_truetype's math is zui's own Zig
+(`text/truetype/src/stb_truetype.c:19`–`28`), not each OS's libm.
+
+**Plan.** In `zui_testing`, `writeSnapshot(frame, writer)`: a header of
+the viewport, the placement, the fonts' fingerprint and the hash of each
+glyph's coverage drawn, then one line per command, positions to 1/64
+unit; and a comparison that reports the first lines that differ, with
+the region whose rectangle holds them. The card's headless test, in
+`zui_truetype`'s text, compares each scene in pixels and in cells with
+`apps/test_card/snapshots/<scene>.<placement>.txt`; `--approve` writes
+them. Its compile errors and tests as `zui_testing`'s are.
+
+**Done when.** The snapshots are the same in all three optimize modes on
+Linux, Windows and macOS (CI's pure-Zig legs and the Windows leg of
+`text/truetype/`), and moving one region by a unit fails the test naming
+that region.
+
+**Waits for** `11-polish:38-test-card`.
+
+**Spec.** §19.4, §20.1.
+
+**Status.** Not started.
+
+## 11-polish:40-terminal-snapshots — Terminal snapshots
+
+T3 of `docs/plans/test-card.md`: the terminal's cells of each scene,
+committed and compared exactly.
+
+**Grounding** (at `cddd4a1`). `renderers/terminal/examples/dump.zig`
+draws frames into cells without a terminal and prints them; CI checked
+the showcase's dump only for its title.
+
+**Plan.** `test-card -- --dump --check` compares every scene's cells,
+glyphs and colors, with `apps/test_card/snapshots/<scene>.terminal.txt`,
+printing the cells that differ and their region; `--approve` writes
+them. Its CI step on Linux, Windows and macOS.
+
+**Done when.** The check passes on all three OSes, and changing one
+cell's color in the card fails it naming the cell and region.
+
+**Waits for** `11-polish:39-frame-snapshots`.
+
+**Spec.** §20.1.
+
+**Status.** Not started.
+
+## 11-polish:41-pixel-hashes — Pixel hashes per rasterizer
+
+T4 of `docs/plans/test-card.md`: each scene's pixels hashed per
+rasterizer, with the approved image rebuilt from its commit on a
+mismatch, so no image is committed.
+
+**Grounding** (at `cddd4a1`). GPUs and llvmpipe round blends
+differently, so `hosts/web/web/check_draw.mjs:30` and `:36` allow 2
+levels a channel and 5. Nothing pins Mesa: CI installs `ubuntu-latest`'s
+(`.github/workflows/ci.yml:310`) and `tools/ci/Dockerfile` builds from
+`ubuntu:26.04`. `ReadBack` (`core/zui_testing/harness.zig:26`) reads a
+renderer's frame back. `bench-compare` builds a commit in a worktree of
+its own (`core/bench/compare.zig:214`). `test-draw` writes failing
+frames to `ZUI_WEB_DRAW_FAILURES`, which CI uploads.
+
+**Plan.** `apps/test_card/pixels.zon`: per scene, renderer and
+rasterizer (`GL_RENDERER` and its version), the SHA-256 of the RGBA8
+read-back and the commit it was approved at. raylib's and the native
+host's `test-card -- --check` compare; a rasterizer with no entry is
+reported and passes. On a mismatch: the drawn image, the approved one
+taken from the reference cache or rebuilt at its commit in a worktree,
+and a diff image, to `ZUI_TEST_CARD_FAILURES`; each differing region
+named with its count, largest difference and bounds, and whether it is
+within `check_draw`'s tolerance. CI's pixel jobs in an image pinned by
+digest with Mesa at fixed versions, which `zig build ci` uses too, their
+failures uploaded. The reference cache, `apps/test_card/.references/`
+and ignored by git: each image named by its hash and checked against it
+when read, filled by `zig build test-card-references`, which builds each
+approved commit once and draws every scene approved at it.
+
+**Done when.** CI's entries pass in that image here and in CI; a
+one-pixel change to a renderer's corner fails naming `geometry` and
+writes the three images; a second mismatch takes the approved image from
+the cache without building; an unknown rasterizer passes with its
+notice.
+
+**Waits for** `11-polish:39-frame-snapshots`.
+
+**Spec.** §20.1.
+
+**Status.** Not started.
+
+## 11-polish:42-scripted-input — Scripted input on the test card
+
+T5 of `docs/plans/test-card.md`: input through each host's own event
+path, its effects checked on the card.
+
+**Grounding** (at `cddd4a1`). raylib's `Host.script`
+(`renderers/raylib/src/root.zig:187`) feeds sampled state; the terminal
+host decodes bytes into events; the native hosts' checks have driven a
+real right click (`68d1959`).
+
+**Plan.** A script the card runs with `--script`: hover the button,
+press and release it, Tab through the controls, open the dialog and
+close it with Escape, drag the slider, type into the field, checking
+after each step the value its region prints and the scene's snapshot.
+Driven by raylib's `Host.script`, the terminal's bytes, and the native
+hosts where they can synthesize input; a host that cannot says so.
+
+**Done when.** The script passes on raylib, the terminal and one native
+host, and a widget that ignores its press fails it at that step.
+
+**Waits for** `11-polish:39-frame-snapshots`.
+
+**Spec.** §19.4, §20.1.
+
+**Status.** Not started.
+
+## 11-polish:43-test-card-review — The test card's review mode
+
+T6 of `docs/plans/test-card.md`: approving a scene by looking at it, in
+the card itself.
+
+**Grounding** (at `cddd4a1`). Until this item, `--approve` writes the
+snapshots, dumps and hashes, and the images go to
+`ZUI_TEST_CARD_FAILURES` for any viewer.
+
+**Plan.** `--review` shows each scene that differs: the drawn frame and
+the approved one side by side, the diff over them, and the snapshot's
+text diff; a key approves it, rewriting its files. Built on the card's
+own renderer and host, so it runs wherever the card does.
+
+**Done when.** Changing a region, reviewing and approving it leaves
+every check green, the files changed only for that scene.
+
+**Waits for** `11-polish:41-pixel-hashes`.
+
+**Spec.** §20.1.
+
+**Status.** Not started.
+
+## 11-polish:44-test-card-on-the-web — The test card in the web checks
+
+T7 of `docs/plans/test-card.md`: the card in the two web checks that
+already compare the browser with native drawing, storing nothing.
+
+**Grounding** (at `cddd4a1`). `hosts/web: test-demo` runs the tour in a
+worker under Node and checks every frame is the one
+`tools/tour_frames.zig` draws natively (`web/check_worker.mjs`, wired at
+`hosts/web/build.zig:110`). `test-draw` draws the frames
+`tools/demo_stream.zig` streams, one per screen (`compared_frames`,
+`hosts/web/build.zig:205`), with the sokol renderer
+(`tools/draw_reference.zig`) and in headless Chromium, and compares them
+in `web/check_draw.mjs`. `hosts/web/` names `apps/tour/` by path.
+
+**Plan.** `hosts/web/` names `apps/test_card/` by path. A worker that
+declares the card's scenes for `zui_webgl.Renderer`, checked by
+`test-demo` against the scenes drawn natively, frame for frame; and the
+card's scenes in `test-draw`'s stream, after the tour's, compared as the
+tour's are, a failing pixel named by the card's region that holds it.
+Both compile for `wasm32-freestanding` in `check`. `hosts/web/README.md`
+and `docs/development.md` say what each check now covers.
+
+**Done when.** `test-demo` and `test-draw` pass with the card's scenes,
+here and in CI; moving a region in the WebAssembly build alone fails
+`test-demo` naming that scene, and a WebGL change to one region's corner
+fails `test-draw` naming that region.
+
+**Waits for** `11-polish:39-frame-snapshots`.
+
+**Spec.** §20.1.
 
 **Status.** Not started.
