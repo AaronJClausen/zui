@@ -28,10 +28,10 @@ pub const backend_variable = "ZUI_HOST_BACKEND";
 /// set to `wayland` or `x11` forces one, and `forced_backend` wins over
 /// it. Each call is one switch on the backend chosen.
 ///
-/// Its declarations are the Wayland host's. On X11, which does not yet
-/// do all of them, a call answers as on a compositor without the
-/// protocol: a second window is refused as one too many, and the
-/// environment reports no system material.
+/// Its declarations are the Wayland host's, and both backends open up to
+/// `max_windows` windows. On X11, which does not yet do all of them, a
+/// call answers as on a compositor without the protocol: the environment
+/// reports no system material.
 ///
 /// ```zig
 /// const App = struct {
@@ -45,6 +45,10 @@ pub const Host = struct {
     pub const zui_capabilities: zui.HostCapabilities = WaylandHost.zui_capabilities;
     pub const max_windows = WaylandHost.max_windows;
     pub const wheel_step = WaylandHost.wheel_step;
+
+    comptime {
+        std.debug.assert(X11Host.max_windows == max_windows);
+    }
 
     pub const zuiClipboard = struct {
         pub fn write(host: *Host, text: []const u8) zui.ServiceError!void {
@@ -205,19 +209,17 @@ pub const Host = struct {
         }
     }
 
-    /// On X11, which opens one window so far, `error.TooManyWindows`.
+    /// See `WaylandHost.zuiOpenWindow` and `X11Host.zuiOpenWindow`.
     pub fn zuiOpenWindow(self: *Host, options: zui.WindowOptions) zui.OpenWindowError!zui.WindowId {
         return switch (self.backend) {
-            .wayland => |*wayland_host| wayland_host.zuiOpenWindow(options),
-            .x11 => error.TooManyWindows,
+            inline else => |*chosen| chosen.zuiOpenWindow(options),
         };
     }
 
-    /// On X11, closes `.main`, as its close button does.
+    /// Closes any window, `.main` included; its id then polls false.
     pub fn zuiCloseWindow(self: *Host, id: zui.WindowId) void {
         switch (self.backend) {
-            .wayland => |*wayland_host| wayland_host.zuiCloseWindow(id),
-            .x11 => |*x11_host| if (id == .main) x11_host.close(),
+            inline else => |*chosen| chosen.zuiCloseWindow(id),
         }
     }
 

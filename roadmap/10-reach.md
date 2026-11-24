@@ -705,6 +705,70 @@ manager that honours the Motif hint (Hyprland's Xwayland lists
 `_NET_WM_MOVERESIZE` but not `_GTK_SHOW_WINDOW_MENU`), and a window
 manager that ignores the hint. Many windows on X11 are next.
 
+Slice 9's fifth sub-slice, many windows on X11, is done in
+`hosts/native/` alone (`hosts/native/linux/x11_host.zig`,
+`hosts/native/linux/x11.zig`, `hosts/native/linux/host.zig`,
+`hosts/native/linux/x11_conformance.zig`,
+`hosts/native/examples/many_windows.zig`), in the Wayland host's slice-7
+shape. `X11Host` is `.many`, with `max_windows = 4` slots, an
+`X11Host.Window` each, holding its X window, inbox, size, requests,
+applied cursor, `WindowChrome`, XDND drag, origin on the root, focus,
+reported environment and terminate state; every call that takes a window
+finds its slot by id, and ids are never given twice. The display, XKB's
+keymap and state, compose, the pointer's position, the clipboard, the
+session and the input context stay on the host. `zuiOpenWindow` creates
+the window with `CreateWindow` checked, so an X error is
+`error.WindowNotCreated`, sets what `init` sets on `.main` (titles,
+class, `WM_DELETE_WINDOW`, `XdndAware`, the Motif hint, size hints),
+maps it unless hidden and reports the whole environment to it; past
+four, `error.TooManyWindows`. `zuiCloseWindow` destroys any window,
+`.main` included, and forgets the pointer, the keyboard and the input
+method there. `dispatch` finds the window each event names: buttons and
+motion move the pointer to their window, a crossing's `EnterNotify`
+enters it, keys and `FocusIn` give it the keyboard, and the input
+context follows the focused window's caret, focused once per change; the
+input method's answers reach the window the key was taken for.
+`WM_DELETE_WINDOW`, `ConfigureNotify`, `Expose`, `_NET_WM_STATE` and
+`_NET_FRAME_EXTENTS` reach their window alone, and a terminate request,
+sleep and waking, `Xft.dpi` and each desktop setting reach every one.
+Since an X selection is owned by a window, the clipboard is owned by an
+unmapped `InputOnly` window of the host's, made at `init` and destroyed
+at `deinit`, which receives `SelectionRequest`, `SelectionNotify`,
+`SelectionClear` and `INCR`'s `PropertyNotify`, so it outlives every
+window the application closes. One wait ends when any window has
+something to poll, at the earliest of the clipboard's, every drag's and
+the input method's deadlines. `zui_host.Host` forwards `zuiOpenWindow`
+and `zuiCloseWindow` to both backends. `many-windows`' click goes
+through the X11 host's handlers on X11. Nothing allocates after `init`.
+In the container (Weston, Xvfb on `:99` without a window manager), 160
+of 164 tests pass in Debug and ReleaseSafe with
+`ZUI_HOST_BACKEND=x11 DISPLAY=:99`, the two `wl_data_device` tests and
+two opt-in shown windows skipped, and 121 of 164 on Weston alone, where
+the X11 tests skip without `DISPLAY`; six are new, and the host suite's
+many-windows steps now run on X11: a second window with its own X
+window, whose `WM_DELETE_WINDOW` closes it alone and whose id then polls
+false; a press in the second window and a key in the focused first
+reaching each alone, then `FocusOut` and `FocusIn` moving the keys to
+the second, and a leave of a window the pointer is not in reporting
+nothing; a fifth window refused and a new id after a close; with `.main`
+closed, the clipboard written, read and converted by another client, and
+a file dialog over the second window answering naming it; SIGINT in both
+windows; and each window's chrome regions apart, a press on the second's
+title bar reaching zui while the first's moves the first. The chooser's
+test now opens a second X11 window. Two windows at two scales does not
+apply: the scale is the screen's `Xft.dpi`, so every window shares it.
+With `ZUI_HOST_BACKEND=x11`, `many-windows -- --check` passes, as do
+`theme -- --check` (restyled in frame 2), the tour's cycle (300 frames,
+no layer or glyph atlas overflow, clean diagnostics) and
+`showcase -- --frames 60`; `title-bar -- --check` fails, saying the
+system keeps its title bar, as it does at the parent commit, since Xvfb
+runs no window manager. On Weston the tour's cycle, `showcase` and
+`many-windows -- --check` pass; `check` and
+`check -Dtarget=aarch64-windows` pass, and natively on Windows 78 of 78
+tests and both checks. Not run: windows shown under a window manager,
+dragged or closed by hand, and tour idle on X11. The system material on
+X11 is next.
+
 Decided here:
 
 - **libwayland-client, linked,** as sokol-zig links it, since the
@@ -2035,11 +2099,13 @@ What remains, and where it went:
   other draws. Move one to a monitor at another scale. Close the first
   window and see the others run on, then close the last and see the
   process end. Each held.
-- **`10-reach:01-linux-host`, done in its slice 7, and
-  `14-macos:01-macos-host` once macOS is taken up:** the Wayland host is
-  `.many`, and the sokol renderer's EGL path attaches a `wl_egl_window`
-  and an EGL surface per window on one EGL context. macOS implements the
-  same contract, and its host stays `.one` until then.
+- **`10-reach:01-linux-host`, done in its slice 7 and slice 9's fifth
+  sub-slice, and `14-macos:01-macos-host` once macOS is taken up:** the
+  Wayland host is `.many`, and the sokol renderer's EGL path attaches a
+  `wl_egl_window` and an EGL surface per window on one EGL context; the
+  X11 host is `.many` too, an X window per window, each drawn through an
+  EGL surface on the same context. macOS implements the same contract,
+  and its host stays `.one` until then.
 - **`zui_wire`:** a connection carries one window. Many windows over the
   wire would take a connection per window, and is not queued.
 - **Docking and tear-off panels** (*Later*) can now build on it.

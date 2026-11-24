@@ -112,6 +112,19 @@ pub const FocusEvent = extern struct {
     pad0: [3]u8,
 };
 
+pub const ExposeEvent = extern struct {
+    response_type: u8,
+    pad0: u8,
+    sequence: u16,
+    window: Window,
+    x: u16,
+    y: u16,
+    width: u16,
+    height: u16,
+    count: u16,
+    pad1: [2]u8,
+};
+
 pub const ConfigureNotifyEvent = extern struct {
     response_type: u8,
     pad0: u8,
@@ -354,6 +367,7 @@ pub const configure_height = 8;
 pub const window_attribute_event_mask = 2048;
 pub const window_attribute_cursor = 16384;
 pub const window_class_input_output = 1;
+pub const window_class_input_only = 2;
 pub const copy_from_parent = 0;
 pub const property_mode_replace = 0;
 pub const any_property_type = 0;
@@ -396,6 +410,7 @@ pub extern "xcb" fn xcb_setup_roots_iterator(setup: *const Setup) callconv(.c) S
 pub extern "xcb" fn xcb_screen_next(iterator: *ScreenIterator) callconv(.c) void;
 pub extern "xcb" fn xcb_generate_id(connection: *Connection) callconv(.c) u32;
 pub extern "xcb" fn xcb_create_window(connection: *Connection, depth: u8, window: Window, parent: Window, x: i16, y: i16, width: u16, height: u16, border_width: u16, class: u16, visual: u32, value_mask: u32, values: ?*const anyopaque) callconv(.c) VoidCookie;
+pub extern "xcb" fn xcb_create_window_checked(connection: *Connection, depth: u8, window: Window, parent: Window, x: i16, y: i16, width: u16, height: u16, border_width: u16, class: u16, visual: u32, value_mask: u32, values: ?*const anyopaque) callconv(.c) VoidCookie;
 pub extern "xcb" fn xcb_destroy_window(connection: *Connection, window: Window) callconv(.c) VoidCookie;
 pub extern "xcb" fn xcb_map_window(connection: *Connection, window: Window) callconv(.c) VoidCookie;
 pub extern "xcb" fn xcb_configure_window(connection: *Connection, window: Window, value_mask: u16, values: ?*const anyopaque) callconv(.c) VoidCookie;

@@ -37,6 +37,10 @@ const UnmappedWindow = struct {
             error.NoX11Display => return skipWithoutServer(),
             else => return err,
         };
+        // As if the pointer and the keyboard were already in the window,
+        // without the events entering it reports.
+        self.window_host.pointer_window = mainOf(&self.window_host);
+        self.window_host.keyboard_window = mainOf(&self.window_host);
     }
 
     fn close(self: *UnmappedWindow) void {
@@ -53,8 +57,13 @@ fn skipWithoutServer() error{SkipZigTest} {
     return error.SkipZigTest;
 }
 
+fn mainOf(window_host: *X11Host) *X11Host.Window {
+    return window_host.windowById(.main).?;
+}
+
 /// Delivers each event the suite posts as the X server would, at the
-/// physical pixels the last poll's scale and zoom put it at.
+/// physical pixels the last poll's scale and zoom put it at, first moving
+/// the pointer or the keyboard's focus into the window it is posted to.
 const ServerHarness = struct {
     window: UnmappedWindow = .{},
 
@@ -63,11 +72,27 @@ const ServerHarness = struct {
     }
 
     pub fn post(self: *ServerHarness, event: zui.Event) bool {
+        return self.postTo(.main, event);
+    }
+
+    pub fn postTo(self: *ServerHarness, id: zui.WindowId, event: zui.Event) bool {
         const window_host = self.host();
+        const target = window_host.windowById(id) orelse return false;
         switch (event) {
-            .pointer_move => |move| window_host.onPointerMotion(physicalPixels(window_host, move.pointer.position)),
-            .pointer_down, .pointer_up => |press| window_host.onButton(1, event == .pointer_down, physicalPixels(window_host, press.pointer.position)),
-            .key_down, .key_up => |key| window_host.onKey(keycodeOf(window_host, key.key) orelse return false, event == .key_down),
+            .pointer_move => |move| {
+                const position = physicalPixels(target, move.pointer.position);
+                if (window_host.pointer_window == target) window_host.onPointerMotion(position) else enterWithPointer(window_host, target, position);
+            },
+            .pointer_down, .pointer_up => |press| {
+                const position = physicalPixels(target, press.pointer.position);
+                if (window_host.pointer_window != target) enterWithPointer(window_host, target, position);
+                window_host.onButton(1, event == .pointer_down, position);
+            },
+            .key_down, .key_up => |key| {
+                const keycode = keycodeOf(window_host, key.key) orelse return false;
+                if (window_host.keyboard_window != target) focusOn(window_host, target);
+                window_host.onKey(keycode, event == .key_down);
+            },
             .environment => |change| switch (change) {
                 .accent => |accent| window_host.onDesktopReport(.{ .accent = accent }),
                 else => return false,
@@ -94,8 +119,18 @@ const ServerHarness = struct {
     }
 };
 
-fn physicalPixels(window_host: *X11Host, position: [2]f32) [2]f32 {
-    const per_unit = window_host.surfaceCoordinatesPerUnit(.main);
+fn enterWithPointer(window_host: *X11Host, target: *X11Host.Window, position: [2]f32) void {
+    window_host.onPointerLeave();
+    window_host.onPointerEnter(target, position);
+}
+
+fn focusOn(window_host: *X11Host, target: *X11Host.Window) void {
+    if (window_host.keyboard_window) |focused| window_host.onFocus(focused, false);
+    window_host.onFocus(target, true);
+}
+
+fn physicalPixels(window: *const X11Host.Window, position: [2]f32) [2]f32 {
+    const per_unit = window.surface_coordinates_per_unit;
     return .{ position[0] * per_unit, position[1] * per_unit };
 }
 
@@ -145,7 +180,7 @@ test "on X11 the first poll reports focus and the environment, and a viewport in
     try testing.expectEqual([2]f32{ 320 / 1.25, 240 / 1.25 }, polled.builder.params.viewport);
     try testing.expectEqual(false, polled.find(.environment).?.window_focused);
     try testing.expectEqual(@as(usize, 10), countOf(&polled, .environment));
-    try testing.expectEqual(zui.Surface{ .x11 = .{ .display = window.host().display, .window = window.host().window.id } }, window.host().zuiSurface(.main));
+    try testing.expectEqual(zui.Surface{ .x11 = .{ .display = window.host().display, .window = mainOf(window.host()).x_window } }, window.host().zuiSurface(.main));
 }
 
 test "on X11 a key reports its key, its evdev code and the modifiers XKB reports, and types its text, but not with Control held" {
@@ -228,8 +263,8 @@ test "on X11 a key the server repeats arrives as presses, each after the first a
     _ = polled.poll(window_host);
     try testing.expect(!polled.find(.key_down).?.repeat);
 
-    window_host.onFocus(true);
-    window_host.onFocus(false);
+    window_host.onFocus(mainOf(window_host), true);
+    window_host.onFocus(mainOf(window_host), false);
     window_host.onKey(a, true);
     _ = polled.poll(window_host);
     try testing.expect(!polled.find(.key_down).?.repeat);
@@ -284,12 +319,12 @@ test "on X11 the server resizing the window is its new size at the next poll" {
     try testing.expectEqual([2]f32{ 320, 240 }, polled.builder.params.viewport);
 
     const size = [_]u32{ 400, 300 };
-    _ = x11.xcb_configure_window(window_host.connection, window_host.window.id, x11.configure_width | x11.configure_height, &size);
+    _ = x11.xcb_configure_window(window_host.connection, mainOf(window_host).x_window, x11.configure_width | x11.configure_height, &size);
     window_host.zuiWait(.{ .at = window_host.now().addSeconds(2) });
     try testing.expect(polled.poll(window_host));
     try testing.expectEqual([2]f32{ 400, 300 }, polled.builder.params.viewport);
 
-    window_host.onConfigure(400, 300);
+    mainOf(window_host).onConfigure(400, 300);
     window_host.zuiWait(.{ .at = window_host.now().addSeconds(0.05) });
     try testing.expect(window_host.now().secondsSince(polled.builder.params.now) >= 0.04);
 }
@@ -328,7 +363,7 @@ test "on X11 focus coming and going is reported once each, and a grab's moving t
     try window.open(1);
     defer window.close();
     const window_host = window.host();
-    const id = window_host.window.id;
+    const id = mainOf(window_host).x_window;
     var polled: zui_testing.PolledRecord = .{};
     polled.init();
     _ = polled.poll(window_host);
@@ -364,7 +399,7 @@ test "on X11 the window manager's WM_DELETE_WINDOW closes the window at the next
 
     var event = std.mem.zeroes(x11.GenericEvent);
     const message: *x11.ClientMessageEvent = @ptrCast(&event);
-    message.* = .{ .response_type = x11.client_message, .format = 32, .sequence = 0, .window = window_host.window.id, .type = window_host.atoms.wm_protocols, .data32 = .{ window_host.atoms.net_wm_name, 0, 0, 0, 0 } };
+    message.* = .{ .response_type = x11.client_message, .format = 32, .sequence = 0, .window = mainOf(window_host).x_window, .type = window_host.atoms.wm_protocols, .data32 = .{ window_host.atoms.net_wm_name, 0, 0, 0, 0 } };
     window_host.dispatch(&event);
     try testing.expect(polled.poll(window_host));
 
@@ -382,17 +417,17 @@ test "on X11 the pointer leaving is reported, and a cursor asked for is loaded o
     polled.init();
     _ = polled.poll(window_host);
 
-    window_host.onPointerEnter(.{ 5, 6 });
+    window_host.onPointerEnter(mainOf(window_host), .{ 5, 6 });
     window_host.onPointerLeave();
     _ = polled.poll(window_host);
     try testing.expectEqual([2]f32{ 5, 6 }, polled.find(.pointer_move).?.pointer.position);
     try testing.expectEqual(zui.PointerId.mouse, polled.find(.pointer_leave).?);
 
     window_host.zuiApply(.main, .{ .cursor = .text });
-    const shown = window_host.shownCursor().?;
+    const shown = window_host.shownCursor(.main).?;
     window_host.zuiApply(.main, .{ .cursor = .default });
     window_host.zuiApply(.main, .{ .cursor = .text });
-    try testing.expectEqual(shown, window_host.shownCursor().?);
+    try testing.expectEqual(shown, window_host.shownCursor(.main).?);
 }
 
 test "on X11 SIGINT wakes the wait as a terminate request, after which the window reports closed" {
@@ -472,7 +507,10 @@ test "zui_host.Host connects to the backend forced, or follows ZUI_HOST_BACKEND,
             .x11 => .x11,
         }), std.meta.activeTag(host.zuiSurface(.main)));
         if (expected == .x11) {
-            try testing.expectError(error.TooManyWindows, host.zuiOpenWindow(.{ .visible = false }));
+            const second = try host.zuiOpenWindow(.{ .visible = false });
+            try testing.expect(second != .main);
+            try testing.expectEqual(zui.SurfaceKind.x11, std.meta.activeTag(host.zuiSurface(second)));
+            host.zuiCloseWindow(second);
             try testing.expectEqual(@as(?WindowManagerSupport, null), host.backend.x11.forced_window_manager_support);
             host.zuiChromeRegions(.main, &.{});
             try testing.expectEqual(@as(?zui.ChromeKind, null), host.chromeKindAt(.main, .{ 1, 1 }));
@@ -758,7 +796,7 @@ test "on X11 an owner's INCR transfer is read in chunks, and one past the bound 
     var other: OtherClient = try .open();
     defer other.close();
     other.own(other.atoms.clipboard);
-    other.watchPropertiesOf(window_host.window.id);
+    other.watchPropertiesOf(window_host.selection_window);
     var replies: ClipboardReplies = .{};
 
     var text: [70_002]u8 = undefined;
@@ -797,7 +835,7 @@ test "on X11 a read whose owner never answers fails after the transfer bound, an
     try X11Host.zuiClipboard.write(window_host, "held");
     var clear = std.mem.zeroes(x11.GenericEvent);
     const cleared: *x11.SelectionClearEvent = @ptrCast(&clear);
-    cleared.* = .{ .response_type = x11.selection_clear, .pad0 = 0, .sequence = 0, .time = 0, .owner = window_host.window.id, .selection = window_host.atoms.clipboard };
+    cleared.* = .{ .response_type = x11.selection_clear, .pad0 = 0, .sequence = 0, .time = 0, .owner = window_host.selection_window, .selection = window_host.atoms.clipboard };
     window_host.dispatch(&clear);
     try testing.expect(!window_host.clipboard.owns_selection);
 }
@@ -823,7 +861,7 @@ test "on X11 files another client drags in and drops arrive as files_dropped at 
     _ = x11.xcb_change_property(other.connection, x11.property_mode_replace, other.window, atoms.xdnd_type_list, x11.atom_atom, 32, listed.len, &listed);
     other.own(atoms.xdnd_selection);
     other.answer = .{ .whole = "file:///home/user/My%20Theme.zon\r\nhttps://ziglang.org/\r\nfile:///tmp/notes.txt\r\n" };
-    const host_window = window_host.window.id;
+    const host_window = mainOf(window_host).x_window;
     const lists_more_types = 1;
     other.sendToHost(host_window, atoms.xdnd_enter, .{ other.window, 5 << 24 | lists_more_types, listed[0], listed[1], listed[2] });
     other.sendToHost(host_window, atoms.xdnd_position, .{ other.window, 0, 120 << 16 | 80, x11.current_time, atoms.xdnd_action_copy });
@@ -863,7 +901,7 @@ test "on X11 a drag that offers no URI list is refused and its drop finished una
     polled.init();
     _ = polled.poll(window_host);
     const atoms = other.atoms;
-    const host_window = window_host.window.id;
+    const host_window = mainOf(window_host).x_window;
     other.own(atoms.xdnd_selection);
     other.answer = .{ .whole = "file:///tmp/notes.txt\r\n" };
 
@@ -990,12 +1028,12 @@ const TitleBarWindow = struct {
     }
 
     fn press(self: *TitleBarWindow, point: [2]i16, x_button: u8) void {
-        var event = pointerButtonEvent(x11.button_press, self.host().window.id, x_button, point);
+        var event = pointerButtonEvent(x11.button_press, mainOf(self.host()).x_window, x_button, point);
         self.host().dispatch(&event);
     }
 
     fn release(self: *TitleBarWindow, point: [2]i16, x_button: u8) void {
-        var event = pointerButtonEvent(x11.button_release, self.host().window.id, x_button, point);
+        var event = pointerButtonEvent(x11.button_release, mainOf(self.host()).x_window, x_button, point);
         self.host().dispatch(&event);
     }
 
@@ -1005,7 +1043,7 @@ const TitleBarWindow = struct {
     }
 
     fn windowChrome(self: *TitleBarWindow) *x11_chrome.WindowChrome {
-        return &self.host().window.window_chrome;
+        return &mainOf(self.host()).window_chrome;
     }
 
     fn lastRequest(self: *TitleBarWindow) ?WindowManagerRequest {
@@ -1032,7 +1070,7 @@ test "on X11 a custom title bar asks the window manager for no decorations and i
     defer titled.close();
     const titled_host = titled.host();
     var hint: [5]u32 = undefined;
-    try testing.expectEqualSlices(u32, &x11_chrome.WindowChrome.no_decorations_hint, x11.readCardinals(titled_host.connection, titled_host.window.id, titled_host.atoms.motif_wm_hints, &hint));
+    try testing.expectEqualSlices(u32, &x11_chrome.WindowChrome.no_decorations_hint, x11.readCardinals(titled_host.connection, mainOf(titled_host).x_window, titled_host.atoms.motif_wm_hints, &hint));
     const environment = reportedEnvironment(&titled.polled);
     try testing.expect(environment.custom_title_bar);
     try testing.expect(!environment.window_maximized);
@@ -1045,19 +1083,19 @@ test "on X11 a custom title bar asks the window manager for no decorations and i
     try window.open(1);
     defer window.close();
     const window_host = window.host();
-    try testing.expectEqual(@as(usize, 0), x11.readCardinals(window_host.connection, window_host.window.id, window_host.atoms.motif_wm_hints, &hint).len);
+    try testing.expectEqual(@as(usize, 0), x11.readCardinals(window_host.connection, mainOf(window_host).x_window, window_host.atoms.motif_wm_hints, &hint).len);
     var polled: zui_testing.PolledRecord = .{};
     polled.init();
     _ = polled.poll(window_host);
     try testing.expect(!reportedEnvironment(&polled).custom_title_bar);
     var regions = titleBarRegions(320, 240);
     window_host.zuiChromeRegions(.main, &regions);
-    try testing.expectEqual(@as(usize, 0), window_host.window.window_chrome.snapshot.count);
-    var press = pointerButtonEvent(x11.button_press, window_host.window.id, 1, .{ 100, 10 });
+    try testing.expectEqual(@as(usize, 0), mainOf(window_host).window_chrome.snapshot.count);
+    var press = pointerButtonEvent(x11.button_press, mainOf(window_host).x_window, 1, .{ 100, 10 });
     window_host.dispatch(&press);
     _ = polled.poll(window_host);
     try testing.expect(polled.find(.pointer_down) != null);
-    try testing.expectEqual(@as(u32, 0), window_host.window.window_chrome.requests_sent);
+    try testing.expectEqual(@as(u32, 0), mainOf(window_host).window_chrome.requests_sent);
 }
 
 test "on X11 a custom title bar is not reported where the window manager cannot move the window, or once it frames the window itself" {
@@ -1070,9 +1108,9 @@ test "on X11 a custom title bar is not reported where the window manager cannot 
     var framed: TitleBarWindow = .{};
     try framed.open(1);
     defer framed.close();
-    framed.host().onFrameExtents(&.{ 0, 0, 0, 0 });
+    mainOf(framed.host()).onFrameExtents(&.{ 0, 0, 0, 0 });
     try testing.expect(framed.windowChrome().isCustom());
-    framed.host().onFrameExtents(&.{ 2, 2, 30, 2 });
+    mainOf(framed.host()).onFrameExtents(&.{ 2, 2, 30, 2 });
     _ = framed.polled.poll(framed.host());
     try testing.expectEqual(false, framed.polled.find(.environment).?.custom_title_bar);
     try testing.expectEqual(@as(?zui.ChromeKind, null), framed.kindAt(framed.pointIn(.title_bar)));
@@ -1180,7 +1218,7 @@ test "on X11 a double click on the title bar maximizes the window, and once _NET
     try testing.expectEqual(@as(u32, 2), titled.windowChrome().requests_sent);
 
     const atoms = &window_host.atoms;
-    window_host.onWindowState(&.{ atoms.net_wm_state_maximized_horz, atoms.net_wm_state_maximized_vert });
+    mainOf(window_host).onWindowState(&.{ atoms.net_wm_state_maximized_horz, atoms.net_wm_state_maximized_vert });
     _ = titled.polled.poll(window_host);
     try testing.expect(titled.polled.find(.environment).?.window_maximized);
 
@@ -1196,7 +1234,7 @@ test "on X11 window_maximized follows the _NET_WM_STATE another client writes, a
     try titled.open(1);
     defer titled.close();
     const window_host = titled.host();
-    const host_window = window_host.window.id;
+    const host_window = mainOf(window_host).x_window;
     var other = try OtherClient.open();
     defer other.close();
     const atoms = &other.atoms;
@@ -1277,7 +1315,7 @@ test "on X11 the window manager is sent each request as EWMH and ICCCM name it, 
     defer titled.close();
     try testing.expect(reportedEnvironment(&titled.polled).custom_title_bar);
     const window_host = titled.host();
-    const host_window = window_host.window.id;
+    const host_window = mainOf(window_host).x_window;
     const atoms = &window_manager.atoms;
     const source_application = 1;
 
@@ -1491,7 +1529,7 @@ const InputMethodWindow = struct {
     /// Focuses the window and asks for text input at `caret`, which the
     /// input method must be told.
     fn focusAtCaret(self: *InputMethodWindow) !void {
-        self.host().onFocus(true);
+        self.host().onFocus(mainOf(self.host()), true);
         self.askForTextInput(caret);
         _ = try self.played.expectCall("FocusIn");
         _ = try self.played.expectCall("SetCursorLocation");
@@ -1554,9 +1592,9 @@ test "on X11 the session's input method is asked for a context at init, and focu
     const window_host = tested.host();
 
     tested.askForTextInput(InputMethodWindow.caret);
-    window_host.onFocus(true);
+    window_host.onFocus(mainOf(window_host), true);
     _ = try tested.played.expectCall("FocusIn");
-    const origin = window_host.window.origin_on_root.?;
+    const origin = mainOf(window_host).origin_on_root.?;
     const located = try tested.played.expectCall("SetCursorLocation");
     try testing.expectEqual([4]u32{ @bitCast(origin[0] + 20), @bitCast(origin[1] + 40), 2, 32 }, located.arguments);
 
@@ -1570,12 +1608,12 @@ test "on X11 the session's input method is asked for a context at init, and focu
     tested.askForTextInput(null);
     _ = try tested.played.expectCall("FocusOut");
 
-    window_host.onFocus(false);
+    window_host.onFocus(mainOf(window_host), false);
     tested.askForTextInput(InputMethodWindow.caret);
     const unfocused_sent = requestsSent(&tested);
     tested.pump();
     try testing.expectEqual(unfocused_sent, requestsSent(&tested));
-    window_host.onFocus(true);
+    window_host.onFocus(mainOf(window_host), true);
     _ = try tested.played.expectCall("FocusIn");
     _ = try tested.played.expectCall("SetCursorLocation");
 }
@@ -1709,7 +1747,7 @@ test "on X11 without an input method on the session bus, keys type through the k
         _ = polled.poll(window_host);
     }
     try testing.expectEqual(ibus.InputContext.Phase.closed, window_host.input_context.phase);
-    window_host.onFocus(true);
+    window_host.onFocus(mainOf(window_host), true);
     window_host.zuiApply(.main, .{ .text_input = .{ .caret = InputMethodWindow.caret } });
     window_host.onKey(keycodeOf(window_host, .z).?, true);
     _ = polled.poll(window_host);
@@ -1735,7 +1773,7 @@ test "with ZUI_HOST_TEST_SHOWN_WINDOW set, keys typed into a shown X11 window go
     polled.init();
     const give_up_at = deadlineIn(3);
     const focus_given_up_at = deadlineIn(1);
-    while (window_host.input_context.phase == .creating or (!window_host.window.focused and window_host.now().isBefore(focus_given_up_at))) {
+    while (window_host.input_context.phase == .creating or (!mainOf(&window_host).focused and window_host.now().isBefore(focus_given_up_at))) {
         if (!window_host.now().isBefore(give_up_at)) return error.Timeout;
         window_host.zuiWait(.{ .at = window_host.now().addSeconds(0.01) });
         _ = polled.poll(&window_host);
@@ -1744,10 +1782,10 @@ test "with ZUI_HOST_TEST_SHOWN_WINDOW set, keys typed into a shown X11 window go
         std.debug.print("skipped: no input method serves org.freedesktop.portal.IBus on the session bus\n", .{});
         return error.SkipZigTest;
     }
-    if (!window_host.window.focused) {
+    if (!mainOf(&window_host).focused) {
         // The input method takes its focus from the context, not from the server.
         std.debug.print("note: the window manager did not focus the window, so the test focuses it as the server would\n", .{});
-        window_host.onFocus(true);
+        window_host.onFocus(mainOf(&window_host), true);
     }
     window_host.zuiApply(.main, .{ .text_input = .{ .caret = .{ .x = 20, .y = 20, .width = 1, .height = 16 } } });
     try testing.expect(window_host.input_context.focused);
@@ -1769,4 +1807,225 @@ test "with ZUI_HOST_TEST_SHOWN_WINDOW set, keys typed into a shown X11 window go
     typed_len += typedText(&polled, typed[typed_len..]).len;
     try testing.expect(window_host.input_context.answering);
     try testing.expectEqualStrings("zui", typed[0..typed_len]);
+}
+
+const second_window_options: zui.WindowOptions = .{ .title = "zui host suite on X11, second window", .size = .{ 320, 240 }, .visible = false };
+
+fn keyEvent(code: u8, window: x11.Window, x_keycode: u8) x11.GenericEvent {
+    return pointerButtonEvent(code, window, x_keycode, .{ 0, 0 });
+}
+
+test "on X11 a second window opens with an X window of its own, its close button closes it alone, and closing it frees its id" {
+    var window: UnmappedWindow = .{};
+    try window.open(1);
+    defer window.close();
+    const window_host = window.host();
+    const second = try window_host.zuiOpenWindow(second_window_options);
+    try testing.expect(second != .main);
+    const second_window = window_host.windowById(second).?;
+    try testing.expect(second_window.x_window != mainOf(window_host).x_window);
+    var polled: zui_testing.PolledRecord = .{};
+    polled.init();
+    try testing.expect(polled.pollWindow(window_host, second));
+    try testing.expectEqual([2]f32{ 320, 240 }, polled.builder.params.viewport);
+    try testing.expectEqual(@as(usize, 10), countOf(&polled, .environment));
+
+    var event = std.mem.zeroes(x11.GenericEvent);
+    const message: *x11.ClientMessageEvent = @ptrCast(&event);
+    message.* = .{ .response_type = x11.client_message, .format = 32, .sequence = 0, .window = second_window.x_window, .type = window_host.atoms.wm_protocols, .data32 = .{ window_host.atoms.wm_delete_window, 0, 0, 0, 0 } };
+    window_host.dispatch(&event);
+    try testing.expect(!polled.pollWindow(window_host, second));
+    try testing.expect(polled.poll(window_host));
+    window_host.zuiCloseWindow(second);
+    try testing.expectEqual(null, window_host.windowById(second));
+    try testing.expect(!polled.pollWindow(window_host, second));
+    try testing.expect(polled.poll(window_host));
+}
+
+test "on X11 the pointer's events reach the window they name, and keys the window with the keyboard's focus" {
+    var window: UnmappedWindow = .{};
+    try window.open(1);
+    defer window.close();
+    const window_host = window.host();
+    if (window_host.keymap == null) {
+        std.debug.print("skipped: the X server offers no XKB keymap\n", .{});
+        return error.SkipZigTest;
+    }
+    const second = try window_host.zuiOpenWindow(second_window_options);
+    const main_x_window = mainOf(window_host).x_window;
+    const second_x_window = window_host.windowById(second).?.x_window;
+    var first_polled: zui_testing.PolledRecord = .{};
+    first_polled.init();
+    var second_polled: zui_testing.PolledRecord = .{};
+    second_polled.init();
+    _ = first_polled.poll(window_host);
+    _ = second_polled.pollWindow(window_host, second);
+
+    var focus_in = focusEvent(x11.focus_in, main_x_window, 0);
+    window_host.dispatch(&focus_in);
+    var press = pointerButtonEvent(x11.button_press, second_x_window, 1, .{ 30, 40 });
+    var release = pointerButtonEvent(x11.button_release, second_x_window, 1, .{ 30, 40 });
+    window_host.dispatch(&press);
+    window_host.dispatch(&release);
+    var key_a = keyEvent(x11.key_press, main_x_window, keycodeOf(window_host, .a).?);
+    window_host.dispatch(&key_a);
+    _ = first_polled.poll(window_host);
+    _ = second_polled.pollWindow(window_host, second);
+    try testing.expectEqual(@as(?zui.PointerButton, null), first_polled.find(.pointer_down));
+    try testing.expectEqual(zui.Key.a, first_polled.find(.key_down).?.key);
+    try testing.expectEqual(true, first_polled.find(.environment).?.window_focused);
+    try testing.expectEqual([2]f32{ 30, 40 }, second_polled.find(.pointer_down).?.pointer.position);
+    try testing.expect(second_polled.find(.pointer_up) != null);
+    try testing.expectEqual(@as(?zui.KeyEvent, null), second_polled.find(.key_down));
+
+    var focus_out = focusEvent(x11.focus_out, main_x_window, 0);
+    window_host.dispatch(&focus_out);
+    var second_focus_in = focusEvent(x11.focus_in, second_x_window, 0);
+    window_host.dispatch(&second_focus_in);
+    var key_b = keyEvent(x11.key_press, second_x_window, keycodeOf(window_host, .b).?);
+    window_host.dispatch(&key_b);
+    _ = first_polled.poll(window_host);
+    _ = second_polled.pollWindow(window_host, second);
+    try testing.expectEqual(zui.EnvironmentChange{ .window_focused = false }, first_polled.find(.environment).?);
+    try testing.expectEqual(@as(?zui.KeyEvent, null), first_polled.find(.key_down));
+    try testing.expectEqual(zui.EnvironmentChange{ .window_focused = true }, second_polled.find(.environment).?);
+    try testing.expectEqual(zui.Key.b, second_polled.find(.key_down).?.key);
+
+    var leave = std.mem.zeroes(x11.GenericEvent);
+    const crossing: *x11.CrossingEvent = @ptrCast(&leave);
+    crossing.response_type = x11.leave_notify;
+    crossing.event = main_x_window;
+    window_host.dispatch(&leave);
+    _ = second_polled.pollWindow(window_host, second);
+    try testing.expectEqual(@as(?zui.PointerId, null), second_polled.find(.pointer_leave));
+    crossing.event = second_x_window;
+    window_host.dispatch(&leave);
+    _ = second_polled.pollWindow(window_host, second);
+    try testing.expectEqual(zui.PointerId.mouse, second_polled.find(.pointer_leave).?);
+}
+
+test "on X11 past the windows the host holds, one more is refused, and after one closes a new one opens with a new id" {
+    var window: UnmappedWindow = .{};
+    try window.open(1);
+    defer window.close();
+    const window_host = window.host();
+    try testing.expectEqual(@as(usize, 4), X11Host.max_windows);
+    try testing.expectEqual(.many, X11Host.zui_capabilities.windows);
+    var opened: [X11Host.max_windows - 1]zui.WindowId = undefined;
+    for (&opened) |*id| id.* = try window_host.zuiOpenWindow(second_window_options);
+    try testing.expectError(error.TooManyWindows, window_host.zuiOpenWindow(second_window_options));
+
+    window_host.zuiCloseWindow(opened[1]);
+    const reopened = try window_host.zuiOpenWindow(second_window_options);
+    for (opened) |id| try testing.expect(reopened != id);
+    try testing.expect(reopened != .main);
+}
+
+const DialogReplies = struct {
+    replies: [4]zui.ServiceReply(1024) = undefined,
+    count: usize = 0,
+
+    pub fn publish(self: *DialogReplies, reply: zui.ServiceReply(1024)) error{Full}!zui.Wake {
+        if (self.count == self.replies.len) return error.Full;
+        self.replies[self.count] = reply;
+        self.count += 1;
+        return .needed;
+    }
+};
+
+test "on X11 with the main window closed, the clipboard is still owned, written and read, and a dialog over another window answers naming it" {
+    var window: UnmappedWindow = .{};
+    try window.open(1);
+    defer window.close();
+    const window_host = window.host();
+    var other: OtherClient = try .open();
+    defer other.close();
+    const second = try window_host.zuiOpenWindow(second_window_options);
+    window_host.zuiCloseWindow(.main);
+    try testing.expectEqual(null, window_host.windowById(.main));
+
+    var pasted: ClipboardReplies = .{};
+    try X11Host.zuiClipboard.write(window_host, "still here");
+    try X11Host.zuiClipboard.read(window_host, .of("paste"), .of(&pasted));
+    try testing.expectEqualStrings("still here", pasted.last().text());
+    var dialogs: DialogReplies = .{};
+    try testing.expectError(error.Unavailable, X11Host.zuiFileDialogs.show(window_host, .main, .of("open"), .{}, .of(&dialogs)));
+    window.service_fake.scriptFileDialog("/zui/theme.zon\x00");
+    try X11Host.zuiFileDialogs.show(window_host, second, .of("open"), .{}, .of(&dialogs));
+
+    other.convert(other.atoms.clipboard, other.atoms.utf8_string);
+    var polled: zui_testing.PolledRecord = .{};
+    polled.init();
+    const deadline = window_host.now().addSeconds(3);
+    while (other.notified == null or dialogs.count == 0) {
+        if (!window_host.now().isBefore(deadline)) return error.Timeout;
+        try testing.expect(polled.pollWindow(window_host, second));
+        window_host.zuiWait(.{ .at = window_host.now().addSeconds(0.005) });
+        other.receive();
+    }
+    var buffer: [64]u8 = undefined;
+    try testing.expectEqualStrings("still here", other.converted(&buffer).value);
+    try testing.expectEqual(second, dialogs.replies[0].window);
+    try testing.expectEqual(.files_chosen, dialogs.replies[0].kind);
+}
+
+test "on X11 a terminate request reaches every window, and each then reports itself closed" {
+    var window: UnmappedWindow = .{};
+    try window.open(1);
+    defer window.close();
+    const window_host = window.host();
+    if (!window_host.handlesSignal(.INT)) {
+        std.debug.print("skipped: SIGINT already has a handler in this process\n", .{});
+        return error.SkipZigTest;
+    }
+    const second = try window_host.zuiOpenWindow(second_window_options);
+    var polled: zui_testing.PolledRecord = .{};
+    polled.init();
+    _ = polled.poll(window_host);
+    _ = polled.pollWindow(window_host, second);
+
+    try std.posix.raise(.INT);
+    window_host.zuiWait(.{ .at = window_host.now().addSeconds(2) });
+    for ([_]zui.WindowId{ .main, second }) |id| {
+        try testing.expect(polled.pollWindow(window_host, id));
+        try testing.expectEqual(zui.Lifecycle.terminate_requested, polled.find(.lifecycle).?);
+        try testing.expect(!polled.pollWindow(window_host, id));
+    }
+}
+
+test "on X11 each window keeps its own chrome regions, and a press on one window's title bar moves that window alone" {
+    var titled: TitleBarWindow = .{};
+    try titled.open(1);
+    defer titled.close();
+    const window_host = titled.host();
+    var second_options = second_window_options;
+    second_options.title_bar = .custom;
+    const second = try window_host.zuiOpenWindow(second_options);
+    var second_polled: zui_testing.PolledRecord = .{};
+    second_polled.init();
+    _ = second_polled.pollWindow(window_host, second);
+    try testing.expect(reportedEnvironment(&second_polled).custom_title_bar);
+    var close_at_left = [_]zui.ChromeRegion{.{ .id = 1, .bounds = .{ .width = 30, .height = title_bar_height }, .kind = .close_button }};
+    window_host.zuiChromeRegions(second, &close_at_left);
+
+    const on_title_bar = titled.pointIn(.title_bar);
+    const on_title_bar_pixels: [2]f32 = .{ @floatFromInt(on_title_bar[0]), @floatFromInt(on_title_bar[1]) };
+    try testing.expectEqual(zui.ChromeKind.title_bar, window_host.chromeKindAt(.main, on_title_bar_pixels).?);
+    try testing.expectEqual(@as(?zui.ChromeKind, null), window_host.chromeKindAt(second, on_title_bar_pixels));
+    try testing.expectEqual(zui.ChromeKind.close_button, window_host.chromeKindAt(second, .{ 10, 10 }).?);
+    try testing.expectEqual(zui.ChromeKind.title_bar, window_host.chromeKindAt(.main, .{ 10, 10 }).?);
+
+    const second_window = window_host.windowById(second).?;
+    var press = pointerButtonEvent(x11.button_press, second_window.x_window, 1, on_title_bar);
+    window_host.dispatch(&press);
+    _ = second_polled.pollWindow(window_host, second);
+    try testing.expect(second_polled.find(.pointer_down) != null);
+    try testing.expectEqual(@as(u32, 0), titled.windowChrome().requests_sent);
+    try testing.expectEqual(@as(u32, 0), second_window.window_chrome.requests_sent);
+
+    var release = pointerButtonEvent(x11.button_release, second_window.x_window, 1, on_title_bar);
+    window_host.dispatch(&release);
+    titled.click(on_title_bar);
+    try testing.expectEqual(WindowManagerRequest{ .move_resize = .{ .direction = .move, .root_position = rootPositionOf(on_title_bar), .x_button = 1 } }, titled.lastRequest().?);
+    try testing.expectEqual(@as(u32, 0), second_window.window_chrome.requests_sent);
 }

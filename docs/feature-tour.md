@@ -2799,11 +2799,12 @@ pub const App = struct {
 };
 ```
 
-On the native Windows and Linux hosts, up to four windows open at once,
-and the sokol renderer draws each through its own swapchain on one
-Direct3D 11 device, or its own EGL surface on one OpenGL context: two
-windows animating at once each draw at the rate one alone does, a 144 Hz
-display's on Windows, and two idle windows use next to no CPU.
+On the native Windows and Linux hosts, Wayland and X11 alike, up to four
+windows open at once, and the sokol renderer draws each through its own
+swapchain on one Direct3D 11 device, or its own EGL surface on one
+OpenGL context: two windows animating at once each draw at the rate one
+alone does, a 144 Hz display's on Windows, and two idle windows use next
+to no CPU.
 
 <a id="own-loop"></a>
 
@@ -2861,16 +2862,15 @@ compositor's keymap with their repeats, typed text, focus, cursor
 shapes, clipboard, dropped files, file watching through inotify,
 notifications, the portal's file dialogs and opening URLs, the
 environment from the desktop portal and UPower over D-Bus, and signals,
-sleep and waking as lifecycle events), and on X11 so far one window with
-the same pointer, wheel, keys, repeats, focus, cursor, scale from
-`Xft.dpi`, clipboard through `CLIPBOARD`, files dropped through XDND,
-environment, services and watching, drawn by the sokol renderer through
-EGL; and, in `hosts/web/`, the web host, which runs an application in a
-dedicated Web Worker drawing on the page's canvas through the WebGL
-renderer in `renderers/webgl/` (pointer, wheel, keys, text through a
-hidden field the IME composes in, cursor, the page's environment,
-visibility as lifecycle, a lost WebGL context, the clipboard and opening
-URLs).
+sleep and waking as lifecycle events), and on X11 many windows with the
+same pointer, wheel, keys, repeats, focus, cursor, scale from `Xft.dpi`,
+clipboard through `CLIPBOARD`, files dropped through XDND, environment,
+services and watching, drawn by the sokol renderer through EGL; and, in
+`hosts/web/`, the web host, which runs an application in a dedicated Web
+Worker drawing on the page's canvas through the WebGL renderer in
+`renderers/webgl/` (pointer, wheel, keys, text through a hidden field
+the IME composes in, cursor, the page's environment, visibility as
+lifecycle, a lost WebGL context, the clipboard and opening URLs).
 
 <a id="renderer"></a>
 

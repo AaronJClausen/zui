@@ -114,7 +114,7 @@ is in the file its group names.
 
 | Item | Where | Waits for | Status |
 |---|---|---|---|
-| `10-reach:01-linux-host` | `hosts/native/`, `renderers/sokol/` | | in progress; slice 9, X11, continues with many windows |
+| `10-reach:01-linux-host` | `hosts/native/`, `renderers/sokol/` | | in progress; slice 9, X11, continues with the system material |
 | `11-polish:27-essential-inputs` | `core/zui_widgets/` | `11-polish:07-zui-icons` | |
 | `11-polish:28-containers-and-navigation` | `core/zui_widgets/` | | |
 | `11-polish:29-overlays` | `core/zui_widgets/` | `11-polish:28-containers-and-navigation` | |

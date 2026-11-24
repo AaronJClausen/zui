@@ -339,17 +339,31 @@ ZUI_HOST_TEST_SESSION_BUS=unix:abstract=/zui-host-test zig build test
 
 ### On X11
 
-`zui_host.linux.X11Host` opens an X11 window through Xlib's display,
-which EGL's X11 platform takes, and speaks the protocol through the xcb
+`zui_host.linux.X11Host` opens X11 windows through Xlib's display, which
+EGL's X11 platform takes, and speaks the protocol through the xcb
 connection beneath it, which owns its event queue. It gives renderers
-the window's `x11` surface (the Xlib `Display` and the window's id), and
-reads and dispatches the server's events on the thread that polls it. So
-far it:
+each window's `x11` surface (the Xlib `Display` and the window's id),
+and reads and dispatches the server's events on the thread that polls
+it. So far it:
 
-- opens one window of the requested size in layout units, titled through
-  `_NET_WM_NAME` and `WM_NAME`, of class `zui`, with min and max sizes
-  for one that is not resizable, and unmapped for `visible = false`, so
-  the server never shows it; its size follows `ConfigureNotify`;
+- opens many windows (`zui_capabilities.windows = .many`): `init` opens
+  `.main`, and `zuiOpenWindow(options)` up to `Host.max_windows - 1`
+  more, each with an id never given twice, its own X window, events,
+  requests, cursor, chrome regions and drag, polled by its id;
+  `zuiCloseWindow(window)` destroys any of them, `.main` included, and
+  `WM_DELETE_WINDOW` closes only the window it names. Each X event names
+  its window: the pointer's reach the window it entered or pressed in,
+  keys the one with the keyboard's focus, which the input method
+  follows, and a drop the one it was dropped on. The clipboard is owned
+  by an unmapped input-only window of the host's own, so it keeps
+  working whichever windows are open, and a terminate request, the
+  system sleeping and the desktop's settings reach every window. The
+  scale is the screen's, so every window has the same;
+- opens each window at the requested size in layout units, titled
+  through `_NET_WM_NAME` and `WM_NAME`, of class `zui`, with min and max
+  sizes for one that is not resizable, and unmapped for
+  `visible = false`, so the server never shows it; its size follows
+  `ConfigureNotify`;
 - reports the scale `Xft.dpi` gives in the resource manager's string (96
   is 1, 144 is 1.5), read at `init` and again whenever the root window's
   `RESOURCE_MANAGER` changes; without it the scale is 1;
@@ -364,7 +378,7 @@ far it:
 - reports a held key's repeats as the server makes them, each a
   `key_down` with `repeat` set that types again: it asks XKB for
   detectable auto-repeat, so a repeat is a press alone;
-- closes when the window manager sends `WM_DELETE_WINDOW`;
+- closes a window when the window manager sends it `WM_DELETE_WINDOW`;
 - sets the cursor a frame asks for from the cursor theme (`xcb-cursor`),
   by its CSS name or the X cursor font's;
 - offers the clipboard as text through the `CLIPBOARD` selection:
@@ -373,14 +387,14 @@ far it:
   `UTF8_STRING`, `text/plain;charset=utf-8`, `TEXT` and `STRING` (in
   Latin-1, each character past it a `?`), refusing any other target, and
   drops the text when another client takes the selection;
-  `read(host, request, sink)` answers the window's own text at once, and
+  `read(host, request, sink)` answers the host's own text at once, and
   otherwise converts the selection to `UTF8_STRING` into a property of
-  the window, publishing a `zui.ServiceReply` from the host's wait once
-  the owner has written it, whole or in `INCR`'s chunks: up to 64 KiB,
-  cut at a character with the rest counted as left out, `""` when no
-  client owns it or its owner refuses, and `.failed` when the owner
-  takes longer than 2 s for it or a chunk of it. The `PRIMARY` selection
-  is not read or written;
+  the host's window, publishing a `zui.ServiceReply` from the host's
+  wait once the owner has written it, whole or in `INCR`'s chunks: up to
+  64 KiB, cut at a character with the rest counted as left out, `""`
+  when no client owns it or its owner refuses, and `.failed` when the
+  owner takes longer than 2 s for it or a chunk of it. The `PRIMARY`
+  selection is not read or written;
 - reports files dropped onto the window through XDND, version 5
   (`XdndAware`): a drag that offers `text/uri-list`, among its first
   three types or on its `XdndTypeList`, is accepted for copying in each
@@ -424,20 +438,25 @@ far it:
 - waits as `nextFrame` says, on the connection, the desktop's buses, the
   watches, the input method and the wake.
 
-Not yet on X11, each answered as on a compositor without the protocol:
-many windows (`zuiOpenWindow` is `error.TooManyWindows`) and the system
-material (`system_material` is false). XIM is not used: it needs Xlib to
-own the event queue, which the host gives to xcb. It links libX11,
-libX11-xcb, libxcb, libxcb-xkb, libxcb-cursor and libxkbcommon-x11.
+Not yet on X11, answered as on a compositor without the protocol: the
+system material (`system_material` is false). XIM is not used: it needs
+Xlib to own the event queue, which the host gives to xcb. It links
+libX11, libX11-xcb, libxcb, libxcb-xkb, libxcb-cursor and
+libxkbcommon-x11.
 
 It passes zui's host suite against a window that is never mapped, whose
 harness delivers what the server would to the host's own handlers, and
 its own tests drive the keys, a repeat, the wheel, a resize the server
-makes, `Xft.dpi`, focus, the close button and the cursor. Another client
-on a connection of its own reads the window's clipboard as each target,
-owns the clipboard and answers the window's reads whole, refused, never,
-and in `INCR`'s chunks within and past the bound, and drags and drops
-onto the window, with and without a URI list. With
+makes, `Xft.dpi`, focus, the close button and the cursor, and, with a
+second window, the close button closing it alone, the pointer and keys
+reaching the window each names, a fifth window refused and a new id
+after a close, the clipboard and a file dialog after `.main` closed, a
+terminate request in every window, and each window's chrome regions
+apart; its many-windows steps run in the host suite. Another client on a
+connection of its own reads the window's clipboard as each target, owns
+the clipboard and answers the window's reads whole, refused, never, and
+in `INCR`'s chunks within and past the bound, and drags and drops onto
+the window, with and without a URI list. With
 `ZUI_HOST_TEST_SESSION_BUS` set, a test plays the input method on that
 bus under the portal's name and checks the context's creation, focus and
 the caret following the frames, a consumed key typing nothing and an
@@ -713,11 +732,13 @@ shared count, the first counted none, and the first draws on after the
 second closes. On Windows its windows are hidden; on Linux they are
 shown for the moment the check takes, since a frame drawn into a surface
 the compositor never shows waits in its swap for a frame callback that
-never comes. On a 144 Hz monitor on Windows, two windows animating at
-once each hold 143 frames a second, as one alone holds 144, and two idle
-windows use no CPU. On Linux under Hyprland at 144 Hz, one window alone
-and each of two draw 72 frames a second, as the one-window tour does
-there, and two idle windows use 0.9 to 21 ms of CPU over 10 s.
+never comes; with `ZUI_HOST_BACKEND=x11` it clicks through the X11
+host's handlers as through the Wayland host's. On a 144 Hz monitor on
+Windows, two windows animating at once each hold 143 frames a second, as
+one alone holds 144, and two idle windows use no CPU. On Linux under
+Hyprland at 144 Hz, one window alone and each of two draw 72 frames a
+second, as the one-window tour does there, and two idle windows use 0.9
+to 21 ms of CPU over 10 s.
 
 ## The tour on a native host
 

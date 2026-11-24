@@ -212,7 +212,7 @@ const ManyWindowsApp = struct {
     }
 
     /// A press and release at the centre of `rect`, reported to the window
-    /// as Windows or the compositor would.
+    /// as Windows, the compositor or the X server would.
     fn clickAt(app: *ManyWindowsApp, window: zui.WindowId, rect: zui.Rect) !void {
         const center: [2]f32 = .{ rect.x + rect.width / 2, rect.y + rect.height / 2 };
         if (comptime builtin.os.tag == .windows) {
@@ -222,18 +222,26 @@ const ManyWindowsApp = struct {
             for ([_]win32.UINT{ win32.WM_MOUSEMOVE, win32.WM_LBUTTONDOWN, win32.WM_LBUTTONUP }) |message| {
                 _ = win32.SendMessageW(target.hwnd, message, if (message == win32.WM_LBUTTONDOWN) win32.MK_LBUTTON else 0, point);
             }
-        } else {
-            const wayland_host = switch (app.host.backend) {
-                .wayland => |*wayland_host| wayland_host,
-                .x11 => return error.ManyWindowsNeedWayland,
-            };
-            const target = wayland_host.windowById(window) orelse return error.WindowNotOpen;
-            const per_unit = wayland_host.surfaceCoordinatesPerUnit(window);
-            const left_button = zui_host.linux.keys.evdev_button_left;
-            wayland_host.onPointerLeave();
-            wayland_host.onPointerEnter(target.surface, 0, .{ center[0] * per_unit, center[1] * per_unit });
-            wayland_host.onPointerButton(left_button, true);
-            wayland_host.onPointerButton(left_button, false);
+        } else switch (app.host.backend) {
+            .wayland => |*wayland_host| {
+                const target = wayland_host.windowById(window) orelse return error.WindowNotOpen;
+                const per_unit = wayland_host.surfaceCoordinatesPerUnit(window);
+                const left_button = zui_host.linux.keys.evdev_button_left;
+                wayland_host.onPointerLeave();
+                wayland_host.onPointerEnter(target.surface, 0, .{ center[0] * per_unit, center[1] * per_unit });
+                wayland_host.onPointerButton(left_button, true);
+                wayland_host.onPointerButton(left_button, false);
+            },
+            .x11 => |*x11_host| {
+                const target = x11_host.windowById(window) orelse return error.WindowNotOpen;
+                const per_unit = x11_host.surfaceCoordinatesPerUnit(window);
+                const position: [2]f32 = .{ center[0] * per_unit, center[1] * per_unit };
+                const primary_x_button = 1;
+                x11_host.onPointerLeave();
+                x11_host.onPointerEnter(target, position);
+                x11_host.onButton(primary_x_button, true, position);
+                x11_host.onButton(primary_x_button, false, position);
+            },
         }
     }
 
