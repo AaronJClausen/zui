@@ -44,6 +44,7 @@ jobs:
       renderers-sokol: ${{ steps.affected.outputs.renderers-sokol }}
       hosts-native: ${{ steps.affected.outputs.hosts-native }}
       hosts-web: ${{ steps.affected.outputs.hosts-web }}
+      examples-template: ${{ steps.affected.outputs.examples-template }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # A new branch, a manual run, or a base that cannot be fetched (a
@@ -448,6 +449,32 @@ jobs:
           set -o pipefail
           timeout 60 zig build tour -- --measure-idle 2>&1 | grep "^idle" | tee idle.log
           echo "The tour's overview under a headless Weston, $(cat idle.log)" >> "$GITHUB_STEP_SUMMARY"
+
+  # The template builds the native host and the sokol renderer, so it is not
+  # a pure package: it runs under a headless Weston, and Windows and macOS
+  # are cross-checked, macOS's being its test alone.
+  template:
+    name: "examples/template: test, check, cross-check and run (ubuntu-latest, Weston)"
+    needs: changes
+    if: needs.changes.outputs.examples-template == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      LIBGL_ALWAYS_SOFTWARE: "1"
+    defaults:
+      run:
+        working-directory: examples/template
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-zig
+      - uses: ./.github/actions/wayland-session
+      - run: zig build test
+      - run: zig build test -Doptimize=ReleaseSafe
+      - run: zig build check
+      - run: zig build check -Dtarget=x86_64-windows
+      - run: zig build check -Dtarget=aarch64-macos
+      - name: Draw 120 frames of the counter, then close its window
+        run: timeout -k 10 120 zig build run -- --frames 120
 
   # What the browser runs compiles for wasm32-freestanding, so the tests run
   # on Linux, and Windows and macOS are cross-checked.

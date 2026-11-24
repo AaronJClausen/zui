@@ -878,12 +878,13 @@ passes natively and for `x86_64-windows` and `aarch64-macos`;
 on a tarball of zui, renamed, builds, tests and runs, and with the
 README's swap to `zui_raylib` too. Every app on `zui_host` and
 `zui_sokol` needs the 20-line `SokolRenderer` adapter, for
-`11-polish:12-developer-experience-audit`. CI has no job for it yet: it
-needs the host's and sokol's Linux packages and a compositor, and
-`.github/scripts/affected_packages.py` resolves its `../..` to the root,
-so a change to `core/` would not mark it affected without a rule of its
-own. From an empty cache, configuring it fetches sokol and stb, as
-`examples/` does, since it needs their modules to declare the app.
+`11-polish:12-developer-experience-audit`. CI's `template` job tests it
+in Debug and ReleaseSafe, checks it natively and for `x86_64-windows`
+and `aarch64-macos`, and draws 120 frames of it under a headless Weston;
+`.github/scripts/affected_packages.py` reaches it through the root,
+whose `.path` dependencies are now in its closure. From an empty cache,
+configuring it fetches sokol and stb, as `examples/` does, since it
+needs their modules to declare the app.
 
 ## 11-polish:10-samples — Samples
 

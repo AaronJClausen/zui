@@ -16,6 +16,7 @@ import subprocess
 import sys
 
 CHANGES_TO_EVERY_JOB = (".github/workflows/ci.yml", ".github/actions/", ".github/scripts/")
+ROOT = "."
 ROOT_BUILD_FILES = ("build.zig", "build.zig.zon", "tests")
 PATH_DEPENDENCY = re.compile(r'\.path\s*=\s*"([^"]+)"')
 
@@ -61,6 +62,12 @@ def is_under(path, directory):
     return path == directory or path.startswith(directory + "/")
 
 
+def belongs_to(path, package):
+    if package == ROOT:
+        return any(is_under(path, file) for file in ROOT_BUILD_FILES)
+    return is_under(path, package)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("base", nargs="?", default="")
@@ -69,17 +76,17 @@ def main():
     arguments = parser.parse_args()
 
     packages = package_directories()
-    dependencies_of = {package: path_dependencies(package) for package in packages}
+    dependencies_of = {package: path_dependencies(package) for package in (*packages, ROOT)}
     changed = changed_files(arguments.base, arguments.head)
     changes_everything = changed is None or any(path.startswith(CHANGES_TO_EVERY_JOB) for path in changed)
 
     affected = {}
     for package in packages:
         closure = dependency_closure(package, dependencies_of)
-        affected[package] = changes_everything or any(is_under(path, directory) for path in changed for directory in closure)
+        affected[package] = changes_everything or any(belongs_to(path, member) for path in changed for member in closure)
 
     outputs = {package.replace("/", "-"): affected[package] for package in packages}
-    outputs["root-build"] = changes_everything or any(is_under(path, file) for path in changed for file in ROOT_BUILD_FILES)
+    outputs["root-build"] = changes_everything or any(belongs_to(path, ROOT) for path in changed)
     for line in (f"{name}={'true' if value else 'false'}" for name, value in outputs.items()):
         print(line)
     for matrix in arguments.matrix:

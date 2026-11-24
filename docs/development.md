@@ -119,10 +119,13 @@ Dependabot's settings or the Pages workflow runs nothing). Its first
 job, `changes`, runs `.github/scripts/affected_packages.py`, which reads
 each package's `build.zig.zon` and names the packages the change
 reaches: a package's jobs run when a file under it, or under a package
-it names by `.path`, directly or not, changed. A change to `ci.yml`,
-`.github/actions/` or `.github/scripts/`, a new branch or a manual run
-reaches every package. Each job, from its package's directory, fits
-within 10 minutes:
+it names by `.path`, directly or not, changed. A package that names the
+root, as the template does, is reached by a change to the root's build
+(`build.zig`, `build.zig.zon`, `tests/`) or to any package the root
+names, but not by one to `themes/` or `examples/samples/`, which the
+root does not name. A change to `ci.yml`, `.github/actions/` or
+`.github/scripts/`, a new branch or a manual run reaches every package.
+Each job, from its package's directory, fits within 10 minutes:
 
 - the root, on every run: the format check, the documentation, and
   `check`, which compiles core and the apps through the root's
@@ -182,7 +185,12 @@ within 10 minutes:
   in a job of its own; `test-site`, the published page, in headless
   Google Chrome; and `test-draw` under `xvfb-run`, its reference drawn
   by llvmpipe and compared with its allowance, keeping the frames that
-  do not match as the run's artifacts.
+  do not match as the run's artifacts;
+- `examples/template/`, in one job on Linux under a headless Weston
+  (`.github/actions/wayland-session`): its tests in Debug and
+  ReleaseSafe, its `check` there and for x86-64 Windows and ARM64 macOS
+  (on macOS, the test alone), and `run -- --frames 120`, which draws the
+  counter's window and closes it.
 
 Every job sets Zig up through `.github/actions/setup-zig`, which turns
 off Windows Defender's real-time scanning on Windows, where it slows
