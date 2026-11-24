@@ -150,6 +150,7 @@ item that raised it.
 | A rasterizer the test card's hashes do not know (`11-polish:41-pixel-hashes`) | reported, and the check passes, settled by the owner: a new GPU or Mesa asks for an approval rather than failing |
 | Where the test card's approved images live (`11-polish:41-pixel-hashes`) | nowhere in the repository, settled by the owner: on a mismatch the approved image is rebuilt from the commit it was approved at, in a worktree of its own, and cached on the developer's machine in `apps/test_card/.references/`, which git ignores. Keeping the images as release assets was the other option |
 | The test card on the web host (`11-polish:44-test-card-on-the-web`) | drawn in the checks the web host already runs, storing nothing, settled by the owner: the card's scenes in `test-demo`'s worker check, so the WebAssembly build lays the card out as the native build does, and in `test-draw`, so WebGL draws it as sokol does, a failure named by region. Not taken for now: pixel hashes for Chromium, since CI installs the newest stable Chrome and a new rasterizer would ask for an approval about every four weeks unless Chrome is pinned; and the scripted input through the page's `input_recorder.mjs`. `docs/plans/test-card.md` keeps both as optional items |
+| When the focus ring shows (`11-polish:45-focus-ring-done-right`) | settled by the owner: on at the first input that navigates without a pointer, whatever device sends it (the keyboard, a gamepad's or a remote's directional pad, a rotary control, a switch device, an accessibility action that moves focus), and, as browsers do, at any key pressed while a control has focus, but a modifier alone or a key pressed with Ctrl, Alt or the system key held, so Space on a clicked button shows its ring; off at a pointer's release, not its press, and kept through a press cancelled by Escape; hover and the wheel leave it as it is; a control that takes typed text (a text field, a text area, a search field, a number stepper's entry, an editable dropdown) shows it however it was focused; focus moved by the application (`requestFocus`, an overlay returning focus to its opener) keeps the state it finds. Only keys that move focus was the other option |
 | A D-Bus client for the Linux host (`10-reach:01-linux-host`) | the host's own, over a Unix socket into fixed buffers, not libdbus or sd-bus: no outside code shares the connection, as EGL shares libwayland's objects, and the portal and UPower need only a handshake, a few calls and three signals; libdbus allocates per message and is thread-unfriendly, sd-bus ties the host to systemd |
 | macOS (`14-macos:01-macos-host`) | set aside by the owner, who has no macOS hardware: its work is listed in `roadmap/14-macos.md`, out of the queue, until the owner chooses to take it up. What fixes a contract's shape for macOS stays in the code as a stub: the `cocoa` surface, the system material's vibrancy, and bench's `.macos` machine readings and counters message. CI keeps its macOS runners, which need no hardware here |
 | Where an element declares its material (`08-effects:05-materials`) | `Ui.Decoration.material`, typed by the renderer's `MaterialHandle`: `Ui.Element`, `Ui.Decoration` and `Ui.Style` are the context's own, and are `zui.Element`, `zui.Decoration` and `zui.Style` without a handle, so no existing code changes. `open` taking `anytype` to accept both was rejected: a literal passed through `anytype` is not converted to `Ui.Element` |
@@ -171,19 +172,3 @@ the spec.
    asked about whose element had no region. The other option is only
    saying so in each query's doc comment. No item is queued until the
    owner chooses.
-3. **When the focus ring shows, beyond the owner's rule**
-   (`11-polish:45-focus-ring-done-right`). The owner set it: on at the
-   first navigation without a pointer, from any input that navigates so,
-   off at a pointer's release, kept through a press cancelled by Escape,
-   and always on a text input. Planned, until the owner says otherwise:
-   hover and the wheel leave it as it is; the inputs that turn it on are
-   the keyboard's, a gamepad's or a remote's directional pad, a rotary
-   control, a switch device and an accessibility action that moves
-   focus; the controls that show it however focused are those that take
-   typed text (text field, text area, search field, a number stepper's
-   entry, an editable dropdown); focus moved by the application
-   (`requestFocus`, an overlay returning focus to its opener) keeps the
-   state it finds. Still to choose: whether a key pressed on a control
-   that a click focused, such as Space on a clicked button, turns it on,
-   as browsers do for any key but a modifier, or only keys that move
-   focus.

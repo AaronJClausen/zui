@@ -3123,10 +3123,13 @@ place of `border` while focused (`decorationOf`,
    that steps focus, a switch device, and an accessibility action that
    moves focus (a screen reader, voice control). The rule is the kind of
    input, not the device: a new source of navigation events turns it on
-   without changing the rule. It turns off at a pointer's release (a
-   click or a tap), not its press; a press cancelled by Escape leaves it
-   on. Hover and the wheel do not change it. A control that takes typed
-   text shows its ring however it was focused, as a text field, a search
+   without changing the rule. As in browsers, it turns on too at any key
+   pressed while a control has focus, but a modifier alone or a key
+   pressed with Ctrl, Alt or the system key held, so Space on a clicked
+   button shows its ring. It turns off at a pointer's release (a click
+   or a tap), not its press; a press cancelled by Escape leaves it on.
+   Hover and the wheel do not change it. A control that takes typed text
+   shows its ring however it was focused, as a text field, a search
    field, a number stepper's entry and an editable dropdown do.
    `widgetState` answers `.focused` only while the focus is shown, and a
    focused control keeps its ring while hovered or pressed, the state's
@@ -3140,11 +3143,12 @@ and each other outset the audit found as even; a sibling declared after
 a focused control and hovered draws under its ring; a ring at offsets
 −2, 0 and 2 has corners parallel to its control's, for round and
 squircle corners; `zui_testing.Driver` tests show the ring after Tab and
-after a gamepad move and after an accessibility action, hide it after a
-click's release, keep it after a press cancelled by Escape and while
-hovering, and show it on a text field focused by a click; the audit is
-clean for every component's `glance` permutations; `counts` within 2% of
-the parent commit; the tour looks the same but for the ring.
+after a gamepad move, after an accessibility action and after Space on a
+clicked button (not after Ctrl+S), hide it after a click's release, keep
+it after a press cancelled by Escape and while hovering, and show it on
+a text field focused by a click; the audit is clean for every
+component's `glance` permutations; `counts` within 2% of the parent
+commit; the tour looks the same but for the ring.
 
 **Waits for** `11-polish:29-overlays`, which changes the same widgets
 and returns focus to an overlay's opener.
