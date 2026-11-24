@@ -101,22 +101,46 @@ pub const Lasso = struct {
 /// parts of their own, since they are not states of the pointer or focus.
 /// Each tag lists the `Style` fields its widget reads.
 pub const Part = enum {
-    /// `label`: `text`.
+    /// `label`, and `labelWith` in the `body` role and the `default` tone:
+    /// `text`.
     label,
-    /// `mutedLabel`: `text`.
+    /// `mutedLabel`, and the `muted` tone's color: `text`.
     muted_label,
+    /// The `accent` tone's color: `text`.
+    label_accent,
+    /// `labelWith` in each other type role: `text`.
+    label_display,
+    label_headline,
+    label_title,
+    label_body_strong,
+    label_label,
+    label_label_strong,
+    label_caption,
+    label_code,
+    label_numeric,
     /// `labeledRow`'s label: `text`, `size[0]` for the label's column and
     /// `gap` between the label and the control.
     row_label,
+    /// The description under a row's label: `text`.
+    row_description,
     /// `disclosure`'s header: `background`, `border`, `focus_ring`,
     /// `corner_radius`, `size[1]`, `padding`, `gap` and `text`.
     disclosure,
-    /// The header's indicator while expanded: `glyph` and `text`.
+    /// The header's chevron while expanded: `glyph`, `text`, `size[0]` for
+    /// the icon's side, and `motion` for its turn.
     disclosure_expanded,
-    /// The header's indicator while collapsed: `glyph` and `text`.
+    /// The header's chevron while collapsed, read as `disclosure_expanded`.
     disclosure_collapsed,
+    /// A control of `ControlSize.small`: `size[0]` for its icon's side,
+    /// `size[1]` for its height, and `text` for its label's type.
+    control_small,
+    /// A control of `ControlSize.medium`, read as `control_small`.
+    control_medium,
+    /// A control of `ControlSize.large`, read as `control_small`.
+    control_large,
     /// `button`, a primary action: `background`, `border`, `focus_ring`,
-    /// `corner_radius`, `size[1]`, `padding`, `gap` and `text`.
+    /// `corner_radius`, `padding`, `gap`, `text` for its color, and `scale`
+    /// and `motion` while pressed. Its size is its `ControlSize`'s part.
     button,
     /// A button of `.variant = .secondary`, read as `button`.
     button_secondary,
@@ -126,14 +150,16 @@ pub const Part = enum {
     button_tertiary,
     /// A button of `.variant = .danger`, read as `button`.
     button_danger,
-    /// `checkbox`'s row: `size[1]`, `gap` and its label's `text`.
+    /// `checkbox`'s row: `size[0]` for its least width, `size[1]`, `gap` and its
+    /// label's `text`.
     checkbox,
     /// The box while unchecked: `background`, `border`, `focus_ring`,
     /// `corner_radius` and `size`.
     checkbox_box,
     /// The box while checked, read as `checkbox_box`.
     checkbox_box_checked,
-    /// The mark in a checked box: `background`, `corner_radius` and `size`.
+    /// The mark in a checked box: `background`, `corner_radius`, `size`,
+    /// and `motion` as it grows in.
     checkbox_mark,
     /// `slider`: `size[1]`.
     slider,
@@ -142,9 +168,18 @@ pub const Part = enum {
     slider_filled,
     /// The track after the thumb, read as `slider_filled`.
     slider_empty,
-    /// The thumb: `background`, `border`, `focus_ring`, `corner_radius` and
-    /// `size`.
+    /// The thumb: `background`, `border`, `corner_radius` and `size`; its
+    /// `focus_ring` is drawn round the whole slider, clear of the track.
     slider_thumb,
+    /// The value shown above the thumb while it is dragged: `background`,
+    /// `corner_radius`, `padding`, `text`, and `gap` between it and the
+    /// thumb.
+    slider_bubble,
+    /// A step's tick on the track before the thumb: `background`,
+    /// `corner_radius` and `size`.
+    slider_tick_filled,
+    /// A tick after the thumb, read as `slider_tick_filled`.
+    slider_tick_empty,
     /// `textField`: `background`, `border`, `focus_ring`, `corner_radius`,
     /// `size[1]`, `padding` and `text`.
     text_field,
@@ -152,6 +187,21 @@ pub const Part = enum {
     text_field_placeholder,
     /// The caret, as tall as the field's text: `background` and `size[0]`.
     text_field_caret,
+    /// A field with an error, read as `text_field`.
+    text_field_error,
+    /// The label shown above a field: `text`, and `gap` below it.
+    text_field_label,
+    /// The help below a field: `text`, and `gap` above it.
+    text_field_help,
+    /// The error below a field in place of its help: `text`, and `gap`
+    /// above it and after its icon.
+    text_field_error_message,
+    /// The error's alert icon: `text` and `size[0]`.
+    text_field_error_icon,
+    /// The icon at a field's start: `text` and `size[0]`.
+    text_field_icon,
+    /// The text at a field's end, such as a unit: `text`.
+    text_field_trailing,
     /// `dropdown`'s button: `background`, `border`, `focus_ring`,
     /// `corner_radius`, `size[1]`, `padding`, `gap` and `text`.
     dropdown,
@@ -165,6 +215,8 @@ pub const Part = enum {
     dropdown_option,
     /// The selected option, read as `dropdown_option`.
     dropdown_option_selected,
+    /// The check at the selected option's end: `text` and `size[0]`.
+    dropdown_check,
     /// `card`: `background`, `border`, `focus_ring`, `corner_radius`,
     /// `shadow`, `padding`, `gap`, and `scale` and `motion` while pressed.
     /// A card that is not interactive is asked only `.idle`.
@@ -241,6 +293,94 @@ pub const Part = enum {
     crumb_current,
     /// Between two crumbs: `glyph`, `text`, and `gap` either side.
     crumb_separator,
+    /// `radioGroup` itself: `gap` between options stacked in a column.
+    radio_group,
+    /// A `radioGroup` laid out in a row, read as `radio_group`.
+    radio_group_horizontal,
+    /// An option of a radio group: `focus_ring`, `corner_radius`, `size[0]`
+    /// for its least width, `size[1]`, `gap` and its label's `text`.
+    radio,
+    /// The circle of an option not chosen: `background`, `border`,
+    /// `corner_radius` and `size`.
+    radio_circle,
+    /// The chosen option's circle, its ring the border, read as
+    /// `radio_circle`.
+    radio_circle_selected,
+    /// `segmented`'s groove: `background`, `corner_radius`, `size[1]` and
+    /// `padding`.
+    segmented,
+    /// A segment: `background`, `border`, `focus_ring`, `corner_radius`,
+    /// `size[1]`, `padding` and `text`.
+    segment,
+    /// The selected segment, read as `segment`.
+    segment_selected,
+    /// The thumb behind the selected segment: `background`, `border`,
+    /// `corner_radius`, `shadow` and `motion`.
+    segmented_thumb,
+    /// Between two unselected segments: `background`, and `size`, its width
+    /// and its share of the groove's height.
+    segmented_separator,
+    /// `numberStepper`'s container: `background`, `border`, `focus_ring`,
+    /// `corner_radius` and `size[1]`.
+    number_stepper,
+    /// Its value: `text`, and `padding` either side.
+    number_stepper_value,
+    /// The unit after its value: `text`.
+    number_stepper_unit,
+    /// The button that steps down: `background`, `corner_radius`, `size[1]`
+    /// for its side, `glyph` and `text`.
+    number_stepper_decrement,
+    /// The button that steps up, read as `number_stepper_decrement`.
+    number_stepper_increment,
+    /// `searchField`: read as `text_field`.
+    search_field,
+    /// Its search icon: `text` and `size[0]`.
+    search_field_icon,
+    /// The shortcut shown while it is empty and unfocused: `background`,
+    /// `corner_radius`, `padding` and `text`.
+    search_field_shortcut,
+    /// The button that clears it: `background`, `corner_radius`, `size`,
+    /// for its side and its icon's, `glyph` and `text`.
+    search_field_clear,
+    /// `iconButton` of `.variant = .tertiary`: `background`, `border`,
+    /// `focus_ring`, `corner_radius`, `text` for its icon's color, and
+    /// `scale` and `motion` while pressed. Its size is its `ControlSize`'s
+    /// part.
+    icon_button,
+    /// An icon button of `.variant = .filled`, read as `icon_button`.
+    icon_button_filled,
+    /// An icon button of `.variant = .tonal`, read as `icon_button`.
+    icon_button_tonal,
+    /// `link`: `focus_ring`, `corner_radius`, `size[1]` for its least
+    /// height, and `text`.
+    link,
+    /// The line under a link's text: `background` and `size[1]`.
+    link_underline,
+    /// `chip`: `background`, `border`, `focus_ring`, `corner_radius`,
+    /// `size[1]`, `padding`, `gap` and `text`.
+    chip,
+    /// A selected chip, read as `chip`.
+    chip_selected,
+    /// The check a selected chip leads with: `text`, `size[0]`, and
+    /// `motion` as it grows in.
+    chip_check,
+    /// The icon a chip leads with: `text` and `size[0]`.
+    chip_icon,
+    /// A closable chip's close button: `background`, `corner_radius`,
+    /// `size` for its side and its icon's, `glyph` and `text`.
+    chip_close,
+    /// `toggle`'s row: `size[1]`, `gap` and its label's `text`.
+    toggle,
+    /// The track while off: `background`, `border`, `focus_ring`,
+    /// `corner_radius` and `size`.
+    toggle_track,
+    /// The track while on, read as `toggle_track`.
+    toggle_track_on,
+    /// The thumb while off: `background`, `corner_radius`, `shadow`,
+    /// `size`, `gap` for how much it widens while pressed, and `motion`.
+    toggle_thumb,
+    /// The thumb while on, read as `toggle_thumb`.
+    toggle_thumb_on,
 };
 
 /// How a widget moves a value it draws toward the skin's next one: at once,
@@ -293,12 +433,20 @@ pub fn Style(comptime Ui: type) type {
 /// pub fn zuiStyle(skin: *const Skin, part: zui_widgets.Part, state: zui.WidgetState, environment: *const zui.Environment) zui_widgets.Style(Ui)
 /// ```
 ///
-/// and no other `zui`-prefixed declaration.
+/// and, to draw icons, optionally
+///
+/// ```zig
+/// pub fn zuiIcon(skin: *const Skin, name: zui.design.Icon) ?zui.design.IconGlyph
+/// ```
+///
+/// and no other `zui`-prefixed declaration. A skin without `zuiIcon`, or
+/// one that returns null, has no icon font.
 pub fn expectSkin(comptime Ui: type, comptime Skin: type) void {
     const name = @typeName(Skin);
     if (@typeInfo(Skin) != .@"struct") @compileError("zui_widgets: a skin must be a struct type, got " ++ name);
     for (@typeInfo(Skin).@"struct".decls) |declaration| {
-        if (std.mem.startsWith(u8, declaration.name, "zui") and !std.mem.eql(u8, declaration.name, "zuiStyle"))
+        const known = std.mem.eql(u8, declaration.name, "zuiStyle") or std.mem.eql(u8, declaration.name, "zuiIcon");
+        if (std.mem.startsWith(u8, declaration.name, "zui") and !known)
             @compileError("zui_widgets: " ++ name ++ " declares unknown `" ++ declaration.name ++ "`");
     }
     if (!@hasDecl(Skin, "zuiStyle")) @compileError("zui_widgets: " ++ name ++ " does not implement the skin contract: missing `zuiStyle`");
@@ -306,6 +454,11 @@ pub fn expectSkin(comptime Ui: type, comptime Skin: type) void {
     const Found = @TypeOf(Skin.zuiStyle);
     if (Found != Expected) @compileError("zui_widgets: " ++ name ++ ".zuiStyle must be fn (*const " ++ name ++
         ", zui_widgets.Part, zui.WidgetState, *const zui.Environment) zui_widgets.Style(Ui), found " ++ @typeName(Found));
+    if (@hasDecl(Skin, "zuiIcon")) {
+        const FoundIcon = @TypeOf(Skin.zuiIcon);
+        if (FoundIcon != fn (*const Skin, zui.design.Icon) ?zui.design.IconGlyph) @compileError("zui_widgets: " ++ name ++
+            ".zuiIcon must be fn (*const " ++ name ++ ", zui.design.Icon) ?zui.design.IconGlyph, found " ++ @typeName(FoundIcon));
+    }
 }
 
 /// zui's own skin, every part styled from `tokens`, which the application
@@ -329,28 +482,50 @@ pub fn DesignSkinWith(comptime Ui: type, comptime ExtraRoles: type) type {
 
         tokens: *const zui.design.Tokens(Ui, ExtraRoles),
 
+        pub fn zuiIcon(skin: *const Skin, name: zui.design.Icon) ?zui.design.IconGlyph {
+            return skin.tokens.icon(name);
+        }
+
         pub fn zuiStyle(skin: *const Skin, part: Part, state: zui.WidgetState, _: *const zui.Environment) Style(Ui) {
             const tokens = skin.tokens;
             const medium_height = tokens.control_heights.get(.medium);
+            const small_icon = tokens.icon_sizes.get(.small);
             return switch (part) {
                 .label => skin.styled(.label, state),
                 .muted_label => skin.styled(.muted_label, state),
+                .label_accent => skin.styled(.label_accent, state),
+                .label_display => skin.styled(.label_display, state),
+                .label_headline => skin.styled(.label_headline, state),
+                .label_title => skin.styled(.label_title, state),
+                .label_body_strong => skin.styled(.label_body_strong, state),
+                .label_label => skin.styled(.label_label, state),
+                .label_label_strong => skin.styled(.label_label_strong, state),
+                .label_caption => skin.styled(.label_caption, state),
+                .label_code => skin.styled(.label_code, state),
+                .label_numeric => skin.styled(.label_numeric, state),
                 .row_label => sized(skin.styled(.row_label, state), .{ label_column_width * tokens.text_padding_scale, 0 }),
+                .row_description => skin.styled(.row_description, state),
                 .disclosure => sized(skin.styled(.disclosure, state), .{ 0, medium_height }),
-                .disclosure_expanded => withGlyph(skin.styled(.disclosure_indicator, state), "v"),
-                .disclosure_collapsed => withGlyph(skin.styled(.disclosure_indicator, state), ">"),
-                .button => sized(skin.styled(.button, state), .{ 0, medium_height }),
-                .button_secondary => sized(skin.styled(.button_secondary, state), .{ 0, medium_height }),
-                .button_tonal => sized(skin.styled(.button_tonal, state), .{ 0, medium_height }),
-                .button_tertiary => sized(skin.styled(.button_tertiary, state), .{ 0, medium_height }),
-                .button_danger => sized(skin.styled(.button_danger, state), .{ 0, medium_height }),
-                .checkbox => sized(skin.styled(.checkbox, state), .{ 0, tokens.control_heights.get(.small) }),
+                .disclosure_expanded, .disclosure_collapsed => chevron: {
+                    var chevron = sized(withGlyph(skin.styled(.disclosure_indicator, state), if (part == .disclosure_expanded) "v" else ">"), .{ small_icon, 0 });
+                    chevron.motion = .{ .tween = tokens.motion.disclosure };
+                    break :chevron chevron;
+                },
+                .control_small => skin.controlOfSize(.control_small, .small, state),
+                .control_medium => skin.controlOfSize(.control_medium, .medium, state),
+                .control_large => skin.controlOfSize(.control_large, .large, state),
+                .button => skin.button(.button, state),
+                .button_secondary => skin.button(.button_secondary, state),
+                .button_tonal => skin.button(.button_tonal, state),
+                .button_tertiary => skin.button(.button_tertiary, state),
+                .button_danger => skin.button(.button_danger, state),
+                .checkbox => sized(skin.styled(.checkbox, state), .{ tokens.target_floors.get(.pointer), tokens.control_heights.get(.small) }),
                 .checkbox_box => skin.checkboxBox(.checkbox_box, state),
                 .checkbox_box_checked => skin.checkboxBox(.checkbox_box_checked, state),
                 .checkbox_mark => mark: {
                     const side = @round(skin.checkboxSide() * check_mark_share);
                     const icon = skin.styled(.checkbox_mark, state);
-                    break :mark .{ .background = icon.text.color, .corner_radius = .all(check_mark_corner_radius), .size = .{ side, side } };
+                    break :mark .{ .background = icon.text.color, .corner_radius = .all(check_mark_corner_radius), .size = .{ side, side }, .motion = .{ .tween = tokens.motion.check } };
                 },
                 .slider => .{ .size = .{ 0, medium_height } },
                 .slider_filled => sized(skin.styled(.slider_filled, state), .{ 0, slider_track_thickness }),
@@ -360,11 +535,35 @@ pub fn DesignSkinWith(comptime Ui: type, comptime ExtraRoles: type) type {
                     if (thumb.border) |*border| border.widths = .all(slider_thumb_border_width);
                     break :thumb thumb;
                 },
+                .slider_bubble => bubble: {
+                    var bubble = skin.styled(.slider_bubble, state);
+                    bubble.gap = slider_bubble_offset;
+                    break :bubble bubble;
+                },
+                .slider_tick_filled => tick: {
+                    const tick = skin.styled(.slider_tick_filled, state);
+                    break :tick .{ .background = tick.text.color, .corner_radius = .all(slider_tick_side / 2), .size = @splat(slider_tick_side) };
+                },
+                .slider_tick_empty => tick: {
+                    const tick = skin.styled(.slider_tick_empty, state);
+                    break :tick .{ .background = tick.text.color, .corner_radius = .all(slider_tick_side / 2), .size = @splat(slider_tick_side) };
+                },
                 .text_field => sized(skin.styled(.text_field, state), .{ 0, medium_height }),
+                .text_field_error => field: {
+                    var field = sized(skin.styled(.text_field_error, state), .{ 0, medium_height });
+                    if (field.border) |*border| border.widths = .all(text_field_error_border_width);
+                    break :field field;
+                },
                 .text_field_placeholder => skin.styled(.text_field_placeholder, state),
                 .text_field_caret => sized(skin.styled(.text_field_caret, state), .{ caret_width, 0 }),
+                .text_field_label => skin.styled(.text_field_label, state),
+                .text_field_help => skin.styled(.text_field_help, state),
+                .text_field_error_message => skin.styled(.text_field_error_message, state),
+                .text_field_error_icon => sized(skin.styled(.text_field_error_icon, state), .{ error_icon_side, 0 }),
+                .text_field_icon => sized(skin.styled(.text_field_icon, state), .{ small_icon, 0 }),
+                .text_field_trailing => skin.styled(.text_field_trailing, state),
                 .dropdown => sized(skin.styled(.dropdown, state), .{ 0, medium_height }),
-                .dropdown_indicator => withGlyph(skin.styled(.dropdown_indicator, state), "v"),
+                .dropdown_indicator => sized(withGlyph(skin.styled(.dropdown_indicator, state), "v"), .{ small_icon, 0 }),
                 .dropdown_popup => popup: {
                     var list = skin.styled(.dropdown_popup, state);
                     const lift = tokens.elevations.get(.floating);
@@ -376,6 +575,7 @@ pub fn DesignSkinWith(comptime Ui: type, comptime ExtraRoles: type) type {
                 },
                 .dropdown_option => sized(skin.styled(.dropdown_option, state), .{ 0, medium_height }),
                 .dropdown_option_selected => sized(skin.styled(.dropdown_option_selected, state), .{ 0, medium_height }),
+                .dropdown_check => sized(skin.styled(.dropdown_check, state), .{ small_icon, 0 }),
                 .card => card: {
                     var card = skin.raised(.card, state, if (state == .hovered) .floating else .raised);
                     card.motion = .{ .tween = tokens.motion.press };
@@ -415,14 +615,7 @@ pub fn DesignSkinWith(comptime Ui: type, comptime ExtraRoles: type) type {
                 .tab_pill_selected => sized(skin.styled(.tab_pill_selected, state), .{ 0, skin.pillHeight() }),
                 .tab_pill_thumb => thumb: {
                     var thumb = sized(skin.raised(.tab_pill_thumb, state, .raised), .{ 0, skin.pillHeight() });
-                    const groove_corner = tokens.corner_radii.get(.control);
-                    const groove_padding = tokens.space(.hair);
-                    thumb.corner_radius = .{
-                        .top_left = @max(groove_corner.top_left - groove_padding, 0),
-                        .top_right = @max(groove_corner.top_right - groove_padding, 0),
-                        .bottom_left = @max(groove_corner.bottom_left - groove_padding, 0),
-                        .bottom_right = @max(groove_corner.bottom_right - groove_padding, 0),
-                    };
+                    thumb.corner_radius = skin.nestedInGroove();
                     thumb.motion = .{ .spring = tokens.motion.toggle };
                     break :thumb thumb;
                 },
@@ -435,6 +628,97 @@ pub fn DesignSkinWith(comptime Ui: type, comptime ExtraRoles: type) type {
                 .crumb => sized(skin.styled(.crumb, state), .{ 0, tokens.control_heights.get(.small) }),
                 .crumb_current => sized(skin.styled(.crumb_current, state), .{ 0, tokens.control_heights.get(.small) }),
                 .crumb_separator => withGlyph(skin.styled(.crumb_separator, state), "›"),
+                .radio_group => skin.styled(.radio_group, state),
+                .radio_group_horizontal => skin.styled(.radio_group_horizontal, state),
+                .radio => sized(skin.styled(.radio, state), .{ tokens.target_floors.get(.pointer), tokens.control_heights.get(.small) }),
+                .radio_circle => skin.radioCircle(.radio_circle, checkbox_border_width, state),
+                .radio_circle_selected => skin.radioCircle(.radio_circle_selected, radio_ring_width, state),
+                .segmented => sized(skin.styled(.segmented, state), .{ 0, medium_height }),
+                .segment => sized(skin.styled(.segment, state), .{ 0, skin.pillHeight() }),
+                .segment_selected => sized(skin.styled(.segment_selected, state), .{ 0, skin.pillHeight() }),
+                .segmented_thumb => thumb: {
+                    var thumb = sized(skin.raised(.segmented_thumb, state, .raised), .{ 0, skin.pillHeight() });
+                    thumb.corner_radius = skin.nestedInGroove();
+                    thumb.motion = .{ .spring = tokens.motion.toggle };
+                    break :thumb thumb;
+                },
+                .segmented_separator => sized(skin.styled(.segmented_separator, state), .{ divider_thickness, segmented_separator_share }),
+                .number_stepper => sized(skin.styled(.number_stepper, state), .{ 0, medium_height }),
+                .number_stepper_value => skin.styled(.number_stepper_value, state),
+                .number_stepper_unit => skin.styled(.number_stepper_unit, state),
+                .number_stepper_decrement => sized(withGlyph(skin.styled(.number_stepper_decrement, state), "-"), .{ small_icon, medium_height }),
+                .number_stepper_increment => sized(withGlyph(skin.styled(.number_stepper_increment, state), "+"), .{ small_icon, medium_height }),
+                .search_field => sized(skin.styled(.search_field, state), .{ 0, medium_height }),
+                .search_field_icon => sized(skin.styled(.search_field_icon, state), .{ small_icon, 0 }),
+                .search_field_shortcut => skin.styled(.search_field_shortcut, state),
+                .search_field_clear => sized(withGlyph(skin.styled(.search_field_clear, state), "×"), .{ small_icon, tokens.control_heights.get(.small) }),
+                .icon_button => skin.button(.icon_button, state),
+                .icon_button_filled => skin.button(.icon_button_filled, state),
+                .icon_button_tonal => skin.button(.icon_button_tonal, state),
+                .link => sized(skin.styled(.link, state), .{ 0, tokens.target_floors.get(.pointer) }),
+                .link_underline => underline: {
+                    var underline = sized(skin.styled(.link_underline, state), .{ 0, link_underline_thickness });
+                    const hovered = state == .hovered or state == .pressed;
+                    if (!hovered) if (underline.background) |line| {
+                        underline.background = faded(line, link_underline_resting_share);
+                    };
+                    break :underline underline;
+                },
+                .chip => sized(skin.styled(.chip, state), .{ 0, tokens.control_heights.get(.small) }),
+                .chip_selected => sized(skin.styled(.chip_selected, state), .{ 0, tokens.control_heights.get(.small) }),
+                .chip_check => check: {
+                    var check = sized(skin.styled(.chip_check, state), .{ small_icon, 0 });
+                    check.motion = .{ .tween = tokens.motion.check };
+                    break :check check;
+                },
+                .chip_icon => sized(skin.styled(.chip_icon, state), .{ small_icon, 0 }),
+                .chip_close => sized(withGlyph(skin.styled(.chip_close, state), "×"), .{ small_icon, tokens.target_floors.get(.pointer) }),
+                .toggle => sized(skin.styled(.toggle, state), .{ 0, tokens.control_heights.get(.small) }),
+                .toggle_track => skin.toggleTrack(.toggle_track, state),
+                .toggle_track_on => skin.toggleTrack(.toggle_track_on, state),
+                .toggle_thumb => skin.toggleThumb(.toggle_thumb, state),
+                .toggle_thumb_on => skin.toggleThumb(.toggle_thumb_on, state),
+            };
+        }
+
+        fn radioCircle(skin: *const Skin, comptime designed: Designed.Part, ring_width: f32, state: zui.WidgetState) Style(Ui) {
+            var circle = sized(skin.styled(designed, state), @splat(skin.checkboxSide()));
+            if (circle.border) |*border| border.widths = .all(ring_width);
+            return circle;
+        }
+
+        /// The approved switch is 32 by 20, 40 by 24 and 48 by 28 at the
+        /// three densities.
+        fn toggleTrack(skin: *const Skin, comptime designed: Designed.Part, state: zui.WidgetState) Style(Ui) {
+            const height = skin.toggleTrackHeight();
+            var track = sized(skin.styled(designed, state), .{ 2 * height - 8, height });
+            track.corner_radius = .all(height / 2);
+            return track;
+        }
+
+        fn toggleThumb(skin: *const Skin, comptime designed: Designed.Part, state: zui.WidgetState) Style(Ui) {
+            const side = skin.toggleTrackHeight() - 2 * toggle_thumb_inset;
+            var thumb = sized(skin.styled(designed, state), @splat(side));
+            thumb.corner_radius = .all(side / 2);
+            thumb.shadow = skin.tokens.elevations.get(.raised).shadow;
+            thumb.gap = toggle_thumb_pressed_widening;
+            thumb.motion = .{ .spring = skin.tokens.motion.toggle };
+            return thumb;
+        }
+
+        fn toggleTrackHeight(skin: *const Skin) f32 {
+            return skin.tokens.control_heights.get(.small) - 4;
+        }
+
+        /// The groove's control corner, less its padding, for what sits in it.
+        fn nestedInGroove(skin: *const Skin) zui.CornerRadius {
+            const groove_corner = skin.tokens.corner_radii.get(.control);
+            const groove_padding = skin.tokens.space(.hair);
+            return .{
+                .top_left = @max(groove_corner.top_left - groove_padding, 0),
+                .top_right = @max(groove_corner.top_right - groove_padding, 0),
+                .bottom_left = @max(groove_corner.bottom_left - groove_padding, 0),
+                .bottom_right = @max(groove_corner.bottom_right - groove_padding, 0),
             };
         }
 
@@ -470,6 +754,18 @@ pub fn DesignSkinWith(comptime Ui: type, comptime ExtraRoles: type) type {
             };
             if (thumb.background) |color| thumb.background = faded(color, share);
             return thumb;
+        }
+
+        fn controlOfSize(skin: *const Skin, comptime designed: Designed.Part, size: zui.design.ControlSize, state: zui.WidgetState) Style(Ui) {
+            return sized(skin.styled(designed, state), .{ skin.tokens.icon_sizes.get(size), skin.tokens.control_heights.get(size) });
+        }
+
+        /// A pressed control shrinks to the design's press scale.
+        fn button(skin: *const Skin, comptime designed: Designed.Part, state: zui.WidgetState) Style(Ui) {
+            var pressable = skin.styled(designed, state);
+            pressable.motion = .{ .tween = skin.tokens.motion.press };
+            if (state == .pressed) pressable.scale = skin.tokens.motion.press_scale;
+            return pressable;
         }
 
         fn pillHeight(skin: *const Skin) f32 {
@@ -534,6 +830,23 @@ const slider_track_thickness = 4;
 const slider_thumb_side = 20;
 const slider_thumb_border_width = 2;
 const caret_width = 2;
+const slider_bubble_offset = 8;
+const slider_tick_side = 4;
+/// A slider of more steps draws no ticks, which would run together.
+const slider_ticks_most = 64;
+const text_field_error_border_width = 2;
+const radio_ring_width = 5.5;
+const segmented_separator_share = 0.5;
+const link_underline_thickness = 1;
+const link_underline_resting_share = 0.4;
+const toggle_thumb_inset = 2;
+const toggle_thumb_pressed_widening = 4;
+/// A number stepper's value is at least as wide as these digits.
+const stepper_value_widest = "0000";
+/// How far the pointer moves along a number stepper's value per step it
+/// scrubs.
+const stepper_scrub_distance = 4;
+const error_icon_side = 12;
 /// Popups paint in this layer and the next one up.
 const popup_layer = 100;
 const card_pressed_scale = 0.985;
@@ -569,9 +882,23 @@ const Designed = struct {
         page,
         label,
         muted_label,
+        label_accent,
+        label_display,
+        label_headline,
+        label_title,
+        label_body_strong,
+        label_label,
+        label_label_strong,
+        label_caption,
+        label_code,
+        label_numeric,
         row_label,
+        row_description,
         disclosure,
         disclosure_indicator,
+        control_small,
+        control_medium,
+        control_large,
         button,
         button_secondary,
         button_tonal,
@@ -584,14 +911,25 @@ const Designed = struct {
         slider_filled,
         slider_empty,
         slider_thumb,
+        slider_bubble,
+        slider_tick_filled,
+        slider_tick_empty,
         text_field,
+        text_field_error,
         text_field_placeholder,
         text_field_caret,
+        text_field_label,
+        text_field_help,
+        text_field_error_message,
+        text_field_error_icon,
+        text_field_icon,
+        text_field_trailing,
         dropdown,
         dropdown_indicator,
         dropdown_popup,
         dropdown_option,
         dropdown_option_selected,
+        dropdown_check,
         card,
         card_title,
         card_body,
@@ -622,6 +960,40 @@ const Designed = struct {
         crumb,
         crumb_current,
         crumb_separator,
+        radio_group,
+        radio_group_horizontal,
+        radio,
+        radio_circle,
+        radio_circle_selected,
+        segmented,
+        segment,
+        segment_selected,
+        segmented_thumb,
+        segmented_separator,
+        number_stepper,
+        number_stepper_value,
+        number_stepper_unit,
+        number_stepper_decrement,
+        number_stepper_increment,
+        search_field,
+        search_field_icon,
+        search_field_shortcut,
+        search_field_clear,
+        icon_button,
+        icon_button_filled,
+        icon_button_tonal,
+        link,
+        link_underline,
+        chip,
+        chip_selected,
+        chip_check,
+        chip_icon,
+        chip_close,
+        toggle,
+        toggle_track,
+        toggle_track_on,
+        toggle_thumb,
+        toggle_thumb_on,
     };
 
     const on_hover: zui.design.PartAppearance(void).Colors = .{ .surface = .secondary_container, .text = .on_secondary_container };
@@ -630,7 +1002,18 @@ const Designed = struct {
         .page = .{ .surface = .surface },
         .label = .{ .text = .on_surface, .type = .body, .on = .page },
         .muted_label = .{ .text = .on_surface_muted, .type = .body, .on = .page },
+        .label_accent = .{ .text = .on_surface_accent, .type = .body, .on = .page },
+        .label_display = onPage(.display),
+        .label_headline = onPage(.headline),
+        .label_title = onPage(.title),
+        .label_body_strong = onPage(.body_strong),
+        .label_label = onPage(.label),
+        .label_label_strong = onPage(.label_strong),
+        .label_caption = onPage(.caption),
+        .label_code = onPage(.code),
+        .label_numeric = onPage(.numeric),
         .row_label = .{ .text = .on_surface, .type = .body, .on = .page, .gap = .l },
+        .row_description = .{ .text = .on_surface_muted, .type = .caption, .on = .page },
         .disclosure = .{
             .text = .on_surface,
             .type = .body_strong,
@@ -642,6 +1025,9 @@ const Designed = struct {
             .states = .{ .hovered = on_hover, .pressed = on_hover },
         },
         .disclosure_indicator = .{ .text = .on_surface_muted, .type = .body, .on = .page },
+        .control_small = .{ .type = .label_strong },
+        .control_medium = .{ .type = .body_strong },
+        .control_large = .{ .type = .body_strong },
         .button = filledButton(.accent, .on_accent),
         .button_secondary = filledButton(.secondary_container, .on_secondary_container),
         .button_tonal = filledButton(.accent_container, .on_accent_container),
@@ -665,27 +1051,31 @@ const Designed = struct {
         // Not `accent`, which high contrast draws in the focus ring's color,
         // so a focused thumb would look like an idle one.
         .slider_thumb = .{ .surface = .surface_raised, .outline = .outline, .shape = .indicator, .target = .pointer },
-        .text_field = .{
-            .surface = .surface_sunken,
-            .text = .on_surface,
-            .type = .body,
-            .on = .text_field,
-            .shape = .control,
-            .padding = .{ .x = .m },
-            .target = .pointer,
-            .states = .{ .hovered = .{ .outline = .outline_muted }, .focused = .{ .surface = .surface, .outline = .accent } },
-        },
+        .slider_bubble = .{ .surface = .surface_inverse, .text = .on_surface_inverse, .type = .label_strong, .on = .slider_bubble, .shape = .chip, .padding = .{ .x = .s, .y = .xs } },
+        .slider_tick_filled = .{ .icon = .on_accent, .on = .slider_filled },
+        .slider_tick_empty = .{ .icon = .outline, .on = .slider_empty },
+        .text_field = textField(false),
+        .text_field_error = textField(true),
         .text_field_placeholder = .{ .text = .on_surface_muted, .type = .body, .on = .text_field },
         .text_field_caret = .{ .surface = .accent },
+        .text_field_label = .{ .text = .on_surface, .type = .label_strong, .on = .page, .gap = .xs },
+        .text_field_help = .{ .text = .on_surface_muted, .type = .caption, .on = .page, .gap = .xs },
+        .text_field_error_message = .{ .text = .on_danger_container, .type = .caption, .on = .page, .gap = .xs },
+        .text_field_error_icon = .{ .icon = .danger, .on = .page },
+        .text_field_icon = .{ .icon = .on_surface_muted, .on = .text_field },
+        .text_field_trailing = .{ .text = .on_surface_muted, .type = .body, .on = .text_field },
         .dropdown = .{ .surface = .surface_sunken, .text = .on_surface, .type = .body, .on = .dropdown, .shape = .control, .padding = .{ .x = .m }, .gap = .s, .target = .pointer },
-        .dropdown_indicator = .{ .text = .on_surface_muted, .type = .body, .on = .dropdown },
+        // Muted only at rest: a focused or pressed button's layer leaves muted
+        // text short of its contrast.
+        .dropdown_indicator = .{ .text = .on_surface_muted, .type = .body, .on = .dropdown, .states = .{ .focused = .{ .text = .on_surface }, .pressed = .{ .text = .on_surface } } },
         .dropdown_popup = .{ .surface = .surface_overlay, .shape = .popup, .padding = .{ .x = .xs, .y = .xs }, .gap = .xs },
         .dropdown_option = option(.body),
         .dropdown_option_selected = selected: {
             var selected = option(.body_strong);
-            selected.cue = "its label in the strong font";
+            selected.cue = "its label in the strong font and its check";
             break :selected selected;
         },
+        .dropdown_check = .{ .icon = .on_surface_accent, .on = .dropdown_popup },
         .card = .{ .surface = .surface_raised, .shape = .container, .padding = .{ .x = .l, .y = .l }, .gap = .m, .target = .pointer },
         .card_title = .{ .text = .on_surface, .type = .title, .on = .card },
         .card_body = .{ .text = .on_surface_muted, .type = .body, .on = .card },
@@ -752,7 +1142,125 @@ const Designed = struct {
         },
         .crumb_current = .{ .text = .on_surface, .type = .label_strong, .on = .page, .padding = .{ .x = .xs } },
         .crumb_separator = .{ .text = .on_surface_muted, .type = .label, .on = .page, .gap = .xs },
+        .radio_group = .{ .gap = .s },
+        .radio_group_horizontal = .{ .gap = .l },
+        .radio = .{ .text = .on_surface, .type = .body, .on = .page, .shape = .control, .gap = .s, .target = .pointer },
+        .radio_circle = .{ .surface = .surface, .outline = .outline, .shape = .indicator },
+        .radio_circle_selected = .{ .surface = .on_accent, .outline = .accent, .shape = .indicator, .cue = "its ring" },
+        .segmented = .{ .surface = .surface_sunken, .shape = .control, .padding = .{ .x = .hair, .y = .hair } },
+        .segment = .{
+            .text = .on_surface_muted,
+            .type = .label_strong,
+            .on = .segmented,
+            .shape = .control,
+            .padding = .{ .x = .m },
+            .target = .pointer,
+            .states = .{ .hovered = .{ .text = .on_surface }, .pressed = .{ .text = .on_surface } },
+        },
+        .segment_selected = .{ .text = .on_surface, .type = .label_strong, .on = .segmented_thumb, .shape = .control, .padding = .{ .x = .m }, .target = .pointer, .cue = "the raised thumb behind it" },
+        .segmented_thumb = .{ .surface = .surface_raised, .shape = .control },
+        .segmented_separator = .{ .surface = .outline_muted },
+        .number_stepper = .{ .surface = .surface_sunken, .shape = .control, .target = .pointer },
+        .number_stepper_value = .{ .text = .on_surface, .type = .numeric, .on = .number_stepper, .padding = .{ .x = .s } },
+        .number_stepper_unit = .{ .text = .on_surface_muted, .type = .body, .on = .number_stepper, .states = .{ .focused = .{ .text = .on_surface }, .pressed = .{ .text = .on_surface } } },
+        .number_stepper_decrement = stepperButton(),
+        .number_stepper_increment = stepperButton(),
+        .search_field = field: {
+            var search = textField(false);
+            search.shape = .chip;
+            search.gap = .s;
+            break :field search;
+        },
+        .search_field_icon = .{ .icon = .on_surface_muted, .on = .search_field },
+        .search_field_shortcut = .{ .surface = .surface, .text = .on_surface_muted, .type = .label, .on = .search_field_shortcut, .shape = .control, .padding = .{ .x = .xs } },
+        .search_field_clear = .{
+            .icon = .on_surface_muted,
+            .on = .search_field,
+            .shape = .indicator,
+            .target = .pointer,
+            .states = .{ .hovered = .{ .surface = .secondary_container, .icon = .on_secondary_container }, .pressed = .{ .surface = .secondary_container, .icon = .on_secondary_container }, .focused = .{ .icon = .on_surface } },
+        },
+        .icon_button = .{
+            .icon = .on_surface_muted,
+            .on = .page,
+            .shape = .indicator,
+            .target = .pointer,
+            .states = .{ .hovered = on_hover_icon, .pressed = on_hover_icon },
+        },
+        .icon_button_filled = .{ .surface = .accent, .icon = .on_accent, .on = .icon_button_filled, .shape = .indicator, .target = .pointer },
+        .icon_button_tonal = .{ .surface = .secondary_container, .icon = .on_secondary_container, .on = .icon_button_tonal, .shape = .indicator, .target = .pointer },
+        .link = .{ .text = .on_surface_accent, .type = .body, .on = .page, .shape = .control, .target = .pointer },
+        .link_underline = .{ .surface = .on_surface_accent },
+        .chip = .{
+            .surface = .surface_sunken,
+            .text = .on_surface,
+            .type = .label_strong,
+            .on = .chip,
+            .shape = .chip,
+            .padding = .{ .x = .m },
+            .gap = .xs,
+            .target = .pointer,
+        },
+        .chip_selected = .{
+            .surface = .accent_container,
+            .text = .on_accent_container,
+            .type = .label_strong,
+            .on = .chip_selected,
+            .shape = .chip,
+            .padding = .{ .x = .m },
+            .gap = .xs,
+            .target = .pointer,
+            .cue = "its check",
+        },
+        .chip_check = .{ .icon = .on_accent_container, .on = .chip_selected },
+        .chip_icon = .{ .icon = .on_surface, .on = .chip },
+        .chip_close = .{
+            .icon = .on_surface_muted,
+            .on = .chip,
+            .shape = .indicator,
+            .target = .pointer,
+            .states = .{ .hovered = .{ .surface = .secondary_container, .icon = .on_secondary_container }, .pressed = .{ .surface = .secondary_container, .icon = .on_secondary_container }, .focused = .{ .icon = .on_surface } },
+        },
+        .toggle = .{ .text = .on_surface, .type = .body, .on = .page, .gap = .m },
+        .toggle_track = .{ .surface = .outline_muted, .outline = .outline, .target = .pointer },
+        .toggle_track_on = .{ .surface = .accent, .target = .pointer, .cue = "its thumb at the far end" },
+        .toggle_thumb = .{ .surface = .outline },
+        .toggle_thumb_on = .{ .surface = .surface_raised },
     });
+
+    const on_hover_icon: zui.design.PartAppearance(void).Colors = .{ .surface = .secondary_container, .icon = .on_surface };
+
+    fn stepperButton() zui.design.PartAppearance(void) {
+        return .{
+            .text = .on_surface,
+            .type = .body_strong,
+            .on = .number_stepper,
+            .shape = .control,
+            .states = .{ .hovered = on_hover, .pressed = on_hover, .disabled = .{ .text = .on_surface_muted } },
+        };
+    }
+
+    fn onPage(comptime type_role: zui.design.TypeRole) zui.design.PartAppearance(void) {
+        return .{ .text = .on_surface, .type = type_role, .on = .page };
+    }
+
+    fn textField(comptime errored: bool) zui.design.PartAppearance(void) {
+        return .{
+            .surface = .surface_sunken,
+            .outline = if (errored) .danger else null,
+            .text = .on_surface,
+            .type = .body,
+            .on = .text_field,
+            .shape = .control,
+            .padding = .{ .x = .m },
+            .target = .pointer,
+            .states = if (errored)
+                .{ .focused = .{ .surface = .surface } }
+            else
+                .{ .hovered = .{ .outline = .outline_muted }, .focused = .{ .surface = .surface, .outline = .accent } },
+            .cue = if (errored) "its error message below it" else null,
+        };
+    }
 
     fn tab(comptime text: zui.design.ColorChoice(void), comptime on: @EnumLiteral()) zui.design.PartAppearance(void) {
         return .{
@@ -813,6 +1321,48 @@ pub const ButtonVariant = enum {
     }
 };
 
+/// An icon button with no fill until hovered, `tertiary`; filled in the
+/// accent for the main action, `filled`; or in a soft fill, `tonal`.
+pub const IconButtonVariant = enum {
+    tertiary,
+    filled,
+    tonal,
+
+    pub fn part(variant: IconButtonVariant) Part {
+        return switch (variant) {
+            .tertiary => .icon_button,
+            .filled => .icon_button_filled,
+            .tonal => .icon_button_tonal,
+        };
+    }
+};
+
+/// The color of a label's text: the page's, muted for what is secondary, or
+/// the accent's.
+pub const LabelTone = enum {
+    default,
+    muted,
+    accent,
+
+    pub fn part(tone: LabelTone) Part {
+        return switch (tone) {
+            .default => .label,
+            .muted => .muted_label,
+            .accent => .label_accent,
+        };
+    }
+};
+
+/// The part a control of `size` reads its height, its icon's side and its
+/// label's type from.
+pub fn controlSizePart(size: zui.design.ControlSize) Part {
+    return switch (size) {
+        .small => .control_small,
+        .medium => .control_medium,
+        .large => .control_large,
+    };
+}
+
 pub const DividerAxis = enum { horizontal, vertical };
 
 /// Where a divider stops short of its parent's edges: at the leading one, as
@@ -853,6 +1403,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
         pub const Skin = SkinType;
         pub const TextStyle = Ui.TextStyle;
         pub const SkinStyle = Style(Ui);
+        const FontId = @FieldType(TextStyle, "font");
 
         skin: Skin,
 
@@ -874,6 +1425,42 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
             ui.text(content, singleLine(self.style(ui, .muted_label, .idle).text));
         }
 
+        pub const LabelOptions = struct {
+            role: zui.design.TypeRole = .body,
+            tone: LabelTone = .default,
+            /// `.none` keeps it on one line.
+            wrap: zui.TextWrap = .none,
+        };
+
+        /// Text in any type role, in the page's text color, muted or
+        /// accented.
+        ///
+        /// ```zig
+        /// widgets.labelWith(ui, "Storage", .{ .role = .title });
+        /// widgets.labelWith(ui, "12 GB of 50 GB used", .{ .role = .caption, .tone = .muted });
+        /// ```
+        pub fn labelWith(self: Self, ui: *Ui, content: []const u8, options: LabelOptions) void {
+            var text_style = self.style(ui, labelPartOf(options.role), .idle).text;
+            if (options.tone != .default) text_style.color = self.style(ui, options.tone.part(), .idle).text.color;
+            text_style.wrap = options.wrap;
+            ui.text(content, text_style);
+        }
+
+        fn labelPartOf(role: zui.design.TypeRole) Part {
+            return switch (role) {
+                .body => .label,
+                .display => .label_display,
+                .headline => .label_headline,
+                .title => .label_title,
+                .body_strong => .label_body_strong,
+                .label => .label_label,
+                .label_strong => .label_label_strong,
+                .caption => .label_caption,
+                .code => .label_code,
+                .numeric => .label_numeric,
+            };
+        }
+
         /// Opens a row with `content` in a column as wide as the skin's
         /// `row_label`. Declare the control, then close the row:
         ///
@@ -883,15 +1470,44 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
         /// ui.close();
         /// ```
         pub fn labeledRow(self: Self, ui: *Ui, content: []const u8) void {
+            self.labeledRowWith(ui, content, .{});
+        }
+
+        pub const LabeledRowOptions = struct {
+            /// Below the label, wrapped to its column; none when empty.
+            description: []const u8 = "",
+            /// A divider above the row, inset at its leading edge, for
+            /// every row of a list on one card but the first.
+            divider_above: bool = false,
+        };
+
+        /// `labeledRow` with a description under its label, and a divider
+        /// above it between the rows of a settings list:
+        ///
+        /// ```zig
+        /// const sync = widgets.groupBox(ui, .of("sync"), "Sync", .{});
+        /// widgets.labeledRowWith(ui, "Wi-Fi only", .{ .description = "Waits for Wi-Fi before uploading." });
+        /// _ = widgets.toggle(ui, .of("wifi_only"), "", &app.wifi_only, .{ .label = "Wi-Fi only" });
+        /// ui.close();
+        /// widgets.labeledRowWith(ui, "Photos", .{ .divider_above = true });
+        /// _ = widgets.toggle(ui, .of("photos"), "", &app.sync_photos, .{ .label = "Photos" });
+        /// ui.close();
+        /// sync.end(ui);
+        /// ```
+        pub fn labeledRowWith(self: Self, ui: *Ui, content: []const u8, options: LabeledRowOptions) void {
+            if (options.divider_above) self.divider(ui, .{ .inset = .leading });
             const row_label = self.style(ui, .row_label, .idle);
             ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = row_label.gap, .child_alignment = .{ .y = .center } } });
-            ui.open(.{ .layout = .{ .sizing = .{ .width = .fixed(row_label.size[0]) } } });
+            ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(row_label.size[0]) } } });
             ui.text(content, singleLine(row_label.text));
+            if (options.description.len != 0) ui.text(options.description, self.style(ui, .row_description, .idle).text);
             ui.close();
         }
 
         /// A full-width header that toggles `expanded` when clicked, for
-        /// collapsible sections. Returns whether it toggled.
+        /// collapsible sections. Its chevron points right while collapsed
+        /// and turns down as it expands, where the context draws
+        /// transforms. Returns whether it toggled.
         ///
         /// ```zig
         /// if (widgets.disclosure(ui, .of("advanced"), "Advanced", &advanced_open)) {}
@@ -902,7 +1518,6 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
             if (toggled) expanded.* = !expanded.*;
             const state = ui.widgetState(id);
             const header = self.style(ui, .disclosure, state);
-            const indicator = self.style(ui, if (expanded.*) .disclosure_expanded else .disclosure_collapsed, state);
             ui.open(.{
                 .id = id,
                 .focusable = true,
@@ -916,22 +1531,76 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                     .child_alignment = .{ .y = .center },
                 },
             });
-            ui.text(indicator.glyph, singleLine(indicator.text));
+            if (Ui.draws_transforms) {
+                const collapsed = self.style(ui, .disclosure_collapsed, state);
+                const quarter_turns = animate(ui, id.child("chevron"), f32, if (expanded.*) 1 else 0, collapsed.motion);
+                const effects: Ui.Effects = .{ .transform = .{ .rotation = quarter_turns * std.math.pi / 2.0 } };
+                ui.open(.{ .effects = if (quarter_turns != 0) &effects else null, .layout = .{ .child_alignment = .{ .x = .center, .y = .center } } });
+                self.icon(ui, .chevron_right, collapsed);
+                ui.close();
+            } else {
+                const indicator = self.style(ui, if (expanded.*) .disclosure_expanded else .disclosure_collapsed, state);
+                self.icon(ui, if (expanded.*) .chevron_down else .chevron_right, indicator);
+            }
             ui.text(content, singleLine(header.text));
             ui.close();
             return toggled;
         }
 
+        /// The skin's `name` in its icon font, in `look`'s text color and
+        /// `look.size[0]` across. Without one, `look.glyph` in its text, or,
+        /// when it has none either, nothing, counted in
+        /// `Diagnostics.missing_icons`.
+        fn icon(self: Self, ui: *Ui, name: zui.design.Icon, look: SkinStyle) void {
+            if (self.iconGlyph(name)) |glyph| {
+                var icon_style = singleLine(look.text);
+                icon_style.font = fontOf(glyph.font);
+                if (look.size[0] > 0) icon_style.size = look.size[0];
+                ui.text(glyph.utf8(), icon_style);
+            } else if (look.glyph.len != 0) {
+                ui.text(look.glyph, singleLine(look.text));
+            } else ui.countMissingIcon();
+        }
+
+        fn iconGlyph(self: Self, name: zui.design.Icon) ?zui.design.IconGlyph {
+            return if (@hasDecl(Skin, "zuiIcon")) self.skin.zuiIcon(name) else null;
+        }
+
+        fn fontOf(index: u32) FontId {
+            return switch (@typeInfo(FontId)) {
+                .int => @intCast(index),
+                .@"enum" => @enumFromInt(index),
+                else => @compileError("zui_widgets: icons need a FontId that is an integer or an enum, got " ++ @typeName(FontId)),
+            };
+        }
+
         pub const ButtonOptions = struct {
             disabled: bool = false,
+            /// `.fit` is at least twice as wide as the button is tall.
             width: zui.Sizing = .fit,
             variant: ButtonVariant = .primary,
+            size: zui.design.ControlSize = .medium,
+            /// Drawn before the label in its color.
+            leading_icon: ?zui.design.Icon = null,
         };
 
         /// True in the frame the button is clicked, or activated with Enter
-        /// or Space while focused.
+        /// or Space while focused. A pressed button shrinks a little, where
+        /// the context draws transforms.
+        ///
+        /// ```zig
+        /// if (widgets.button(ui, .of("export"), "Export", .{ .variant = .secondary, .size = .small, .leading_icon = .arrow_down })) app.exportReport();
+        /// ```
         pub fn button(self: Self, ui: *Ui, id: zui.Id, content: []const u8, options: ButtonOptions) bool {
-            const look = self.style(ui, options.variant.part(), stateOf(ui, id, options.disabled));
+            const state = stateOf(ui, id, options.disabled);
+            const look = self.style(ui, options.variant.part(), state);
+            const control = self.style(ui, controlSizePart(options.size), state);
+            var label_style = singleLine(control.text);
+            label_style.color = look.text.color;
+            var width = options.width;
+            if (width.rule == .fit) width.min = @max(width.min, control.size[1] * 2);
+            const scale = pressScale(ui, id, look);
+            const effects: Ui.Effects = .{ .transform = .{ .scale = @splat(scale) } };
             ui.open(.{
                 .id = id,
                 .focusable = true,
@@ -939,16 +1608,30 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                 .cursor = if (options.disabled) null else .pointer,
                 .semantics = .{ .role = .button, .label = content },
                 .decoration = decorationOf(look, ui.focused(id)),
+                .effects = if (scale != 1) &effects else null,
                 .layout = .{
-                    .sizing = .{ .width = options.width, .height = .fixed(look.size[1]) },
+                    .sizing = .{ .width = width, .height = .fixed(control.size[1]) },
                     .padding = look.padding,
                     .child_gap = look.gap,
                     .child_alignment = .{ .x = .center, .y = .center },
                 },
             });
-            ui.text(content, singleLine(look.text));
+            if (options.leading_icon) |name| {
+                var icon_look = look;
+                icon_look.size[0] = control.size[0];
+                icon_look.glyph = "";
+                self.icon(ui, name, icon_look);
+            }
+            ui.text(content, label_style);
             ui.close();
             return ui.clicked(id);
+        }
+
+        /// `look.scale` reached through `look.motion`, where the context
+        /// draws transforms.
+        fn pressScale(ui: *Ui, id: zui.Id, look: SkinStyle) f32 {
+            if (!Ui.draws_transforms) return 1;
+            return animate(ui, id.child("press"), f32, look.scale, look.motion);
         }
 
         pub const CheckboxOptions = struct {
@@ -972,7 +1655,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                 .disabled = options.disabled,
                 .cursor = if (options.disabled) null else .pointer,
                 .semantics = .{ .role = .checkbox, .label = if (options.label.len != 0) options.label else content, .state = .{ .checked = checked.* } },
-                .layout = .{ .sizing = .{ .height = .fixed(row.size[1]) }, .child_gap = row.gap, .child_alignment = .{ .y = .center } },
+                .layout = .{ .sizing = .{ .width = .fitBetween(row.size[0], std.math.inf(f32)), .height = .fixed(row.size[1]) }, .child_gap = row.gap, .child_alignment = .{ .y = .center } },
             });
             ui.open(.{
                 .decoration = decorationOf(box, ui.focused(id)),
@@ -983,11 +1666,12 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
             });
             if (checked.*) {
                 const mark = self.style(ui, .checkbox_mark, state);
+                const grown = animate(ui, id.child("mark"), f32, 1, mark.motion);
                 ui.box(.{
                     .decoration = decorationOf(mark, false),
-                    .layout = .{ .sizing = .{ .width = .fixed(mark.size[0]), .height = .fixed(mark.size[1]) } },
+                    .layout = .{ .sizing = .{ .width = .fixed(mark.size[0] * grown), .height = .fixed(mark.size[1] * grown) } },
                 });
-            }
+            } else _ = animate(ui, id.child("mark"), f32, 0, .{ .tween = .{ .duration = 0 } });
             ui.close();
             if (content.len != 0) ui.text(content, singleLine(row.text));
             ui.close();
@@ -1042,8 +1726,12 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
             step: ?f64 = null,
             disabled: bool = false,
             width: zui.Sizing = .grow,
-            /// Its name to an assistive technology; the slider draws no text.
+            /// Its name to an assistive technology.
             label: []const u8 = "",
+            /// A tick at each `step`, where there are at most 64 of them.
+            ticks: bool = false,
+            /// The value above the thumb while it is dragged.
+            bubble: bool = true,
         };
 
         /// Edits the integer or float behind `value` by dragging, with the
@@ -1098,6 +1786,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                     .value = .{ .range = .{ .value = current, .min = options.min, .max = options.max, .step = key_step } },
                     .actions = .initOne(.adjust),
                 },
+                .decoration = .{ .border = if (ui.focused(id)) thumb.focus_ring else null, .corner_radius = thumb.corner_radius, .corner_shape = thumb.corner_shape },
                 .layout = .{ .sizing = .{ .width = options.width, .height = .fixed(self.style(ui, .slider, state).size[1]) }, .child_alignment = .{ .y = .center } },
             });
             // The grow weights split the track's free space at the value,
@@ -1106,16 +1795,60 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                 .decoration = decorationOf(filled, false),
                 .layout = .{ .sizing = .{ .width = .growWeighted(fraction), .height = .fixed(filled.size[1]) } },
             });
+            const thumb_id = id.child("thumb");
             ui.box(.{
-                .decoration = decorationOf(thumb, ui.focused(id)),
+                .id = thumb_id,
+                .decoration = decorationOf(thumb, false),
                 .layout = .{ .sizing = .{ .width = .fixed(thumb.size[0]), .height = .fixed(thumb.size[1]) } },
             });
             ui.box(.{
                 .decoration = decorationOf(empty, false),
                 .layout = .{ .sizing = .{ .width = .growWeighted(1 - fraction), .height = .fixed(empty.size[1]) } },
             });
+            if (options.ticks) if (options.step) |step| self.sliderTicks(ui, id, thumb.size[0], fraction, step, options, state);
+            if (options.bubble and !options.disabled and ui.pressed(id)) self.sliderBubble(ui, thumb_id, Value, current, key_step);
             ui.close();
             return changed;
+        }
+
+        /// Placed from the slider's rectangle in the previous frame, so
+        /// its first frame draws none.
+        fn sliderTicks(self: Self, ui: *Ui, id: zui.Id, thumb_side: f32, fraction: f32, step: f64, options: SliderOptions, state: zui.WidgetState) void {
+            const range = options.max - options.min;
+            if (step <= 0 or range <= 0) return;
+            const intervals = @floor(range / step + 1e-9);
+            if (intervals < 1 or intervals > slider_ticks_most) return;
+            const rect = ui.rectOf(id) orelse return ui.requestFrame();
+            const filled = self.style(ui, .slider_tick_filled, state);
+            const empty = self.style(ui, .slider_tick_empty, state);
+            const travel = rect.width - thumb_side;
+            const count: usize = @intFromFloat(intervals);
+            for (0..count + 1) |index| {
+                const at: f32 = @floatCast(@as(f64, @floatFromInt(index)) * step / range);
+                if (@abs(at - fraction) * travel < thumb_side / 2) continue;
+                const tick = if (at < fraction) filled else empty;
+                ui.box(.{
+                    .floating = .{ .attach_to = .parent, .anchor = .center_left, .attach_point = .center_left, .offset = .{ thumb_side / 2 + at * travel - tick.size[0] / 2, 0 }, .capture = false },
+                    .decoration = decorationOf(tick, false),
+                    .layout = .{ .sizing = .{ .width = .fixed(tick.size[0]), .height = .fixed(tick.size[1]) } },
+                });
+            }
+        }
+
+        fn sliderBubble(self: Self, ui: *Ui, thumb_id: zui.Id, comptime Value: type, value: f64, key_step: f64) void {
+            const bubble = self.style(ui, .slider_bubble, .idle);
+            var digits: [32]u8 = undefined;
+            const shown = if (@typeInfo(Value) == .int or @round(key_step) == key_step)
+                std.fmt.bufPrint(&digits, "{d}", .{@round(value)}) catch ""
+            else
+                std.fmt.bufPrint(&digits, "{d:.2}", .{value}) catch "";
+            ui.open(.{
+                .floating = .{ .attach_to = .{ .element = thumb_id }, .anchor = .bottom_center, .attach_point = .top_center, .offset = .{ 0, -bubble.gap }, .z = popup_layer, .capture = false },
+                .decoration = decorationOf(bubble, false),
+                .layout = .{ .padding = bubble.padding, .child_alignment = .{ .x = .center, .y = .center } },
+            });
+            ui.text(shown, singleLine(bubble.text));
+            ui.close();
         }
 
         fn snap(proposed: f64, options: SliderOptions) f64 {
@@ -1130,6 +1863,16 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
             placeholder: []const u8 = "",
             /// Its name to an assistive technology; the placeholder when empty.
             label: []const u8 = "",
+            /// Shows `label` above the field.
+            show_label: bool = false,
+            /// Below the field, wrapped to its width; none when empty.
+            help: []const u8 = "",
+            /// Below the field in place of `help`, and outlines the field in
+            /// the danger color; none when empty.
+            error_message: []const u8 = "",
+            leading_icon: ?zui.design.Icon = null,
+            /// At the field's end, such as a unit; none when empty.
+            trailing: []const u8 = "",
             disabled: bool = false,
             width: zui.Sizing = .grow,
         };
@@ -1149,15 +1892,77 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
         /// inserts at it; Left, Right, Home, End, Backspace and Delete move
         /// and delete by character. Focusing with Tab puts the caret at
         /// the end.
+        ///
+        /// ```zig
+        /// _ = widgets.textField(ui, .of("email"), &app.email, .{
+        ///     .label = "Email",
+        ///     .show_label = true,
+        ///     .help = "We send the receipt here.",
+        ///     .error_message = if (app.email_valid) "" else "Enter an address like ada@example.com.",
+        /// });
+        /// ```
         pub fn textField(self: Self, ui: *Ui, id: zui.Id, text: *EditableText, options: TextFieldOptions) TextFieldResult {
+            const errored = options.error_message.len != 0;
+            const framed = options.show_label or options.help.len != 0 or errored;
+            if (framed) {
+                ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = options.width }, .child_gap = self.style(ui, .text_field_label, .idle).gap } });
+                if (options.show_label) ui.text(options.label, singleLine(self.style(ui, .text_field_label, .idle).text));
+            }
+            const result = self.editableLine(ui, id, text, .{
+                .field = if (errored) .text_field_error else .text_field,
+                .placeholder = options.placeholder,
+                .label = options.label,
+                .leading_icon = options.leading_icon,
+                .trailing = options.trailing,
+                .disabled = options.disabled,
+                .width = if (framed) .grow else options.width,
+            });
+            if (framed) {
+                if (errored) {
+                    const message = self.style(ui, .text_field_error_message, .idle);
+                    ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = message.gap } });
+                    self.icon(ui, .alert, self.style(ui, .text_field_error_icon, .idle));
+                    ui.text(options.error_message, message.text);
+                    ui.close();
+                } else if (options.help.len != 0) {
+                    ui.text(options.help, self.style(ui, .text_field_help, .idle).text);
+                }
+                ui.close();
+            }
+            return result;
+        }
+
+        const Line = struct {
+            field: Part,
+            placeholder: []const u8,
+            label: []const u8,
+            leading_icon: ?zui.design.Icon,
+            leading_part: Part = .text_field_icon,
+            trailing: []const u8 = "",
+            /// Shown at the end while the field is empty and unfocused.
+            shortcut: []const u8 = "",
+            /// A button at the end that empties the field, while it has text.
+            clearable: bool = false,
+            disabled: bool,
+            width: zui.Sizing,
+        };
+
+        fn editableLine(self: Self, ui: *Ui, id: zui.Id, text: *EditableText, options: Line) TextFieldResult {
             const state = stateOf(ui, id, options.disabled);
-            const field = self.style(ui, .text_field, state);
+            const field = self.style(ui, options.field, state);
             const caret_look = self.style(ui, .text_field_caret, state);
+            const clear_id = id.child("clear");
+            var cleared = false;
+            if (options.clearable and !options.disabled and text.len != 0 and ui.clicked(clear_id)) {
+                text.set("");
+                cleared = true;
+                ui.requestFocus(id);
+            }
             const text_style = singleLine(field.text);
             const scroll_id = id.child("scroll");
             const caret = ui.state(id, Caret);
             const focused = ui.focused(id) and !options.disabled;
-            var result: TextFieldResult = .{};
+            var result: TextFieldResult = .{ .changed = cleared };
 
             var position = boundaryAtOrBefore(text.slice(), caret.position);
             if (focused and !caret.was_focused) position = text.len;
@@ -1221,9 +2026,11 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                 .layout = .{
                     .sizing = .{ .width = options.width, .height = .fixed(field.size[1]) },
                     .padding = field.padding,
+                    .child_gap = if (options.field == .search_field) field.gap else if (options.leading_icon != null or options.trailing.len != 0) field.padding.left else 0,
                     .child_alignment = .{ .y = .center },
                 },
             });
+            if (options.leading_icon) |name| self.icon(ui, name, self.style(ui, options.leading_part, state));
             ui.open(.{
                 .id = scroll_id,
                 .scroll = .{ .horizontal = true, .vertical = false },
@@ -1243,6 +2050,26 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                 if (after.len != 0) ui.text(after, text_style);
             }
             ui.close();
+            if (options.trailing.len != 0) ui.text(options.trailing, singleLine(self.style(ui, .text_field_trailing, state).text));
+            if (options.shortcut.len != 0 and text.len == 0 and !focused) {
+                const hint = self.style(ui, .search_field_shortcut, state);
+                ui.open(.{ .decoration = decorationOf(hint, false), .layout = .{ .padding = hint.padding, .child_alignment = .{ .y = .center } } });
+                ui.text(options.shortcut, singleLine(hint.text));
+                ui.close();
+            }
+            if (options.clearable and text.len != 0 and !options.disabled) {
+                const clear = self.style(ui, .search_field_clear, nestedState(ui, clear_id, state));
+                ui.open(.{
+                    .id = clear_id,
+                    .interactive = true,
+                    .cursor = .pointer,
+                    .semantics = .{ .role = .button, .label = "Clear" },
+                    .decoration = decorationOf(clear, false),
+                    .layout = .{ .sizing = .{ .width = .fixed(clear.size[1]), .height = .fixed(clear.size[1]) }, .child_alignment = .{ .x = .center, .y = .center } },
+                });
+                self.icon(ui, .close, clear);
+                ui.close();
+            }
             ui.close();
             ui.requestTextInput(id, id.child("caret"));
             return result;
@@ -1319,7 +2146,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
             if (width.rule == .fit) {
                 var widest_label: f32 = 0;
                 for (labels) |option_label| widest_label = @max(widest_label, ui.measureText(option_label, text_style)[0]);
-                const indicator_width = ui.measureText(indicator.glyph, indicator_style)[0];
+                const indicator_width = if (self.iconGlyph(.chevron_down) != null) indicator.size[0] else ui.measureText(indicator.glyph, indicator_style)[0];
                 width.min = @max(width.min, widest_label + indicator_width + look.gap + look.padding.total(.x));
             }
             const selected_label = if (selected.* < labels.len) labels[selected.*] else "";
@@ -1339,7 +2166,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
             });
             ui.text(selected_label, text_style);
             ui.box(.{ .layout = .{ .sizing = .{ .width = .grow } } });
-            ui.text(indicator.glyph, indicator_style);
+            self.icon(ui, .chevron_down, indicator);
             ui.close();
 
             if (popup.open) self.declarePopup(ui, id, backdrop_id, selected.*, labels);
@@ -1386,6 +2213,10 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                     },
                 });
                 ui.text(option_label, singleLine(option.text));
+                if (index == selected) {
+                    ui.box(.{ .layout = .{ .sizing = .{ .width = .grow } } });
+                    self.icon(ui, .check, self.style(ui, .dropdown_check, ui.widgetState(option_id)));
+                }
                 ui.close();
             }
             ui.close();
@@ -1894,16 +2725,21 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
         /// groove, sliding from tab to tab. It is placed from the previous
         /// frame's rectangles, so the first frame draws none.
         fn tabIndicator(self: Self, ui: *Ui, bar_id: zui.Id, tab_id: zui.Id, pill: bool) void {
+            if (pill) return self.slidingIndicator(ui, bar_id, tab_id, .tab_pill_thumb, 0, .center_left);
+            self.slidingIndicator(ui, bar_id, tab_id, .tab_indicator, self.style(ui, .tab, .idle).padding.left, .bottom_left);
+        }
+
+        /// `part` under or behind `tab_id`, inset `label_inset` at either
+        /// side, sliding through the part's motion when the tab changes.
+        fn slidingIndicator(self: Self, ui: *Ui, bar_id: zui.Id, tab_id: zui.Id, part: Part, label_inset: f32, point: zui.AnchorPoint) void {
             const bar_rect = ui.rectOf(bar_id) orelse return ui.requestFrame();
             const tab_rect = ui.rectOf(tab_id) orelse return ui.requestFrame();
-            const look = self.style(ui, if (pill) .tab_pill_thumb else .tab_indicator, .idle);
-            const label_inset = if (pill) 0 else self.style(ui, .tab, .idle).padding.left;
+            const look = self.style(ui, part, .idle);
             const from_start = if (ui.environment().direction == .right_to_left)
                 (bar_rect.x + bar_rect.width) - (tab_rect.x + tab_rect.width)
             else
                 tab_rect.x - bar_rect.x;
             const placed = animate(ui, bar_id.child("indicator"), [2]f32, .{ from_start + label_inset, @max(tab_rect.width - 2 * label_inset, 0) }, look.motion);
-            const point: zui.AnchorPoint = if (pill) .center_left else .bottom_left;
             const effects: Ui.Effects = .{ .shadow = look.shadow };
             ui.box(.{
                 .floating = .{ .attach_to = .parent, .anchor = point, .attach_point = point, .offset = .{ placed[0], 0 }, .z = 0, .capture = false },
@@ -2063,7 +2899,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                 if (collapsed and index > 0 and index < last - 1) {
                     if (index == 1) {
                         self.crumbLink(ui, more_id, collapsed_crumbs_glyph, "Show the hidden levels");
-                        ui.text(separator.glyph, singleLine(separator.text));
+                        self.icon(ui, .chevron_right, separator);
                     }
                     continue;
                 }
@@ -2077,7 +2913,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                     ui.close();
                 } else {
                     self.crumbLink(ui, id.indexedChild("crumb", index), crumb, crumb);
-                    ui.text(separator.glyph, singleLine(separator.text));
+                    self.icon(ui, .chevron_right, separator);
                 }
             }
             ui.close();
@@ -2102,6 +2938,566 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
             ui.close();
         }
 
+        pub const RadioGroupOptions = struct {
+            /// Its name to an assistive technology.
+            label: []const u8 = "",
+            /// `.top_to_bottom` stacks the options; `.left_to_right` puts
+            /// them in a row.
+            direction: zui.Direction = .top_to_bottom,
+            disabled: bool = false,
+        };
+
+        /// An option for each named tag of the enum behind `selected`,
+        /// labeled with `labelFromIdentifier`. Clicking one chooses it; the
+        /// arrow keys move the choice and the focus with it, wrapping, and
+        /// only the chosen option is in the Tab order. Returns whether the
+        /// choice changed.
+        ///
+        /// ```zig
+        /// _ = widgets.radioGroup(ui, .of("delivery"), &order.delivery, .{ .label = "Delivery" });
+        /// ```
+        pub fn radioGroup(self: Self, ui: *Ui, id: zui.Id, selected: anytype, options: RadioGroupOptions) bool {
+            const Enum = EnumPointee(@TypeOf(selected), "radioGroup");
+            const tags = comptime std.enums.values(Enum);
+            const labels = comptime tagLabels(Enum);
+            const current = std.mem.indexOfScalar(Enum, tags, selected.*) orelse 0;
+            var chosen = current;
+            if (!options.disabled) {
+                for (0..tags.len) |index| {
+                    if (ui.clicked(id.indexedChild("option", index))) chosen = index;
+                }
+                if (ui.navigated(id.indexedChild("option", current))) |direction| {
+                    const mirrored = ui.environment().direction == .right_to_left;
+                    const forward = switch (direction) {
+                        .down => true,
+                        .up => false,
+                        .right => !mirrored,
+                        .left => mirrored,
+                    };
+                    chosen = if (forward) (current + 1) % tags.len else (current + tags.len - 1) % tags.len;
+                }
+            }
+            const changed = chosen != current;
+            if (changed) {
+                selected.* = tags[chosen];
+                ui.requestFocus(id.indexedChild("option", chosen));
+            }
+
+            const horizontal = options.direction == .left_to_right;
+            const group = self.style(ui, if (horizontal) .radio_group_horizontal else .radio_group, .idle);
+            ui.open(.{
+                .id = id,
+                .semantics = .{ .role = .group, .label = options.label },
+                .layout = .{ .direction = options.direction, .child_gap = group.gap },
+            });
+            for (labels, 0..) |option_label, index| {
+                const option_id = id.indexedChild("option", index);
+                const is_selected = index == chosen;
+                const state = stateOf(ui, option_id, options.disabled);
+                const row = self.style(ui, .radio, state);
+                const circle = self.style(ui, if (is_selected) .radio_circle_selected else .radio_circle, state);
+                ui.open(.{
+                    .id = option_id,
+                    .interactive = true,
+                    .focusable = is_selected,
+                    .disabled = options.disabled,
+                    .cursor = if (options.disabled) null else .pointer,
+                    .semantics = .{ .role = .radio, .label = option_label, .state = .{ .checked = is_selected } },
+                    .decoration = .{ .border = if (ui.focused(option_id)) row.focus_ring else null, .corner_radius = row.corner_radius, .corner_shape = row.corner_shape },
+                    .layout = .{
+                        .sizing = .{ .width = .fitBetween(row.size[0], std.math.inf(f32)), .height = .fixed(row.size[1]) },
+                        .child_gap = row.gap,
+                        .child_alignment = .{ .y = .center },
+                    },
+                });
+                ui.box(.{
+                    .decoration = decorationOf(circle, false),
+                    .layout = .{ .sizing = .{ .width = .fixed(circle.size[0]), .height = .fixed(circle.size[1]) } },
+                });
+                ui.text(option_label, singleLine(row.text));
+                ui.close();
+            }
+            ui.close();
+            return changed;
+        }
+
+        pub const SegmentedOptions = struct {
+            /// Its name to an assistive technology.
+            label: []const u8 = "",
+        };
+
+        /// A segment for each named tag of the enum behind `selected`, in a
+        /// groove, the selected one on a raised thumb that slides through
+        /// the toggle spring. Clicking a segment selects it; the arrow
+        /// keys move the selection and the focus with it, wrapping, and
+        /// only the selected segment is in the Tab order. Returns whether
+        /// the selection changed.
+        ///
+        /// ```zig
+        /// _ = widgets.segmented(ui, .of("layout"), &app.layout, .{ .label = "Layout" });
+        /// ```
+        pub fn segmented(self: Self, ui: *Ui, id: zui.Id, selected: anytype, options: SegmentedOptions) bool {
+            const Enum = EnumPointee(@TypeOf(selected), "segmented");
+            const tags = comptime std.enums.values(Enum);
+            const labels = comptime tagLabels(Enum);
+            const current = std.mem.indexOfScalar(Enum, tags, selected.*) orelse 0;
+            var chosen = current;
+            for (0..tags.len) |index| {
+                if (ui.clicked(id.indexedChild("segment", index))) chosen = index;
+            }
+            if (ui.navigated(id.indexedChild("segment", current))) |direction| {
+                const forward = (direction == .right) != (ui.environment().direction == .right_to_left);
+                if (direction == .left or direction == .right) chosen = if (forward) (current + 1) % tags.len else (current + tags.len - 1) % tags.len;
+            }
+            const changed = chosen != current;
+            if (changed) {
+                selected.* = tags[chosen];
+                ui.requestFocus(id.indexedChild("segment", chosen));
+            }
+
+            const groove = self.style(ui, .segmented, .idle);
+            const separator = self.style(ui, .segmented_separator, .idle);
+            ui.open(.{
+                .id = id,
+                .semantics = .{ .role = .group, .label = options.label },
+                .decoration = decorationOf(groove, false),
+                .layout = .{ .sizing = .{ .height = .fixed(groove.size[1]) }, .padding = groove.padding, .child_alignment = .{ .y = .center } },
+            });
+            self.slidingIndicator(ui, id, id.indexedChild("segment", chosen), .segmented_thumb, 0, .center_left);
+            for (labels, 0..) |segment_label, index| {
+                if (index != 0) {
+                    const between_unselected = index != chosen and index - 1 != chosen;
+                    ui.box(.{
+                        .decoration = .{ .background = if (between_unselected) separator.background else null },
+                        .layout = .{ .sizing = .{ .width = .fixed(separator.size[0]), .height = .fixed(@round((groove.size[1] - groove.padding.total(.y)) * separator.size[1])) } },
+                    });
+                }
+                const segment_id = id.indexedChild("segment", index);
+                const is_selected = index == chosen;
+                const look = self.style(ui, if (is_selected) .segment_selected else .segment, ui.widgetState(segment_id));
+                ui.open(.{
+                    .id = segment_id,
+                    .interactive = true,
+                    .focusable = is_selected,
+                    .cursor = .pointer,
+                    .semantics = .{ .role = .radio, .label = segment_label, .state = .{ .checked = is_selected, .selected = is_selected } },
+                    .decoration = decorationOf(look, ui.focused(segment_id)),
+                    .layout = .{ .sizing = .{ .height = .fixed(look.size[1]) }, .padding = look.padding, .child_alignment = .{ .x = .center, .y = .center } },
+                });
+                ui.text(segment_label, singleLine(look.text));
+                ui.close();
+            }
+            ui.close();
+            return changed;
+        }
+
+        pub const NumberStepperOptions = struct {
+            min: f64 = -std.math.inf(f64),
+            max: f64 = std.math.inf(f64),
+            /// What the buttons, the arrow keys and a scrub step by.
+            step: f64 = 1,
+            /// After the value, such as "nights"; none when empty.
+            unit: []const u8 = "",
+            /// Its name to an assistive technology.
+            label: []const u8 = "",
+            disabled: bool = false,
+        };
+
+        const StepperEntry = struct {
+            typed: [stepper_typed_capacity]u8,
+            typed_len: u8,
+            was_focused: bool,
+            scrubbing: bool,
+            scrub_start_x: f32,
+            scrub_start_value: f64,
+        };
+
+        const stepper_typed_capacity = 24;
+
+        /// Edits the integer or float behind `value` between − and +
+        /// buttons, each disabled at its limit. While focused, Up and Down
+        /// step and typing replaces the value; dragging the value sideways
+        /// scrubs it a step for every few units. Returns whether the value
+        /// changed.
+        ///
+        /// ```zig
+        /// _ = widgets.numberStepper(ui, .of("nights"), &booking.nights, .{ .min = 1, .max = 30, .unit = "nights", .label = "Nights" });
+        /// ```
+        pub fn numberStepper(self: Self, ui: *Ui, id: zui.Id, value: anytype, options: NumberStepperOptions) bool {
+            const Value = NumberPointee(@TypeOf(value), "numberStepper");
+            const entry = ui.state(id, StepperEntry);
+            const value_id = id.child("value");
+            const decrement_id = id.child("decrement");
+            const increment_id = id.child("increment");
+            const focused = ui.focused(id);
+            const previous: f64 = numberToFloat(value.*);
+            var proposed = previous;
+
+            if (!focused or !entry.was_focused) entry.typed_len = 0;
+            entry.was_focused = focused;
+            if (!options.disabled) {
+                if (ui.clicked(decrement_id)) proposed -= options.step;
+                if (ui.clicked(increment_id)) proposed += options.step;
+                if (ui.adjusted(id)) |steps| {
+                    proposed += options.step * @as(f64, @floatFromInt(steps));
+                    entry.typed_len = 0;
+                }
+                if (focused) {
+                    var edited = false;
+                    for (ui.keyEvents()) |key_event| switch (key_event.key) {
+                        .backspace => if (entry.typed_len > 0) {
+                            entry.typed_len -= 1;
+                            edited = true;
+                        },
+                        .enter, .escape => entry.typed_len = 0,
+                        else => {},
+                    };
+                    for (ui.typedText()) |byte| {
+                        const numeric = std.ascii.isDigit(byte) or byte == '-' or (byte == '.' and @typeInfo(Value) == .float);
+                        if (!numeric or entry.typed_len == stepper_typed_capacity) continue;
+                        entry.typed[entry.typed_len] = byte;
+                        entry.typed_len += 1;
+                        edited = true;
+                    }
+                    if (edited and entry.typed_len != 0) if (std.fmt.parseFloat(f64, entry.typed[0..entry.typed_len])) |typed| {
+                        proposed = typed;
+                    } else |_| {};
+                }
+                if (ui.pressed(value_id)) {
+                    if (ui.primaryPointer()) |pointer| {
+                        if (!entry.scrubbing) {
+                            entry.scrubbing = true;
+                            entry.scrub_start_x = pointer.position[0];
+                            entry.scrub_start_value = previous;
+                        }
+                        const steps: f64 = @trunc((pointer.position[0] - entry.scrub_start_x) / stepper_scrub_distance);
+                        proposed = entry.scrub_start_value + steps * options.step;
+                    }
+                } else entry.scrubbing = false;
+            }
+
+            var changed = false;
+            if (proposed != previous) {
+                const stored = floatToNumber(Value, std.math.clamp(proposed, options.min, options.max));
+                changed = stored != value.*;
+                value.* = stored;
+            }
+            const current: f64 = numberToFloat(value.*);
+
+            const state = stateOf(ui, id, options.disabled);
+            const container = self.style(ui, .number_stepper, state);
+            const shown = self.style(ui, .number_stepper_value, state);
+            const value_style = singleLine(shown.text);
+            ui.open(.{
+                .id = id,
+                .focusable = true,
+                .disabled = options.disabled,
+                .semantics = .{
+                    .role = .slider,
+                    .label = options.label,
+                    .value = .{ .range = .{ .value = current, .min = options.min, .max = options.max, .step = options.step } },
+                    .actions = .initOne(.adjust),
+                },
+                .decoration = decorationOf(container, ui.focused(id)),
+                .layout = .{ .sizing = .{ .height = .fixed(container.size[1]) }, .child_alignment = .{ .y = .center } },
+            });
+            self.stepperButton(ui, decrement_id, .number_stepper_decrement, options.disabled or current <= options.min, "Decrease");
+            var digits: [32]u8 = undefined;
+            const text = if (entry.typed_len != 0) entry.typed[0..entry.typed_len] else formatNumber(&digits, value.*);
+            ui.open(.{
+                .id = value_id,
+                .interactive = !options.disabled,
+                .cursor = if (options.disabled) null else .resize_horizontal,
+                .gestures = .{ .pan = .horizontal },
+                .layout = .{
+                    .sizing = .{ .width = .fitBetween(ui.measureText(stepper_value_widest, value_style)[0] + shown.padding.total(.x), std.math.inf(f32)), .height = .grow },
+                    .padding = shown.padding,
+                    .child_gap = shown.padding.left,
+                    .child_alignment = .{ .x = .center, .y = .center },
+                },
+            });
+            ui.text(text, value_style);
+            if (options.unit.len != 0) ui.text(options.unit, singleLine(self.style(ui, .number_stepper_unit, state).text));
+            ui.close();
+            self.stepperButton(ui, increment_id, .number_stepper_increment, options.disabled or current >= options.max, "Increase");
+            ui.close();
+            return changed;
+        }
+
+        fn stepperButton(self: Self, ui: *Ui, id: zui.Id, part: Part, disabled: bool, accessible_name: []const u8) void {
+            const look = self.style(ui, part, stateOf(ui, id, disabled));
+            ui.open(.{
+                .id = id,
+                .interactive = true,
+                .disabled = disabled,
+                .cursor = if (disabled) null else .pointer,
+                .semantics = .{ .role = .button, .label = accessible_name },
+                .decoration = decorationOf(look, false),
+                .layout = .{ .sizing = .{ .width = .fixed(look.size[1]), .height = .fixed(look.size[1]) }, .child_alignment = .{ .x = .center, .y = .center } },
+            });
+            ui.text(look.glyph, singleLine(look.text));
+            ui.close();
+        }
+
+        pub const SearchFieldOptions = struct {
+            placeholder: []const u8 = "Search",
+            /// The keys that reach the field, shown while it is empty and
+            /// unfocused; none when empty. The application handles them.
+            shortcut: []const u8 = "",
+            /// Its name to an assistive technology; the placeholder when empty.
+            label: []const u8 = "",
+            disabled: bool = false,
+            width: zui.Sizing = .grow,
+        };
+
+        /// A text field for a query, with a search icon at its start, its
+        /// shortcut while empty and unfocused, and a button that clears it
+        /// while it has text. Escape clears it, and a second Escape leaves
+        /// it.
+        ///
+        /// ```zig
+        /// if (ui.chordPressed(.{ .key = .k, .modifiers = .{ .control = true } })) ui.requestFocus(.of("search"));
+        /// if (widgets.searchField(ui, .of("search"), &app.query, .{ .shortcut = "Ctrl K" }).changed) app.refilter();
+        /// ```
+        pub fn searchField(self: Self, ui: *Ui, id: zui.Id, text: *EditableText, options: SearchFieldOptions) TextFieldResult {
+            var escaped = false;
+            if (!options.disabled and ui.focused(id) and ui.keyPressed(.escape)) {
+                if (text.len != 0) {
+                    text.set("");
+                    escaped = true;
+                } else ui.requestFocus(.none);
+            }
+            var result = self.editableLine(ui, id, text, .{
+                .field = .search_field,
+                .placeholder = options.placeholder,
+                .label = options.label,
+                .leading_icon = .search,
+                .leading_part = .search_field_icon,
+                .shortcut = options.shortcut,
+                .clearable = true,
+                .disabled = options.disabled,
+                .width = options.width,
+            });
+            result.changed = result.changed or escaped;
+            return result;
+        }
+
+        pub const IconButtonOptions = struct {
+            /// Its name to an assistive technology, and later its tooltip.
+            label: []const u8,
+            variant: IconButtonVariant = .tertiary,
+            size: zui.design.ControlSize = .medium,
+            disabled: bool = false,
+        };
+
+        /// A square button showing `name`, true in the frame it is clicked,
+        /// or activated with Enter or Space while focused. Its accessible
+        /// label is required, since it shows no text. Under a design
+        /// without an icon font it draws no icon, counted in
+        /// `Diagnostics.missing_icons`.
+        ///
+        /// ```zig
+        /// if (widgets.iconButton(ui, .of("close"), .close, .{ .label = "Close" })) app.closePanel();
+        /// ```
+        pub fn iconButton(self: Self, ui: *Ui, id: zui.Id, name: zui.design.Icon, options: IconButtonOptions) bool {
+            const state = stateOf(ui, id, options.disabled);
+            const look = self.style(ui, options.variant.part(), state);
+            const control = self.style(ui, controlSizePart(options.size), state);
+            const scale = pressScale(ui, id, look);
+            const effects: Ui.Effects = .{ .transform = .{ .scale = @splat(scale) } };
+            ui.open(.{
+                .id = id,
+                .focusable = true,
+                .disabled = options.disabled,
+                .cursor = if (options.disabled) null else .pointer,
+                .semantics = .{ .role = .button, .label = options.label },
+                .decoration = decorationOf(look, ui.focused(id)),
+                .effects = if (scale != 1) &effects else null,
+                .layout = .{ .sizing = .{ .width = .fixed(control.size[1]), .height = .fixed(control.size[1]) }, .child_alignment = .{ .x = .center, .y = .center } },
+            });
+            var icon_look = look;
+            icon_look.size[0] = control.size[0];
+            icon_look.glyph = "";
+            self.icon(ui, name, icon_look);
+            ui.close();
+            return ui.clicked(id);
+        }
+
+        /// Text that leads elsewhere, underlined, true in the frame it is
+        /// clicked or activated with Enter or Space. Opening `url` is the
+        /// application's, through its host's `open_url` service; the link
+        /// reports it to an assistive technology.
+        ///
+        /// ```zig
+        /// if (widgets.link(ui, .of("policy"), "Cancellation policy", "https://example.com/cancellation")) try services.open_url(url);
+        /// ```
+        pub fn link(self: Self, ui: *Ui, id: zui.Id, content: []const u8, url: []const u8) bool {
+            const state = ui.widgetState(id);
+            const look = self.style(ui, .link, state);
+            const underline = self.style(ui, .link_underline, state);
+            ui.open(.{
+                .id = id,
+                .focusable = true,
+                .cursor = .pointer,
+                .semantics = .{ .role = .link, .label = content, .value = .{ .text = url } },
+                .decoration = .{ .border = if (ui.focused(id)) look.focus_ring else null, .corner_radius = look.corner_radius, .corner_shape = look.corner_shape },
+                .layout = .{
+                    .direction = .top_to_bottom,
+                    .sizing = .{ .height = .fitBetween(look.size[1], std.math.inf(f32)) },
+                    .child_alignment = .{ .y = .center },
+                },
+            });
+            ui.text(content, singleLine(look.text));
+            ui.box(.{ .decoration = .{ .background = underline.background }, .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(underline.size[1]) } } });
+            ui.close();
+            return ui.clicked(id);
+        }
+
+        pub const ChipOptions = struct {
+            /// A filter chip, toggled when clicked; null for one that is
+            /// not selectable.
+            selected: ?*bool = null,
+            /// A close button at its end, and Delete or Backspace while it
+            /// is focused, close it.
+            closable: bool = false,
+            leading_icon: ?zui.design.Icon = null,
+            /// Its name to an assistive technology; `content` when empty.
+            label: []const u8 = "",
+            disabled: bool = false,
+        };
+
+        pub const ChipResult = struct {
+            /// Its selection changed.
+            toggled: bool = false,
+            /// It asked to be closed; the application removes it.
+            closed: bool = false,
+        };
+
+        /// A compact choice, filter or tag. A selected chip leads with a
+        /// check that grows in through the check motion.
+        ///
+        /// ```zig
+        /// for (app.filters, 0..) |*filter, index| {
+        ///     if (widgets.chip(ui, .indexed("filter", index), filter.name, .{ .selected = &filter.on }).toggled) app.refilter();
+        /// }
+        /// if (widgets.chip(ui, .of("tag.urgent"), "Urgent", .{ .closable = true }).closed) app.removeTag(.urgent);
+        /// ```
+        pub fn chip(self: Self, ui: *Ui, id: zui.Id, content: []const u8, options: ChipOptions) ChipResult {
+            const close_id = id.child("close");
+            var result: ChipResult = .{};
+            if (!options.disabled) {
+                if (options.closable and (ui.clicked(close_id) or ui.dismissed(id) or
+                    (ui.focused(id) and (ui.keyPressed(.delete) or ui.keyPressed(.backspace)))))
+                {
+                    result.closed = true;
+                } else if (options.selected) |selected| if (ui.clicked(id)) {
+                    selected.* = !selected.*;
+                    result.toggled = true;
+                };
+            }
+            const is_selected = if (options.selected) |selected| selected.* else false;
+            const state = stateOf(ui, id, options.disabled);
+            const look = self.style(ui, if (is_selected) .chip_selected else .chip, state);
+            const accessible_name = if (options.label.len != 0) options.label else content;
+            ui.open(.{
+                .id = id,
+                .focusable = true,
+                .disabled = options.disabled,
+                .cursor = if (options.disabled) null else .pointer,
+                .semantics = .{
+                    .role = if (options.selected != null) .checkbox else .button,
+                    .label = accessible_name,
+                    .state = .{ .checked = if (options.selected != null) is_selected else null },
+                    .actions = if (options.closable) .initOne(.dismiss) else .initEmpty(),
+                },
+                .decoration = decorationOf(look, ui.focused(id)),
+                .layout = .{
+                    .sizing = .{ .height = .fixed(look.size[1]) },
+                    .padding = look.padding,
+                    .child_gap = look.gap,
+                    .child_alignment = .{ .y = .center },
+                },
+            });
+            if (options.selected != null) {
+                const check = self.style(ui, .chip_check, state);
+                const grown = animate(ui, id.child("check"), f32, if (is_selected) 1 else 0, if (is_selected) check.motion else .{ .tween = .{ .duration = 0 } });
+                if (is_selected) {
+                    ui.open(.{ .layout = .{ .sizing = .{ .width = .fixed(check.size[0] * grown) }, .child_alignment = .{ .x = .center } }, .clip = .both });
+                    self.icon(ui, .check, check);
+                    ui.close();
+                }
+            }
+            if (options.leading_icon) |name| self.icon(ui, name, self.style(ui, .chip_icon, state));
+            ui.text(content, singleLine(look.text));
+            if (options.closable) {
+                const close = self.style(ui, .chip_close, if (options.disabled) .disabled else nestedState(ui, close_id, state));
+                ui.open(.{
+                    .id = close_id,
+                    .interactive = !options.disabled,
+                    .cursor = if (options.disabled) null else .pointer,
+                    .semantics = .{ .role = .button, .label = "Remove" },
+                    .decoration = decorationOf(close, false),
+                    .layout = .{ .sizing = .{ .width = .fixed(close.size[1]), .height = .fixed(close.size[1]) }, .child_alignment = .{ .x = .center, .y = .center } },
+                });
+                self.icon(ui, .close, close);
+                ui.close();
+            }
+            ui.close();
+            return result;
+        }
+
+        pub const ToggleOptions = struct {
+            disabled: bool = false,
+            /// Its name to an assistive technology; `content` when empty.
+            label: []const u8 = "",
+        };
+
+        /// A switch after its label, turning `on` on or off when clicked or
+        /// with Space; returns whether it did. Its thumb slides through the
+        /// toggle spring and widens while pressed. An empty `content` draws
+        /// the switch alone, for the end of a settings row.
+        ///
+        /// ```zig
+        /// widgets.labeledRowWith(ui, "Breakfast", .{ .description = "Served from 7 to 10." });
+        /// _ = widgets.toggle(ui, .of("breakfast"), "", &booking.breakfast, .{ .label = "Breakfast" });
+        /// ui.close();
+        /// ```
+        pub fn toggle(self: Self, ui: *Ui, id: zui.Id, content: []const u8, on: *bool, options: ToggleOptions) bool {
+            const toggled = !options.disabled and ui.clicked(id);
+            if (toggled) on.* = !on.*;
+            const state = stateOf(ui, id, options.disabled);
+            const row = self.style(ui, .toggle, state);
+            const track = self.style(ui, if (on.*) .toggle_track_on else .toggle_track, state);
+            const thumb = self.style(ui, if (on.*) .toggle_thumb_on else .toggle_thumb, state);
+            const inset = (track.size[1] - thumb.size[1]) / 2;
+            const widening = if (state == .pressed) thumb.gap else 0;
+            const travel = track.size[0] - 2 * inset - thumb.size[0] - widening;
+            const placed = animate(ui, id.child("thumb"), [2]f32, .{ if (on.*) travel else 0, thumb.size[0] + widening }, thumb.motion);
+            ui.open(.{
+                .id = id,
+                .focusable = true,
+                .disabled = options.disabled,
+                .cursor = if (options.disabled) null else .pointer,
+                .semantics = .{ .role = .toggle, .label = if (options.label.len != 0) options.label else content, .state = .{ .checked = on.* } },
+                .layout = .{ .sizing = .{ .height = .fixed(row.size[1]) }, .child_gap = row.gap, .child_alignment = .{ .y = .center } },
+            });
+            if (content.len != 0) ui.text(content, singleLine(row.text));
+            ui.open(.{
+                .decoration = decorationOf(track, ui.focused(id)),
+                .layout = .{ .sizing = .{ .width = .fixed(track.size[0]), .height = .fixed(track.size[1]) } },
+            });
+            const effects: Ui.Effects = .{ .shadow = thumb.shadow };
+            ui.box(.{
+                .floating = .{ .attach_to = .parent, .anchor = .center_left, .attach_point = .center_left, .offset = .{ inset + placed[0], 0 }, .capture = false },
+                .decoration = decorationOf(thumb, false),
+                .effects = if (thumb.shadow != null) &effects else null,
+                .layout = .{ .sizing = .{ .width = .fixed(placed[1]), .height = .fixed(thumb.size[1]) } },
+            });
+            ui.close();
+            ui.close();
+            return toggled;
+        }
+
         fn animate(ui: *Ui, id: zui.Id, comptime T: type, target: T, motion: Motion) T {
             return switch (motion) {
                 .none => target,
@@ -2115,6 +3511,14 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
         fn stateOf(ui: *const Ui, id: zui.Id, disabled: bool) zui.WidgetState {
             if (disabled) return .disabled;
             return ui.widgetState(id);
+        }
+
+        /// A button inside a control sits on the control's fill, which
+        /// focus changes, so while the pointer is not on it, it takes the
+        /// control's focus.
+        fn nestedState(ui: *const Ui, id: zui.Id, outer: zui.WidgetState) zui.WidgetState {
+            const own = ui.widgetState(id);
+            return if (own == .idle and outer == .focused) outer else own;
         }
 
         fn singleLine(text_style: TextStyle) TextStyle {
@@ -2285,8 +3689,277 @@ pub const previews = struct {
         }
     };
 
-    /// Every component above, for a review or an audit to step through.
-    pub const all = .{ Card, Divider, ScrollArea, GroupBox, Tabs, NavigationList, Breadcrumbs };
+    pub const Label = struct {
+        pub const Content = struct { text: []const u8, role: zui.design.TypeRole = .body, tone: LabelTone = .default };
+
+        pub const zuiPreviews = .{
+            .body = Content{ .text = "Your changes are saved." },
+            .title = Content{ .text = "Storage", .role = .title },
+            .muted_caption = Content{ .text = "Updated 2 minutes ago", .role = .caption, .tone = .muted },
+            .accent = Content{ .text = "3 new", .role = .label_strong, .tone = .accent },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            widgets.labelWith(ui, content.text, .{ .role = content.role, .tone = content.tone });
+        }
+    };
+
+    pub const LabeledRow = struct {
+        pub const Content = struct { label: []const u8, description: []const u8 = "" };
+
+        pub const zuiPreviews = .{
+            .plain = Content{ .label = "Volume" },
+            .described = Content{ .label = "Wi-Fi only", .description = "Waits for Wi-Fi before uploading photos." },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            const group = widgets.groupBox(ui, .of("preview.labeled_row"), "Sync", .{});
+            widgets.labeledRowWith(ui, content.label, .{ .description = content.description });
+            var on = true;
+            _ = widgets.toggle(ui, .of("preview.labeled_row.first"), "", &on, .{ .label = content.label });
+            ui.close();
+            widgets.labeledRowWith(ui, "Photos", .{ .divider_above = true });
+            _ = widgets.toggle(ui, .of("preview.labeled_row.second"), "", &on, .{ .label = "Photos" });
+            ui.close();
+            group.end(ui);
+        }
+    };
+
+    pub const Disclosure = struct {
+        pub const Content = struct { title: []const u8, expanded: bool };
+
+        pub const zuiPreviews = .{
+            .collapsed = Content{ .title = "Advanced", .expanded = false },
+            .expanded = Content{ .title = "Advanced", .expanded = true },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            var expanded = content.expanded;
+            _ = widgets.disclosure(ui, .of("preview.disclosure"), content.title, &expanded);
+            if (expanded) widgets.label(ui, "Proxy and certificates");
+        }
+    };
+
+    pub const Button = struct {
+        pub const Content = struct {
+            label: []const u8,
+            variant: ButtonVariant = .primary,
+            size: zui.design.ControlSize = .medium,
+            leading_icon: ?zui.design.Icon = null,
+            disabled: bool = false,
+        };
+
+        pub const zuiPreviews = .{
+            .primary = Content{ .label = "Save" },
+            .secondary = Content{ .label = "Cancel", .variant = .secondary },
+            .tonal = Content{ .label = "Share", .variant = .tonal },
+            .tertiary = Content{ .label = "Learn more", .variant = .tertiary },
+            .danger = Content{ .label = "Delete project", .variant = .danger },
+            .small_with_icon = Content{ .label = "Export", .variant = .secondary, .size = .small, .leading_icon = .arrow_down },
+            .large = Content{ .label = "Continue to payment", .size = .large },
+            .disabled = Content{ .label = "Save", .disabled = true },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            _ = widgets.button(ui, .of("preview.button"), content.label, .{ .variant = content.variant, .size = content.size, .leading_icon = content.leading_icon, .disabled = content.disabled });
+        }
+    };
+
+    pub const Checkbox = struct {
+        pub const Content = struct { label: []const u8, checked: bool };
+
+        pub const zuiPreviews = .{
+            .unchecked = Content{ .label = "Send me a weekly summary", .checked = false },
+            .checked = Content{ .label = "Remember this device", .checked = true },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            var checked = content.checked;
+            _ = widgets.checkbox(ui, .of("preview.checkbox"), content.label, &checked, .{});
+        }
+    };
+
+    pub const Slider = struct {
+        pub const Content = struct { value: f32, step: ?f64 = null, ticks: bool = false };
+
+        pub const zuiPreviews = .{
+            .continuous = Content{ .value = 0.4 },
+            .ticked = Content{ .value = 0.5, .step = 0.125, .ticks = true },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            var value = content.value;
+            _ = widgets.slider(ui, .of("preview.slider"), &value, .{ .step = content.step, .ticks = content.ticks, .label = "Volume" });
+        }
+    };
+
+    pub const TextField = struct {
+        pub const Content = struct {
+            text: []const u8 = "",
+            placeholder: []const u8 = "",
+            label: []const u8,
+            help: []const u8 = "",
+            error_message: []const u8 = "",
+            trailing: []const u8 = "",
+        };
+
+        pub const zuiPreviews = .{
+            .empty = Content{ .placeholder = "ada@example.com", .label = "Email" },
+            .labeled = Content{ .text = "Ada Lovelace", .label = "Name", .help = "As it appears on your card." },
+            .errored = Content{ .text = "ada@", .label = "Email", .error_message = "Enter an address like ada@example.com." },
+            .unit = Content{ .text = "72", .label = "Weight", .trailing = "kg" },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            var bytes: [64]u8 = undefined;
+            var text: EditableText = .init(&bytes, content.text);
+            _ = widgets.textField(ui, .of("preview.text_field"), &text, .{
+                .placeholder = content.placeholder,
+                .label = content.label,
+                .show_label = true,
+                .help = content.help,
+                .error_message = content.error_message,
+                .trailing = content.trailing,
+            });
+        }
+    };
+
+    pub const Dropdown = struct {
+        pub const Content = struct { options: []const []const u8, selected: usize };
+
+        pub const zuiPreviews = .{
+            .short = Content{ .options = &.{ "Low", "Medium", "High" }, .selected = 1 },
+            .long = Content{ .options = &.{ "Every hour", "Every day at 9:00", "Every Monday morning" }, .selected = 2 },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            var selected = content.selected;
+            _ = widgets.dropdown(ui, .of("preview.dropdown"), &selected, content.options, .{ .label = "Frequency" });
+        }
+    };
+
+    pub const RadioGroup = struct {
+        pub const Room = enum { single, double, family_suite };
+        pub const Content = struct { selected: Room, direction: zui.Direction = .top_to_bottom };
+
+        pub const zuiPreviews = .{
+            .stacked = Content{ .selected = .double },
+            .row = Content{ .selected = .single, .direction = .left_to_right },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            var selected = content.selected;
+            _ = widgets.radioGroup(ui, .of("preview.radio_group"), &selected, .{ .label = "Room", .direction = content.direction });
+        }
+    };
+
+    pub const Segmented = struct {
+        pub const View = enum { list, grid, map };
+        pub const Content = struct { selected: View };
+
+        pub const zuiPreviews = .{
+            .first = Content{ .selected = .list },
+            .middle = Content{ .selected = .grid },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            var selected = content.selected;
+            _ = widgets.segmented(ui, .of("preview.segmented"), &selected, .{ .label = "View" });
+        }
+    };
+
+    pub const NumberStepper = struct {
+        pub const Content = struct { value: i32, unit: []const u8 = "" };
+
+        pub const zuiPreviews = .{
+            .nights = Content{ .value = 3, .unit = "nights" },
+            .at_limit = Content{ .value = 1 },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            var value = content.value;
+            _ = widgets.numberStepper(ui, .of("preview.number_stepper"), &value, .{ .min = 1, .max = 30, .unit = content.unit, .label = "Nights" });
+        }
+    };
+
+    pub const SearchField = struct {
+        pub const Content = struct { query: []const u8 = "", shortcut: []const u8 = "Ctrl K" };
+
+        pub const zuiPreviews = .{
+            .empty = Content{},
+            .typed = Content{ .query = "lisbon" },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            var bytes: [64]u8 = undefined;
+            var query: EditableText = .init(&bytes, content.query);
+            _ = widgets.searchField(ui, .of("preview.search_field"), &query, .{ .shortcut = content.shortcut, .label = "Search stays" });
+        }
+    };
+
+    pub const IconButton = struct {
+        pub const Content = struct { icon: zui.design.Icon, label: []const u8, variant: IconButtonVariant = .tertiary, size: zui.design.ControlSize = .medium };
+
+        pub const zuiPreviews = .{
+            .tertiary = Content{ .icon = .close, .label = "Close" },
+            .filled = Content{ .icon = .check, .label = "Done", .variant = .filled },
+            .tonal_small = Content{ .icon = .info, .label = "About", .variant = .tonal, .size = .small },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            _ = widgets.iconButton(ui, .of("preview.icon_button"), content.icon, .{ .label = content.label, .variant = content.variant, .size = content.size });
+        }
+    };
+
+    pub const Link = struct {
+        pub const Content = struct { text: []const u8, url: []const u8 };
+
+        pub const zuiPreviews = .{
+            .short = Content{ .text = "Help", .url = "https://example.com/help" },
+            .long = Content{ .text = "Read the cancellation policy", .url = "https://example.com/cancellation" },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            _ = widgets.link(ui, .of("preview.link"), content.text, content.url);
+        }
+    };
+
+    pub const Chip = struct {
+        pub const Content = struct { label: []const u8, selected: ?bool = null, closable: bool = false };
+
+        pub const zuiPreviews = .{
+            .filter = Content{ .label = "Sea view", .selected = false },
+            .selected = Content{ .label = "Breakfast", .selected = true },
+            .tag = Content{ .label = "Lisbon", .closable = true },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            var selected = content.selected orelse false;
+            _ = widgets.chip(ui, .of("preview.chip"), content.label, .{ .selected = if (content.selected != null) &selected else null, .closable = content.closable });
+        }
+    };
+
+    pub const Toggle = struct {
+        pub const Content = struct { label: []const u8, on: bool };
+
+        pub const zuiPreviews = .{
+            .off = Content{ .label = "Pets allowed", .on = false },
+            .on = Content{ .label = "Free cancellation", .on = true },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            var on = content.on;
+            _ = widgets.toggle(ui, .of("preview.toggle"), content.label, &on, .{});
+        }
+    };
+
+    /// The containers and navigation, for a review or an audit to step
+    /// through.
+    pub const containers = .{ Card, Divider, ScrollArea, GroupBox, Tabs, NavigationList, Breadcrumbs };
+    /// The essential inputs and the text they sit beside.
+    pub const inputs = .{ Label, LabeledRow, Disclosure, Button, Checkbox, Slider, TextField, Dropdown, RadioGroup, Segmented, NumberStepper, SearchField, IconButton, Link, Chip, Toggle };
+    /// Every component above.
+    pub const all = containers ++ inputs;
 
     const preview_height = 160;
     const preview_rows = [_][]const u8{
@@ -2338,6 +4011,18 @@ fn numberToFloat(number: anytype) f64 {
     };
 }
 
+/// Whole numbers without a fraction, the rest to two places.
+fn formatNumber(buffer: []u8, number: anytype) []const u8 {
+    return switch (@typeInfo(@TypeOf(number))) {
+        .int => std.fmt.bufPrint(buffer, "{d}", .{number}) catch "",
+        .float => if (@round(number) == number)
+            std.fmt.bufPrint(buffer, "{d}", .{number}) catch ""
+        else
+            std.fmt.bufPrint(buffer, "{d:.2}", .{number}) catch "",
+        else => comptime unreachable,
+    };
+}
+
 fn floatToNumber(comptime Number: type, float: f64) Number {
     return switch (@typeInfo(Number)) {
         .int => std.math.lossyCast(Number, @round(float)),
@@ -2375,4 +4060,5 @@ fn boundaryAtOrBefore(text: []const u8, position: usize) usize {
 test {
     _ = @import("tests.zig");
     _ = @import("containers_tests.zig");
+    _ = @import("inputs_tests.zig");
 }

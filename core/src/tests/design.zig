@@ -194,3 +194,24 @@ test "look takes a part chosen at run time" {
     const part: Chip.Part = if (selected) .container_selected else .container;
     try testing.expectEqual(colorFor(.idle, @intFromEnum(design.ColorRole.secondary_container)), tokens.look(Chip, part, .idle).decoration.background.?);
 }
+
+test "an icon drawn without a font is counted in the frame's diagnostics, which stay ok" {
+    var harness: support.Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+    var ui = harness.begin();
+    ui.countMissingIcon();
+    ui.countMissingIcon();
+    var frame = try harness.end();
+    try testing.expectEqual(2, frame.diagnostics.missing_icons);
+    try testing.expect(frame.diagnostics.ok());
+
+    ui = harness.begin();
+    for (0..300) |_| ui.countMissingIcon();
+    frame = try harness.end();
+    try testing.expectEqual(255, frame.diagnostics.missing_icons);
+
+    _ = harness.begin();
+    frame = try harness.end();
+    try testing.expectEqual(0, frame.diagnostics.missing_icons);
+}

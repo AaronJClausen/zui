@@ -937,7 +937,7 @@ fn auditGlance(comptime Component: type, permutation: zui_design.Permutation, pr
 }
 
 test "every container and navigation component's glance permutations audit clean" {
-    inline for (zui_widgets.previews.all) |Component| {
+    inline for (zui_widgets.previews.containers) |Component| {
         const Glance = zui_design.Permutations(Component, .glance);
         for (0..Glance.count) |index| {
             const permutation = Glance.at(index);
@@ -947,7 +947,7 @@ test "every container and navigation component's glance permutations audit clean
 }
 
 test "every container and navigation component audits clean in every scheme and density" {
-    inline for (zui_widgets.previews.all) |Component| {
+    inline for (zui_widgets.previews.containers) |Component| {
         const Glance = zui_design.Permutations(Component, .glance);
         for (std.enums.values(zui_design.Scheme)) |scheme| {
             for (std.enums.values(zui.design.Density)) |density| {

@@ -177,6 +177,33 @@ fn declareWidgetsWith(widgets: anytype, ui: *Ui, scope: zui.Id) void {
     _ = widgets.lasso(ui, scope.child("settings"), &selection);
     _ = zui_reflect.inspector(widgets, ui, scope.child("settings"), &settings);
     declareContainersWith(widgets, ui, scope);
+    declareInputsWith(widgets, ui, scope);
+}
+
+fn declareInputsWith(widgets: anytype, ui: *Ui, scope: zui.Id) void {
+    widgets.labelWith(ui, "title", .{ .role = .title, .tone = .accent, .wrap = .words });
+    widgets.labeledRowWith(ui, "row", .{ .description = "described", .divider_above = true });
+    _ = widgets.button(ui, scope.child("sized_button"), "button", .{ .size = .large, .leading_icon = .check, .variant = .tonal });
+    ui.close();
+    _ = widgets.slider(ui, scope.child("ticked_slider"), &settings.volume, .{ .step = 0.25, .ticks = true, .bubble = false });
+    _ = widgets.textField(ui, scope.child("framed_field"), &settings.name, .{
+        .label = "name",
+        .show_label = true,
+        .help = "help",
+        .error_message = "error",
+        .leading_icon = .search,
+        .trailing = "kg",
+    });
+    _ = widgets.radioGroup(ui, scope.child("radio"), &settings.quality, .{ .direction = .left_to_right, .label = "quality" });
+    _ = widgets.segmented(ui, scope.child("segmented"), &container_section, .{ .label = "section" });
+    _ = widgets.numberStepper(ui, scope.child("retries"), &settings.retries, .{ .min = -5, .max = 5, .unit = "tries" });
+    _ = widgets.numberStepper(ui, scope.child("gain"), &settings.volume, .{ .step = 0.1 });
+    _ = widgets.searchField(ui, scope.child("search"), &settings.name, .{ .shortcut = "Ctrl K" });
+    _ = widgets.iconButton(ui, scope.child("close"), .close, .{ .label = "Close", .variant = .filled, .size = .small });
+    _ = widgets.link(ui, scope.child("link"), "help", "https://example.com");
+    const chip = widgets.chip(ui, scope.child("chip"), "chip", .{ .selected = &settings.enabled, .closable = true, .leading_icon = .info });
+    if (chip.closed or chip.toggled) container_place = 0;
+    _ = widgets.toggle(ui, scope.child("toggle"), "toggle", &settings.enabled, .{ .disabled = false });
 }
 
 const ContainerSection = enum { overview, activity };

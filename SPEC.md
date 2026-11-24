@@ -1535,7 +1535,9 @@ never sees it:
 
 Capabilities are comptime-known, so lowering costs nothing when the
 renderer supports everything, and each lowering is listed in the frame's
-diagnostics for the inspector.
+diagnostics for the inspector. A widget asked for an icon its skin has
+no font for draws none and counts it, with `ui.countMissingIcon()`, in
+`Diagnostics.missing_icons`; like a lowering, it is not a failure.
 
 ### 13.4 Hit regions and chrome
 
@@ -2325,8 +2327,9 @@ const widgets: zui_widgets.Widgets(Ui, QuietSkin) = .{ .skin = .{} };
 ```
 
 `zui_widgets` checks the skin once, when `Widgets(Ui, Skin)` is
-instantiated. A skin is a struct that declares `zuiStyle` and no other
-`zui`-prefixed declaration.
+instantiated. A skin is a struct that declares `zuiStyle`, optionally
+`zuiIcon(skin, name: zui.design.Icon) ?zui.design.IconGlyph` to draw
+icons, and no other `zui`-prefixed declaration.
 
 - **`part`** is one element a widget draws: `button`, `checkbox_box`,
   `checkbox_mark`, `slider_thumb`, `text_field_caret`, `dropdown_option`
@@ -2367,6 +2370,7 @@ instantiated. A skin is a struct that declares `zuiStyle` and no other
 The messages: `"zui_widgets: a skin must be a struct type, got u32"`;
 `` "zui_widgets: demo.Skin does not implement the skin contract: missing `zuiStyle`" ``;
 `"zui_widgets: demo.Skin.zuiStyle must be fn (*const demo.Skin, zui_widgets.Part, zui.WidgetState, *const zui.Environment) zui_widgets.Style(Ui), found …"`;
+`"zui_widgets: demo.Skin.zuiIcon must be fn (*const demo.Skin, zui.design.Icon) ?zui.design.IconGlyph, found …"`;
 `` "zui_widgets: demo.Skin declares unknown `zuiStlye`" ``.
 
 ---
@@ -3098,13 +3102,18 @@ color vision the tokens were resolved for.
 
 | Widget | Edits | Returns |
 |---|---|---|
-| `button` | nothing | clicked |
+| `button`, `iconButton` | nothing | clicked |
+| `link` | nothing | followed; the application opens the URL through `open_url` |
 | `checkbox`, `toggle` | `*bool` | toggled |
+| `radioGroup`, `segmented` | any enum | changed |
+| `numberStepper` | any integer or float | changed |
+| `searchField` | `*EditableText` | `.{ changed, submitted }` |
+| `chip` | `*bool` when selectable | `.{ toggled, closed }` |
 | `slider` | any integer or float | changed |
 | `textField`, `textArea` | `*EditableText` | `.{ changed, submitted }` |
 | `dropdown`, `dropdownEnum` | `*usize`, any enum | changed |
 | `disclosure` | `*bool` | toggled |
-| `progressBar`, `asyncImage`, `label`, `labeledRow` | nothing | nothing |
+| `progressBar`, `asyncImage`, `label`, `labelWith`, `labeledRow`, `labeledRowWith` | nothing | nothing |
 | `card` | nothing | clicked, when interactive |
 | `divider`, `groupBox` | nothing | nothing |
 | `scrollArea`, `scrollbar` | the scroll offset | nothing |
@@ -3126,7 +3135,36 @@ its rows stand the skin's `navigation_list` gap apart, in `DesignSkin`
 the `xs` spacing tier, so the gap follows the density. Each container
 and navigation component declares its `zuiPreviews` in
 `zui_widgets.previews`, with a `declare` that shows it through any
-`Widgets`.
+`Widgets`; so does each input.
+
+A radio group and a segmented control keep only the chosen option in the
+Tab order, and the arrow keys move the choice and the focus with it. A
+number stepper steps with its − and + buttons, each disabled at its
+limit, and with Up and Down; typing replaces its value, and dragging the
+value sideways scrubs it a step for every 4 units. A search field shows
+its shortcut while empty and unfocused and a clear button while it has
+text; Escape clears it, and a second Escape leaves it. An icon button's
+accessible label is required. A chip is selectable, toggling a `*bool`,
+or closable, by its close button, Delete, Backspace or a `dismiss`
+action. A toggle's thumb slides through `motion.toggle` and widens while
+pressed.
+
+A button takes a `ControlSize`, which sets its height and its label's
+type, and a leading icon; a text field shows its label above it, its
+help or its error below it, an icon at its start and a unit at its end;
+`labelWith` sets a label's type role and its tone (`default`, `muted`,
+`accent`), and `labeledRowWith` a row's description and the inset
+divider that parts the rows of a list on one card. A dragged slider
+shows its value in a bubble above the thumb and may tick each step; the
+dropdown checks its selected option; the disclosure's chevron turns
+through `Tokens.motion.disclosure`, a pressed button shrinks through
+`motion.press` and a checkbox's mark grows in through `motion.check`,
+each landing at once under reduced motion. A skin draws icons through an
+optional `zuiIcon(name) ?zui.design.IconGlyph`, which `DesignSkin`
+answers from `Tokens.icon`. A component's own indicator without one
+falls back to the skin's glyph; an icon with no glyph to fall back to,
+such as one the application asked for, is not drawn and is counted in
+`Diagnostics.missing_icons`, which is not a failure.
 
 Every control is focusable, draws the skin's focus ring, reports
 semantics when the feature is on, and is operable by keyboard and by

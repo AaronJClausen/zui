@@ -4,16 +4,17 @@ const zui_testing = @import("zui_testing");
 const zui_widgets = @import("zui_widgets.zig");
 const zui_design = @import("zui_design");
 const EveryContainer = @import("containers_tests.zig").EveryContainer;
+const EveryInput = @import("inputs_tests.zig").EveryInput;
 
 const testing = std.testing;
 const Text = zui_testing.FixedMetricsText(u16);
 const Ui = zui.Context(.{
     .limits = .{
-        .max_elements = 256,
-        .max_text_bytes = 4096,
+        .max_elements = 512,
+        .max_text_bytes = 8192,
         .max_depth = 16,
-        .max_render_commands = 512,
-        .state_slots = 256,
+        .max_render_commands = 1024,
+        .state_slots = 512,
         .measure_cache_entries = 1024,
     },
     .Text = Text,
@@ -672,6 +673,8 @@ fn EveryWidget(comptime SkinnedWidgets: type) type {
             const button: zui.Id = .of("button");
             const variants = [_]zui.Id{ .of("secondary"), .of("tonal"), .of("tertiary"), .of("danger") };
             const disabled_button: zui.Id = .of("disabled_button");
+            const small_button: zui.Id = .of("small_button");
+            const large_button: zui.Id = .of("large_button");
             const checked: zui.Id = .of("checked");
             const unchecked: zui.Id = .of("unchecked");
             const slider: zui.Id = .of("slider");
@@ -700,24 +703,36 @@ fn EveryWidget(comptime SkinnedWidgets: type) type {
 
         fn declare(form: *Self, ui: *Ui) void {
             const widgets_in_use = form.widgets;
-            ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(400) }, .padding = .all(10), .child_gap = 10 } });
+            ui.open(.{ .layout = .{ .padding = .all(10), .child_gap = 10 } });
+            ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(300) }, .child_gap = 10 } });
             widgets_in_use.label(ui, "label");
             widgets_in_use.mutedLabel(ui, "muted");
+            widgets_in_use.labelWith(ui, "accent", .{ .tone = .accent });
+            inline for (comptime std.enums.values(zui.design.TypeRole)) |role| widgets_in_use.labelWith(ui, @tagName(role), .{ .role = role });
             widgets_in_use.labeledRow(ui, "row");
             _ = widgets_in_use.disclosure(ui, ids.expanded, "expanded", &form.expanded);
             ui.close();
+            widgets_in_use.labeledRowWith(ui, "described", .{ .description = "description", .divider_above = true });
+            ui.close();
             _ = widgets_in_use.disclosure(ui, ids.collapsed, "collapsed", &form.collapsed);
+            ui.close();
+            ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(200) }, .child_gap = 10 } });
             _ = widgets_in_use.button(ui, ids.button, "button", .{});
             inline for (comptime std.enums.values(zui_widgets.ButtonVariant)[1..], ids.variants) |variant, id| {
                 _ = widgets_in_use.button(ui, id, @tagName(variant), .{ .variant = variant });
             }
             _ = widgets_in_use.button(ui, ids.disabled_button, "disabled", .{ .disabled = true });
+            _ = widgets_in_use.button(ui, ids.small_button, "small", .{ .size = .small, .leading_icon = .check });
+            _ = widgets_in_use.button(ui, ids.large_button, "large", .{ .size = .large });
             _ = widgets_in_use.checkbox(ui, ids.checked, "checked", &form.checked, .{});
             _ = widgets_in_use.checkbox(ui, ids.unchecked, "unchecked", &form.unchecked, .{});
-            _ = widgets_in_use.slider(ui, ids.slider, &form.level, .{});
-            _ = widgets_in_use.textField(ui, ids.field, &form.field, .{});
-            _ = widgets_in_use.textField(ui, ids.empty_field, &form.empty_field, .{ .placeholder = "empty" });
+            ui.close();
+            ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(260) }, .child_gap = 10 } });
+            _ = widgets_in_use.slider(ui, ids.slider, &form.level, .{ .step = 0.25, .ticks = true });
+            _ = widgets_in_use.textField(ui, ids.field, &form.field, .{ .label = "field", .show_label = true, .help = "help", .leading_icon = .search, .trailing = "kg" });
+            _ = widgets_in_use.textField(ui, ids.empty_field, &form.empty_field, .{ .placeholder = "empty", .error_message = "error" });
             _ = widgets_in_use.dropdown(ui, ids.dropdown, &form.choice, &.{ "one", "two", "three" }, .{});
+            ui.close();
             ui.close();
         }
     };
@@ -777,8 +792,8 @@ test "a skin of data alone restyles every widget" {
     };
     try testing.expectEqual(@as(usize, 1), rings);
     try testing.expect(frame.rectOf(SkinnedForm.ids.dropdown.child("popup")) != null);
-    try testing.expectEqual(@as(usize, 22), rectangles);
-    try testing.expectEqual(@as(usize, 22), texts);
+    try testing.expectEqual(@as(usize, 29), rectangles);
+    try testing.expectEqual(@as(usize, 44), texts);
     for ([_]zui.Id{ SkinnedForm.ids.expanded, SkinnedForm.ids.button, SkinnedForm.ids.checked, SkinnedForm.ids.slider, SkinnedForm.ids.field, SkinnedForm.ids.dropdown }) |id| {
         try testing.expectEqual(@as(f32, 22), frame.rectOf(id).?.height);
     }
@@ -805,14 +820,17 @@ test "every part and every state reach the skin" {
     const Recorded = zui_widgets.Widgets(Ui, RecordingSkin);
     const SkinnedForm = EveryWidget(Recorded);
     const SkinnedContainers = EveryContainer(Recorded);
+    const SkinnedInputs = EveryInput(Recorded);
     const Both = struct {
         form: SkinnedForm,
         containers: SkinnedContainers,
+        inputs: SkinnedInputs,
 
         fn declare(both: *@This(), ui: *Ui) void {
             ui.open(.{ .layout = .{ .sizing = .grow_both } });
             SkinnedForm.declare(&both.form, ui);
             SkinnedContainers.declare(&both.containers, ui);
+            SkinnedInputs.declare(&both.inputs, ui);
             ui.close();
         }
     };
@@ -821,8 +839,9 @@ test "every part and every state reach the skin" {
     try fixture.init();
     defer fixture.deinit();
     const driver = &fixture.driver;
-    var both: Both = .{ .form = undefined, .containers = .{ .widgets = .{ .skin = .{ .asked = &asked } } } };
+    var both: Both = .{ .form = undefined, .containers = .{ .widgets = .{ .skin = .{ .asked = &asked } } }, .inputs = undefined };
     both.form.init(.{ .skin = .{ .asked = &asked } });
+    both.inputs.init(.{ .skin = .{ .asked = &asked } });
     _ = try driver.frame(&both, Both.declare, &.{});
     _ = try driver.hover(&both, Both.declare, SkinnedForm.ids.button);
     _ = try driver.drag(&both, Both.declare, SkinnedForm.ids.slider, .{ 0.5, 0.5 }, .{ 0.6, 0.5 });
@@ -878,6 +897,7 @@ test "every widget in the design skin meets its contrast and target floor in eve
             defer fixture.deinit();
             var form: SkinnedForm = undefined;
             form.init(.{ .skin = .{ .tokens = &tokens } });
+            fixture.driver.viewport = .{ 800, 1000 };
             _ = try fixture.driver.frame(&form, OnPage.declare, &.{});
             _ = try fixture.driver.click(&form, OnPage.declare, SkinnedForm.ids.dropdown);
             const frame = try fixture.driver.focus(&form, OnPage.declare, SkinnedForm.ids.dropdown.indexedChild("option", 0));
@@ -903,10 +923,8 @@ test "the design skin's focus ring stands apart from every focused control, fill
             ui.close();
         }
     };
-    // Not the slider, whose thumb's ring crosses the accent track on
-    // either side of it.
     const focused_controls = [_]zui.Id{ SkinnedForm.ids.expanded, SkinnedForm.ids.button } ++ SkinnedForm.ids.variants ++
-        [_]zui.Id{ SkinnedForm.ids.checked, SkinnedForm.ids.unchecked, SkinnedForm.ids.dropdown };
+        [_]zui.Id{ SkinnedForm.ids.checked, SkinnedForm.ids.unchecked, SkinnedForm.ids.slider, SkinnedForm.ids.dropdown };
     inline for (comptime std.enums.values(zui_design.Scheme)) |scheme| {
         const theme: zui.Environment.Theme = if (scheme == .light or scheme == .light_high_contrast) .light else .dark;
         const tokens = comptime TokensIn(Ui, .{ .theme = theme, .contrast = scheme.environmentContrast(), .density = .comfortable });

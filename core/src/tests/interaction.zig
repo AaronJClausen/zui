@@ -134,6 +134,24 @@ test "focus requested for a disabled element is refused, even with Enter in the 
     try finish(&harness);
 }
 
+test "focus requested for no element leaves none focused" {
+    var harness: Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    var ui = try step(&harness, .{}, .{});
+    ui.requestFocus(a);
+    try finish(&harness);
+    ui = try step(&harness, .{}, .{});
+    try testing.expect(ui.focused(a));
+    ui.requestFocus(.none);
+    try finish(&harness);
+    ui = try step(&harness, .{ .keys_pressed = &.{.enter} }, .{});
+    try testing.expect(!ui.focused(a));
+    try testing.expect(!ui.clicked(a));
+    try finish(&harness);
+}
+
 test "hover covers interactive ancestors; the click goes to the innermost" {
     var harness: Harness = .{};
     try harness.init();

@@ -151,7 +151,7 @@ fn inspectField(
 
 fn stepper(widgets: anytype, ui: *@TypeOf(widgets).Ui, id: zui.Id, comptime Number: type, number: *Number, comptime options: FieldOptions) bool {
     const previous = number.*;
-    const square: zui.Sizing = .fixed(widgets.style(ui, .button, .idle).size[1]);
+    const square: zui.Sizing = .fixed(widgets.style(ui, .control_medium, .idle).size[1]);
     if (widgets.button(ui, id.child("decrement"), "-", .{ .width = square })) number.* = stepped(Number, number.*, options, .down);
     ui.open(.{ .layout = .{ .sizing = .{ .width = .fixed(72) }, .child_alignment = .{ .x = .center } } });
     numberText(widgets, ui, number.*);

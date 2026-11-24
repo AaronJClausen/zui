@@ -169,6 +169,9 @@ pub const Diagnostics = struct {
     /// A declared `ExtendedColor` lay outside SDR or sRGB's gamut, and the
     /// renderer draws only `Color`, so emission clamped it. Not a failure.
     clamped_colors: bool = false,
+    /// Icons widgets were asked to draw while the design names no icon
+    /// font, so each drew none. Saturates at 255. Not a failure.
+    missing_icons: u8 = 0,
 
     pub fn ok(self: Diagnostics) bool {
         return self.exceeded.count() == 0 and self.duplicate_ids == 0 and !self.unbalanced and self.refused_publishes == 0;
@@ -1235,6 +1238,13 @@ pub fn Context(comptime config: Config) type {
             self.frame_requested = true;
         }
 
+        /// Counts an icon this frame was asked to draw but had no font for
+        /// in `Diagnostics.missing_icons`, for a widget that drew none.
+        pub fn countMissingIcon(self: *Self) void {
+            const frame = self.declaring();
+            frame.diagnostics.missing_icons +|= 1;
+        }
+
         /// Asks for a frame at `instant`, e.g. the caret's next blink.
         pub fn requestFrameAt(self: *Self, instant: Instant) void {
             if (self.requested_deadline) |deadline| if (!instant.isBefore(deadline)) return;
@@ -1794,7 +1804,7 @@ pub fn Context(comptime config: Config) type {
             if (input_state.pending_focus) |requested| {
                 // Checked here as well as at endFrame, so a disabled element
                 // is never focused for long enough to be activated by Enter.
-                if (results.isFocusable(requested)) input_state.focus = requested;
+                if (requested == Id.none.hash or results.isFocusable(requested)) input_state.focus = requested;
                 input_state.pending_focus = null;
             }
 
@@ -2677,7 +2687,7 @@ pub fn Context(comptime config: Config) type {
         }
 
         /// Focus moves to `element_id` at the next `beginFrame`, which this
-        /// requests.
+        /// requests; `.none` leaves no element focused.
         pub fn requestFocus(self: *Self, element_id: Id) void {
             self.memory.input.pending_focus = element_id.hash;
             self.requestFrame();

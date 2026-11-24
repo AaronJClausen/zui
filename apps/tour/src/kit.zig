@@ -130,6 +130,7 @@ pub fn Kit(comptime spec: Spec) type {
                 .gesture_arena => .{ .title = "Gesture Arena", .tagline = "Nested gestures, each going to its owner", .lane = .spectacle, .features = &.{ "Gestures", "momentum", "claim" } },
                 .light_lab => .{ .title = "Light Lab", .tagline = "Gradients, shadows, frost, materials and corners, or their fallbacks", .lane = .spectacle, .features = &.{ "Effects", "Material", "CornerShape" } },
                 .one_declaration => .{ .title = "One Declaration", .tagline = "The same UI in every theme, size and direction", .lane = .spectacle, .features = &.{ "Environment", "right-to-left", "contrast" } },
+                .cabin_booking => .{ .title = "Cabin Booking", .tagline = "A booking form of steppers, switches, chips and choices", .lane = .field_case, .features = &.{ "numberStepper", "toggle", "chip" } },
                 .clickable_chaos => .{ .title = "Clickable Chaos", .tagline = "Hundreds of turning cards, each hit where drawn", .lane = .spectacle, .features = &.{ "Transform", "hit inversion" } },
                 .preferences => .{ .title = "Preferences", .tagline = "Density, color vision, contrast and text size, for the whole tour", .lane = .start, .features = &.{ "zui_design", "Tokens", "Preferences" } },
             };

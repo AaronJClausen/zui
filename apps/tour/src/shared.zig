@@ -42,6 +42,7 @@ pub const Screen = enum {
     gesture_arena,
     light_lab,
     one_declaration,
+    cabin_booking,
     clickable_chaos,
     preferences,
 

@@ -2184,6 +2184,82 @@ with `end` on what they return, which draws the scrollbar or the
 description after the content. A table of your own reuses the scrollbar
 with `widgets.scrollbar(ui, table_id, rows_id, .y, 0)`.
 
+<a id="widget-inputs"></a>
+
+### Inputs · *shipped*
+
+Radio groups and segmented controls over an enum, a number stepper over
+any integer or float, a search field with its shortcut and a clear
+button, filter chips and closable tags, and switches beside the
+checkbox, the slider, the text field and the dropdown. The arrow keys
+move a radio group's or a segmented control's choice and the focus with
+it; a number stepper steps with Up and Down, takes typed digits and
+scrubs when its value is dragged sideways; Escape clears a search field
+and a second Escape leaves it. A text field shows its label above it,
+its help or its error below it, an icon at its start and a unit at its
+end; a dragged slider shows its value in a bubble and may tick each
+step; the dropdown checks its selected option.
+
+`src/ui/booking.zig`
+
+```zig
+const Room = enum { cabin, lodge, treehouse };
+
+fn booking(app: *App, ui: *Ui) void {
+    if (ui.chordPressed(.{ .key = .k, .modifiers = .{ .control = true } })) ui.requestFocus(.of("search"));
+    if (widgets.searchField(ui, .of("search"), &app.query, .{ .shortcut = "Ctrl K" }).changed) app.refilter();
+    if (widgets.chip(ui, .of("sea_view"), "Sea view", .{ .selected = &app.sea_view }).toggled) app.refilter();
+    _ = widgets.segmented(ui, .of("listing"), &app.listing, .{ .label = "Show as" });
+    _ = widgets.radioGroup(ui, .of("room"), &app.room, .{ .label = "Room", .direction = .left_to_right });
+    _ = widgets.slider(ui, .of("budget"), &app.budget, .{ .min = 40, .max = 240, .step = 20, .ticks = true });
+
+    const stay = widgets.groupBox(ui, .of("stay"), "Stay", .{});
+    widgets.labeledRow(ui, "Nights");
+    _ = widgets.numberStepper(ui, .of("nights"), &app.nights, .{ .min = 1, .max = 30, .unit = "nights", .label = "Nights" });
+    ui.close();
+    widgets.labeledRowWith(ui, "Breakfast", .{ .description = "Served from 7 to 10.", .divider_above = true });
+    _ = widgets.toggle(ui, .of("breakfast"), "", &app.breakfast, .{ .label = "Breakfast" });
+    ui.close();
+    stay.end(ui);
+
+    _ = widgets.textField(ui, .of("email"), &app.email, .{
+        .label = "Email",
+        .show_label = true,
+        .help = "We send the receipt here.",
+        .error_message = if (app.emailValid()) "" else "Enter a whole address.",
+    });
+}
+```
+
+The tour's Cabin Booking screen is this form.
+
+<a id="widget-actions"></a>
+
+### Buttons, links, labels and icons · *shipped*
+
+A button takes a size, `small`, `medium` or `large`, which sets its
+height and its label's type, and a leading icon; a pressed button
+shrinks through the design's press motion. An icon button is a square of
+its size, its accessible label required. A link returns true when
+followed and leaves opening the address to the host's `open_url`
+service. `labelWith` draws text in any type role and tone, and a
+disclosure's chevron turns as it opens. Icons come from the design's
+icon font through the skin's `zuiIcon`; under a design without one, a
+widget's own chevrons fall back to text, and any other icon is not drawn
+and is counted in `Diagnostics.missing_icons`.
+
+`src/ui/toolbar.zig`
+
+```zig
+fn toolbar(app: *App, ui: *Ui) void {
+    widgets.labelWith(ui, "Your booking", .{ .role = .title });
+    widgets.labelWith(ui, "Saved 2 minutes ago", .{ .role = .caption, .tone = .muted });
+    if (widgets.iconButton(ui, .of("close"), .close, .{ .label = "Close", .size = .small })) app.closePanel();
+    if (widgets.button(ui, .of("book"), "Book", .{ .size = .large, .leading_icon = .check })) app.book();
+    if (widgets.link(ui, .of("policy"), "Cancellation policy", policy_url)) app.services.open_url(policy_url) catch {};
+}
+```
+
 <a id="widget-theme"></a>
 
 ### Theming widgets · *shipped*

@@ -39,7 +39,7 @@ and each is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:24-the-tour` The tour, redone | done |
 | `11-polish:25-focus-ring-on-fills` A focus ring that shows on a filled control | done |
 | `11-polish:26-small-targets` Targets of at least 24 units in the tour | done |
-| `11-polish:27-essential-inputs` Essential inputs | not started |
+| `11-polish:27-essential-inputs` Essential inputs | done |
 | `11-polish:28-containers-and-navigation` Containers and navigation | done |
 | `11-polish:29-overlays` Overlays | not started |
 | `11-polish:30-feedback-and-media` Feedback and media | not started |
@@ -2197,13 +2197,13 @@ and `test-draw` on the NVIDIA GPU, every frame matching; `test-all` and
 The inputs a consumer app reaches for first, and the rest of the
 existing widgets' specs: D4 of the default design's plan.
 
-**Grounding** (at `1aa1061`). `zui_widgets` declares `label`,
+**Grounding** (at `cddd4a1`). `zui_widgets` declares `label`,
 `mutedLabel`, `labeledRow`, `disclosure`, `button`, `checkbox`, `lasso`,
-`slider`, `textField` and `dropdown`
-(`core/zui_widgets/zui_widgets.zig:498`), styled by `DesignSkin`
-(`:236`) through one component, `Designed` (`:355`), whose `Part`s map
+`slider`, `textField` and `dropdown` in `Widgets(Ui, Skin)`
+(`core/zui_widgets/zui_widgets.zig:848`), styled by `DesignSkin`
+(`:321`) through one component, `Designed` (`:567`), whose `Part`s map
 from `zui_widgets.Part` (`:103`). A button takes a `ButtonVariant`
-(`:478`) but no size or icon. Its specs are the entries `radio_group`,
+(`:798`) but no size or icon. Its specs are the entries `radio_group`,
 `segmented_control`, `number_stepper`, `search_field`, `icon_button`,
 `link`, `chip` and `toggle` of `components` in
 `docs/plans/default-ui-designs/exports/zui-default-design.json`, and,
@@ -2238,7 +2238,76 @@ for the existing widgets, `button`, `text_field`, `label`,
 
 **Spec.** §18, §19.2.
 
-**Status.** Not started.
+**Status.** Done, in one commit rather than two slices, since the new
+widgets' parts and the existing ones' share the every-part test.
+`Widgets(Ui, Skin)` in `core/zui_widgets/zui_widgets.zig` gains
+`radioGroup` and `segmented` over any enum (the arrow keys move the
+choice and the focus with it, only the chosen option in the Tab order;
+the segmented thumb slides through `Tokens.motion.toggle`, a separator
+between two unselected segments), `numberStepper` over any integer or
+float (− and + buttons disabled at each limit, Up and Down, typed digits
+replacing the value, a sideways drag of the value scrubbing a step per 4
+units), `searchField` (its search icon, its shortcut while empty and
+unfocused, a clear button while it has text; Escape clears it and a
+second Escape leaves it), `iconButton` (a required accessible label;
+`tertiary`, `filled` and `tonal`), `link` (true when followed, its URL
+in its semantics, the underline at 40% until hovered), `chip`
+(selectable, its check growing in through `motion.check`, or closable by
+its button, Delete, Backspace or `dismiss`) and `toggle` (the thumb
+springing through `motion.toggle`, widening by 4 while pressed). The
+existing widgets gain the rest of their specs: `button`'s `size` (a
+`ControlSize`, read from the new `control_small`, `control_medium` and
+`control_large` parts, a fitted button at least twice as wide as tall)
+and `leading_icon`, and its press to `motion.press_scale`; `textField`'s
+`show_label`, `help`, `error_message` (a 2-unit `danger` outline),
+`leading_icon` and `trailing`; `labelWith`, a type role and a tone
+(`default`, `muted`, `accent`); `labeledRowWith`, a description and an
+inset divider above the row; the slider's value bubble while dragged and
+its ticks; the dropdown's check on the selected option; the disclosure's
+chevron turning through `motion.disclosure` where the context draws
+transforms; the checkbox's mark growing in through `motion.check`. 59
+`Part` tags, each in `Designed`'s appearance and `DesignSkin`. A skin
+draws icons through an optional `zuiIcon`, which `DesignSkin` answers
+from `Tokens.icon` (a wrong signature is a compile error,
+`skin_wrong_icon_signature`); a widget's own chevrons and close buttons
+fall back to the skin's glyph, and any other icon asked for under a
+design without an icon font is not drawn and is counted in the core's
+new `Diagnostics.missing_icons` (through `ui.countMissingIcon()`, a byte
+that keeps `Diagnostics` at 96 bytes, not a failure). `requestFocus`
+takes `.none`, leaving no element focused, for the search field's second
+Escape. Found on the way: the slider's focus ring now rounds the whole
+slider, since round its thumb it crossed the accent track; the
+dropdown's chevron and the stepper's unit turn `on_surface` while
+focused or pressed, where muted text fell short of its contrast; a
+checkbox drawn without a label is at least the pointer's target floor
+wide. `zui_widgets.previews` gains `inputs`, each input's `zuiPreviews`
+(`all` is now `containers ++ inputs`). Tested in
+`core/zui_widgets/inputs_tests.zig` with `zui_testing.Driver`: every
+state and key the specs list, the semantics and actions, each motion and
+its landing at once under reduced motion, icons drawn from an icon font
+and counted without one, and every input's `glance` permutations and
+each preview in every scheme and density audited clean; `tests.zig`'s
+every-part test covers the new parts, and `core/tests/instantiate.zig`
+exercises each API through three skins. The tour gains a Cabin Booking
+screen (`apps/tour/src/screens/cabin_booking.zig`, in the Field case
+lane, after One Declaration in Ctrl+PgDn's order so no shortcut digit
+moves): search and filter chips, closable place tags, a segmented
+control, a radio group, a ticked budget slider, a link, steppers and
+switches in settings rows on one card, an email field with help and an
+error, a dropdown, a disclosure of price details and buttons of each
+size. `ARCHITECTURE.md` §7 lists where the specs could not be met here:
+no icon font in the tour, no spin button role or hidden cursor, the
+stepper's "-" and "+", and the rest. Verified: core `test` in three
+modes, `check` for `wasm32-freestanding` and `powerpc-linux`, `test` for
+`x86-linux`; the tour's `test` in three modes and `check`, also for
+`x86_64-windows`; raylib's tour cycle (`diagnostics ok: true`), its
+screenshots of `overview`, `harbor`, `x_ray`, `log_tail`, `light_lab`,
+`field_guide` and `cabin_booking`, and `--measure-idle`; the terminal's
+`tour -- --dump --every-screen`; the native host's tour cycle
+(`0 layer overflows, 0 glyph atlas overflows, diagnostics ok: true`);
+`test-all`, `check-all` and the web host's `test-demo` and `test-host`.
+`counts` is +0.00% in instructions on every scenario against the parent,
+none of which uses these widgets.
 
 ## 11-polish:28-containers-and-navigation — Containers and navigation
 
