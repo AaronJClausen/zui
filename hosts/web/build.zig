@@ -200,10 +200,10 @@ fn drawReference(b: *std.Build, draw_reference: *std.Build.Step.Compile, stream:
     return reference;
 }
 
-/// The frame of each of the tour's fifteen screens that `test-draw`
+/// The frame of each of the tour's sixteen screens that `test-draw`
 /// compares: the middle one of the 24 that `tools/demo_stream.zig` streams.
 const compared_frames = compared: {
-    var numbers: [15]u64 = undefined;
+    var numbers: [16]u64 = undefined;
     for (&numbers, 0..) |*number, screen| number.* = 24 * screen + 12;
     break :compared numbers;
 };
