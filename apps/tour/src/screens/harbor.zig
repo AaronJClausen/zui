@@ -463,6 +463,12 @@ pub fn Using(comptime kit: type) type {
             }
 
             /// The console with numbered nodes on its features; each opens a card with live proof.
+            /// The toggles the top bar's menu offers while Harbor X-ray is open.
+            pub fn declareXrayMenuToggles(self: *Harbor, ui: *Ui, shell: *const Shell) void {
+                _ = shell.widgets.checkbox(ui, .of("menu.x_ray.outline"), "Outline regions", &self.outline_regions, .{});
+                _ = shell.widgets.checkbox(ui, .of("menu.x_ray.timeline"), "Frame timeline", &self.show_timeline, .{});
+            }
+
             pub fn declareXray(self: *Harbor, ui: *Ui, shell: *const Shell) void {
                 self.declareConsole(ui, shell, true);
                 self.declareXrayOverlay(ui, shell);
@@ -1208,7 +1214,7 @@ pub fn Using(comptime kit: type) type {
                     .focusable = true,
                     .cursor = .pointer,
                     .semantics = self.semantic(.{ .role = .button, .label = feature.title() }),
-                    .floating = .{ .attach_to = .{ .element = nodeTarget(feature) }, .anchor = .center, .attach_point = .top_right, .z = 800, .clip = .target },
+                    .floating = .{ .attach_to = .{ .element = nodeTarget(feature) }, .anchor = .center, .attach_point = .top_right, .z = 92, .clip = .target },
                     .layout = .{ .sizing = .{ .width = .fitBetween(hit_size, std.math.inf(f32)), .height = .fixed(hit_size) }, .child_alignment = .{ .x = .center, .y = .center } },
                 });
                 defer ui.close();
@@ -1240,13 +1246,13 @@ pub fn Using(comptime kit: type) type {
                     const rect = ui.rectOf(region[0]) orelse continue;
                     ui.open(.{
                         .id = .indexed("harbor_outline", index),
-                        .floating = .{ .attach_to = .{ .element = region[0] }, .z = 790, .capture = false },
+                        .floating = .{ .attach_to = .{ .element = region[0] }, .z = 90, .capture = false },
                         .layout = .{ .sizing = .{ .width = .fixed(rect.width), .height = .fixed(rect.height) } },
                         .decoration = .{ .border = .{ .color = shell.colors.get(.accent), .widths = .all(1) }, .corner_radius = .all(4) },
                     });
                     defer ui.close();
                     ui.open(.{
-                        .floating = .{ .anchor = .top_left, .attach_point = .bottom_left, .offset = .{ 4, 0 }, .z = 790, .capture = false },
+                        .floating = .{ .anchor = .top_left, .attach_point = .bottom_left, .offset = .{ 4, 0 }, .z = 90, .capture = false },
                         .layout = .{ .padding = .symmetric(6, 1) },
                         .decoration = .{ .background = shell.colors.get(.accent), .corner_radius = .{ .bottom_left = 4, .bottom_right = 4 } },
                     });
@@ -1268,7 +1274,7 @@ pub fn Using(comptime kit: type) type {
                     .id = ids.harbor_xray_card,
                     .interactive = true,
                     .semantics = self.semantic(.{ .role = .group, .label = feature.title() }),
-                    .floating = .{ .attach_to = .{ .element = nodeDotId(feature) }, .anchor = anchor, .attach_point = attach_point, .offset = overlap, .z = 810 },
+                    .floating = .{ .attach_to = .{ .element = nodeDotId(feature) }, .anchor = anchor, .attach_point = attach_point, .offset = overlap, .z = 94 },
                     .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(340) }, .padding = .all(14), .child_gap = 8 },
                     .decoration = .{ .background = colors.get(.surface), .border = .{ .color = colors.get(.accent).mix(colors.get(.outline_muted), 0.5), .widths = .all(1) }, .corner_radius = .all(8), .corner_shape = kit.panel_corner_shape },
                     .effects = &floating_shadow,

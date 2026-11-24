@@ -225,6 +225,14 @@ pub fn Using(comptime kit: type) type {
             rate_newest: usize = 0,
             pace: u32 = 400,
 
+            /// The toggles the top bar's menu offers while this screen is open.
+            pub fn declareMenuToggles(self: *LogTail, ui: *Ui, shell: *const Shell) void {
+                var following = self.following;
+                if (shell.widgets.checkbox(ui, .of("menu.log_tail.follow"), "Follow the newest line", &following, .{})) {
+                    if (following) self.follow() else self.hold();
+                }
+            }
+
             pub fn declare(self: *LogTail, ui: *Ui, shell: *const Shell) void {
                 self.receive(ui);
                 const rate = ui.source(.log_rate);

@@ -49,7 +49,7 @@ and each is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:34-zui-widgets-views` `zui_widgets_views` | not started |
 | `11-polish:35-italics` Italics | done |
 | `11-polish:36-motion-in-core` Motion in the core | done |
-| `11-polish:37-tour-preferences-menu` The tour's preferences in a menu on the top bar | not started |
+| `11-polish:37-tour-preferences-menu` The tour's preferences in a menu on the top bar | done |
 | `11-polish:38-test-card` The test card | not started |
 | `11-polish:39-frame-snapshots` Frame snapshots | not started |
 | `11-polish:40-terminal-snapshots` Terminal snapshots | not started |
@@ -2819,17 +2819,131 @@ mode, the 1 Hz tick, the inspector), and the toggles each screen keeps
 of its own. What the tokens resolved to stays on a screen of its own and
 does not go in the menu.
 
-**Plan.** Given when the item is taken, on `11-polish:29-overlays`'
-`menu` and `popover`: the menu opened from a button on the top bar,
-pinning it keeps it open beside the screen while its settings change,
-each screen's own toggles in a section of their own shown while that
-screen is open, and the keyboard reaching every setting.
+**Grounding** (at `a0747c6`). The header (`header`,
+`apps/tour/src/tour.zig:258`) declares the zoom's three buttons
+(`:287`), a Light or Dark button that pushes an environment change, and
+the `Live`, `1 Hz` and `Inspector` checkboxes (`:295`), each with its id
+in `ids`; `handleShortcuts` (`:235`) answers Ctrl+= and Ctrl+-, Ctrl+L
+and Ctrl+I whatever has focus. The Preferences screen
+(`apps/tour/src/screens/preferences.zig:21`) declares two cards:
+`choices` (`:29`), dropdowns for density, color vision and contrast, the
+system text checkbox, the text size slider over the screen's own
+`text_scale` and Reset, writing `Shell.preference_choices`
+(`kit.PreferenceChoices`, `apps/tour/src/kit.zig:179`); and `resolved`
+(`:83`), what the tokens came to. The screen is the `.preferences` case
+of `Screen` and the `preferences` field of `Screens`
+(`apps/tour/src/tour.zig:68`), titled in `kit.info`
+(`apps/tour/src/kit.zig:135`); `hosts/web`'s `test-draw`, raylib's
+screenshot list and the terminal's `--every-screen` name it by that
+case. `popover` (`core/zui_widgets/zui_widgets.zig:4315`) holds any
+controls, toggled by its anchor; unpinned it lays a backdrop and is a
+focus scope (`:4351`), closing on Escape (`dismissed`,
+`core/src/context.zig:2614`), a click outside or `dismiss` and giving
+focus back to its anchor, and `pinned` (`:4286`) drops both, so the page
+beside it takes the pointer and Tab moves in and out of it. It does not
+move focus into itself as it opens, and Tab from outside a focus scope
+never enters it (`nextFocus`, `core/src/interaction.zig:277`). Its panel
+is at most 360 wide (`:1028`) at the popup layer, 100, below the 790 to
+810 Harbor X-ray's nodes, outlines and cards float at
+(`apps/tour/src/screens/harbor.zig:1211`). `menu` (`:4077`) holds only
+items that close it when chosen. The toggles screens keep of their own:
+Harbor X-ray's outlines and timeline (`xrayBar`, `:1124`), Log Tail's
+following, the Field Guide's compact cards and counts, the Quiet
+Machine's game loop, the Gesture Arena's lasso, the Light Lab's moving
+scene and glow, and the Clickable Chaos wave's pause and layout
+outlines.
+
+**Plan.**
+
+1. **A popover, not a menu.** `menu` closes on every choice and holds
+   only items; the settings are dropdowns, a slider, a segmented control
+   and checkboxes, so the menu is a `popover` anchored below a
+   **Preferences** button that takes the header's controls' place at the
+   top bar's end, also opened by Ctrl+,. Pinned is the popover's
+   `pinned`, not a panel docked at the right: a docked panel would
+   narrow the stage, so every screen would lay out again as it is pinned
+   and the change being watched would move; floating keeps the screen
+   where it was, and the page beside it still takes the pointer and Tab.
+   A **Keep open** switch at the menu's top pins it; its button or
+   Ctrl+, closes it.
+2. **What it holds,** in sections: *View* (the zoom's buttons, and a
+   segmented Light or Dark that pushes the environment change), *Your
+   preferences* (the Preferences screen's choices, moved with the
+   slider's `text_scale` into the menu's state,
+   `apps/tour/src/preferences_menu.zig`), *Frames* (`Live`, `1 Hz`,
+   `Inspector`), and the open screen's section. The settings scroll
+   inside the menu where the window is too short for them. The ids stay
+   the header's, so `ids.zoom_in` is still the zoom's button.
+3. **Each screen's section** is a hook: a screen's state declares
+   `declareMenuToggles(self, ui, shell)` and the menu declares it under
+   the screen's title while that screen is open, as `afterFrame` and
+   `init` are found; Harbor X-ray, which shares Harbor's state, has
+   `declareXrayMenuToggles`, as it has `declareXray`. The screens keep
+   their toggles where they are too, where each explains itself, as the
+   Field Guide keeps its compact cards in its Display popover and its
+   settings: both write the same state. Harbor X-ray's floating layers
+   move under the popup layer (90 to 94), keeping their order, so a menu
+   or a dropdown is drawn over its nodes.
+4. **The keyboard.** Opening the menu focuses its first control, the
+   switch, since `popover` does not and Tab would not enter its scope.
+   Unpinned, Tab and Shift+Tab move through every setting and stay in
+   the menu, and Escape closes it and gives focus back to the button;
+   pinned, Tab runs on from its last setting to the page. Up and Down
+   are not taken to move between settings, since the slider, the
+   segmented control and the dropdowns answer the arrows themselves:
+   each control takes its own. The header's shortcuts stay in
+   `handleShortcuts`.
+5. **The Tokens screen.** What the tokens resolved to stays on the
+   `.preferences` screen, retitled Tokens, so every list that names the
+   screen by its case still holds.
+
+**Done when.** The tour's headless test (`apps/tour/src/tests.zig`)
+opens the menu, pinned and not, on every screen a renderer is offered,
+on renderers that draw every optional command and none, in pixels and in
+cells, in the default window and a small one: the frame's diagnostics
+are clean, the menu lies inside the window and every element in it
+inside the menu (so a terminal shows it within its cells); the contrast
+audit is clean over every screen with the menu open, pinned and not, in
+light and dark; a `zui_testing.Driver` test opens it from its button by
+Enter, Tabs to every setting without leaving it, changes the text size,
+the density, the zoom and live mode by keyboard, and closes it by Escape
+with focus back on the button, and another pins it, shows another screen
+and its toggle by clicks beside it, Tabs out of it to the rail, keeps
+the shortcuts working and closes it by Ctrl+,; each screen's toggles
+show only while that screen is open. The terminal's `--every-screen`
+cuts nothing short; raylib's and the native host's cycles are clean; the
+web host's `test-demo` and `test-draw` pass.
 
 **Waits for** `11-polish:29-overlays`.
 
 **Spec.** §18, §19.2.
 
-**Status.** Not started.
+**Status.** Done. The top bar holds one **Preferences** button (or
+Ctrl+,) opening a `popover` of every setting the tour offers: the zoom
+and a segmented Light or Dark, the density, color vision, contrast and
+text size moved from the Preferences screen
+(`apps/tour/src/preferences_menu.zig`), `Live`, `1 Hz` and `Inspector`,
+and the open screen's own toggles through its `declareMenuToggles`
+(Harbor X-ray, Log Tail, Field Guide, Quiet Machine, Gesture Arena,
+Light Lab, Clickable Chaos). **Keep open** pins it beside the screen.
+The settings scroll in a `scrollArea` sized to the room below the button
+(from the button's place in the frame it opens, so the area does not
+start out overflowing and take a Tab stop it then drops); the zoom's
+step buttons are 28 wide and the contrast choice reads *System*, since
+*Follow the system* and two square buttons beside a label did not fit
+the popover's 320-unit column, which the new test caught. The
+Preferences screen is retitled Tokens and shows what the tokens resolved
+to; its case and field are unchanged. Harbor X-ray's nodes, outlines and
+cards float at 90 to 94, under the popup layer. Five tests in
+`apps/tour/src/tests.zig`, which now imports `zui_testing`. Verified:
+the tour's `test` in three modes and `check`, also for `x86_64-windows`;
+raylib's tour cycle (`diagnostics ok: true`), its screenshots of
+`overview`, `harbor`, `x_ray`, `log_tail`, `light_lab` and `preferences`
+and, with the menu opened for the shot, Quiet Machine and Harbor X-ray
+unpinned and Light Lab pinned, and `--measure-idle` (0.98% of one core,
+20 frames in 10 s); the terminal's `tour -- --dump --every-screen`; the
+native host's tour cycle; the web host's `test-demo` (Debug and
+ReleaseSafe) and `test-draw`.
 
 ## 11-polish:38-test-card — The test card
 

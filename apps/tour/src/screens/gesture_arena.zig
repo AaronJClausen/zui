@@ -293,6 +293,11 @@ pub fn Using(comptime kit: type) type {
             picked_row: ?u8 = null,
 
             /// Declares the page into the tour's stage.
+            /// The toggles the top bar's menu offers while this screen is open.
+            pub fn declareMenuToggles(self: *GestureArena, ui: *Ui, shell: *const Shell) void {
+                _ = shell.widgets.checkbox(ui, .of("menu.gesture_arena.lasso_tool"), "Lasso tool", &self.lasso_tool, .{});
+            }
+
             pub fn declare(self: *GestureArena, ui: *Ui, shell: *const Shell) void {
                 const map_rect = ui.rectOf(ids.map) orelse zui.Rect{ .width = 800, .height = 560 };
                 self.lassoRecognizer(ui, map_rect);

@@ -131,6 +131,12 @@ pub fn Using(comptime kit: type) type {
             notice_storage: [3]zui_widgets.ToastEntry = undefined,
             notices: zui_widgets.ToastQueue = .{ .entries = &.{} },
 
+            /// The toggles the top bar's menu offers while this screen is open.
+            pub fn declareMenuToggles(self: *FieldGuide, ui: *Ui, shell: *const Shell) void {
+                _ = shell.widgets.checkbox(ui, .of("menu.field_guide.compact"), "Compact cards", &self.compact, .{});
+                _ = shell.widgets.checkbox(ui, .of("menu.field_guide.counts"), "Show how many guides a section holds", &self.show_counts, .{});
+            }
+
             pub fn declare(self: *FieldGuide, ui: *Ui, shell: *const Shell) void {
                 const widgets = shell.widgets;
                 if (self.notices.entries.len == 0) self.notices = .init(&self.notice_storage);

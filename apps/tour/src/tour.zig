@@ -8,12 +8,28 @@ const Screen = shared.Screen;
 const Perf = shared.Perf;
 
 const rail_width = 236;
+const preferences_menu_width = 320;
+/// Square at the smallest density's small control, so the zoom row fits
+/// beside its label at every density.
+const zoom_step_button_width = 28;
+/// The menu's settings scroll in no less than this, however short the window.
+const preferences_menu_least_room = 120;
+/// What the menu leaves free below it: the popover's padding and the
+/// window's margin.
+const preferences_menu_margin = 32;
+/// Between the button and the menu's settings in the frame the menu opens,
+/// before they have been placed: the gap, the padding and the menu's title.
+const preferences_menu_heading_allowance = 72;
 
 const floating_panel_effects: zui.Effects = .{ .shadow = .{ .color = .rgba(0x00000060), .offset = .{ 0, 8 }, .blur = 24 } };
 
 const ids = zui.ids(.{
     "root",
     "header",
+    "preferences",
+    "preferences.menu",
+    "preferences.pin",
+    "preferences.scroll",
     "zoom_out",
     "zoom_reset",
     "zoom_in",
@@ -38,6 +54,15 @@ pub const stage_id = ids.stage;
 pub const rail_screens_id = ids.@"rail.screens";
 /// The id of the tour's outermost element.
 pub const root_id = ids.root;
+/// The id of the top bar's button that opens the preferences menu.
+pub const preferences_button_id = ids.preferences;
+/// The id of the preferences menu's `popover`; its panel is
+/// `preferences_menu_id.child("panel")`.
+pub const preferences_menu_id = ids.@"preferences.menu";
+/// The id of the switch that pins the preferences menu open.
+pub const preferences_pin_id = ids.@"preferences.pin";
+/// The id of the preferences menu's `scrollArea`, which holds its settings.
+pub const preferences_settings_id = ids.@"preferences.scroll";
 
 /// The tour's state and its declaration of a frame, through `kit`, a
 /// `Kit`. Whoever runs it hands it the frames: `zui_tour.App` through
@@ -46,6 +71,7 @@ pub fn Tour(comptime kit: type) type {
     const Ui = kit.Ui;
     const Shell = kit.Shell;
     const rail_rows = RailRows(kit);
+    const PreferencesMenu = @import("preferences_menu.zig").Using(kit).PreferencesMenu;
 
     const Screens = struct {
         overview: ScreenOf(.overview, "Overview", @import("screens/overview.zig")),
@@ -90,6 +116,7 @@ pub fn Tour(comptime kit: type) type {
         fonts: kit.Fonts,
         appearance: kit.Appearance = .{},
         preference_choices: kit.PreferenceChoices = .{},
+        preferences_menu: PreferencesMenu = .{},
 
         zoom: f32 = 1,
         /// Refreshes the strip once a second through `requestFrameAt`, so an
@@ -244,6 +271,7 @@ pub fn Tour(comptime kit: type) type {
             if (ui.chordPressed(.{ .key = .minus, .modifiers = control })) tour.setZoom(tour.zoom - 0.1);
             if (ui.chordPressed(.{ .key = .i, .modifiers = control })) tour.inspector_open = !tour.inspector_open;
             if (ui.chordPressed(.{ .key = .l, .modifiers = control })) tour.live = !tour.live;
+            if (ui.chordPressed(.{ .key = .comma, .modifiers = control })) tour.preferences_menu.open = !tour.preferences_menu.open;
             if (kit.Inspector != void and ui.chordPressed(.{ .key = .f12 })) {
                 tour.zui_debug_open = !tour.zui_debug_open;
                 // The panel stays empty until a frame it observed is followed by another.
@@ -284,15 +312,111 @@ pub fn Tour(comptime kit: type) type {
                 frame_shell.label(ui, .caption, info.tagline);
             }
 
-            if (widgets.button(ui, ids.zoom_out, "-", .{ .variant = .secondary })) tour.setZoom(tour.zoom - 0.1);
-            var zoom_buffer: [16]u8 = undefined;
-            if (widgets.button(ui, ids.zoom_reset, std.fmt.bufPrint(&zoom_buffer, "{d:.0}%", .{tour.zoom * 100}) catch "zoom", .{ .variant = .secondary })) tour.zoom = 1;
-            if (widgets.button(ui, ids.zoom_in, "+", .{ .variant = .secondary })) tour.setZoom(tour.zoom + 0.1);
-            const dark = ui.environment().theme == .dark;
-            if (widgets.button(ui, ids.theme, if (dark) "Light" else "Dark", .{ .variant = .secondary })) frame_shell.changeEnvironment(.{ .theme = if (dark) .light else .dark });
-            _ = widgets.checkbox(ui, ids.live, "Live", &tour.live, .{});
-            _ = widgets.checkbox(ui, ids.heartbeat, "1 Hz", &tour.heartbeat, .{});
-            _ = widgets.checkbox(ui, ids.inspector_toggle, "Inspector", &tour.inspector_open, .{});
+            _ = widgets.button(ui, ids.preferences, "Preferences", .{ .variant = .secondary });
+            tour.preferencesMenu(ui, frame_shell);
+        }
+
+        /// The menu below the top bar's button, holding every setting the
+        /// tour offers: the view, the preferences the tokens follow, what
+        /// asks for frames, and the open screen's own toggles. Unpinned it
+        /// keeps Tab inside and closes on Escape or a click outside; pinned
+        /// it stays open while the screen beside it takes the pointer.
+        fn preferencesMenu(tour: *Self, ui: *Ui, frame_shell: *const Shell) void {
+            const widgets = frame_shell.widgets;
+            const menu = &tour.preferences_menu;
+            const panel = widgets.popover(ui, ids.@"preferences.menu", ids.preferences, &menu.open, .{ .label = "Preferences", .pinned = menu.pinned }) orelse {
+                menu.was_open = false;
+                return;
+            };
+            defer panel.end(ui);
+            if (menu.open and !menu.was_open) ui.requestFocus(ids.@"preferences.pin");
+            menu.was_open = menu.open;
+
+            {
+                ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 12, .child_alignment = .{ .y = .center } } });
+                defer ui.close();
+                widgets.labelWith(ui, "Preferences", .{ .role = .title });
+                frame_shell.spacer(ui);
+                _ = widgets.toggle(ui, ids.@"preferences.pin", "Keep open", &menu.pinned, .{});
+            }
+            const area = widgets.scrollArea(ui, ids.@"preferences.scroll", .{
+                .width = .fixed(preferences_menu_width),
+                .height = .fitBetween(0, preferencesMenuRoom(ui)),
+                .child_gap = 10,
+                .label = "Preferences",
+                .layer = widgets.style(ui, .popover, .idle).layer + 1,
+            });
+            defer area.end(ui);
+
+            menuSection(ui, frame_shell, "VIEW");
+            widgets.labeledRow(ui, "Zoom");
+            {
+                ui.open(.{ .layout = .{ .child_gap = 4, .child_alignment = .{ .y = .center } } });
+                defer ui.close();
+                const step_width: zui.Sizing = .fixed(zoom_step_button_width);
+                if (widgets.button(ui, ids.zoom_out, "-", .{ .variant = .secondary, .size = .small, .width = step_width })) tour.setZoom(tour.zoom - 0.1);
+                var zoom_buffer: [16]u8 = undefined;
+                if (widgets.button(ui, ids.zoom_reset, std.fmt.bufPrint(&zoom_buffer, "{d:.0}%", .{tour.zoom * 100}) catch "zoom", .{ .variant = .secondary, .size = .small })) tour.zoom = 1;
+                if (widgets.button(ui, ids.zoom_in, "+", .{ .variant = .secondary, .size = .small, .width = step_width })) tour.setZoom(tour.zoom + 0.1);
+            }
+            ui.close();
+            var theme = ui.environment().theme;
+            widgets.labeledRow(ui, "Theme");
+            if (widgets.segmented(ui, ids.theme, &theme, .{ .label = "Theme" })) frame_shell.changeEnvironment(.{ .theme = theme });
+            ui.close();
+
+            menuSection(ui, frame_shell, "YOUR PREFERENCES");
+            if (menu.declareChoices(ui, frame_shell)) ui.requestFrame();
+
+            menuSection(ui, frame_shell, "FRAMES");
+            {
+                ui.open(.{ .layout = .{ .child_gap = 16, .child_alignment = .{ .y = .center } } });
+                defer ui.close();
+                _ = widgets.checkbox(ui, ids.live, "Live", &tour.live, .{});
+                _ = widgets.checkbox(ui, ids.heartbeat, "1 Hz", &tour.heartbeat, .{});
+                _ = widgets.checkbox(ui, ids.inspector_toggle, "Inspector", &tour.inspector_open, .{});
+            }
+
+            if (screenHasMenuToggles(tour.current)) {
+                var heading: [64]u8 = undefined;
+                menuSection(ui, frame_shell, std.ascii.upperString(&heading, kit.info(tour.current).title));
+                tour.declareScreenMenuToggles(ui, frame_shell);
+            }
+        }
+
+        fn menuSection(ui: *Ui, frame_shell: *const Shell, heading: []const u8) void {
+            frame_shell.widgets.labelWith(ui, heading, .{ .role = .caption, .tone = .muted });
+        }
+
+        /// The height the menu's settings may take below the top bar
+        /// before they scroll.
+        fn preferencesMenuRoom(ui: *const Ui) f32 {
+            const viewport = ui.viewport();
+            const top = if (ui.rectOf(ids.@"preferences.scroll")) |placed|
+                placed.y
+            else if (ui.rectOf(ids.preferences)) |button|
+                button.y + button.height + preferences_menu_heading_allowance
+            else
+                viewport[1] / 2;
+            return @max(preferences_menu_least_room, viewport[1] - top - preferences_menu_margin);
+        }
+
+        /// The section the open screen adds to the menu, from its
+        /// `declareMenuToggles`.
+        fn declareScreenMenuToggles(tour: *Self, ui: *Ui, frame_shell: *const Shell) void {
+            switch (tour.current) {
+                .x_ray => tour.screens.harbor.declareXrayMenuToggles(ui, frame_shell),
+                inline else => |screen| if (comptime hasHook(@FieldType(Screens, @tagName(screen)), "declareMenuToggles")) {
+                    @field(tour.screens, @tagName(screen)).declareMenuToggles(ui, frame_shell);
+                },
+            }
+        }
+
+        fn screenHasMenuToggles(screen: Screen) bool {
+            return switch (screen) {
+                .x_ray => true,
+                inline else => |named| comptime hasHook(@FieldType(Screens, @tagName(named)), "declareMenuToggles"),
+            };
         }
 
         fn rail(tour: *Self, ui: *Ui, frame_shell: *const Shell) void {
@@ -316,6 +440,7 @@ pub fn Tour(comptime kit: type) type {
             frame_shell.label(ui, .tiny, "Ctrl+I  frame inspector");
             if (kit.Inspector != void) frame_shell.label(ui, .tiny, "F12  zui_debug inspector");
             frame_shell.label(ui, .tiny, "Ctrl+L  live mode");
+            frame_shell.label(ui, .tiny, "Ctrl+,  preferences");
         }
 
         fn strip(tour: *Self, ui: *Ui, frame_shell: *const Shell) void {

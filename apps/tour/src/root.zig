@@ -37,6 +37,10 @@ pub const Tour = @import("tour.zig").Tour;
 pub const stage_id = @import("tour.zig").stage_id;
 pub const root_id = @import("tour.zig").root_id;
 pub const rail_screens_id = @import("tour.zig").rail_screens_id;
+pub const preferences_button_id = @import("tour.zig").preferences_button_id;
+pub const preferences_menu_id = @import("tour.zig").preferences_menu_id;
+pub const preferences_pin_id = @import("tour.zig").preferences_pin_id;
+pub const preferences_settings_id = @import("tour.zig").preferences_settings_id;
 pub const RailRows = @import("tour.zig").RailRows;
 
 /// What a target names: the tour's host, renderer and font system.

@@ -86,6 +86,11 @@ pub fn Using(comptime kit: type) type {
             sensor_changes_seen: u64 = 0,
 
             /// Declares the page into the tour's stage.
+            /// The toggles the top bar's menu offers while this screen is open.
+            pub fn declareMenuToggles(self: *QuietMachine, ui: *Ui, shell: *const Shell) void {
+                _ = shell.widgets.checkbox(ui, .of("menu.quiet_machine.game_loop"), "Compare with a game loop", &self.game_loop, .{});
+            }
+
             pub fn declare(self: *QuietMachine, ui: *Ui, shell: *const Shell) void {
                 self.followVisit(ui, shell);
                 self.requestOnlyWhatChanges(ui, shell);

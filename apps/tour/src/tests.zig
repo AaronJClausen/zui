@@ -3,6 +3,7 @@ const zui = @import("zui");
 const zui_app = @import("zui_app");
 const zui_design = @import("zui_design");
 const zui_glyphs = @import("zui_glyphs");
+const zui_testing = @import("zui_testing");
 const zui_truetype = @import("zui_truetype");
 const tour = @import("zui_tour");
 
@@ -157,6 +158,49 @@ fn Harness(comptime kit: type) type {
             return harness.frame(default_window);
         }
 
+        /// `screen` settled with the preferences menu open, pinned or not;
+        /// the caller releases it.
+        fn frameWithMenu(harness: *Self, screen: tour.Screen, pinned: bool, viewport: [2]f32) *const Ui.Frame {
+            harness.tour.show(screen);
+            harness.tour.preferences_menu.open = true;
+            harness.tour.preferences_menu.pinned = pinned;
+            for (0..30) |_| harness.ui.release(harness.frame(viewport));
+            return harness.frame(viewport);
+        }
+
+        /// The menu lies inside the window, and every element in it inside
+        /// the menu's width.
+        fn expectMenuFits(frame_to_check: *const Ui.Frame, viewport: [2]f32) !void {
+            const panel_id = tour.preferences_menu_id.child("panel");
+            const panel = frame_to_check.rectOf(panel_id).?;
+            try testing.expect(panel.x >= 0 and panel.y >= 0);
+            try testing.expect(panel.x + panel.width <= viewport[0] + 0.01 and panel.y + panel.height <= viewport[1] + 0.01);
+            const panel_index = frame_to_check.lookup(panel_id.hash).?;
+            for (panel_index..frame_to_check.inspect(panel_index).subtree_end) |index| {
+                const inside = frame_to_check.inspect(@intCast(index)).rect;
+                if (inside.width == 0) continue;
+                try testing.expect(inside.x >= panel.x - 0.01 and inside.x + inside.width <= panel.x + panel.width + 0.01);
+            }
+            const settings = frame_to_check.rectOf(tour.preferences_settings_id).?;
+            try testing.expect(frame_to_check.rectOf(tour.preferences_settings_id.child("content")).?.width <= settings.width + 0.01);
+        }
+
+        fn expectTheMenuFitsOnEveryScreen() !void {
+            var harness: Self = .{};
+            try harness.init();
+            defer harness.deinit();
+            for ([_][2]f32{ default_window, .{ 1100, 700 } }) |viewport| {
+                for (kit.offered_screens) |screen| {
+                    for ([_]bool{ false, true }) |pinned| {
+                        const opened = harness.frameWithMenu(screen, pinned, viewport);
+                        defer harness.ui.release(opened);
+                        try testing.expect(opened.diagnostics.ok());
+                        try expectMenuFits(opened, viewport);
+                    }
+                }
+            }
+        }
+
         fn expectEveryScreenWithinLimits() !void {
             var harness: Self = .{};
             try harness.init();
@@ -239,7 +283,218 @@ test "every screen audits clean, in light and dark, after Tab focuses a control"
     try testing.expectEqual(0, finding_count);
 }
 
-test "the preferences screen's choices resolve the tour's tokens again, over the environment's, and audit clean" {
+test "the preferences menu opens on every screen, pinned and not, within its limits and inside the window, in pixels and in cells" {
+    inline for (renderers) |Renderer| try Harness(KitFor(Renderer)).expectTheMenuFitsOnEveryScreen();
+}
+
+test "the preferences menu audits clean over every screen, pinned and not, in light and dark" {
+    const kit = KitFor(FakeRenderer(true, .pixel_grid));
+    var harness: Harness(kit) = .{};
+    try harness.init();
+    defer harness.deinit();
+    const room = try testing.allocator.alloc(zui_design.Finding, 1024);
+    defer testing.allocator.free(room);
+    var finding_count: usize = 0;
+    for ([_]zui.Environment.Theme{ .light, .dark }) |theme| {
+        for (kit.offered_screens) |screen| {
+            for ([_]bool{ false, true }) |pinned| {
+                harness.tour.preferences_menu.open = true;
+                harness.tour.preferences_menu.pinned = pinned;
+                const audited = harness.frameToAudit(screen, theme);
+                defer harness.ui.release(audited);
+                try testing.expect(audited.rectOf(tour.preferences_menu_id.child("panel")) != null);
+                const tokens = &harness.tour.appearance.tokens;
+                const findings = zui_design.audit(audited, .{ .page_background = tokens.colors.get(.idle).get(.background), .focus_ring_color = tokens.colors.get(.focused).get(.focus) }, room);
+                try testing.expectEqual(0, findings.dropped);
+                for (findings.slice()) |finding| printFinding(theme, screen, finding);
+                finding_count += findings.slice().len;
+            }
+        }
+    }
+    try testing.expectEqual(0, finding_count);
+}
+
+/// The tour as `zui_testing.Driver` runs it, in the default window.
+fn Driven(comptime kit: type) type {
+    return struct {
+        const Self = @This();
+        const Tour = tour.Tour(kit);
+
+        text: kit.Text = .{},
+        ui: kit.Ui = undefined,
+        tour: *Tour = undefined,
+        driver: zui_testing.Driver(kit.Ui) = undefined,
+
+        fn init(driven: *Self) !void {
+            try driven.text.init();
+            driven.ui = try .init(testing.allocator, testing.io, &driven.text);
+            driven.tour = try testing.allocator.create(Tour);
+            driven.tour.init(testing.io, .zero, driven.text.fonts);
+            driven.driver = .{ .ui = &driven.ui, .sources = &driven.tour.sources, .viewport = default_window };
+        }
+
+        fn deinit(driven: *Self) void {
+            driven.tour.deinit();
+            testing.allocator.destroy(driven.tour);
+            driven.ui.deinit(testing.allocator);
+        }
+
+        fn frames(driven: *Self, count: usize) !void {
+            for (0..count) |_| _ = try driven.driver.frame(driven.tour, Tour.declare, &.{});
+        }
+
+        fn press(driven: *Self, keys: []const zui.Key) !void {
+            _ = try driven.driver.pressKeys(driven.tour, Tour.declare, keys);
+            try driven.frames(1);
+        }
+
+        fn chord(driven: *Self, key: zui.Key) !void {
+            driven.driver.modifiers = .{ .control = true };
+            defer driven.driver.modifiers = .{};
+            try driven.press(&.{key});
+        }
+
+        fn click(driven: *Self, element_id: zui.Id) !void {
+            _ = try driven.driver.click(driven.tour, Tour.declare, element_id);
+            try driven.frames(1);
+        }
+
+        fn focused(driven: *const Self, element_id: zui.Id) bool {
+            return driven.ui.focused(element_id);
+        }
+
+        /// Presses Tab until focus comes back to where it started, at most
+        /// `most` times, and returns whether it passed `element_id`.
+        fn tabReaches(driven: *Self, element_id: zui.Id, most: usize) !bool {
+            for (0..most) |_| {
+                try driven.press(&.{.tab});
+                if (driven.focused(element_id)) return true;
+            }
+            return false;
+        }
+    };
+}
+
+test "the keyboard opens the preferences menu, reaches and changes every setting in it, and Escape gives focus back to its button" {
+    const kit = KitFor(FakeRenderer(true, .pixel_grid));
+    var driven: Driven(kit) = .{};
+    try driven.init();
+    defer driven.deinit();
+    const app = driven.tour;
+    try driven.frames(3);
+
+    try driven.press(&.{.tab});
+    try testing.expect(driven.focused(tour.preferences_button_id));
+    try driven.press(&.{.enter});
+    try testing.expect(app.preferences_menu.open);
+    try testing.expect(driven.focused(tour.preferences_pin_id));
+
+    const settings = [_]zui.Id{
+        .of("zoom_out"),
+        .of("zoom_reset"),
+        .of("zoom_in"),
+        zui.Id.of("theme").indexedChild("segment", @intFromEnum(driven.ui.environment().theme)),
+        .of("preferences.density"),
+        .of("preferences.color_vision"),
+        .of("preferences.contrast"),
+        .of("preferences.system_text"),
+        .of("live"),
+        .of("heartbeat"),
+        .of("inspector_toggle"),
+    };
+    for (settings) |setting| try testing.expect(try driven.tabReaches(setting, 40));
+    try testing.expect(try driven.tabReaches(tour.preferences_pin_id, 40));
+    try testing.expect(!try driven.tabReaches(tour.rail_screens_id.indexedChild("item", tour.RailRows(kit).rowOf(.overview)), 40));
+
+    try testing.expect(try driven.tabReaches(.of("preferences.system_text"), 40));
+    try driven.press(&.{.space});
+    try testing.expectEqual(@as(?f32, 1), app.preference_choices.text_scale);
+    try testing.expect(try driven.tabReaches(.of("preferences.text_scale"), 40));
+    try driven.press(&.{.right});
+    try testing.expectEqual(@as(?f32, 1.05), app.preference_choices.text_scale);
+    try testing.expect(try driven.tabReaches(.of("preferences.reset"), 40));
+
+    try testing.expect(try driven.tabReaches(.of("preferences.density"), 40));
+    try driven.press(&.{.down});
+    try testing.expectEqual(zui.design.Density.roomy, app.preference_choices.density);
+
+    const zoom_before = app.zoom;
+    try testing.expect(try driven.tabReaches(.of("zoom_in"), 40));
+    try driven.press(&.{.enter});
+    try testing.expect(app.zoom > zoom_before);
+
+    try testing.expect(try driven.tabReaches(.of("live"), 40));
+    try driven.press(&.{.space});
+    try testing.expect(app.live);
+
+    try driven.press(&.{.escape});
+    try testing.expect(!app.preferences_menu.open);
+    try testing.expect(driven.focused(tour.preferences_button_id));
+}
+
+test "a pinned preferences menu stays open while the screen beside it takes clicks and Tab, and Ctrl+, closes it" {
+    const kit = KitFor(FakeRenderer(true, .pixel_grid));
+    var driven: Driven(kit) = .{};
+    try driven.init();
+    defer driven.deinit();
+    const app = driven.tour;
+    try driven.frames(3);
+
+    try driven.chord(.comma);
+    try testing.expect(app.preferences_menu.open);
+    try testing.expect(driven.focused(tour.preferences_pin_id));
+    try driven.press(&.{.space});
+    try testing.expect(app.preferences_menu.pinned);
+
+    try driven.click(tour.rail_screens_id.indexedChild("item", tour.RailRows(kit).rowOf(.quiet_machine)));
+    try testing.expectEqual(tour.Screen.quiet_machine, app.current);
+    try testing.expect(app.preferences_menu.open);
+
+    const game_loop: zui.Id = .of("menu.quiet_machine.game_loop");
+    try driven.click(game_loop);
+    try testing.expect(app.screens.quiet_machine.game_loop);
+    try driven.press(&.{.escape});
+    try testing.expect(app.preferences_menu.open);
+
+    try testing.expect(try driven.tabReaches(tour.rail_screens_id.indexedChild("item", tour.RailRows(kit).rowOf(.quiet_machine)), 60));
+
+    const zoom_before = app.zoom;
+    try driven.chord(.equals);
+    try testing.expect(app.zoom > zoom_before);
+    try driven.chord(.l);
+    try testing.expect(app.live);
+
+    try driven.chord(.comma);
+    try testing.expect(!app.preferences_menu.open);
+    try driven.frames(1);
+    try testing.expect(driven.ui.rectOf(game_loop) == null);
+}
+
+test "each screen's own toggles show in the menu only while that screen is open" {
+    const kit = KitFor(FakeRenderer(true, .pixel_grid));
+    var harness: Harness(kit) = .{};
+    try harness.init();
+    defer harness.deinit();
+    const toggles = [_]struct { tour.Screen, zui.Id }{
+        .{ .x_ray, .of("menu.x_ray.outline") },
+        .{ .log_tail, .of("menu.log_tail.follow") },
+        .{ .field_guide, .of("menu.field_guide.compact") },
+        .{ .quiet_machine, .of("menu.quiet_machine.game_loop") },
+        .{ .gesture_arena, .of("menu.gesture_arena.lasso_tool") },
+        .{ .light_lab, .of("menu.light_lab.animate") },
+        .{ .clickable_chaos, .of("menu.clickable_chaos.layout_boxes") },
+    };
+    for (kit.offered_screens) |screen| {
+        const opened = harness.frameWithMenu(screen, false, default_window);
+        defer harness.ui.release(opened);
+        for (toggles) |toggle| try testing.expectEqual(toggle[0] == screen, opened.rectOf(toggle[1]) != null);
+    }
+    harness.ui.release(harness.frameWithMenu(.x_ray, true, default_window));
+    try harness.click(.of("menu.x_ray.outline"));
+    try testing.expect(harness.tour.screens.harbor.outline_regions);
+}
+
+test "the preferences menu's choices resolve the tour's tokens again, over the environment's, and the tokens screen audits clean" {
     const kit = KitFor(FakeRenderer(true, .pixel_grid));
     var harness: Harness(kit) = .{};
     try harness.init();

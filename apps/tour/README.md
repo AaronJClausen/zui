@@ -63,12 +63,28 @@ has focus, shows another screen.
 | Light Lab | Spectacle | gradients mixed in OKLab, shadows and glow, frost over a moving scene, the renderer's materials, and round, continuous and chamfered corners at the radius the controls set, each beside how a renderer without it lowers it, with its declaration printed as Zig. Frost needs `.backdrop_blur` and materials a `MaterialHandle` of patterns |
 | One Declaration | Spectacle | one function's invoice in six views (dark, light, high contrast, 150% text, right to left, compact) sharing one state, and buttons that change the real environment |
 | Clickable Chaos | Spectacle | offered only to a renderer that draws `.transform`: 240 cards turned and scaled in a wave, each hit where it is drawn |
-| Preferences | Start | density, color vision, contrast and text size, chosen over what the environment reports and resolved by `zui_design` into new tokens only when one changes, with the preferences, control heights, status colors and widgets the tokens give; every screen follows |
+| Tokens | Start | what `zui_design` resolved the tokens to from the preferences the menu chose: the preferences, control heights, status colors and widgets they give |
+
+Every setting the tour offers is in one menu, a `popover` that
+**Preferences** on the top bar opens, or Ctrl+,: the zoom and the light
+or dark theme; density, color vision, contrast and text size, chosen
+over what the environment reports and resolved by `zui_design` into new
+tokens only when one changes, which every screen follows; live mode, the
+1 Hz refresh and the frame inspector; and, while a screen that keeps
+toggles of its own is open, a section of them (Harbor X-ray's outlines
+and timeline, Log Tail's following, the Field Guide's cards, the Quiet
+Machine's game loop, the Gesture Arena's lasso, the Light Lab's moving
+scene and glow, the Clickable Chaos wave). Opening it focuses its first
+control; Tab and Shift+Tab move between its settings, each control takes
+its own arrows, and Escape or a click outside closes it and gives focus
+back to its button. **Keep open** pins it: it stays open beside the
+screen, which still takes the pointer and Tab, so a change shows as it
+is made, until the button or Ctrl+, closes it.
 
 Ctrl+1 to Ctrl+0 jump to the first ten screens, Ctrl+PgDn and Ctrl+PgUp
 to the next and previous, Ctrl+= and Ctrl+- zoom (through
 `FrameParams.zoom`), Ctrl+L declares a frame at every refresh to watch
-the costs live, and Tab moves focus.
+the costs live, Ctrl+, opens the preferences, and Tab moves focus.
 
 ![Harbor, the flagship console](../../renderers/raylib/docs/harbor.png)
 
@@ -79,5 +95,5 @@ measure with `zui_truetype`:
 
 | Command | What it does |
 |---|---|
-| `zig build test` | declare every screen headlessly on renderers that draw every optional command and none, in pixels and in cells; audit every screen with `zui_design.audit` in light and dark, expecting no text contrast finding and exactly the causes `11-polish:25-focus-ring-on-fills` and `11-polish:26-small-targets` record; resolve the preferences screen's choices over the environment's and audit it clean; and check the tour's compile errors |
+| `zig build test` | declare every screen headlessly on renderers that draw every optional command and none, in pixels and in cells; audit every screen with `zui_design.audit` in light and dark, expecting no text contrast finding and exactly the causes `11-polish:25-focus-ring-on-fills` and `11-polish:26-small-targets` record; open the preferences menu, pinned and not, on every screen, inside the window in pixels and in cells and audited clean in light and dark; drive it with `zui_testing.Driver`, reaching and changing every setting by keyboard, pinning it while the screen takes clicks, and showing each screen's toggles only on that screen; resolve the menu's choices over the environment's and audit the Tokens screen clean; and check the tour's compile errors |
 | `zig build check` | compile the tour and its tests, natively and for `wasm32-freestanding` |

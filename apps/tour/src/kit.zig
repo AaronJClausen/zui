@@ -132,7 +132,7 @@ pub fn Kit(comptime spec: Spec) type {
                 .one_declaration => .{ .title = "One Declaration", .tagline = "The same UI in every theme, size and direction", .lane = .spectacle, .features = &.{ "Environment", "right-to-left", "contrast" } },
                 .cabin_booking => .{ .title = "Cabin Booking", .tagline = "A booking form of steppers, switches, chips, a dialog and toasts", .lane = .field_case, .features = &.{ "numberStepper", "dialog", "toasts" } },
                 .clickable_chaos => .{ .title = "Clickable Chaos", .tagline = "Hundreds of turning cards, each hit where drawn", .lane = .spectacle, .features = &.{ "Transform", "hit inversion" } },
-                .preferences => .{ .title = "Preferences", .tagline = "Density, color vision, contrast and text size, for the whole tour", .lane = .start, .features = &.{ "zui_design", "Tokens", "Preferences" } },
+                .preferences => .{ .title = "Tokens", .tagline = "What the preferences on the top bar resolved to, for the whole tour", .lane = .start, .features = &.{ "zui_design", "Tokens", "Preferences" } },
             };
         }
 
@@ -173,7 +173,7 @@ pub fn Kit(comptime spec: Spec) type {
             }
         };
 
-        /// What the user chose on the preferences screen over what the
+        /// What the user chose in the preferences menu over what the
         /// environment reports. A null contrast or text scale follows the
         /// environment's.
         pub const PreferenceChoices = struct {
@@ -231,7 +231,7 @@ pub fn Kit(comptime spec: Spec) type {
             colors: Colors,
             /// The preferences the tokens were resolved for.
             preferences: zui_design.Preferences,
-            /// The tour's, which the preferences screen changes.
+            /// The tour's, which the preferences menu changes.
             preference_choices: *PreferenceChoices,
             widgets: Widgets,
             fonts: Fonts,

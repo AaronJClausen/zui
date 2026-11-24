@@ -49,6 +49,12 @@ pub fn Using(comptime kit: type) type {
             animate: bool = true,
             scene_seconds: f32 = 0,
 
+            /// The toggles the top bar's menu offers while this screen is open.
+            pub fn declareMenuToggles(self: *LightLab, ui: *Ui, shell: *const Shell) void {
+                _ = shell.widgets.checkbox(ui, .of("menu.light_lab.animate"), "Move the scene", &self.animate, .{});
+                _ = shell.widgets.checkbox(ui, .of("menu.light_lab.glow"), "A glow: no offset", &self.glow, .{});
+            }
+
             pub fn declare(self: *LightLab, ui: *Ui, shell: *const Shell) void {
                 if (self.animate and !shell.reduced_motion) {
                     self.scene_seconds += @min(ui.dt(), longest_step_seconds);

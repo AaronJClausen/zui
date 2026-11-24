@@ -1,7 +1,5 @@
 const std = @import("std");
 
-const ContrastChoice = enum { follow_the_system, normal, high };
-
 const shown_emphases = [_]@import("../shared.zig").Emphasis{ .accent, .success, .warning, .danger };
 
 pub fn Using(comptime kit: type) type {
@@ -9,81 +7,23 @@ pub fn Using(comptime kit: type) type {
     const Shell = kit.Shell;
     const ControlSize = kit.zui.design.ControlSize;
     return struct {
-        /// The choices no OS reports, and the ones the tour may override:
-        /// density, color vision, contrast and text scale. Each is resolved
-        /// into new tokens once, on the frame after it changes, and every
-        /// screen and widget follows.
+        /// What `zui_design` resolved the tokens to from the preferences
+        /// the top bar's menu chooses, which every screen and widget
+        /// follows.
         pub const Preferences = struct {
-            /// The slider's own value, kept while the system's text scale
-            /// is followed so turning that off starts from where it was.
-            text_scale: f32 = 1,
-
-            pub fn declare(self: *Preferences, ui: *Ui, shell: *const Shell) void {
-                shell.pageHeading(ui, "PREFERENCES", "Your preferences", "zui_design resolves the tokens again only when one of these changes; the whole tour follows.");
+            pub fn declare(_: *Preferences, ui: *Ui, shell: *const Shell) void {
+                shell.pageHeading(ui, "TOKENS", "What your preferences resolved to", "Choose density, color vision, contrast and text size in Preferences on the top bar; zui_design resolves the tokens again only when one changes, and the whole tour follows.");
                 ui.open(.{ .layout = .{ .sizing = .grow_both, .child_gap = 12 } });
                 defer ui.close();
-                if (self.choices(ui, shell)) ui.requestFrame();
-                resolved(ui, shell);
-            }
-
-            fn choices(self: *Preferences, ui: *Ui, shell: *const Shell) bool {
-                const widgets = shell.widgets;
-                const chosen = shell.preference_choices;
-                shell.openCard(ui, "Your choices", .{ .width = .grow_equal, .height = .grow });
-                defer ui.close();
-                var changed = false;
-
-                widgets.labeledRow(ui, "Density");
-                changed = widgets.dropdownEnum(ui, .of("preferences.density"), &chosen.density, .{ .label = "Density" }) or changed;
-                ui.close();
-
-                widgets.labeledRow(ui, "Color vision");
-                changed = widgets.dropdownEnum(ui, .of("preferences.color_vision"), &chosen.color_vision, .{ .label = "Color vision" }) or changed;
-                ui.close();
-
-                var contrast: ContrastChoice = if (chosen.contrast) |contrast| switch (contrast) {
-                    .normal => .normal,
-                    .high => .high,
-                } else .follow_the_system;
-                widgets.labeledRow(ui, "Contrast");
-                if (widgets.dropdownEnum(ui, .of("preferences.contrast"), &contrast, .{ .label = "Contrast" })) {
-                    chosen.contrast = switch (contrast) {
-                        .follow_the_system => null,
-                        .normal => .normal,
-                        .high => .high,
-                    };
-                    changed = true;
-                }
-                ui.close();
-
-                var follows_system_text = chosen.text_scale == null;
-                if (widgets.checkbox(ui, .of("preferences.system_text"), "Use the system's text size", &follows_system_text, .{})) {
-                    chosen.text_scale = if (follows_system_text) null else self.text_scale;
-                    changed = true;
-                }
-                widgets.labeledRow(ui, "Text size");
-                if (widgets.slider(ui, .of("preferences.text_scale"), &self.text_scale, .{ .min = kit.text_scale_range[0], .max = kit.text_scale_range[1], .step = 0.05, .disabled = follows_system_text, .label = "Text size" })) {
-                    chosen.text_scale = self.text_scale;
-                    changed = true;
-                }
-                ui.open(.{ .layout = .{ .sizing = .{ .width = .fixed(48) }, .child_alignment = .{ .x = .end } } });
-                shell.print(ui, .caption, "{d:.0}%", .{shell.preferences.text_scale * 100});
-                ui.close();
-                ui.close();
-
-                shell.spacer(ui);
-                if (widgets.button(ui, .of("preferences.reset"), "Reset", .{ .variant = .secondary, .disabled = std.meta.eql(chosen.*, kit.PreferenceChoices{}) })) {
-                    chosen.* = .{};
-                    changed = true;
-                }
-                return changed;
+                preferencesAndHeights(ui, shell);
+                statusAndWidgets(ui, shell);
             }
         };
 
-        fn resolved(ui: *Ui, shell: *const Shell) void {
+        fn preferencesAndHeights(ui: *Ui, shell: *const Shell) void {
             const tokens = shell.tokens;
             const preferences = shell.preferences;
-            shell.openCard(ui, "What the tokens resolved to", .{ .width = .grow_equal, .height = .grow });
+            shell.openCard(ui, "Your preferences", .{ .width = .grow_equal, .height = .grow });
             defer ui.close();
             shell.print(ui, .caption, "theme .{t}, contrast .{t}, density .{t}", .{ preferences.theme, preferences.contrast, preferences.density });
             shell.print(ui, .caption, "color vision .{t}, text {d:.0}%", .{ preferences.color_vision, preferences.text_scale * 100 });
@@ -97,7 +37,11 @@ pub fn Using(comptime kit: type) type {
                 }
             }
             shell.print(ui, .caption, "the least target {d:.0}, a gap of {d:.0}", .{ tokens.target_floors.get(.pointer), tokens.space(.m) });
-            shell.divider(ui);
+        }
+
+        fn statusAndWidgets(ui: *Ui, shell: *const Shell) void {
+            shell.openCard(ui, "Status and widgets", .{ .width = .grow_equal, .height = .grow });
+            defer ui.close();
             shell.label(ui, .caption, "STATUS, ADAPTED TO YOUR COLOR VISION");
             {
                 ui.open(.{ .layout = .{ .child_gap = 8 } });

@@ -29,6 +29,12 @@ pub fn Using(comptime kit: type) type {
             hits: u32 = 0,
             flipped: [card_count]bool = @splat(false),
 
+            /// The toggles the top bar's menu offers while this screen is open.
+            pub fn declareMenuToggles(self: *ClickableChaos, ui: *Ui, shell: *const Shell) void {
+                _ = shell.widgets.checkbox(ui, .of("menu.clickable_chaos.paused"), "Pause the wave", &self.paused, .{});
+                _ = shell.widgets.checkbox(ui, .of("menu.clickable_chaos.layout_boxes"), "Outline where layout put them", &self.show_layout_boxes, .{});
+            }
+
             pub fn declare(self: *ClickableChaos, ui: *Ui, shell: *const Shell) void {
                 const moving = !self.paused and !shell.reduced_motion and self.speed > 0;
                 if (moving) {
