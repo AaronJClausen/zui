@@ -30,7 +30,7 @@ and each is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:15-type-scale` The type scale | done |
 | `11-polish:16-corner-shapes` Corner shapes | done |
 | `11-polish:17-nested-corners` Nested corners | done |
-| `11-polish:18-system-accent` The system's accent color | done; the Windows host's part waiting on CI |
+| `11-polish:18-system-accent` The system's accent color | done |
 | `11-polish:19-default-design` The default design | done |
 | `11-polish:20-appearance-audit` The appearance audit | done |
 | `11-polish:21-permutations` Every permutation of a component | done |
@@ -1355,7 +1355,7 @@ cannot be run here.
 
 **Spec.** §7.2, §18.3.
 
-**Status.** Done, with the Windows host's part waiting on CI:
+**Status.** Done:
 
 - `zui.Environment.accent: ?zui.Color`, null where the system has none,
   and `EnvironmentChange.accent`, which `Context` applies as every other
@@ -1382,11 +1382,12 @@ cannot be run here.
   fails; `Host.forced_accent` stands in for the user's in tests. The
   harness posts the suite's accent by setting it and sending the
   message, and a test checks the first record, a change and a repeat
-  that sends nothing. Compiled with `check` for `x86_64-windows` and
-  `aarch64-windows`, not run. **Waiting on CI:** the Windows leg of
-  `hosts/native/`'s conformance, the host suite on both windows and the
-  test "the accent is reported at the first poll, and again when the
-  colorization changes".
+  that sends nothing. Run natively on Windows 11 on 2026-11-23, at
+  `556822f`: `hosts/native/`'s `zig build test --summary all` passes 78
+  of 78 tests in Debug and ReleaseSafe, among them the host suite on
+  both windows and "the accent is reported at the first poll, and again
+  when the colorization changes", and `check` passes for
+  `x86_64-windows` and `aarch64-windows`.
 - Web: `page_environment.mjs` reads the `AccentColor` system color from
   a hidden element's computed `color` as `#rrggbb` (`"none"` where
   `CSS.supports` does not know it) at the start, and again when the
