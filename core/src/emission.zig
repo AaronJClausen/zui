@@ -31,6 +31,18 @@ pub fn EmitLevel(comptime Index: type, comptime draws_transforms: bool, comptime
     };
 }
 
+/// The focused element's border, its focus ring when shown, kept aside
+/// and drawn after the rest of its layer, so no later sibling covers it.
+pub fn KeptRing(comptime RenderCommand: type, comptime draws_transforms: bool) type {
+    return struct {
+        focused_id: u64 = 0,
+        command: ?RenderCommand = null,
+        /// In effect where the border would have been drawn.
+        clip: style.Rect = .{},
+        space: if (draws_transforms) u32 else void = if (draws_transforms) interaction.no_space else {},
+    };
+}
+
 /// What a level needs to keep its element's commands as a snapshot when its
 /// subtree ends.
 pub const ExitTrack = struct {
@@ -92,6 +104,7 @@ fn emit(comptime Ui: type, ui: *Ui, frame: *Ui.Frame, comptime walk: Walk) void 
     const emitting = Ui.Tracing.begin(.emit);
     const results = &ui.memory.results;
     results.clear();
+    ui.emit_kept_ring = .{ .focused_id = ui.memory.input.focus };
     var emitter: Emitter(Ui) = .{
         .frame = frame,
         .results = results,
@@ -101,6 +114,7 @@ fn emit(comptime Ui: type, ui: *Ui, frame: *Ui.Frame, comptime walk: Walk) void 
         .ghosts = if (Ui.keeps_exit_ghosts) &ui.memory.exit_ghosts else {},
         .now = if (Ui.keeps_exit_ghosts) ui.now() else {},
         .drawn_corner_radii = if (Ui.nests_corners) &ui.memory.drawn_corner_radii else {},
+        .kept_ring = &ui.emit_kept_ring,
     };
 
     const viewport: style.Rect = .{ .width = frame.params.viewport[0], .height = frame.params.viewport[1] };
@@ -156,6 +170,7 @@ fn emit(comptime Ui: type, ui: *Ui, frame: *Ui.Frame, comptime walk: Walk) void 
         emitter.leave(&levels[depth], if (depth == 0) 0 else levels[depth - 1].z);
         if (depth == 0) break;
     }
+    if (ui.emit_kept_ring.command != null) emitter.emitKeptRing(&ui.emit_kept_ring, viewport);
     if (Ui.keeps_exit_ghosts) emitGhosts(Ui, ui, &emitter);
     frame.diagnostics.needed.set(.max_render_commands, emitter.attempted_commands);
     emitting.end();
@@ -253,8 +268,10 @@ fn Emitter(comptime Ui: type) type {
         /// Reported as `needed.exit_ghost_commands` once emission ends.
         ghost_commands_needed: if (Ui.keeps_exit_ghosts) u32 else void = if (Ui.keeps_exit_ghosts) 0 else {},
         drawn_corner_radii: if (Ui.nests_corners) *[Ui.max_elements]style.CornerRadius else void,
+        kept_ring: *Ui.KeptRing,
 
         const max_layered_runs = 64;
+
         const LayeredRun = struct { start: u32, end: u32, z: i16 };
 
         fn rectOf(self: *const Self, element: Ui.Index) style.Rect {
@@ -886,6 +903,12 @@ fn Emitter(comptime Ui: type) type {
             const border = if (found.border) |*border| border else return;
             if (border.between_children > 0) @call(.never_inline, emitDividers, .{ self, element, border, level });
             if (border.widths.left == 0 and border.widths.right == 0 and border.widths.top == 0 and border.widths.bottom == 0) return;
+            @call(.never_inline, emitBorder, .{ self, level, found, border });
+        }
+
+        fn emitBorder(self: *Self, level: *const Level, found: *const Ui.Decoration, border: *const Ui.Border) void {
+            const frame = self.frame;
+            const element = level.element;
             const offset = self.wholePixels(border.offset);
             const drawn_outside = offset > 0;
             const widths = if (drawn_outside) self.lineWidthsInWholePixels(border.widths) else border.widths;
@@ -895,12 +918,35 @@ fn Emitter(comptime Ui: type) type {
             const element_radius = self.cornerRadiusOf(element, found);
             const radius = if (drawn_outside) outsetBorderRadius(element_radius.clampedTo(element_bounds), widths, offset) else element_radius;
             const corners = self.cornersIn(snapped, radius, found.corner_shape);
-            self.push(.{ .bounds = snapped, .id = frame.element_id[element], .z = level.z, .payload = .{ .border = .{
+            const element_id = frame.element_id[element];
+            const command: Ui.RenderCommand = .{ .bounds = snapped, .id = element_id, .z = level.z, .payload = .{ .border = .{
                 .color = self.commandColor(border.color),
                 .widths = widths,
                 .corner_radius = corners.radius,
                 .corner_shape = corners.shape,
-            } } });
+            } } };
+            const ring = self.kept_ring;
+            if (element_id == ring.focused_id and element_id != 0) {
+                ring.* = .{ .focused_id = element_id, .command = command, .clip = level.clip, .space = level.space };
+                return;
+            }
+            self.push(command);
+        }
+
+        /// Begins again the clip and transforms the ring was declared in,
+        /// at the end of its layer.
+        fn emitKeptRing(self: *Self, ring: *const Ui.KeptRing, viewport: style.Rect) void {
+            const command = ring.command.?;
+            const z = command.z;
+            const id = command.id;
+            self.switchLayer(z);
+            const transforms: u16 = if (Ui.draws_transforms) self.reopenTransforms(ring.space, z) else 0;
+            const clipped = !std.meta.eql(ring.clip, viewport);
+            if (clipped) self.push(.{ .bounds = self.snap(ring.clip), .id = id, .z = z, .payload = .{ .clip_begin = self.snap(ring.clip) } });
+            self.push(command);
+            if (clipped) self.push(.{ .bounds = self.snap(ring.clip), .id = id, .z = z, .payload = .clip_end });
+            for (0..transforms) |_| self.push(.{ .bounds = command.bounds, .id = id, .z = z, .payload = .transform_end });
+            self.switchLayer(0);
         }
 
         fn outsetBorderBounds(element_bounds: style.Rect, widths: style.Edges, offset: f32) style.Rect {

@@ -385,6 +385,9 @@ pub fn Context(comptime config: Config) type {
             .commands = config.commands,
             .corner_shapes = config.corner_shapes,
         });
+        /// The focused element's border, as emission keeps it for the end
+        /// of its layer.
+        pub const KeptRing = emission.KeptRing(RenderCommand, draws_transforms);
         pub const has_image = config.ImageHandle != void;
         /// What `image` declares.
         pub const Image = struct {
@@ -895,6 +898,7 @@ pub fn Context(comptime config: Config) type {
         /// element on another layer can begin its ancestors' transforms
         /// again there.
         emit_space_effects: [max_spaces]u32 = undefined,
+        emit_kept_ring: KeptRing = .{},
 
         frame_released: std.Io.Event = .unset,
         now_instant: Instant = .zero,

@@ -3,7 +3,7 @@ const zui = @import("../root.zig");
 
 const testing = std.testing;
 
-const Ui = zui.Context(.{ .limits = .{ .max_elements = 32, .max_render_commands = 64 }, .commands = .initMany(&.{.shadow}) });
+const Ui = zui.Context(.{ .limits = .{ .max_elements = 32, .max_render_commands = 64 }, .commands = .initMany(&.{ .shadow, .transform }) });
 
 const scales = [_]f32{ 1, 1.25, 1.5, 2 };
 const fractional_origins = [_][2]f32{ .{ 20, 10 }, .{ 20.3, 10.6 }, .{ 20.5, 10.5 }, .{ 20.71, 10.13 }, .{ 33.9, 7.45 } };
@@ -160,4 +160,99 @@ test "a shadow's offset and spread are whole pixels, so it reaches as far on eac
         try expectWholePixels(shadow.offset[1] * scale);
         try expectWholePixels(shadow.spread * scale);
     }
+}
+
+const Neighbours = struct {
+    const control: zui.Id = .of("control");
+    const neighbour: zui.Id = .of("neighbour");
+
+    const Around = enum { nothing, clip, transform };
+    const nudge: zui.Effects = .{ .transform = .{ .translation = .{ 5, 0 } } };
+
+    fn declare(ui: *Ui, around: Around) void {
+        ui.open(.{ .clip = if (around == .clip) .both else .none, .effects = if (around == .transform) &nudge else null, .layout = .{ .padding = .all(20) } });
+        ui.box(.{
+            .id = control,
+            .focusable = true,
+            .layout = .{ .sizing = .{ .width = .fixed(60), .height = .fixed(30) } },
+            .decoration = .{ .background = .white, .border = .{ .color = .black, .widths = .all(2), .offset = 2 } },
+        });
+        ui.box(.{
+            .id = neighbour,
+            .interactive = true,
+            .layout = .{ .sizing = .{ .width = .fixed(60), .height = .fixed(30) } },
+            .decoration = .{ .background = if (ui.hovered(neighbour)) .rgb(0x808080) else .rgb(0x404040) },
+        });
+        ui.close();
+    }
+};
+
+fn indexOf(frame: anytype, id: zui.Id, comptime tag: std.meta.Tag(Ui.RenderCommand.Payload)) !usize {
+    for (frame.commands(), 0..) |command, index| if (command.id == id.hash and command.payload == tag) return index;
+    return error.CommandNotFound;
+}
+
+fn pressTab(ui: *Ui, around: Neighbours.Around, events: []const zui.Event) void {
+    ui.beginFrame(&recordAt(1));
+    Neighbours.declare(ui, around);
+    ui.release(ui.endFrame());
+    ui.beginFrame(&.{ .params = .{ .now = .zero, .viewport = .{ 800, 600 } }, .events = events });
+}
+
+test "a sibling declared after a focused control, hovered, draws under its ring" {
+    var ui: Ui = try .init(testing.allocator, testing.io);
+    defer ui.deinit(testing.allocator);
+    const over_neighbour: zui.Pointer = .{ .id = .mouse, .kind = .mouse, .position = .{ 110, 35 }, .at = .zero };
+    pressTab(&ui, .nothing, &.{
+        .{ .pointer_move = .{ .pointer = over_neighbour } },
+        .{ .key_down = .{ .key = .tab, .at = .zero } },
+    });
+    try testing.expect(ui.focused(Neighbours.control));
+    try testing.expect(ui.hovered(Neighbours.neighbour));
+    Neighbours.declare(&ui, .nothing);
+    const frame = ui.endFrame();
+    defer ui.release(frame);
+
+    const ring = try indexOf(frame, Neighbours.control, .border);
+    try testing.expect(ring > try indexOf(frame, Neighbours.neighbour, .rectangle));
+    try testing.expectEqual(frame.commands().len - 1, ring);
+    var rings: usize = 0;
+    for (frame.commands()) |command| rings += @intFromBool(command.payload == .border);
+    try testing.expectEqual(1, rings);
+}
+
+test "a kept ring is drawn inside the clip it was declared in" {
+    var ui: Ui = try .init(testing.allocator, testing.io);
+    defer ui.deinit(testing.allocator);
+    pressTab(&ui, .clip, &.{.{ .key_down = .{ .key = .tab, .at = .zero } }});
+    Neighbours.declare(&ui, .clip);
+    const frame = ui.endFrame();
+    defer ui.release(frame);
+
+    const commands = frame.commands();
+    const ring = try indexOf(frame, Neighbours.control, .border);
+    try testing.expect(commands[ring - 1].payload == .clip_begin);
+    try testing.expect(commands[ring + 1].payload == .clip_end);
+    try testing.expectEqual(zui.Rect{ .x = 0, .y = 0, .width = 160, .height = 70 }, commands[ring - 1].payload.clip_begin);
+}
+
+test "a kept ring is drawn inside the transforms it was declared in" {
+    var ui: Ui = try .init(testing.allocator, testing.io);
+    defer ui.deinit(testing.allocator);
+    pressTab(&ui, .transform, &.{.{ .key_down = .{ .key = .tab, .at = .zero } }});
+    Neighbours.declare(&ui, .transform);
+    const frame = ui.endFrame();
+    defer ui.release(frame);
+
+    const commands = frame.commands();
+    const ring = try indexOf(frame, Neighbours.control, .border);
+    try testing.expectEqual(zui.Transform{ .translation = .{ 5, 0 } }, commands[ring - 2].payload.transform_begin);
+    try testing.expect(commands[ring + 2].payload == .transform_end);
+    var begun: i32 = 0;
+    for (commands) |command| switch (command.payload) {
+        .transform_begin => begun += 1,
+        .transform_end => begun -= 1,
+        else => {},
+    };
+    try testing.expectEqual(0, begun);
 }

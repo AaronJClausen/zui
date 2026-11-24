@@ -1519,9 +1519,13 @@ adding a base command always does, at compile time.
 `Frame.commands()` is in paint order: by layer, then declaration order.
 A border and its dividers are emitted after its element's subtree,
 inside the element's own clip, which leaves them whole since both lie in
-its box, except a border with an offset, which lies outside it. Bounds
-snap to whole physical pixels using the frame's `scale × zoom`, each
-edge rounded on its own. A length that grows or shrinks a snapped
+its box, except a border with an offset, which lies outside it. The
+focused element's border, its focus ring when shown, is kept aside and
+drawn after the rest of its layer, with the clip and transforms it was
+declared in begun again around it, so a later sibling's hover never
+covers it and a higher layer still does: one kept command a frame.
+Bounds snap to whole physical pixels using the frame's `scale × zoom`,
+each edge rounded on its own. A length that grows or shrinks a snapped
 rectangle is rounded instead, so it moves every side alike: a ring's
 offset and widths, a divider's thickness and the border widths it spans
 inside, and a shadow's offset and spread. A line's width is at least one
