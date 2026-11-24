@@ -910,13 +910,14 @@ fn Emitter(comptime Ui: type) type {
             const frame = self.frame;
             const element = level.element;
             const offset = self.wholePixels(border.offset);
-            const drawn_outside = offset > 0;
-            const widths = if (drawn_outside) self.lineWidthsInWholePixels(border.widths) else border.widths;
+            const offsets_border = offset != 0;
+            const widths = if (offsets_border) self.lineWidthsInWholePixels(border.widths) else border.widths;
             const element_bounds = self.snap(self.rectOf(element));
-            const snapped = if (drawn_outside) outsetBorderBounds(element_bounds, widths, offset) else element_bounds;
+            const growth = ringGrowth(widths, offset);
+            const snapped = if (offsets_border) grownBy(element_bounds, growth) else element_bounds;
             if (snapped.intersect(level.outer_clip).isEmpty()) return;
             const element_radius = self.cornerRadiusOf(element, found);
-            const radius = if (drawn_outside) outsetBorderRadius(element_radius.clampedTo(element_bounds), widths, offset) else element_radius;
+            const radius = if (offsets_border) ringRadius(element_radius.clampedTo(element_bounds), growth, found.corner_shape) else element_radius;
             const corners = self.cornersIn(snapped, radius, found.corner_shape);
             const element_id = frame.element_id[element];
             const command: Ui.RenderCommand = .{ .bounds = snapped, .id = element_id, .z = level.z, .payload = .{ .border = .{
@@ -949,29 +950,39 @@ fn Emitter(comptime Ui: type) type {
             self.switchLayer(0);
         }
 
-        fn outsetBorderBounds(element_bounds: style.Rect, widths: style.Edges, offset: f32) style.Rect {
-            const left = offset + widths.left;
-            const top = offset + widths.top;
+        /// How far each side of a ring lies from its element's edge. Outside,
+        /// the gap and then the width; inside, its outer edge is the offset
+        /// in from the element's, and its width lies further in.
+        fn ringGrowth(widths: style.Edges, offset: f32) style.Edges {
+            if (offset < 0) return .all(offset);
+            return .{ .left = offset + widths.left, .right = offset + widths.right, .top = offset + widths.top, .bottom = offset + widths.bottom };
+        }
+
+        fn grownBy(bounds: style.Rect, growth: style.Edges) style.Rect {
             return .{
-                .x = element_bounds.x - left,
-                .y = element_bounds.y - top,
-                .width = element_bounds.width + left + offset + widths.right,
-                .height = element_bounds.height + top + offset + widths.bottom,
+                .x = bounds.x - growth.left,
+                .y = bounds.y - growth.top,
+                .width = bounds.width + growth.left + growth.right,
+                .height = bounds.height + growth.top + growth.bottom,
             };
         }
 
-        /// A square corner stays square, as an outline around a sharp box is.
-        fn outsetBorderRadius(element_radius: style.CornerRadius, widths: style.Edges, offset: f32) style.CornerRadius {
+        /// Each corner parallel to the element's at the ring's distance from
+        /// it, as nested corners are: a chamfer's cut moves (2 − √2) as far
+        /// as a curve's radius. A square corner stays square, as an outline
+        /// around a sharp box is, and a radius shrunk past 0 is square.
+        fn ringRadius(element_radius: style.CornerRadius, growth: style.Edges, shape: style.CornerShape) style.CornerRadius {
+            const radius_per_growth: f32 = if (shape == .chamfer) 2 - std.math.sqrt2 else 1;
             return .{
-                .top_left = outsetCorner(element_radius.top_left, offset + @max(widths.left, widths.top)),
-                .top_right = outsetCorner(element_radius.top_right, offset + @max(widths.right, widths.top)),
-                .bottom_left = outsetCorner(element_radius.bottom_left, offset + @max(widths.left, widths.bottom)),
-                .bottom_right = outsetCorner(element_radius.bottom_right, offset + @max(widths.right, widths.bottom)),
+                .top_left = ringCorner(element_radius.top_left, @max(growth.left, growth.top) * radius_per_growth),
+                .top_right = ringCorner(element_radius.top_right, @max(growth.right, growth.top) * radius_per_growth),
+                .bottom_left = ringCorner(element_radius.bottom_left, @max(growth.left, growth.bottom) * radius_per_growth),
+                .bottom_right = ringCorner(element_radius.bottom_right, @max(growth.right, growth.bottom) * radius_per_growth),
             };
         }
 
-        fn outsetCorner(radius: f32, growth: f32) f32 {
-            return if (radius > 0) radius + growth else 0;
+        fn ringCorner(radius: f32, growth: f32) f32 {
+            return if (radius > 0) @max(radius + growth, 0) else 0;
         }
 
         /// What cuts off the children of a floating element's target. An

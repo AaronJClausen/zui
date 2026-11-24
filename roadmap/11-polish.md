@@ -57,7 +57,7 @@ and each is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:42-scripted-input` Scripted input on the test card | not started |
 | `11-polish:43-test-card-review` The test card's review mode | not started |
 | `11-polish:44-test-card-on-the-web` The test card in the web checks | not started |
-| `11-polish:45-focus-ring-done-right` A focus ring that sits evenly, above its neighbours, only for navigation without a pointer | in progress (slice 2 of 4) |
+| `11-polish:45-focus-ring-done-right` A focus ring that sits evenly, above its neighbours, only for navigation without a pointer | in progress (slice 3 of 4) |
 
 ### The design system
 
@@ -3312,4 +3312,9 @@ step 2) is done: the focused element's border is kept aside
 (`Ui.KeptRing`, in the context) and drawn after the rest of its layer,
 inside the clip and transforms it was declared in; tested in
 `focus_ring.zig` with a hovered sibling declared after the control, a
-clip and a transform. Next: slice 3, corners for any offset.
+clip and a transform. Slice 3 (Plan step 3) is done: a negative offset
+draws the ring inside its control, its radii shrunk to no less than 0,
+and each corner follows the control's at the ring's distance, a
+chamfer's cut by (2 − √2) of it (`ringGrowth`, `ringRadius`); tested at
+offsets −2, 0 and 2 for round, continuous and chamfered corners. Next:
+slice 4, focus visible.

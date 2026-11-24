@@ -1174,7 +1174,12 @@ its element, as a focus ring that must not touch a filled control: its
 each side by the offset and the width, each rounded to whole pixels
 (§13.2), and each rounded corner's radius by the same, so the ring is
 concentric with the element and as far from its fill on every side; a
-square corner stays square. It takes no space and changes no hit
+square corner stays square. A negative offset draws the ring inside the
+element, its outer edge that far in from the element's edge, each radius
+shrunk by the same to no less than 0. A corner keeps its shape and
+follows the element's at the ring's distance, as nested corners do
+(§18.7): `round` and `continuous` radii change by the distance,
+`chamfer` by (2 − √2) times it. It takes no space and changes no hit
 testing, and the clips around the element, its own included, cut it off
 where it passes them. An offset of zero emits the command as before.
 

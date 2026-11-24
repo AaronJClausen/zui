@@ -256,3 +256,42 @@ test "a kept ring is drawn inside the transforms it was declared in" {
     };
     try testing.expectEqual(0, begun);
 }
+
+const ShapedUi = zui.Context(.{ .limits = .{ .max_elements = 32, .max_render_commands = 64 }, .corner_shapes = .initFull() });
+
+fn ringAt(offset: f32, shape: zui.CornerShape, radius: f32) !ShapedUi.RenderCommand {
+    var ui: ShapedUi = try .init(testing.allocator, testing.io);
+    defer ui.deinit(testing.allocator);
+    ui.beginFrame(&recordAt(1));
+    ui.open(.{ .layout = .{ .padding = .{ .left = 20, .top = 10 } } });
+    ui.box(.{
+        .layout = .{ .sizing = .{ .width = .fixed(100), .height = .fixed(40) } },
+        .decoration = .{ .background = .white, .corner_radius = .all(radius), .corner_shape = shape, .border = .{ .color = .black, .widths = .all(2), .offset = offset } },
+    });
+    ui.close();
+    const frame = ui.endFrame();
+    defer ui.release(frame);
+    for (frame.commands()) |command| if (command.payload == .border) return command;
+    return error.CommandNotFound;
+}
+
+test "a ring at offsets -2, 0 and 2 has corners parallel to its control's, round, continuous or chamfered" {
+    const control: zui.Rect = .{ .x = 20, .y = 10, .width = 100, .height = 40 };
+    for ([_]zui.CornerShape{ .round, .continuous, .chamfer }) |shape| {
+        const radius_per_unit: f32 = if (shape == .chamfer) 2 - std.math.sqrt2 else 1;
+        for ([_]f32{ -2, 0, 2 }) |offset| {
+            const ring = try ringAt(offset, shape, 8);
+            const growth: f32 = if (offset > 0) offset + 2 else offset;
+            try testing.expectEqual(zui.Rect{ .x = control.x - growth, .y = control.y - growth, .width = control.width + 2 * growth, .height = control.height + 2 * growth }, ring.bounds);
+            try testing.expectApproxEqAbs(8 + growth * radius_per_unit, ring.payload.border.corner_radius.top_left, 1e-4);
+            try testing.expectEqual(ring.payload.border.corner_radius.top_left, ring.payload.border.corner_radius.bottom_right);
+            try testing.expectEqual(shape, ring.payload.border.corner_shape);
+            try testing.expectEqual(zui.Edges.all(2), ring.payload.border.widths);
+        }
+    }
+}
+
+test "a ring inside its control keeps square corners square and shrinks a small radius to square" {
+    try testing.expectEqual(zui.CornerRadius.zero, (try ringAt(-2, .round, 0)).payload.border.corner_radius);
+    try testing.expectEqual(zui.CornerRadius.zero, (try ringAt(-6, .round, 4)).payload.border.corner_radius);
+}
