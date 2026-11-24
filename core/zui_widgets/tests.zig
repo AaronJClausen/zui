@@ -854,6 +854,8 @@ test "every part and every state reach the skin" {
     _ = try driver.click(&both, Both.declare, SkinnedForm.ids.dropdown);
     _ = try driver.frame(&both, Both.declare, &.{});
     _ = try driver.focus(&both, Both.declare, SkinnedOverlays.ids.anchor);
+    // A key that is not a modifier shows the focus, so the tooltip opens.
+    _ = try driver.pressKeys(&both, Both.declare, &.{.f12});
     both.overlays.open = true;
     _ = try driver.frame(&both, Both.declare, &.{});
     _ = try driver.frame(&both, Both.declare, &.{});
@@ -946,7 +948,7 @@ test "the design skin's focus ring stands apart from every focused control, fill
         fixture.driver.viewport = .{ 800, 1000 };
         _ = try fixture.driver.frame(&form, OnPage.declare, &.{});
         for (focused_controls) |control| {
-            const frame = try fixture.driver.focus(&form, OnPage.declare, control);
+            const frame = try fixture.driver.tabTo(&form, OnPage.declare, control);
             var rings: usize = 0;
             for (frame.commands()) |command| if (command.payload == .border and command.payload.border.color.eql(ring_color)) {
                 rings += 1;

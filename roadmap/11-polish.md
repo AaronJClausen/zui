@@ -57,7 +57,7 @@ and each is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:42-scripted-input` Scripted input on the test card | not started |
 | `11-polish:43-test-card-review` The test card's review mode | not started |
 | `11-polish:44-test-card-on-the-web` The test card in the web checks | not started |
-| `11-polish:45-focus-ring-done-right` A focus ring that sits evenly, above its neighbours, only for navigation without a pointer | in progress (slice 3 of 4) |
+| `11-polish:45-focus-ring-done-right` A focus ring that sits evenly, above its neighbours, only for navigation without a pointer | done |
 
 ### The design system
 
@@ -3298,23 +3298,33 @@ and returns focus to an overlay's opener.
 
 **Spec.** §7, §11.2, §13.2, §18, §19.2.
 
-**Status.** In progress, in four slices. Slice 1 (Plan step 1) is done:
-emission snaps the control first and grows the ring from it by its
-offset and widths rounded to whole pixels, a width to at least one
-(`wholePixels`, `lineWidthsInWholePixels` in `core/src/emission.zig`);
-dividers round their thickness and the border widths they span inside,
-shadows their offset and spread; `Ui.pixelsPerUnit()` lets the scrollbar
-round its thumb's thickness and inset. The corner radii were already
-clamped to snapped bounds. Tests: `core/src/tests/focus_ring.zig`
-(fractional positions and sizes at 1, 1.25, 1.5 and 2 times) and the
-scrollbar's in `core/zui_widgets/containers_tests.zig`. Slice 2 (Plan
-step 2) is done: the focused element's border is kept aside
-(`Ui.KeptRing`, in the context) and drawn after the rest of its layer,
-inside the clip and transforms it was declared in; tested in
-`focus_ring.zig` with a hovered sibling declared after the control, a
-clip and a transform. Slice 3 (Plan step 3) is done: a negative offset
-draws the ring inside its control, its radii shrunk to no less than 0,
-and each corner follows the control's at the ring's distance, a
-chamfer's cut by (2 − √2) of it (`ringGrowth`, `ringRadius`); tested at
-offsets −2, 0 and 2 for round, continuous and chamfered corners. Next:
-slice 4, focus visible.
+**Status.** Done, in four slices. Slice 1: emission snaps the control
+first and grows the ring from it by its offset and widths rounded to
+whole pixels, a width to at least one (`wholePixels`,
+`lineWidthsInWholePixels` in `core/src/emission.zig`); the audit found
+the same flaw in dividers, shadows' offset and spread and the
+scrollbar's thumb, each now rounding its amount (`Ui.pixelsPerUnit()`
+for the widget); the corner radii were already clamped to snapped
+bounds. Slice 2: the focused element's border is kept aside
+(`Ui.KeptRing`) and drawn after the rest of its layer, inside the clip
+and transforms it was declared in. Slice 3: a negative offset draws the
+ring inside its control, and each corner follows the control's at the
+ring's distance, a chamfer's cut by (2 − √2) of it. Slice 4:
+`ui.focusVisible()`, kept from the record's events by the browsers'
+rule; `widgetState` answers `.focused` only while it is on; Escape
+cancels a press, whose release then keeps it; the widgets draw a ring
+only while it is on, but the text field, search field and number
+stepper, which show it however focused; the tooltip shows at once on
+focus only while it is on; `zui_testing.Driver` gains `scale`,
+`pressDirection` and `tabTo`. Tests: `core/src/tests/focus_ring.zig`
+(fractional positions at 1, 1.25, 1.5 and 2 times; a hovered later
+sibling under the ring; clip and transform; offsets −2, 0 and 2, round,
+continuous and chamfered), the scrollbar's in `containers_tests.zig`,
+and *When the focus ring shows* in `inputs_tests.zig` (Tab, a gamepad's
+move, an accessibility action, Space but not Ctrl+S, a click's release,
+a press Escape cancels, hover and the wheel, a text field focused by a
+click); the `glance` audit stays clean. counts, each slice against its
+parent: at most +0.07%, +1.02% (4096 interactive boxes, endFrame),
++0.02% and +0.07%. The tour's cycles print `diagnostics ok: true` on
+raylib and on the native host, and its screenshots match those taken at
+`a0747c6` but for timings.

@@ -254,6 +254,33 @@ pub fn Driver(comptime Ui: type) type {
             return self.frame(app, declare, events[0..count]);
         }
 
+        /// One step of a gamepad's or a remote's directional pad, or of the
+        /// arrow keys, which a host sends alike, as the arrow key:
+        ///
+        /// ```zig
+        /// _ = try driver.pressDirection(&app, App.declare, .down); // the next row, its ring shown
+        /// ```
+        pub fn pressDirection(self: *Self, app: anytype, comptime declare: anytype, direction: zui.NavigationDirection) !*const Ui.Frame {
+            const key: zui.Key = switch (direction) {
+                .left => .left,
+                .right => .right,
+                .up => .up,
+                .down => .down,
+            };
+            return self.pressKeys(app, declare, &.{key});
+        }
+
+        /// Presses Tab, a frame each, until `element_id` has focus, as a
+        /// keyboard user reaches it, so its ring shows; `focus` moves focus
+        /// as the application does, which leaves the ring as it was.
+        pub fn tabTo(self: *Self, app: anytype, comptime declare: anytype, element_id: zui.Id) !*const Ui.Frame {
+            for (0..Ui.limits.max_elements) |_| {
+                const ended = try self.pressKeys(app, declare, &.{.tab});
+                if (self.ui.focused(element_id)) return ended;
+            }
+            return error.NotInTabOrder;
+        }
+
         /// Delivers `text` in frames of at most `limits.max_text_input_bytes`,
         /// split at character boundaries, so nothing is truncated.
         pub fn typeText(self: *Self, app: anytype, comptime declare: anytype, text: []const u8) !*const Ui.Frame {
@@ -277,7 +304,9 @@ pub fn Driver(comptime Ui: type) type {
             return self.frame(app, declare, &.{.{ .action = .{ .target = element_id.hash, .action = requested } }});
         }
 
-        /// Focus moves at the start of the next frame, which this runs.
+        /// Focus moves at the start of the next frame, which this runs, as
+        /// `requestFocus` moves it: whether its ring shows is left as it
+        /// was. `tabTo` shows it.
         pub fn focus(self: *Self, app: anytype, comptime declare: anytype, element_id: zui.Id) !*const Ui.Frame {
             self.ui.requestFocus(element_id);
             return self.frame(app, declare, &.{});

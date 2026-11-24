@@ -399,11 +399,12 @@ test "enter or space on the focused element counts as a click" {
     try finish(&harness);
     ui = try step(&harness, .{}, .{});
     try testing.expect(ui.focused(b));
-    try testing.expectEqual(zui.WidgetState.focused, ui.widgetState(b));
+    try testing.expectEqual(zui.WidgetState.idle, ui.widgetState(b));
     try finish(&harness);
     for ([_]zui.Key{ .enter, .space }) |key| {
         ui = try step(&harness, .{ .keys_pressed = &.{key} }, .{});
         try testing.expect(ui.clicked(b));
+        try testing.expectEqual(zui.WidgetState.focused, ui.widgetState(b));
         try finish(&harness);
     }
 }

@@ -224,7 +224,7 @@ test "an icon button's label is its tooltip" {
     const driver = &fixture.driver;
     var app: Toolbar = .{};
     _ = try driver.frame(&app, Toolbar.declare, &.{});
-    const frame = try driver.focus(&app, Toolbar.declare, Toolbar.close);
+    const frame = try driver.tabTo(&app, Toolbar.declare, Toolbar.close);
     try testing.expectEqualStrings("Close the board", (try nodeOf(frame, Toolbar.bubble(Toolbar.close))).label);
 }
 
@@ -247,7 +247,7 @@ test "a tooltip flips above an anchor at the window's bottom and stays inside it
     const driver = &fixture.driver;
     var app: EdgeTip = .{ .position = .{ 770, 560 } };
     try reducedMotion(driver, &app, EdgeTip.declare);
-    _ = try driver.focus(&app, EdgeTip.declare, EdgeTip.anchor);
+    _ = try driver.tabTo(&app, EdgeTip.declare, EdgeTip.anchor);
     for (0..2) |_| {
         const frame = try driver.frame(&app, EdgeTip.declare, &.{});
         const bubble = frame.rectOf(EdgeTip.anchor.child("tooltip")).?;

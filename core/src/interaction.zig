@@ -447,10 +447,13 @@ pub fn Contact(comptime max_chain: usize, comptime has_gestures: bool) type {
         lifted: bool,
         /// The element the secondary button's press began on, or 0.
         secondary_target: u64,
+        /// Escape cancelled its primary press, so its release neither
+        /// clicks nor hides the focus.
+        press_cancelled: bool,
         gesture: if (has_gestures) PointerGesture else void,
 
         pub fn init(pointer: input.Pointer) Self {
-            return .{ .pointer = pointer, .buttons = .initEmpty(), .press_target = 0, .press_order = 0, .hover_stale = false, .hover_chain = undefined, .hover_count = 0, .lifted = false, .secondary_target = 0, .gesture = if (has_gestures) .pressedAt(pointer) else {} };
+            return .{ .pointer = pointer, .buttons = .initEmpty(), .press_target = 0, .press_order = 0, .hover_stale = false, .hover_chain = undefined, .hover_count = 0, .lifted = false, .secondary_target = 0, .press_cancelled = false, .gesture = if (has_gestures) .pressedAt(pointer) else {} };
         }
 
         pub fn hovers(self: *const Self) bool {
@@ -551,6 +554,9 @@ pub fn State(comptime max_contacts: u8, comptime max_chain: usize, comptime max_
 
         focus: u64,
         pending_focus: ?u64,
+        /// The last input was one that navigates without a pointer, so the
+        /// focused element shows its ring.
+        focus_visible: bool,
 
         pub fn reset(self: *Self) void {
             self.contacts = @splat(null);
@@ -562,6 +568,7 @@ pub fn State(comptime max_contacts: u8, comptime max_chain: usize, comptime max_
             self.drags_active = false;
             self.focus = 0;
             self.pending_focus = null;
+            self.focus_visible = false;
             self.clearFrameEvents();
         }
 

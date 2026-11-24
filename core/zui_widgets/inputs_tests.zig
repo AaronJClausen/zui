@@ -1090,6 +1090,155 @@ test "a pressed toggle's thumb widens toward its travel, and the switch reports 
 }
 
 // =============================================================
+// When the focus ring shows
+// =============================================================
+
+const Ringed = struct {
+    const save: zui.Id = .of("save");
+    const share: zui.Id = .of("share");
+    const note: zui.Id = .of("note");
+
+    note_bytes: [16]u8 = undefined,
+    note_text: zui_widgets.EditableText = undefined,
+    saves: u32 = 0,
+
+    fn init(app: *Ringed) void {
+        app.note_text = .init(&app.note_bytes, "");
+    }
+
+    fn declare(app: *Ringed, ui: *Ui) void {
+        ui.open(.{ .layout = .{ .direction = .top_to_bottom, .padding = .all(20), .child_gap = 20 } });
+        if (widgets.button(ui, save, "Save", .{})) app.saves += 1;
+        _ = widgets.button(ui, share, "Share", .{});
+        _ = widgets.textField(ui, note, &app.note_text, .{ .label = "Note" });
+        ui.close();
+    }
+
+    fn ringed(ui: *const Ui, frame: anytype, id: zui.Id) bool {
+        const drawn = borderOf(frame, id) orelse return false;
+        const part: zui_widgets.Part = if (id.hash == note.hash) .text_field else .button;
+        const ring = widgets.style(ui, part, .focused).focus_ring.?;
+        return drawn.color.eql(ring.color) and std.meta.eql(drawn.widths, ring.widths);
+    }
+
+    fn start(fixture: *Fixture(Ui), app: *Ringed) !void {
+        try fixture.init();
+        app.init();
+        _ = try fixture.driver.frame(app, declare, &.{});
+    }
+
+    fn pointerAt(driver: anytype, id: zui.Id) !zui.Pointer {
+        return .{ .id = .mouse, .kind = .mouse, .position = try driver.pointOn(id, .{ 0.5, 0.5 }), .at = driver.now };
+    }
+};
+
+test "the ring shows after Tab, a gamepad's move and an accessibility action, and not after a click" {
+    var fixture: Fixture(Ui) = .{};
+    var app: Ringed = .{};
+    try Ringed.start(&fixture, &app);
+    defer fixture.deinit();
+    const driver = &fixture.driver;
+
+    var frame = try driver.pressKeys(&app, Ringed.declare, &.{.tab});
+    try testing.expect(fixture.ui.focused(Ringed.save));
+    try testing.expect(Ringed.ringed(&fixture.ui, frame, Ringed.save));
+    try testing.expectEqual(zui.WidgetState.focused, fixture.ui.widgetState(Ringed.save));
+
+    frame = try driver.click(&app, Ringed.declare, Ringed.share);
+    try testing.expect(fixture.ui.focused(Ringed.share));
+    try testing.expect(!fixture.ui.focusVisible());
+    try testing.expect(!Ringed.ringed(&fixture.ui, frame, Ringed.share));
+
+    frame = try driver.pressDirection(&app, Ringed.declare, .down);
+    try testing.expect(Ringed.ringed(&fixture.ui, frame, Ringed.share));
+
+    _ = try driver.click(&app, Ringed.declare, Ringed.share);
+    frame = try driver.action(&app, Ringed.declare, Ringed.save, .focus);
+    try testing.expect(fixture.ui.focused(Ringed.save));
+    try testing.expect(Ringed.ringed(&fixture.ui, frame, Ringed.save));
+}
+
+test "Space on a clicked button shows its ring, and Ctrl+S does not" {
+    var fixture: Fixture(Ui) = .{};
+    var app: Ringed = .{};
+    try Ringed.start(&fixture, &app);
+    defer fixture.deinit();
+    const driver = &fixture.driver;
+
+    _ = try driver.click(&app, Ringed.declare, Ringed.save);
+    try testing.expectEqual(1, app.saves);
+    driver.modifiers = .{ .control = true };
+    var frame = try driver.pressKeys(&app, Ringed.declare, &.{.s});
+    try testing.expect(!Ringed.ringed(&fixture.ui, frame, Ringed.save));
+    frame = try driver.pressKeys(&app, Ringed.declare, &.{.control});
+    try testing.expect(!Ringed.ringed(&fixture.ui, frame, Ringed.save));
+    driver.modifiers = .{};
+    frame = try driver.pressKeys(&app, Ringed.declare, &.{.shift});
+    try testing.expect(!Ringed.ringed(&fixture.ui, frame, Ringed.save));
+
+    frame = try driver.pressKeys(&app, Ringed.declare, &.{.space});
+    try testing.expectEqual(2, app.saves);
+    try testing.expect(Ringed.ringed(&fixture.ui, frame, Ringed.save));
+}
+
+test "a click's release hides the ring, its press does not, and a press Escape cancels keeps it" {
+    var fixture: Fixture(Ui) = .{};
+    var app: Ringed = .{};
+    try Ringed.start(&fixture, &app);
+    defer fixture.deinit();
+    const driver = &fixture.driver;
+
+    _ = try driver.pressKeys(&app, Ringed.declare, &.{.tab});
+    const on_save = try Ringed.pointerAt(driver, Ringed.save);
+    var frame = try driver.frame(&app, Ringed.declare, &.{ .{ .pointer_move = .{ .pointer = on_save } }, .{ .pointer_down = .{ .pointer = on_save } } });
+    try testing.expect(fixture.ui.pressed(Ringed.save));
+    try testing.expect(Ringed.ringed(&fixture.ui, frame, Ringed.save));
+
+    frame = try driver.pressKeys(&app, Ringed.declare, &.{.escape});
+    try testing.expect(!fixture.ui.pressed(Ringed.save));
+    frame = try driver.frame(&app, Ringed.declare, &.{.{ .pointer_up = .{ .pointer = on_save } }});
+    try testing.expectEqual(0, app.saves);
+    try testing.expect(Ringed.ringed(&fixture.ui, frame, Ringed.save));
+
+    frame = try driver.click(&app, Ringed.declare, Ringed.save);
+    try testing.expectEqual(1, app.saves);
+    try testing.expect(fixture.ui.focused(Ringed.save));
+    try testing.expect(!Ringed.ringed(&fixture.ui, frame, Ringed.save));
+}
+
+test "a focused control keeps its ring while hovered, the hover's fill drawn with it" {
+    var fixture: Fixture(Ui) = .{};
+    var app: Ringed = .{};
+    try Ringed.start(&fixture, &app);
+    defer fixture.deinit();
+    const driver = &fixture.driver;
+
+    _ = try driver.pressKeys(&app, Ringed.declare, &.{.tab});
+    const frame = try driver.hover(&app, Ringed.declare, Ringed.save);
+    try testing.expectEqual(zui.WidgetState.hovered, fixture.ui.widgetState(Ringed.save));
+    try testing.expect(Ringed.ringed(&fixture.ui, frame, Ringed.save));
+    try testing.expectEqual(widgets.style(&fixture.ui, .button, .hovered).background.?, rectangleOf(frame, Ringed.save).?.color);
+
+    const wheel = try driver.frame(&app, Ringed.declare, &.{.{ .wheel = .{ .position = try driver.pointOn(Ringed.save, .{ 0.5, 0.5 }), .delta = .{ 0, 40 }, .at = driver.now } }});
+    try testing.expect(Ringed.ringed(&fixture.ui, wheel, Ringed.save));
+}
+
+test "a text field shows its ring however it was focused, a click too" {
+    var fixture: Fixture(Ui) = .{};
+    var app: Ringed = .{};
+    try Ringed.start(&fixture, &app);
+    defer fixture.deinit();
+    const driver = &fixture.driver;
+
+    _ = try driver.click(&app, Ringed.declare, Ringed.note);
+    const frame = try driver.frame(&app, Ringed.declare, &.{.{ .pointer_leave = .mouse }});
+    try testing.expect(fixture.ui.focused(Ringed.note));
+    try testing.expect(!fixture.ui.focusVisible());
+    try testing.expect(Ringed.ringed(&fixture.ui, frame, Ringed.note));
+    try testing.expectEqual(zui.WidgetState.idle, fixture.ui.widgetState(Ringed.note));
+}
+
+// =============================================================
 // Every component, under review
 // =============================================================
 

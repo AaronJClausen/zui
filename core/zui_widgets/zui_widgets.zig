@@ -1900,7 +1900,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                 .focusable = true,
                 .cursor = .pointer,
                 .semantics = .{ .role = .button, .label = content, .state = .{ .expanded = expanded.* } },
-                .decoration = decorationOf(header, ui.focused(id)),
+                .decoration = decorationOf(header, focusShown(ui, id)),
                 .layout = .{
                     .sizing = .{ .width = .grow, .height = .fixed(header.size[1]) },
                     .padding = header.padding,
@@ -1984,7 +1984,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                 .disabled = options.disabled,
                 .cursor = if (options.disabled) null else .pointer,
                 .semantics = .{ .role = .button, .label = content },
-                .decoration = decorationOf(look, ui.focused(id)),
+                .decoration = decorationOf(look, focusShown(ui, id)),
                 .effects = if (scale != 1) &effects else null,
                 .layout = .{
                     .sizing = .{ .width = width, .height = .fixed(control.size[1]) },
@@ -2035,7 +2035,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                 .layout = .{ .sizing = .{ .width = .fitBetween(row.size[0], std.math.inf(f32)), .height = .fixed(row.size[1]) }, .child_gap = row.gap, .child_alignment = .{ .y = .center } },
             });
             ui.open(.{
-                .decoration = decorationOf(box, ui.focused(id)),
+                .decoration = decorationOf(box, focusShown(ui, id)),
                 .layout = .{
                     .sizing = .{ .width = .fixed(box.size[0]), .height = .fixed(box.size[1]) },
                     .child_alignment = .{ .x = .center, .y = .center },
@@ -2163,7 +2163,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                     .value = .{ .range = .{ .value = current, .min = options.min, .max = options.max, .step = key_step } },
                     .actions = .initOne(.adjust),
                 },
-                .decoration = .{ .border = if (ui.focused(id)) thumb.focus_ring else null, .corner_radius = thumb.corner_radius, .corner_shape = thumb.corner_shape },
+                .decoration = .{ .border = if (focusShown(ui, id)) thumb.focus_ring else null, .corner_radius = thumb.corner_radius, .corner_shape = thumb.corner_shape },
                 .layout = .{ .sizing = .{ .width = options.width, .height = .fixed(self.style(ui, .slider, state).size[1]) }, .child_alignment = .{ .y = .center } },
             });
             // The grow weights split the track's free space at the value,
@@ -2325,7 +2325,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
         };
 
         fn editableLine(self: Self, ui: *Ui, id: zui.Id, text: *EditableText, options: Line) TextFieldResult {
-            const state = stateOf(ui, id, options.disabled);
+            const state = textEntryStateOf(ui, id, options.disabled);
             const field = self.style(ui, options.field, state);
             const caret_look = self.style(ui, .text_field_caret, state);
             const clear_id = id.child("clear");
@@ -2533,7 +2533,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                 .disabled = options.disabled,
                 .cursor = if (options.disabled) null else .pointer,
                 .semantics = .{ .role = .combo_box, .label = options.label, .value = .{ .text = selected_label }, .state = .{ .expanded = popup.open } },
-                .decoration = decorationOf(look, ui.focused(id)),
+                .decoration = decorationOf(look, focusShown(ui, id)),
                 .layout = .{
                     .sizing = .{ .width = width, .height = .fixed(look.size[1]) },
                     .padding = look.padding,
@@ -2582,7 +2582,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                     .focusable = true,
                     .cursor = .pointer,
                     .semantics = .{ .role = .option, .label = option_label, .state = .{ .selected = index == selected } },
-                    .decoration = decorationOf(option, ui.focused(option_id)),
+                    .decoration = decorationOf(option, focusShown(ui, option_id)),
                     .layout = .{
                         .sizing = .{ .width = .grow, .height = .fixed(option.size[1]) },
                         .padding = option.padding,
@@ -2648,7 +2648,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                 .focusable = interactive,
                 .cursor = if (interactive) .pointer else null,
                 .semantics = if (interactive) .{ .role = .button, .label = options.label } else null,
-                .decoration = decorationOf(look, interactive and ui.focused(id)),
+                .decoration = decorationOf(look, interactive and focusShown(ui, id)),
                 .effects = if (look.shadow != null or scale != 1) &effects else null,
                 .layout = .{
                     .direction = .top_to_bottom,
@@ -2776,7 +2776,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                 .focusable = overflows,
                 .scroll = .{ .horizontal = axes[0], .vertical = axes[1] },
                 .semantics = .{ .role = .scroll_area, .label = options.label },
-                .decoration = .{ .border = if (ui.focused(id)) look.focus_ring else null, .corner_radius = look.corner_radius, .corner_shape = look.corner_shape },
+                .decoration = .{ .border = if (focusShown(ui, id)) look.focus_ring else null, .corner_radius = look.corner_radius, .corner_shape = look.corner_shape },
                 .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = options.width, .height = options.height } },
             });
             ui.open(.{
@@ -3088,7 +3088,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                     .focusable = is_selected,
                     .cursor = .pointer,
                     .semantics = .{ .role = .radio, .label = tab_label, .state = .{ .checked = is_selected, .selected = is_selected } },
-                    .decoration = decorationOf(look, ui.focused(tab_id)),
+                    .decoration = decorationOf(look, focusShown(ui, tab_id)),
                     .layout = .{ .sizing = .{ .height = .fixed(look.size[1]) }, .padding = look.padding, .child_alignment = .{ .x = .center, .y = .center } },
                 });
                 ui.text(tab_label, singleLine(look.text));
@@ -3199,7 +3199,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                     .focusable = focusable_row == index,
                     .cursor = .pointer,
                     .semantics = .{ .role = .option, .label = item.label, .state = .{ .selected = is_selected } },
-                    .decoration = decorationOf(look, ui.focused(row_id)),
+                    .decoration = decorationOf(look, focusShown(ui, row_id)),
                     .layout = .{
                         .sizing = .{ .width = .grow, .height = .fixed(look.size[1]) },
                         .padding = look.padding,
@@ -3306,7 +3306,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                 .focusable = true,
                 .cursor = .pointer,
                 .semantics = .{ .role = .link, .label = accessible_name },
-                .decoration = decorationOf(look, ui.focused(crumb_id)),
+                .decoration = decorationOf(look, focusShown(ui, crumb_id)),
                 .layout = .{
                     .sizing = .{ .width = .fitBetween(look.size[1], std.math.inf(f32)), .height = .fixed(look.size[1]) },
                     .padding = look.padding,
@@ -3382,7 +3382,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                     .disabled = options.disabled,
                     .cursor = if (options.disabled) null else .pointer,
                     .semantics = .{ .role = .radio, .label = option_label, .state = .{ .checked = is_selected } },
-                    .decoration = .{ .border = if (ui.focused(option_id)) row.focus_ring else null, .corner_radius = row.corner_radius, .corner_shape = row.corner_shape },
+                    .decoration = .{ .border = if (focusShown(ui, option_id)) row.focus_ring else null, .corner_radius = row.corner_radius, .corner_shape = row.corner_shape },
                     .layout = .{
                         .sizing = .{ .width = .fitBetween(row.size[0], std.math.inf(f32)), .height = .fixed(row.size[1]) },
                         .child_gap = row.gap,
@@ -3460,7 +3460,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                     .focusable = is_selected,
                     .cursor = .pointer,
                     .semantics = .{ .role = .radio, .label = segment_label, .state = .{ .checked = is_selected, .selected = is_selected } },
-                    .decoration = decorationOf(look, ui.focused(segment_id)),
+                    .decoration = decorationOf(look, focusShown(ui, segment_id)),
                     .layout = .{ .sizing = .{ .height = .fixed(look.size[1]) }, .padding = look.padding, .child_alignment = .{ .x = .center, .y = .center } },
                 });
                 ui.text(segment_label, singleLine(look.text));
@@ -3563,7 +3563,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
             }
             const current: f64 = numberToFloat(value.*);
 
-            const state = stateOf(ui, id, options.disabled);
+            const state = textEntryStateOf(ui, id, options.disabled);
             const container = self.style(ui, .number_stepper, state);
             const shown = self.style(ui, .number_stepper_value, state);
             const value_style = singleLine(shown.text);
@@ -3690,7 +3690,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                 .disabled = options.disabled,
                 .cursor = if (options.disabled) null else .pointer,
                 .semantics = .{ .role = .button, .label = options.label },
-                .decoration = decorationOf(look, ui.focused(id)),
+                .decoration = decorationOf(look, focusShown(ui, id)),
                 .effects = if (scale != 1) &effects else null,
                 .layout = .{ .sizing = .{ .width = .fixed(control.size[1]), .height = .fixed(control.size[1]) }, .child_alignment = .{ .x = .center, .y = .center } },
             });
@@ -3720,7 +3720,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                 .focusable = true,
                 .cursor = .pointer,
                 .semantics = .{ .role = .link, .label = content, .value = .{ .text = url } },
-                .decoration = .{ .border = if (ui.focused(id)) look.focus_ring else null, .corner_radius = look.corner_radius, .corner_shape = look.corner_shape },
+                .decoration = .{ .border = if (focusShown(ui, id)) look.focus_ring else null, .corner_radius = look.corner_radius, .corner_shape = look.corner_shape },
                 .layout = .{
                     .direction = .top_to_bottom,
                     .sizing = .{ .height = .fitBetween(look.size[1], std.math.inf(f32)) },
@@ -3790,7 +3790,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                     .state = .{ .checked = if (options.selected != null) is_selected else null },
                     .actions = if (options.closable) .initOne(.dismiss) else .initEmpty(),
                 },
-                .decoration = decorationOf(look, ui.focused(id)),
+                .decoration = decorationOf(look, focusShown(ui, id)),
                 .layout = .{
                     .sizing = .{ .height = .fixed(look.size[1]) },
                     .padding = look.padding,
@@ -3863,7 +3863,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
             });
             if (content.len != 0) ui.text(content, singleLine(row.text));
             ui.open(.{
-                .decoration = decorationOf(track, ui.focused(id)),
+                .decoration = decorationOf(track, focusShown(ui, id)),
                 .layout = .{ .sizing = .{ .width = .fixed(track.size[0]), .height = .fixed(track.size[1]) } },
             });
             const effects: Ui.Effects = .{ .shadow = thumb.shadow };
@@ -3888,9 +3888,6 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
         const TooltipState = struct {
             waiting: bool,
             shown: bool,
-            /// Focus came with a press, so the tooltip shows only while
-            /// hovered.
-            pointer_focus: bool,
             escaped: bool,
             hovered_since: zui.Instant,
         };
@@ -3900,8 +3897,8 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
 
         /// `content` beside `anchor_id`, an element declared before it:
         /// after half a second of hover, at once when another tooltip closed
-        /// within the last 0.3 s, and at once when the anchor takes focus
-        /// other than by a press. It takes no pointer, and Escape hides it
+        /// within the last 0.3 s, and at once while the anchor has focus and
+        /// the focus is shown (`ui.focusVisible`). It takes no pointer, and Escape hides it
         /// until the pointer and the focus leave. While one is due, an idle
         /// application asks only for a frame at the instant it is.
         ///
@@ -3914,13 +3911,8 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
             const tip = ui.state(bubble_id, TooltipState);
             const warmth = ui.state(tooltip_warmth_id, TooltipWarmth);
             const now = ui.now();
-            const focused = ui.focused(anchor_id);
-            const pressed = ui.pressed(anchor_id);
-            if (pressed or ui.clicked(anchor_id)) {
-                tip.pointer_focus = true;
-            } else if (!focused) tip.pointer_focus = false;
-            const hovering = ui.hovered(anchor_id) and !pressed;
-            const keyboard_focus = focused and !tip.pointer_focus;
+            const hovering = ui.hovered(anchor_id) and !ui.pressed(anchor_id);
+            const keyboard_focus = focusShown(ui, anchor_id);
             if (!hovering and !keyboard_focus) {
                 tip.escaped = false;
             } else if (ui.keyPressed(.escape)) tip.escaped = true;
@@ -4243,7 +4235,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                 .disabled = options.disabled,
                 .cursor = if (options.disabled) null else .pointer,
                 .semantics = .{ .role = .menu_item, .label = content, .state = .{ .checked = options.checked } },
-                .decoration = decorationOf(look, ui.focused(item_id)),
+                .decoration = decorationOf(look, focusShown(ui, item_id)),
                 .layout = .{
                     .sizing = .{ .width = .grow, .height = .fixed(look.size[1]) },
                     .padding = look.padding,
@@ -4487,7 +4479,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                 .cursor = .pointer,
                 .semantics = .{ .role = .button, .label = "Close" },
                 .floating = .{ .attach_to = .parent, .anchor = corner, .attach_point = corner, .offset = .{ inward, close.padding.top }, .z = layer },
-                .decoration = decorationOf(close, ui.focused(close_id)),
+                .decoration = decorationOf(close, focusShown(ui, close_id)),
                 .layout = .{ .sizing = .{ .width = .fixed(close.size[1]), .height = .fixed(close.size[1]) }, .child_alignment = .{ .x = .center, .y = .center } },
             });
             self.icon(ui, .close, close);
@@ -4609,7 +4601,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                 .focusable = true,
                 .cursor = .pointer,
                 .semantics = .{ .role = .button, .label = content },
-                .decoration = .{ .border = if (ui.focused(action_id)) look.focus_ring else null, .corner_radius = look.corner_radius, .corner_shape = look.corner_shape },
+                .decoration = .{ .border = if (focusShown(ui, action_id)) look.focus_ring else null, .corner_radius = look.corner_radius, .corner_shape = look.corner_shape },
                 .layout = .{ .direction = .top_to_bottom, .sizing = .{ .height = .fitBetween(look.size[1], std.math.inf(f32)) }, .child_alignment = .{ .y = .center } },
             });
             ui.text(content, singleLine(look.text));
@@ -4808,6 +4800,20 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
             var single_line = text_style;
             single_line.wrap = .none;
             return single_line;
+        }
+
+        /// A control's ring shows while it has focus and the focus is to be
+        /// shown; one that takes typed text calls `ui.focused` instead, as
+        /// its ring shows however it was focused.
+        fn focusShown(ui: *const Ui, id: zui.Id) bool {
+            return ui.focused(id) and ui.focusVisible();
+        }
+
+        /// A control that takes typed text looks focused however it was
+        /// focused, while the pointer is not on it.
+        fn textEntryStateOf(ui: *const Ui, id: zui.Id, disabled: bool) zui.WidgetState {
+            const own = stateOf(ui, id, disabled);
+            return if (own == .idle and ui.focused(id)) .focused else own;
         }
 
         fn decorationOf(look: SkinStyle, focused: bool) Ui.Decoration {

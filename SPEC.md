@@ -1285,6 +1285,7 @@ pub fn rectOf(self: *const Self, id: Id) ?Rect                  // as laid out l
 pub fn pointerLocal(self: *const Self, id: Id) ?[2]f32          // the primary pointer, from the element's top-left
 pub fn requestFocus(self: *Self, id: Id) void                  // .none leaves no element focused
 pub fn focusedId(self: *const Self) Id                          // .none when nothing is focused
+pub fn focusVisible(self: *const Self) bool                     // the focused element shows its ring (§11.2)
 
 pub fn primaryPointer(self: *const Self) ?Pointer               // the mouse, or the first touch still down
 pub fn keyPressed(self: *const Self, key: Key) bool
@@ -1305,14 +1306,15 @@ pub fn measureText(self: *Self, content: []const u8, style: TextStyle) [2]f32   
 - **Press and click** go to the hot element. A click is a press and a
   release on the same element by the same pointer, and lasts one frame.
   `pressed` is true while any pointer whose press began on the element
-  is down.
+  is down. Escape ends every press still down without a click.
 - **Keyboard and accessibility activation.** Enter or Space on the
   focused element, and an `invoke` action naming the element, also count
   as `clicked`, so everything clickable works without a pointer.
 - **`widgetState`** is `.disabled`, `.pressed`, `.hovered`, `.focused`
-  or `.idle`, checked in that order. Skins index it with
-  `std.EnumArray`, so a new state is a compile error in every skin until
-  it is handled.
+  or `.idle`, checked in that order, and `.focused` only while
+  `focusVisible` (§11.2): a control a click focused is `.idle` once the
+  pointer leaves it. Skins index it with `std.EnumArray`, so a new state
+  is a compile error in every skin until it is handled.
 - **The answers come from a compact copy** of the previous frame's
   rectangles, hit regions and tab order, kept in the `Context` so they
   survive `frames_in_flight = 1`.
@@ -1325,6 +1327,26 @@ move in declaration order among focusable, enabled elements, and a
 `focus_scope` keeps focus inside its descendants. `requestFocus` takes
 effect at the next `beginFrame`. `focusedId` names the focused element,
 so an overlay can give focus back to what had it when it closes.
+
+`focusVisible` says whether the focused element shows its ring, as
+browsers decide `:focus-visible`, from the record's events: the kind of
+input decides, not the device. It turns on at an input that navigates
+without a pointer, Tab and Shift-Tab, an arrow, a gamepad's or a
+remote's directional pad, which a host sends as the arrow keys, and an
+accessibility action that moves focus, and at any other key but a
+modifier alone or one pressed with Ctrl, Alt or the system key held, so
+Space on a clicked button shows its ring and a shortcut does not. It
+turns off at a pointer's release, a click or a tap, not its press, and a
+press that Escape cancelled leaves it on. Hover, the wheel and
+`requestFocus` leave it as it is; it is off until the first such input.
+A focused control keeps its ring while hovered or pressed, its state's
+fill and the ring drawn together, and a control that takes typed text
+shows its ring however it was focused. A custom control follows the same
+rule:
+
+```zig
+.border = if (ui.focused(id) and ui.focusVisible()) focus_ring else null,
+```
 
 ### 11.3 Intents
 
@@ -2369,8 +2391,11 @@ icons, and no other `zui`-prefixed declaration.
   the context's color and font types. Each `Part` reads only the fields
   its doc comment lists.
 - **The focus ring is `Style.focus_ring`.** It is drawn in place of the
-  border while the element has keyboard focus, which it keeps while
-  hovered or pressed, so it is a field and not a state.
+  border while the element has focus and `focusVisible` (§11.2), which
+  it keeps while hovered or pressed, so it is a field and not a state. A
+  control that takes typed text (a text field, a search field, a number
+  stepper) draws it whenever focused, and takes the `.focused` style
+  then while the pointer is not on it.
 - **A skin of data** holds its tables and returns from them:
   `parts: std.EnumArray(Part, std.EnumArray(WidgetState, Style(Ui)))`
   answers `return skin.parts.get(part).get(state);`. A theme pack
@@ -2611,11 +2636,11 @@ const look = tokens.look(Chip, .container, ui.widgetState(id));
 - **States** come from the resolver's state layers: hovered, pressed,
   focused and disabled are derived from the part's roles, and the focus
   ring is the `focus` role, drawn in place of the outline of a part with
-  a `target` while it is focused, `focus_ring_offset` outside the part's
-  edge (`Border.offset`), so the surface around the part shows between
-  them and the ring stands apart from a filled control. A part may give
-  a state its own colors with `.states = .{ .pressed = .{ ... } }`, read
-  in that state's layer.
+  a `target` while its focus is shown, `focus_ring_offset` outside the
+  part's edge (`Border.offset`), so the surface around the part shows
+  between them and the ring stands apart from a filled control. A part
+  may give a state its own colors with
+  `.states = .{ .pressed = .{ ... } }`, read in that state's layer.
 - **`zuiDistinguish`** lists the pairs of parts that must look
   different, as a checked and an unchecked box are parts of their own
   (§16.7); `.{ .part, .idle, .hovered }` pairs one part in two states.
@@ -3193,12 +3218,12 @@ such as one the application asked for, is not drawn and is counted in
 
 What floats over the page is declared after what it floats beside. A
 tooltip shows after 0.5 s of hover, at once within 0.3 s of another
-closing, and at once on focus not given by a press; an icon button's
-label is its tooltip. A menu opens from its anchor, or as a context menu
-at the pointer when `contextRequested` answers for its region, focusing
-its first item; its items take a shortcut, an icon, a check and the
-danger colors, the arrows, Home and End move through them past the
-disabled ones, and a letter jumps to the next item it starts.
+closing, and at once while its anchor's focus is shown (§11.2); an icon
+button's label is its tooltip. A menu opens from its anchor, or as a
+context menu at the pointer when `contextRequested` answers for its
+region, focusing its first item; its items take a shortcut, an icon, a
+check and the danger colors, the arrows, Home and End move through them
+past the disabled ones, and a letter jumps to the next item it starts.
 Breadcrumbs past four fold their middle crumbs into such a menu. A
 popover opens below, above or beside its anchor and flips to the
 opposite side where the window has no room, kept inside it along the

@@ -1874,6 +1874,8 @@ pub fn Context(comptime config: Config) type {
                     const hot = self.refreshHover(contact);
                     contact.buttons.remove(up.button);
                     if (up.button == .primary) {
+                        if (!contact.press_cancelled) input_state.focus_visible = false;
+                        contact.press_cancelled = false;
                         if (features.gestures and contact.gesture.held()) input_state.recognize(contact.gesture.recognizer, event);
                         if (features.gestures and !contact.gesture.held() and contact.gesture.long_press_owner != 0 and !up.pointer.at.isBefore(contact.gesture.longPressDue())) self.longPress(contact);
                         const claimed = features.gestures and contact.gesture.claimed();
@@ -1907,10 +1909,12 @@ pub fn Context(comptime config: Config) type {
                 .key_down => |key_event| {
                     input_state.key_events[input_state.key_event_count] = key_event;
                     input_state.key_event_count += 1;
+                    if (showsFocus(key_event)) input_state.focus_visible = true;
                     switch (key_event.key) {
                         .tab => input_state.focus = results.nextFocus(input_state.focus, !key_event.modifiers.shift),
                         .enter, .space => if (input_state.focus != 0) input_state.addClick(input_state.focus),
                         .menu => if (input_state.focus != 0) input_state.addContextRequest(input_state.focus),
+                        .escape => cancelPresses(input_state),
                         else => {},
                     }
                 },
@@ -1936,6 +1940,29 @@ pub fn Context(comptime config: Config) type {
             for (&input_state.contacts) |*slot| {
                 if (slot.*) |*contact| if (contact.hover_stale) {
                     _ = self.refreshHover(contact);
+                };
+            }
+        }
+
+        /// A key that navigates, or any key but a modifier pressed without
+        /// Ctrl, Alt or the system key held: Space on a clicked button
+        /// shows its ring, a shortcut does not.
+        fn showsFocus(key_event: input.KeyEvent) bool {
+            switch (key_event.key) {
+                .tab => return true,
+                .shift, .control, .alt, .super, .caps_lock => return false,
+                else => {},
+            }
+            const held = key_event.modifiers;
+            return !(held.control or held.alt or held.super);
+        }
+
+        /// Escape ends every primary press without a click.
+        fn cancelPresses(input_state: *InputState) void {
+            for (&input_state.contacts) |*slot| {
+                if (slot.*) |*contact| if (contact.buttons.contains(.primary)) {
+                    contact.press_target = 0;
+                    contact.press_cancelled = true;
                 };
             }
         }
@@ -2009,6 +2036,7 @@ pub fn Context(comptime config: Config) type {
             input_state.presses_begun += 1;
             contact.press_order = input_state.presses_begun;
             contact.press_target = 0;
+            contact.press_cancelled = false;
             input_state.focus = 0;
             const region = results.regions[hot orelse return];
             if (region.flags.disabled) return;
@@ -2029,6 +2057,7 @@ pub fn Context(comptime config: Config) type {
                 .invoke => if (flags.interactive) input_state.addClick(target),
                 .focus => if (results.isFocusable(target)) {
                     input_state.focus = target;
+                    input_state.focus_visible = true;
                 },
                 .show_menu => if (flags.interactive) input_state.addContextRequest(target),
                 .scroll => |delta| self.scrollByAction(target, delta),
@@ -2721,12 +2750,30 @@ pub fn Context(comptime config: Config) type {
             self.requestFrame();
         }
 
+        /// `.focused` only while the focus is shown (`focusVisible`): a
+        /// control a click focused is `.idle` once the pointer leaves it.
         pub fn widgetState(self: *const Self, element_id: Id) interaction.WidgetState {
             if (self.memory.results.regionFlags(element_id.hash).disabled) return .disabled;
             if (self.pressed(element_id)) return .pressed;
             if (self.hovered(element_id)) return .hovered;
-            if (self.focused(element_id)) return .focused;
+            if (self.focused(element_id) and self.focusVisible()) return .focused;
             return .idle;
+        }
+
+        /// Whether the focused element is to show its ring, as browsers
+        /// decide `:focus-visible`: on at Tab, an arrow or any key pressed
+        /// without Ctrl, Alt or the system key, from a keyboard, a gamepad
+        /// or a remote alike, and at an accessibility action that moves
+        /// focus; off at a pointer's release, unless Escape cancelled its
+        /// press. Hover, the wheel and `requestFocus` leave it as it is. A
+        /// custom control draws its ring as the widgets do; one that takes
+        /// typed text shows it whenever `focused`.
+        ///
+        /// ```zig
+        /// .border = if (ui.focused(id) and ui.focusVisible()) focus_ring else null,
+        /// ```
+        pub fn focusVisible(self: *const Self) bool {
+            return self.memory.input.focus_visible;
         }
 
         /// The element's rectangle in the previous frame.

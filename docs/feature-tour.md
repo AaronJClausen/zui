@@ -847,7 +847,7 @@ fn toolButton(ui: *Ui, id: zui.Id, label: []const u8, enabled: bool) bool {
         .layout = .{ .padding = .symmetric(12, 6), .child_alignment = .{ .y = .center } },
         .decoration = .{
             .background = tool_colors.get(state),
-            .border = if (ui.focused(id)) .{ .color = .rgb(0xffc65c), .widths = .all(2) } else null,
+            .border = if (ui.focused(id) and ui.focusVisible()) .{ .color = .rgb(0xffc65c), .widths = .all(2), .offset = 2 } else null,
             .corner_radius = .all(5),
         },
     });
@@ -871,6 +871,19 @@ adds Enter and Space activation on top of this.
 `focusable` puts an element in the tab order, which follows declaration
 order. `focus_scope` keeps Tab cycling inside a subtree, as a dialog
 needs. `requestFocus` moves focus programmatically.
+
+The focus ring shows only for navigation without a pointer, as browsers
+decide `:focus-visible`: `ui.focusVisible()` turns on at Tab, an arrow
+or a gamepad's directional pad, an accessibility action that moves
+focus, or any key but a shortcut, so Space on a clicked button shows its
+ring and Ctrl+S does not; a pointer's release turns it off. A focused
+control keeps its ring while hovered or pressed, and a text field shows
+it however it was focused. `widgetState` answers `.focused` only while
+it is on, and a custom control asks for it beside `focused`, as the
+button above does. The ring is drawn after the rest of its layer, so a
+later neighbour's hover never covers it, as far from the control's fill
+on every side in whole pixels, and its corners follow the control's at
+any `offset`, inside the control when it is negative.
 
 `src/ui/rename_dialog.zig`
 
