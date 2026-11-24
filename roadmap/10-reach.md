@@ -1661,7 +1661,9 @@ What remains, and where it went:
   region, so a right click never reached `contextRequested`, which
   `--check` missed because the fake scripts the popup. The hidden
   window, the fake and the hand-run `Show` of slice 3 cover everything
-  else.
+  else. `--check` now opens the popup by a right click on the root,
+  reported through the host's own handlers, so it fails if the root has
+  no hit region.
 - **The menu bar shrinks the client area** by its height: `setBar`
   resizes the window's content, so the next record's viewport is
   smaller, and removing the bar gives it back. A window opened at a size

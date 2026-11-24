@@ -603,12 +603,14 @@ zig build services -- --check      # every service against the host's fake, in a
 
 `--check` hides the window and answers every service through the host's
 fake (`Host.fakeServices`), so nothing opens or shows. It presses each
-button in turn, chooses an item from the menu bar as Windows would
-report it, and fails unless each answer shows in a frame within 10 s. It
-uses the real clipboard, and so replaces what it holds. A paste right
-after a copy often finds the clipboard held by clipboard history, and is
-answered `.failed = .unavailable`; the check presses Paste again, as a
-user would. Setting a menu bar shrinks the window's content by the bar's
+button in turn, opens the popup menu by a right click on the window's
+empty background, reported through the host's own handlers as the OS
+would, chooses an item from the menu bar as Windows would report it, and
+fails unless each answer shows in a frame within 10 s. It uses the real
+clipboard, and so replaces what it holds. A paste right after a copy
+often finds the clipboard held by clipboard history, and is answered
+`.failed = .unavailable`; the check presses Paste again, as a user
+would. Setting a menu bar shrinks the window's content by the bar's
 height. On Linux the check presses only the buttons of the services the
 host offers, the file dialogs, the notification and the URL, and draws
 nothing: a surface the compositor never shows gets no frame callbacks,

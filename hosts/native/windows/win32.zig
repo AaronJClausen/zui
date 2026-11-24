@@ -206,6 +206,7 @@ pub const NCCALCSIZE_PARAMS = extern struct {
     lppos: ?*anyopaque,
 };
 pub const MK_LBUTTON = 0x0001;
+pub const MK_RBUTTON = 0x0002;
 pub const USER_DEFAULT_SCREEN_DPI = 96;
 pub const DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2: isize = -4;
 

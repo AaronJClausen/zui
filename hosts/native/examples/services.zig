@@ -336,9 +336,9 @@ const ServicesApp = struct {
     }
 };
 
-/// `--check`: presses each button in turn, as a click would, with the
-/// host's fake answering as a user might, and passes once each answer
-/// shows in a frame.
+/// `--check`: presses each button in turn, as a click would, opens the
+/// popup menu by a right click, with the host's fake answering as a user
+/// might, and passes once each answer shows in a frame.
 const Check = struct {
     deadline: zui.Instant,
     step_index: usize = 0,
@@ -364,7 +364,13 @@ const Check = struct {
         /// Chooses the bar's first item, as a click in it would, in place
         /// of pressing the button.
         chooses_from_menu_bar: bool = false,
+        /// Right-clicks the root at `empty_point`, through the host's own
+        /// handlers, in place of pressing the button.
+        opens_by_right_click: bool = false,
     };
+
+    /// Inside the root's padding, away from every child.
+    const empty_point: [2]f32 = .{ 12, 12 };
 
     const steps = offeredSteps(&.{
         .{ .action = .copy, .shows = "copied \"zui copied this (1)\"" },
@@ -372,7 +378,7 @@ const Check = struct {
         .{ .action = .pick_file, .shows = picked_path },
         .{ .action = .save_file, .shows = saved_path },
         .{ .action = .notify, .shows = "clicked" },
-        .{ .action = .popup_menu, .shows = "chose Paste" },
+        .{ .action = .popup_menu, .shows = "chose Paste", .opens_by_right_click = true },
         .{ .action = .toggle_menu_bar, .shows = "shown: File, Edit, Help", .menu_bar = .shown },
         .{ .action = .toggle_menu_bar, .shows = "chose Pick a file", .chooses_from_menu_bar = true },
         .{ .action = .toggle_menu_bar, .shows = "removed", .menu_bar = .removed },
@@ -430,9 +436,22 @@ const Check = struct {
                 .popup_menu => if (comptime services.has_menus) fake.scriptPopupMenu(Action.menuItem(.paste)),
                 else => {},
             }
-            app.wanted.insert(current.action);
+            if (current.opens_by_right_click) rightClickAt(app, empty_point) else app.wanted.insert(current.action);
         }
         app.host.zuiWaker().wake();
+    }
+
+    /// A secondary press and release at `position`, in layout units,
+    /// reported to the main window as Windows would. Only a host with
+    /// menus offers the popup step, and only the Windows host has them.
+    fn rightClickAt(app: *ServicesApp, position: [2]f32) void {
+        if (comptime builtin.os.tag == .windows) {
+            const pixels_per_unit = app.host.pixelsPerUnit(.main);
+            const point = win32.lparamFromPoint(@intFromFloat(position[0] * pixels_per_unit), @intFromFloat(position[1] * pixels_per_unit));
+            for ([_]win32.UINT{ win32.WM_MOUSEMOVE, win32.WM_RBUTTONDOWN, win32.WM_RBUTTONUP }) |message| {
+                _ = win32.SendMessageW(app.host.hwnd, message, if (message == win32.WM_RBUTTONDOWN) win32.MK_RBUTTON else 0, point);
+            }
+        } else unreachable;
     }
 
     fn observe(self: *Check, app: *ServicesApp, frame: *const Ui.Frame) void {
