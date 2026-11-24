@@ -36,7 +36,7 @@ decorations; many windows.
 | `10-reach:04-window-decorations` Window decorations | waiting on a person |
 | `10-reach:05-many-windows` Many windows | done |
 | `10-reach:06-platform-owned-loop` Hosts whose platform owns the loop | done |
-| `10-reach:07-x11-ibus` The input method on X11 over IBus's D-Bus protocol | waiting on CI |
+| `10-reach:07-x11-ibus` The input method on X11 over IBus's D-Bus protocol | done |
 | `10-reach:08-ring-edges-agree` WebGL and sokol agree on a ring's inner edge | done |
 | `10-reach:09-turned-edges-agree` WebGL and sokol agree on a turned box's edges | done |
 | `10-reach:10-light-lab-on-llvmpipe` Break It's line blocks within llvmpipe's tolerance | done |
@@ -2236,21 +2236,21 @@ cycle passes on X11.
 
 **Spec.** §7, §16.3, §16.6.
 
-**Status.** Done here, in `hosts/native/` alone, with CI's Xvfb leg
-still to confirm it. `hosts/native/linux/ibus.zig` holds
-`ibus.InputContext`, on a connection of its own to the session bus:
-`X11Host.init` opens it within the same 250 ms as the desktop's settings
-(`Session.readDesktopUntil`), says `Hello`, watches the portal's
-`NameOwnerChanged` and sends `CreateInputContext("zui")` with
-`no_auto_start`, waiting for no answer; the answer, read by the host's
-wait, makes the context ready, watches its signals by path and sender,
-and sets its capabilities (preedit text and focus). `zuiApply`, focus
-and `ConfigureNotify` focus it with the caret in root coordinates (the
-window's origin from `xcb_translate_coordinates`, kept until the window
-is configured) or unfocus it, each request sent only when it changes.
-`X11Host.onKey` reads each key's keysym, evdev code, X modifier mask and
-what it would type (`keyboard.PressedKey`) as it goes down, and hands it
-to `takeKey`, which holds it in order, behind up to 64 entries, until
+**Status.** Done, in `hosts/native/` alone, and confirmed by CI's Xvfb
+leg. `hosts/native/linux/ibus.zig` holds `ibus.InputContext`, on a
+connection of its own to the session bus: `X11Host.init` opens it within
+the same 250 ms as the desktop's settings (`Session.readDesktopUntil`),
+says `Hello`, watches the portal's `NameOwnerChanged` and sends
+`CreateInputContext("zui")` with `no_auto_start`, waiting for no answer;
+the answer, read by the host's wait, makes the context ready, watches
+its signals by path and sender, and sets its capabilities (preedit text
+and focus). `zuiApply`, focus and `ConfigureNotify` focus it with the
+caret in root coordinates (the window's origin from
+`xcb_translate_coordinates`, kept until the window is configured) or
+unfocus it, each request sent only when it changes. `X11Host.onKey`
+reads each key's keysym, evdev code, X modifier mask and what it would
+type (`keyboard.PressedKey`) as it goes down, and hands it to `takeKey`,
+which holds it in order, behind up to 64 entries, until
 `ProcessKeyEvent` answers: consumed, it reaches the record as a key and
 types nothing; not consumed, it types through xkb and compose as before.
 Past 100 ms (`answer_bound_ns`, which `zuiWait` wakes for) every key
@@ -2285,8 +2285,15 @@ window manager and the two opt-in tests skipped), `check` passes for
 this target, `x86_64-windows` and `aarch64-windows`, and `services`,
 `theme`, `title-bar`, the tour's cycle and the showcase pass on both
 backends. Not done: a real input method's commit (fcitx5 ran in its
-keyboard layout, so it consumed nothing), and CI: its Xvfb leg of
-`hosts/native` is to pass the five bus tests with its private bus.
+keyboard layout, so it consumed nothing). CI's Xvfb leg was run on
+2026-11-23, at `0127e6f`, in the `tools/ci` image (Ubuntu 26.04) under
+Docker on Windows, with Xvfb, a headless Weston and a private session
+bus: `ZUI_HOST_BACKEND=x11 zig build test --summary all` passes 154 of
+158, the five bus tests among them, skipping the two tests that need a
+seat Weston lacks and the two opt-in shown windows. Run from a checkout
+bind-mounted from Windows, the file-watching test misses its
+subdirectory's events, since inotify does not see every change through
+that mount; from a copy on the container's own disk it passes.
 
 ## 10-reach:08-ring-edges-agree — WebGL and sokol agree on a ring's inner edge
 
