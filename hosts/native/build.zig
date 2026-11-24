@@ -59,6 +59,7 @@ pub fn build(b: *std.Build) void {
     if (has_host) addManyWindowsExample(b, target, optimize, host_module, core, check_step, core_options);
     if (has_host) addMaterialExample(b, target, optimize, host_module, core, check_step, core_options);
     if (windows) addWindowsExamples(b, target, optimize, host_module, core, check_step, core_options);
+    if (linux) addTerminateCheck(b, target, optimize, host_module, core, test_step, check_step);
 
     const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "zui_host.zig", "windows", "linux", "examples" };
     b.step("fmt", "Format all Zig sources").dependOn(&b.addFmt(.{ .paths = formatted_paths }).step);
@@ -222,6 +223,30 @@ fn addManyWindowsExample(b: *std.Build, target: std.Build.ResolvedTarget, optimi
     if (b.args) |arguments| run_many_windows.addArgs(arguments);
     b.step("many-windows", "Run one application in two windows, each with its own UI (`-- --check` clicks and closes them and quits, hidden on Windows; `--measure-idle`, `--measure-animation`)").dependOn(&run_many_windows.step);
     check_step.dependOn(&many_windows.step);
+}
+
+/// An application whose window is never shown, sent SIGTERM and SIGINT in
+/// a process of its own, must end within a second of each; `test` runs it.
+fn addTerminateCheck(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, host_module: *std.Build.Module, core: *std.Build.Dependency, test_step: *std.Build.Step, check_step: *std.Build.Step) void {
+    const terminate_check = b.addExecutable(.{
+        .name = "zui-host-terminate-check",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("linux/terminate_check.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zui_host", .module = host_module },
+                .{ .name = "zui", .module = core.module("zui") },
+                .{ .name = "zui_app", .module = core.module("zui_app") },
+            },
+        }),
+    });
+    linkThroughLlvmOnLinux(terminate_check);
+    const run_terminate_check = b.addRunArtifact(terminate_check);
+    const terminate_check_step = b.step("terminate-check", "End an application whose window is never shown by SIGTERM and by SIGINT, each within a second (skipped without a display server)");
+    terminate_check_step.dependOn(&run_terminate_check.step);
+    test_step.dependOn(terminate_check_step);
+    check_step.dependOn(&terminate_check.step);
 }
 
 /// The desktop through a window, where the system has a material, on

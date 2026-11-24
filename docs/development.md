@@ -167,15 +167,16 @@ Each job, from its package's directory, fits within 10 minutes:
   the `tour` target's `--dump --every-screen`, which fails when a screen
   cuts a line of text short at the side of its clip, on Linux, Windows
   and macOS;
-- `hosts/native/`: its tests in Debug and ReleaseSafe and its `check`,
-  on Windows, and on Linux under a headless Weston with a D-Bus daemon
-  of its own (`.github/actions/wayland-session`), where the Debug tests
-  run again under `xvfb-run` with `ZUI_HOST_BACKEND=x11`, so the X11
-  host's suite and tests run and `zui_host.Host` is forced to X11, and
-  `check` for ARM64 Windows runs too; and in a job of its own under
-  Weston, the `theme` example's `--check`, the `tour` target's visit of
-  every screen, which must report no layer or glyph atlas overflow and
-  clean diagnostics, and its CPU while idle, shown in the job summary. A
+- `hosts/native/`: its tests in Debug and ReleaseSafe, which on Linux
+  include `terminate-check`, and its `check`, on Windows, and on Linux
+  under a headless Weston with a D-Bus daemon of its own
+  (`.github/actions/wayland-session`), where the Debug tests run again
+  under `xvfb-run` with `ZUI_HOST_BACKEND=x11`, so the X11 host's suite
+  and tests run and `zui_host.Host` is forced to X11, and `check` for
+  ARM64 Windows runs too; and in a job of its own under Weston, the
+  `theme` example's `--check`, the `tour` target's visit of every
+  screen, which must report no layer or glyph atlas overflow and clean
+  diagnostics, and its CPU while idle, shown in the job summary. A
   headless Weston has no seat, so no clipboard, and the `services`
   example's `--check` runs on a desktop, as the Windows examples do;
 - `hosts/web/`: on Linux, its tests in Debug with `check` there and for

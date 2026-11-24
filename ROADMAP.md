@@ -114,7 +114,6 @@ is in the file its group names.
 
 | Item | Where | Waits for | Status |
 |---|---|---|---|
-| `10-reach:11-terminate-while-hidden` | `hosts/native/` | | |
 | `11-polish:45-focus-ring-done-right` | `core/src/`, `core/zui_widgets/`, `core/zui_design/` | `11-polish:29-overlays` | |
 | `11-polish:37-tour-preferences-menu` | `apps/tour/` | `11-polish:29-overlays` | |
 | `11-polish:30-feedback-and-media` | `core/zui_widgets/`, `core/zui_design/` | `11-polish:07-zui-icons` | |

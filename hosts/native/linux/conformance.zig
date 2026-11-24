@@ -384,7 +384,7 @@ test "the system preparing to sleep is a suspend, and waking a resume" {
     try testing.expectEqualSlices(zui.Lifecycle, &.{ .@"suspend", .@"resume" }, lifecycle[0..count]);
 }
 
-test "SIGINT, SIGTERM and SIGHUP each wake the wait as a terminate request, after which the window reports closed" {
+test "SIGINT, SIGTERM and SIGHUP each wake the wait as a terminate request, after which the next wait ends at once and the window reports closed" {
     for ([_]std.posix.SIG{ .INT, .TERM, .HUP }) |signal| {
         var window: UnshownWindow = .{};
         try window.open(1);
@@ -401,6 +401,9 @@ test "SIGINT, SIGTERM and SIGHUP each wake the wait as a terminate request, afte
         window_host.zuiWait(.{ .at = window_host.now().addSeconds(2) });
         try testing.expect(polled.poll(window_host));
         try testing.expectEqual(zui.Lifecycle.terminate_requested, polled.find(.lifecycle).?);
+        const waited_from = window_host.now();
+        window_host.zuiWait(.{ .at = waited_from.addSeconds(2) });
+        try testing.expect(window_host.now().secondsSince(waited_from) < 1);
         try testing.expect(!polled.poll(window_host));
     }
 }

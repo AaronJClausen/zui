@@ -50,8 +50,9 @@ and for the examples sokol's
 
 | Command | What it does |
 |---|---|
-| `zig build test` | the unit tests, and zui's host suite and the host's own tests against a window the user never sees (on Linux, on Wayland and on X11, each skipped without its display server) |
+| `zig build test` | the unit tests, and zui's host suite and the host's own tests against a window the user never sees (on Linux, on Wayland and on X11, each skipped without its display server), and on Linux `terminate-check` |
 | `zig build conformance` | only the host suite and the host's own tests |
+| `zig build terminate-check` | run an application whose window is never shown in a process of its own and end it by SIGTERM, then by SIGINT, failing unless each ends within a second (Linux; skipped without a display server) |
 | `zig build check` | compile the host, its tests and the examples; add `-Dtarget=x86_64-windows` or `aarch64-windows` to cross-compile |
 | `zig build tour` | run the tour, drawn by the sokol renderer (Windows, Direct3D 11; Linux, OpenGL through EGL on Wayland or X11); `-- --frames 300 --cycle 30` visits every screen and quits, `-- --measure-idle` reports the CPU used over 10 idle seconds |
 | `zig build material` | show the system material, or its fallback; `-- --check` reports a hidden window's material and quits, `-- --frames 120` quits after 120 frames |
@@ -225,10 +226,12 @@ Wayland client has no modal loop to escape. So far it:
   those settings stay at zui's defaults, and `host.environmentSources()`
   says which answered;
 - reports lifecycle events: SIGINT, SIGTERM and SIGHUP are
-  `.terminate_requested`, after which the next poll reports the window
-  closed, unless the application handles or ignores the signal itself (a
-  second Ctrl+C ends the process); the system sleeping and waking
-  (logind's `PrepareForSleep`) are `.suspend` and `.resume`;
+  `.terminate_requested`, after which the next wait ends at once and the
+  next poll reports the window closed, even while the compositor shows
+  none of its frames, as for a window on a hidden workspace, unless the
+  application handles or ignores the signal itself (a second Ctrl+C ends
+  the process); the system sleeping and waking (logind's
+  `PrepareForSleep`) are `.suspend` and `.resume`;
 - reports files dropped onto the window (`wl_data_device`, an offer of
   `text/uri-list` accepted for copying), each `file://` URI on this
   machine percent-decoded to its path, at the drop's position;

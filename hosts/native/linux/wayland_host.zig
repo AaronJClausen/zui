@@ -313,6 +313,13 @@ pub const WaylandHost = struct {
             self.input_arrived = true;
         }
 
+        /// A window that delivered a terminate request awaits the poll that
+        /// reports it closed, or a wait after it would never end: a hidden
+        /// window's frames are held until the compositor answers one.
+        fn awaitsPoll(self: *const Window) bool {
+            return self.in_use and (self.input_arrived or self.closed or self.terminate_delivered);
+        }
+
         fn deliverText(self: *Window, utf8: []const u8) void {
             self.inbox.pushText(utf8);
             self.input_arrived = true;
@@ -758,7 +765,7 @@ pub const WaylandHost = struct {
 
     /// Something reached a window since its last poll, or one closed.
     fn anyWindowAwaitsPoll(self: *const Host) bool {
-        for (&self.windows) |*window| if (window.in_use and (window.input_arrived or window.closed)) return true;
+        for (&self.windows) |*window| if (window.awaitsPoll()) return true;
         return false;
     }
 

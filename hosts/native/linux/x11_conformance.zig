@@ -439,7 +439,7 @@ test "on X11 the pointer leaving is reported, and a cursor asked for is loaded o
     try testing.expectEqual(shown, window_host.shownCursor(.main).?);
 }
 
-test "on X11 SIGINT wakes the wait as a terminate request, after which the window reports closed" {
+test "on X11 SIGINT wakes the wait as a terminate request, after which the next wait ends at once and the window reports closed" {
     var window: UnmappedWindow = .{};
     try window.open(1);
     defer window.close();
@@ -455,6 +455,9 @@ test "on X11 SIGINT wakes the wait as a terminate request, after which the windo
     window_host.zuiWait(.{ .at = window_host.now().addSeconds(2) });
     try testing.expect(polled.poll(window_host));
     try testing.expectEqual(zui.Lifecycle.terminate_requested, polled.find(.lifecycle).?);
+    const waited_from = window_host.now();
+    window_host.zuiWait(.{ .at = waited_from.addSeconds(2) });
+    try testing.expect(window_host.now().secondsSince(waited_from) < 1);
     try testing.expect(!polled.poll(window_host));
 }
 

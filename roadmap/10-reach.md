@@ -40,7 +40,7 @@ decorations; many windows.
 | `10-reach:08-ring-edges-agree` WebGL and sokol agree on a ring's inner edge | done |
 | `10-reach:09-turned-edges-agree` WebGL and sokol agree on a turned box's edges | done |
 | `10-reach:10-light-lab-on-llvmpipe` Break It's line blocks within llvmpipe's tolerance | done |
-| `10-reach:11-terminate-while-hidden` A Linux window on a hidden workspace ends on SIGTERM | not started |
+| `10-reach:11-terminate-while-hidden` A Linux window on a hidden workspace ends on SIGTERM | done |
 
 ---
 
@@ -2709,17 +2709,34 @@ pixels.
 
 Found while building `11-polish:09-template-project`, on 2026-11-23.
 
-**Grounding** (at `d3e673d`). On Hyprland, with the template's window on
-a workspace not shown, SIGTERM, sent directly or by `timeout`, did not
-end `examples/template`'s app: the process stayed in `poll` until it was
-sent SIGKILL. `--frames` closes the same window. Not yet known: whether
-the signal reaches the app's process at all or only `zig build run`
-around it, whether SIGTERM is blocked or caught in the thread that
-should take it, and whether a window on a shown workspace behaves the
-same. The host blocks SIGPIPE only around one write
-(`writeWithoutPipeSignal`, `hosts/native/linux/data_device.zig:455`),
-restoring the mask after. A window that is not shown gets no frame
-callbacks, which pace its frames since `ac3efb4`.
+**Grounding** (at `a0747c6`; lines as the fix leaves them). On Hyprland,
+with the template's window on a workspace not shown, SIGTERM, sent
+directly or by `timeout`, did not end `examples/template`'s app: the
+process stayed in `poll` until it was sent SIGKILL. `--frames` closes
+the same window.
+
+Found, running the built `zui-template` and `zui-host-tour`: the signal
+reaches the app's one thread, neither blocked nor ignored there
+(`/proc/<pid>/task/*/status`: `SigBlk` 0, `SigCgt` holding SIGINT,
+SIGTERM and SIGHUP), and the host's handler turns it into a terminate
+request, which the next poll delivers. The renderer's swap is not where
+the process waits: on Wayland the sokol renderer swaps with an interval
+of 0 (`renderers/sokol/src/egl.zig:207`). The process waits in the
+host's own `ppoll` with no timeout (`waitForEvents`,
+`hosts/native/linux/wayland_host.zig:861`, from `zuiWait`, `:809`), in
+the wait `zui_app` takes after the frame that handled the terminate
+request. That wait ended only on something that made a window await its
+poll, input or a close (`anyWindowAwaitsPoll`, `:767`), and a window
+that had delivered its terminate request (`terminate_delivered`, set at
+`:742`) did not count, though its next poll reports it closed. A window
+shown gets frame callbacks, which end a wait for a due frame; a hidden
+one gets none, its frames held until the compositor answers
+(`frameHold`, `:787`), and a static application's `.on_event` wait has
+no deadline either way: the template stayed on a shown workspace too.
+The X11 host had the same rule (`Window.awaitsPoll`,
+`hosts/native/linux/x11_host.zig:292`). The existing tests polled
+straight after the terminate request, without the wait between that
+`zui_app` takes.
 
 **Plan.** Reproduce with the template and the tour, run as built
 executables, not through `zig build`, on a shown and a hidden workspace,
@@ -2735,4 +2752,20 @@ the same with SIGINT; the native host's tests and its tour cycle pass.
 
 **Spec.** §16.3.
 
-**Status.** Not started.
+**Status.** Done. A window that has delivered its terminate request
+awaits its poll on Wayland and on X11 (`Window.awaitsPoll`), so the wait
+after it ends at once and the next poll reports the window closed. The
+host's `terminate-check` (`hosts/native/linux/terminate_check.zig`, run
+by `zig build test` on Linux) runs an application whose window is never
+shown, a surface without a role on Wayland and an unmapped window on
+X11, in a process of its own, sends it SIGTERM and then SIGINT, and
+fails unless each run ends within a second; before the fix both ran into
+its SIGKILL at the second, and after it they end in 2 to 6 ms on
+Hyprland, on Wayland and with `ZUI_HOST_BACKEND=x11`. The Wayland and
+X11 signal tests also wait between the terminate request and the poll
+that reports the window closed, as `zui_app` does, and see the wait end
+within a second. Built as executables, `zui-template` and
+`zui-host-tour` each end within 100 ms of SIGTERM and of SIGINT, on the
+shown workspace and moved to a hidden one
+(`hyprctl dispatch movetoworkspacesilent special:zui-hidden,pid:<pid>`),
+where before the template outlived SIGTERM on both.

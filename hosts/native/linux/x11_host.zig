@@ -287,8 +287,10 @@ pub const X11Host = struct {
             self.input_arrived = true;
         }
 
+        /// A window that delivered a terminate request awaits the poll that
+        /// reports it closed, or a wait after it would never end.
         fn awaitsPoll(self: *const Window) bool {
-            return self.in_use and (self.input_arrived or self.closed);
+            return self.in_use and (self.input_arrived or self.closed or self.terminate_delivered);
         }
 
         /// Reports each setting that differs from what the window last
