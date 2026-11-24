@@ -33,7 +33,7 @@ decorations; many windows.
 | `10-reach:01-linux-host` Linux | in progress |
 | `10-reach:02-web-host` Web | done |
 | `10-reach:03-services` Services | done |
-| `10-reach:04-window-decorations` Window decorations | waiting on a person |
+| `10-reach:04-window-decorations` Window decorations | done |
 | `10-reach:05-many-windows` Many windows | done |
 | `10-reach:06-platform-owned-loop` Hosts whose platform owns the loop | done |
 | `10-reach:07-x11-ibus` The input method on X11 over IBus's D-Bus protocol | done |
@@ -1793,8 +1793,10 @@ Slice 2, the Windows host (`0e3e704`), is done:
 - `zig build title-bar -- --check` hit-tests each part as `zui_app` laid
   it out in a hidden window, and exits 0.
 
-Waiting on a person, on `zig build title-bar` in `hosts/native/`, with
-and without `--no-system-material`, in light and dark mode:
+Checked by the owner on 2026-11-23, at `ebef8a6` on Windows 11, after
+`zig build title-bar -- --check` passed there: `zig build title-bar` in
+`hosts/native/`, with and without `--no-system-material`, in light and
+dark mode:
 
 - Dragging the title bar moves the window, double-clicking it maximizes
   and restores it, and right-clicking it opens the system menu.
@@ -1807,8 +1809,9 @@ and without `--no-system-material`, in light and dark mode:
 - Maximized, the title bar is not cut off at the top.
 - Mica, dark mode, and the DWM border and shadow show.
 - Moving the window to a monitor at another scale keeps the parts where
-  they are drawn. Once checked, `10-reach:04-window-decorations` is
-  done.
+  they are drawn.
+
+Each held, so `10-reach:04-window-decorations` is done.
 
 ## 10-reach:05-many-windows — Many windows
 
@@ -2024,12 +2027,14 @@ Measured across the item:
 
 What remains, and where it went:
 
-- **Seen by a person, owed:** `zig build many-windows` on the desktop.
-  Open a third window from either. Click in each and see only its own
-  count move, while the shared count moves in all. Drag each window and
-  resize it while the other draws. Move one to a monitor at another
-  scale. Close the first window and see the others run on, then close
-  the last and see the process end.
+- **Seen by the owner on 2026-11-23,** at `ebef8a6` on Windows 11, after
+  `zig build many-windows -- --check` passed there:
+  `zig build many-windows` on the desktop. Open a third window from
+  either. Click in each and see only its own count move, while the
+  shared count moves in all. Drag each window and resize it while the
+  other draws. Move one to a monitor at another scale. Close the first
+  window and see the others run on, then close the last and see the
+  process end. Each held.
 - **`10-reach:01-linux-host`, done in its slice 7, and
   `14-macos:01-macos-host` once macOS is taken up:** the Wayland host is
   `.many`, and the sokol renderer's EGL path attaches a `wl_egl_window`
