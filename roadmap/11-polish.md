@@ -3090,7 +3090,10 @@ place of `border` while focused (`decorationOf`,
    hovered, however focus came: a click focuses a control and shows its
    ring, and hovering a focused control hides it. The core keeps no
    record of whether the user is navigating with a pointer or without
-   one.
+   one. `11-polish:29-overlays`' tooltip guesses it: it shows at once
+   when its anchor gains focus without a press
+   (`core/zui_widgets/zui_widgets.zig:3891`), and this item's rule
+   replaces that guess.
 
 **Plan.**
 
@@ -3128,7 +3131,8 @@ place of `border` while focused (`decorationOf`,
    `widgetState` answers `.focused` only while the focus is shown, and a
    focused control keeps its ring while hovered or pressed, the state's
    fill and the ring drawn together. A query, `ui.focusVisible()`, lets
-   a custom control follow the same rule.
+   a custom control follow the same rule. The tooltip shows at once on
+   focus only while the focus is shown.
 
 **Done when.** A test at fractional positions and at 1, 1.25, 1.5 and 2
 times scale finds the gap between ring and fill equal on all four sides,
