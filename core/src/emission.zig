@@ -277,6 +277,28 @@ fn Emitter(comptime Ui: type) type {
             return .{ .x = left, .y = top, .width = right - left, .height = bottom - top };
         }
 
+        /// A length that grows or shrinks a snapped rectangle, rounded to
+        /// whole physical pixels, so every side moves by the same amount.
+        inline fn wholePixels(self: *const Self, units: f32) f32 {
+            return @round(units * self.pixels_per_unit) * self.units_per_pixel;
+        }
+
+        /// A line's width in whole physical pixels, never thinner than one
+        /// unless it is 0, so a hairline at a fractional scale still shows.
+        inline fn lineWidthInWholePixels(self: *const Self, units: f32) f32 {
+            if (units == 0) return 0;
+            return @max(@round(units * self.pixels_per_unit), 1) * self.units_per_pixel;
+        }
+
+        fn lineWidthsInWholePixels(self: *const Self, widths: style.Edges) style.Edges {
+            return .{
+                .left = self.lineWidthInWholePixels(widths.left),
+                .right = self.lineWidthInWholePixels(widths.right),
+                .top = self.lineWidthInWholePixels(widths.top),
+                .bottom = self.lineWidthInWholePixels(widths.bottom),
+            };
+        }
+
         /// `color` itself, unless the renderer draws only `Color`, when an
         /// `ExtendedColor` is clamped and the frame told if that changed it.
         inline fn commandColor(self: *Self, color: Ui.Color) Ui.CommandColor {
@@ -678,9 +700,9 @@ fn Emitter(comptime Ui: type) type {
             const corners = self.decorationCornersIn(snapped, element);
             self.push(.{ .bounds = snapped, .id = self.frame.element_id[element], .z = z, .payload = .{ .shadow = .{
                 .color = self.commandColor(shadow.color),
-                .offset = shadow.offset,
+                .offset = .{ self.wholePixels(shadow.offset[0]), self.wholePixels(shadow.offset[1]) },
                 .blur = shadow.blur,
-                .spread = shadow.spread,
+                .spread = self.wholePixels(shadow.spread),
                 .corner_radius = corners.radius,
                 .corner_shape = corners.shape,
             } } });
@@ -855,22 +877,23 @@ fn Emitter(comptime Ui: type) type {
         /// Dividers and the border, inside the element's own clip, so a
         /// floating element's target's clip cuts them off with the rest of
         /// it. A border with an offset lies outside the box, and that clip
-        /// cuts it off too.
+        /// cuts it off too. The element is snapped before the border grows
+        /// from it by whole pixels, so the gap beside its fill is even.
         inline fn closeSubtree(self: *Self, level: *const Level) void {
             const frame = self.frame;
             const element = level.element;
             const found = frame.decorationOf(element) orelse return;
             const border = if (found.border) |*border| border else return;
             if (border.between_children > 0) @call(.never_inline, emitDividers, .{ self, element, border, level });
-            const widths = border.widths;
-            if (widths.left == 0 and widths.right == 0 and widths.top == 0 and widths.bottom == 0) return;
-            const element_bounds = self.rectOf(element);
-            const drawn_outside = border.offset > 0;
-            const bounds = if (drawn_outside) outsetBorderBounds(element_bounds, widths, border.offset) else element_bounds;
-            if (bounds.intersect(level.outer_clip).isEmpty()) return;
-            const snapped = self.snap(bounds);
+            if (border.widths.left == 0 and border.widths.right == 0 and border.widths.top == 0 and border.widths.bottom == 0) return;
+            const offset = self.wholePixels(border.offset);
+            const drawn_outside = offset > 0;
+            const widths = if (drawn_outside) self.lineWidthsInWholePixels(border.widths) else border.widths;
+            const element_bounds = self.snap(self.rectOf(element));
+            const snapped = if (drawn_outside) outsetBorderBounds(element_bounds, widths, offset) else element_bounds;
+            if (snapped.intersect(level.outer_clip).isEmpty()) return;
             const element_radius = self.cornerRadiusOf(element, found);
-            const radius = if (drawn_outside) outsetBorderRadius(element_radius.clampedTo(self.snap(element_bounds)), widths, border.offset) else element_radius;
+            const radius = if (drawn_outside) outsetBorderRadius(element_radius.clampedTo(element_bounds), widths, offset) else element_radius;
             const corners = self.cornersIn(snapped, radius, found.corner_shape);
             self.push(.{ .bounds = snapped, .id = frame.element_id[element], .z = level.z, .payload = .{ .border = .{
                 .color = self.commandColor(border.color),
@@ -940,8 +963,9 @@ fn Emitter(comptime Ui: type) type {
             const frame = self.frame;
             const along: usize = @intFromEnum(frame.layoutOf(element).direction.axis());
             const across = 1 - along;
-            const bounds = self.rectOf(element);
-            const widths = border.widths;
+            const bounds = self.snap(self.rectOf(element));
+            const widths = self.lineWidthsInWholePixels(border.widths);
+            const thickness = self.lineWidthInWholePixels(border.between_children);
             const across_start = if (across == 0) bounds.x + widths.left else bounds.y + widths.top;
             const across_length = if (across == 0) bounds.width - widths.left - widths.right else bounds.height - widths.top - widths.bottom;
 
@@ -953,8 +977,8 @@ fn Emitter(comptime Ui: type) type {
                 if (previous) |previous_extent| {
                     var origin: [2]f32 = undefined;
                     var size: [2]f32 = undefined;
-                    origin[along] = dividerStart(previous_extent, extent, border.between_children);
-                    size[along] = border.between_children;
+                    origin[along] = self.wholePixels(dividerStart(previous_extent, extent, thickness));
+                    size[along] = thickness;
                     origin[across] = across_start;
                     size[across] = across_length;
                     self.pushDivider(element, border, level, .{ .x = origin[0], .y = origin[1], .width = size[0], .height = size[1] });
@@ -967,9 +991,9 @@ fn Emitter(comptime Ui: type) type {
         /// as tall as the line, and one between two lines spans the row.
         fn emitLineDividers(self: *Self, element: Ui.Index, border: *const Ui.Border, level: *const Level) void {
             const frame = self.frame;
-            const bounds = self.rectOf(element);
-            const widths = border.widths;
-            const thickness = border.between_children;
+            const bounds = self.snap(self.rectOf(element));
+            const widths = self.lineWidthsInWholePixels(border.widths);
+            const thickness = self.lineWidthInWholePixels(border.between_children);
             var previous_line: ?[2]f32 = null;
             var lines = layout.Lines(Ui).init(frame, element);
             while (lines.next()) |line| {
@@ -981,7 +1005,7 @@ fn Emitter(comptime Ui: type) type {
                 }
                 if (previous_line) |previous_extent| self.pushDivider(element, border, level, .{
                     .x = bounds.x + widths.left,
-                    .y = dividerStart(previous_extent, line_extent, thickness),
+                    .y = self.wholePixels(dividerStart(previous_extent, line_extent, thickness)),
                     .width = bounds.width - widths.left - widths.right,
                     .height = thickness,
                 });
@@ -990,7 +1014,7 @@ fn Emitter(comptime Ui: type) type {
                 while (children.next()) |child| {
                     const extent: [2]f32 = .{ frame.position[child][0], frame.position[child][0] + frame.size[child][0] };
                     if (previous_child) |previous_extent| self.pushDivider(element, border, level, .{
-                        .x = dividerStart(previous_extent, extent, thickness),
+                        .x = self.wholePixels(dividerStart(previous_extent, extent, thickness)),
                         .y = line_extent[0],
                         .width = thickness,
                         .height = line_extent[1] - line_extent[0],

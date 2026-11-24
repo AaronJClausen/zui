@@ -2867,7 +2867,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
             const over_track = ui.hovered(track_id);
             const thumb = self.style(ui, .scroll_thumb, if (dragging) .pressed else if (over_track) .hovered else .idle);
             const track = self.style(ui, .scroll_track, if (dragging or over_track) .hovered else .idle);
-            const inset = thumb.padding.top;
+            const inset = wholePixels(ui, thumb.padding.top);
             const track_length = @max(view_length - 2 * inset, 0);
             const thumb_length = std.math.clamp(track_length * view_length / content_length, @min(thumb.size[1], track_length), track_length);
             const travel = track_length - thumb_length;
@@ -2903,7 +2903,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
             if (recently_scrolled) ui.requestFrameAt(fades_at);
             const shown = recently_scrolled or over_track or dragging or ui.focused(scroll_id);
             const opacity = animate(ui, thumb_id.child("opacity"), f32, if (shown) 1 else 0, thumb.motion);
-            const thickness = animate(ui, thumb_id.child("thickness"), f32, thumb.size[0], thumb.motion);
+            const thickness = wholePixels(ui, animate(ui, thumb_id.child("thickness"), f32, thumb.size[0], thumb.motion));
             const thumb_start = inset + travel * offset[along] / overflow;
 
             const corner: zui.AnchorPoint = if (vertical) .top_right else .bottom_left;
@@ -4794,6 +4794,14 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
         fn nestedState(ui: *const Ui, id: zui.Id, outer: zui.WidgetState) zui.WidgetState {
             const own = ui.widgetState(id);
             return if (own == .idle and outer == .focused) outer else own;
+        }
+
+        /// A length one box is inset in another by, rounded to whole
+        /// pixels, so the inset is as wide on every side wherever the
+        /// boxes land.
+        fn wholePixels(ui: *const Ui, units: f32) f32 {
+            const pixels_per_unit = ui.pixelsPerUnit();
+            return @round(units * pixels_per_unit) / pixels_per_unit;
         }
 
         fn singleLine(text_style: TextStyle) TextStyle {

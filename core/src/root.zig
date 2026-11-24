@@ -286,4 +286,5 @@ test {
     _ = @import("tests/design.zig");
     _ = @import("tests/corners.zig");
     _ = @import("tests/borders.zig");
+    _ = @import("tests/focus_ring.zig");
 }

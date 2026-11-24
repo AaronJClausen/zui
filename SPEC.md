@@ -1170,12 +1170,13 @@ the border. A border whose widths are all zero emits no `border`
 command, so `.border = .{ .color = line, .between_children = 1 }` draws
 dividers alone. A border with an `offset` above zero is drawn outside
 its element, as a focus ring that must not touch a filled control: its
-`border` command's bounds grow by the offset and the width on each side,
-and each rounded corner's radius by the same, so the ring is concentric
-with the element; a square corner stays square. It takes no space and
-changes no hit testing, and the clips around the element, its own
-included, cut it off where it passes them. An offset of zero emits the
-command as before.
+`border` command's bounds are the element's snapped rectangle grown on
+each side by the offset and the width, each rounded to whole pixels
+(§13.2), and each rounded corner's radius by the same, so the ring is
+concentric with the element and as far from its fill on every side; a
+square corner stays square. It takes no space and changes no hit
+testing, and the clips around the element, its own included, cut it off
+where it passes them. An offset of zero emits the command as before.
 
 The four switches are written as booleans, `.focusable = true`, and null
 means false. They are optional because Zig stores a `bool` field as one
@@ -1289,6 +1290,7 @@ pub fn composition(self: *const Self) ?Composition
 pub fn dt(self: *const Self) f32                                // seconds between this record's `now` and the last
 pub fn now(self: *const Self) Instant
 pub fn viewport(self: *const Self) [2]f32
+pub fn pixelsPerUnit(self: *const Self) f32                     // the record's scale × zoom, to round an inset to whole pixels
 pub fn measureText(self: *Self, content: []const u8, style: TextStyle) [2]f32   // through the caches
 ```
 
@@ -1518,7 +1520,14 @@ adding a base command always does, at compile time.
 A border and its dividers are emitted after its element's subtree,
 inside the element's own clip, which leaves them whole since both lie in
 its box, except a border with an offset, which lies outside it. Bounds
-snap to whole physical pixels using the frame's `scale × zoom`.
+snap to whole physical pixels using the frame's `scale × zoom`, each
+edge rounded on its own. A length that grows or shrinks a snapped
+rectangle is rounded instead, so it moves every side alike: a ring's
+offset and widths, a divider's thickness and the border widths it spans
+inside, and a shadow's offset and spread. A line's width is at least one
+pixel, so a hairline at a fractional scale still shows.
+`Ui.pixelsPerUnit()` lets a widget do the same, as the scrollbar rounds
+its thumb's thickness and inset.
 
 ### 13.3 Lowering
 

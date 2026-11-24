@@ -1283,6 +1283,19 @@ pub fn Context(comptime config: Config) type {
             return frame.params.viewport;
         }
 
+        /// The current frame's physical pixels per layout unit: its
+        /// record's scale times its zoom. A control that insets one box in
+        /// another rounds the inset to whole pixels with it, so the inset
+        /// is as wide on every side wherever the box lands:
+        ///
+        /// ```zig
+        /// const inset = @round(2 * ui.pixelsPerUnit()) / ui.pixelsPerUnit();
+        /// ```
+        pub fn pixelsPerUnit(self: *const Self) f32 {
+            const frame = self.current orelse @panic("zui: pixelsPerUnit() is only known between beginFrame() and endFrame()");
+            return frame.pixels_per_unit;
+        }
+
         /// As the host last reported it through `environment` events.
         pub fn environment(self: *const Self) *const Environment {
             return &self.current_environment;

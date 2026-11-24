@@ -80,6 +80,8 @@ pub fn Driver(comptime Ui: type) type {
         ui: *Ui,
         sources: SourcesPointer = if (Ui.has_sources) null else {},
         viewport: [2]f32 = .{ 800, 600 },
+        /// Physical pixels per layout unit, the record's `scale`.
+        scale: f32 = 1,
         now: zui.Instant = .zero,
         frame_interval_ns: u64 = std.time.ns_per_s / 60,
         /// Held for every key the driver presses.
@@ -110,7 +112,7 @@ pub fn Driver(comptime Ui: type) type {
 
         fn run(self: *Self, app: anytype, comptime declare: anytype, events: []const zui.Event, deliveries: ?*const DeliveriesOrVoid) !*const Ui.Frame {
             self.now = self.now.addNanoseconds(self.frame_interval_ns);
-            const params: zui.FrameParams = .{ .now = self.now, .viewport = self.viewport };
+            const params: zui.FrameParams = .{ .now = self.now, .viewport = self.viewport, .scale = self.scale };
             if (Ui.has_sources) {
                 const sources = self.sources orelse @panic("zui_testing: this Driver's context has sources; set `.sources = &app.sources`");
                 self.ui.beginFrame(&.{ .params = params, .events = events, .deliveries = deliveries }, sources);

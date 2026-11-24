@@ -290,9 +290,10 @@ const Inbox = struct {
     const thumb = track.child("thumb");
 
     rows: usize = 40,
+    left: f32 = 0,
 
     fn declare(app: *Inbox, ui: *Ui) void {
-        ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(300) } } });
+        ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(300 + app.left) }, .padding = .{ .left = app.left } } });
         const scrolled = widgets.scrollArea(ui, area, .{ .height = .fixed(200), .label = "Inbox" });
         for (0..app.rows) |index| ui.box(.{ .id = .indexed("row", index), .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(20) } } });
         scrolled.end(ui);
@@ -333,6 +334,24 @@ test "a scroll area scrolls with the wheel, and its thumb shows where and how mu
     const moved = try thumbRectangle(frame, Inbox.area);
     try testing.expectApproxEqAbs(2 + (196 - at_top.height) * 300.0 / 600.0, moved.y, 0.5);
     try testing.expectEqual(zui.SemanticScroll{ .offset = .{ 0, 300 }, .content = .{ 300, 800 }, .viewport = .{ 300, 200 }, .axes = .{ false, true } }, (try nodeOf(frame, Inbox.area)).scroll.?);
+}
+
+test "the thumb is as thick and as far from the edge wherever the area lands, in whole pixels" {
+    for ([_]f32{ 1, 1.25, 1.5, 2 }) |scale| for ([_]f32{ 0, 0.3, 0.5, 0.7 }) |left| {
+        var fixture: Fixture(Ui) = .{};
+        try fixture.init();
+        defer fixture.deinit();
+        fixture.driver.scale = scale;
+        var app: Inbox = .{ .left = left };
+        _ = try fixture.driver.frame(&app, Inbox.declare, &.{});
+        const frame = try fixture.driver.frame(&app, Inbox.declare, &.{});
+
+        const thumb = try thumbRectangle(frame, Inbox.area);
+        const resting_thickness = (tokens.control_heights.get(.medium) - 4) / 4;
+        try testing.expectApproxEqAbs(@round(resting_thickness * scale), thumb.width * scale, 1e-3);
+        const area_right_in_pixels = @round((left + 300) * scale);
+        try testing.expectApproxEqAbs(@round(2 * scale), area_right_in_pixels - (thumb.x + thumb.width) * scale, 1e-3);
+    };
 }
 
 test "the thumb is thin at rest, wider and darker while the pointer is over its track, and darker still while dragged" {

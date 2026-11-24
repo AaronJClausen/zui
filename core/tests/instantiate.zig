@@ -75,7 +75,7 @@ export fn zuiCheckFrame(width: f32, height: f32, pointer_x: f32, pointer_y: f32)
     ui.text("check every pass", .{ .wrap = .words, .alignment = .center, .letter_spacing = 1 });
     ui.image(.{ .handle = 1 }, .{ .layout = .{ .sizing = .{ .width = .fixed(8), .height = .percent(0.5) } } });
     ui.image(.{ .handle = 1, .natural_size = .{ 16, 9 } }, .{ .layout = .{ .sizing = .{ .width = .grow } } });
-    ui.box(.{ .layout = .{ .sizing = .{ .width = .grow, .height = .aspectRatio(16.0 / 9.0) } } });
+    ui.box(.{ .layout = .{ .sizing = .{ .width = .grow, .height = .aspectRatio(16.0 / 9.0) }, .padding = .all(@round(2 * ui.pixelsPerUnit()) / ui.pixelsPerUnit()) } });
     ui.custom(2, .{ .id = .indexed("cell", 3) });
     ui.box(.{ .id = save, .focusable = true, .cursor = if (ui.environment().theme == .dark) .pointer else null, .decoration = .{ .background = if (ui.widgetState(save) == .hovered) .black else .white }, .layout = .{ .sizing = .{ .width = .{ .rule = .grow, .amount = 1, .max = 40 } } }, .semantics = .{ .role = .button, .label = "Save", .state = .{ .checked = ui.clicked(save) } } });
     ui.open(.{ .id = list, .scroll = .both, .focus_scope = true, .gestures = .{ .pan = if (ui.hovered(list)) .both else .vertical, .zoom = true, .drag = ui.pressed(list), .long_press = true, .double_tap = ui.focused(list), .custom = true }, .layout = .{ .sizing = .{ .width = .fixed(50), .height = .fixed(20) } }, .semantics = .{ .role = .list_box, .value = .{ .range = .{ .value = 0.5 } }, .actions = .initOne(.dismiss) } });
