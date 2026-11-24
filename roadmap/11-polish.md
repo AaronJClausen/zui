@@ -50,7 +50,7 @@ and each is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:35-italics` Italics | done |
 | `11-polish:36-motion-in-core` Motion in the core | done |
 | `11-polish:37-tour-preferences-menu` The tour's preferences in a menu on the top bar | done |
-| `11-polish:38-test-card` The test card | not started |
+| `11-polish:38-test-card` The test card | done |
 | `11-polish:39-frame-snapshots` Frame snapshots | not started |
 | `11-polish:40-terminal-snapshots` Terminal snapshots | not started |
 | `11-polish:41-pixel-hashes` Pixel hashes per rasterizer | not started |
@@ -2981,7 +2981,36 @@ the terminal with `--dump`.
 
 **Spec.** §3, §20.1.
 
-**Status.** Not started.
+**Status.** Done, in one commit. `apps/test_card/` is the package and
+module `zui_test_card`, which the root re-exports: `Card(Ui)` declares
+the seven regions at their fixed rectangles in 640×384 units, each with
+an id (`Region.id`), in the six scenes of `Scene`, in `zui_fonts`'
+typefaces, `zui_widgets` and zui's default design, light and compact.
+The card makes each scene's input itself in `prepareRecord`, which
+replaces the host's measurements and input with its size, a clock of 60
+frames a second, an environment with reduced motion, and the pointer,
+press and Tab its scene is in, and clears the focus as a scene ends, so
+a scene drawn after any other is the scene held. The tooltip opens above
+its anchor, the side with more room, so its first frame is placed as
+every later one; the dialog is not dismissible and focuses nothing, so
+it too is whole in its first frame.
+`App(.{ .Host, .Renderer, .Text, .renderer_name, .host_name })` runs it
+through `zui_app` with `--scene`, `--frames`, `--hidden` and
+`--screenshot`, printing the tour's line. The `test-card` targets are in
+`renderers/raylib/` (with screenshots), `renderers/terminal/` (with
+`--dump`) and `hosts/native/`, with their CI steps; the package's own CI
+legs are the pure packages'. Measured here: the headless test passes in
+Debug, ReleaseSafe and ReleaseFast, and `check` compiles it for
+`wasm32-freestanding`, x86-64 Windows and ARM64 macOS; it finds every
+region where it belongs with its content inside it, each scene's state,
+every scene drawn in turn equal command by command to the scene held,
+clean diagnostics and no contrast finding, on all four fake renderers.
+`test-card -- --frames 6` prints `diagnostics ok: true` on raylib
+(hidden, with 0 layer and 0 glyph atlas overflows), on the native host
+under Hyprland (0 and 0), and in the terminal's `--dump`. The `pressed`
+scene shows the button's focus ring today, which
+`11-polish:45-focus-ring-done-right` removes; T2's snapshots are taken
+after it.
 
 ## 11-polish:39-frame-snapshots — Frame snapshots
 

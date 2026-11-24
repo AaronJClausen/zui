@@ -78,7 +78,8 @@ Stop and ask the user instead of guessing when:
 | a bundled typeface | `text/fonts/`, its file and licence beside `zui_fonts.zig`, which makes it a `pub const` of its `@embedFile` bytes and adds both to `.paths` in `text/fonts/build.zig.zon` |
 | a new face, shaper or rasterizer | a package of its own beside `text/truetype/`, depending on `zui_glyphs`, and in the root's `packages`, `.paths` and `.dependencies` |
 | the tour | `apps/tour/src/`, the `zui_tour` module, which the root re-exports: `zui_tour.App(.{ .Host, .Renderer, .Text, .renderer_name })` is the application `zui_app` runs. A screen is `apps/tour/src/screens/<name>.zig`, generic over the tour's `Kit` through `Using(kit)`, a field of `Screens` in `apps/tour/src/tour.zig` and a case of `Screen` in `apps/tour/src/shared.zig`; one that needs an optional command is offered only by `Kit.offers`. The tour imports no renderer, host or font system, and compiles for `wasm32-freestanding`. Its headless test is `apps/tour/src/tests.zig`, its compile errors `apps/tour/tests/compile_errors/<case>.zig` with a row in `compile_error_cases` in `apps/tour/build.zig` |
-| a target: a `main` that runs an app on a host, a renderer and a font system | `examples/<app>.zig` in the renderer's or host's package (`renderers/raylib/`, `renderers/terminal/`, `hosts/native/`; sokol's are `hosts/native/`'s), built as the step named after the app, such as `tour`. It names the app, the host, the renderer and the font system at one place, and adds only what its host or its flags need, such as screenshots or `--dump` |
+| the test card | `apps/test_card/src/`, the `zui_test_card` module, which the root re-exports: `zui_test_card.App(.{ .Host, .Renderer, .Text, .renderer_name })` is the application `zui_app` runs. The card and its scenes are `apps/test_card/src/card.zig`: seven regions at 640×384 units, each with an id, in six scenes, each a pure function of its state, whose input the card makes itself. It imports no renderer, host or font system, and compiles for `wasm32-freestanding`. Its headless test is `apps/test_card/src/tests.zig`, its compile errors `apps/test_card/tests/compile_errors/<case>.zig` with a row in `compile_error_cases` in `apps/test_card/build.zig` |
+| a target: a `main` that runs an app on a host, a renderer and a font system | `examples/<app>.zig` in the renderer's or host's package (`renderers/raylib/`, `renderers/terminal/`, `hosts/native/`; sokol's are `hosts/native/`'s), built as the step named after the app, `tour` or `test-card`. It names the app, the host, the renderer and the font system at one place, and adds only what its host or its flags need, such as screenshots or `--dump` |
 | the design vocabulary: roles, tiers, `Design`, `Tokens`, the appearance contract | `core/src/design.zig`, exported as `zui.design`; its check in `core/src/contracts.zig` |
 | an OS design language | `themes/src/<design language>.zig`, exported from `themes/src/root.zig` (the `zui_themes` module), with its tests beside it. It is a `zui.design.Design`, data the widgets reach through `zui_widgets.DesignSkin`: it imports only `zui`, its tests also `zui_design`, and it holds no drawing or OS code |
 | the review of a component's permutations, and the workbench | `apps/review/`, the `zui_review` module, an app like the tour, generic over host, renderer and font system |
@@ -146,36 +147,42 @@ same names; another package's own steps run from its directory. In
 `text/truetype/`, run `zig build test` in all three optimize modes and
 `zig build check` (which, for the text packages, also compiles their
 tests for `wasm32-freestanding`) before committing; `test-all` and
-`check-all` run them from the root. In `apps/tour/`, run
-`zig build test` in all three optimize modes, `zig build check`, which
-also compiles the tour's tests for `wasm32-freestanding`, and the same
-`check` with `-Dtarget=x86_64-windows`; the tour's `test` declares every
-screen headlessly on renderers that draw every optional command and
-none, in pixels and in cells, and checks its compile errors. In
-`renderers/terminal/`, run `zig build test` (which runs `conformance`
-too), `zig build check`, the same `check` with `-Dtarget=x86_64-windows`
-and `-Dtarget=aarch64-macos`, and
+`check-all` run them from the root. In `apps/tour/` and
+`apps/test_card/`, run `zig build test` in all three optimize modes,
+`zig build check`, which also compiles the tour's or the test card's
+tests for `wasm32-freestanding`, and the same `check` with
+`-Dtarget=x86_64-windows`; the tour's `test` declares every screen, and
+the test card's every scene, headlessly on renderers that draw every
+optional command and none, in pixels and in cells, and checks its
+compile errors. In `renderers/terminal/`, run `zig build test` (which
+runs `conformance` too), `zig build check`, the same `check` with
+`-Dtarget=x86_64-windows` and `-Dtarget=aarch64-macos`, and
 `zig build tour -- --dump --every-screen`, which prints every screen the
-terminal is offered and fails when one cuts text short. Without `--dump`
-the tour is interactive: never run it so outside a terminal of its own
-(`script` under `timeout`, with `--frames`). In `renderers/raylib/`, run
-`zig build test`, `zig build check` and `zig build conformance`; the
-tour's cycle, `zig build tour -- --hidden --frames 600 --cycle 50`,
-which must print `diagnostics ok: true`; a screenshot of each of
-`overview`, `harbor`, `x_ray`, `log_tail` and `light_lab` with
+terminal is offered and fails when one cuts text short, and
+`zig build test-card -- --dump --frames 6`, which prints every scene of
+the test card and must print `diagnostics ok: true`. Without `--dump`
+the targets are interactive: never run them so outside a terminal of
+their own (`script` under `timeout`, with `--frames`). In
+`renderers/raylib/`, run `zig build test`, `zig build check` and
+`zig build conformance`; the tour's cycle,
+`zig build tour -- --hidden --frames 600 --cycle 50`, which must print
+`diagnostics ok: true`; a screenshot of each of `overview`, `harbor`,
+`x_ray`, `log_tail` and `light_lab` with
 `zig build tour -- --screenshot <absolute path> --screen <name>`;
-`zig build tour -- --measure-idle`; and `check` with `-Dzui-tracy=true`
-and with `-Dtarget=x86_64-windows`. Conformance and the tour open hidden
+`zig build tour -- --measure-idle`;
+`zig build test-card -- --hidden --frames 6`, which must print
+`diagnostics ok: true`; and `check` with `-Dzui-tracy=true` and with
+`-Dtarget=x86_64-windows`. Conformance and the targets open hidden
 windows, so they need a display (CI runs them under `xvfb-run`); never
-run the tour without `--hidden --frames`, `--screenshot` or
+run a target without `--hidden --frames`, `--screenshot` or
 `--measure-idle`, since its window stays open until closed. Its links on
 Linux print `warning(link): unexpected LLD stderr` and still succeed. In
 `renderers/sokol/`, run `zig build test`, `zig build check`, the same
 `check` with `-Dtarget=wasm32-freestanding`, with
 `-Dtarget=x86_64-windows` and with `-Dgl=true -Dtarget=x86_64-windows`,
 and `zig build conformance`, which opens a window and must print that
-`zui_sokol.Renderer` passes zui's renderer suite; its tour is
-`hosts/native/`'s, below. After changing a shader's GLSL, run
+`zui_sokol.Renderer` passes zui's renderer suite; its tour and test card
+are `hosts/native/`'s, below. After changing a shader's GLSL, run
 `zig build shaders` and commit the regenerated `.glsl.zig`. Its links on
 Linux print `warning(link): unexpected LLD stderr` and a
 `failed command:` line and still succeed. In `hosts/native/`, start a
@@ -191,13 +198,14 @@ print that every service answered; `zig build theme -- --check`, which
 must print the frame it restyled in; the tour's cycle,
 `zig build tour -- --frames 300 --cycle 30`, which must print
 `0 layer overflows, 0 glyph atlas overflows, diagnostics ok: true`, also
-after any change to the sokol renderer or the tour; and
-`zig build tour -- --measure-idle`. They need a Wayland compositor (CI
-runs a headless Weston); never run an example without `--check`,
-`--frames` or `--measure-idle`, since its window stays open until
-closed. Its links on Linux print the same LLD noise. In
-`renderers/webgl/`, run `zig build test` in all three optimize modes and
-`zig build check`, which also compiles the tests for
+after any change to the sokol renderer or the tour;
+`zig build tour -- --measure-idle`; and
+`zig build test-card -- --frames 6`, which must print the same. They
+need a Wayland compositor (CI runs a headless Weston); never run an
+example without `--check`, `--frames` or `--measure-idle`, since its
+window stays open until closed. Its links on Linux print the same LLD
+noise. In `renderers/webgl/`, run `zig build test` in all three optimize
+modes and `zig build check`, which also compiles the tests for
 `wasm32-freestanding`. In `hosts/web/`, run `zig build test` in all
 three optimize modes and `zig build check`, which compiles the client
 and the tour's worker for `wasm32-freestanding`, so a browser break

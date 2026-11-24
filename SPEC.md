@@ -151,10 +151,10 @@ zui is one repository, `zui`, of packages:
 
 | Directory | Holds |
 |---|---|
-| the root | the package `zui`, which re-exports core's modules and those of `zui_glyphs`, `zui_fonts` and `zui_tour` |
+| the root | the package `zui`, which re-exports core's modules and those of `zui_glyphs`, `zui_fonts`, `zui_tour` and `zui_test_card` |
 | `core/` | the core, the contracts, and the modules, as the package `zui_core` |
 | `text/` | text, one package each: `glyphs/` (`zui_glyphs`, what font systems and renderers share), `truetype/` (`zui_truetype`, the default font system) and `fonts/` (`zui_fonts`, the bundled typefaces) |
-| `apps/` | the tour (`zui_tour`), which every renderer and host runs |
+| `apps/` | the tour (`zui_tour`) and the test card (`zui_test_card`), which every renderer and host runs |
 | `themes/` | the OS design languages as `Design`s (`zui_themes`) |
 | `examples/` | samples and the template project |
 | `renderers/` | renderers, one package each: `raylib/` (`zui_raylib`, which also holds an adapter host), `sokol/` (`zui_sokol`), `terminal/` (`zui_terminal`) and `webgl/` (`zui_webgl`, the browser's drawing) |
@@ -3675,6 +3675,14 @@ with nothing repaired.
   where every producer runs inline.
 - **Replay:** a recorded session replays to identical commands without
   starting any work.
+- **The test card** (`zui_test_card`): seven regions, each with an id,
+  at 640×384 units, in six scenes, each a pure function of its state,
+  with no clock and no motion. Its headless test declares every scene on
+  renderers that draw every optional command and none, in pixels and in
+  cells, and finds a scene drawn after another the same as the scene
+  held, its diagnostics clean and its text and focus ring meeting their
+  contrast targets; every renderer's and host's `test-card` target draws
+  each scene once with clean diagnostics.
 
 ### 20.2 Budgets
 

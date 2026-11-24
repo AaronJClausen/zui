@@ -2570,8 +2570,8 @@ Your own drawing takes its colors from the same tokens, each role by
 what it is for: a panel in `surface` with an `outline_muted` border, its
 text in `on_surface`, a status as a `success_container` pill with
 `on_success_container` text. It then meets its contrast targets in every
-scheme, contrast and color vision, as the widgets do; zui's tour draws
-every color this way.
+scheme, contrast and color vision, as the widgets do; zui's tour and
+test card draw every color this way.
 
 `src/appearance.zig`
 

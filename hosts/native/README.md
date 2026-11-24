@@ -55,6 +55,7 @@ and for the examples sokol's
 | `zig build terminate-check` | run an application whose window is never shown in a process of its own and end it by SIGTERM, then by SIGINT, failing unless each ends within a second (Linux; skipped without a display server) |
 | `zig build check` | compile the host, its tests and the examples; add `-Dtarget=x86_64-windows` or `aarch64-windows` to cross-compile |
 | `zig build tour` | run the tour, drawn by the sokol renderer (Windows, Direct3D 11; Linux, OpenGL through EGL on Wayland or X11); `-- --frames 300 --cycle 30` visits every screen and quits, `-- --measure-idle` reports the CPU used over 10 idle seconds |
+| `zig build test-card` | run the [test card](../../apps/test_card/README.md), drawn by the sokol renderer; `-- --scene <name>` holds one scene, `-- --frames 6` draws every scene once and quits |
 | `zig build material` | show the system material, or its fallback; `-- --check` reports a hidden window's material and quits, `-- --frames 120` quits after 120 frames |
 | `zig build hdr` | show HDR white beside SDR white (Windows) |
 | `zig build remote` | run the tour in another process and draw it here, over `zui_wire` (Windows) |
@@ -766,9 +767,11 @@ idle windows use 0.9 to 21 ms of CPU over 10 s.
 `zig build tour` runs [the tour](../../apps/tour/README.md) on this
 host, drawn by the sokol renderer, which draws into a `win32` window
 through sokol_gfx with D3D11, or into a `wayland` surface with OpenGL
-through EGL, without sokol_app. `hosts/native/examples/tour.zig` is the
-target: it names the tour, this host, the sokol renderer and the font
-system, and adds the screenshot this host's window gives:
+through EGL, without sokol_app, and `zig build test-card` runs the test
+card the same way (`hosts/native/examples/test_card.zig`).
+`hosts/native/examples/tour.zig` is the target: it names the tour, this
+host, the sokol renderer and the font system, and adds the screenshot
+this host's window gives:
 
 ```zig
 const Tour = zui_tour.App(.{ .Host = zui_host.Host, .Renderer = SokolRenderer, .Text = zui_truetype.Text, .renderer_name = "sokol" });
@@ -796,7 +799,8 @@ used 4.6 ms over 10 s in Debug, with 1 frame and no wakes.
 it prints the frames drawn, the sokol renderer's layer and glyph atlas
 overflows, and whether every frame's diagnostics were clean
 (`diagnostics ok: true`), which CI checks on Linux under a headless
-Weston.
+Weston; the test card prints the same with `--frames 6`, after drawing
+every scene once.
 
 ## The tour in another process
 

@@ -53,6 +53,7 @@ pub fn build(b: *std.Build) void {
     if (has_host) check_step.dependOn(&conformance_tests.step);
 
     if (has_host) addTour(b, target, optimize, host_module, core, check_step, core_options);
+    if (has_host) addTestCard(b, target, optimize, host_module, core, check_step, core_options);
     if (has_host) addTheme(b, target, optimize, host_module, core, check_step, core_options);
     if (has_host) addServicesExample(b, target, optimize, host_module, core, check_step, core_options);
     if (has_host) addTitleBarExample(b, target, optimize, host_module, core, check_step, core_options);
@@ -104,6 +105,34 @@ fn addTour(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builti
     if (b.args) |arguments| run_tour.addArgs(arguments);
     b.step("tour", "Run zui's tour on this host (`-- --frames 300 --cycle 30` visits every screen and quits; `-- --measure-idle` reports its idle CPU time)").dependOn(&run_tour.step);
     check_step.dependOn(&tour.step);
+}
+
+/// zui's test card on this host, drawn by the sokol renderer as the tour is.
+fn addTestCard(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, host_module: *std.Build.Module, core: *std.Build.Dependency, check_step: *std.Build.Step, core_options: CoreOptions) void {
+    const zui_sokol_dependency = sokolDeclaring(b, core_options.on(target, optimize), "zui_sokol") orelse return;
+    const truetype_dependency = truetypeDeclaring(b, core_options.on(target, optimize)) orelse return;
+    const test_card = b.addExecutable(.{
+        .name = "zui-host-test-card",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/test_card.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zui_host", .module = host_module },
+                .{ .name = "zui", .module = core.module("zui") },
+                .{ .name = "zui_app", .module = core.module("zui_app") },
+                .{ .name = "zui_sokol", .module = zui_sokol_dependency.module("zui_sokol") },
+                .{ .name = "zui_truetype", .module = truetype_dependency.module("zui_truetype") },
+                .{ .name = "zui_test_card", .module = b.dependency("zui_test_card", core_options.on(target, optimize)).module("zui_test_card") },
+            },
+        }),
+    });
+    linkThroughLlvmOnLinux(test_card);
+    b.installArtifact(test_card);
+    const run_test_card = b.addRunArtifact(test_card);
+    if (b.args) |arguments| run_test_card.addArgs(arguments);
+    b.step("test-card", "Run zui's test card on this host (`-- --frames 6` draws every scene once and quits)").dependOn(&run_test_card.step);
+    check_step.dependOn(&test_card.step);
 }
 
 /// A window styled by a ZON file that the host's file watch reloads, on

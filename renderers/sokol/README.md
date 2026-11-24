@@ -232,7 +232,7 @@ and on Linux needs
 | `zig build check -Dgl=true` | the same, rendering into a native host's window with OpenGL instead of D3D11 |
 | `zig build shaders` | regenerate each `src/*.glsl.zig` from its GLSL with sokol-shdc, after the GLSL changes |
 
-Its `tour` target is the native hosts' (see
+Its `tour` and `test-card` targets are the native hosts' (see
 [hosts/native/](../../hosts/native/README.md#the-tour-on-a-native-host)).
 Its links on Linux print `warning(link): unexpected LLD stderr` and a
 `failed command:` line and still succeed.

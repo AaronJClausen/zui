@@ -1,0 +1,13 @@
+.{
+    .name = .zui_test_card,
+    .version = "0.1.0",
+    .fingerprint = 0xa5d4790e29fed295, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        .zui_core = .{ .path = "../../core" },
+        .zui_glyphs = .{ .path = "../../text/glyphs" },
+        .zui_fonts = .{ .path = "../../text/fonts" },
+        .zui_truetype = .{ .path = "../../text/truetype" },
+    },
+    .paths = .{ "build.zig", "build.zig.zon", "src", "tests" },
+}

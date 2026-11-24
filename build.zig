@@ -8,6 +8,7 @@ const packages = [_][]const u8{
     "text/fonts",
     "text/truetype",
     "apps/tour",
+    "apps/test_card",
     "themes",
     "examples",
     "examples/template",
@@ -41,7 +42,7 @@ const pure_zig_packages = [_][]const u8{ "zui_glyphs", "zui_fonts" };
 
 /// Pure-Zig packages built on core, re-exported with the options core is
 /// given, so that their `zui` is the one the aggregator re-exports.
-const pure_zig_packages_on_core = [_][]const u8{"zui_tour"};
+const pure_zig_packages_on_core = [_][]const u8{ "zui_tour", "zui_test_card" };
 
 /// A dependency's build does not see the arguments after `--`, and installs
 /// into a prefix of its own in the cache, so the aggregator runs and installs

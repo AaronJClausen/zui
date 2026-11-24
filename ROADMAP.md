@@ -120,7 +120,6 @@ is in the file its group names.
 | `11-polish:32-zui-widgets-data` | `core/zui_widgets_data/` | `11-polish:29-overlays` | |
 | `11-polish:33-pickers` | `core/zui_widgets_data/` | `11-polish:32-zui-widgets-data` | |
 | `11-polish:34-zui-widgets-views` | `core/zui_widgets_views/` | `11-polish:30-feedback-and-media` | |
-| `11-polish:38-test-card` | `apps/test_card/`, `renderers/raylib/`, `renderers/terminal/`, `hosts/native/` | | |
 | `11-polish:39-frame-snapshots` | `core/zui_testing/`, `apps/test_card/` | `11-polish:38-test-card` | |
 | `11-polish:40-terminal-snapshots` | `renderers/terminal/`, `apps/test_card/` | `11-polish:39-frame-snapshots` | |
 | `11-polish:41-pixel-hashes` | `apps/test_card/`, `renderers/raylib/`, `hosts/native/`, `.github/`, `tools/ci/` | `11-polish:39-frame-snapshots` | |

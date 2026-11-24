@@ -68,12 +68,31 @@ pub fn build(b: *std.Build) void {
             .{ .name = "zui_tour", .module = b.dependency("zui_tour", core_options.on(target, optimize)).module("zui_tour") },
         },
     });
-    const tour = addTourExecutable(b, tour_module);
+    const tour = addAppExecutable(b, "tour", tour_module);
     b.installArtifact(tour);
-    check.compile(addTourExecutable(b, tour_module));
+    check.compile(addAppExecutable(b, "tour", tour_module));
     const run_tour = b.addRunArtifact(tour);
     if (b.args) |arguments| run_tour.addArgs(arguments);
     b.step("tour", "Run zui's tour (`-- --hidden --frames 600 --cycle 50` visits every screen and quits)").dependOn(&run_tour.step);
+
+    const test_card_module = b.createModule(.{
+        .root_source_file = b.path("examples/test_card.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zui_raylib", .module = backend_module },
+            .{ .name = "zui", .module = zui_module },
+            .{ .name = "zui_app", .module = zui_app_module },
+            .{ .name = "zui_truetype", .module = zui_truetype_module },
+            .{ .name = "zui_test_card", .module = b.dependency("zui_test_card", core_options.on(target, optimize)).module("zui_test_card") },
+        },
+    });
+    const test_card = addAppExecutable(b, "test-card", test_card_module);
+    b.installArtifact(test_card);
+    check.compile(addAppExecutable(b, "test-card", test_card_module));
+    const run_test_card = b.addRunArtifact(test_card);
+    if (b.args) |arguments| run_test_card.addArgs(arguments);
+    b.step("test-card", "Run zui's test card (`-- --hidden --frames 6` draws every scene once and quits; `-- --screenshot <path> --scene <name>` saves one)").dependOn(&run_test_card.step);
 }
 
 /// `check` compiles its own copy of each artifact, which nothing else runs
@@ -96,8 +115,8 @@ fn addTest(b: *std.Build, module: *std.Build.Module) *std.Build.Step.Compile {
     return tests;
 }
 
-fn addTourExecutable(b: *std.Build, module: *std.Build.Module) *std.Build.Step.Compile {
-    const executable = b.addExecutable(.{ .name = "zui-raylib-tour", .root_module = module });
+fn addAppExecutable(b: *std.Build, app_name: []const u8, module: *std.Build.Module) *std.Build.Step.Compile {
+    const executable = b.addExecutable(.{ .name = b.fmt("zui-raylib-{s}", .{app_name}), .root_module = module });
     if (module.resolved_target.?.result.os.tag == .windows) executable.subsystem = .windows;
     linkThroughLlvmOnLinux(executable);
     return executable;

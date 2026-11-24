@@ -144,8 +144,9 @@ exe.root_module.addImport("zui_tracy", zui.module("zui_tracy"));
 // Text: what font systems and renderers share, and the bundled typefaces.
 exe.root_module.addImport("zui_glyphs", zui.module("zui_glyphs"));
 exe.root_module.addImport("zui_fonts", zui.module("zui_fonts"));
-// The tour, which a renderer's or a host's `tour` target runs.
+// The tour and the test card, which a renderer's or a host's `tour` and `test-card` targets run.
 exe.root_module.addImport("zui_tour", zui.module("zui_tour"));
+exe.root_module.addImport("zui_test_card", zui.module("zui_test_card"));
 // The default font system, which builds stb_truetype, so it is a package of its own.
 const zui_truetype = zui.builder.dependency("zui_truetype", .{ .target = target, .optimize = optimize });
 exe.root_module.addImport("zui_truetype", zui_truetype.module("zui_truetype"));
@@ -185,6 +186,7 @@ API, what it draws or reports, its limits, and its build steps.
 | `zui_host` | [hosts/native/](hosts/native/README.md) | the native hosts, for Windows and for Linux on Wayland or X11 |
 | `zui_web` | [hosts/web/](hosts/web/README.md) | the web host, the tour on it as the published page, and the thin client over `zui_wire` the checks compare it with |
 | `zui_tour` | [apps/tour/](apps/tour/README.md) | zui shown four ways: an operations console, the same console with its features pointed out, field cases and spectacles, for any host and renderer |
+| `zui_test_card` | [apps/test_card/](apps/test_card/README.md) | a small, fixed application every backend draws for the checks that run it: seven regions in six scenes, each a pure function of its state |
 | `zui_themes` | [themes/](themes/) | the design languages of Windows (Fluent), GNOME (libadwaita) and KDE (Breeze) as `zui.design.Design`s |
 | `zui_template` | [examples/template/](examples/template/README.md) | the template project: a small app on `zui_app`, the native host and the sokol renderer, with a headless test, to copy out as the start of your own |
 | — | [examples/](examples/) | samples; a skeleton today |

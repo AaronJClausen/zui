@@ -142,6 +142,9 @@ compiles it:
 | `zig build tour -- --measure-startup` | report the time from process start to the first presented frame (Windows) |
 | `zig build tour -- --zui-debug` | open `zui_debug`'s inspector, which F12 toggles |
 | `zig build tour -Dzui-tracy=true` | trace zui's zones into Tracy 0.14.1 |
+| `zig build test-card` | run the [test card](../../apps/test_card/README.md), at rest; `-- --scene <name>` holds one scene |
+| `zig build test-card -- --hidden --frames 6` | draw every scene of the test card once in a hidden window, then quit, printing whether every frame's diagnostics were clean (`diagnostics ok: true`) |
+| `zig build test-card -- --screenshot <absolute path> --scene <name>` | draw a scene offscreen, save it as a PNG once it settles, and quit |
 
 Conformance and the targets open hidden windows, so they need a display;
 CI runs them under `xvfb-run`.
@@ -161,7 +164,8 @@ startup measurement, and the run's report in `zui_debug`'s panel. The
 Light Lab's gradients, shadows, frost and materials are lowered here,
 and Clickable Chaos, which needs transforms, is not offered. The
 `zui_debug` panel's theme does not reload from a file, since this host
-has no file watch.
+has no file watch. `examples/test_card.zig` runs the test card the same
+way, with its screenshots drawn offscreen too.
 
 `--measure-idle` runs the tour in a hidden window and reads its own CPU
 time at two frames it asks for with `requestFrameAt`, 10 seconds apart,
