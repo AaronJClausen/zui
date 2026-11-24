@@ -320,7 +320,8 @@ restores it, right-clicking it opens the window menu, the grip resizes
 it, the caption buttons show hover and press and each works once, the
 maximize button shows restore while maximized, and a monitor at a
 fractional scale keeps the parts where they are drawn. The Windows check
-now also expects the grip as `HTBOTTOMRIGHT`, compiled here and not run.
+now also expects the grip as `HTBOTTOMRIGHT`; it ran natively on Windows
+11 on 2026-11-23 and passed.
 
 Slice 7 is done in `hosts/native/` and `renderers/sokol/`
 (`hosts/native/linux/host.zig`, `hosts/native/linux/conformance.zig`,
@@ -1650,13 +1651,17 @@ the process's.
 
 What remains, and where it went:
 
-- **Seen by a person, owed:** `zig build services` on the desktop, with
-  a screenshot of each: the real toast, and clicking it to see
-  "clicked"; the real open and save dialogs choosing a file; the real
-  popup from a right click and from its button; the real menu bar, its
-  menus opened by hand and an item chosen; and the browser opening
-  <https://ziglang.org>. The hidden window, the fake and the hand-run
-  `Show` of slice 3 cover everything else.
+- **Seen by the owner on 2026-11-23,** at `7d91dff` on Windows 11:
+  `zig build services` on the desktop: the real toast, and clicking it
+  to see "clicked"; the real open and save dialogs choosing a file; the
+  real popup from its button and from a right click; the real menu bar,
+  its menus opened by hand and an item chosen; the browser opening
+  <https://ziglang.org>; and copy and paste. Each held once the
+  example's root was made interactive: without it the root had no hit
+  region, so a right click never reached `contextRequested`, which
+  `--check` missed because the fake scripts the popup. The hidden
+  window, the fake and the hand-run `Show` of slice 3 cover everything
+  else.
 - **The menu bar shrinks the client area** by its height: `setBar`
   resizes the window's content, so the next record's viewport is
   smaller, and removing the bar gives it back. A window opened at a size

@@ -208,6 +208,7 @@ const ServicesApp = struct {
 
         ui.open(.{
             .id = root_id,
+            .interactive = true,
             .layout = .{ .direction = .top_to_bottom, .sizing = .grow_both, .padding = .all(24), .child_gap = 10 },
             .decoration = .{ .background = .rgb(0x1c1c26) },
         });

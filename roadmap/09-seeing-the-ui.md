@@ -270,9 +270,11 @@ ReleaseFast with Turbo Boost on, took a median of 198 and 197 µs with
 semantics off and 195, 198 and 197 µs with it on, within the runs'
 spread; the tour on the Windows host with the bridge drew 300 frames
 across every screen with diagnostics ok and idled at 0.0 ms of CPU over
-10 s. A person's check with Narrator and Accessibility Insights on
-`zig build accessible` and the tour has not been made; the automated
-checks cover what it would see.
+10 s. The owner checked `zig build accessible` and the tour with
+Narrator and Accessibility Insights on Windows 11 on 2026-11-23, at
+`7d91dff`: each control was read with its name, role and state, and
+toggling, setting, expanding, selecting, scrolling and invoking worked
+through it.
 
 ## 09-seeing-the-ui:03-safety-sweeps — Safety sweeps
 
