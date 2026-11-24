@@ -157,3 +157,14 @@ Each is planned with its first option. SPEC.md §22 has those that change
 the spec.
 
 1. **Physical keys.** Planned: logical keys plus the opaque scancode.
+2. **Asking about input on an element that cannot receive it.**
+   `ui.contextRequested(id)`, `clicked`, `pressed` and their kin answer
+   false forever for an element that declares nothing giving it a hit
+   region (interaction, focus, gestures, scrolling, disabled, pointer
+   capture), with no signal to the application. The services example's
+   right-click menu failed this way until its root was made interactive
+   (`46880a2`), and only a person's check found it. Planned: a
+   debug-build diagnostic in `Diagnostics` or `zui_debug`, naming an id
+   asked about whose element had no region. The other option is only
+   saying so in each query's doc comment. No item is queued until the
+   owner chooses.
