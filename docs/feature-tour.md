@@ -3582,5 +3582,7 @@ These names compile, but they don't do anything yet. This list is from
   tint. Only the sokol renderer draws a transform; the others draw the
   element as laid out. Only the sokol renderer draws a material; the
   others draw its fallback background.
-- There's no template project or samples yet. The best reference is the
-  tour, in `apps/tour/`, which every renderer and host runs.
+- There are no samples yet. Start an app from the template project in
+  `examples/template/`, a counter on the native host with a headless
+  test; the tour, in `apps/tour/`, which every renderer and host runs,
+  is the fullest reference.

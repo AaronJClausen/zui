@@ -2767,7 +2767,7 @@ fn present(renderer: *Renderer, surface: zui.Surface, frame: *const Ui.Frame) !v
             <li>Interactive elements take three steps: declare, query by id, then pick colors from the state yourself. Widgets hide it, but there is nothing in between.</li>
             <li><code class="z">labeledRow</code> leaves you to close the row, an asymmetry that's easy to get wrong.</li>
             <li>Only the sokol renderer draws gradients and shadows so far; the raylib and terminal renderers show a gradient as one flat color and no shadow. Only the sokol renderer blurs a backdrop; the others draw its tint. Only the sokol renderer draws a transform; the others draw the element as laid out. Only the sokol renderer draws a material; the others draw its fallback background.</li>
-            <li>There's no template project or samples yet. The best reference is the tour, in <code>apps/tour/</code>, which every renderer and host runs.</li>
+            <li>There are no samples yet. Start an app from the template project in <code>examples/template/</code>, a counter on the native host with a headless test; the tour, in <code>apps/tour/</code>, which every renderer and host runs, is the fullest reference.</li>
           </ul>
         </div>
       </div>

@@ -186,7 +186,8 @@ API, what it draws or reports, its limits, and its build steps.
 | `zui_web` | [hosts/web/](hosts/web/README.md) | the web host, the tour on it as the published page, and the thin client over `zui_wire` the checks compare it with |
 | `zui_tour` | [apps/tour/](apps/tour/README.md) | zui shown four ways: an operations console, the same console with its features pointed out, field cases and spectacles, for any host and renderer |
 | `zui_themes` | [themes/](themes/) | the design languages of Windows (Fluent), GNOME (libadwaita) and KDE (Breeze) as `zui.design.Design`s |
-| — | [examples/](examples/) | a template project and samples; a skeleton today |
+| `zui_template` | [examples/template/](examples/template/README.md) | the template project: a small app on `zui_app`, the native host and the sokol renderer, with a headless test, to copy out as the start of your own |
+| — | [examples/](examples/) | samples; a skeleton today |
 
 ## Development
 

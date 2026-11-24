@@ -17,8 +17,9 @@ README lists its steps and what they need:
 [WebGL](../renderers/webgl/README.md#development),
 [the native hosts](../hosts/native/README.md#development),
 [the web host](../hosts/web/README.md#development),
-[the tour](../apps/tour/README.md#development) and
-[the text packages](../text/README.md#development).
+[the tour](../apps/tour/README.md#development),
+[the text packages](../text/README.md#development) and
+[the template project](../examples/template/README.md#build-and-run).
 
 ## The root's steps
 

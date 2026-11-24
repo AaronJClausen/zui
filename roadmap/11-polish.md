@@ -21,7 +21,7 @@ and each is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:06-text-editing` Text editing | not started |
 | `11-polish:07-zui-icons` `zui_icons` | done |
 | `11-polish:08-zui-themes` `zui_themes` | done |
-| `11-polish:09-template-project` The template project | not started |
+| `11-polish:09-template-project` The template project | done |
 | `11-polish:10-samples` Samples | not started |
 | `11-polish:11-profiling-guide` A profiling guide | done |
 | `11-polish:12-developer-experience-audit` A developer-experience audit | not started |
@@ -835,6 +835,55 @@ were not run: no hot path changes. The root does not re-export
 ## 11-polish:09-template-project — The template project
 
 In `examples/template/`.
+
+**Grounding** (at `cddd4a1`). `zui_app.run`
+(`core/zui_app/zui_app.zig:403`) runs an `App` naming `Host`, `Renderer`
+and `Text`, taking a renderer `init(self, surface, text)` (`:1116`,
+checked at `:1229`); `zui_sokol.Renderer` has only `init(text)` and
+`initForSurface(text, surface)` (`renderers/sokol/src/renderer.zig:135`,
+`:147`), so an app on it wraps it, as
+`hosts/native/examples/accessible.zig` does. `zui_design.resolve`
+(`core/zui_design/zui_design.zig:149`) and `Preferences.from` (`:80`)
+give the tokens `zui_widgets.DesignSkin` reads; `zui_testing.Driver`
+(`core/zui_testing/zui_testing.zig:71`, `click` at `:151`) runs whole
+frames headless. The root re-exports `zui_app`, `zui_design`,
+`zui_widgets`, `zui_testing` and `zui_fonts`, and reaches `zui_host`,
+`zui_sokol` and `zui_truetype` through `zui.builder.dependency`
+(`build.zig`, `build.zig.zon`).
+
+**Plan.** A package of its own naming the root by path, which is no
+cycle, since the root lists it in `packages` but does not depend on it;
+copied out, `zig fetch --save git+https://github.com/AaronJClausen/zui`
+replaces that entry. `Counter(Ui)` holds the app, generic over the
+context so the window and the test declare the same UI: a title, a
+count, a button that adds one and one that resets it, in the default
+design resolved again only when the preferences change, set in the
+bundled Atkinson Hyperlegible regular and bold. `main.zig` runs it on
+`zui_app` over `zui_host` and the sokol renderer, with `--frames <n>`.
+Steps `run`, `test`, `check`, `fmt`, `fmt-check`; `check` on an OS
+without a native host builds the test alone. A README covers copying it
+out, building, swapping to raylib, and the limits.
+
+**Done when.** `test` passes in three modes and `check` natively and for
+`x86_64-windows`; `run -- --frames 120` closes its own window; the test
+clicks the button and sees the count drawn; the root's `test-all` and
+`check-all` run it; a copy outside the repository on a fetched zui
+builds, tests and runs from its README alone.
+
+**Status.** Done. `examples/template/` holds `src/counter.zig`,
+`src/main.zig`, `src/tests.zig`, `build.zig`, `build.zig.zon` and a
+README. Its test passes in Debug, ReleaseSafe and ReleaseFast; `check`
+passes natively and for `x86_64-windows` and `aarch64-macos`;
+`run -- --frames 120` exits 0 on Wayland; a copy outside the repository
+on a tarball of zui, renamed, builds, tests and runs, and with the
+README's swap to `zui_raylib` too. Every app on `zui_host` and
+`zui_sokol` needs the 20-line `SokolRenderer` adapter, for
+`11-polish:12-developer-experience-audit`. CI has no job for it yet: it
+needs the host's and sokol's Linux packages and a compositor, and
+`.github/scripts/affected_packages.py` resolves its `../..` to the root,
+so a change to `core/` would not mark it affected without a rule of its
+own. From an empty cache, configuring it fetches sokol and stb, as
+`examples/` does, since it needs their modules to declare the app.
 
 ## 11-polish:10-samples — Samples
 

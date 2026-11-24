@@ -10,6 +10,7 @@ const packages = [_][]const u8{
     "apps/tour",
     "themes",
     "examples",
+    "examples/template",
     "renderers/terminal",
     "renderers/raylib",
     "renderers/sokol",
