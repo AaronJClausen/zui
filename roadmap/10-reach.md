@@ -40,6 +40,7 @@ decorations; many windows.
 | `10-reach:08-ring-edges-agree` WebGL and sokol agree on a ring's inner edge | done |
 | `10-reach:09-turned-edges-agree` WebGL and sokol agree on a turned box's edges | done |
 | `10-reach:10-light-lab-on-llvmpipe` Break It's line blocks within llvmpipe's tolerance | done |
+| `10-reach:11-terminate-while-hidden` A Linux window on a hidden workspace ends on SIGTERM | not started |
 
 ---
 
@@ -2703,3 +2704,35 @@ pixels differing by more than 5 (by up to 46) with four samples and
 without text, and 3 (by up to 146) with one; each matches a neighbour
 within 1, so none counts against the allowance of 4 and 1 unmatched
 pixels.
+
+## 10-reach:11-terminate-while-hidden — A Linux window on a hidden workspace ends on SIGTERM
+
+Found while building `11-polish:09-template-project`, on 2026-11-23.
+
+**Grounding** (at `d3e673d`). On Hyprland, with the template's window on
+a workspace not shown, SIGTERM, sent directly or by `timeout`, did not
+end `examples/template`'s app: the process stayed in `poll` until it was
+sent SIGKILL. `--frames` closes the same window. Not yet known: whether
+the signal reaches the app's process at all or only `zig build run`
+around it, whether SIGTERM is blocked or caught in the thread that
+should take it, and whether a window on a shown workspace behaves the
+same. The host blocks SIGPIPE only around one write
+(`writeWithoutPipeSignal`, `hosts/native/linux/data_device.zig:455`),
+restoring the mask after. A window that is not shown gets no frame
+callbacks, which pace its frames since `ac3efb4`.
+
+**Plan.** Reproduce with the template and the tour, run as built
+executables, not through `zig build`, on a shown and a hidden workspace,
+and with SIGTERM and SIGINT; find where the signal goes
+(`/proc/<pid>/status`'s `SigBlk`, `SigIgn` and `SigCgt` per thread);
+then make the host's process end on SIGTERM and SIGINT whatever its
+window's state, as it would without zui, or, if the host must catch
+them, close its windows and return from `zuiPoll` so `zui_app` stops.
+
+**Done when.** A test or check of the host's own sends SIGTERM to an
+example whose window is not shown and sees it exit within a second, and
+the same with SIGINT; the native host's tests and its tour cycle pass.
+
+**Spec.** §16.3.
+
+**Status.** Not started.
