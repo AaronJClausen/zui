@@ -29,7 +29,13 @@ const ids = zui.ids(.{
     "cabin_booking.close",
     "cabin_booking.agree",
     "cabin_booking.form",
+    "cabin_booking.confirm",
+    "cabin_booking.confirm.cancel",
+    "cabin_booking.confirm.book",
+    "cabin_booking.notices",
 });
+
+const undo_booking = 1;
 
 /// The screen, declared through `kit`, the tour's `Kit`.
 pub fn Using(comptime kit: type) type {
@@ -39,7 +45,9 @@ pub fn Using(comptime kit: type) type {
         /// A booking form built from the essential inputs: a search field
         /// and filter chips, a segmented control, a radio group, a slider
         /// with ticks, steppers, switches in settings rows, a text field
-        /// with help and an error, buttons of each size and a link.
+        /// with help and an error, buttons of each size and a link. Its
+        /// icon buttons show their labels as tooltips; Book asks in a
+        /// dialog, and a toast says what happened, with an Undo.
         pub const CabinBooking = struct {
             query_bytes: [48]u8 = undefined,
             query: zui_widgets.EditableText = .{ .buffer = &.{} },
@@ -60,18 +68,57 @@ pub fn Using(comptime kit: type) type {
             booked: u32 = 0,
             saved: bool = false,
             policy_opened: bool = false,
+            confirming: bool = false,
+            notice_storage: [4]zui_widgets.ToastEntry = undefined,
+            notices: zui_widgets.ToastQueue = .{ .entries = &.{} },
 
             pub fn declare(self: *CabinBooking, ui: *Ui, shell: *const Shell) void {
                 if (self.query.buffer.len == 0) {
                     self.query = .init(&self.query_bytes, "");
                     self.email = .init(&self.email_bytes, "ada@");
+                    self.notices = .init(&self.notice_storage);
                 }
                 if (ui.chordPressed(.{ .key = .k, .modifiers = .{ .control = true } })) ui.requestFocus(ids.@"cabin_booking.search");
                 shell.pageHeading(ui, "CABIN BOOKING", "Essential inputs", "A booking form drawn from the tokens: search and filters, choices, numbers, switches, a field that explains itself, and buttons of every size.");
-                const area = shell.widgets.scrollArea(ui, ids.@"cabin_booking.form", .{ .direction = .left_to_right, .child_gap = 16, .label = "Booking" });
-                defer area.end(ui);
-                self.find(ui, shell);
-                self.book(ui, shell);
+                {
+                    const area = shell.widgets.scrollArea(ui, ids.@"cabin_booking.form", .{ .direction = .left_to_right, .child_gap = 16, .label = "Booking" });
+                    defer area.end(ui);
+                    self.find(ui, shell);
+                    self.book(ui, shell);
+                }
+                self.confirm(ui, shell);
+                if (shell.widgets.toasts(ui, ids.@"cabin_booking.notices", &self.notices)) |tag| {
+                    if (tag == undo_booking and self.booked != 0) {
+                        self.booked -= 1;
+                        _ = self.notices.push(.{ .message = "Booking undone." });
+                    }
+                }
+            }
+
+            fn confirm(self: *CabinBooking, ui: *Ui, shell: *const Shell) void {
+                const widgets = shell.widgets;
+                var description: [96]u8 = undefined;
+                const shown = widgets.dialog(ui, ids.@"cabin_booking.confirm", &self.confirming, .{
+                    .title = "Book this stay?",
+                    .description = std.fmt.bufPrint(&description, "{d} nights for {d} guests, at {d} a night.", .{ self.nights, self.guests, self.budget }) catch "",
+                    .initial_focus = ids.@"cabin_booking.confirm.book",
+                }) orelse return;
+                defer shown.end(ui);
+                widgets.labelWith(ui, "Free cancellation until 48 hours before.", .{ .role = .caption, .tone = .muted });
+                shown.actions(ui);
+                defer ui.close();
+                if (widgets.button(ui, ids.@"cabin_booking.confirm.cancel", "Not yet", .{ .variant = .secondary })) self.confirming = false;
+                if (widgets.button(ui, ids.@"cabin_booking.confirm.book", "Book", .{})) {
+                    self.confirming = false;
+                    self.booked += 1;
+                    var message: [64]u8 = undefined;
+                    _ = self.notices.push(.{
+                        .message = std.fmt.bufPrint(&message, "Booked {d} nights by the bay.", .{self.nights}) catch "Booked.",
+                        .action = "Undo",
+                        .tone = .success,
+                        .tag = undo_booking,
+                    });
+                }
             }
 
             fn find(self: *CabinBooking, ui: *Ui, shell: *const Shell) void {
@@ -167,8 +214,12 @@ pub fn Using(comptime kit: type) type {
                 {
                     ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 8, .child_alignment = .{ .y = .center } } });
                     defer ui.close();
-                    if (widgets.button(ui, ids.@"cabin_booking.book", "Book", .{ .size = .large, .leading_icon = .check, .disabled = !self.agreed or !valid })) self.booked += 1;
-                    if (widgets.button(ui, ids.@"cabin_booking.save", if (self.saved) "Saved" else "Save for later", .{ .variant = .secondary, .size = .small })) self.saved = !self.saved;
+                    if (widgets.button(ui, ids.@"cabin_booking.book", "Book", .{ .size = .large, .leading_icon = .check, .disabled = !self.agreed or !valid })) self.confirming = true;
+                    if (widgets.button(ui, ids.@"cabin_booking.save", if (self.saved) "Saved" else "Save for later", .{ .variant = .secondary, .size = .small })) {
+                        self.saved = !self.saved;
+                        _ = self.notices.push(.{ .message = if (self.saved) "Saved for later." else "No longer saved." });
+                    }
+                    widgets.tooltip(ui, ids.@"cabin_booking.save", "Keep this stay in your list", .{ .shortcut = "Ctrl+S" });
                 }
                 if (self.booked != 0) shell.print(ui, .caption, "Booked {d} time{s}.", .{ self.booked, if (self.booked == 1) "" else "s" });
             }

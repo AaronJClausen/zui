@@ -381,6 +381,72 @@ pub const Part = enum {
     toggle_thumb,
     /// The thumb while on, read as `toggle_thumb`.
     toggle_thumb_on,
+    /// `tooltip`'s bubble: `background`, `corner_radius`, `shadow`,
+    /// `padding`, `text`, `size[0]` for its greatest width, `gap` from its
+    /// anchor, `layer`, `motion` as it enters and `exit` as it leaves.
+    tooltip,
+    /// The shortcut after a tooltip's text: `text`, and `gap` before it.
+    tooltip_shortcut,
+    /// `menu`'s panel: `background`, `border`, `corner_radius`, `shadow`,
+    /// `padding`, `size` for its least and greatest width, `gap` from its
+    /// anchor, `layer`, `motion` and `exit`.
+    menu,
+    /// A menu's item: `background`, `border`, `focus_ring`,
+    /// `corner_radius`, `size[1]`, `padding`, `gap` and `text`.
+    menu_item,
+    /// An item that destroys, read as `menu_item`.
+    menu_item_danger,
+    /// The icon in an item's leading column: `text` and `size[0]`.
+    menu_icon,
+    /// The shortcut at an item's end: `text`, and `gap` before it.
+    menu_shortcut,
+    /// The check of a checked item: `glyph`, `text`, and `size[0]` for the
+    /// leading column's width.
+    menu_check,
+    /// The line between groups of items: `background`, `size[1]` for its
+    /// thickness and `padding` round it.
+    menu_separator,
+    /// A group's label: `text` and `padding`.
+    menu_section,
+    /// `popover`'s panel: `background`, `border`, `corner_radius`,
+    /// `shadow`, `padding`, `size[0]` for its greatest width, `gap` from its
+    /// anchor, `layer`, `motion` and `exit`.
+    popover,
+    /// The scrim beneath a dialog: `background`, `layer`, `motion` and
+    /// `exit`.
+    dialog_scrim,
+    /// `dialog`'s panel: `background`, `border`, `corner_radius`, `shadow`,
+    /// `padding`, `gap`, `size[0]` for its greatest width, `layer`, `motion`
+    /// and `exit`.
+    dialog,
+    /// Its title: `text`.
+    dialog_title,
+    /// Its description: `text`.
+    dialog_description,
+    /// The row of its actions: `gap`.
+    dialog_actions,
+    /// The button at its top trailing corner that closes it: `background`,
+    /// `corner_radius`, `size[1]` for its side, `padding` for its inset from
+    /// the corner, `glyph` and `text`.
+    dialog_close,
+    /// The stack of toasts: `padding.bottom` from the window's edge, `gap`
+    /// by which each older toast shows above the next, and `layer`.
+    toast_stack,
+    /// A toast: `background`, `border`, `corner_radius`, `shadow`,
+    /// `padding`, `gap`, `text`, `size[0]` for its greatest width, `scale`
+    /// each older one shrinks by, `motion` and `exit`.
+    toast,
+    /// A toast's action: `focus_ring`, `corner_radius`, `size[1]` for its
+    /// least height, and `text`.
+    toast_action,
+    /// The line under the action: `background` and `size[1]`.
+    toast_action_underline,
+    /// The icon of a toast of `.tone = .neutral`: `text` and `size[0]`.
+    toast_icon,
+    /// The icon of a toast of `.tone = .success`, read as `toast_icon`.
+    toast_icon_success,
+    /// The icon of a toast of `.tone = .danger`, read as `toast_icon`.
+    toast_icon_danger,
 };
 
 /// How a widget moves a value it draws toward the skin's next one: at once,
@@ -423,6 +489,9 @@ pub fn Style(comptime Ui: type) type {
         scale: f32 = 1,
         /// How a part that moves or fades follows this style.
         motion: Motion = .none,
+        /// How a part that leaves keeps drawing as it fades, where the
+        /// context keeps exit ghosts; null leaves at once.
+        exit: ?zui.Exit = null,
     };
 }
 
@@ -564,15 +633,7 @@ pub fn DesignSkinWith(comptime Ui: type, comptime ExtraRoles: type) type {
                 .text_field_trailing => skin.styled(.text_field_trailing, state),
                 .dropdown => sized(skin.styled(.dropdown, state), .{ 0, medium_height }),
                 .dropdown_indicator => sized(withGlyph(skin.styled(.dropdown_indicator, state), "v"), .{ small_icon, 0 }),
-                .dropdown_popup => popup: {
-                    var list = skin.styled(.dropdown_popup, state);
-                    const lift = tokens.elevations.get(.floating);
-                    list.background = tokens.colors.get(state).get(lift.surface);
-                    list.border = if (lift.rim) |rim| .{ .color = rim, .widths = .all(tokens.outline_width) } else null;
-                    list.shadow = lift.shadow;
-                    list.layer = popup_layer;
-                    break :popup list;
-                },
+                .dropdown_popup => skin.lifted(.dropdown_popup, state, .floating),
                 .dropdown_option => sized(skin.styled(.dropdown_option, state), .{ 0, medium_height }),
                 .dropdown_option_selected => sized(skin.styled(.dropdown_option_selected, state), .{ 0, medium_height }),
                 .dropdown_check => sized(skin.styled(.dropdown_check, state), .{ small_icon, 0 }),
@@ -678,7 +739,106 @@ pub fn DesignSkinWith(comptime Ui: type, comptime ExtraRoles: type) type {
                 .toggle_track_on => skin.toggleTrack(.toggle_track_on, state),
                 .toggle_thumb => skin.toggleThumb(.toggle_thumb, state),
                 .toggle_thumb_on => skin.toggleThumb(.toggle_thumb_on, state),
+                .tooltip => bubble: {
+                    var bubble = sized(skin.styled(.tooltip, state), .{ tooltip_greatest_width, 0 });
+                    bubble.shadow = tokens.elevations.get(.floating).shadow;
+                    bubble.layer = tooltip_layer;
+                    bubble.motion = .{ .tween = tokens.motion.popover_enter };
+                    bubble.exit = exitThrough(tokens.motion.popover_exit);
+                    break :bubble bubble;
+                },
+                .tooltip_shortcut => skin.styled(.tooltip_shortcut, state),
+                .menu => panel: {
+                    var panel = sized(skin.lifted(.menu, state, .floating), .{ menu_least_width, menu_greatest_width });
+                    panel.motion = .{ .tween = tokens.motion.popover_enter };
+                    panel.exit = exitThrough(tokens.motion.popover_exit);
+                    break :panel panel;
+                },
+                .menu_item => skin.menuItem(.menu_item, state),
+                .menu_item_danger => skin.menuItem(.menu_item_danger, state),
+                .menu_icon => sized(skin.styled(.menu_icon, state), .{ small_icon, 0 }),
+                .menu_shortcut => skin.styled(.menu_shortcut, state),
+                .menu_check => sized(withGlyph(skin.styled(.menu_check, state), "•"), .{ small_icon, 0 }),
+                .menu_separator => sized(skin.styled(.menu_separator, state), .{ 0, divider_thickness }),
+                .menu_section => skin.styled(.menu_section, state),
+                .popover => panel: {
+                    var panel = sized(skin.lifted(.popover, state, .floating), .{ popover_greatest_width, 0 });
+                    panel.motion = .{ .tween = tokens.motion.popover_enter };
+                    panel.exit = exitThrough(tokens.motion.popover_exit);
+                    break :panel panel;
+                },
+                .dialog_scrim => scrim: {
+                    var scrim = skin.styled(.dialog_scrim, state);
+                    scrim.layer = dialog_layer;
+                    scrim.motion = .{ .tween = tokens.motion.dialog_enter };
+                    scrim.exit = exitThrough(tokens.motion.dialog_exit);
+                    break :scrim scrim;
+                },
+                .dialog => panel: {
+                    var panel = sized(skin.lifted(.dialog, state, .modal), .{ dialog_greatest_width, 0 });
+                    panel.layer = dialog_layer + 1;
+                    panel.motion = .{ .tween = tokens.motion.dialog_enter };
+                    panel.exit = exitThrough(tokens.motion.dialog_exit);
+                    break :panel panel;
+                },
+                .dialog_title => skin.styled(.dialog_title, state),
+                .dialog_description => skin.styled(.dialog_description, state),
+                .dialog_actions => skin.styled(.dialog_actions, state),
+                .dialog_close => sized(withGlyph(skin.styled(.dialog_close, state), "×"), .{ small_icon, tokens.control_heights.get(.small) }),
+                .toast_stack => stack: {
+                    var stack = skin.styled(.toast_stack, state);
+                    stack.layer = toast_layer;
+                    break :stack stack;
+                },
+                .toast => toast: {
+                    var toast = sized(skin.styled(.toast, state), .{ toast_greatest_width, 0 });
+                    toast.shadow = tokens.elevations.get(.modal).shadow;
+                    toast.scale = toast_tucked_scale;
+                    toast.motion = .{ .spring = tokens.motion.toast_enter };
+                    toast.exit = exitThrough(tokens.motion.toast_exit);
+                    break :toast toast;
+                },
+                .toast_action => sized(skin.styled(.toast_action, state), .{ 0, tokens.target_floors.get(.pointer) }),
+                .toast_action_underline => underline: {
+                    var underline = sized(skin.styled(.toast_action_underline, state), .{ 0, link_underline_thickness });
+                    const hovered = state == .hovered or state == .pressed;
+                    if (!hovered) if (underline.background) |line| {
+                        underline.background = faded(line, link_underline_resting_share);
+                    };
+                    break :underline underline;
+                },
+                .toast_icon => sized(skin.styled(.toast_icon, state), .{ tokens.icon_sizes.get(.medium), 0 }),
+                .toast_icon_success => sized(skin.styled(.toast_icon_success, state), .{ tokens.icon_sizes.get(.medium), 0 }),
+                .toast_icon_danger => sized(skin.styled(.toast_icon_danger, state), .{ tokens.icon_sizes.get(.medium), 0 }),
             };
+        }
+
+        /// A popup standing at `elevation`: that level's surface, rim and
+        /// shadow.
+        fn lifted(skin: *const Skin, comptime designed: Designed.Part, state: zui.WidgetState, elevation: zui.design.Elevation) Style(Ui) {
+            const tokens = skin.tokens;
+            const lift = tokens.elevations.get(elevation);
+            var panel = skin.styled(designed, state);
+            panel.background = tokens.colors.get(state).get(lift.surface);
+            panel.border = if (lift.rim) |rim| .{ .color = rim, .widths = .all(tokens.outline_width) } else null;
+            panel.shadow = lift.shadow;
+            panel.layer = popup_layer;
+            return panel;
+        }
+
+        /// The approved item is as tall as a medium control, its corners
+        /// the panel's less the panel's padding.
+        fn menuItem(skin: *const Skin, comptime designed: Designed.Part, state: zui.WidgetState) Style(Ui) {
+            const tokens = skin.tokens;
+            var item = sized(skin.styled(designed, state), .{ 0, tokens.control_heights.get(.medium) });
+            item.corner_radius = nestedCorner(tokens.corner_radii.get(.popup), tokens.space(.xs));
+            return item;
+        }
+
+        fn exitThrough(tween: zui.motion.TweenOptions) zui.Exit {
+            return .{ .seconds = tween.duration, .fade = switch (tween.easing) {
+                inline else => |easing| @field(zui.ExitFade, @tagName(easing)),
+            } };
         }
 
         fn radioCircle(skin: *const Skin, comptime designed: Designed.Part, ring_width: f32, state: zui.WidgetState) Style(Ui) {
@@ -712,13 +872,15 @@ pub fn DesignSkinWith(comptime Ui: type, comptime ExtraRoles: type) type {
 
         /// The groove's control corner, less its padding, for what sits in it.
         fn nestedInGroove(skin: *const Skin) zui.CornerRadius {
-            const groove_corner = skin.tokens.corner_radii.get(.control);
-            const groove_padding = skin.tokens.space(.hair);
+            return nestedCorner(skin.tokens.corner_radii.get(.control), skin.tokens.space(.hair));
+        }
+
+        fn nestedCorner(outer: zui.CornerRadius, padding: f32) zui.CornerRadius {
             return .{
-                .top_left = @max(groove_corner.top_left - groove_padding, 0),
-                .top_right = @max(groove_corner.top_right - groove_padding, 0),
-                .bottom_left = @max(groove_corner.bottom_left - groove_padding, 0),
-                .bottom_right = @max(groove_corner.bottom_right - groove_padding, 0),
+                .top_left = @max(outer.top_left - padding, 0),
+                .top_right = @max(outer.top_right - padding, 0),
+                .bottom_left = @max(outer.bottom_left - padding, 0),
+                .bottom_right = @max(outer.bottom_right - padding, 0),
             };
         }
 
@@ -847,8 +1009,39 @@ const stepper_value_widest = "0000";
 /// scrubs.
 const stepper_scrub_distance = 4;
 const error_icon_side = 12;
-/// Popups paint in this layer and the next one up.
+/// Popups paint in this layer and the next one up, over toasts and dialogs,
+/// so a menu or a dropdown opened in a dialog shows above it; tooltips paint
+/// over them all.
 const popup_layer = 100;
+const dialog_layer = 50;
+const toast_layer = 60;
+const tooltip_layer = 120;
+const tooltip_greatest_width = 240;
+const tooltip_delay_seconds = 0.5;
+/// A tooltip shows at once within this long of another closing, as the
+/// pointer moves along a toolbar.
+const tooltip_warm_seconds = 0.3;
+const menu_least_width = 200;
+const menu_greatest_width = 320;
+/// Up and Down skip the disabled ones among a menu's first this many items.
+const menu_items_tracked = 64;
+const popover_greatest_width = 360;
+const dialog_greatest_width = 480;
+/// A dialog in a window narrower than this is a sheet along its bottom.
+const bottom_sheet_below_width = 600;
+const toast_greatest_width = 420;
+const toast_tucked_scale = 0.96;
+const toast_seconds = 5;
+/// Shown at once; the rest wait their turn.
+const toasts_shown_most = 3;
+const toast_message_capacity = 160;
+const toast_action_capacity = 32;
+/// How far an overlay slides as it enters, toward where it settles.
+const enter_slide = 8;
+const toast_enter_slide = 24;
+const enter_scale = 0.96;
+/// An overlay kept inside the window stays this far from its edges.
+const viewport_margin = 8;
 const card_pressed_scale = 0.985;
 const divider_thickness = 1;
 const scroll_thumb_widening = 4;
@@ -994,6 +1187,30 @@ const Designed = struct {
         toggle_track_on,
         toggle_thumb,
         toggle_thumb_on,
+        tooltip,
+        tooltip_shortcut,
+        menu,
+        menu_item,
+        menu_item_danger,
+        menu_icon,
+        menu_shortcut,
+        menu_check,
+        menu_separator,
+        menu_section,
+        popover,
+        dialog_scrim,
+        dialog,
+        dialog_title,
+        dialog_description,
+        dialog_actions,
+        dialog_close,
+        toast_stack,
+        toast,
+        toast_action,
+        toast_action_underline,
+        toast_icon,
+        toast_icon_success,
+        toast_icon_danger,
     };
 
     const on_hover: zui.design.PartAppearance(void).Colors = .{ .surface = .secondary_container, .text = .on_secondary_container };
@@ -1226,7 +1443,60 @@ const Designed = struct {
         .toggle_track_on = .{ .surface = .accent, .target = .pointer, .cue = "its thumb at the far end" },
         .toggle_thumb = .{ .surface = .outline },
         .toggle_thumb_on = .{ .surface = .surface_raised },
+        .tooltip = .{ .surface = .surface_inverse, .text = .on_surface_inverse, .type = .label, .on = .tooltip, .shape = .control, .padding = .{ .x = .s, .y = .xs }, .gap = .xs },
+        .tooltip_shortcut = .{ .text = .on_surface_inverse, .type = .label, .on = .tooltip, .gap = .s },
+        .menu = .{ .surface = .surface_overlay, .shape = .popup, .padding = .{ .x = .xs, .y = .xs }, .gap = .xs },
+        .menu_item = .{
+            .text = .on_surface,
+            .type = .body,
+            .on = .menu,
+            .shape = .control,
+            .padding = .{ .x = .s },
+            .gap = .m,
+            .target = .pointer,
+            .states = .{ .hovered = on_hover, .pressed = on_hover },
+        },
+        .menu_item_danger = .{
+            .text = .on_danger_container,
+            .type = .body,
+            .on = .menu,
+            .shape = .control,
+            .padding = .{ .x = .s },
+            .gap = .m,
+            .target = .pointer,
+            .states = .{ .hovered = on_danger_hover, .pressed = on_danger_hover },
+        },
+        .menu_icon = .{ .icon = .on_surface_muted, .on = .menu, .states = .{ .hovered = .{ .icon = .on_secondary_container }, .pressed = .{ .icon = .on_secondary_container } } },
+        .menu_shortcut = .{ .text = .on_surface_muted, .type = .label, .on = .menu, .gap = .xl, .states = .{ .hovered = .{ .text = .on_secondary_container }, .pressed = .{ .text = .on_secondary_container } } },
+        .menu_check = .{ .icon = .on_surface_accent, .on = .menu, .states = .{ .hovered = .{ .icon = .on_secondary_container }, .pressed = .{ .icon = .on_secondary_container } } },
+        .menu_separator = .{ .surface = .outline_muted, .padding = .{ .x = .s, .y = .xs } },
+        .menu_section = .{ .text = .on_surface_muted, .type = .caption, .on = .menu, .padding = .{ .x = .s, .y = .xs } },
+        .popover = .{ .surface = .surface_overlay, .shape = .popup, .padding = .{ .x = .l, .y = .l }, .gap = .s },
+        .dialog_scrim = .{ .surface = .scrim },
+        .dialog = .{ .surface = .surface_overlay, .shape = .popup, .padding = .{ .x = .xl, .y = .xl }, .gap = .l },
+        .dialog_title = .{ .text = .on_surface, .type = .headline, .on = .dialog },
+        .dialog_description = .{ .text = .on_surface_muted, .type = .body, .on = .dialog },
+        .dialog_actions = .{ .gap = .s },
+        .dialog_close = .{
+            .icon = .on_surface_muted,
+            .on = .dialog,
+            .shape = .indicator,
+            .padding = .{ .x = .m, .y = .m },
+            .target = .pointer,
+            .states = .{ .hovered = .{ .surface = .secondary_container, .icon = .on_secondary_container }, .pressed = .{ .surface = .secondary_container, .icon = .on_secondary_container }, .focused = .{ .icon = .on_surface } },
+        },
+        .toast_stack = .{ .padding = .{ .y = .xl }, .gap = .s },
+        .toast = .{ .surface = .surface_inverse, .text = .on_surface_inverse, .type = .body, .on = .toast, .shape = .popup, .padding = .{ .x = .l, .y = .m }, .gap = .m },
+        // The accent's focus ring falls short of its contrast on the
+        // inverse surface, so the ring is drawn in the inverse surface's text.
+        .toast_action = .{ .text = .on_surface_inverse, .type = .body_strong, .on = .toast, .shape = .control, .target = .pointer, .states = .{ .focused = .{ .outline = .on_surface_inverse } } },
+        .toast_action_underline = .{ .surface = .on_surface_inverse },
+        .toast_icon = .{ .icon = .on_surface_inverse, .on = .toast },
+        .toast_icon_success = .{ .icon = .success, .on = .toast },
+        .toast_icon_danger = .{ .icon = .danger, .on = .toast },
     });
+
+    const on_danger_hover: zui.design.PartAppearance(void).Colors = .{ .surface = .danger_container, .text = .on_danger_container };
 
     const on_hover_icon: zui.design.PartAppearance(void).Colors = .{ .surface = .secondary_container, .icon = .on_surface };
 
@@ -1392,6 +1662,113 @@ pub const NavigationItem = struct {
     /// A heading, which is never selected.
     heading: bool = false,
 };
+
+/// The side of its anchor an overlay opens on: below or above it, or
+/// beside it at the reading direction's start or end. Where the window
+/// has no room on that side and has it on the opposite one, it flips.
+pub const Placement = enum { below, above, leading, trailing };
+
+pub const ToastTone = enum { neutral, success, danger };
+
+/// What `ToastQueue.push` shows.
+pub const Toast = struct {
+    /// Copied, cut at a character past 160 bytes.
+    message: []const u8,
+    /// A button's label, such as "Undo"; none when empty. Copied, cut at a
+    /// character past 32 bytes.
+    action: []const u8 = "",
+    tone: ToastTone = .neutral,
+    /// What `toasts` returns when its action is chosen, so the application
+    /// knows which toast it was.
+    tag: u32 = 0,
+};
+
+/// One toast in a `ToastQueue`'s storage.
+pub const ToastEntry = struct {
+    message_bytes: [toast_message_capacity]u8,
+    message_len: u8,
+    action_bytes: [toast_action_capacity]u8,
+    action_len: u8,
+    tone: ToastTone,
+    tag: u32,
+    key: u32,
+    shown: bool,
+    paused: bool,
+    /// Declared one last time, so its exit fade starts from this frame.
+    leaving: bool,
+    deadline: zui.Instant,
+    /// Seconds still to show while paused.
+    left: f32,
+
+    pub fn message(entry: *const ToastEntry) []const u8 {
+        return entry.message_bytes[0..entry.message_len];
+    }
+
+    pub fn action(entry: *const ToastEntry) []const u8 {
+        return entry.action_bytes[0..entry.action_len];
+    }
+};
+
+/// The toasts waiting and showing, oldest first, in storage the
+/// application owns.
+///
+/// ```zig
+/// var toast_storage: [8]zui_widgets.ToastEntry = undefined;
+/// var notices: zui_widgets.ToastQueue = .init(&toast_storage);
+/// _ = notices.push(.{ .message = "Booking confirmed", .action = "Undo", .tone = .success, .tag = booking.id });
+/// ```
+pub const ToastQueue = struct {
+    entries: []ToastEntry,
+    len: usize = 0,
+    next_key: u32 = 0,
+
+    pub fn init(storage: []ToastEntry) ToastQueue {
+        return .{ .entries = storage };
+    }
+
+    /// Queues `toast` after those already waiting; a full queue keeps the
+    /// toasts it has and returns false.
+    pub fn push(queue: *ToastQueue, toast: Toast) bool {
+        if (queue.len == queue.entries.len) return false;
+        const entry = &queue.entries[queue.len];
+        entry.* = .{
+            .message_bytes = undefined,
+            .message_len = @intCast(copyCut(&entry.message_bytes, toast.message)),
+            .action_bytes = undefined,
+            .action_len = @intCast(copyCut(&entry.action_bytes, toast.action)),
+            .tone = toast.tone,
+            .tag = toast.tag,
+            .key = queue.next_key,
+            .shown = false,
+            .paused = false,
+            .leaving = false,
+            .deadline = .zero,
+            .left = 0,
+        };
+        queue.next_key +%= 1;
+        queue.len += 1;
+        return true;
+    }
+
+    /// Oldest first.
+    pub fn waiting(queue: *const ToastQueue) []const ToastEntry {
+        return queue.entries[0..queue.len];
+    }
+
+    fn remove(queue: *ToastQueue, index: usize) void {
+        std.mem.copyForwards(ToastEntry, queue.entries[index .. queue.len - 1], queue.entries[index + 1 .. queue.len]);
+        queue.len -= 1;
+    }
+};
+
+/// Copies as much of `bytes` as fits, cut at a character boundary, and
+/// returns how many bytes that was.
+fn copyCut(buffer: []u8, bytes: []const u8) usize {
+    var count = @min(bytes.len, buffer.len);
+    while (count > 0 and count < bytes.len and isContinuationByte(bytes[count])) count -= 1;
+    @memcpy(buffer[0..count], bytes[0..count]);
+    return count;
+}
 
 /// Controls declared into a `*Ui` and styled by `Skin`, any type that
 /// implements the skin contract (`expectSkin`).
@@ -2863,12 +3240,12 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
             label: []const u8 = "",
         };
 
-        const Trail = struct { expanded: bool };
+        const Trail = struct { folded_open: bool };
 
         /// The way back from the current page, `crumbs` from the top: each
         /// crumb but the last is a link, focusable and activated with Enter
-        /// or Space. Past four crumbs the middle ones collapse into a "…"
-        /// crumb, which shows them when chosen. Returns the index of the
+        /// or Space. Past four crumbs the middle ones fold into a "…"
+        /// crumb, which opens a menu of them. Returns the index of the
         /// crumb chosen this frame.
         ///
         /// ```zig
@@ -2877,13 +3254,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
         pub fn breadcrumbs(self: Self, ui: *Ui, id: zui.Id, crumbs: []const []const u8, options: BreadcrumbsOptions) ?usize {
             if (crumbs.len == 0) return null;
             const last = crumbs.len - 1;
-            const trail = ui.state(id, Trail);
-            const more_id = id.child("more");
-            if (crumbs.len > most_crumbs_shown and !trail.expanded and ui.clicked(more_id)) {
-                trail.expanded = true;
-                ui.requestFocus(id.indexedChild("crumb", 1));
-            }
-            const collapsed = crumbs.len > most_crumbs_shown and !trail.expanded;
+            const folded = crumbs.len > most_crumbs_shown;
             var chosen: ?usize = null;
             for (0..last) |index| {
                 if (ui.clicked(id.indexedChild("crumb", index))) chosen = index;
@@ -2896,9 +3267,17 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                 .layout = .{ .child_gap = separator.gap, .child_alignment = .{ .y = .center } },
             });
             for (crumbs, 0..) |crumb, index| {
-                if (collapsed and index > 0 and index < last - 1) {
+                if (folded and index > 0 and index < last - 1) {
                     if (index == 1) {
+                        const more_id = id.child("more");
                         self.crumbLink(ui, more_id, collapsed_crumbs_glyph, "Show the hidden levels");
+                        const trail = ui.state(id, Trail);
+                        if (self.menu(ui, id.child("folded"), more_id, &trail.folded_open, .{ .label = "Hidden levels" })) |hidden| {
+                            for (crumbs[1 .. last - 1], 1..) |hidden_crumb, hidden_index| {
+                                if (hidden.item(ui, hidden_crumb, .{})) chosen = hidden_index;
+                            }
+                            hidden.end(ui);
+                        }
                         self.icon(ui, .chevron_right, separator);
                     }
                     continue;
@@ -3283,7 +3662,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
         }
 
         pub const IconButtonOptions = struct {
-            /// Its name to an assistive technology, and later its tooltip.
+            /// Its name to an assistive technology, and its tooltip.
             label: []const u8,
             variant: IconButtonVariant = .tertiary,
             size: zui.design.ControlSize = .medium,
@@ -3292,8 +3671,8 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
 
         /// A square button showing `name`, true in the frame it is clicked,
         /// or activated with Enter or Space while focused. Its accessible
-        /// label is required, since it shows no text. Under a design
-        /// without an icon font it draws no icon, counted in
+        /// label is required, since it shows no text, and is its tooltip.
+        /// Under a design without an icon font it draws no icon, counted in
         /// `Diagnostics.missing_icons`.
         ///
         /// ```zig
@@ -3320,6 +3699,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
             icon_look.glyph = "";
             self.icon(ui, name, icon_look);
             ui.close();
+            self.tooltip(ui, id, options.label, .{});
             return ui.clicked(id);
         }
 
@@ -3498,6 +3878,901 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
             return toggled;
         }
 
+        pub const TooltipOptions = struct {
+            /// The keys that do the same, shown after the text; none when
+            /// empty.
+            shortcut: []const u8 = "",
+            placement: Placement = .below,
+        };
+
+        const TooltipState = struct {
+            waiting: bool,
+            shown: bool,
+            /// Focus came with a press, so the tooltip shows only while
+            /// hovered.
+            pointer_focus: bool,
+            escaped: bool,
+            hovered_since: zui.Instant,
+        };
+
+        const TooltipWarmth = struct { closed: bool, closed_at: zui.Instant };
+        const tooltip_warmth_id: zui.Id = .of("zui_widgets.tooltip_warmth");
+
+        /// `content` beside `anchor_id`, an element declared before it:
+        /// after half a second of hover, at once when another tooltip closed
+        /// within the last 0.3 s, and at once when the anchor takes focus
+        /// other than by a press. It takes no pointer, and Escape hides it
+        /// until the pointer and the focus leave. While one is due, an idle
+        /// application asks only for a frame at the instant it is.
+        ///
+        /// ```zig
+        /// if (widgets.button(ui, .of("share"), "Share", .{})) app.share();
+        /// widgets.tooltip(ui, .of("share"), "Copy a link to this page", .{ .shortcut = "Ctrl+Shift+S" });
+        /// ```
+        pub fn tooltip(self: Self, ui: *Ui, anchor_id: zui.Id, content: []const u8, options: TooltipOptions) void {
+            const bubble_id = anchor_id.child("tooltip");
+            const tip = ui.state(bubble_id, TooltipState);
+            const warmth = ui.state(tooltip_warmth_id, TooltipWarmth);
+            const now = ui.now();
+            const focused = ui.focused(anchor_id);
+            const pressed = ui.pressed(anchor_id);
+            if (pressed or ui.clicked(anchor_id)) {
+                tip.pointer_focus = true;
+            } else if (!focused) tip.pointer_focus = false;
+            const hovering = ui.hovered(anchor_id) and !pressed;
+            const keyboard_focus = focused and !tip.pointer_focus;
+            if (!hovering and !keyboard_focus) {
+                tip.escaped = false;
+            } else if (ui.keyPressed(.escape)) tip.escaped = true;
+            if (!(hovering or keyboard_focus) or tip.escaped) {
+                if (tip.shown) warmth.* = .{ .closed = true, .closed_at = now };
+                tip.shown = false;
+                tip.waiting = false;
+                return;
+            }
+            const opening = !tip.shown;
+            if (opening) {
+                const warm = warmth.closed and now.isBefore(warmth.closed_at.addSeconds(tooltip_warm_seconds));
+                if (!keyboard_focus and !warm) {
+                    if (!tip.waiting) {
+                        tip.waiting = true;
+                        tip.hovered_since = now;
+                    }
+                    const due = tip.hovered_since.addSeconds(tooltip_delay_seconds);
+                    if (now.isBefore(due)) return ui.requestFrameAt(due);
+                }
+                tip.shown = true;
+            }
+
+            const look = self.style(ui, .tooltip, .idle);
+            const shortcut = self.style(ui, .tooltip_shortcut, .idle);
+            const placed = placeBeside(ui, anchor_id, bubble_id, options.placement, look.gap, .center);
+            const entered = entrance(ui, bubble_id.child("enter"), opening, look.motion);
+            const effects = overlayEffects(look, enteredScale(entered), placed.origin);
+            ui.open(.{
+                .id = bubble_id,
+                .floating = slid(placed, entered, look.layer, false),
+                .semantics = .{ .role = .tooltip, .label = content },
+                .decoration = decorationOf(look, false),
+                .effects = effectsOrNull(&effects),
+                .exit = look.exit,
+                .layout = .{
+                    .sizing = .{ .width = .fitBetween(0, look.size[0]) },
+                    .padding = look.padding,
+                    .child_gap = shortcut.gap,
+                    .child_alignment = .{ .y = .center },
+                },
+            });
+            ui.text(content, look.text);
+            if (options.shortcut.len != 0) ui.text(options.shortcut, singleLine(shortcut.text));
+            ui.close();
+        }
+
+        pub const MenuOptions = struct {
+            /// Its name to an assistive technology.
+            label: []const u8 = "",
+            /// Where a menu opened from an anchor opens; a context menu
+            /// opens at the pointer.
+            placement: Placement = .below,
+        };
+
+        pub const MenuItemOptions = struct {
+            /// The keys that do the same, at the item's end; none when empty.
+            shortcut: []const u8 = "",
+            /// Drawn in the leading column of an item that is not checkable.
+            icon: ?zui.design.Icon = null,
+            /// Null for an item that is not checkable; true draws its check.
+            checked: ?bool = null,
+            /// An item that destroys, in the danger colors.
+            danger: bool = false,
+            disabled: bool = false,
+        };
+
+        const MenuState = struct {
+            was_open: bool,
+            at_point: bool,
+            /// Where a context menu opened, from the window's top-left.
+            point: [2]f32,
+            /// What focus goes back to when it closes.
+            opener: u64,
+            item_count: u8,
+            disabled_items: u64,
+            leading_column: bool,
+            declared: u8,
+            declared_disabled: u64,
+            declared_leading: bool,
+            focused_item: u8,
+            typed: u8,
+            typed_after_focus: u8,
+            typed_first: u8,
+        };
+
+        const no_item = std.math.maxInt(u8);
+
+        /// What `menu` and `contextMenu` opened: declare its items, then call
+        /// `end`.
+        pub const Menu = struct {
+            widgets: Self,
+            id: zui.Id,
+            open: *bool,
+            state: *MenuState,
+
+            /// True in the frame the item is chosen, by a click, Enter or
+            /// Space, which closes the menu and gives focus back to what
+            /// opened it.
+            pub fn item(opened: Menu, ui: *Ui, content: []const u8, options: MenuItemOptions) bool {
+                return opened.widgets.menuItem(ui, opened, content, options);
+            }
+
+            /// A line between two groups of items.
+            pub fn separator(opened: Menu, ui: *Ui) void {
+                const line = opened.widgets.style(ui, .menu_separator, .idle);
+                ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .padding = line.padding } });
+                ui.box(.{ .decoration = .{ .background = line.background }, .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(line.size[1]) } } });
+                ui.close();
+            }
+
+            /// A label above the group of items after it.
+            pub fn section(opened: Menu, ui: *Ui, content: []const u8) void {
+                const heading = opened.widgets.style(ui, .menu_section, .idle);
+                ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .padding = heading.padding } });
+                ui.text(content, singleLine(heading.text));
+                ui.close();
+            }
+
+            /// Closes the panel.
+            pub fn end(opened: Menu, ui: *Ui) void {
+                ui.close();
+                const state = opened.state;
+                if (state.declared_leading != state.leading_column) ui.requestFrame();
+                state.item_count = state.declared;
+                state.disabled_items = state.declared_disabled;
+                state.leading_column = state.declared_leading;
+                const jump = if (state.typed_after_focus != no_item) state.typed_after_focus else state.typed_first;
+                if (jump != no_item) ui.requestFocus(menuItemId(opened.id, jump));
+            }
+        };
+
+        /// A menu beside `anchor_id`, an element declared before it, while
+        /// `open` is true; clicking the anchor opens it and focuses its first
+        /// item. Up and Down move through the items, wrapping past the
+        /// disabled ones, Home and End reach the first and the last, and a
+        /// letter jumps to the next item that starts with it. Choosing an
+        /// item, Escape, a click outside or a `dismiss` action closes it and
+        /// gives focus back to the anchor. It opens below the anchor unless
+        /// `placement` says otherwise, flipped where the window has no room.
+        /// Returns the menu to declare items in while it is open, and in the
+        /// frame it closes, so it fades out from where it was.
+        ///
+        /// ```zig
+        /// _ = widgets.button(ui, .of("file"), "File", .{ .variant = .tertiary });
+        /// if (widgets.menu(ui, .of("file.menu"), .of("file"), &app.file_menu_open, .{ .label = "File" })) |file| {
+        ///     if (file.item(ui, "Open", .{ .shortcut = "Ctrl+O" })) app.open();
+        ///     if (file.item(ui, "Autosave", .{ .checked = app.autosave })) app.autosave = !app.autosave;
+        ///     file.separator(ui);
+        ///     if (file.item(ui, "Delete", .{ .danger = true })) app.delete();
+        ///     file.end(ui);
+        /// }
+        /// ```
+        pub fn menu(self: Self, ui: *Ui, id: zui.Id, anchor_id: zui.Id, open: *bool, options: MenuOptions) ?Menu {
+            const state = ui.state(id, MenuState);
+            if (ui.clicked(anchor_id)) {
+                open.* = !open.*;
+                state.at_point = false;
+            }
+            return self.openMenu(ui, id, anchor_id, open, state, options);
+        }
+
+        /// A menu at the pointer when the user asks for `region_id`'s context
+        /// menu: a right click on it, the menu key while it is focused, or a
+        /// long press on one that declares `.gestures.long_press`. The region
+        /// must take the pointer, by being interactive or focusable or
+        /// declaring a gesture. The menu opens toward the side of the pointer
+        /// with room, and otherwise works as `menu` does, giving focus back
+        /// to what had it.
+        ///
+        /// ```zig
+        /// _ = widgets.card(ui, row_id, .{ .interactive = true, .label = file.name });
+        /// ui.close();
+        /// if (widgets.contextMenu(ui, row_id.child("menu"), row_id, &app.row_menu_open, .{ .label = file.name })) |row_menu| {
+        ///     if (row_menu.item(ui, "Rename", .{ .shortcut = "F2" })) app.rename(file);
+        ///     row_menu.end(ui);
+        /// }
+        /// ```
+        pub fn contextMenu(self: Self, ui: *Ui, id: zui.Id, region_id: zui.Id, open: *bool, options: MenuOptions) ?Menu {
+            const state = ui.state(id, MenuState);
+            if (ui.contextRequested(region_id)) {
+                open.* = true;
+                state.at_point = true;
+                state.point = contextPoint(ui, region_id, ui.keyPressed(.menu));
+            }
+            return self.openMenu(ui, id, region_id, open, state, options);
+        }
+
+        /// The pointer, when it is over the region and the menu key did not
+        /// ask; the region's center otherwise.
+        fn contextPoint(ui: *const Ui, region_id: zui.Id, from_key: bool) [2]f32 {
+            const rect = ui.rectOf(region_id) orelse return .{ 0, 0 };
+            if (!from_key) if (ui.primaryPointer()) |pointer| {
+                const at = pointer.position;
+                if (at[0] >= rect.x and at[1] >= rect.y and at[0] < rect.x + rect.width and at[1] < rect.y + rect.height) return at;
+            };
+            return .{ rect.x + rect.width / 2, rect.y + rect.height / 2 };
+        }
+
+        fn openMenu(self: Self, ui: *Ui, id: zui.Id, opener_id: zui.Id, open: *bool, state: *MenuState, options: MenuOptions) ?Menu {
+            const panel_id = id.child("panel");
+            const backdrop_id = id.child("backdrop");
+            const opening = open.* and !state.was_open;
+            const closing = open.* and !opening and (ui.clicked(backdrop_id) or ui.dismissed(panel_id));
+            if (closing) open.* = false;
+            if (!open.* and !closing) {
+                if (state.was_open) ui.requestFocus(.{ .hash = state.opener });
+                state.was_open = false;
+                return null;
+            }
+            if (closing) {
+                state.was_open = false;
+                ui.requestFocus(.{ .hash = state.opener });
+            } else if (opening) {
+                const focused_before = ui.focusedId();
+                state.was_open = true;
+                state.opener = if (state.at_point and !focused_before.isNone()) focused_before.hash else opener_id.hash;
+                ui.requestFocus(menuItemId(id, if (state.item_count != 0) enabledItem(state, 0, .forward) else 0));
+            }
+            state.declared = 0;
+            state.declared_disabled = 0;
+            state.declared_leading = false;
+            state.focused_item = no_item;
+            state.typed_after_focus = no_item;
+            state.typed_first = no_item;
+            state.typed = 0;
+            if (!opening and !closing) {
+                for (0..state.item_count) |index| {
+                    if (ui.focused(menuItemId(id, index))) state.focused_item = @intCast(index);
+                }
+                if (state.focused_item != no_item) menuKeys(ui, id, state);
+                for (ui.typedText()) |byte| if (std.ascii.isAlphanumeric(byte)) {
+                    state.typed = std.ascii.toLower(byte);
+                    break;
+                };
+            }
+
+            const look = self.style(ui, .menu, .idle);
+            const viewport = ui.viewport();
+            if (!closing) ui.box(.{
+                .id = backdrop_id,
+                .interactive = true,
+                .floating = .{ .attach_to = .root, .z = look.layer },
+                .layout = .{ .sizing = .{ .width = .fixed(viewport[0]), .height = .fixed(viewport[1]) } },
+            });
+            const placed = if (state.at_point) placeAtPoint(ui, panel_id, state.point) else placeBeside(ui, opener_id, panel_id, options.placement, look.gap, .start);
+            const entered = entrance(ui, panel_id.child("enter"), opening, look.motion);
+            const effects = overlayEffects(look, enteredScale(entered), placed.origin);
+            ui.open(.{
+                .id = panel_id,
+                .focus_scope = true,
+                .semantics = .{ .role = .menu, .label = options.label, .actions = .initOne(.dismiss) },
+                .floating = slid(placed, entered, look.layer + 1, true),
+                .decoration = decorationOf(look, false),
+                .effects = effectsOrNull(&effects),
+                .exit = look.exit,
+                .layout = .{
+                    .direction = .top_to_bottom,
+                    .padding = look.padding,
+                    .sizing = .{ .width = .fitBetween(look.size[0], look.size[1]) },
+                },
+            });
+            return .{ .widgets = self, .id = id, .open = open, .state = state };
+        }
+
+        fn menuItemId(menu_id: zui.Id, index: usize) zui.Id {
+            return menu_id.indexedChild("item", index);
+        }
+
+        fn menuKeys(ui: *Ui, id: zui.Id, state: *const MenuState) void {
+            const count: usize = state.item_count;
+            var target: usize = state.focused_item;
+            for (ui.keyEvents()) |key_event| switch (key_event.key) {
+                .down => target = enabledItem(state, target + 1, .forward),
+                .up => target = enabledItem(state, target + count - 1, .backward),
+                .home => target = enabledItem(state, 0, .forward),
+                .end => target = enabledItem(state, count - 1, .backward),
+                else => {},
+            };
+            if (target != state.focused_item) ui.requestFocus(menuItemId(id, target));
+        }
+
+        /// The first item at or past `start` going `toward`, wrapping, that
+        /// was not disabled in the previous frame.
+        fn enabledItem(state: *const MenuState, start: usize, toward: Toward) usize {
+            const count: usize = state.item_count;
+            var index = start % count;
+            for (0..count) |_| {
+                const disabled = index < menu_items_tracked and state.disabled_items & (@as(u64, 1) << @intCast(index)) != 0;
+                if (!disabled) return index;
+                index = if (toward == .forward) (index + 1) % count else (index + count - 1) % count;
+            }
+            return start % count;
+        }
+
+        fn menuItem(self: Self, ui: *Ui, opened: Menu, content: []const u8, options: MenuItemOptions) bool {
+            const state = opened.state;
+            const index: usize = state.declared;
+            if (state.declared < no_item - 1) state.declared += 1;
+            const item_id = menuItemId(opened.id, index);
+            if (options.disabled and index < menu_items_tracked) state.declared_disabled |= @as(u64, 1) << @intCast(index);
+            const leading = options.checked != null or options.icon != null;
+            if (leading) state.declared_leading = true;
+            if (state.typed != 0 and !options.disabled and content.len != 0 and std.ascii.toLower(content[0]) == state.typed) {
+                if (state.typed_first == no_item) state.typed_first = @intCast(index);
+                if (state.typed_after_focus == no_item and (state.focused_item == no_item or index > state.focused_item)) state.typed_after_focus = @intCast(index);
+            }
+            const chosen = !options.disabled and ui.clicked(item_id);
+            if (chosen) {
+                opened.open.* = false;
+                state.was_open = false;
+                ui.requestFocus(.{ .hash = state.opener });
+            }
+
+            const item_state = stateOf(ui, item_id, options.disabled);
+            const look = self.style(ui, if (options.danger) .menu_item_danger else .menu_item, item_state);
+            ui.open(.{
+                .id = item_id,
+                .focusable = true,
+                .disabled = options.disabled,
+                .cursor = if (options.disabled) null else .pointer,
+                .semantics = .{ .role = .menu_item, .label = content, .state = .{ .checked = options.checked } },
+                .decoration = decorationOf(look, ui.focused(item_id)),
+                .layout = .{
+                    .sizing = .{ .width = .grow, .height = .fixed(look.size[1]) },
+                    .padding = look.padding,
+                    .child_gap = look.gap,
+                    .child_alignment = .{ .y = .center },
+                },
+            });
+            if (state.leading_column or leading) {
+                const check = self.style(ui, .menu_check, item_state);
+                ui.open(.{ .layout = .{ .sizing = .{ .width = .fixed(check.size[0]) }, .child_alignment = .{ .x = .center, .y = .center } } });
+                if (options.checked orelse false) {
+                    self.icon(ui, .check, check);
+                } else if (options.checked == null) {
+                    if (options.icon) |name| self.icon(ui, name, self.style(ui, .menu_icon, item_state));
+                }
+                ui.close();
+            }
+            ui.text(content, singleLine(look.text));
+            if (options.shortcut.len != 0) {
+                const shortcut = self.style(ui, .menu_shortcut, item_state);
+                var room: zui.Sizing = .grow;
+                room.min = shortcut.gap;
+                ui.box(.{ .layout = .{ .sizing = .{ .width = room } } });
+                var shortcut_style = singleLine(shortcut.text);
+                if (options.danger) shortcut_style.color = look.text.color;
+                ui.text(options.shortcut, shortcut_style);
+            }
+            ui.close();
+            return chosen;
+        }
+
+        pub const PopoverOptions = struct {
+            placement: Placement = .below,
+            /// Its name to an assistive technology.
+            label: []const u8 = "",
+            /// Stays open beside a page that still takes the pointer, as a
+            /// panel pinned in place: a click outside does not close it, and
+            /// Tab moves in and out of it. Its anchor, Escape, a `dismiss`
+            /// action or the application closes it.
+            pinned: bool = false,
+        };
+
+        /// What `popover` opened: declare its content, then call `end`.
+        pub const Popover = struct {
+            pub fn end(_: Popover, ui: *Ui) void {
+                ui.close();
+            }
+        };
+
+        const PopoverState = struct { was_open: bool };
+
+        /// A panel beside `anchor_id`, an element declared before it, while
+        /// `open` is true, its content in a column; clicking the anchor
+        /// toggles it. It opens on `placement`'s side of the anchor and flips
+        /// to the opposite one where the window has no room, kept inside the
+        /// window along the other axis. Escape, a click outside or a
+        /// `dismiss` action closes it and gives focus back to the anchor; Tab
+        /// stays inside it unless it is pinned. Returns the popover to
+        /// declare content in while it is open, and in the frame it closes
+        /// itself, so it fades out from where it was.
+        ///
+        /// ```zig
+        /// _ = widgets.button(ui, .of("filters"), "Filters", .{ .variant = .secondary });
+        /// if (widgets.popover(ui, .of("filters.panel"), .of("filters"), &app.filters_open, .{ .label = "Filters" })) |panel| {
+        ///     _ = widgets.checkbox(ui, .of("filters.unread"), "Unread only", &app.unread_only, .{});
+        ///     panel.end(ui);
+        /// }
+        /// ```
+        pub fn popover(self: Self, ui: *Ui, id: zui.Id, anchor_id: zui.Id, open: *bool, options: PopoverOptions) ?Popover {
+            const state = ui.state(id, PopoverState);
+            const panel_id = id.child("panel");
+            const backdrop_id = id.child("backdrop");
+            if (ui.clicked(anchor_id)) open.* = !open.*;
+            var closed_itself = false;
+            if (open.* and state.was_open) {
+                const outside = !options.pinned and ui.clicked(backdrop_id);
+                if (outside or ui.dismissed(panel_id) or (ui.focused(anchor_id) and ui.keyPressed(.escape))) {
+                    open.* = false;
+                    closed_itself = true;
+                }
+            }
+            if (!open.*) {
+                if (state.was_open and (closed_itself or !options.pinned)) ui.requestFocus(anchor_id);
+                state.was_open = false;
+                if (!closed_itself) return null;
+            }
+            const opening = open.* and !state.was_open;
+            if (open.*) state.was_open = true;
+
+            const look = self.style(ui, .popover, .idle);
+            if (!options.pinned and !closed_itself) {
+                const viewport = ui.viewport();
+                ui.box(.{
+                    .id = backdrop_id,
+                    .interactive = true,
+                    .floating = .{ .attach_to = .root, .z = look.layer },
+                    .layout = .{ .sizing = .{ .width = .fixed(viewport[0]), .height = .fixed(viewport[1]) } },
+                });
+            }
+            const placed = placeBeside(ui, anchor_id, panel_id, options.placement, look.gap, .start);
+            const entered = entrance(ui, panel_id.child("enter"), opening, look.motion);
+            const effects = overlayEffects(look, enteredScale(entered), placed.origin);
+            ui.open(.{
+                .id = panel_id,
+                .focus_scope = !options.pinned,
+                .semantics = .{ .role = .dialog, .label = options.label, .actions = .initOne(.dismiss) },
+                .floating = slid(placed, entered, look.layer + 1, true),
+                .decoration = decorationOf(look, false),
+                .effects = effectsOrNull(&effects),
+                .exit = look.exit,
+                .layout = .{
+                    .direction = .top_to_bottom,
+                    .sizing = .{ .width = .fitBetween(0, look.size[0]) },
+                    .padding = look.padding,
+                    .child_gap = look.gap,
+                },
+            });
+            return .{};
+        }
+
+        pub const DialogOptions = struct {
+            title: []const u8,
+            /// Below the title, wrapped to the panel; none when empty.
+            description: []const u8 = "",
+            /// Escape, a click on the scrim, a `dismiss` action and its close
+            /// button close it; false for one the user must answer.
+            dismissible: bool = true,
+            /// Focused as it opens, such as its first field or its confirm
+            /// button; when none, its close button. A dialog that is not
+            /// dismissible names one, or nothing inside it is focused.
+            initial_focus: zui.Id = .none,
+        };
+
+        /// What `dialog` opened: declare its content, its `actions`, then
+        /// call `end`.
+        pub const Dialog = struct {
+            widgets: Self,
+
+            /// Opens the row of its actions, at the panel's trailing edge:
+            /// declare cancel and then confirm, and close the row with
+            /// `ui.close()`.
+            pub fn actions(opened: Dialog, ui: *Ui) void {
+                const row = opened.widgets.style(ui, .dialog_actions, .idle);
+                ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = row.gap, .child_alignment = .{ .x = .end, .y = .center } } });
+            }
+
+            pub fn end(_: Dialog, ui: *Ui) void {
+                ui.close();
+            }
+        };
+
+        const DialogState = struct { was_open: bool, opener: u64 };
+
+        /// A panel at the window's center while `open` is true, over a scrim
+        /// that takes the pointer from the page, at the `modal` elevation. It
+        /// keeps Tab inside it, focuses `initial_focus` as it opens, and when
+        /// it closes, by the application or as it is dismissed, gives focus
+        /// back to what had it before. In a window narrower than 600 units
+        /// it is a sheet along the window's bottom. Returns the dialog to
+        /// declare content in while it is open, and in the frame it is
+        /// dismissed, so it fades out from where it was.
+        ///
+        /// ```zig
+        /// if (widgets.dialog(ui, .of("delete"), &app.confirming_delete, .{ .title = "Delete the project?", .description = "Its 12 boards go too.", .initial_focus = .of("delete.confirm") })) |confirm| {
+        ///     confirm.actions(ui);
+        ///     if (widgets.button(ui, .of("delete.cancel"), "Cancel", .{ .variant = .secondary })) app.confirming_delete = false;
+        ///     if (widgets.button(ui, .of("delete.confirm"), "Delete", .{ .variant = .danger })) app.deleteProject();
+        ///     ui.close();
+        ///     confirm.end(ui);
+        /// }
+        /// ```
+        pub fn dialog(self: Self, ui: *Ui, id: zui.Id, open: *bool, options: DialogOptions) ?Dialog {
+            const state = ui.state(id, DialogState);
+            const panel_id = id.child("panel");
+            const scrim_id = id.child("scrim");
+            const close_id = id.child("close");
+            const dismissed = open.* and state.was_open and options.dismissible and
+                (ui.clicked(scrim_id) or ui.clicked(close_id) or ui.dismissed(panel_id));
+            if (dismissed) open.* = false;
+            if (!open.*) {
+                if (state.was_open) ui.requestFocus(.{ .hash = state.opener });
+                state.was_open = false;
+                if (!dismissed) return null;
+            }
+            const opening = open.* and !state.was_open;
+            if (opening) {
+                state.* = .{ .was_open = true, .opener = ui.focusedId().hash };
+                ui.requestFocus(if (!options.initial_focus.isNone()) options.initial_focus else if (options.dismissible) close_id else .none);
+            }
+
+            const viewport = ui.viewport();
+            const scrim = self.style(ui, .dialog_scrim, .idle);
+            const look = self.style(ui, .dialog, .idle);
+            const scrim_shown = entrance(ui, scrim_id.child("enter"), opening, scrim.motion);
+            ui.box(.{
+                .id = scrim_id,
+                .interactive = !dismissed,
+                .floating = .{ .attach_to = .root, .z = scrim.layer },
+                .decoration = .{ .background = if (scrim.background) |color| (if (scrim_shown < 1) faded(color, scrim_shown) else color) else null },
+                .exit = scrim.exit,
+                .layout = .{ .sizing = .{ .width = .fixed(viewport[0]), .height = .fixed(viewport[1]) } },
+            });
+            const sheet = viewport[0] < bottom_sheet_below_width;
+            const margin = look.padding.left;
+            var decoration = decorationOf(look, false);
+            if (sheet) decoration.corner_radius = .{ .top_left = look.corner_radius.top_left, .top_right = look.corner_radius.top_right };
+            const point: zui.AnchorPoint = if (sheet) .bottom_center else .center;
+            const entered = entrance(ui, panel_id.child("enter"), opening, look.motion);
+            const rise: f32 = if (sheet) toast_enter_slide else enter_slide;
+            const effects = overlayEffects(look, enteredScale(entered), .{ 0.5, if (sheet) 1 else 0.5 });
+            ui.open(.{
+                .id = panel_id,
+                .focus_scope = true,
+                .semantics = .{ .role = .dialog, .label = options.title, .actions = if (options.dismissible) .initOne(.dismiss) else .initEmpty() },
+                .floating = .{ .attach_to = .root, .anchor = point, .attach_point = point, .offset = .{ 0, (1 - entered) * rise }, .z = look.layer },
+                .decoration = decoration,
+                .effects = effectsOrNull(&effects),
+                .exit = look.exit,
+                .layout = .{
+                    .direction = .top_to_bottom,
+                    .sizing = .{ .width = .fixed(if (sheet) viewport[0] else @min(look.size[0], @max(viewport[0] - 2 * margin, 0))) },
+                    .padding = look.padding,
+                    .child_gap = look.gap,
+                },
+            });
+            const close = self.style(ui, .dialog_close, ui.widgetState(close_id));
+            if (options.dismissible) self.dialogClose(ui, close_id, close, look.layer);
+            ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .padding = .{ .right = if (options.dismissible) close.size[1] else 0 } } });
+            ui.text(options.title, self.style(ui, .dialog_title, .idle).text);
+            ui.close();
+            if (options.description.len != 0) ui.text(options.description, self.style(ui, .dialog_description, .idle).text);
+            return .{ .widgets = self };
+        }
+
+        fn dialogClose(self: Self, ui: *Ui, close_id: zui.Id, close: SkinStyle, layer: i16) void {
+            const corner: zui.AnchorPoint = if (ui.environment().direction == .right_to_left) .top_left else .top_right;
+            const inward: f32 = if (corner == .top_left) close.padding.left else -close.padding.right;
+            ui.open(.{
+                .id = close_id,
+                .focusable = true,
+                .cursor = .pointer,
+                .semantics = .{ .role = .button, .label = "Close" },
+                .floating = .{ .attach_to = .parent, .anchor = corner, .attach_point = corner, .offset = .{ inward, close.padding.top }, .z = layer },
+                .decoration = decorationOf(close, ui.focused(close_id)),
+                .layout = .{ .sizing = .{ .width = .fixed(close.size[1]), .height = .fixed(close.size[1]) }, .child_alignment = .{ .x = .center, .y = .center } },
+            });
+            self.icon(ui, .close, close);
+            ui.close();
+        }
+
+        /// The toasts of `queue` at the window's bottom center, the newest
+        /// in front and up to two older ones tucked behind it, each 4%
+        /// smaller where the context draws transforms; the rest wait their
+        /// turn. Each stays five seconds from when it shows, paused while
+        /// the pointer is over one or focus is on an action, then leaves.
+        /// Choosing its action, or Escape on it or a `dismiss` action, takes
+        /// it away at once. Each is announced to an assistive technology as
+        /// it shows. While one counts down, an idle application asks only
+        /// for a frame at the instant it leaves. Returns the `tag` of the
+        /// toast whose action was chosen this frame.
+        ///
+        /// ```zig
+        /// if (widgets.toasts(ui, .of("notices"), &app.notices)) |booking_id| app.undoBooking(booking_id);
+        /// ```
+        pub fn toasts(self: Self, ui: *Ui, id: zui.Id, queue: *ToastQueue) ?u32 {
+            var index: usize = 0;
+            while (index < queue.len) {
+                if (queue.entries[index].leaving) queue.remove(index) else index += 1;
+            }
+            var chosen: ?u32 = null;
+            for (queue.entries[0..@min(queue.len, toasts_shown_most)]) |*entry| {
+                const toast_id = id.indexedChild("toast", entry.key);
+                const action_id = toast_id.child("action");
+                const acted = entry.action_len != 0 and ui.clicked(action_id);
+                if (acted) chosen = entry.tag;
+                if (acted or ui.dismissed(toast_id) or (ui.focused(action_id) and ui.keyPressed(.escape))) leave(ui, entry);
+            }
+
+            const now = ui.now();
+            var held = false;
+            for (queue.entries[0..@min(queue.len, toasts_shown_most)]) |*entry| {
+                const toast_id = id.indexedChild("toast", entry.key);
+                if (ui.hovered(toast_id) or ui.focused(toast_id.child("action"))) held = true;
+            }
+            for (queue.entries[0..@min(queue.len, toasts_shown_most)]) |*entry| {
+                if (!entry.shown or entry.leaving) continue;
+                if (held) {
+                    if (!entry.paused) entry.left = @max(entry.deadline.secondsSince(now), 0);
+                    entry.paused = true;
+                } else {
+                    if (entry.paused) entry.deadline = now.addSeconds(entry.left);
+                    entry.paused = false;
+                    if (!now.isBefore(entry.deadline)) leave(ui, entry);
+                }
+            }
+
+            const shown_count = @min(queue.len, toasts_shown_most);
+            if (shown_count == 0) return chosen;
+            const stack = self.style(ui, .toast_stack, .idle);
+            for (queue.entries[0..shown_count], 0..) |*entry, position| {
+                const opening = !entry.shown;
+                if (opening) {
+                    entry.shown = true;
+                    entry.deadline = now.addSeconds(toast_seconds);
+                }
+                if (!entry.paused and !entry.leaving) ui.requestFrameAt(entry.deadline);
+                const z = stack.layer + @as(i16, @intCast(position));
+                self.declareToast(ui, id.indexedChild("toast", entry.key), entry, shown_count - 1 - position, stack, z, opening);
+            }
+            return chosen;
+        }
+
+        fn leave(ui: *Ui, entry: *ToastEntry) void {
+            entry.leaving = true;
+            ui.requestFrame();
+        }
+
+        fn declareToast(self: Self, ui: *Ui, toast_id: zui.Id, entry: *const ToastEntry, behind: usize, stack: SkinStyle, z: i16, opening: bool) void {
+            const look = self.style(ui, .toast, .idle);
+            const risen = entrance(ui, toast_id.child("enter"), opening, look.motion);
+            const depth: f32 = @floatFromInt(behind);
+            const scale = if (Ui.draws_transforms) std.math.pow(f32, look.scale, depth) else 1;
+            const effects = overlayEffects(look, scale, .{ 0.5, 0 });
+            const viewport = ui.viewport();
+            ui.open(.{
+                .id = toast_id,
+                .interactive = true,
+                .semantics = .{ .role = .status, .label = entry.message(), .actions = .initOne(.dismiss) },
+                .floating = .{
+                    .attach_to = .root,
+                    .anchor = .bottom_center,
+                    .attach_point = .bottom_center,
+                    .offset = .{ 0, (1 - risen) * toast_enter_slide - stack.padding.bottom - depth * stack.gap },
+                    .z = z,
+                },
+                .decoration = decorationOf(look, false),
+                .effects = effectsOrNull(&effects),
+                .exit = look.exit,
+                .layout = .{
+                    .sizing = .{ .width = .fitBetween(0, @min(look.size[0], @max(viewport[0] - 2 * viewport_margin, 0))) },
+                    .padding = look.padding,
+                    .child_gap = look.gap,
+                    .child_alignment = .{ .y = .center },
+                },
+            });
+            const tone_icon: zui.design.Icon, const tone_part: Part = switch (entry.tone) {
+                .neutral => .{ .info, .toast_icon },
+                .success => .{ .success, .toast_icon_success },
+                .danger => .{ .danger, .toast_icon_danger },
+            };
+            self.icon(ui, tone_icon, self.style(ui, tone_part, .idle));
+            ui.text(entry.message(), look.text);
+            if (entry.action_len != 0) self.toastAction(ui, toast_id.child("action"), entry.action());
+            ui.close();
+        }
+
+        fn toastAction(self: Self, ui: *Ui, action_id: zui.Id, content: []const u8) void {
+            const state = ui.widgetState(action_id);
+            const look = self.style(ui, .toast_action, state);
+            const underline = self.style(ui, .toast_action_underline, state);
+            ui.open(.{
+                .id = action_id,
+                .focusable = true,
+                .cursor = .pointer,
+                .semantics = .{ .role = .button, .label = content },
+                .decoration = .{ .border = if (ui.focused(action_id)) look.focus_ring else null, .corner_radius = look.corner_radius, .corner_shape = look.corner_shape },
+                .layout = .{ .direction = .top_to_bottom, .sizing = .{ .height = .fitBetween(look.size[1], std.math.inf(f32)) }, .child_alignment = .{ .y = .center } },
+            });
+            ui.text(content, singleLine(look.text));
+            ui.box(.{ .decoration = .{ .background = underline.background }, .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(underline.size[1]) } } });
+            ui.close();
+        }
+
+        const Alignment = enum { start, center };
+        const Side = enum { below, above, left, right };
+
+        /// Where an overlay goes beside its anchor, the way it slides as it
+        /// enters, and the point it grows from.
+        const Beside = struct {
+            floating: zui.Floating,
+            /// Away from the anchor.
+            away: [2]f32,
+            origin: [2]f32,
+        };
+
+        /// `panel_id` on `placement`'s side of `anchor_id`, or on the
+        /// opposite one where the window has room for it there and not on
+        /// that side, moved along the other axis to stay inside the window.
+        /// Its size is known from the previous frame, so in the frame it
+        /// opens it takes the side with more room.
+        fn placeBeside(ui: *const Ui, anchor_id: zui.Id, panel_id: zui.Id, placement: Placement, gap: f32, alignment: Alignment) Beside {
+            const viewport = ui.viewport();
+            const mirrored = ui.environment().direction == .right_to_left;
+            const preferred: Side = switch (placement) {
+                .below => .below,
+                .above => .above,
+                .leading => if (mirrored) .right else .left,
+                .trailing => if (mirrored) .left else .right,
+            };
+            const panel = ui.rectOf(panel_id);
+            const anchor = ui.rectOf(anchor_id);
+            const side = if (anchor) |rect| sideWithRoom(rect, panel, viewport, preferred, gap) else preferred;
+            const vertical = side == .below or side == .above;
+            const at_end = vertical and mirrored and alignment == .start;
+            const panel_point: zui.AnchorPoint, const anchor_point: zui.AnchorPoint = switch (side) {
+                .below => if (alignment == .center) .{ .top_center, .bottom_center } else if (at_end) .{ .top_right, .bottom_right } else .{ .top_left, .bottom_left },
+                .above => if (alignment == .center) .{ .bottom_center, .top_center } else if (at_end) .{ .bottom_right, .top_right } else .{ .bottom_left, .top_left },
+                .right => if (alignment == .center) .{ .center_left, .center_right } else .{ .top_left, .top_right },
+                .left => if (alignment == .center) .{ .center_right, .center_left } else .{ .top_right, .top_left },
+            };
+            var shift: f32 = 0;
+            if (anchor) |rect| if (panel) |size| {
+                const axis: usize = if (vertical) 0 else 1;
+                const anchor_start = if (vertical) rect.x else rect.y;
+                const anchor_length = if (vertical) rect.width else rect.height;
+                const length = if (vertical) size.width else size.height;
+                const start = switch (alignment) {
+                    .center => anchor_start + (anchor_length - length) / 2,
+                    .start => if (at_end) anchor_start + anchor_length - length else anchor_start,
+                };
+                const kept = @max(@min(start, viewport[axis] - viewport_margin - length), viewport_margin);
+                shift = kept - start;
+            };
+            const along: f32 = switch (side) {
+                .below, .right => gap,
+                .above, .left => -gap,
+            };
+            const away: [2]f32 = switch (side) {
+                .below => .{ 0, 1 },
+                .above => .{ 0, -1 },
+                .right => .{ 1, 0 },
+                .left => .{ -1, 0 },
+            };
+            return .{
+                .floating = .{
+                    .attach_to = .{ .element = anchor_id },
+                    .anchor = panel_point,
+                    .attach_point = anchor_point,
+                    .offset = if (vertical) .{ shift, along } else .{ along, shift },
+                },
+                .away = away,
+                .origin = panel_point.fractions(),
+            };
+        }
+
+        fn sideWithRoom(anchor: zui.Rect, panel: ?zui.Rect, viewport: [2]f32, preferred: Side, gap: f32) Side {
+            const opposite: Side = switch (preferred) {
+                .below => .above,
+                .above => .below,
+                .left => .right,
+                .right => .left,
+            };
+            const preferred_room = roomOn(preferred, anchor, viewport, gap);
+            const opposite_room = roomOn(opposite, anchor, viewport, gap);
+            const roomier = if (opposite_room > preferred_room) opposite else preferred;
+            const rect = panel orelse return roomier;
+            const needed = if (preferred == .below or preferred == .above) rect.height else rect.width;
+            if (preferred_room >= needed) return preferred;
+            if (opposite_room >= needed) return opposite;
+            return roomier;
+        }
+
+        fn roomOn(side: Side, anchor: zui.Rect, viewport: [2]f32, gap: f32) f32 {
+            const room = switch (side) {
+                .below => viewport[1] - (anchor.y + anchor.height),
+                .above => anchor.y,
+                .right => viewport[0] - (anchor.x + anchor.width),
+                .left => anchor.x,
+            };
+            return room - gap - viewport_margin;
+        }
+
+        /// A context menu's corner at `point`, opening right and down unless
+        /// the window has room only the other way.
+        fn placeAtPoint(ui: *const Ui, panel_id: zui.Id, point: [2]f32) Beside {
+            const viewport = ui.viewport();
+            var flips: [2]bool = .{ point[0] > viewport[0] / 2, point[1] > viewport[1] / 2 };
+            if (ui.rectOf(panel_id)) |rect| {
+                const size: [2]f32 = .{ rect.width, rect.height };
+                for (0..2) |axis| {
+                    const after = viewport[axis] - viewport_margin - point[axis];
+                    const before = point[axis] - viewport_margin;
+                    flips[axis] = size[axis] > after and (size[axis] <= before or before > after);
+                }
+            }
+            const corner: zui.AnchorPoint = if (flips[1])
+                (if (flips[0]) .bottom_right else .bottom_left)
+            else
+                (if (flips[0]) .top_right else .top_left);
+            return .{
+                .floating = .{ .attach_to = .root, .anchor = corner, .attach_point = .top_left, .offset = point },
+                .away = .{ 0, if (flips[1]) -1 else 1 },
+                .origin = corner.fractions(),
+            };
+        }
+
+        /// `beside`, still `enter_slide` short of it toward its anchor until
+        /// it has `entered`.
+        fn slid(beside: Beside, entered: f32, z: i16, capture: bool) zui.Floating {
+            var floating = beside.floating;
+            const short = (1 - entered) * enter_slide;
+            floating.offset = .{ floating.offset[0] - beside.away[0] * short, floating.offset[1] - beside.away[1] * short };
+            floating.z = z;
+            floating.capture = capture;
+            return floating;
+        }
+
+        /// How far an overlay has entered through `motion`: 0 in the frame it
+        /// opens, then toward 1.
+        fn entrance(ui: *Ui, id: zui.Id, opening: bool, motion: Motion) f32 {
+            if (opening) _ = switch (motion) {
+                .spring => animate(ui, id, f32, 0, motion),
+                .none, .tween => animate(ui, id, f32, 0, .{ .tween = .{ .duration = 0 } }),
+            };
+            return animate(ui, id, f32, 1, motion);
+        }
+
+        fn enteredScale(entered: f32) f32 {
+            return if (Ui.draws_transforms) enter_scale + (1 - enter_scale) * entered else 1;
+        }
+
+        fn overlayEffects(look: SkinStyle, scale: f32, origin: [2]f32) Ui.Effects {
+            return .{ .shadow = look.shadow, .transform = if (scale != 1) .{ .scale = @splat(scale), .origin = origin } else null };
+        }
+
+        fn effectsOrNull(effects: *const Ui.Effects) ?*const Ui.Effects {
+            return if (effects.shadow != null or effects.transform != null) effects else null;
+        }
+
         fn animate(ui: *Ui, id: zui.Id, comptime T: type, target: T, motion: Motion) T {
             return switch (motion) {
                 .none => target,
@@ -3549,9 +4824,9 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
     };
 }
 
-/// The containers and navigation as review shows them: each component's
-/// `zuiPreviews`, the content it is seen with, and `declare`, which
-/// declares it with one of them through any `Widgets`.
+/// Each component as review shows it: its `zuiPreviews`, the content it
+/// is seen with, and `declare`, which declares it with one of them through
+/// any `Widgets`. An overlay's preview declares it open.
 ///
 /// ```zig
 /// const Glance = zui_design.Permutations(zui_widgets.previews.Tabs, .glance);
@@ -3953,13 +5228,119 @@ pub const previews = struct {
         }
     };
 
+    /// Shown once its anchor has focus, as after Tab.
+    pub const Tooltip = struct {
+        pub const Content = struct { text: []const u8, shortcut: []const u8 = "" };
+
+        pub const zuiPreviews = .{
+            .short = Content{ .text = "Copy a link" },
+            .shortcut = Content{ .text = "Copy a link to this page", .shortcut = "Ctrl+Shift+S" },
+            .long = Content{ .text = "Shares the board with everyone in the workspace, who can comment but not edit it." },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            const anchor: zui.Id = .of("preview.tooltip.anchor");
+            _ = widgets.button(ui, anchor, "Share", .{ .variant = .secondary });
+            widgets.tooltip(ui, anchor, content.text, .{ .shortcut = content.shortcut });
+        }
+    };
+
+    pub const Menu = struct {
+        pub const Content = struct { section: []const u8 = "", checkable: bool = false, shortcuts: bool = true, danger: bool = true, icons: bool = false };
+
+        pub const zuiPreviews = .{
+            .actions = Content{},
+            .checkable = Content{ .section = "Show", .checkable = true, .shortcuts = false, .danger = false },
+            .icons = Content{ .icons = true, .danger = false },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            const anchor: zui.Id = .of("preview.menu.anchor");
+            _ = widgets.button(ui, anchor, "Actions", .{ .variant = .secondary });
+            var open = true;
+            const shown = widgets.menu(ui, .of("preview.menu"), anchor, &open, .{ .label = "Actions" }) orelse return;
+            if (content.section.len != 0) shown.section(ui, content.section);
+            _ = shown.item(ui, "Copy link", .{ .shortcut = if (content.shortcuts) "Ctrl+C" else "", .checked = if (content.checkable) true else null, .icon = if (content.icons) .arrow_up else null });
+            _ = shown.item(ui, "Duplicate", .{ .shortcut = if (content.shortcuts) "Ctrl+D" else "", .checked = if (content.checkable) false else null, .icon = if (content.icons) .arrow_down else null });
+            _ = shown.item(ui, "Archive", .{ .disabled = true });
+            if (content.danger) {
+                shown.separator(ui);
+                _ = shown.item(ui, "Delete", .{ .danger = true });
+            }
+            shown.end(ui);
+        }
+    };
+
+    pub const Popover = struct {
+        pub const Content = struct { title: []const u8, body: []const u8, placement: Placement = .below };
+
+        pub const zuiPreviews = .{
+            .below = Content{ .title = "Filters", .body = "Show only the stays you can cancel for free." },
+            .beside = Content{ .title = "About this cabin", .body = "Sleeps four, with a wood stove and a view of the bay.", .placement = .trailing },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            const anchor: zui.Id = .of("preview.popover.anchor");
+            _ = widgets.button(ui, anchor, content.title, .{ .variant = .secondary });
+            var open = true;
+            const shown = widgets.popover(ui, .of("preview.popover"), anchor, &open, .{ .placement = content.placement, .label = content.title }) orelse return;
+            widgets.labelWith(ui, content.title, .{ .role = .title });
+            widgets.labelWith(ui, content.body, .{ .wrap = .words });
+            _ = widgets.button(ui, .of("preview.popover.apply"), "Apply", .{ .size = .small });
+            shown.end(ui);
+        }
+    };
+
+    pub const Dialog = struct {
+        pub const Content = struct { title: []const u8, description: []const u8, confirm: []const u8, danger: bool = false };
+
+        pub const zuiPreviews = .{
+            .confirm = Content{ .title = "Book this cabin?", .description = "Three nights from Friday, for two guests.", .confirm = "Book" },
+            .destructive = Content{ .title = "Delete the project?", .description = "Its 12 boards and their history go too. This cannot be undone.", .confirm = "Delete", .danger = true },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            var open = true;
+            const shown = widgets.dialog(ui, .of("preview.dialog"), &open, .{ .title = content.title, .description = content.description, .initial_focus = .of("preview.dialog.confirm") }) orelse return;
+            shown.actions(ui);
+            _ = widgets.button(ui, .of("preview.dialog.cancel"), "Cancel", .{ .variant = .secondary });
+            _ = widgets.button(ui, .of("preview.dialog.confirm"), content.confirm, .{ .variant = if (content.danger) .danger else .primary });
+            ui.close();
+            shown.end(ui);
+        }
+    };
+
+    pub const Toasts = struct {
+        pub const Content = struct { message: []const u8, action: []const u8 = "", tone: ToastTone = .neutral, stacked: bool = false };
+
+        pub const zuiPreviews = .{
+            .neutral = Content{ .message = "Link copied" },
+            .undo = Content{ .message = "Booking confirmed for three nights", .action = "Undo", .tone = .success },
+            .failed = Content{ .message = "Could not reach the server", .action = "Retry", .tone = .danger },
+            .stacked = Content{ .message = "Two cabins saved", .action = "View", .stacked = true },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            var storage: [toasts_shown_most]ToastEntry = undefined;
+            var queue: ToastQueue = .init(&storage);
+            if (content.stacked) {
+                _ = queue.push(.{ .message = "Lisbon cabin saved" });
+                _ = queue.push(.{ .message = "Porto loft saved" });
+            }
+            _ = queue.push(.{ .message = content.message, .action = content.action, .tone = content.tone });
+            _ = widgets.toasts(ui, .of("preview.toasts"), &queue);
+        }
+    };
+
     /// The containers and navigation, for a review or an audit to step
     /// through.
     pub const containers = .{ Card, Divider, ScrollArea, GroupBox, Tabs, NavigationList, Breadcrumbs };
     /// The essential inputs and the text they sit beside.
     pub const inputs = .{ Label, LabeledRow, Disclosure, Button, Checkbox, Slider, TextField, Dropdown, RadioGroup, Segmented, NumberStepper, SearchField, IconButton, Link, Chip, Toggle };
+    /// What floats over the page.
+    pub const overlays = .{ Tooltip, Menu, Popover, Dialog, Toasts };
     /// Every component above.
-    pub const all = containers ++ inputs;
+    pub const all = containers ++ inputs ++ overlays;
 
     const preview_height = 160;
     const preview_rows = [_][]const u8{
@@ -4061,4 +5442,5 @@ test {
     _ = @import("tests.zig");
     _ = @import("containers_tests.zig");
     _ = @import("inputs_tests.zig");
+    _ = @import("overlays_tests.zig");
 }

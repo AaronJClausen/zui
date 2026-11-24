@@ -152,6 +152,29 @@ test "focus requested for no element leaves none focused" {
     try finish(&harness);
 }
 
+test "the focused element's id can be kept and focused again" {
+    var harness: Harness = .{};
+    try harness.init();
+    defer harness.deinit();
+
+    var ui = try step(&harness, .{}, .{});
+    try testing.expect(ui.focusedId().isNone());
+    ui.requestFocus(a);
+    try finish(&harness);
+    ui = try step(&harness, .{}, .{});
+    const opener = ui.focusedId();
+    try testing.expect(opener.eql(a));
+    ui.requestFocus(.none);
+    try finish(&harness);
+    ui = try step(&harness, .{}, .{});
+    try testing.expect(ui.focusedId().isNone());
+    ui.requestFocus(opener);
+    try finish(&harness);
+    ui = try step(&harness, .{}, .{});
+    try testing.expect(ui.focused(a));
+    try finish(&harness);
+}
+
 test "hover covers interactive ancestors; the click goes to the innermost" {
     var harness: Harness = .{};
     try harness.init();

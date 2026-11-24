@@ -2142,9 +2142,9 @@ widens under the pointer and fades when scrolling stops; group boxes of
 settings rows; tabs over an enum, underlined or in a pill groove; a
 sidebar's navigation list with section headings, counts and shortcuts,
 its rows a density's `xs` spacing tier apart; and breadcrumbs that
-return the crumb chosen. The arrow keys move the selection of tabs and
-the list, and a focused scroll area scrolls with the arrows, Page Up and
-Down, Home and End.
+return the crumb chosen, past four folding the middle ones into a menu.
+The arrow keys move the selection of tabs and the list, and a focused
+scroll area scrolls with the arrows, Page Up and Down, Home and End.
 
 `src/ui/library.zig`
 
@@ -2259,6 +2259,64 @@ fn toolbar(app: *App, ui: *Ui) void {
     if (widgets.link(ui, .of("policy"), "Cancellation policy", policy_url)) app.services.open_url(policy_url) catch {};
 }
 ```
+
+<a id="widget-overlays"></a>
+
+### Overlays · *shipped*
+
+Tooltips, menus, context menus, popovers, dialogs and toasts. A tooltip
+shows after half a second of hover, at once on keyboard focus, and an
+icon button shows its label as one. A menu opens from its anchor or, as
+a context menu, at the pointer on a right click, a long press or the
+menu key; its items take shortcuts, icons, checks and the danger colors,
+the arrows, Home and End move through them, and a letter jumps to the
+next that starts with it. A popover opens on its side of its anchor and
+flips to stay inside the window, and can be pinned beside a page that
+still takes the pointer. A dialog stands over a scrim, keeps Tab inside
+it and gives focus back to what opened it. Toasts wait in a queue in
+storage you own, show for five seconds unless hovered, and offer an
+action such as Undo. Each enters and leaves through the design's motion,
+at once under reduced motion, and a timer asks an idle application only
+for a frame at its deadline.
+
+`src/ui/board.zig`
+
+```zig
+fn board(app: *App, ui: *Ui) void {
+    _ = widgets.button(ui, .of("more"), "More", .{ .variant = .tertiary });
+    widgets.tooltip(ui, .of("more"), "Actions for this board", .{});
+    if (widgets.menu(ui, .of("more.menu"), .of("more"), &app.more_open, .{ .label = "Board" })) |more| {
+        if (more.item(ui, "Copy link", .{ .shortcut = "Ctrl+L" })) app.copyLink();
+        if (more.item(ui, "Follow", .{ .checked = app.following })) app.following = !app.following;
+        more.separator(ui);
+        if (more.item(ui, "Delete board", .{ .danger = true })) app.confirming_delete = true;
+        more.end(ui);
+    }
+
+    _ = widgets.button(ui, .of("filters"), "Filters", .{ .variant = .secondary });
+    if (widgets.popover(ui, .of("filters.panel"), .of("filters"), &app.filters_open, .{ .label = "Filters" })) |filters| {
+        _ = widgets.checkbox(ui, .of("unread"), "Unread only", &app.unread_only, .{});
+        filters.end(ui);
+    }
+
+    if (widgets.dialog(ui, .of("delete"), &app.confirming_delete, .{ .title = "Delete the board?", .description = "Its 40 cards go too.", .initial_focus = .of("delete.cancel") })) |confirm| {
+        confirm.actions(ui);
+        if (widgets.button(ui, .of("delete.cancel"), "Cancel", .{ .variant = .secondary })) app.confirming_delete = false;
+        if (widgets.button(ui, .of("delete.confirm"), "Delete", .{ .variant = .danger })) {
+            app.deleteBoard();
+            app.confirming_delete = false;
+            _ = app.notices.push(.{ .message = "Board deleted", .action = "Undo", .tag = app.board_id });
+        }
+        ui.close();
+        confirm.end(ui);
+    }
+    if (widgets.toasts(ui, .of("notices"), &app.notices)) |board_id| app.restoreBoard(board_id);
+}
+```
+
+The tour's Field Guide screen has a menu, a context menu on each guide
+and a popover; its Cabin Booking screen asks in a dialog and answers
+with a toast.
 
 <a id="widget-theme"></a>
 

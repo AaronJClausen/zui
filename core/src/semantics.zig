@@ -24,6 +24,14 @@ pub const Role = enum(u8) {
     image,
     dialog,
     scroll_area,
+    /// A list of commands, opened from a button or as a context menu.
+    menu,
+    /// One command in a `menu`; checked when it turns something on or off.
+    menu_item,
+    /// Text that describes the element it floats beside.
+    tooltip,
+    /// A message announced as it appears, as a toast is.
+    status,
 };
 
 /// A slider's or a progress bar's position in its range.

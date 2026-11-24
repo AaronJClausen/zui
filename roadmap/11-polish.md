@@ -41,7 +41,7 @@ and each is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:26-small-targets` Targets of at least 24 units in the tour | done |
 | `11-polish:27-essential-inputs` Essential inputs | done |
 | `11-polish:28-containers-and-navigation` Containers and navigation | done |
-| `11-polish:29-overlays` Overlays | not started |
+| `11-polish:29-overlays` Overlays | done |
 | `11-polish:30-feedback-and-media` Feedback and media | not started |
 | `11-polish:31-rich-text-and-reordering` Rich text and the reorderable list | not started |
 | `11-polish:32-zui-widgets-data` `zui_widgets_data` | not started |
@@ -2435,12 +2435,13 @@ published page's licences.
 
 What floats over the page: D6 of the default design's plan.
 
-**Grounding** (at `1aa1061`). The dropdown's list
-(`core/zui_widgets/zui_widgets.zig:999`) is the pattern: a backdrop
-attached to the root, a `floating` element attached to its anchor, a
-`focus_scope`, and the `dismiss` action read by `ui.dismissed`
-(`core/src/context.zig:2604`), at the `floating` elevation. The specs
-are `tooltip`, `menu`, `popover`, `dialog` and `toast` in
+**Grounding** (at `a77804a`). The dropdown's list (`declarePopup`,
+`core/zui_widgets/zui_widgets.zig:2176`; its part's look at `:567`) is
+the pattern: a backdrop attached to the root, a `floating` element
+attached to its anchor, a `focus_scope`, and the `dismiss` action read
+by `ui.dismissed` (`core/src/context.zig:2614`), at the `floating`
+elevation. The specs are `tooltip`, `menu`, `popover`, `dialog` and
+`toast` in
 `docs/plans/default-ui-designs/exports/zui-default-design.json`, with
 the tooltip's delay, the toast's seconds and each overlay's greatest
 width in its `metrics`.
@@ -2462,7 +2463,79 @@ and focus returns to an overlay's opener when it closes.
 
 **Spec.** §18, §19.2.
 
-**Status.** Not started.
+**Status.** Done, in one commit rather than two slices, since the
+overlays share their placement, their entrance and the every-part test.
+`Widgets(Ui, Skin)` in `core/zui_widgets/zui_widgets.zig` gains
+`tooltip` (after 0.5 s of hover, at once within 0.3 s of another closing
+and on focus not given by a press, Escape hiding it; no pointer taken;
+an `iconButton` shows its label as one), `menu` and `contextMenu`, which
+return a `Menu` whose `item`, `separator`, `section` and `end` declare
+it (shortcuts, an icon or a check in a leading column, the danger
+colors, disabled items; Up and Down wrapping past the disabled ones,
+Home, End and a letter jumping to the next item it starts; Enter, Space
+or a click choosing and closing; the context menu at the pointer on a
+right click or a long press, at the region's center on the menu key,
+flipped to fit), `popover` (below, above or beside its anchor at the
+reading direction's start or end, flipped where the window has no room
+and moved along the other axis to stay inside it; `pinned` keeps no
+backdrop or focus scope, for `11-polish:37-tour-preferences-menu`),
+`dialog` (over the `scrim` at the `modal` elevation, focusing
+`initial_focus` or its close button, keeping Tab inside, `actions`
+opening its trailing row; a sheet along the bottom below 600 units;
+`dismissible = false` for one that must be answered) and `toasts` over a
+`ToastQueue` in storage the application owns (up to three shown, the
+newest in front and the older ones tucked behind, 4% smaller each where
+the context draws transforms; 5 s from when each shows, paused while
+hovered or its action focused; the action returns the toast's `tag`; a
+full queue refuses a push). Menus, popovers and dialogs close on Escape,
+a click outside and `dismiss`, and give focus back to their opener,
+through the core's new `focusedId`. Each enters by sliding and growing
+through `Tokens.motion`'s `popover_enter`, `dialog_enter` or
+`toast_enter`, and leaves as an exit ghost through the matching exit
+(`Style.exit`, from the skin), declared once more in the frame it closes
+so its fade starts there; both land at once under reduced motion. A
+tooltip waiting on its delay and a toast on its seconds ask only for a
+frame at the deadline. Breadcrumbs past four fold their middle crumbs
+into a menu. `zui.SemanticRole` gains `menu`, `menu_item`, `tooltip` and
+`status`, which the Windows bridge maps to UIA's menu, menu item,
+tooltip and text controls. 24 `Part` tags, each in `Designed`'s
+appearance and `DesignSkin`; the greatest widths (240, 320, 360, 480,
+420), the menu's least width (200), the delays and the toast's seconds
+are the skin's and the module's named constants.
+`zui_widgets.previews.overlays` holds each overlay's `zuiPreviews`
+(`all` is `containers ++ inputs ++ overlays`). Tested in
+`core/zui_widgets/overlays_tests.zig` with `zui_testing.Driver`: every
+state and key the specs list, the semantics and actions, the motion and
+its landing under reduced motion, the exit ghost, the timers and the
+frames an idle application asks for, focus returning to each opener, the
+popover flipping at each edge of the window, and every overlay's
+`glance` permutations and each preview in every scheme and density
+audited clean; `tests.zig`'s every-part test covers the new parts
+through `EveryOverlay`, and `core/tests/instantiate.zig` exercises each
+API through three skins. Found on the way: a toast's action draws its
+focus ring in `on_surface_inverse`, since the `focus` ring falls short
+on the inverse surface, and a tooltip's shortcut is drawn at full
+`on_surface_inverse`, since 70% falls short in the light theme. The
+tour's Field Guide gains a Display popover, a More menu of the section's
+actions and a context menu on each guide, with toasts for what they did;
+Cabin Booking asks in a dialog before it books, answers with a toast
+that can undo it, and shows tooltips on its icon buttons and Save.
+`ARCHITECTURE.md` §7 lists where the specs could not be met here: no
+submenus, no keyboard-only focus, no live region in the Windows bridge,
+no fade on entering, and the rest. Verified: core `test` in three modes,
+`check` for `wasm32-freestanding` and `powerpc-linux`, `test` for
+`x86-linux`; the tour's `test` in three modes and `check`, also for
+`x86_64-windows`; raylib's tour cycle (`diagnostics ok: true`), its
+screenshots of `overview`, `harbor`, `x_ray`, `log_tail`, `light_lab`,
+`field_guide` and `cabin_booking` (and, with the overlays opened for the
+shot, the menu, the dialog and the toasts), and `--measure-idle` (0.8%
+of one core); the terminal's `tour -- --dump --every-screen`; the native
+host's tour cycle
+(`0 layer overflows, 0 glyph atlas overflows, diagnostics ok: true`) and
+its `check` for `x86_64-windows` and `aarch64-windows`; `test-all`,
+`check-all` and the web host's `test-demo`, `test-host` and `test-draw`.
+`counts` is +0.00% in instructions on every scenario against the parent,
+none of which uses these widgets.
 
 ## 11-polish:30-feedback-and-media — Feedback and media
 

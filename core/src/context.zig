@@ -2686,6 +2686,17 @@ pub fn Context(comptime config: Config) type {
             return !element_id.isNone() and self.memory.input.focus == element_id.hash;
         }
 
+        /// The element with keyboard focus, or `.none`, for a dialog to give
+        /// focus back to when it closes.
+        ///
+        /// ```zig
+        /// if (opening) dialog_state.opener = ui.focusedId();
+        /// if (closing) ui.requestFocus(dialog_state.opener);
+        /// ```
+        pub fn focusedId(self: *const Self) Id {
+            return .{ .hash = self.memory.input.focus };
+        }
+
         /// Focus moves to `element_id` at the next `beginFrame`, which this
         /// requests; `.none` leaves no element focused.
         pub fn requestFocus(self: *Self, element_id: Id) void {

@@ -1277,7 +1277,8 @@ pub fn focused(self: *const Self, id: Id) bool
 pub fn widgetState(self: *const Self, id: Id) WidgetState
 pub fn rectOf(self: *const Self, id: Id) ?Rect                  // as laid out last frame
 pub fn pointerLocal(self: *const Self, id: Id) ?[2]f32          // the primary pointer, from the element's top-left
-pub fn requestFocus(self: *Self, id: Id) void
+pub fn requestFocus(self: *Self, id: Id) void                  // .none leaves no element focused
+pub fn focusedId(self: *const Self) Id                          // .none when nothing is focused
 
 pub fn primaryPointer(self: *const Self) ?Pointer               // the mouse, or the first touch still down
 pub fn keyPressed(self: *const Self, key: Key) bool
@@ -1315,7 +1316,8 @@ Pressing a focusable element focuses it; pressing elsewhere clears
 focus; an element that stops being declared loses it. Tab and Shift-Tab
 move in declaration order among focusable, enabled elements, and a
 `focus_scope` keeps focus inside its descendants. `requestFocus` takes
-effect at the next `beginFrame`.
+effect at the next `beginFrame`. `focusedId` names the focused element,
+so an overlay can give focus back to what had it when it closes.
 
 ### 11.3 Intents
 
@@ -3120,6 +3122,11 @@ color vision the tokens were resolved for.
 | `tabs` | any enum | changed |
 | `navigationList` | `*usize` | changed |
 | `breadcrumbs` | nothing | the crumb chosen |
+| `tooltip` | nothing | nothing |
+| `menu`, `contextMenu` | `*bool`, open | the `Menu` to declare items in while open; `Menu.item` returns chosen |
+| `popover` | `*bool`, open | the `Popover` to declare content in while open |
+| `dialog` | `*bool`, open | the `Dialog` to declare content and actions in while open |
+| `toasts` | `*ToastQueue` | the tag of the toast whose action was chosen |
 
 `card`, `scrollArea` and `groupBox` open a container: a card closes with
 `ui.close()`, and the others with `end` on the value they return, which
@@ -3165,6 +3172,34 @@ answers from `Tokens.icon`. A component's own indicator without one
 falls back to the skin's glyph; an icon with no glyph to fall back to,
 such as one the application asked for, is not drawn and is counted in
 `Diagnostics.missing_icons`, which is not a failure.
+
+What floats over the page is declared after what it floats beside. A
+tooltip shows after 0.5 s of hover, at once within 0.3 s of another
+closing, and at once on focus not given by a press; an icon button's
+label is its tooltip. A menu opens from its anchor, or as a context menu
+at the pointer when `contextRequested` answers for its region, focusing
+its first item; its items take a shortcut, an icon, a check and the
+danger colors, the arrows, Home and End move through them past the
+disabled ones, and a letter jumps to the next item it starts.
+Breadcrumbs past four fold their middle crumbs into such a menu. A
+popover opens below, above or beside its anchor and flips to the
+opposite side where the window has no room, kept inside it along the
+other axis; a pinned one has no backdrop and keeps no focus scope, so
+the page beside it still takes the pointer. A dialog stands over the
+`scrim` at the `modal` elevation, focuses the element it names, keeps
+Tab inside it, and in a window narrower than 600 units is a sheet along
+the bottom. Menus, popovers and dialogs close on Escape, a click outside
+and a `dismiss` action, and give focus back to their opener. Toasts wait
+in a `ToastQueue` over storage the application owns, which refuses one
+past its capacity; up to three show at the bottom center, the newest in
+front, each for 5 s from when it shows and paused while hovered or
+focused, and report the `status` role. Each overlay enters through
+`Tokens.motion`'s `popover_enter`, `dialog_enter` or `toast_enter` and
+leaves as an exit ghost through the matching exit, declared once more in
+the frame it closes so its fade starts there; both land at once under
+reduced motion. A tooltip or a toast waiting on its time asks only for a
+frame at its deadline. Each overlay declares its `zuiPreviews` in
+`zui_widgets.previews.overlays`.
 
 Every control is focusable, draws the skin's focus ring, reports
 semantics when the feature is on, and is operable by keyboard and by

@@ -874,26 +874,39 @@ test "breadcrumbs return the crumb chosen by click or by Enter, and the current 
     try testing.expectEqual(zui.SemanticRole.group, (try nodeOf(frame, Path.id)).role);
 }
 
-test "past four crumbs the middle ones collapse into one that shows them" {
+test "past four crumbs the middle ones fold into a menu of them" {
     var fixture: Fixture(Ui) = .{};
     try fixture.init();
     defer fixture.deinit();
     const driver = &fixture.driver;
     var app: Path = .{ .crumbs = &.{ "Home", "Projects", "Harbor", "Services", "Orders", "Settings" } };
+    const more = Path.id.child("more");
+    const folded = Path.id.child("folded");
     var frame = try driver.frame(&app, Path.declare, &.{});
     try testing.expect(frame.rectOf(Path.crumb(0)) != null);
     try testing.expectEqual(@as(?zui.Rect, null), frame.rectOf(Path.crumb(1)));
     try testing.expectEqual(@as(?zui.Rect, null), frame.rectOf(Path.crumb(3)));
     try testing.expect(frame.rectOf(Path.crumb(4)) != null);
-    const more = frame.rectOf(Path.id.child("more")).?;
-    try testing.expect(more.width >= tokens.target_floors.get(.pointer));
+    try testing.expect(frame.rectOf(more).?.width >= tokens.target_floors.get(.pointer));
+    try testing.expectEqual(@as(?zui.Rect, null), frame.rectOf(folded.child("panel")));
 
-    _ = try driver.click(&app, Path.declare, Path.id.child("more"));
+    _ = try driver.click(&app, Path.declare, more);
     frame = try driver.frame(&app, Path.declare, &.{});
-    try testing.expectEqual(@as(?zui.Rect, null), frame.rectOf(Path.id.child("more")));
-    for (0..5) |index| try testing.expect(frame.rectOf(Path.crumb(index)) != null);
-    try testing.expect(fixture.ui.focused(Path.crumb(1)));
-    try testing.expectEqual(@as(?usize, null), app.chosen);
+    try testing.expectEqual(zui.SemanticRole.menu, (try nodeOf(frame, folded.child("panel"))).role);
+    for (0..3, [_][]const u8{ "Projects", "Harbor", "Services" }) |index, label| {
+        const item = try nodeOf(frame, folded.indexedChild("item", index));
+        try testing.expectEqual(zui.SemanticRole.menu_item, item.role);
+        try testing.expectEqualStrings(label, item.label);
+    }
+    try testing.expect(frame.rectOf(folded.indexedChild("item", 3)) == null);
+    try testing.expect(fixture.ui.focused(folded.indexedChild("item", 0)));
+
+    _ = try driver.pressKeys(&app, Path.declare, &.{.down});
+    _ = try driver.pressKeys(&app, Path.declare, &.{.enter});
+    try testing.expectEqual(@as(?usize, 2), app.chosen);
+    frame = try driver.frame(&app, Path.declare, &.{});
+    try testing.expectEqual(@as(?zui.Rect, null), frame.rectOf(folded.child("panel")));
+    try testing.expect(fixture.ui.focused(more));
 }
 
 // =============================================================

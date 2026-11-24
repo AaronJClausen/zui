@@ -1,5 +1,6 @@
 const std = @import("std");
 const zui = @import("zui");
+const zui_widgets = @import("zui_widgets");
 
 /// The guide's sections, each a tab.
 const Section = enum { getting_started, layout, containers, navigation, tokens, changelog };
@@ -95,7 +96,17 @@ const ids = zui.ids(.{
     "field_guide.settings",
     "field_guide.compact",
     "field_guide.counts",
+    "field_guide.more",
+    "field_guide.more.menu",
+    "field_guide.display",
+    "field_guide.display.panel",
+    "field_guide.display.compact",
+    "field_guide.display.counts",
+    "field_guide.notices",
 });
+
+/// The most guides a section holds, each with its context menu.
+const most_guides = 5;
 
 /// The screen, declared through `kit`, the tour's `Kit`.
 pub fn Using(comptime kit: type) type {
@@ -104,7 +115,9 @@ pub fn Using(comptime kit: type) type {
     return struct {
         /// A documentation browser built from the containers and the
         /// navigation: sections on tabs, views in a groove, a trail back,
-        /// cards, group boxes and areas that scroll.
+        /// cards, group boxes and areas that scroll; a menu of the section's
+        /// actions, a context menu on each guide, a popover of display
+        /// settings, and toasts that say what an action did.
         pub const FieldGuide = struct {
             section: Section = .containers,
             view: View = .overview,
@@ -112,9 +125,15 @@ pub fn Using(comptime kit: type) type {
             compact: bool = false,
             show_counts: bool = true,
             following: std.EnumArray(Section, bool) = .initFill(false),
+            more_open: bool = false,
+            display_open: bool = false,
+            guide_menus_open: [most_guides]bool = @splat(false),
+            notice_storage: [3]zui_widgets.ToastEntry = undefined,
+            notices: zui_widgets.ToastQueue = .{ .entries = &.{} },
 
             pub fn declare(self: *FieldGuide, ui: *Ui, shell: *const Shell) void {
                 const widgets = shell.widgets;
+                if (self.notices.entries.len == 0) self.notices = .init(&self.notice_storage);
                 shell.pageHeading(ui, "FIELD GUIDE", "Containers and navigation", "A documentation browser drawn from the tokens: sections on tabs, views in a groove, a trail back, cards and areas that scroll.");
                 ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .grow_both, .child_gap = 12 } });
                 defer ui.close();
@@ -127,12 +146,50 @@ pub fn Using(comptime kit: type) type {
                     if (self.show_counts) shell.printColored(ui, .caption, shell.colors.get(.on_surface_muted), "{d} {s} in {s}", .{ guide_count, if (guide_count == 1) "guide" else "guides", contents.get(self.section).title });
                     shell.spacer(ui);
                     _ = widgets.tabs(ui, ids.@"field_guide.views", &self.view, .{ .style = .pill, .label = "View" });
+                    self.display(ui, shell);
+                    self.more(ui, shell);
                 }
                 switch (self.view) {
                     .overview => self.overview(ui, shell),
                     .examples => self.example(ui, shell),
                     .settings => self.settings(ui, shell),
                 }
+                _ = widgets.toasts(ui, ids.@"field_guide.notices", &self.notices);
+            }
+
+            fn display(self: *FieldGuide, ui: *Ui, shell: *const Shell) void {
+                const widgets = shell.widgets;
+                _ = widgets.button(ui, ids.@"field_guide.display", "Display", .{ .variant = .secondary, .size = .small });
+                const panel = widgets.popover(ui, ids.@"field_guide.display.panel", ids.@"field_guide.display", &self.display_open, .{ .label = "Display" }) orelse return;
+                defer panel.end(ui);
+                widgets.labelWith(ui, "Display", .{ .role = .title });
+                _ = widgets.checkbox(ui, ids.@"field_guide.display.compact", "Compact cards", &self.compact, .{});
+                _ = widgets.checkbox(ui, ids.@"field_guide.display.counts", "Show how many guides a section holds", &self.show_counts, .{});
+            }
+
+            fn more(self: *FieldGuide, ui: *Ui, shell: *const Shell) void {
+                const widgets = shell.widgets;
+                _ = widgets.button(ui, ids.@"field_guide.more", "More", .{ .variant = .tertiary, .size = .small });
+                const actions = widgets.menu(ui, ids.@"field_guide.more.menu", ids.@"field_guide.more", &self.more_open, .{ .label = "Section actions", .placement = .below }) orelse return;
+                defer actions.end(ui);
+                actions.section(ui, contents.get(self.section).title);
+                if (actions.item(ui, "Copy a link to this section", .{ .shortcut = "Ctrl+L" })) self.notify("Link copied.");
+                const following = self.following.getPtr(self.section);
+                if (actions.item(ui, "Follow this section", .{ .checked = following.* })) {
+                    following.* = !following.*;
+                    self.notify(if (following.*) "Following this section." else "No longer following this section.");
+                }
+                _ = actions.item(ui, "Print", .{ .shortcut = "Ctrl+P", .disabled = true });
+                actions.separator(ui);
+                if (actions.item(ui, "Back to the start", .{ .danger = true })) {
+                    self.section = .getting_started;
+                    self.view = .overview;
+                    self.opened = null;
+                }
+            }
+
+            fn notify(self: *FieldGuide, message: []const u8) void {
+                _ = self.notices.push(.{ .message = message });
             }
 
             fn trail(self: *FieldGuide, ui: *Ui, shell: *const Shell) void {
@@ -167,14 +224,31 @@ pub fn Using(comptime kit: type) type {
                     ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 12 } });
                     defer ui.close();
                     for (guides[index..@min(index + 2, guides.len)], index..) |guide, guide_index| {
-                        if (widgets.card(ui, .indexed("field_guide.guide", guide_index), .{ .interactive = true, .label = guide.title, .width = .grow_equal })) self.opened = guide_index;
+                        const card_id: zui.Id = .indexed("field_guide.guide", guide_index);
+                        if (widgets.card(ui, card_id, .{ .interactive = true, .label = guide.title, .width = .grow_equal })) self.opened = guide_index;
                         widgets.cardTitle(ui, guide.title);
                         if (!self.compact) widgets.cardBody(ui, guide.summary);
                         ui.close();
+                        self.guideMenu(ui, shell, card_id, guide_index, guide.title);
                     }
                     if (index + 1 == guides.len) ui.box(.{ .layout = .{ .sizing = .{ .width = .grow_equal } } });
                 }
                 widgets.divider(ui, .{ .label = "end of the section" });
+            }
+
+            /// A right click on a guide, or the menu key while it is
+            /// focused, opens its menu.
+            fn guideMenu(self: *FieldGuide, ui: *Ui, shell: *const Shell, card_id: zui.Id, guide_index: usize, title: []const u8) void {
+                if (guide_index >= most_guides) return;
+                const guide = shell.widgets.contextMenu(ui, card_id.child("menu"), card_id, &self.guide_menus_open[guide_index], .{ .label = title }) orelse return;
+                defer guide.end(ui);
+                if (guide.item(ui, "Open", .{ .shortcut = "Enter" })) self.opened = guide_index;
+                if (guide.item(ui, "Copy a link to this guide", .{ .shortcut = "Ctrl+L" })) self.notify("Link copied.");
+                const following = self.following.getPtr(self.section);
+                if (guide.item(ui, "Follow this section", .{ .checked = following.* })) {
+                    following.* = !following.*;
+                    self.notify(if (following.*) "Following this section." else "No longer following this section.");
+                }
             }
 
             fn example(self: *FieldGuide, ui: *Ui, shell: *const Shell) void {

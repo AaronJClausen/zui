@@ -253,10 +253,13 @@ pub const UIA_HyperlinkControlTypeId: CONTROLTYPEID = 50005;
 pub const UIA_ImageControlTypeId: CONTROLTYPEID = 50006;
 pub const UIA_ListItemControlTypeId: CONTROLTYPEID = 50007;
 pub const UIA_ListControlTypeId: CONTROLTYPEID = 50008;
+pub const UIA_MenuControlTypeId: CONTROLTYPEID = 50009;
+pub const UIA_MenuItemControlTypeId: CONTROLTYPEID = 50011;
 pub const UIA_ProgressBarControlTypeId: CONTROLTYPEID = 50012;
 pub const UIA_RadioButtonControlTypeId: CONTROLTYPEID = 50013;
 pub const UIA_SliderControlTypeId: CONTROLTYPEID = 50015;
 pub const UIA_TextControlTypeId: CONTROLTYPEID = 50020;
+pub const UIA_ToolTipControlTypeId: CONTROLTYPEID = 50022;
 pub const UIA_GroupControlTypeId: CONTROLTYPEID = 50026;
 pub const UIA_PaneControlTypeId: CONTROLTYPEID = 50033;
 

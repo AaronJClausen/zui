@@ -667,9 +667,12 @@ fn controlType(role: zui.SemanticRole) uia.CONTROLTYPEID {
         .combo_box => uia.UIA_ComboBoxControlTypeId,
         .list_box => uia.UIA_ListControlTypeId,
         .option => uia.UIA_ListItemControlTypeId,
-        .label, .heading => uia.UIA_TextControlTypeId,
+        .label, .heading, .status => uia.UIA_TextControlTypeId,
         .image => uia.UIA_ImageControlTypeId,
         .dialog, .scroll_area => uia.UIA_PaneControlTypeId,
+        .menu => uia.UIA_MenuControlTypeId,
+        .menu_item => uia.UIA_MenuItemControlTypeId,
+        .tooltip => uia.UIA_ToolTipControlTypeId,
     };
 }
 

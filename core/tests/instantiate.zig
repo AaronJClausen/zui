@@ -178,6 +178,32 @@ fn declareWidgetsWith(widgets: anytype, ui: *Ui, scope: zui.Id) void {
     _ = zui_reflect.inspector(widgets, ui, scope.child("settings"), &settings);
     declareContainersWith(widgets, ui, scope);
     declareInputsWith(widgets, ui, scope);
+    declareOverlaysWith(widgets, ui, scope);
+}
+
+var overlays_open = true;
+var toast_storage: [2]zui_widgets.ToastEntry = undefined;
+var toast_queue: zui_widgets.ToastQueue = .init(&toast_storage);
+
+fn declareOverlaysWith(widgets: anytype, ui: *Ui, scope: zui.Id) void {
+    const anchor = scope.child("overlay_anchor");
+    _ = widgets.button(ui, anchor, "anchor", .{});
+    widgets.tooltip(ui, anchor, "tooltip", .{ .shortcut = "Ctrl+T", .placement = .above });
+    if (widgets.menu(ui, scope.child("menu"), anchor, &overlays_open, .{ .label = "menu", .placement = .trailing })) |shown| {
+        shown.section(ui, "section");
+        if (shown.item(ui, "item", .{ .shortcut = "Ctrl+I", .icon = .info, .checked = true, .danger = true, .disabled = false })) overlays_open = false;
+        shown.separator(ui);
+        shown.end(ui);
+    }
+    if (widgets.contextMenu(ui, scope.child("context_menu"), anchor, &overlays_open, .{})) |shown| shown.end(ui);
+    if (widgets.popover(ui, scope.child("popover"), anchor, &overlays_open, .{ .placement = .leading, .pinned = true, .label = "popover" })) |shown| shown.end(ui);
+    if (widgets.dialog(ui, scope.child("dialog"), &overlays_open, .{ .title = "title", .description = "description", .dismissible = false, .initial_focus = anchor })) |shown| {
+        shown.actions(ui);
+        ui.close();
+        shown.end(ui);
+    }
+    if (!toast_queue.push(.{ .message = "toast", .action = "Undo", .tone = .success, .tag = 1 })) _ = toast_queue.waiting();
+    if (widgets.toasts(ui, scope.child("toasts"), &toast_queue)) |tag| _ = tag;
 }
 
 fn declareInputsWith(widgets: anytype, ui: *Ui, scope: zui.Id) void {
