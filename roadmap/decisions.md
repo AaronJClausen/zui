@@ -171,3 +171,19 @@ the spec.
    asked about whose element had no region. The other option is only
    saying so in each query's doc comment. No item is queued until the
    owner chooses.
+3. **When the focus ring shows, beyond the owner's rule**
+   (`11-polish:45-focus-ring-done-right`). The owner set it: on at the
+   first navigation without a pointer, from any input that navigates so,
+   off at a pointer's release, kept through a press cancelled by Escape,
+   and always on a text input. Planned, until the owner says otherwise:
+   hover and the wheel leave it as it is; the inputs that turn it on are
+   the keyboard's, a gamepad's or a remote's directional pad, a rotary
+   control, a switch device and an accessibility action that moves
+   focus; the controls that show it however focused are those that take
+   typed text (text field, text area, search field, a number stepper's
+   entry, an editable dropdown); focus moved by the application
+   (`requestFocus`, an overlay returning focus to its opener) keeps the
+   state it finds. Still to choose: whether a key pressed on a control
+   that a click focused, such as Space on a clicked button, turns it on,
+   as browsers do for any key but a modifier, or only keys that move
+   focus.

@@ -57,6 +57,7 @@ and each is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:42-scripted-input` Scripted input on the test card | not started |
 | `11-polish:43-test-card-review` The test card's review mode | not started |
 | `11-polish:44-test-card-on-the-web` The test card in the web checks | not started |
+| `11-polish:45-focus-ring-done-right` A focus ring that sits evenly, above its neighbours, only for navigation without a pointer | not started |
 
 ### The design system
 
@@ -2970,5 +2971,107 @@ fails `test-draw` naming that region.
 **Waits for** `11-polish:39-frame-snapshots`.
 
 **Spec.** §20.1.
+
+**Status.** Not started.
+
+## 11-polish:45-focus-ring-done-right — A focus ring that sits evenly, above its neighbours, only for navigation without a pointer
+
+The owner's report of 2026-11-23: the focus ring is lopsided on some
+controls, a later sibling's hover draws over it, its corners do not
+follow its offset, and it shows after a click as well as after Tab.
+
+**Grounding** (at `a77804a`). A control's ring is its border with
+`focus_ring_offset` (`Tokens.lookIn`, `core/src/design.zig:682-685`),
+copied by `zui_widgets.DesignSkin` into `Style.focus_ring` and drawn in
+place of `border` while focused (`decorationOf`,
+`core/zui_widgets/zui_widgets.zig:3530`). Emission draws it in
+`closeSubtree` (`core/src/emission.zig:858-880`):
+
+1. **Snapping.** The ring's bounds are the element's unsnapped bounds
+   grown by `offset + width` (`outsetBorderBounds`, `:883`), and only
+   then snapped to whole pixels (`snap`, `:270`, which rounds each edge
+   on its own), while the control's fill is its own bounds snapped. At a
+   fractional position, or a scale where the offset or the width is a
+   fraction of a pixel (2 units at 1.25× is 2.5 pixels), each edge of
+   the ring rounds apart from the fill's edge beside it, so the gap is a
+   pixel wider on one side than the other. The widths themselves are
+   never snapped. Other places outset or inset a snapped rectangle in
+   units the same way and may show it too: shadows' and glows' bounds
+   (`:677-739`), dividers (`emitDividers`), the corner radii clamped to
+   snapped bounds (`:617`, `:873`), the scrollbar's inset thumb and the
+   slider's ring round the whole slider in `zui_widgets`.
+2. **Order.** The ring is pushed at the end of its element's subtree, in
+   its element's layer (`level.z`), so a sibling declared after it draws
+   its hover fill, or anything else, over the part of the ring outside
+   the control. Nothing draws the ring after its neighbours.
+3. **Corners.** `outsetBorderRadius` (`:895`) grows each radius by
+   `offset + max(width)` and keeps a square corner square, but the ring
+   is drawn only when the offset is positive (`drawn_outside`, `:868`):
+   a negative offset, a ring inside the control, is ignored and drawn on
+   the control's edge, with the control's own radius. The corner shape
+   (`cornersIn`) is not adjusted for the outset either, so a squircle's
+   ring is a squircle of the larger box, not the curve parallel to the
+   control's.
+4. **When it shows.** `widgetState` (`core/src/context.zig:2696`) is
+   `.focused` whenever the element has focus and is not pressed or
+   hovered, however focus came: a click focuses a control and shows its
+   ring, and hovering a focused control hides it. The core keeps no
+   record of whether the user is navigating with a pointer or without
+   one.
+
+**Plan.**
+
+1. Snap first, then grow: the ring's rectangle is the control's snapped
+   rectangle grown, on every side alike, by the offset and the width
+   each rounded to whole pixels (at least one pixel of width), and its
+   radii follow from those whole-pixel amounts. Audit every other place
+   that grows or shrinks a snapped rectangle by units (the list above)
+   and make each round its amount, not its edges, with a test at a
+   fractional position and at 1.25× and 1.5×.
+2. The ring above its neighbours: emission keeps the focused element's
+   ring aside and draws it after the rest of the layer that holds its
+   element (still inside that element's clip and transform, so a
+   scrolled-away control's ring is cut off with it, and a floating layer
+   above still covers it). At most one ring a frame, so it costs one
+   kept command.
+3. Corners for any offset: a positive offset grows each radius by the
+   offset and the width, a negative one shrinks it, to no less than 0,
+   and a ring inside the control is drawn inside it; the corner shape
+   draws the curve parallel to the control's, as
+   `11-polish:17-nested-corners` does for nested boxes.
+4. Focus visible: the core keeps whether the focus is to be shown, from
+   the record's events. It turns on at the first input that navigates
+   without a pointer, whatever device sends it: the keyboard's (Tab and
+   Shift+Tab, the arrows, Home, End, Page Up and Down where they move
+   focus), a gamepad's or a remote's directional pad, a rotary control
+   that steps focus, a switch device, and an accessibility action that
+   moves focus (a screen reader, voice control). The rule is the kind of
+   input, not the device: a new source of navigation events turns it on
+   without changing the rule. It turns off at a pointer's release (a
+   click or a tap), not its press; a press cancelled by Escape leaves it
+   on. Hover and the wheel do not change it. A control that takes typed
+   text shows its ring however it was focused, as a text field, a search
+   field, a number stepper's entry and an editable dropdown do.
+   `widgetState` answers `.focused` only while the focus is shown, and a
+   focused control keeps its ring while hovered or pressed, the state's
+   fill and the ring drawn together. A query, `ui.focusVisible()`, lets
+   a custom control follow the same rule.
+
+**Done when.** A test at fractional positions and at 1, 1.25, 1.5 and 2
+times scale finds the gap between ring and fill equal on all four sides,
+and each other outset the audit found as even; a sibling declared after
+a focused control and hovered draws under its ring; a ring at offsets
+−2, 0 and 2 has corners parallel to its control's, for round and
+squircle corners; `zui_testing.Driver` tests show the ring after Tab and
+after a gamepad move and after an accessibility action, hide it after a
+click's release, keep it after a press cancelled by Escape and while
+hovering, and show it on a text field focused by a click; the audit is
+clean for every component's `glance` permutations; `counts` within 2% of
+the parent commit; the tour looks the same but for the ring.
+
+**Waits for** `11-polish:29-overlays`, which changes the same widgets
+and returns focus to an overlay's opener.
+
+**Spec.** §7, §11.2, §13.2, §18, §19.2.
 
 **Status.** Not started.
