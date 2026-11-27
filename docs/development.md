@@ -209,11 +209,24 @@ package's legs, the shards of one optimize mode), and the quickest jobs
 keep none. Zig never deletes what its cache no longer needs, so each key
 also names the day (UTC): a run restores the cache saved earlier that
 day, and a day's first run starts cold, rather than every cache growing
-by each run's builds until setup-zig empties it at 2 GiB.
+by each run's builds until setup-zig saves it empty past its
+`cache-size-limit`, 2048 MiB unless a leg asks for more: core's Linux
+`tests`, `zui-debug` and `Tracy` legs, and `hosts/native/`'s Linux
+tests, grow by about 0.85 GB a run, and keep 4096 MiB.
+
+The Cache cleanup workflow (`.github/workflows/cache-cleanup.yml`) runs
+after every CI run, daily, and by hand, where `dry-run` only prints what
+it would delete. With `gh` alone, it deletes each cache that no run can
+restore: of the entries of a ref whose keys differ only in their
+trailing run id and attempt, all but the newest, and every
+`setup-zig-cache-v2-` entry whose key names a day before today (UTC). It
+never deletes Zig's own download, `setup-zig-tarball-`. It is a workflow
+of its own because local CI runs every job of `ci.yml`.
 
 When CI passes on a push to `main` and its `test-site` job ran, the
-Pages workflow builds the site in ReleaseSmall, runs `test-site` on it,
-and publishes it; `workflow_dispatch` publishes without asking CI.
+Pages workflow sets Zig up through the same action, builds the site in
+ReleaseSmall, runs `test-site` on it, and publishes it;
+`workflow_dispatch` publishes without asking CI.
 
 Those targets exist to catch assumptions about the host machine early:
 the first 32-bit build found two places that used a 64-bit hash as an

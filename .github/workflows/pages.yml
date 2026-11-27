@@ -71,9 +71,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
-      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
-        with:
-          version: ${{ env.ZIG_VERSION }}
+      - uses: ./.github/actions/setup-zig
       - run: zig build site -Doptimize=ReleaseSmall
       - run: google-chrome --version
       - run: zig build test-site -Doptimize=ReleaseSmall -Dbrowser=google-chrome

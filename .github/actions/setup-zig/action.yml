@@ -7,6 +7,9 @@ inputs:
   use-cache:
     description: Whether to restore and save Zig's cache, which a job too quick to gain from it leaves off
     default: "true"
+  cache-size-limit:
+    description: The MiB past which setup-zig saves the cache empty, so the next run starts cold
+    default: "2048"
 runs:
   using: composite
   steps:
@@ -15,7 +18,7 @@ runs:
       shell: pwsh
       run: Set-MpPreference -DisableRealtimeMonitoring $true
     # Zig never deletes what its cache no longer needs, so a cache restored
-    # and saved by every run grows until setup-zig empties it at 2 GiB.
+    # and saved by every run grows until setup-zig empties it at its limit.
     # Starting each one afresh every day keeps it to one day's builds.
     - id: cache-day
       shell: bash
@@ -24,4 +27,5 @@ runs:
       with:
         version: ${{ env.ZIG_VERSION }}
         use-cache: ${{ inputs.use-cache }}
+        cache-size-limit: ${{ inputs.cache-size-limit }}
         cache-key: ${{ inputs.cache-key && format('{0}-{1}', steps.cache-day.outputs.day, inputs.cache-key) || steps.cache-day.outputs.day }}

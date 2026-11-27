@@ -1,0 +1,57 @@
+name: Cache cleanup
+
+# setup-zig saves a new cache entry on every run, keyed by the run, and
+# GitHub holds a repository's caches to 10 GB, evicting the oldest past it.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Only print the keys that would be deleted
+        type: boolean
+        default: false
+
+permissions:
+  actions: write
+
+concurrency:
+  group: cache-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    name: Delete the caches no run restores
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      DRY_RUN: ${{ inputs.dry-run || false }}
+    steps:
+      - name: Delete every entry but each ref's newest of a key, and every earlier day's Zig cache
+        run: |
+          gh cache list --limit 1000 --json id,key,ref,createdAt > caches.json
+          # A Zig cache's key ends in its run's id and attempt, and names its day (UTC),
+          # which a run restores only from that day's entries.
+          jq -r --arg today "$(date -u +%F)" '
+            map(. + {key_without_run: (.key | sub("-[0-9]+-[0-9]+$"; ""))})
+            | (group_by([.ref, .key_without_run]) | map(sort_by(.createdAt) | .[:-1]) | add // []) as $superseded
+            | map(select((.key | startswith("setup-zig-cache-v2-")) and ([.key | capture("-(?<day>[0-9]{4}-[0-9]{2}-[0-9]{2})-").day][0] // $today) < $today)) as $earlier_days
+            | $superseded + $earlier_days
+            | unique_by(.id)
+            | map(select(.key | startswith("setup-zig-tarball-") | not))
+            | sort_by(.key)[]
+            | "\(.id)\t\(.key)"' caches.json > doomed.tsv
+          echo "$(wc -l < doomed.tsv) of $(jq length caches.json) entries to delete"
+          while IFS=$'\t' read -r id key; do
+            if [ "$DRY_RUN" = true ]; then
+              echo "would delete $key"
+            else
+              echo "deleting $key"
+              gh cache delete "$id"
+            fi
+          done < doomed.tsv

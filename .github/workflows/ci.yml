@@ -120,11 +120,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { leg: tests, os: ubuntu-latest, run: zig build test }
+          # A run adds about 0.85 GB to these caches, and a day's fourth run outgrows 2 GiB.
+          - { leg: tests, os: ubuntu-latest, run: zig build test, cache-size-limit: 4096 }
           - { leg: tests, os: windows-latest, run: zig build test }
           - { leg: tests, os: macos-latest, run: zig build test }
-          - { leg: zui-debug, os: ubuntu-latest, run: zig build test -Dzui-debug=true }
-          - { leg: Tracy, os: ubuntu-latest, run: zig build test-unit -Dzui-tracy=true }
+          - { leg: zui-debug, os: ubuntu-latest, run: zig build test -Dzui-debug=true, cache-size-limit: 4096 }
+          - { leg: Tracy, os: ubuntu-latest, run: zig build test-unit -Dzui-tracy=true, cache-size-limit: 4096 }
           - { leg: Tracy, os: windows-latest, run: zig build test-unit -Dzui-tracy=true }
           - { leg: Tracy, os: macos-latest, run: zig build test-unit -Dzui-tracy=true }
           # ThreadSanitizer cannot place its shadow memory with the runner's
@@ -146,6 +147,7 @@ jobs:
         with:
           cache-key: ${{ matrix.cache-key || matrix.leg }}
           use-cache: ${{ !matrix.without-cache }}
+          cache-size-limit: ${{ matrix.cache-size-limit || 2048 }}
       - run: ${{ matrix.run }}
 
   bench:
@@ -439,6 +441,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-zig
+        with:
+          cache-size-limit: 4096
       - uses: ./.github/actions/wayland-session
       - name: Run the unit tests and zui's host suite against a window the user never sees
         run: zig build test --summary all
