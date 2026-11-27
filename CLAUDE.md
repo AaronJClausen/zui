@@ -160,14 +160,16 @@ runs `conformance` too), `zig build check`, the same `check` with
 `zig build tour -- --dump --every-screen`, which prints every screen the
 terminal is offered and fails when one cuts text short, and
 `zig build test-card -- --dump --frames 6`, which prints every scene of
-the test card and must print `diagnostics ok: true`. Without `--dump`
-the targets are interactive: never run them so outside a terminal of
-their own (`script` under `timeout`, with `--frames`). In
-`renderers/raylib/`, run `zig build test`, `zig build check` and
-`zig build conformance`; the tour's cycle,
-`zig build tour -- --hidden --frames 600 --cycle 50`, which must print
-`diagnostics ok: true`; a screenshot of each of `overview`, `harbor`,
-`x_ray`, `log_tail` and `light_lab` with
+the test card and must print `diagnostics ok: true`, and
+`zig build test-card -- --dump --check`, which compares every scene's
+cells with `apps/test_card/snapshots/<scene>.terminal.txt`
+(`--dump --approve` writes them again). Without `--dump` the targets are
+interactive: never run them so outside a terminal of their own (`script`
+under `timeout`, with `--frames`). In `renderers/raylib/`, run
+`zig build test`, `zig build check` and `zig build conformance`; the
+tour's cycle, `zig build tour -- --hidden --frames 600 --cycle 50`,
+which must print `diagnostics ok: true`; a screenshot of each of
+`overview`, `harbor`, `x_ray`, `log_tail` and `light_lab` with
 `zig build tour -- --screenshot <absolute path> --screen <name>`;
 `zig build tour -- --measure-idle`;
 `zig build test-card -- --hidden --frames 6`, which must print

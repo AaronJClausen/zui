@@ -137,6 +137,19 @@ When a change to the card, to layout or to the fonts is meant,
 them, and `git diff snapshots/` shows what changed for review. A new
 scene fails to compile the tests until it has been approved.
 
+Beside them, `<scene>.terminal.txt` holds what the terminal draws of
+each scene at 80×24 cells: its glyphs, a row a line, then each row's
+backgrounds and the foregrounds of its glyphs as runs of columns. The
+terminal's `zig build test-card -- --dump --check`, run from
+[renderers/terminal/](../../renderers/terminal/README.md#development),
+draws each scene from a card of its own once it settles and compares its
+cells with these exactly, naming each cell that differs, its column, row
+and region, with the glyph and colors approved and drawn;
+`zig build test-card -- --dump --approve` there writes them again. The
+target reads and writes them at run time, in the directory its build
+step passes, so a missing or stale one fails the check rather than the
+build.
+
 ## Development
 
 Run from `apps/test_card/`; the first build fetches stb, since the tests

@@ -120,7 +120,7 @@ is in the file its group names.
 | `11-polish:33-pickers` | `core/zui_widgets_data/` | `11-polish:32-zui-widgets-data` | |
 | `11-polish:34-zui-widgets-views` | `core/zui_widgets_views/` | `11-polish:30-feedback-and-media` | |
 | `11-polish:39-frame-snapshots` | `core/zui_testing/`, `apps/test_card/` | `11-polish:38-test-card` | waiting on CI: `apps/test_card: snapshots` on Windows and macOS |
-| `11-polish:40-terminal-snapshots` | `renderers/terminal/`, `apps/test_card/` | `11-polish:39-frame-snapshots` | |
+| `11-polish:40-terminal-snapshots` | `renderers/terminal/`, `apps/test_card/` | `11-polish:39-frame-snapshots` | waiting on CI: the terminal job's `--dump --check` on Windows and macOS |
 | `11-polish:41-pixel-hashes` | `apps/test_card/`, `renderers/raylib/`, `hosts/native/`, `.github/`, `tools/ci/` | `11-polish:39-frame-snapshots` | |
 | `11-polish:42-scripted-input` | `apps/test_card/`, `renderers/raylib/`, `renderers/terminal/`, `hosts/native/` | `11-polish:39-frame-snapshots` | |
 | `11-polish:43-test-card-review` | `apps/test_card/` | `11-polish:41-pixel-hashes` | |

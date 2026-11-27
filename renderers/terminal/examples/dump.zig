@@ -22,6 +22,19 @@ pub fn withoutFlag(arena: std.mem.Allocator, arguments: []const [:0]const u8, fl
     return if (found) others.items else null;
 }
 
+/// The value after `option` and the arguments without either, when
+/// `option` and a value are among them.
+pub fn withoutOption(arena: std.mem.Allocator, arguments: []const [:0]const u8, option: []const u8) !?struct { value: [:0]const u8, others: []const [:0]const u8 } {
+    const index = for (arguments, 0..) |argument, index| {
+        if (std.mem.eql(u8, argument, option)) break index;
+    } else return null;
+    if (index + 1 == arguments.len) return null;
+    var others: std.ArrayList([:0]const u8) = .empty;
+    try others.appendSlice(arena, arguments[0..index]);
+    try others.appendSlice(arena, arguments[index + 2 ..]);
+    return .{ .value = arguments[index + 1], .others = others.items };
+}
+
 /// The terminal is the screen: a line logged on it would stay among the
 /// cells until they change.
 pub fn noticeAfterStarting(notice: zui_app.Notice) void {

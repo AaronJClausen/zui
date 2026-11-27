@@ -57,7 +57,7 @@ pub fn build(b: *std.Build) void {
     const check_step = b.step("check", "Compile the backend and the targets without producing output");
     check_step.dependOn(&unit_tests.step);
     const tour_step = b.step("tour", "Run zui's tour in this terminal (Ctrl+C or Ctrl+Q quits); --dump --screen <name> prints a screen's glyphs");
-    const test_card_step = b.step("test-card", "Run zui's test card in this terminal (Ctrl+C or Ctrl+Q quits); --dump --frames 6 prints every scene's glyphs");
+    const test_card_step = b.step("test-card", "Run zui's test card in this terminal (Ctrl+C or Ctrl+Q quits); --dump --frames 6 prints every scene's glyphs, --dump --check compares their cells with snapshots/");
     // Until stb is fetched, the font system the targets name declares no
     // module.
     const truetype_dependency = truetypeDeclaring(b, core_options.on(target, optimize)) orelse return;
@@ -83,6 +83,7 @@ pub fn build(b: *std.Build) void {
     if (b.args) |arguments| run_tour.addArgs(arguments);
     tour_step.dependOn(&run_tour.step);
 
+    const test_card_dependency = b.dependency("zui_test_card", core_options.on(target, optimize));
     const test_card = b.addExecutable(.{
         .name = "zui-terminal-test-card",
         .root_module = b.createModule(.{
@@ -94,7 +95,7 @@ pub fn build(b: *std.Build) void {
                 .{ .name = "zui", .module = zui_module },
                 .{ .name = "zui_app", .module = zui_app_module },
                 .{ .name = "zui_truetype", .module = truetype_dependency.module("zui_truetype") },
-                .{ .name = "zui_test_card", .module = b.dependency("zui_test_card", core_options.on(target, optimize)).module("zui_test_card") },
+                .{ .name = "zui_test_card", .module = test_card_dependency.module("zui_test_card") },
             },
         }),
     });
@@ -102,8 +103,23 @@ pub fn build(b: *std.Build) void {
     check_step.dependOn(&test_card.step);
     const run_test_card = b.addRunArtifact(test_card);
     run_test_card.stdio = .inherit;
-    if (b.args) |arguments| run_test_card.addArgs(arguments);
+    if (b.args) |arguments| {
+        run_test_card.addArgs(arguments);
+        if (namesSnapshotAction(arguments)) {
+            run_test_card.addArg("--snapshots");
+            run_test_card.addDirectoryArg(test_card_dependency.path("snapshots"));
+        }
+    }
     test_card_step.dependOn(&run_test_card.step);
+}
+
+/// Whether the test card's arguments check or approve its snapshots, which
+/// are read from and written into the card's own `snapshots/`.
+fn namesSnapshotAction(arguments: []const []const u8) bool {
+    for (arguments) |argument| {
+        if (std.mem.eql(u8, argument, "--check") or std.mem.eql(u8, argument, "--approve")) return true;
+    }
+    return false;
 }
 
 /// The font system the targets name, once it has declared its module:

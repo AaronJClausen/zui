@@ -9,6 +9,14 @@ pub const CellRect = cells.CellRect;
 pub const render = cells.render;
 pub const countTextLinesCutShort = cells.countTextLinesCutShort;
 
+const snapshot = @import("snapshot.zig");
+pub const SnapshotRegion = snapshot.SnapshotRegion;
+pub const writeSnapshot = snapshot.writeSnapshot;
+pub const readSnapshot = snapshot.readSnapshot;
+pub const ReadSnapshotError = snapshot.ReadSnapshotError;
+pub const cellsLookAlike = snapshot.cellsLookAlike;
+pub const writeSnapshotDifferences = snapshot.writeSnapshotDifferences;
+
 pub const Screen = @import("screen.zig").Screen;
 pub const InputDecoder = @import("input.zig").InputDecoder;
 pub const Terminal = @import("terminal.zig").Terminal;
@@ -155,6 +163,7 @@ test "an invalid byte measures as the one cell it is drawn in" {
 test {
     std.testing.refAllDecls(@This());
     _ = cells;
+    _ = snapshot;
     _ = @import("screen.zig");
     _ = @import("input.zig");
     _ = @import("terminal.zig");

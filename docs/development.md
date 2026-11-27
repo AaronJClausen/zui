@@ -170,8 +170,9 @@ Each job, from its package's directory, fits within 10 minutes:
 - `renderers/terminal/`: its tests, its conformance, its `check`, the
   `tour` target's `--dump --every-screen`, which fails when a screen
   cuts a line of text short at the side of its clip, and the `test-card`
-  target's `--dump --frames 6`, which must report clean diagnostics, on
-  Linux, Windows and macOS;
+  target's `--dump --check`, which compares every scene's cells with its
+  committed snapshot in `apps/test_card/snapshots/` exactly and must
+  report clean diagnostics, on Linux, Windows and macOS;
 - `hosts/native/`: its tests in Debug and ReleaseSafe, which on Linux
   include `terminate-check`, and its `check`, on Windows, and on Linux
   under a headless Weston with a D-Bus daemon of its own

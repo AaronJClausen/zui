@@ -439,7 +439,10 @@ the cell covering it, so it passes the renderer suite at a tolerance of
 terminal does not draw, and `examples/test_card.zig`, the test card at
 80×24 cells, both in `zui_truetype`'s text laid out in cells; each takes
 `--dump`, which draws frames into cells without a terminal and prints
-their glyphs (`examples/dump.zig`).
+their glyphs (`examples/dump.zig`). `src/snapshot.zig` writes cells as
+text, reads them back and names the cells that differ, with which the
+test card's `--dump --check` compares each scene with its committed
+snapshot, and `--dump --approve` writes them.
 
 The raylib renderer, `zui_raylib`, names raylib as a lazy dependency, so
 raylib is fetched only when the package's own `build()` runs, as the

@@ -3792,7 +3792,10 @@ with nothing repaired.
   with its committed snapshot,
   `apps/test_card/snapshots/<scene>.<placement>.txt`, exactly; every
   renderer's and host's `test-card` target draws each scene once with
-  clean diagnostics.
+  clean diagnostics; and the terminal's `test-card -- --dump --check`
+  compares each scene's cells, their glyphs and colors, with
+  `apps/test_card/snapshots/<scene>.terminal.txt`, exactly, on Linux,
+  Windows and macOS.
 
 ### 20.2 Budgets
 

@@ -3529,6 +3529,47 @@ test "the settings screen is its approved snapshot" {
 }
 ```
 
+A terminal's cells are the image, so they are compared exactly too.
+`zui_terminal.writeSnapshot` writes a `CellBuffer` as text a reviewer
+reads: its glyphs a row a line, then each row's backgrounds and the
+foregrounds of its glyphs as runs of columns. `readSnapshot` reads it
+back, and `writeSnapshotDifferences` names each cell that looks
+different, its column, row and region, with the glyph and colors
+expected and drawn, as the test card's terminal snapshots do.
+
+`tests/settings_cells.zig`
+
+```zig
+test "the settings screen draws its approved cells" {
+    const gpa = std.testing.allocator;
+    var text: zui_terminal.Text = .{};
+    var ui: Ui = try .init(gpa, std.testing.io, &text);
+    defer ui.deinit(gpa);
+    var driver: zui_testing.Driver(Ui) = .{ .ui = &ui };
+    var app: App = .{};
+    const frame = try driver.frame(&app, App.declareSettings, &.{});
+
+    var drawn: zui_terminal.CellBuffer = .{};
+    defer drawn.deinit(gpa);
+    try drawn.resize(gpa, 80, 24);
+    drawn.fill(.{ .foreground = app.background, .background = app.background });
+    zui_terminal.render(&drawn, zui_terminal.default_cell_size, frame.commands());
+
+    var approved: zui_terminal.CellBuffer = .{};
+    defer approved.deinit(gpa);
+    try approved.resize(gpa, 80, 24);
+    try zui_terminal.readSnapshot(&approved, @embedFile("snapshots/settings.terminal.txt"));
+    const regions = [_]zui_terminal.SnapshotRegion{
+        .{ .name = "sidebar", .rect = frame.rectOf(.of("sidebar")).? },
+    };
+    var report: std.Io.Writer.Allocating = .init(gpa);
+    defer report.deinit();
+    const differing = try zui_terminal.writeSnapshotDifferences(&report.writer, &approved, &drawn, zui_terminal.default_cell_size, &regions, 20);
+    if (differing != 0) std.debug.print("{s}", .{report.written()});
+    try std.testing.expectEqual(0, differing);
+}
+```
+
 <a id="replay"></a>
 
 ### Record and replay · *shipped*

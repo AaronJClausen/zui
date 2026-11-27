@@ -288,11 +288,11 @@ jobs:
       - run: zig build check
       - name: Render every screen of the tour a terminal draws, failing on text cut short
         run: zig build tour -- --dump --every-screen
-      - name: Draw every scene of the test card into cells
+      - name: Compare every scene of the test card's cells with its snapshot
         shell: bash
         run: |
           set -o pipefail
-          zig build test-card -- --dump --frames 6 2>&1 | tee dump.txt
+          zig build test-card -- --dump --check 2>&1 | tee dump.txt
           grep "diagnostics ok: true" dump.txt
 
   raylib:

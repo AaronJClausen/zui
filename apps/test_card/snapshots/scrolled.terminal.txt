@@ -1,0 +1,76 @@
+cells 80x24
+glyphs
+| zui test card   scene: scrolled   renderer: terminal   host: none (--dump)     |
+| viewport: 640x384   placement: cells 8x16   fonts: bc9879a240d42133            |
+|   bg     sf     sfr    sfs    sfo    sfi    on     onm    oni    ona    ac     |
+|   oac    acc    oacc   sec    osec   dg     odg    dgc    odgc   wn     own    |
+|   wnc    ownc   ok     ook    okc    ookc   sel    osel   ol     olm    fo     |
+|   scr    sh     rim  grey                                                      |
+| display            code                                                        |
+|                                          row 3                                 |
+|                    numeric               row 4                                 |
+| headline           label                                                       |
+|                    label_strong          row 5                                 |
+| title                                                                          |
+| body               caption                                                     |
+|                                         Tab: a tooltip over the page           |
+| body_strong                                                                    |
+| Hxgjpqy WMW 0123456789                    Anchor                               |
+|                                                                                |
+| This line is longer than                                                       |
+|                                                                                |
+|                                           Button  clicks 0    Checkbox on      |
+| ┌──┐ ┌──┐ ┌──┐                                                                 |
+| └──┘ └──┘ └──┘                                       0.50  zui           zui   |
+|                                              []                                |
+|                                                                                |
+backgrounds
+00 0-79 #24272a
+01 0-79 #24272a
+02 0-0 #ffffff 1-2 #f5f8fe 3-21 #ffffff 22-23 #eef1f7 24-35 #ffffff 36-37 #24272a 38-42 #ffffff 43-44 #181b1e 45-49 #ffffff 50-51 #53555a 52-56 #ffffff 57-58 #f2f5fb 59-63 #ffffff 64-65 #004ca7 66-70 #ffffff 71-72 #2269cd 73-79 #ffffff
+03 0-7 #ffffff 8-9 #dae9ff 10-14 #ffffff 15-16 #003981 17-21 #ffffff 22-23 #e8effa 24-28 #ffffff 29-30 #233146 31-35 #ffffff 36-37 #760007 38-49 #ffffff 50-51 #ffebe8 52-56 #ffffff 57-58 #8b1f1c 59-63 #ffffff 64-65 #ffca7f 66-70 #ffffff 71-72 #211300 73-79 #ffffff
+04 0-0 #ffffff 1-2 #ffefdb 3-7 #ffffff 8-9 #624000 10-14 #ffffff 15-16 #00823a 17-28 #ffffff 29-30 #def8e2 31-35 #ffffff 36-37 #005423 38-42 #ffffff 43-44 #c5ddff 45-49 #ffffff 50-51 #14161a 52-56 #ffffff 57-58 #83868b 59-63 #ffffff 64-65 #dce0e5 66-70 #ffffff 71-72 #2a71d6 73-79 #ffffff
+05 0-0 #ffffff 1-2 #99999b 3-7 #ffffff 8-9 #0b0d11 10-14 #ffffff 15-16 #eeeeee 17-26 #ffffff 27-28 #000000 29-30 #111111 31-32 #222222 33-34 #333333 35-36 #444444 37-38 #555555 39-40 #666666 41-42 #777777 43-44 #888888 45-46 #999999 47-48 #aaaaaa 49-50 #bbbbbb 51-52 #cccccc 53-54 #dddddd 55-56 #eeeeee 57-79 #ffffff
+06 0-39 #eef1f7 40-79 #f5f8fe
+07 0-39 #eef1f7 40-40 #f5f8fe 41-47 #ffffff 48-78 #2269cd 79-79 #f5f8fe
+08 0-39 #eef1f7 40-40 #f5f8fe 41-78 #eef1f7 79-79 #f5f8fe
+09 0-39 #eef1f7 40-40 #f5f8fe 41-78 #eef1f7 79-79 #f5f8fe
+10 0-39 #eef1f7 40-40 #f5f8fe 41-78 #ffffff 79-79 #f5f8fe
+11 0-39 #eef1f7 40-79 #f5f8fe
+12 0-39 #eef1f7 40-79 #ffffff
+13 0-39 #eef1f7 40-79 #ffffff
+14 0-39 #eef1f7 40-79 #ffffff
+15 0-39 #eef1f7 40-40 #ffffff 41-49 #e8effa 50-79 #ffffff
+16 0-39 #eef1f7 40-79 #ffffff
+17 0-39 #eef1f7 40-79 #ffffff
+18 0-39 #eef1f7 40-79 #f5f8fe
+19 0-40 #f5f8fe 41-49 #2269cd 50-59 #f5f8fe 60-61 #2269cd 62-79 #f5f8fe
+20 0-15 #f5f8fe 16-19 #2269cd 20-20 #f5f8fe 21-24 #2269cd 25-25 #f5f8fe 26-29 #2269cd 30-30 #f5f8fe 31-34 #53555a 35-40 #f5f8fe 41-49 #2269cd 50-79 #f5f8fe
+21 0-15 #f5f8fe 16-19 #2269cd 20-20 #f5f8fe 21-24 #2269cd 25-25 #f5f8fe 26-29 #2269cd 30-30 #f5f8fe 31-34 #53555a 35-58 #f5f8fe 59-72 #eef1f7 73-79 #f5f8fe
+22 0-45 #f5f8fe 46-47 #ffffff 48-58 #f5f8fe 59-72 #eef1f7 73-79 #f5f8fe
+23 0-15 #f5f8fe 16-19 #181b1e 20-79 #f5f8fe
+foregrounds
+00 1-74 #f2f5fb
+01 1-67 #f2f5fb
+02 3-74 #181b1e
+03 3-75 #181b1e
+04 3-74 #181b1e
+05 3-25 #181b1e
+06 1-23 #181b1e
+07 42-46 #181b1e
+08 20-46 #181b1e
+09 1-24 #181b1e
+10 20-46 #181b1e
+11 1-5 #181b1e
+12 1-26 #181b1e
+13 41-68 #181b1e
+14 1-11 #181b1e
+15 1-22 #181b1e 43-48 #233146
+16
+17 1-24 #181b1e
+18
+19 43-48 #ffffff 51-73 #181b1e
+20 1-14 #181b1e
+21 1-76 #181b1e
+22 46-47 #83868b
+23
