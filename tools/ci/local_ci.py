@@ -46,6 +46,8 @@ CROSS_CHECKS_NEEDING_AN_SDK = {
 }
 FAILED_LOG_LINES = 40
 RUNS_KEPT = 5
+ZIG_CACHE_LIMIT_BYTES = 10 * 1024**3
+IMAGE = "zui-local-ci"
 
 
 def git(*arguments, cwd=None):
@@ -393,7 +395,7 @@ class Docker:
                 packages.update(word for word in match.group(1).split() if not word.startswith("-"))
         build_arguments = {"ZIG_VERSION": workflow["env"]["ZIG_VERSION"], "APT_PACKAGES": " ".join(sorted(packages))}
         fingerprint = hashlib.sha256((DOCKERFILE.read_text() + json.dumps(build_arguments, sort_keys=True)).encode()).hexdigest()[:16]
-        tag = f"zui-local-ci:{fingerprint}"
+        tag = f"{IMAGE}:{fingerprint}"
         if subprocess.run(self.command("image", "inspect", tag), capture_output=True).returncode != 0:
             log = self.state / "image-build.log"
             print(f"local CI: building the container image {tag}, once for these packages; its log is {log}", flush=True)
@@ -401,7 +403,20 @@ class Docker:
                 arguments = [argument for key, value in build_arguments.items() for argument in ("--build-arg", f"{key}={value}")]
                 if subprocess.run(self.command("build", "-t", tag, *arguments, "-f", str(DOCKERFILE), str(DOCKERFILE.parent)), stdout=output, stderr=subprocess.STDOUT).returncode != 0:
                     sys.exit(f"local CI: building the container image failed; see {log}")
+            self.remove_images_other_than(tag)
         return tag
+
+    def remove_images_other_than(self, current):
+        """Each image is about 3 GB, and the run lock keeps every other run off the old ones."""
+        listed = subprocess.run(self.command("images", IMAGE, "--format", "{{.Tag}}"), capture_output=True, text=True)
+        old_images = [image for image in (f"{IMAGE}:{tag}" for tag in listed.stdout.split()) if image != current]
+        removals = [["image", "rm", *old_images]] if old_images else []
+        for arguments in [*removals, ["builder", "prune", "-f"]]:
+            result = subprocess.run(self.command(*arguments), capture_output=True, text=True)
+            if result.returncode != 0:
+                print(f"local CI: warning: docker {' '.join(arguments)} failed, and the run goes on: {result.stderr.strip()}", flush=True)
+            elif arguments[0] == "image":
+                print(f"local CI: removed the old container images {', '.join(old_images)}", flush=True)
 
     def run_arguments(self, image, driver, container, runner_temp):
         cache = self.state / "container-cache"
@@ -421,6 +436,35 @@ class Docker:
             "-e", "HOME=/cache/home", "-e", "GIT_TERMINAL_PROMPT=0", "-e", "CI=true",
             "-w", mounted, image, "bash", str(driver),
         )
+
+
+def disk_usage(directory):
+    total = 0
+    with os.scandir(directory) as entries:
+        for entry in entries:
+            total += entry.stat(follow_symlinks=False).st_blocks * 512
+            if entry.is_dir(follow_symlinks=False):
+                total += disk_usage(entry.path)
+    return total
+
+
+def delete_cache_over_limit(cache, limit_bytes=ZIG_CACHE_LIMIT_BYTES):
+    """Zig never deletes from its cache, so one past `limit_bytes` is deleted
+    whole: with only some entries deleted, Zig can take a manifest for a hit
+    whose output is gone."""
+    if not cache.is_dir():
+        return
+    size = disk_usage(cache)
+    if size > limit_bytes:
+        shutil.rmtree(cache)
+        print(f"local CI: deleted {cache}, which had grown to {size / 1024**3:.1f} GiB", flush=True)
+
+
+def zig_caches(state):
+    """The containers' cache, and the cache of each package in the worktree, where the cross-checks build."""
+    worktree = state / "worktree"
+    build_files = git("ls-files", ":(glob)**/build.zig", cwd=worktree).splitlines() if (worktree / ".git").exists() else []
+    return [state / "container-cache" / "zig", *(worktree / pathlib.Path(build_file).parent / ".zig-cache" for build_file in build_files)]
 
 
 def prepare_worktree(state, head):
@@ -490,6 +534,8 @@ def main():
     except BlockingIOError:
         print("local CI: waiting for another run, which uses the same worktree", flush=True)
         fcntl.flock(lock, fcntl.LOCK_EX)
+    for cache in zig_caches(state):
+        delete_cache_over_limit(cache)
     head = git("rev-parse", "--verify", f"{arguments.head}^{{commit}}")
     base = "" if arguments.all else git("rev-parse", "--verify", f"{arguments.base}^{{commit}}") if arguments.base else default_base()
     if base and subprocess.run(["git", "merge-base", "--is-ancestor", base, head]).returncode != 0:

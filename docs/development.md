@@ -230,9 +230,10 @@ expands each job's matrix and runs its legs side by side
 - a Linux leg runs its steps in an Ubuntu 26.04 container, the one
   `ubuntu-latest` runs, built from `tools/ci/Dockerfile`, with Zig,
   Node, Google Chrome and every package the workflow and its actions
-  `apt-get install`; the image is built once for each set of packages.
-  Its build cache is kept in `.git/local-ci/container-cache`, apart from
-  this machine's;
+  `apt-get install`; the image is built once for each set of packages,
+  and building it removes every other `zui-local-ci` image and the build
+  cache no image uses (`docker builder prune -f`). Its Zig cache is kept
+  in `.git/local-ci/container-cache/zig`, apart from this machine's;
 - a Windows or macOS leg, which cannot run here, becomes
   `zig build check -Dtarget=x86_64-windows` or `aarch64-macos`, with the
   leg's other `-D` options, run here. A cross-check analyses the code
@@ -243,8 +244,13 @@ expands each job's matrix and runs its legs side by side
 It tests a commit, never the working tree, in a worktree of its own at
 `.git/local-ci/worktree`, kept between runs so its caches stay warm, and
 keeps the last runs' logs in `.git/local-ci/runs/`; a failing leg's log
-ends the report. `-- --all` runs every job, `-- --only <regex>` the legs
-whose names match, `-- --list` names them without running them, and
+ends the report. Zig never deletes from its cache, and each run builds a
+new commit, so before a run starts, a cache past 10 GiB, the containers'
+or a package's `.zig-cache` in the worktree, is deleted whole, as
+setup-zig empties one past its limit: with only some entries deleted,
+Zig can take a manifest for a hit whose output is gone. `-- --all` runs
+every job, `-- --only <regex>` the legs whose names match, `-- --list`
+names them without running them, and
 `-- --base <commit> --head <commit>` tests another change. It needs uv
 and Docker, which the user must be able to reach without `sudo`.
 
