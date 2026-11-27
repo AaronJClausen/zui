@@ -974,6 +974,215 @@ test "a toast that leaves fades out through toast_exit where the context keeps g
 }
 
 // =============================================================
+// An overlay opened inside another
+// =============================================================
+
+const Preferences = struct {
+    const Inner = enum { dropdowns, menu, context_menu, popover, tooltip, dialog, slider, controls };
+    const anchor: zui.Id = .of("preferences");
+    const id: zui.Id = .of("preferences.popover");
+    const panel: zui.Id = id.child("panel");
+    const theme: zui.Id = .of("preferences.theme");
+    const density: zui.Id = .of("preferences.density");
+    const opener: zui.Id = .of("preferences.opener");
+    const inner_id: zui.Id = .of("preferences.inner");
+
+    inner: Inner = .dropdowns,
+    open: bool = true,
+    inner_open: bool = false,
+    theme_choice: usize = 0,
+    density_choice: usize = 0,
+    volume: f32 = 0.5,
+
+    fn declare(app: *Preferences, ui: *Ui) void {
+        ui.open(.{ .layout = .{ .sizing = .grow_both, .padding = .all(40) } });
+        _ = widgets.button(ui, anchor, "Preferences", .{});
+        if (widgets.popover(ui, id, anchor, &app.open, .{ .label = "Preferences" })) |preferences| {
+            _ = widgets.dropdown(ui, theme, &app.theme_choice, &.{ "Dark", "Light", "System" }, .{ .label = "Theme" });
+            _ = widgets.dropdown(ui, density, &app.density_choice, &.{ "Compact", "Comfortable" }, .{ .label = "Density" });
+            app.declareInner(ui);
+            preferences.end(ui);
+        }
+        ui.close();
+    }
+
+    fn declareInner(app: *Preferences, ui: *Ui) void {
+        switch (app.inner) {
+            .dropdowns => {},
+            .menu, .context_menu => {
+                _ = widgets.button(ui, opener, "More", .{});
+                const opened = if (app.inner == .menu)
+                    widgets.menu(ui, inner_id, opener, &app.inner_open, .{ .label = "More" })
+                else
+                    widgets.contextMenu(ui, inner_id, opener, &app.inner_open, .{ .label = "More" });
+                if (opened) |more| {
+                    _ = more.item(ui, "Reset", .{});
+                    more.end(ui);
+                }
+            },
+            .popover => {
+                _ = widgets.button(ui, opener, "Advanced", .{});
+                if (widgets.popover(ui, inner_id, opener, &app.inner_open, .{ .label = "Advanced" })) |advanced| {
+                    ui.box(.{ .layout = .{ .sizing = .{ .width = .fixed(80), .height = .fixed(40) } } });
+                    advanced.end(ui);
+                }
+            },
+            .tooltip => {
+                _ = widgets.button(ui, opener, "Reset", .{});
+                widgets.tooltip(ui, opener, "Reset every preference", .{});
+            },
+            .dialog => {
+                if (widgets.button(ui, opener, "Reset", .{})) app.inner_open = true;
+                if (widgets.dialog(ui, inner_id, &app.inner_open, .{ .title = "Reset every preference?" })) |confirm| confirm.end(ui);
+            },
+            .slider => _ = widgets.slider(ui, opener, &app.volume, .{ .label = "Volume" }),
+            .controls => {
+                _ = widgets.toggle(ui, opener, "Keep open", &app.inner_open, .{});
+                _ = widgets.slider(ui, .of("preferences.steps"), &app.volume, .{ .step = 0.25, .ticks = true, .label = "Steps" });
+                widgets.spinner(ui, .of("preferences.saving"), .{});
+                widgets.avatar(ui, .of("preferences.owner"), .{ .name = "Ana Ribeiro", .presence = .online });
+            },
+        }
+    }
+
+    fn option(dropdown_id: zui.Id, index: usize) zui.Id {
+        return dropdown_id.indexedChild("option", index);
+    }
+};
+
+fn layerOf(frame: anytype, element_id: zui.Id) ?i16 {
+    for (frame.commands()) |command| {
+        if (command.id == element_id.hash) return command.z;
+    }
+    return null;
+}
+
+fn indexOfText(frame: anytype, content: []const u8) ?usize {
+    for (frame.commands(), 0..) |command, index| {
+        if (command.payload == .text and std.mem.eql(u8, command.payload.text.content, content)) return index;
+    }
+    return null;
+}
+
+fn highestTextLayer(frame: anytype) i16 {
+    var highest: i16 = std.math.minInt(i16);
+    for (frame.commands()) |command| {
+        if (command.payload == .text) highest = @max(highest, command.z);
+    }
+    return highest;
+}
+
+test "a dropdown opened inside a popover paints its list above the triggers after it, and a click on one closes the list" {
+    var fixture: Fixture(Ui) = .{};
+    try fixture.init();
+    defer fixture.deinit();
+    const driver = &fixture.driver;
+    var app: Preferences = .{};
+    try reducedMotion(driver, &app, Preferences.declare);
+    _ = try driver.frame(&app, Preferences.declare, &.{});
+    _ = try driver.click(&app, Preferences.declare, Preferences.theme);
+    const frame = try driver.frame(&app, Preferences.declare, &.{});
+    try testing.expect(frame.rectOf(Preferences.option(Preferences.theme, 1)) != null);
+    try testing.expect(indexOfText(frame, "Light").? > indexOfText(frame, "Compact").?);
+    try testing.expect(layerOf(frame, Preferences.theme.child("popup")).? > layerOf(frame, Preferences.panel).?);
+
+    _ = try driver.click(&app, Preferences.declare, Preferences.density);
+    const closed = try driver.frame(&app, Preferences.declare, &.{});
+    try testing.expect(app.open);
+    try testing.expectEqual(null, closed.rectOf(Preferences.option(Preferences.theme, 1)));
+    try testing.expectEqual(null, closed.rectOf(Preferences.option(Preferences.density, 1)));
+    try testing.expectEqual(0, app.density_choice);
+}
+
+test "every overlay opened inside a popover floats above it, and a click on the popover beneath closes it" {
+    const cases = [_]Preferences.Inner{ .menu, .context_menu, .popover, .tooltip, .dialog, .slider };
+    for (cases) |inner| {
+        var fixture: Fixture(Ui) = .{};
+        try fixture.init();
+        defer fixture.deinit();
+        const driver = &fixture.driver;
+        var app: Preferences = .{ .inner = inner };
+        try reducedMotion(driver, &app, Preferences.declare);
+        _ = try driver.frame(&app, Preferences.declare, &.{});
+        const opener = (try driver.frame(&app, Preferences.declare, &.{})).rectOf(Preferences.opener).?;
+        const center: [2]f32 = .{ opener.x + opener.width / 2, opener.y + opener.height / 2 };
+        switch (inner) {
+            .context_menu => _ = try rightClick(driver, &app, Preferences.declare, center),
+            .tooltip => {
+                _ = try moveTo(driver, &app, Preferences.declare, center);
+                _ = try waitFor(driver, &app, Preferences.declare, 0.6);
+            },
+            .slider => _ = try driver.frame(&app, Preferences.declare, &.{
+                .{ .pointer_move = .{ .pointer = mouse(driver, center) } },
+                .{ .pointer_down = .{ .pointer = mouse(driver, center) } },
+            }),
+            else => _ = try driver.click(&app, Preferences.declare, Preferences.opener),
+        }
+        const frame = try driver.frame(&app, Preferences.declare, &.{});
+        const beneath = layerOf(frame, Preferences.panel).?;
+        const above = switch (inner) {
+            .menu, .context_menu, .popover, .dialog => layerOf(frame, Preferences.inner_id.child("panel")).?,
+            .tooltip => layerOf(frame, Preferences.opener.child("tooltip")).?,
+            .slider => highestTextLayer(frame),
+            .dropdowns, .controls => unreachable,
+        };
+        if (above <= beneath) {
+            std.debug.print("{t} paints in layer {d}, the popover it opened in in {d}\n", .{ inner, above, beneath });
+            return error.TestUnexpectedResult;
+        }
+        if (inner == .tooltip or inner == .slider) continue;
+        try testing.expect(app.inner_open);
+        _ = try driver.click(&app, Preferences.declare, Preferences.theme);
+        const closed = try driver.frame(&app, Preferences.declare, &.{});
+        try testing.expect(!app.inner_open);
+        try testing.expect(app.open);
+        try testing.expectEqual(null, closed.rectOf(Preferences.option(Preferences.theme, 1)));
+    }
+}
+
+test "the parts floating within the controls inside a popover paint above it" {
+    var fixture: Fixture(Ui) = .{};
+    try fixture.init();
+    defer fixture.deinit();
+    const driver = &fixture.driver;
+    var app: Preferences = .{ .inner = .controls };
+    try reducedMotion(driver, &app, Preferences.declare);
+    const frame = try driver.frame(&app, Preferences.declare, &.{});
+    const panel = frame.rectOf(Preferences.panel).?;
+    const beneath = layerOf(frame, Preferences.panel).?;
+    for (frame.commands()) |command| {
+        if (command.z >= beneath or command.payload == .clip_begin or command.payload == .clip_end) continue;
+        const bounds = command.bounds;
+        const overlaps = bounds.x < panel.x + panel.width and panel.x < bounds.x + bounds.width and bounds.y < panel.y + panel.height and panel.y < bounds.y + bounds.height;
+        if (overlaps) {
+            std.debug.print("a {t} at {any} paints in layer {d}, beneath the popover's {d}\n", .{ command.payload, bounds, command.z, beneath });
+            return error.TestUnexpectedResult;
+        }
+    }
+}
+
+test "a dialog's close button sits at its trailing top corner, the left one right to left" {
+    var fixture: Fixture(Ui) = .{};
+    try fixture.init();
+    defer fixture.deinit();
+    const driver = &fixture.driver;
+    var app: Booking = .{ .open = true };
+    try reducedMotion(driver, &app, Booking.declare);
+    for ([_]zui.ReadingDirection{ .left_to_right, .right_to_left }) |direction| {
+        _ = try driver.frame(&app, Booking.declare, &.{.{ .environment = .{ .direction = direction } }});
+        const frame = try driver.frame(&app, Booking.declare, &.{});
+        const panel = frame.rectOf(Booking.id.child("panel")).?;
+        const close = frame.rectOf(Booking.id.child("close")).?;
+        try testing.expect(close.y < panel.y + panel.height / 4);
+        const middle = panel.x + panel.width / 2;
+        switch (direction) {
+            .left_to_right => try testing.expect(close.x > middle),
+            .right_to_left => try testing.expect(close.x + close.width < middle),
+        }
+    }
+}
+
+// =============================================================
 // Every component, under review
 // =============================================================
 

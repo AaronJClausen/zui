@@ -872,7 +872,9 @@ was measured slower, so they stay separate.
   target inside the floating element's own subtree, or an id no element
   has, falls back to the parent, since the subtree's position would
   depend on itself.
-- **They paint in layer `z`,** sorted stably, so declaration order holds
+- **They paint in layer `z`,** the frame's rather than one counted from
+  a floating ancestor's, so one with `z = 1` inside a floating element
+  at 101 paints beneath it; sorted stably, so declaration order holds
   within a layer, and they escape their ancestors' clips unless
   `.clip = .target`, which cuts them off where their target's children
   are: for `.parent`, as a child in the flow; for an element, by that
@@ -3251,17 +3253,29 @@ the page beside it still takes the pointer. A dialog stands over the
 `scrim` at the `modal` elevation, focuses the element it names, keeps
 Tab inside it, and in a window narrower than 600 units is a sheet along
 the bottom. Menus, popovers and dialogs close on Escape, a click outside
-and a `dismiss` action, and give focus back to their opener. Toasts wait
-in a `ToastQueue` over storage the application owns, which refuses one
-past its capacity; up to three show at the bottom center, the newest in
-front, each for 5 s from when it shows and paused while hovered or
-focused, and report the `status` role. Each overlay enters through
-`Tokens.motion`'s `popover_enter`, `dialog_enter` or `toast_enter` and
-leaves as an exit ghost through the matching exit, declared once more in
-the frame it closes so its fade starts there; both land at once under
-reduced motion. A tooltip or a toast waiting on its time asks only for a
-frame at its deadline. Each overlay declares its `zuiPreviews` in
-`zui_widgets.previews.overlays`.
+and a `dismiss` action, and give focus back to their opener. An overlay
+declared inside another, between a menu's, a popover's or a dialog's
+opening and its `end`, floats above it: a dropdown's list, a menu, a
+popover, a tooltip, a dialog and a slider's bubble take the layers above
+the enclosing surface's where their skin's are not already higher, with
+their backdrop or scrim, so they paint over everything declared in that
+surface, and a click on it closes them as a click outside does, without
+reaching the control it lands on. A part floating within a control, such
+as a toggle's thumb, a slider's ticks, the tabs' indicator or an
+avatar's presence dot, counts its layer from the enclosing surface's,
+since a floating element's `z` is the frame's (§8.4). A widget that
+opens an overlay of its own follows the same rule. A dialog's close
+button sits at its trailing top corner, through the floating anchors'
+mirroring (§8.1). Toasts wait in a `ToastQueue` over storage the
+application owns, which refuses one past its capacity; up to three show
+at the bottom center, the newest in front, each for 5 s from when it
+shows and paused while hovered or focused, and report the `status` role.
+Each overlay enters through `Tokens.motion`'s `popover_enter`,
+`dialog_enter` or `toast_enter` and leaves as an exit ghost through the
+matching exit, declared once more in the frame it closes so its fade
+starts there; both land at once under reduced motion. A tooltip or a
+toast waiting on its time asks only for a frame at its deadline. Each
+overlay declares its `zuiPreviews` in `zui_widgets.previews.overlays`.
 
 A banner spans its container in its tone's container role, with the
 tone's icon, a title, one action and a close button; it reports the

@@ -2286,8 +2286,10 @@ the arrows, Home and End move through them, and a letter jumps to the
 next that starts with it. A popover opens on its side of its anchor and
 flips to stay inside the window, and can be pinned beside a page that
 still takes the pointer. A dialog stands over a scrim, keeps Tab inside
-it and gives focus back to what opened it. Toasts wait in a queue in
-storage you own, show for five seconds unless hovered, and offer an
+it and gives focus back to what opened it. An overlay opened inside
+another, such as a dropdown's list in a popover, floats above it, and a
+click on the one beneath closes the list first. Toasts wait in a queue
+in storage you own, show for five seconds unless hovered, and offer an
 action such as Undo. Each enters and leaves through the design's motion,
 at once under reduced motion, and a timer asks an idle application only
 for a frame at its deadline.
@@ -2309,6 +2311,7 @@ fn board(app: *App, ui: *Ui) void {
     _ = widgets.button(ui, .of("filters"), "Filters", .{ .variant = .secondary });
     if (widgets.popover(ui, .of("filters.panel"), .of("filters"), &app.filters_open, .{ .label = "Filters" })) |filters| {
         _ = widgets.checkbox(ui, .of("unread"), "Unread only", &app.unread_only, .{});
+        _ = widgets.dropdownEnum(ui, .of("sort"), &app.sort, .{ .label = "Sort by" });
         filters.end(ui);
     }
 

@@ -58,7 +58,7 @@ and each is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:43-test-card-review` The test card's review mode | not started |
 | `11-polish:44-test-card-on-the-web` The test card in the web checks | not started |
 | `11-polish:45-focus-ring-done-right` A focus ring that sits evenly, above its neighbours, only for navigation without a pointer | done |
-| `11-polish:46-dropdown-above-its-overlay` A dropdown's list above the overlay it opens in | not started |
+| `11-polish:46-dropdown-above-its-overlay` A dropdown's list above the overlay it opens in | done |
 
 ### The design system
 
@@ -3477,4 +3477,38 @@ changed, and `counts` within 2%.
 
 **Spec.** §8.4, §19.2.
 
-**Status.** Not started.
+**Status.** Done, in one commit, in `zui_widgets` alone, since the
+public API was enough: the core's `z` stays the frame's. A menu, a
+context menu, a popover and a dialog make their surface's layer the
+enclosing overlay's (a `ui.state` slot under a fixed id) from their
+opening until their `end`, which restores the one before, so the handles
+`Menu`, `Popover` and `Dialog` carry it. A dropdown's list, a menu, a
+popover, a tooltip, a dialog and a slider's bubble declared inside take
+the layers above it where their skin's are not already higher
+(`overlayLayer`), their backdrop or scrim with them, so the list paints
+after the triggers declared after it and a click on one of them reaches
+the backdrop and closes the list without opening the other, as a click
+outside does. The parts floating within a control, a toggle's thumb, a
+slider's ticks, the tabs' indicator, a spinner's arc, a skeleton's
+highlight and an avatar's presence dot, count their layer from the
+enclosing surface's (`inEnclosingLayer`): a toggle's thumb in a popover
+painted in layer 1, beneath the panel at 101, as the tour's "Keep open"
+switch did. An overlay at the page keeps its skin's layers, so the test
+card's snapshots are unchanged. The dialog's close button anchors at its
+top right with its offset inward and lets the core's mirroring place it,
+as the avatar's dot does: it had been mirrored twice and sat at the left
+in both directions. Tested in `core/zui_widgets/overlays_tests.zig` with
+`zui_testing.Driver`, each failing before the fix: the dropdown in a
+popover above a second one, the list painted after the second trigger
+and closed by a click on it; a menu, a context menu, a popover, a
+tooltip, a dialog and a slider's bubble inside a popover each above its
+panel, and each but the tooltip and the bubble closed by a click on a
+trigger beneath; the controls' floating parts in a popover never beneath
+it; the close button at the right left to right and at the left right to
+left. The tour is unchanged; a throwaway Driver test on the tour itself
+found the density dropdown's list painted after the color vision trigger
+and closed by a click on it. The raylib tour cannot open its preferences
+menu from the command line, so no screenshot shows it. `counts` was not
+run, since `core/src/` is unchanged. A scroll area's `layer` option is
+still the application's to set inside an overlay, as the tour's
+preferences menu sets it.

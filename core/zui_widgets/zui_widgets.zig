@@ -2680,7 +2680,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                 if (@abs(at - fraction) * travel < thumb_side / 2) continue;
                 const tick = if (at < fraction) filled else empty;
                 ui.box(.{
-                    .floating = .{ .attach_to = .parent, .anchor = .center_left, .attach_point = .center_left, .offset = .{ thumb_side / 2 + at * travel - tick.size[0] / 2, 0 }, .capture = false },
+                    .floating = .{ .attach_to = .parent, .anchor = .center_left, .attach_point = .center_left, .offset = .{ thumb_side / 2 + at * travel - tick.size[0] / 2, 0 }, .z = inEnclosingLayer(ui, 1), .capture = false },
                     .decoration = decorationOf(tick, false),
                     .layout = .{ .sizing = .{ .width = .fixed(tick.size[0]), .height = .fixed(tick.size[1]) } },
                 });
@@ -2695,7 +2695,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
             else
                 std.fmt.bufPrint(&digits, "{d:.2}", .{value}) catch "";
             ui.open(.{
-                .floating = .{ .attach_to = .{ .element = thumb_id }, .anchor = .bottom_center, .attach_point = .top_center, .offset = .{ 0, -bubble.gap }, .z = popup_layer, .capture = false },
+                .floating = .{ .attach_to = .{ .element = thumb_id }, .anchor = .bottom_center, .attach_point = .top_center, .offset = .{ 0, -bubble.gap }, .z = overlayLayer(ui, popup_layer), .capture = false },
                 .decoration = decorationOf(bubble, false),
                 .layout = .{ .padding = bubble.padding, .child_alignment = .{ .x = .center, .y = .center } },
             });
@@ -3027,11 +3027,12 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
 
         fn declarePopup(self: Self, ui: *Ui, id: zui.Id, backdrop_id: zui.Id, selected: usize, labels: []const []const u8) void {
             const list = self.style(ui, .dropdown_popup, .idle);
+            const backdrop_layer = overlayLayer(ui, list.layer);
             const viewport = ui.viewport();
             ui.box(.{
                 .id = backdrop_id,
                 .interactive = true,
-                .floating = .{ .attach_to = .root, .z = list.layer },
+                .floating = .{ .attach_to = .root, .z = backdrop_layer },
                 .layout = .{ .sizing = .{ .width = .fixed(viewport[0]), .height = .fixed(viewport[1]) } },
             });
             const button_width = if (ui.rectOf(id)) |rect| rect.width else 0;
@@ -3041,7 +3042,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                 .effects = if (list.shadow != null) &effects else null,
                 .focus_scope = true,
                 .semantics = .{ .role = .list_box, .actions = .initOne(.dismiss) },
-                .floating = .{ .attach_to = .{ .element = id }, .attach_point = .bottom_left, .offset = .{ 0, list.gap }, .z = list.layer + 1 },
+                .floating = .{ .attach_to = .{ .element = id }, .attach_point = .bottom_left, .offset = .{ 0, list.gap }, .z = backdrop_layer +| 1 },
                 .decoration = decorationOf(list, false),
                 .layout = .{
                     .direction = .top_to_bottom,
@@ -3594,7 +3595,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
             const placed = animate(ui, bar_id.child("indicator"), [2]f32, .{ from_start + label_inset, @max(tab_rect.width - 2 * label_inset, 0) }, look.motion);
             const effects: Ui.Effects = .{ .shadow = look.shadow };
             ui.box(.{
-                .floating = .{ .attach_to = .parent, .anchor = point, .attach_point = point, .offset = .{ placed[0], 0 }, .z = 0, .capture = false },
+                .floating = .{ .attach_to = .parent, .anchor = point, .attach_point = point, .offset = .{ placed[0], 0 }, .z = inEnclosingLayer(ui, 0), .capture = false },
                 .decoration = decorationOf(look, false),
                 .effects = if (look.shadow != null) &effects else null,
                 .layout = .{ .sizing = .{ .width = .fixed(placed[1]), .height = .fixed(look.size[1]) } },
@@ -4343,7 +4344,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
             });
             const effects: Ui.Effects = .{ .shadow = thumb.shadow };
             ui.box(.{
-                .floating = .{ .attach_to = .parent, .anchor = .center_left, .attach_point = .center_left, .offset = .{ inset + placed[0], 0 }, .capture = false },
+                .floating = .{ .attach_to = .parent, .anchor = .center_left, .attach_point = .center_left, .offset = .{ inset + placed[0], 0 }, .z = inEnclosingLayer(ui, 1), .capture = false },
                 .decoration = decorationOf(thumb, false),
                 .effects = if (thumb.shadow != null) &effects else null,
                 .layout = .{ .sizing = .{ .width = .fixed(placed[1]), .height = .fixed(thumb.size[1]) } },
@@ -4418,7 +4419,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
             const effects = overlayEffects(look, enteredScale(entered), placed.origin);
             ui.open(.{
                 .id = bubble_id,
-                .floating = slid(placed, entered, look.layer, false),
+                .floating = slid(placed, entered, overlayLayer(ui, look.layer), false),
                 .semantics = .{ .role = .tooltip, .label = content },
                 .decoration = decorationOf(look, false),
                 .effects = effectsOrNull(&effects),
@@ -4477,12 +4478,14 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
         const no_item = std.math.maxInt(u8);
 
         /// What `menu` and `contextMenu` opened: declare its items, then call
-        /// `end`.
+        /// `end`. Until `end`, the overlays declared in it float above it,
+        /// as `Popover`'s do.
         pub const Menu = struct {
             widgets: Self,
             id: zui.Id,
             open: *bool,
             state: *MenuState,
+            enclosing_layer: i16,
 
             /// True in the frame the item is chosen, by a click, Enter or
             /// Space, which closes the menu and gives focus back to what
@@ -4510,6 +4513,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
             /// Closes the panel.
             pub fn end(opened: Menu, ui: *Ui) void {
                 ui.close();
+                leaveOverlay(ui, opened.enclosing_layer);
                 const state = opened.state;
                 if (state.declared_leading != state.leading_column) ui.requestFrame();
                 state.item_count = state.declared;
@@ -4626,11 +4630,13 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
             }
 
             const look = self.style(ui, .menu, .idle);
+            const backdrop_layer = overlayLayer(ui, look.layer);
+            const panel_layer = backdrop_layer +| 1;
             const viewport = ui.viewport();
             if (!closing) ui.box(.{
                 .id = backdrop_id,
                 .interactive = true,
-                .floating = .{ .attach_to = .root, .z = look.layer },
+                .floating = .{ .attach_to = .root, .z = backdrop_layer },
                 .layout = .{ .sizing = .{ .width = .fixed(viewport[0]), .height = .fixed(viewport[1]) } },
             });
             const placed = if (state.at_point) placeAtPoint(ui, panel_id, state.point) else placeBeside(ui, opener_id, panel_id, options.placement, look.gap, .start);
@@ -4640,7 +4646,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                 .id = panel_id,
                 .focus_scope = true,
                 .semantics = .{ .role = .menu, .label = options.label, .actions = .initOne(.dismiss) },
-                .floating = slid(placed, entered, look.layer + 1, true),
+                .floating = slid(placed, entered, panel_layer, true),
                 .decoration = decorationOf(look, false),
                 .effects = effectsOrNull(&effects),
                 .exit = look.exit,
@@ -4650,7 +4656,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                     .sizing = .{ .width = .fitBetween(look.size[0], look.size[1]) },
                 },
             });
-            return .{ .widgets = self, .id = id, .open = open, .state = state };
+            return .{ .widgets = self, .id = id, .open = open, .state = state, .enclosing_layer = enterOverlay(ui, panel_layer) };
         }
 
         fn menuItemId(menu_id: zui.Id, index: usize) zui.Id {
@@ -4754,9 +4760,26 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
         };
 
         /// What `popover` opened: declare its content, then call `end`.
+        /// Until `end`, an overlay declared in it (a dropdown's list, a
+        /// menu, another popover, a tooltip, a dialog, a slider's bubble)
+        /// takes the layers above it, so it paints over the content and its
+        /// backdrop takes a click meant for a control beneath, closing it as
+        /// a click outside does; a control's floating part, such as a
+        /// toggle's thumb, counts its layer from the popover's.
+        ///
+        /// ```zig
+        /// if (widgets.popover(ui, .of("view.panel"), .of("view"), &app.view_open, .{ .label = "View" })) |view| {
+        ///     _ = widgets.dropdownEnum(ui, .of("view.sort"), &app.sort, .{ .label = "Sort by" });
+        ///     _ = widgets.toggle(ui, .of("view.compact"), "Compact rows", &app.compact, .{});
+        ///     view.end(ui);
+        /// }
+        /// ```
         pub const Popover = struct {
-            pub fn end(_: Popover, ui: *Ui) void {
+            enclosing_layer: i16,
+
+            pub fn end(opened: Popover, ui: *Ui) void {
                 ui.close();
+                leaveOverlay(ui, opened.enclosing_layer);
             }
         };
 
@@ -4801,12 +4824,14 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
             if (open.*) state.was_open = true;
 
             const look = self.style(ui, .popover, .idle);
+            const backdrop_layer = overlayLayer(ui, look.layer);
+            const panel_layer = backdrop_layer +| 1;
             if (!options.pinned and !closed_itself) {
                 const viewport = ui.viewport();
                 ui.box(.{
                     .id = backdrop_id,
                     .interactive = true,
-                    .floating = .{ .attach_to = .root, .z = look.layer },
+                    .floating = .{ .attach_to = .root, .z = backdrop_layer },
                     .layout = .{ .sizing = .{ .width = .fixed(viewport[0]), .height = .fixed(viewport[1]) } },
                 });
             }
@@ -4817,7 +4842,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                 .id = panel_id,
                 .focus_scope = !options.pinned,
                 .semantics = .{ .role = .dialog, .label = options.label, .actions = .initOne(.dismiss) },
-                .floating = slid(placed, entered, look.layer + 1, true),
+                .floating = slid(placed, entered, panel_layer, true),
                 .decoration = decorationOf(look, false),
                 .effects = effectsOrNull(&effects),
                 .exit = look.exit,
@@ -4828,7 +4853,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                     .child_gap = look.gap,
                 },
             });
-            return .{};
+            return .{ .enclosing_layer = enterOverlay(ui, panel_layer) };
         }
 
         pub const DialogOptions = struct {
@@ -4845,9 +4870,11 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
         };
 
         /// What `dialog` opened: declare its content, its `actions`, then
-        /// call `end`.
+        /// call `end`. Until `end`, the overlays declared in it float above
+        /// it, as `Popover`'s do.
         pub const Dialog = struct {
             widgets: Self,
+            enclosing_layer: i16,
 
             /// Opens the row of its actions, at the panel's trailing edge:
             /// declare cancel and then confirm, and close the row with
@@ -4857,8 +4884,9 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                 ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = row.gap, .child_alignment = .{ .x = .end, .y = .center } } });
             }
 
-            pub fn end(_: Dialog, ui: *Ui) void {
+            pub fn end(opened: Dialog, ui: *Ui) void {
                 ui.close();
+                leaveOverlay(ui, opened.enclosing_layer);
             }
         };
 
@@ -4904,11 +4932,13 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
             const viewport = ui.viewport();
             const scrim = self.style(ui, .dialog_scrim, .idle);
             const look = self.style(ui, .dialog, .idle);
+            const scrim_layer = overlayLayer(ui, scrim.layer);
+            const panel_layer = @max(look.layer, scrim_layer +| 1);
             const scrim_shown = entrance(ui, scrim_id.child("enter"), opening, scrim.motion);
             ui.box(.{
                 .id = scrim_id,
                 .interactive = !dismissed,
-                .floating = .{ .attach_to = .root, .z = scrim.layer },
+                .floating = .{ .attach_to = .root, .z = scrim_layer },
                 .decoration = .{ .background = if (scrim.background) |color| (if (scrim_shown < 1) faded(color, scrim_shown) else color) else null },
                 .exit = scrim.exit,
                 .layout = .{ .sizing = .{ .width = .fixed(viewport[0]), .height = .fixed(viewport[1]) } },
@@ -4925,7 +4955,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                 .id = panel_id,
                 .focus_scope = true,
                 .semantics = .{ .role = .dialog, .label = options.title, .actions = if (options.dismissible) .initOne(.dismiss) else .initEmpty() },
-                .floating = .{ .attach_to = .root, .anchor = point, .attach_point = point, .offset = .{ 0, (1 - entered) * rise }, .z = look.layer },
+                .floating = .{ .attach_to = .root, .anchor = point, .attach_point = point, .offset = .{ 0, (1 - entered) * rise }, .z = panel_layer },
                 .decoration = decoration,
                 .effects = effectsOrNull(&effects),
                 .exit = look.exit,
@@ -4937,23 +4967,21 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                 },
             });
             const close = self.style(ui, .dialog_close, ui.widgetState(close_id));
-            if (options.dismissible) self.dialogClose(ui, close_id, close, look.layer);
+            if (options.dismissible) self.dialogClose(ui, close_id, close, panel_layer);
             ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .padding = .{ .right = if (options.dismissible) close.size[1] else 0 } } });
             ui.text(options.title, self.style(ui, .dialog_title, .idle).text);
             ui.close();
             if (options.description.len != 0) ui.text(options.description, self.style(ui, .dialog_description, .idle).text);
-            return .{ .widgets = self };
+            return .{ .widgets = self, .enclosing_layer = enterOverlay(ui, panel_layer) };
         }
 
         fn dialogClose(self: Self, ui: *Ui, close_id: zui.Id, close: SkinStyle, layer: i16) void {
-            const corner: zui.AnchorPoint = if (ui.environment().direction == .right_to_left) .top_left else .top_right;
-            const inward: f32 = if (corner == .top_left) close.padding.left else -close.padding.right;
             ui.open(.{
                 .id = close_id,
                 .focusable = true,
                 .cursor = .pointer,
                 .semantics = .{ .role = .button, .label = "Close" },
-                .floating = .{ .attach_to = .parent, .anchor = corner, .attach_point = corner, .offset = .{ inward, close.padding.top }, .z = layer },
+                .floating = .{ .attach_to = .parent, .anchor = .top_right, .attach_point = .top_right, .offset = .{ -close.padding.right, close.padding.top }, .z = layer },
                 .decoration = decorationOf(close, focusShown(ui, close_id)),
                 .layout = .{ .sizing = .{ .width = .fixed(close.size[1]), .height = .fixed(close.size[1]) }, .child_alignment = .{ .x = .center, .y = .center } },
             });
@@ -5300,7 +5328,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                 const along = @as(f32, @floatFromInt(dot)) / (spinner_arc_dots - 1);
                 const angle = (turned + spinner_sweep_turns * (along - 0.5)) * 2 * std.math.pi;
                 ui.box(.{
-                    .floating = .{ .attach_to = .parent, .anchor = .center, .attach_point = .center, .offset = .{ radius * @sin(angle), -radius * @cos(angle) }, .capture = false },
+                    .floating = .{ .attach_to = .parent, .anchor = .center, .attach_point = .center, .offset = .{ radius * @sin(angle), -radius * @cos(angle) }, .z = inEnclosingLayer(ui, 1), .capture = false },
                     .decoration = .{ .background = arc.background, .corner_radius = .all(stroke / 2) },
                     .layout = .{ .sizing = .{ .width = .fixed(stroke), .height = .fixed(stroke) } },
                 });
@@ -5378,7 +5406,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
             const band = rect.width * shimmer.size[0];
             const phase = loopPhase(ui, skeleton_shimmer_period_seconds);
             ui.box(.{
-                .floating = .{ .attach_to = .parent, .anchor = .top_left, .attach_point = .top_left, .offset = .{ phase * (rect.width + band) - band, 0 }, .capture = false },
+                .floating = .{ .attach_to = .parent, .anchor = .top_left, .attach_point = .top_left, .offset = .{ phase * (rect.width + band) - band, 0 }, .z = inEnclosingLayer(ui, 1), .capture = false },
                 .decoration = .{ .background = shimmer.background },
                 .layout = .{ .sizing = .{ .width = .fixed(band), .height = .fixed(rect.height) } },
             });
@@ -5545,7 +5573,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                 const ringed_width = if (dot.border) |border| border.widths.left else 0;
                 const dot_side = @max(side / 4, avatar_presence_least_side) + 2 * ringed_width;
                 ui.box(.{
-                    .floating = .{ .attach_to = .parent, .anchor = .bottom_right, .attach_point = .bottom_right, .capture = false },
+                    .floating = .{ .attach_to = .parent, .anchor = .bottom_right, .attach_point = .bottom_right, .z = inEnclosingLayer(ui, 1), .capture = false },
                     .decoration = decorationOf(dot, false),
                     .layout = .{ .sizing = .{ .width = .fixed(dot_side), .height = .fixed(dot_side) } },
                 });
@@ -5828,6 +5856,41 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
                 .away = .{ 0, if (flips[1]) -1 else 1 },
                 .origin = corner.fractions(),
             };
+        }
+
+        const enclosing_overlay_id: zui.Id = .of("zui_widgets.enclosing_overlay");
+        const EnclosingOverlay = struct { layer: i16 };
+
+        /// The lowest layer an overlay takes: `own`, or the one above the
+        /// surface of the overlay it is declared inside, so a dropdown in a
+        /// popover, or a menu in a dialog, paints and takes the pointer above
+        /// it. Overlays with content (menus, popovers and dialogs) make their
+        /// surface the enclosing one until their `end`.
+        fn overlayLayer(ui: *Ui, own: i16) i16 {
+            const enclosing = ui.stateIfPresent(enclosing_overlay_id, EnclosingOverlay) orelse return own;
+            if (enclosing.layer == 0) return own;
+            return @max(own, enclosing.layer +| 1);
+        }
+
+        /// Makes `surface_layer` the enclosing overlay's; returns the one it
+        /// replaces, for `leaveOverlay`.
+        fn enterOverlay(ui: *Ui, surface_layer: i16) i16 {
+            const enclosing = ui.state(enclosing_overlay_id, EnclosingOverlay);
+            const replaced = enclosing.layer;
+            enclosing.layer = surface_layer;
+            return replaced;
+        }
+
+        fn leaveOverlay(ui: *Ui, replaced_layer: i16) void {
+            ui.state(enclosing_overlay_id, EnclosingOverlay).layer = replaced_layer;
+        }
+
+        /// `z` counted from the surface of the overlay a control is declared
+        /// inside, for a part floating within the control, such as a
+        /// toggle's thumb, which would otherwise paint beneath that surface.
+        fn inEnclosingLayer(ui: *Ui, z: i16) i16 {
+            const enclosing = ui.stateIfPresent(enclosing_overlay_id, EnclosingOverlay) orelse return z;
+            return enclosing.layer +| z;
         }
 
         /// `beside`, still `enter_slide` short of it toward its anchor until
