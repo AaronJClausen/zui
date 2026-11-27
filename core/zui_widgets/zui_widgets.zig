@@ -568,6 +568,75 @@ pub const Part = enum {
     async_image,
     /// The icon of an image that failed: `text`, `size[0]` and `glyph`.
     async_image_failed,
+    /// `zui_widgets_data`'s table header, which stays above the rows as
+    /// they scroll: `background`, `border` for the line beneath it and
+    /// `size[1]` for its least height. It takes the rows' padding and
+    /// gap, so each title stands over its column.
+    table_header,
+    /// A column's title in the header: `text`, `focus_ring`,
+    /// `corner_radius` and `gap` before its sort arrow.
+    table_header_cell,
+    /// The arrow of the column the rows are sorted by, in ascending
+    /// order: `text`, `size[0]` for its side and `glyph`.
+    table_sort_ascending,
+    /// The arrow in descending order, read as `table_sort_ascending`.
+    table_sort_descending,
+    /// A row: `background`, `border` for the line beneath it, `focus_ring`
+    /// on the row the keyboard is on, `size[1]` for its least height,
+    /// `padding`, `gap` between the columns and `text`.
+    table_row,
+    /// A selected row, read as `table_row`.
+    table_row_selected,
+    /// A numeric cell: `text`, whose font and size it takes, drawn in the
+    /// row's color and aligned to the column's trailing edge.
+    table_cell_numeric,
+    /// The handle at a column's trailing edge that resizes it:
+    /// `size[0]` for the width it takes the pointer in, `size[1]` for its
+    /// line's thickness, and `background` for the line, drawn while
+    /// dragged.
+    table_resize_handle,
+    /// `zui_widgets_data`'s tree row: `background`, `focus_ring`,
+    /// `corner_radius`, `size[0]` for the indent of each level, `size[1]`
+    /// for its height, `padding`, `gap` and `text`.
+    tree_row,
+    /// A selected row, read as `tree_row`.
+    tree_row_selected,
+    /// The chevron of an expanded row: `text`, `size[0]` for its side,
+    /// `glyph`, and `motion` for its turn.
+    tree_chevron_expanded,
+    /// The chevron of a collapsed row with children, read as
+    /// `tree_chevron_expanded`.
+    tree_chevron_collapsed,
+    /// The line beside the rows of the focused row's branch: `background`
+    /// and `size[0]` for its thickness.
+    tree_guide,
+    /// `zui_widgets_data`'s split pane divider: `background`, `size[0]`
+    /// for its thickness and `size[1]` for the width it takes the pointer
+    /// in.
+    split_divider,
+    /// The divider while dragged, focused or hovered a moment, read as
+    /// `split_divider`.
+    split_divider_active,
+};
+
+/// The parts only `zui_widgets_data`'s components ask a skin for, which its
+/// own tests reach.
+pub const data_parts = [_]Part{
+    .table_header,
+    .table_header_cell,
+    .table_sort_ascending,
+    .table_sort_descending,
+    .table_row,
+    .table_row_selected,
+    .table_cell_numeric,
+    .table_resize_handle,
+    .tree_row,
+    .tree_row_selected,
+    .tree_chevron_expanded,
+    .tree_chevron_collapsed,
+    .tree_guide,
+    .split_divider,
+    .split_divider_active,
 };
 
 /// How a widget moves a value it draws toward the skin's next one: at once,
@@ -990,7 +1059,49 @@ pub fn DesignSkinWith(comptime Ui: type, comptime ExtraRoles: type) type {
                     break :frame frame;
                 },
                 .async_image_failed => sized(withGlyph(skin.styled(.async_image_failed, state), "!"), .{ tokens.icon_sizes.get(.medium), 0 }),
+                .table_header => header: {
+                    var header = sized(skin.styled(.table_header, state), .{ 0, medium_height });
+                    if (header.border) |*border| border.widths = .{ .bottom = tokens.outline_width };
+                    break :header header;
+                },
+                .table_header_cell => skin.styled(.table_header_cell, state),
+                .table_sort_ascending => sized(withGlyph(skin.styled(.table_sort_indicator, state), "^"), .{ small_icon, 0 }),
+                .table_sort_descending => sized(withGlyph(skin.styled(.table_sort_indicator, state), "v"), .{ small_icon, 0 }),
+                .table_row => skin.tableRow(.table_row, state),
+                .table_row_selected => skin.tableRow(.table_row_selected, state),
+                .table_cell_numeric => skin.styled(.table_cell_numeric, state),
+                .table_resize_handle => sized(skin.styled(.table_resize_handle, state), .{ @max(resize_hit_width, tokens.target_floors.get(.pointer)), resize_line_thickness }),
+                .tree_row => skin.treeRow(.tree_row, state),
+                .tree_row_selected => skin.treeRow(.tree_row_selected, state),
+                .tree_chevron_expanded, .tree_chevron_collapsed => chevron: {
+                    var chevron = sized(withGlyph(skin.styled(.tree_chevron, state), if (part == .tree_chevron_expanded) "v" else ">"), .{ small_icon, 0 });
+                    chevron.motion = .{ .tween = tokens.motion.disclosure };
+                    break :chevron chevron;
+                },
+                .tree_guide => sized(skin.styled(.tree_guide, state), .{ divider_thickness, 0 }),
+                .split_divider => sized(skin.styled(.split_divider, state), .{ divider_thickness, @max(resize_hit_width, tokens.target_floors.get(.pointer)) }),
+                .split_divider_active => sized(skin.styled(.split_divider_active, state), .{ split_divider_active_thickness, @max(resize_hit_width, tokens.target_floors.get(.pointer)) }),
             };
+        }
+
+        /// A table's rows are as tall as a large control, and as a medium
+        /// one at the compact density; the pointer over one tints it at half
+        /// the hover's strength.
+        fn tableRow(skin: *const Skin, comptime designed: Designed.Part, state: zui.WidgetState) Style(Ui) {
+            const tokens = skin.tokens;
+            const compact = tokens.control_heights.get(.small) == small_control_compact_height;
+            var row = sized(skin.styled(designed, state), .{ 0, tokens.control_heights.get(if (compact) .medium else .large) });
+            if (row.border) |*border| border.widths = .{ .bottom = tokens.outline_width };
+            if (designed == .table_row and state == .hovered) if (row.background) |color| {
+                row.background = faded(color, table_row_hover_share);
+            };
+            return row;
+        }
+
+        /// A tree indents each level by the `l` tier.
+        fn treeRow(skin: *const Skin, comptime designed: Designed.Part, state: zui.WidgetState) Style(Ui) {
+            const tokens = skin.tokens;
+            return sized(skin.styled(designed, state), .{ tokens.space(.l), tokens.control_heights.get(.medium) });
         }
 
         /// A badge is 18, 20 and 22 tall at the three densities.
@@ -1299,6 +1410,12 @@ const progress_indeterminate_share = 0.3;
 const progress_pulse_least_alpha = 0.4;
 const image_fade_in: zui.motion.TweenOptions = .{ .duration = 0.2, .easing = .ease_out };
 const banner_close_hover_share = 0.12;
+const table_row_hover_share = 0.5;
+/// The approved width a table's resize handle and a split pane's divider
+/// take the pointer in, which the pointer's target floor widens.
+const resize_hit_width = 8;
+const resize_line_thickness = 1;
+const split_divider_active_thickness = 3;
 const badge_count_overflow = std.fmt.comptimePrint("{d}+", .{badge_count_most});
 
 const keyboard_scroll_step = 40;
@@ -1498,6 +1615,19 @@ const Designed = struct {
         progress_fill,
         async_image,
         async_image_failed,
+        table_header,
+        table_header_cell,
+        table_sort_indicator,
+        table_row,
+        table_row_selected,
+        table_cell_numeric,
+        table_resize_handle,
+        tree_row,
+        tree_row_selected,
+        tree_chevron,
+        tree_guide,
+        split_divider,
+        split_divider_active,
     };
 
     const on_hover: zui.design.PartAppearance(void).Colors = .{ .surface = .secondary_container, .text = .on_secondary_container };
@@ -1823,6 +1953,63 @@ const Designed = struct {
         .progress_fill = .{ .surface = .accent, .shape = .indicator },
         .async_image = .{ .surface = .surface_sunken, .shape = .image },
         .async_image_failed = .{ .icon = .on_surface_muted, .on = .async_image },
+        .table_header = .{ .surface = .surface, .outline = .outline_muted },
+        .table_header_cell = .{
+            .text = .on_surface_muted,
+            .type = .label_strong,
+            .on = .table_header,
+            .shape = .control,
+            .gap = .xs,
+            .target = .pointer,
+            .states = .{ .hovered = .{ .text = .on_surface }, .pressed = .{ .text = .on_surface } },
+        },
+        .table_sort_indicator = .{ .icon = .on_surface, .on = .table_header },
+        .table_row = .{
+            .text = .on_surface,
+            .type = .body,
+            .on = .page,
+            .outline = .outline_muted,
+            .padding = .{ .x = .m },
+            .gap = .m,
+            .target = .pointer,
+            .states = .{ .hovered = .{ .surface = .secondary_container }, .pressed = .{ .surface = .secondary_container } },
+        },
+        .table_row_selected = .{
+            .surface = .selection,
+            .text = .on_selection,
+            .type = .body,
+            .on = .table_row_selected,
+            .outline = .outline_muted,
+            .padding = .{ .x = .m },
+            .gap = .m,
+            .target = .pointer,
+        },
+        .table_cell_numeric = .{ .text = .on_surface, .type = .numeric, .on = .page },
+        .table_resize_handle = .{ .states = .{ .pressed = .{ .surface = .accent } } },
+        .tree_row = .{
+            .text = .on_surface,
+            .type = .body,
+            .on = .page,
+            .shape = .control,
+            .padding = .{ .x = .s },
+            .gap = .xs,
+            .target = .pointer,
+            .states = .{ .hovered = on_hover, .pressed = on_hover },
+        },
+        .tree_row_selected = .{
+            .surface = .accent_container,
+            .text = .on_accent_container,
+            .type = .body,
+            .on = .tree_row_selected,
+            .shape = .control,
+            .padding = .{ .x = .s },
+            .gap = .xs,
+            .target = .pointer,
+        },
+        .tree_chevron = .{ .icon = .on_surface_muted, .on = .page, .states = .{ .hovered = .{ .icon = .on_secondary_container }, .pressed = .{ .icon = .on_secondary_container } } },
+        .tree_guide = .{ .surface = .outline_muted },
+        .split_divider = .{ .surface = .outline_muted, .target = .pointer },
+        .split_divider_active = .{ .surface = .accent, .target = .pointer },
     });
 
     fn bannerOf(comptime surface: zui.design.ColorChoice(void), comptime text: zui.design.ColorChoice(void), comptime on: @EnumLiteral()) zui.design.PartAppearance(void) {
@@ -2403,7 +2590,7 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
         /// `look.size[0]` across. Without one, `look.glyph` in its text, or,
         /// when it has none either, nothing, counted in
         /// `Diagnostics.missing_icons`.
-        fn icon(self: Self, ui: *Ui, name: zui.design.Icon, look: SkinStyle) void {
+        pub fn icon(self: Self, ui: *Ui, name: zui.design.Icon, look: SkinStyle) void {
             if (self.iconGlyph(name)) |glyph| {
                 var icon_style = singleLine(look.text);
                 icon_style.font = fontOf(glyph.font);
@@ -5865,8 +6052,16 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
         /// surface of the overlay it is declared inside, so a dropdown in a
         /// popover, or a menu in a dialog, paints and takes the pointer above
         /// it. Overlays with content (menus, popovers and dialogs) make their
-        /// surface the enclosing one until their `end`.
-        fn overlayLayer(ui: *Ui, own: i16) i16 {
+        /// surface the enclosing one until their `end`, and an overlay of
+        /// another module does the same:
+        ///
+        /// ```zig
+        /// const scrim_layer = Widgets.overlayLayer(ui, own_layer);
+        /// const replaced = Widgets.enterOverlay(ui, scrim_layer + 1);
+        /// declarePanelContent(ui);
+        /// Widgets.leaveOverlay(ui, replaced);
+        /// ```
+        pub fn overlayLayer(ui: *Ui, own: i16) i16 {
             const enclosing = ui.stateIfPresent(enclosing_overlay_id, EnclosingOverlay) orelse return own;
             if (enclosing.layer == 0) return own;
             return @max(own, enclosing.layer +| 1);
@@ -5874,21 +6069,23 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
 
         /// Makes `surface_layer` the enclosing overlay's; returns the one it
         /// replaces, for `leaveOverlay`.
-        fn enterOverlay(ui: *Ui, surface_layer: i16) i16 {
+        pub fn enterOverlay(ui: *Ui, surface_layer: i16) i16 {
             const enclosing = ui.state(enclosing_overlay_id, EnclosingOverlay);
             const replaced = enclosing.layer;
             enclosing.layer = surface_layer;
             return replaced;
         }
 
-        fn leaveOverlay(ui: *Ui, replaced_layer: i16) void {
+        /// Makes `replaced_layer`, what `enterOverlay` returned, the
+        /// enclosing overlay's again.
+        pub fn leaveOverlay(ui: *Ui, replaced_layer: i16) void {
             ui.state(enclosing_overlay_id, EnclosingOverlay).layer = replaced_layer;
         }
 
         /// `z` counted from the surface of the overlay a control is declared
         /// inside, for a part floating within the control, such as a
         /// toggle's thumb, which would otherwise paint beneath that surface.
-        fn inEnclosingLayer(ui: *Ui, z: i16) i16 {
+        pub fn inEnclosingLayer(ui: *Ui, z: i16) i16 {
             const enclosing = ui.stateIfPresent(enclosing_overlay_id, EnclosingOverlay) orelse return z;
             return enclosing.layer +| z;
         }

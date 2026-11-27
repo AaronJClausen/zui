@@ -113,7 +113,7 @@ packages.
 | Layer | Holds | Bound |
 |---|---|---|
 | **Core** (`zui`) | layout, interaction, state, the frame boundary, sources and demand, the shared vocabulary, every contract and its checks | no OS calls, no drawing, no threads of its own beyond `Io` it is given; identical behavior on every target |
-| **Modules** (`zui_*`, in `core/`) | defaults built on the public API: async sources, widgets, reflection, testing, tracing, the app runner, wire, debug, motion, color, icons, design | the public API only, enforced by the module boundary (§3.3) |
+| **Modules** (`zui_*`, in `core/`) | defaults built on the public API: async sources, widgets, data components, reflection, testing, tracing, the app runner, wire, debug, motion, color, icons, design | the public API only, enforced by the module boundary (§3.3) |
 | **Text** | font systems, typefaces, and the layout of a run that font systems and renderers share | implement the text contract; never import a renderer |
 | **Renderers** | drawing, images, materials, and text where its layout places it | implement the renderer contract, and may implement the text contract; never import a host |
 | **Hosts** | windows, the event loop, OS events and services, frame pacing | implement the host contract; never import a renderer |
@@ -3315,6 +3315,74 @@ it is right on the first frame. Text editing covers selection, word
 movement, the clipboard through the host, multiple lines and IME
 composition, with the IME area reported in `HostRequests`.
 
+A module's components draw through the same `Widgets`: `icon` draws the
+skin's icon, and `overlayLayer`, `enterOverlay`, `leaveOverlay` and
+`inEnclosingLayer` keep the rule above for an overlay or a floating part
+of another module. `zui_widgets.data_parts` lists the parts only
+`zui_widgets_data` asks a skin for.
+
+#### 19.2.1 `zui_widgets_data`
+
+`zui_widgets_data.of(widgets)` gives the components of data-heavy tools,
+drawn through any `Widgets(Ui, Skin)`, which it takes as `anytype` since
+a module cannot import another (§3.3). Their parts are tags of
+`zui_widgets.Part`, so a skin restyles them as it restyles every widget,
+and `DesignSkin` styles them from `Tokens`.
+
+| Component | Edits | Returns |
+|---|---|---|
+| `table` | `*Sort`, the `*KeySet` of the selected rows, the columns' widths | `.{ sorted, selection_changed, resized, activated }` |
+| `tree` | the `*KeySet`s of the expanded and of the selected nodes | `.{ selection_changed, expansion_changed, activated }` |
+| `splitPane` | `*f32`, the first pane's length | the `SplitPane` to declare the panes in |
+
+A `KeySet` holds keys in storage the application owns, in order, and
+refuses one past its capacity, counting it in `refused`. A table's rows
+are a slice of its `Row` or a value with `count()` and `row(index)`, so
+they may be made as they are asked for, and its `Column(Row)`s give each
+column a title, its cell's text from a row, a width or a share of what
+the others leave, and whether it is numeric, in the `numeric` type role
+at its trailing edge, or sortable. Only the rows in view are declared,
+and one either side, each as tall as the skin's `table_row` or its text,
+so a table of a million rows declares as much as one of a hundred; the
+header stays above them as they scroll. A click selects a row; while the
+table is focused the arrows, Page Up and Down, Home and End move the
+selection, with Ctrl the keyboard's row alone, Ctrl+Space adds that row
+to the selection or takes it away, and Enter activates it. A click on a
+sortable column's title, or Enter or Space on it, sorts by it, and a
+second reverses the order; the application sorts the rows. The handle at
+each column's trailing edge resizes it, dragged or with the arrows while
+focused, down to the column's least width; a column's own widths grow
+with the text scale. The table reports the `list_box` role, each row an
+`option`, each sortable title a `button` selected while the rows are
+sorted by it, and each handle a `slider`.
+
+A tree's nodes are the application's, reached through its `label`,
+`children` and `key`. Up and Down move the selection through the rows
+shown, Home and End to the first and last; Right expands a row or moves
+to its first child, Left collapses it or moves to its parent, both
+mirrored right to left, and `*` expands every sibling; Ctrl, Ctrl+Space
+and Enter are as a table's. A click on a row's chevron opens or closes
+it, and elsewhere on the row selects it. The chevron turns through
+`Tokens.motion.disclosure`, each level is indented by the `l` spacing
+tier, and a line marks the branch of the keyboard's row. Each row
+reports the `option` role, expanded or collapsed when it has children.
+
+A split pane parts two panes along its axis with a divider that the
+pointer drags and the arrows move by 16 units once focused, each pane
+kept at least `min` long. The divider is one unit thick, takes the
+pointer across the pointer's target floor, and thickens to three in the
+accent while dragged or focused, or after 0.15 s of hover, asking for a
+frame at that instant. It reports the `slider` role with the first
+pane's length, which an `adjust` action moves.
+
+The module also holds `toolbar`, `statusBar`, `commandPalette`, filtered
+as typed at the `topmost` elevation, and `propertyGrid`, whose look
+`zui_reflect.inspector` takes too. Each component declares its
+`zuiPreviews` in `zui_widgets_data.previews`. A `Data` of a type that is
+not a `Widgets` is a compile error, as
+`"zui_widgets_data: Data needs a zui_widgets.Widgets(Ui, Skin), got u32"`,
+and so are a table's rows of another shape, naming the shapes it takes.
+
 ### 19.3 `zui_reflect`
 
 `inspector(widgets, ui, id, &value)` declares an editor per field of a
@@ -3909,7 +3977,7 @@ The order follows the dependencies of the design, not a calendar.
 | 8. Effects | optional commands, lowering, transforms with hit inversion, materials, `ExtendedColor` | lowering tested for each; one renderer draws each; HDR white brighter than SDR on the Windows host |
 | 9. Seeing the UI | `zui_debug`, semantics with accessibility actions, safety sweeps, the demo in a browser | the Windows host bridges semantics to UI Automation |
 | 10. Reach | Linux and web hosts; services; window decorations; many windows | each host passes its suite and runs the demo unchanged |
-| 11. Polish | `zui_motion` and exit ghosts; the design system: its vocabulary and appearance contract, `zui_design`, the type scale, corner shapes and nested corners, the system's accent, the default design, the audit, permutations and the review; full text editing with IME; `zui_color`, `zui_icons`, skins and theme packs; samples and the template | each with `zui_testing` coverage; every widget meets §18.4 in every theme, contrast and density; IME on Windows |
+| 11. Polish | `zui_motion` and exit ghosts; the design system: its vocabulary and appearance contract, `zui_design`, the type scale, corner shapes and nested corners, the system's accent, the default design, its components and `zui_widgets_data`, the audit, permutations and the review; full text editing with IME; `zui_color`, `zui_icons`, skins and theme packs; samples and the template | each with `zui_testing` coverage; every widget meets §18.4 in every theme, contrast and density; IME on Windows |
 | Later | docking, a grid layout, layout islands, static subtrees, SIMD | only with a measured win or a demonstrated need |
 | Set aside | the macOS host, and macOS's counters, skin and IME; the contracts keep their macOS shapes (the `cocoa` surface, vibrancy) | not built until macOS is taken up |
 

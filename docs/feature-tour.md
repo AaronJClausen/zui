@@ -2383,6 +2383,62 @@ list and warns of a full list in a banner; its Photo Culling screen
 shows a photo decoding with a progress bar and one waiting as a
 skeleton.
 
+<a id="widget-data"></a>
+
+### Tables, trees and split panes · *shipped*
+
+`zui_widgets_data` holds the components of data-heavy tools, drawn
+through any `zui_widgets.Widgets` and styled by its skin. A table
+declares only the rows in view, so a million rows cost what a hundred
+do: its header stays put as they scroll, a click on a column's title
+sorts by it, its handles resize the columns, and numeric cells sit at
+their trailing edge. Rows are a slice or anything with `count()` and
+`row(index)`, made as they are asked for. A tree opens and closes its
+rows by their chevrons or the arrow keys, and marks the branch the
+keyboard is in. A split pane's divider drags, or moves by 16 with the
+arrows, each pane kept to its least size. Selections and expanded nodes
+are `KeySet`s over storage you own, which refuse a key past their
+capacity.
+
+`src/ui/library.zig`
+
+```zig
+const photo_columns = [_]zui_widgets_data.Column(Photo){
+    .{ .title = "Name", .text = Photo.fileName },
+    .{ .title = "Taken", .text = Photo.takenOn, .width = 120 },
+    .{ .title = "Size", .text = Photo.formattedSize, .width = 88, .numeric = true },
+};
+
+fn library(app: *App, ui: *Ui) void {
+    const data = zui_widgets_data.of(app.widgets);
+    const panes = data.splitPane(ui, .of("library"), &app.sidebar_width, .{ .min = 200, .label = "Sidebar width" });
+    const albums = data.tree(ui, .of("albums"), Album, app.albums, .{
+        .expanded = &app.open_albums,
+        .selection = &app.chosen_album,
+        .label = Album.name,
+        .children = Album.subalbums,
+        .key = Album.id,
+        .accessible_label = "Albums",
+    });
+    if (albums.selection_changed) app.showChosenAlbum();
+    panes.second(ui);
+    const photos = data.table(ui, .of("photos"), Photo, app.photos(), .{
+        .columns = &photo_columns,
+        .sort = &app.photo_sort,
+        .selection = &app.chosen_photos,
+        .widths = &app.column_widths,
+        .key = Photo.id,
+        .label = "Photos",
+    });
+    if (photos.sorted) app.sortPhotos();
+    if (photos.activated) |index| app.openViewer(index);
+    panes.end(ui);
+}
+```
+
+The toolbar, the status bar, the command palette and the property grid
+are next.
+
 <a id="widget-theme"></a>
 
 ### Theming widgets · *shipped*

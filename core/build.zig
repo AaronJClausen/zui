@@ -94,6 +94,8 @@ const compile_error_cases = [_]struct { name: []const u8, expected_error: []cons
     .{ .name = "widgets_slider_on_bool", .expected_error = "zui_widgets: slider needs a pointer to an integer or float, got *bool" },
     .{ .name = "widgets_async_image_without_status", .expected_error = "zui_widgets: asyncImage needs a source with a status, a tagged union with a `ready` field or a value whose `status()` returns one, got u32" },
     .{ .name = "widgets_async_image_wrong_handle", .expected_error = "zui_widgets: asyncImage's source is ready with []const u8, not the context's ImageHandle, u32" },
+    .{ .name = "widgets_data_not_widgets", .expected_error = "zui_widgets_data: Data needs a zui_widgets.Widgets(Ui, Skin), got u32" },
+    .{ .name = "widgets_data_table_rows_without_count", .expected_error = "zui_widgets_data: table needs its rows as a slice of widgets_data_table_rows_without_count.Row or a value with `count()` and `row(index)`, got u32" },
     .{ .name = "widgets_async_image_unknown_status", .expected_error = "zui_widgets: asyncImage's source status widgets_async_image_unknown_status.Loaded has `downloading`, which is none of idle, running, ready, failed and canceled" },
     .{ .name = "reflect_misspelled_option", .expected_error = "no field named 'volum' in struct 'zui_reflect.FieldOptionsOf(reflect_misspelled_option.Settings)'" },
     .{ .name = "reflect_untyped_options", .expected_error = "; declare it as `pub const zui_inspector: zui_reflect.Options(@This())` so misspelled options fail to compile" },
@@ -285,6 +287,29 @@ pub fn build(b: *std.Build) void {
         .imports = &.{.{ .name = "zui", .module = zui_module }},
     });
 
+    const widgets_data_module = b.addModule("zui_widgets_data", .{
+        .root_source_file = b.path("zui_widgets_data/zui_widgets_data.zig"),
+        .target = target,
+        .optimize = optimize,
+        .sanitize_thread = if (sanitize_thread) true else null,
+        .imports = &.{.{ .name = "zui", .module = zui_module }},
+    });
+    // Its tests are a module of their own, so the module itself imports
+    // only zui while its tests reach the widgets it draws through.
+    const widgets_data_tests_module = b.createModule(.{
+        .root_source_file = b.path("zui_widgets_data/tests.zig"),
+        .target = target,
+        .optimize = optimize,
+        .sanitize_thread = if (sanitize_thread) true else null,
+        .imports = &.{
+            .{ .name = "zui", .module = zui_module },
+            .{ .name = "zui_widgets_data", .module = widgets_data_module },
+            .{ .name = "zui_widgets", .module = widgets_module },
+            .{ .name = "zui_testing", .module = testing_module },
+            .{ .name = "zui_design", .module = design_module },
+        },
+    });
+
     const test_step = b.step("test", "Run the unit tests and the compile-error tests, and compile the benchmark tools");
     const unit_test_step = b.step("test-unit", "Run the unit tests, in the selected optimize mode");
     const compile_error_test_step = b.step("test-compile-errors", "Check every compile error's message, which no optimize mode changes");
@@ -300,7 +325,7 @@ pub fn build(b: *std.Build) void {
     // zui's own binary is the longest, so its shard takes the cheap ones.
     const unit_test_shards = [_][]const *std.Build.Module{
         &.{ zui_module, bench_statistics_module, color_module, design_module, icons_module, motion_module, tracy_module, reflect_module },
-        &.{ testing_module, app_module, debug_module, async_module, widgets_module, wire_module },
+        &.{ testing_module, app_module, debug_module, async_module, widgets_module, widgets_data_tests_module, wire_module },
     };
     for (unit_test_shards, 1..) |shard_modules, shard_number| {
         const shard_step = b.step(
@@ -341,6 +366,7 @@ pub fn build(b: *std.Build) void {
                     .{ .name = "zui_testing", .module = testing_module },
                     .{ .name = "zui_async", .module = async_module },
                     .{ .name = "zui_widgets", .module = widgets_module },
+                    .{ .name = "zui_widgets_data", .module = widgets_data_module },
                     .{ .name = "zui_reflect", .module = reflect_module },
                     .{ .name = "zui_app", .module = app_module },
                     .{ .name = "zui_wire", .module = wire_module },
@@ -382,6 +408,7 @@ pub fn build(b: *std.Build) void {
                 .{ .name = "zui_testing", .module = testing_module },
                 .{ .name = "zui_async", .module = async_module },
                 .{ .name = "zui_widgets", .module = widgets_module },
+                .{ .name = "zui_widgets_data", .module = widgets_data_module },
                 .{ .name = "zui_reflect", .module = reflect_module },
                 .{ .name = "zui_app", .module = app_module },
                 .{ .name = "zui_tracy", .module = tracy_module },
@@ -477,7 +504,7 @@ pub fn build(b: *std.Build) void {
     b.step("bench-report", "Set side by side each machine's results for one commit: -- <results dir> [<commit>]").dependOn(&run_bench_report.step);
     bench_tools_step.dependOn(&bench_report_executable.step);
 
-    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "tests", "bench", "zui_testing", "zui_async", "zui_widgets", "zui_reflect", "zui_tracy", "zui_app", "zui_wire", "zui_debug", "zui_motion", "zui_color", "zui_design", "zui_icons" };
+    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "tests", "bench", "zui_testing", "zui_async", "zui_widgets", "zui_widgets_data", "zui_reflect", "zui_tracy", "zui_app", "zui_wire", "zui_debug", "zui_motion", "zui_color", "zui_design", "zui_icons" };
     b.step("fmt", "Format all Zig sources").dependOn(&b.addFmt(.{ .paths = formatted_paths }).step);
     b.step("fmt-check", "Fail if any Zig source is not formatted").dependOn(&b.addFmt(.{ .paths = formatted_paths, .check = true }).step);
 }

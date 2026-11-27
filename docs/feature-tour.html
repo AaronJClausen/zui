@@ -1949,6 +1949,45 @@ fn inbox(app: *App, ui: *Ui) void {
         <p>The tour's Kanban screen counts each list in a badge, puts each card's owner in an avatar and the team in a stack, says "No cards" in an empty list and warns of a full list in a banner; its Photo Culling screen shows a photo decoding with a progress bar and one waiting as a skeleton.</p>
       </article>
 
+      <article class="feature" id="widget-data" data-title="Tables, trees and split panes">
+        <div class="feature-head"><h3>Tables, trees and split panes</h3><span class="pill shipped">Shipped</span></div>
+        <p><code class="z">zui_widgets_data</code> holds the components of data-heavy tools, drawn through any <code class="z">zui_widgets.Widgets</code> and styled by its skin. A table declares only the rows in view, so a million rows cost what a hundred do: its header stays put as they scroll, a click on a column's title sorts by it, its handles resize the columns, and numeric cells sit at their trailing edge. Rows are a slice or anything with <code class="z">count()</code> and <code class="z">row(index)</code>, made as they are asked for. A tree opens and closes its rows by their chevrons or the arrow keys, and marks the branch the keyboard is in. A split pane's divider drags, or moves by 16 with the arrows, each pane kept to its least size. Selections and expanded nodes are <code class="z">KeySet</code>s over storage you own, which refuse a key past their capacity.</p>
+<script type="text/x-zig" data-file="src/ui/library.zig">
+const photo_columns = [_]zui_widgets_data.Column(Photo){
+    .{ .title = "Name", .text = Photo.fileName },
+    .{ .title = "Taken", .text = Photo.takenOn, .width = 120 },
+    .{ .title = "Size", .text = Photo.formattedSize, .width = 88, .numeric = true },
+};
+
+fn library(app: *App, ui: *Ui) void {
+    const data = zui_widgets_data.of(app.widgets);
+    const panes = data.splitPane(ui, .of("library"), &app.sidebar_width, .{ .min = 200, .label = "Sidebar width" });
+    const albums = data.tree(ui, .of("albums"), Album, app.albums, .{
+        .expanded = &app.open_albums,
+        .selection = &app.chosen_album,
+        .label = Album.name,
+        .children = Album.subalbums,
+        .key = Album.id,
+        .accessible_label = "Albums",
+    });
+    if (albums.selection_changed) app.showChosenAlbum();
+    panes.second(ui);
+    const photos = data.table(ui, .of("photos"), Photo, app.photos(), .{
+        .columns = &photo_columns,
+        .sort = &app.photo_sort,
+        .selection = &app.chosen_photos,
+        .widths = &app.column_widths,
+        .key = Photo.id,
+        .label = "Photos",
+    });
+    if (photos.sorted) app.sortPhotos();
+    if (photos.activated) |index| app.openViewer(index);
+    panes.end(ui);
+}
+</script>
+        <p>The toolbar, the status bar, the command palette and the property grid are next.</p>
+      </article>
+
       <article class="feature" id="widget-theme" data-title="Theming widgets">
         <div class="feature-head"><h3>Theming widgets</h3><span class="pill shipped">Shipped</span></div>
         <p>A widget set is styled by a skin: any struct that declares <code class="z">zuiStyle(part, state, environment)</code> and returns a <code class="z">zui_widgets.Style(Ui)</code> for each element a widget draws, so a theme pack restyles every widget without forking it. The skin reads the environment, so it follows dark mode, contrast and text size, and the style's <code class="z">focus_ring</code> is drawn while a control has focus. A mistake in a skin fails to compile with a message naming it. <code class="z">zui_widgets.DesignSkin(Ui)</code> is zui's own skin: every part drawn in the roles, tiers and shapes of the default design, from <code class="z">zui.design.Tokens</code> you resolve again when a preference changes, so the widgets follow the theme, contrast, density, text size and color vision. Its focus ring is drawn 2 units outside the control, so it shows on an accent-filled button or a checked box as well as on the page. A button takes a variant, <code class="z">primary</code>, <code class="z">secondary</code>, <code class="z">tonal</code>, <code class="z">tertiary</code> or <code class="z">danger</code>.</p>

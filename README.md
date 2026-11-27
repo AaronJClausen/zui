@@ -130,6 +130,7 @@ exe.root_module.addImport("zui", zui.module("zui"));
 // Optional:
 exe.root_module.addImport("zui_async", zui.module("zui_async"));
 exe.root_module.addImport("zui_widgets", zui.module("zui_widgets"));
+exe.root_module.addImport("zui_widgets_data", zui.module("zui_widgets_data"));
 exe.root_module.addImport("zui_reflect", zui.module("zui_reflect"));
 exe.root_module.addImport("zui_app", zui.module("zui_app"));
 exe.root_module.addImport("zui_wire", zui.module("zui_wire"));
@@ -177,7 +178,7 @@ API, what it draws or reports, its limits, and its build steps.
 
 | Package | Directory | What it is |
 |---|---|---|
-| `zui` and its modules | `core/`, re-exported by the root | the engine, `zui_async`, `zui_widgets`, `zui_reflect`, `zui_app`, `zui_wire`, `zui_debug`, `zui_motion`, `zui_color`, `zui_design`, `zui_icons`, `zui_testing` and `zui_tracy` |
+| `zui` and its modules | `core/`, re-exported by the root | the engine, `zui_async`, `zui_widgets`, `zui_widgets_data`, `zui_reflect`, `zui_app`, `zui_wire`, `zui_debug`, `zui_motion`, `zui_color`, `zui_design`, `zui_icons`, `zui_testing` and `zui_tracy` |
 | `zui_glyphs`, `zui_truetype`, `zui_fonts` | [text/](text/README.md) | the layout that font systems and renderers share, the default font system on stb_truetype, and the bundled typefaces |
 | `zui_raylib` | [renderers/raylib/](renderers/raylib/README.md) | a raylib renderer and adapter host, the reference backend |
 | `zui_sokol` | [renderers/sokol/](renderers/sokol/README.md) | a sokol renderer on D3D11, Metal or OpenGL, drawing every optional command and extended colors |

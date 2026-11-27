@@ -7,6 +7,7 @@ const zui = @import("zui");
 const zui_testing = @import("zui_testing");
 const zui_async = @import("zui_async");
 const zui_widgets = @import("zui_widgets");
+const zui_widgets_data = @import("zui_widgets_data");
 const zui_reflect = @import("zui_reflect");
 const zui_tracy = @import("zui_tracy");
 const zui_app = @import("zui_app");
@@ -180,6 +181,71 @@ fn declareWidgetsWith(widgets: anytype, ui: *Ui, scope: zui.Id) void {
     declareInputsWith(widgets, ui, scope);
     declareOverlaysWith(widgets, ui, scope);
     declareFeedbackWith(widgets, ui, scope);
+    declareDataWith(widgets, ui, scope);
+}
+
+const CheckRow = struct {
+    index: usize,
+
+    fn title(row: *const CheckRow, buffer: *[zui_widgets_data.cell_capacity]u8) []const u8 {
+        return std.fmt.bufPrint(buffer, "{d}", .{row.index}) catch "";
+    }
+
+    fn key(row: *const CheckRow) u64 {
+        return row.index;
+    }
+};
+
+const CheckRows = struct {
+    pub fn count(_: CheckRows) usize {
+        return 1_000_000;
+    }
+
+    pub fn row(_: CheckRows, index: usize) CheckRow {
+        return .{ .index = index };
+    }
+};
+
+const CheckNode = struct {
+    name: []const u8,
+    children: []const CheckNode = &.{},
+
+    fn label(node: *const CheckNode) []const u8 {
+        return node.name;
+    }
+
+    fn childrenOf(node: *const CheckNode) []const CheckNode {
+        return node.children;
+    }
+
+    fn key(node: *const CheckNode) u64 {
+        return node.name.len;
+    }
+};
+
+const check_columns = [_]zui_widgets_data.Column(CheckRow){
+    .{ .title = "row", .text = CheckRow.title },
+    .{ .title = "count", .text = CheckRow.title, .width = 40, .numeric = true, .sortable = false },
+};
+const check_nodes = [_]CheckNode{.{ .name = "root", .children = &.{.{ .name = "leaf" }} }};
+var check_sort: zui_widgets_data.Sort = .{};
+var check_key_storage: [4]u64 = undefined;
+var check_keys: zui_widgets_data.KeySet = .init(&check_key_storage);
+var check_widths = [_]f32{ 0, 0 };
+var check_split: f32 = 200;
+
+fn declareDataWith(widgets: anytype, ui: *Ui, scope: zui.Id) void {
+    const data = zui_widgets_data.of(widgets);
+    const panes = data.splitPane(ui, scope.child("split"), &check_split, .{ .axis = .vertical, .min = 40, .label = "split" });
+    const shown = data.table(ui, scope.child("table"), CheckRow, CheckRows{}, .{ .columns = &check_columns, .sort = &check_sort, .selection = &check_keys, .widths = &check_widths, .key = CheckRow.key, .label = "table" });
+    if (shown.sorted or shown.selection_changed or shown.resized or shown.activated != null) check_split = 100;
+    panes.second(ui);
+    const folders = data.tree(ui, scope.child("tree"), CheckNode, &check_nodes, .{ .expanded = &check_keys, .selection = &check_keys, .label = CheckNode.label, .children = CheckNode.childrenOf, .key = CheckNode.key });
+    if (folders.selection_changed or folders.expansion_changed or folders.activated != null or panes.resized) check_split = 120;
+    panes.end(ui);
+    inline for (zui_widgets_data.previews.all) |Component| {
+        Component.declare(widgets, ui, zui_design.Permutations(Component, .glance).preview(.{}));
+    }
 }
 
 const CheckImageStatus = zui.Status(error{NotFound}!u32);

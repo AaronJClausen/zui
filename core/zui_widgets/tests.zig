@@ -869,6 +869,7 @@ test "every part and every state reach the skin" {
     const drawn_only_with_gradients = [_]zui_widgets.Part{ .scroll_edge_fade, .scroll_edge_fade_raised };
     for (std.enums.values(zui_widgets.Part)) |part| {
         if (std.mem.indexOfScalar(zui_widgets.Part, &drawn_only_with_gradients, part) != null) continue;
+        if (std.mem.indexOfScalar(zui_widgets.Part, &zui_widgets.data_parts, part) != null) continue;
         if (!asked.parts.get(part)) {
             std.debug.print("never asked for {t}\n", .{part});
             return error.PartNeverStyled;

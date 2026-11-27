@@ -19,6 +19,7 @@
         "zui_testing",
         "zui_async",
         "zui_widgets",
+        "zui_widgets_data",
         "zui_reflect",
         "zui_tracy",
         "zui_app",
