@@ -51,8 +51,8 @@ and each is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:36-motion-in-core` Motion in the core | done |
 | `11-polish:37-tour-preferences-menu` The tour's preferences in a menu on the top bar | done |
 | `11-polish:38-test-card` The test card | done |
-| `11-polish:39-frame-snapshots` Frame snapshots | done here; waiting on CI for Windows and macOS |
-| `11-polish:40-terminal-snapshots` Terminal snapshots | done here; waiting on CI for Windows and macOS |
+| `11-polish:39-frame-snapshots` Frame snapshots | done |
+| `11-polish:40-terminal-snapshots` Terminal snapshots | done |
 | `11-polish:41-pixel-hashes` Pixel hashes per rasterizer | not started |
 | `11-polish:42-scripted-input` Scripted input on the test card | not started |
 | `11-polish:43-test-card-review` The test card's review mode | not started |
@@ -3149,8 +3149,8 @@ that region.
 
 **Spec.** §19.4, §20.1.
 
-**Status.** Done here; Windows and macOS wait on CI. `zui_testing`'s
-`snapshot` writes every length to the nearest 1/64 unit, and
+**Status.** Done. `zui_testing`'s `snapshot` writes every length to the
+nearest 1/64 unit, and
 `writeFrameSnapshot(writer, frame, names, header)` heads it with the
 frame's viewport and pixels a unit and the placement
 (`SnapshotPlacement.of`), the fonts' fingerprint and the glyph coverage
@@ -3173,9 +3173,8 @@ here: the snapshots match in Debug, ReleaseSafe and ReleaseFast on
 x86-64 Linux, and on `-Dtarget=x86-linux` too, so that target is not
 skipped; one unit of space above the `geometry` region fails the test
 with `` the snapshot differs from line 121, in the `geometry` region ``
-and 18 differing lines. CI runs the card's tests on Linux alone and only
-compiles them for Windows and macOS, so confirming those needs the
-card's tests run on their runners.
+and 18 differing lines. CI's `apps/test_card: snapshots` job runs the
+card's tests on Windows and macOS, and they passed there at `ac99650`.
 
 ## 11-polish:40-terminal-snapshots — Terminal snapshots
 
@@ -3200,16 +3199,16 @@ cell's color in the card fails it naming the cell and region.
 
 **Spec.** §20.1.
 
-**Status.** Done here, in one commit; Windows and macOS wait on CI.
-`zui_terminal.writeSnapshot` writes a `CellBuffer` as text: its glyphs
-framed in `|`, a row a line, then each row's backgrounds and the
-foregrounds of its glyphs as runs of columns (a blank's foreground is
-not drawn, so not kept; a cell has no attributes). `readSnapshot` reads
-it back, `cellsLookAlike` compares two cells as a terminal shows them,
-and `writeSnapshotDifferences` names each differing cell's column, row,
-region and colors, all in `renderers/terminal/src/snapshot.zig` with its
-tests. The test card's `--dump --check` draws each scene from a card and
-context of its own, held for `settling_frames`, and compares it with
+**Status.** Done, in one commit. `zui_terminal.writeSnapshot` writes a
+`CellBuffer` as text: its glyphs framed in `|`, a row a line, then each
+row's backgrounds and the foregrounds of its glyphs as runs of columns
+(a blank's foreground is not drawn, so not kept; a cell has no
+attributes). `readSnapshot` reads it back, `cellsLookAlike` compares two
+cells as a terminal shows them, and `writeSnapshotDifferences` names
+each differing cell's column, row, region and colors, all in
+`renderers/terminal/src/snapshot.zig` with its tests. The test card's
+`--dump --check` draws each scene from a card and context of its own,
+held for `settling_frames`, and compares it with
 `apps/test_card/snapshots/<scene>.terminal.txt`, read at run time from
 the directory the build step passes in `--snapshots` when `--check` or
 `--approve` is given; `--dump --approve` writes them, and
@@ -3218,8 +3217,8 @@ the directory the build step passes in `--snapshots` when `--check` or
 Here the check passes in all six scenes with clean diagnostics, and the
 blue of the eighth grey of the `swatches` ramp raised by one fails it in
 every scene, naming columns 41 and 42 of row 5 in `swatches`, `#777777`
-approved and `#777778` drawn. Remains: CI's terminal job running
-`--dump --check` in place of `--frames 6` on Linux, Windows and macOS.
+approved and `#777778` drawn. CI's terminal job runs `--dump --check` on
+Linux, Windows and macOS, and it passed on all three at `ac99650`.
 
 ## 11-polish:41-pixel-hashes — Pixel hashes per rasterizer
 
