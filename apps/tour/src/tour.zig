@@ -91,6 +91,7 @@ pub fn Tour(comptime kit: type) type {
         one_declaration: ScreenOf(.one_declaration, "OneDeclaration", @import("screens/one_declaration.zig")),
         clickable_chaos: ScreenOf(.clickable_chaos, "ClickableChaos", @import("screens/clickable_chaos.zig")),
         cabin_booking: ScreenOf(.cabin_booking, "CabinBooking", @import("screens/cabin_booking.zig")),
+        manifest: ScreenOf(.manifest, "Manifest", @import("screens/manifest.zig")),
         preferences: ScreenOf(.preferences, "Preferences", @import("screens/preferences.zig")),
 
         /// `void` for a screen the renderer is not offered, so it costs nothing.

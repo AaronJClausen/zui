@@ -43,6 +43,7 @@ pub const Screen = enum {
     light_lab,
     one_declaration,
     cabin_booking,
+    manifest,
     clickable_chaos,
     preferences,
 

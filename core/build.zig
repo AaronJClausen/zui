@@ -95,6 +95,7 @@ const compile_error_cases = [_]struct { name: []const u8, expected_error: []cons
     .{ .name = "widgets_async_image_without_status", .expected_error = "zui_widgets: asyncImage needs a source with a status, a tagged union with a `ready` field or a value whose `status()` returns one, got u32" },
     .{ .name = "widgets_async_image_wrong_handle", .expected_error = "zui_widgets: asyncImage's source is ready with []const u8, not the context's ImageHandle, u32" },
     .{ .name = "widgets_data_not_widgets", .expected_error = "zui_widgets_data: Data needs a zui_widgets.Widgets(Ui, Skin), got u32" },
+    .{ .name = "widgets_data_property_grid_uneditable_field", .expected_error = "zui_widgets_data: propertyGrid cannot edit widgets_data_property_grid_uneditable_field.Layer.on_change, a *const fn () void; hide it with `.fields.on_change = .{ .hidden = true }` in its zui_inspector" },
     .{ .name = "widgets_data_table_rows_without_count", .expected_error = "zui_widgets_data: table needs its rows as a slice of widgets_data_table_rows_without_count.Row or a value with `count()` and `row(index)`, got u32" },
     .{ .name = "widgets_async_image_unknown_status", .expected_error = "zui_widgets: asyncImage's source status widgets_async_image_unknown_status.Loaded has `downloading`, which is none of idle, running, ready, failed and canceled" },
     .{ .name = "reflect_misspelled_option", .expected_error = "no field named 'volum' in struct 'zui_reflect.FieldOptionsOf(reflect_misspelled_option.Settings)'" },

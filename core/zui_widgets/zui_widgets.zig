@@ -617,10 +617,51 @@ pub const Part = enum {
     /// The divider while dragged, focused or hovered a moment, read as
     /// `split_divider`.
     split_divider_active,
+    /// `zui_widgets_data`'s toolbar: `background`, `border` for the line
+    /// beneath it, `size[1]` for its least height, `padding` and `gap`
+    /// between its items.
+    toolbar,
+    /// The line between two groups of a toolbar's items: `background`,
+    /// `size` for its thickness and length, and `padding` for the room
+    /// either side of it.
+    toolbar_separator,
+    /// `zui_widgets_data`'s status bar: `background`, `border` for the
+    /// line above it, `size[1]` for its least height, `padding`, `gap`
+    /// between its items and `text`.
+    status_bar,
+    /// The scrim behind a command palette: `background`, `layer`,
+    /// `motion` as it fades in and `exit`.
+    command_palette_scrim,
+    /// The command palette's panel: `background`, `border`, `shadow`,
+    /// `corner_radius`, `size[0]` for its greatest width, `padding`,
+    /// `gap`, `layer`, `motion` as it enters and `exit`.
+    command_palette,
+    /// One command it lists: `background`, `text`, `corner_radius`,
+    /// `size[1]` for its height, `padding` and `gap` before its shortcut.
+    command_palette_result,
+    /// The command Enter would choose, read as `command_palette_result`.
+    command_palette_result_selected,
+    /// The part of a command's name that matches what was typed: `text`.
+    command_palette_match,
+    /// A command's shortcut, drawn as a keycap: `background`, `text`,
+    /// `corner_radius` and `padding`.
+    command_palette_shortcut,
+    /// The heading above a group of commands: `text` and `padding`.
+    command_palette_heading,
+    /// A row of `zui_widgets_data`'s property grid and of
+    /// `zui_reflect.inspector`: `size[0]` for its label column's least
+    /// width, `size[1]` for its least height, `padding` and `gap` between
+    /// the label and the editor.
+    property_row,
+    /// A property's name: `text`.
+    property_label,
+    /// The dot beside a property changed from its default: `background`,
+    /// `corner_radius` and `size[0]` for its side.
+    property_changed,
 };
 
-/// The parts only `zui_widgets_data`'s components ask a skin for, which its
-/// own tests reach.
+/// The parts only `zui_widgets_data`'s components, and `zui_reflect`'s
+/// inspector, ask a skin for, which their own tests reach.
 pub const data_parts = [_]Part{
     .table_header,
     .table_header_cell,
@@ -637,6 +678,19 @@ pub const data_parts = [_]Part{
     .tree_guide,
     .split_divider,
     .split_divider_active,
+    .toolbar,
+    .toolbar_separator,
+    .status_bar,
+    .command_palette_scrim,
+    .command_palette,
+    .command_palette_result,
+    .command_palette_result_selected,
+    .command_palette_match,
+    .command_palette_shortcut,
+    .command_palette_heading,
+    .property_row,
+    .property_label,
+    .property_changed,
 };
 
 /// How a widget moves a value it draws toward the skin's next one: at once,
@@ -1081,6 +1135,40 @@ pub fn DesignSkinWith(comptime Ui: type, comptime ExtraRoles: type) type {
                 .tree_guide => sized(skin.styled(.tree_guide, state), .{ divider_thickness, 0 }),
                 .split_divider => sized(skin.styled(.split_divider, state), .{ divider_thickness, @max(resize_hit_width, tokens.target_floors.get(.pointer)) }),
                 .split_divider_active => sized(skin.styled(.split_divider_active, state), .{ split_divider_active_thickness, @max(resize_hit_width, tokens.target_floors.get(.pointer)) }),
+                .toolbar => bar: {
+                    var bar = sized(skin.styled(.toolbar, state), .{ 0, tokens.control_heights.get(.large) });
+                    if (bar.border) |*border| border.widths = .{ .bottom = tokens.outline_width };
+                    break :bar bar;
+                },
+                .toolbar_separator => sized(skin.styled(.toolbar_separator, state), .{ divider_thickness, toolbar_separator_length }),
+                .status_bar => bar: {
+                    var bar = sized(skin.styled(.status_bar, state), .{ 0, status_bar_height });
+                    if (bar.border) |*border| border.widths = .{ .top = tokens.outline_width };
+                    break :bar bar;
+                },
+                .command_palette_scrim => scrim: {
+                    var scrim = skin.styled(.command_palette_scrim, state);
+                    if (scrim.background) |color| scrim.background = faded(color, command_palette_scrim_share);
+                    scrim.layer = command_palette_layer;
+                    scrim.motion = .{ .tween = tokens.motion.dialog_enter };
+                    scrim.exit = exitThrough(tokens.motion.dialog_exit);
+                    break :scrim scrim;
+                },
+                .command_palette => panel: {
+                    var panel = sized(skin.lifted(.command_palette, state, .topmost), .{ command_palette_greatest_width, 0 });
+                    panel.layer = command_palette_layer + 1;
+                    panel.motion = .{ .tween = tokens.motion.dialog_enter };
+                    panel.exit = exitThrough(tokens.motion.dialog_exit);
+                    break :panel panel;
+                },
+                .command_palette_result => skin.menuItem(.command_palette_result, state),
+                .command_palette_result_selected => skin.menuItem(.command_palette_result_selected, state),
+                .command_palette_match => skin.styled(.command_palette_match, state),
+                .command_palette_shortcut => skin.styled(.command_palette_shortcut, state),
+                .command_palette_heading => skin.styled(.command_palette_heading, state),
+                .property_row => sized(skin.styled(.property_row, state), .{ property_label_least_width, medium_height }),
+                .property_label => skin.styled(.property_label, state),
+                .property_changed => sized(skin.styled(.property_changed, state), @splat(property_changed_side)),
             };
         }
 
@@ -1416,6 +1504,13 @@ const table_row_hover_share = 0.5;
 const resize_hit_width = 8;
 const resize_line_thickness = 1;
 const split_divider_active_thickness = 3;
+const toolbar_separator_length = 20;
+const status_bar_height = 24;
+const command_palette_layer = 110;
+const command_palette_greatest_width = 560;
+const command_palette_scrim_share = 0.5;
+const property_label_least_width = 120;
+const property_changed_side = 6;
 const badge_count_overflow = std.fmt.comptimePrint("{d}+", .{badge_count_most});
 
 const keyboard_scroll_step = 40;
@@ -1628,6 +1723,19 @@ const Designed = struct {
         tree_guide,
         split_divider,
         split_divider_active,
+        toolbar,
+        toolbar_separator,
+        status_bar,
+        command_palette_scrim,
+        command_palette,
+        command_palette_result,
+        command_palette_result_selected,
+        command_palette_match,
+        command_palette_shortcut,
+        command_palette_heading,
+        property_row,
+        property_label,
+        property_changed,
     };
 
     const on_hover: zui.design.PartAppearance(void).Colors = .{ .surface = .secondary_container, .text = .on_secondary_container };
@@ -2010,6 +2118,37 @@ const Designed = struct {
         .tree_guide = .{ .surface = .outline_muted },
         .split_divider = .{ .surface = .outline_muted, .target = .pointer },
         .split_divider_active = .{ .surface = .accent, .target = .pointer },
+        .toolbar = .{ .surface = .surface, .outline = .outline_muted, .padding = .{ .x = .s }, .gap = .xs },
+        .toolbar_separator = .{ .surface = .outline_muted, .padding = .{ .x = .s } },
+        .status_bar = .{ .surface = .surface_sunken, .outline = .outline_muted, .text = .on_surface_muted, .type = .caption, .on = .status_bar, .padding = .{ .x = .m }, .gap = .l },
+        .command_palette_scrim = .{ .surface = .scrim },
+        .command_palette = .{ .surface = .surface_overlay, .shape = .popup, .padding = .{ .x = .xs, .y = .xs }, .gap = .xs },
+        .command_palette_result = .{
+            .text = .on_surface,
+            .type = .body,
+            .on = .command_palette,
+            .shape = .control,
+            .padding = .{ .x = .m },
+            .gap = .m,
+            .target = .pointer,
+            .states = .{ .hovered = on_hover, .pressed = on_hover },
+        },
+        .command_palette_result_selected = .{
+            .surface = .secondary_container,
+            .text = .on_secondary_container,
+            .type = .body,
+            .on = .command_palette_result_selected,
+            .shape = .control,
+            .padding = .{ .x = .m },
+            .gap = .m,
+            .target = .pointer,
+        },
+        .command_palette_match = .{ .text = .on_surface_accent, .type = .body_strong, .on = .command_palette },
+        .command_palette_shortcut = .{ .surface = .surface_sunken, .text = .on_surface_muted, .type = .label, .on = .command_palette_shortcut, .shape = .control, .padding = .{ .x = .xs } },
+        .command_palette_heading = .{ .text = .on_surface_muted, .type = .caption, .on = .command_palette, .padding = .{ .x = .m, .y = .xs } },
+        .property_row = .{ .padding = .{ .y = .xs }, .gap = .m },
+        .property_label = .{ .text = .on_surface_muted, .type = .label, .on = .page },
+        .property_changed = .{ .surface = .accent, .shape = .indicator },
     });
 
     fn bannerOf(comptime surface: zui.design.ColorChoice(void), comptime text: zui.design.ColorChoice(void), comptime on: @EnumLiteral()) zui.design.PartAppearance(void) {

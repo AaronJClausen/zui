@@ -86,12 +86,12 @@ fn coreModule(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.bui
 }
 
 fn tourModuleOptions(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, core_options: CoreOptions) std.Build.Module.CreateOptions {
-    const imports = b.allocator.alloc(std.Build.Module.Import, 11) catch @panic("out of memory");
-    for (imports[0..9], [_][]const u8{ "zui", "zui_app", "zui_widgets", "zui_reflect", "zui_async", "zui_debug", "zui_tracy", "zui_motion", "zui_design" }) |*import, name| {
+    const imports = b.allocator.alloc(std.Build.Module.Import, 12) catch @panic("out of memory");
+    for (imports[0..10], [_][]const u8{ "zui", "zui_app", "zui_widgets", "zui_widgets_data", "zui_reflect", "zui_async", "zui_debug", "zui_tracy", "zui_motion", "zui_design" }) |*import, name| {
         import.* = .{ .name = name, .module = coreModule(b, target, optimize, core_options, name) };
     }
-    imports[9] = .{ .name = "zui_glyphs", .module = b.dependency("zui_glyphs", .{ .target = target, .optimize = optimize }).module("zui_glyphs") };
-    imports[10] = .{ .name = "zui_fonts", .module = b.dependency("zui_fonts", .{ .target = target, .optimize = optimize }).module("zui_fonts") };
+    imports[10] = .{ .name = "zui_glyphs", .module = b.dependency("zui_glyphs", .{ .target = target, .optimize = optimize }).module("zui_glyphs") };
+    imports[11] = .{ .name = "zui_fonts", .module = b.dependency("zui_fonts", .{ .target = target, .optimize = optimize }).module("zui_fonts") };
     return .{ .root_source_file = b.path("src/root.zig"), .target = target, .optimize = optimize, .imports = imports };
 }
 

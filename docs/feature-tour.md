@@ -2436,8 +2436,54 @@ fn library(app: *App, ui: *Ui) void {
 }
 ```
 
-The toolbar, the status bar, the command palette and the property grid
-are next.
+The tour's Manifest screen shows them, with a million containers in its
+table.
+
+<a id="widget-data-tools"></a>
+
+### Toolbars, status bars, the command palette and property grids · *shipped*
+
+A toolbar holds tertiary buttons in groups; as the window narrows, the
+items it has no room for move into a More menu at its end. A status bar
+sets short captions along the bottom. A command palette opens over
+everything at the topmost elevation, lists the commands whose name holds
+what is typed, the match in the accent, under group headings with their
+shortcuts, and returns the one chosen with Enter or a click; focus goes
+back to where it was. A property grid edits any struct in rows of a name
+and an editor, reads its `zui_inspector` for labels, ranges and hidden
+fields, and marks each value changed from its default with a dot;
+`zui_reflect.inspector` draws its rows the same way.
+
+`src/ui/darkroom.zig`
+
+```zig
+fn darkroom(app: *App, ui: *Ui) void {
+    const data = zui_widgets_data.of(app.widgets);
+    if (ui.chordPressed(.{ .key = .k, .modifiers = .{ .control = true } })) app.palette_open = true;
+
+    var bar = data.toolbar(ui, .of("darkroom.toolbar"), .{ .label = "Editing" });
+    if (bar.item(ui, .of("darkroom.undo"), "Undo", .{ .disabled = !app.canUndo() })) app.undo();
+    bar.separator(ui);
+    if (bar.item(ui, .of("darkroom.crop"), "Crop", .{})) app.startCrop();
+    if (bar.item(ui, .of("darkroom.export"), "Export", .{})) app.exportPhoto();
+    bar.end(ui);
+
+    if (data.propertyGrid(ui, .of("darkroom.develop"), &app.develop)) app.redevelop();
+
+    var count_text: [32]u8 = undefined;
+    data.statusBar(ui, .of("darkroom.status"), .{ .label = "Status" });
+    data.statusText(ui, std.fmt.bufPrint(&count_text, "{d} photos", .{app.photos.len}) catch "");
+    data.statusText(ui, if (app.saved) "Saved" else "Edited");
+    ui.close();
+
+    if (data.commandPalette(ui, .of("darkroom.palette"), &app.palette_open, &darkroom_commands, .{ .query = &app.palette_query })) |index| app.runCommand(index);
+}
+```
+
+The tour's Manifest screen puts all seven together: a million containers
+in a table beside a tree of holds under a toolbar, the selected
+container's papers in a property grid, a status bar, and a command
+palette on Ctrl+K.
 
 <a id="widget-theme"></a>
 

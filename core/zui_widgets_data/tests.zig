@@ -768,6 +768,372 @@ test "in a right-to-left layout dragging the divider toward the start widens the
 }
 
 // =============================================================
+// Toolbar
+// =============================================================
+
+const Editor = struct {
+    width: f32 = 600,
+    undone: u32 = 0,
+    exported: u32 = 0,
+    redo_disabled: bool = true,
+
+    fn declare(editor: *Editor, ui: *Ui) void {
+        ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(editor.width) } } });
+        var bar = data.toolbar(ui, .of("bar"), .{ .label = "Editing" });
+        if (bar.item(ui, .of("bar.undo"), "Undo", .{})) editor.undone += 1;
+        if (bar.item(ui, .of("bar.redo"), "Redo", .{ .disabled = editor.redo_disabled })) editor.undone -= 1;
+        bar.separator(ui);
+        _ = bar.item(ui, .of("bar.crop"), "Crop", .{});
+        _ = bar.item(ui, .of("bar.rotate"), "Rotate", .{});
+        bar.separator(ui);
+        if (bar.item(ui, .of("bar.export"), "Export", .{})) editor.exported += 1;
+        bar.end(ui);
+        ui.close();
+    }
+};
+
+test "a toolbar shows its items in groups, and a click chooses one" {
+    var fixture: Fixture = .{};
+    try fixture.init();
+    defer fixture.deinit();
+    const driver = &fixture.driver;
+    var editor: Editor = .{};
+    _ = try driver.frame(&editor, Editor.declare, &.{});
+    var frame = try driver.frame(&editor, Editor.declare, &.{});
+    for ([_][]const u8{ "bar.undo", "bar.redo", "bar.crop", "bar.rotate", "bar.export" }) |name| try testing.expect(frame.rectOf(.dynamic(name)) != null);
+    try testing.expect(frame.rectOf(zui.Id.of("bar").child("more")) == null);
+    const bar = frame.rectOf(.of("bar")).?;
+    try testing.expectEqual(tokens.control_heights.get(.large), bar.height);
+    const separator = skinColor(.toolbar_separator, .idle);
+    var separators: usize = 0;
+    for (frame.commands()) |command| if (command.payload == .rectangle and command.payload.rectangle.color.eql(separator) and command.bounds.width == 1) {
+        separators += 1;
+    };
+    try testing.expectEqual(2, separators);
+    _ = try driver.click(&editor, Editor.declare, .of("bar.export"));
+    try testing.expectEqual(1, editor.exported);
+    _ = try driver.click(&editor, Editor.declare, .of("bar.redo"));
+    try testing.expectEqual(0, editor.undone);
+    frame = try driver.frame(&editor, Editor.declare, &.{});
+    try testing.expectEqual(zui.SemanticRole.group, (try nodeOf(frame, .of("bar"))).role);
+}
+
+test "the items a toolbar has no room for move into a menu at its end, chosen from there" {
+    var fixture: Fixture = .{};
+    try fixture.init();
+    defer fixture.deinit();
+    const driver = &fixture.driver;
+    var editor: Editor = .{ .width = 220 };
+    _ = try driver.frame(&editor, Editor.declare, &.{});
+    _ = try driver.frame(&editor, Editor.declare, &.{});
+    var frame = try driver.frame(&editor, Editor.declare, &.{});
+    const more = zui.Id.of("bar").child("more");
+    try testing.expect(frame.rectOf(.of("bar.undo")) != null);
+    try testing.expect(frame.rectOf(.of("bar.export")) == null);
+    try testing.expect(frame.rectOf(more) != null);
+    const bar = frame.rectOf(.of("bar")).?;
+    const more_rect = frame.rectOf(more).?;
+    try testing.expect(more_rect.x + more_rect.width <= bar.x + bar.width + 0.5);
+
+    _ = try driver.click(&editor, Editor.declare, more);
+    frame = try driver.frame(&editor, Editor.declare, &.{});
+    try testing.expect(textCommand(frame, "Export") != null);
+    var export_item: ?zui.Rect = null;
+    for (frame.semantics()) |node| {
+        if (node.role == .menu_item and std.mem.eql(u8, node.label, "Export")) export_item = node.bounds;
+    }
+    const at = export_item.?;
+    const pointer: zui.Pointer = .{ .id = .mouse, .kind = .mouse, .position = .{ at.x + at.width / 2, at.y + at.height / 2 }, .at = driver.now };
+    _ = try driver.frame(&editor, Editor.declare, &.{ .{ .pointer_move = .{ .pointer = pointer } }, .{ .pointer_down = .{ .pointer = pointer } }, .{ .pointer_up = .{ .pointer = pointer } } });
+    try testing.expectEqual(0, editor.exported);
+    _ = try driver.frame(&editor, Editor.declare, &.{});
+    try testing.expectEqual(1, editor.exported);
+    _ = try driver.frame(&editor, Editor.declare, &.{});
+    try testing.expectEqual(1, editor.exported);
+
+    editor.width = 600;
+    _ = try driver.frame(&editor, Editor.declare, &.{});
+    _ = try driver.frame(&editor, Editor.declare, &.{});
+    frame = try driver.frame(&editor, Editor.declare, &.{});
+    try testing.expect(frame.rectOf(.of("bar.export")) != null);
+    try testing.expect(frame.rectOf(more) == null);
+}
+
+// =============================================================
+// Status bar
+// =============================================================
+
+test "a status bar sets its texts in the caption role on the sunken surface" {
+    const Window = struct {
+        fn declare(_: *void, ui: *Ui) void {
+            ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(500) } } });
+            data.statusBar(ui, .of("status"), .{ .label = "Status" });
+            data.statusText(ui, "12 files");
+            data.statusText(ui, "Saved");
+            ui.close();
+            ui.close();
+        }
+    };
+    var fixture: Fixture = .{};
+    try fixture.init();
+    defer fixture.deinit();
+    var app = {};
+    const frame = try fixture.driver.frame(&app, Window.declare, &.{});
+    const bar = frame.rectOf(.of("status")).?;
+    try testing.expectEqual(24, bar.height);
+    try testing.expectEqual(skinColor(.status_bar, .idle), rectangleColorAt(frame, bar).?);
+    const saved = textCommand(frame, "Saved").?;
+    try testing.expectEqual(tokens.colors.get(.idle).get(.on_surface_muted), saved.payload.text.style.color);
+    try testing.expectEqual(tokens.text_styles.get(.caption).size, saved.payload.text.style.size);
+    const files = textCommand(frame, "12 files").?.bounds;
+    try testing.expectApproxEqAbs(files.x + files.width + tokens.space(.l), saved.bounds.x, 0.5);
+    try testing.expectEqualStrings("Status", (try nodeOf(frame, .of("status"))).label);
+}
+
+// =============================================================
+// Command palette
+// =============================================================
+
+const palette_commands = [_]zui_widgets_data.Command{
+    .{ .label = "Open file", .shortcut = "Ctrl+O", .group = "File" },
+    .{ .label = "Export as PNG", .shortcut = "Ctrl+E", .group = "File" },
+    .{ .label = "Export as JPEG", .group = "File" },
+    .{ .label = "Toggle grid", .group = "View" },
+};
+
+const palette_id: zui.Id = .of("palette");
+const palette_query_id = palette_id.child("query");
+
+const Studio = struct {
+    open: bool = false,
+    in_dialog: bool = false,
+    dialog_open: bool = true,
+    query_bytes: [32]u8 = undefined,
+    query: zui_widgets_data.Data(Widgets).EditableText = undefined,
+    ran: ?usize = null,
+
+    fn init(studio: *Studio) void {
+        studio.* = .{};
+        studio.query = .init(&studio.query_bytes, "stale");
+    }
+
+    fn declare(studio: *Studio, ui: *Ui) void {
+        ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .grow_both } });
+        if (widgets.button(ui, .of("opener"), "Commands", .{})) studio.open = true;
+        if (studio.in_dialog) {
+            if (widgets.dialog(ui, .of("dialog"), &studio.dialog_open, .{ .title = "Edit" })) |shown| {
+                studio.palette(ui);
+                shown.end(ui);
+            }
+        } else studio.palette(ui);
+        ui.close();
+    }
+
+    fn palette(studio: *Studio, ui: *Ui) void {
+        if (data.commandPalette(ui, palette_id, &studio.open, &palette_commands, .{ .query = &studio.query })) |index| studio.ran = index;
+    }
+};
+
+fn resultId(index: usize) zui.Id {
+    return palette_id.indexedChild("result", index);
+}
+
+test "a command palette lists every command under its group, and typing filters it, the match in the accent" {
+    var fixture: Fixture = .{};
+    try fixture.init();
+    defer fixture.deinit();
+    const driver = &fixture.driver;
+    var studio: Studio = undefined;
+    studio.init();
+    _ = try driver.frame(&studio, Studio.declare, &.{});
+    _ = try driver.click(&studio, Studio.declare, .of("opener"));
+    var frame = try driver.frame(&studio, Studio.declare, &.{});
+    try testing.expect(fixture.ui.focused(palette_query_id));
+    try testing.expectEqualStrings("", studio.query.slice());
+    for (0..palette_commands.len) |index| try testing.expect(frame.rectOf(resultId(index)) != null);
+    try testing.expect(textCommand(frame, "File") != null and textCommand(frame, "View") != null);
+    try testing.expect(textCommand(frame, "Ctrl+O") != null);
+    try testing.expectEqual(zui.SemanticRole.dialog, (try nodeOf(frame, palette_id.child("panel"))).role);
+    try testing.expect((try nodeOf(frame, resultId(0))).state.selected);
+    frame = try waitFor(driver, &studio, Studio.declare, 0.5);
+    const panel = frame.rectOf(palette_id.child("panel")).?;
+    try testing.expectApproxEqAbs(driver.viewport[1] * 0.2, panel.y, 1);
+    try testing.expectEqual(560, panel.width);
+
+    _ = try driver.typeText(&studio, Studio.declare, "ex");
+    frame = try driver.frame(&studio, Studio.declare, &.{});
+    try testing.expect(frame.rectOf(resultId(0)) == null);
+    try testing.expect(frame.rectOf(resultId(1)) != null and frame.rectOf(resultId(2)) != null);
+    try testing.expect(frame.rectOf(resultId(3)) == null);
+    const match = textCommand(frame, "Ex").?;
+    try testing.expectEqual(tokens.text_styles.get(.body_strong).font, match.payload.text.style.font);
+    try testing.expect(textCommand(frame, "port as JPEG") != null);
+    var accent_matches: usize = 0;
+    for (frame.commands()) |command| if (command.payload == .text and std.mem.eql(u8, command.payload.text.content, "Ex") and command.payload.text.style.color.eql(tokens.colors.get(.idle).get(.on_surface_accent))) {
+        accent_matches += 1;
+    };
+    try testing.expectEqual(1, accent_matches);
+
+    _ = try driver.typeText(&studio, Studio.declare, "zz");
+    frame = try driver.frame(&studio, Studio.declare, &.{});
+    try testing.expect(textCommand(frame, "No command matches") != null);
+}
+
+test "Up and Down move a palette's selection, Enter runs it, and focus goes back to the opener" {
+    var fixture: Fixture = .{};
+    try fixture.init();
+    defer fixture.deinit();
+    const driver = &fixture.driver;
+    var studio: Studio = undefined;
+    studio.init();
+    _ = try driver.frame(&studio, Studio.declare, &.{});
+    _ = try driver.focus(&studio, Studio.declare, .of("opener"));
+    _ = try driver.pressKeys(&studio, Studio.declare, &.{.enter});
+    _ = try driver.frame(&studio, Studio.declare, &.{});
+    _ = try driver.pressKeys(&studio, Studio.declare, &.{ .down, .down, .up, .up, .up });
+    var frame = try driver.frame(&studio, Studio.declare, &.{});
+    try testing.expect((try nodeOf(frame, resultId(3))).state.selected);
+    _ = try driver.pressKeys(&studio, Studio.declare, &.{.down});
+    _ = try driver.pressKeys(&studio, Studio.declare, &.{.down});
+    _ = try driver.pressKeys(&studio, Studio.declare, &.{.enter});
+    try testing.expectEqual(@as(?usize, 1), studio.ran);
+    try testing.expect(!studio.open);
+    frame = try driver.frame(&studio, Studio.declare, &.{});
+    _ = try driver.frame(&studio, Studio.declare, &.{});
+    try testing.expect(fixture.ui.focused(.of("opener")));
+}
+
+test "a click chooses a command, and Escape, the scrim and a dismiss action close the palette without one" {
+    var fixture: Fixture = .{};
+    try fixture.init();
+    defer fixture.deinit();
+    const driver = &fixture.driver;
+    var studio: Studio = undefined;
+    studio.init();
+    _ = try driver.frame(&studio, Studio.declare, &.{});
+    studio.open = true;
+    _ = try driver.frame(&studio, Studio.declare, &.{});
+    _ = try driver.frame(&studio, Studio.declare, &.{});
+    _ = try driver.click(&studio, Studio.declare, resultId(3));
+    try testing.expectEqual(@as(?usize, 3), studio.ran);
+    try testing.expect(!studio.open);
+
+    studio.ran = null;
+    _ = try driver.frame(&studio, Studio.declare, &.{});
+    studio.open = true;
+    _ = try driver.frame(&studio, Studio.declare, &.{});
+    _ = try driver.frame(&studio, Studio.declare, &.{});
+    _ = try driver.pressKeys(&studio, Studio.declare, &.{.escape});
+    try testing.expect(!studio.open);
+
+    _ = try driver.frame(&studio, Studio.declare, &.{});
+    studio.open = true;
+    _ = try driver.frame(&studio, Studio.declare, &.{});
+    _ = try driver.frame(&studio, Studio.declare, &.{});
+    _ = try driver.clickAt(&studio, Studio.declare, palette_id.child("scrim"), .{ 0.5, 0.95 });
+    try testing.expect(!studio.open);
+
+    _ = try driver.frame(&studio, Studio.declare, &.{});
+    studio.open = true;
+    _ = try driver.frame(&studio, Studio.declare, &.{});
+    _ = try driver.frame(&studio, Studio.declare, &.{});
+    _ = try driver.action(&studio, Studio.declare, palette_id.child("panel"), .dismiss);
+    try testing.expect(!studio.open);
+    try testing.expectEqual(@as(?usize, null), studio.ran);
+}
+
+test "a palette opened in a dialog floats above it, and its scrim takes the click meant for the dialog's" {
+    var fixture: Fixture = .{};
+    try fixture.init();
+    defer fixture.deinit();
+    const driver = &fixture.driver;
+    var studio: Studio = undefined;
+    studio.init();
+    studio.in_dialog = true;
+    _ = try driver.frame(&studio, Studio.declare, &.{});
+    studio.open = true;
+    _ = try driver.frame(&studio, Studio.declare, &.{});
+    _ = try driver.frame(&studio, Studio.declare, &.{});
+    _ = try driver.clickAt(&studio, Studio.declare, zui.Id.of("dialog").child("scrim"), .{ 0.02, 0.98 });
+    try testing.expect(!studio.open);
+    try testing.expect(studio.dialog_open);
+    _ = try driver.frame(&studio, Studio.declare, &.{});
+    _ = try driver.clickAt(&studio, Studio.declare, zui.Id.of("dialog").child("scrim"), .{ 0.02, 0.98 });
+    try testing.expect(!studio.dialog_open);
+}
+
+// =============================================================
+// Property grid
+// =============================================================
+
+const Lens = struct {
+    camera: []const u8 = "X100V",
+    exposure: f32 = 0.5,
+    iso: u16 = 400,
+    mode: enum { auto, manual } = .auto,
+    raw: bool = false,
+    serial: u32 = 7,
+    crop: struct { width: u16 = 6000 } = .{},
+
+    pub const zui_inspector = .{ .fields = .{ .exposure = .{ .min = 0, .max = 1 }, .iso = .{ .label = "ISO" }, .serial = .{ .hidden = true } } };
+};
+
+const grid_id: zui.Id = .of("grid");
+
+const Darkroom = struct {
+    lens: Lens = .{},
+    changes: u32 = 0,
+
+    fn declare(room: *Darkroom, ui: *Ui) void {
+        ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(500) } } });
+        if (data.propertyGrid(ui, grid_id, &room.lens)) room.changes += 1;
+        ui.close();
+    }
+};
+
+fn changedDots(frame: anytype) usize {
+    const accent = skinColor(.property_changed, .idle);
+    var dots: usize = 0;
+    for (frame.commands()) |command| if (command.payload == .rectangle and command.payload.rectangle.color.eql(accent) and command.bounds.width == 6) {
+        dots += 1;
+    };
+    return dots;
+}
+
+test "a property grid edits each field in its editor, named as its zui_inspector says" {
+    var fixture: Fixture = .{};
+    try fixture.init();
+    defer fixture.deinit();
+    const driver = &fixture.driver;
+    var room: Darkroom = .{};
+    _ = try driver.frame(&room, Darkroom.declare, &.{});
+    var frame = try driver.frame(&room, Darkroom.declare, &.{});
+    try testing.expect(textCommand(frame, "ISO") != null);
+    try testing.expect(textCommand(frame, "Camera") != null and textCommand(frame, "X100V") != null);
+    try testing.expect(textCommand(frame, "Serial") == null);
+    try testing.expectEqual(zui.SemanticRole.slider, (try nodeOf(frame, grid_id.child("exposure"))).role);
+    try testing.expectEqual(zui.SemanticRole.toggle, (try nodeOf(frame, grid_id.child("raw"))).role);
+    try testing.expectEqual(zui.SemanticRole.combo_box, (try nodeOf(frame, grid_id.child("mode"))).role);
+    try testing.expectEqual(0, changedDots(frame));
+    const label = textCommand(frame, "Exposure").?.bounds;
+    const editor = frame.rectOf(grid_id.child("exposure")).?;
+    try testing.expectApproxEqAbs(label.x + 200 + tokens.space(.m), editor.x, 1);
+
+    _ = try driver.click(&room, Darkroom.declare, grid_id.child("raw"));
+    try testing.expect(room.lens.raw);
+    try testing.expectEqual(1, room.changes);
+    frame = try driver.frame(&room, Darkroom.declare, &.{});
+    try testing.expectEqual(1, changedDots(frame));
+
+    _ = try driver.click(&room, Darkroom.declare, grid_id.child("crop"));
+    frame = try driver.frame(&room, Darkroom.declare, &.{});
+    try testing.expect(textCommand(frame, "Width") == null);
+    _ = try driver.click(&room, Darkroom.declare, grid_id.child("crop"));
+    frame = try driver.frame(&room, Darkroom.declare, &.{});
+    try testing.expect(textCommand(frame, "Width") != null);
+}
+
+// =============================================================
 // Every component, under review
 // =============================================================
 

@@ -26,6 +26,7 @@ pub fn Kit(comptime spec: Spec) type {
     return struct {
         pub const zui = @import("zui");
         pub const zui_widgets = @import("zui_widgets");
+        pub const zui_widgets_data = @import("zui_widgets_data");
         pub const zui_design = @import("zui_design");
         pub const zui_reflect = @import("zui_reflect");
         pub const zui_async = @import("zui_async");
@@ -131,6 +132,7 @@ pub fn Kit(comptime spec: Spec) type {
                 .light_lab => .{ .title = "Light Lab", .tagline = "Gradients, shadows, frost, materials and corners, or their fallbacks", .lane = .spectacle, .features = &.{ "Effects", "Material", "CornerShape" } },
                 .one_declaration => .{ .title = "One Declaration", .tagline = "The same UI in every theme, size and direction", .lane = .spectacle, .features = &.{ "Environment", "right-to-left", "contrast" } },
                 .cabin_booking => .{ .title = "Cabin Booking", .tagline = "A booking form of steppers, switches, chips, a dialog and toasts", .lane = .field_case, .features = &.{ "numberStepper", "dialog", "toasts" } },
+                .manifest => .{ .title = "Manifest", .tagline = "A million containers in a table, a tree of holds, a toolbar and a command palette", .lane = .field_case, .features = &.{ "table", "tree", "commandPalette" } },
                 .clickable_chaos => .{ .title = "Clickable Chaos", .tagline = "Hundreds of turning cards, each hit where drawn", .lane = .spectacle, .features = &.{ "Transform", "hit inversion" } },
                 .preferences => .{ .title = "Tokens", .tagline = "What the preferences on the top bar resolved to, for the whole tour", .lane = .start, .features = &.{ "zui_design", "Tokens", "Preferences" } },
             };

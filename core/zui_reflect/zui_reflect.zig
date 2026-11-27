@@ -82,7 +82,7 @@ fn inspectFields(widgets: anytype, ui: *@TypeOf(widgets).Ui, id: zui.Id, comptim
         const field_options = comptime @field(options.fields, field.name);
         if (field_options.hidden) continue;
         const label = comptime field_options.label orelse zui_widgets.labelFromIdentifier(field.name);
-        if (inspectField(widgets, ui, id.child(field.name), label, field.type, &@field(value, field.name), field_options)) changed = true;
+        if (inspectField(widgets, ui, id.child(field.name), label, field.type, &@field(value, field.name), comptime field.defaultValue(), field_options)) changed = true;
     }
     return changed;
 }
@@ -96,21 +96,22 @@ fn inspectField(
     label: []const u8,
     comptime Field: type,
     field: *Field,
+    comptime default: ?Field,
     comptime options: FieldOptions,
 ) bool {
     if (Field == zui_widgets.EditableText) {
-        widgets.labeledRow(ui, label);
+        propertyRow(widgets, ui, label, false);
         defer ui.close();
         return widgets.textField(ui, id, field, .{ .placeholder = options.placeholder, .label = label }).changed;
     }
     switch (@typeInfo(Field)) {
         .bool => {
-            widgets.labeledRow(ui, label);
+            propertyRow(widgets, ui, label, changedFromDefault(Field, field.*, default));
             defer ui.close();
             return widgets.checkbox(ui, id, "", field, .{ .label = label });
         },
         .int, .float => {
-            widgets.labeledRow(ui, label);
+            propertyRow(widgets, ui, label, changedFromDefault(Field, field.*, default));
             defer ui.close();
             if (options.min != null and options.max != null) {
                 const changed = widgets.slider(ui, id, field, .{ .min = options.min.?, .max = options.max.?, .step = options.step, .label = label });
@@ -120,12 +121,12 @@ fn inspectField(
             return stepper(widgets, ui, id, Field, field, options);
         },
         .@"enum" => {
-            widgets.labeledRow(ui, label);
+            propertyRow(widgets, ui, label, changedFromDefault(Field, field.*, default));
             defer ui.close();
             return widgets.dropdownEnum(ui, id, field, .{ .label = label });
         },
         .pointer => {
-            widgets.labeledRow(ui, label);
+            propertyRow(widgets, ui, label, changedFromDefault(Field, field.*, default));
             defer ui.close();
             widgets.label(ui, field.*);
             return false;
@@ -147,6 +148,39 @@ fn inspectField(
         },
         else => comptime unreachable,
     }
+}
+
+/// A row in the property grid's look: the label in a column of 40% of
+/// the row, at least the skin's `property_row` width, with a dot after it
+/// when `changed`. Declare the editor, then close the row.
+fn propertyRow(widgets: anytype, ui: *@TypeOf(widgets).Ui, label: []const u8, changed: bool) void {
+    const row = widgets.style(ui, .property_row, .idle);
+    var name = widgets.style(ui, .property_label, .idle).text;
+    name.wrap = .words;
+    ui.open(.{ .layout = .{
+        .sizing = .{ .width = .grow, .height = .fitBetween(row.size[1], std.math.inf(f32)) },
+        .padding = .{ .top = row.padding.top, .bottom = row.padding.bottom },
+        .child_gap = row.gap,
+        .child_alignment = .{ .y = .center },
+    } });
+    ui.open(.{ .layout = .{ .sizing = .{ .width = .{ .rule = .percent, .amount = label_column_share, .min = row.size[0] } }, .child_gap = row.gap / 2, .child_alignment = .{ .y = .center } } });
+    ui.text(label, name);
+    if (changed) {
+        const dot = widgets.style(ui, .property_changed, .idle);
+        ui.box(.{ .decoration = .{ .background = dot.background, .corner_radius = dot.corner_radius, .corner_shape = dot.corner_shape }, .layout = .{ .sizing = .{ .width = .fixed(dot.size[0]), .height = .fixed(dot.size[0]) } } });
+    }
+    ui.close();
+}
+
+const label_column_share = 0.4;
+
+fn changedFromDefault(comptime Field: type, value: Field, comptime default: ?Field) bool {
+    const original = default orelse return false;
+    return switch (@typeInfo(Field)) {
+        .bool, .int, .float, .@"enum" => value != original,
+        .pointer => if (Field == []const u8) !std.mem.eql(u8, value, original) else false,
+        else => false,
+    };
 }
 
 fn stepper(widgets: anytype, ui: *@TypeOf(widgets).Ui, id: zui.Id, comptime Number: type, number: *Number, comptime options: FieldOptions) bool {

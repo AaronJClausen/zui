@@ -243,10 +243,21 @@ fn declareDataWith(widgets: anytype, ui: *Ui, scope: zui.Id) void {
     const folders = data.tree(ui, scope.child("tree"), CheckNode, &check_nodes, .{ .expanded = &check_keys, .selection = &check_keys, .label = CheckNode.label, .children = CheckNode.childrenOf, .key = CheckNode.key });
     if (folders.selection_changed or folders.expansion_changed or folders.activated != null or panes.resized) check_split = 120;
     panes.end(ui);
+    var bar = data.toolbar(ui, scope.child("toolbar"), .{ .label = "toolbar", .width = .fixed(100) });
+    if (bar.item(ui, scope.child("toolbar.undo"), "undo", .{ .icon = .close }) or bar.item(ui, scope.child("toolbar.redo"), "redo", .{ .disabled = true })) check_split = 130;
+    bar.separator(ui);
+    bar.end(ui);
+    data.statusBar(ui, scope.child("status"), .{ .label = "status" });
+    data.statusText(ui, "status");
+    ui.close();
+    if (data.commandPalette(ui, scope.child("palette"), &overlays_open, &check_commands, .{ .query = &settings.name, .placeholder = "command" })) |index| check_split = @floatFromInt(index);
+    if (data.propertyGrid(ui, scope.child("grid"), &settings)) check_split = 140;
     inline for (zui_widgets_data.previews.all) |Component| {
         Component.declare(widgets, ui, zui_design.Permutations(Component, .glance).preview(.{}));
     }
 }
+
+const check_commands = [_]zui_widgets_data.Command{ .{ .label = "open", .shortcut = "Ctrl+O", .group = "file" }, .{ .label = "close" } };
 
 const CheckImageStatus = zui.Status(error{NotFound}!u32);
 

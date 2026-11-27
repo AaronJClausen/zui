@@ -206,3 +206,35 @@ test "Options has one entry per field" {
     try testing.expectEqualStrings("volume", fields[0].name);
     try testing.expectEqual(zui_reflect.FieldOptions, fields[1].type);
 }
+
+test "the inspector lays its rows out as the property grid does, marking a value changed from its default" {
+    var fixture: Fixture = .{};
+    try fixture.init();
+    defer fixture.deinit();
+    var frame = try fixture.frame();
+    const accent = widgets.skin.zuiStyle(.property_changed, .idle, &.{}).background.?;
+    try testing.expectEqual(0, dotsOf(frame, accent));
+    const label = textOf(frame, "Fullscreen").?;
+    try testing.expectEqual(tokens.colors.get(.idle).get(.on_surface_muted), label.payload.text.style.color);
+    const checkbox = frame.rectOf(settings_id.child("fullscreen")).?;
+    try testing.expectApproxEqAbs(label.bounds.x + 484 * 0.4 + tokens.space(.m), checkbox.x, 1);
+
+    try fixture.click(settings_id.child("fullscreen"));
+    frame = try fixture.frame();
+    try testing.expectEqual(1, dotsOf(frame, accent));
+}
+
+fn textOf(frame: *const Ui.Frame, content: []const u8) ?@TypeOf(frame.commands()[0]) {
+    for (frame.commands()) |command| {
+        if (command.payload == .text and std.mem.eql(u8, command.payload.text.content, content)) return command;
+    }
+    return null;
+}
+
+fn dotsOf(frame: *const Ui.Frame, color: zui.Color) usize {
+    var dots: usize = 0;
+    for (frame.commands()) |command| if (command.payload == .rectangle and command.payload.rectangle.color.eql(color) and command.bounds.width == 6) {
+        dots += 1;
+    };
+    return dots;
+}

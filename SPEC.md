@@ -3375,11 +3375,46 @@ accent while dragged or focused, or after 0.15 s of hover, asking for a
 frame at that instant. It reports the `slider` role with the first
 pane's length, which an `adjust` action moves.
 
-The module also holds `toolbar`, `statusBar`, `commandPalette`, filtered
-as typed at the `topmost` elevation, and `propertyGrid`, whose look
-`zui_reflect.inspector` takes too. Each component declares its
-`zuiPreviews` in `zui_widgets_data.previews`. A `Data` of a type that is
-not a `Widgets` is a compile error, as
+A toolbar is a bar of tertiary buttons and icon buttons in groups parted
+by a line; the items it has no room for move into a menu at its trailing
+end, from which one is chosen in the next frame. A status bar is a bar
+of caption texts on the sunken surface along a window's or a pane's
+bottom.
+
+A command palette stands a fifth of the way down the window over the
+scrim at half its alpha, at the `topmost` elevation, entering through
+`Tokens.motion.dialog_enter`. As the user types into its query, an
+`EditableText` the application owns that it empties as it opens, it
+lists the commands whose label holds the query, ignoring case, the part
+that matches in the accent's strong text, each under its group's heading
+and with its shortcut as a keycap, eight at most around the selection.
+Up and Down move the selection, wrapping, and Enter or a click chooses
+it, closing the palette and returning the command's index; Escape, a
+click on the scrim and a `dismiss` action close it without one, and
+focus goes back to its opener. Declared inside another overlay, it
+floats above it (§19.2's rule).
+
+A property grid edits the fields of a struct in rows of a muted label,
+in a column of 40% of the row and at least 120 units, and an editor: a
+switch, a slider for a number with `min` and `max` and a stepper for one
+without, a dropdown, a text field for `EditableText`, read-only text for
+`[]const u8`, and a group that opens and closes for a struct. A dot in
+the accent beside a label marks a value changed from the field's
+default. It reads the struct's `zui_inspector` for labels, hidden fields
+and ranges, and a visible field of a type it cannot edit is a compile
+error naming the field and the line that hides it.
+`zui_reflect.inspector` lays its rows out in the same parts.
+
+| Component | Edits | Returns |
+|---|---|---|
+| `toolbar` | nothing | the `Toolbar` whose `item` returns chosen |
+| `statusBar` | nothing | nothing; `statusText` declares its texts |
+| `commandPalette` | `*bool`, open, and the query | the index of the command chosen |
+| `propertyGrid` | any struct | changed |
+
+Each component declares its `zuiPreviews` in
+`zui_widgets_data.previews`. A `Data` of a type that is not a `Widgets`
+is a compile error, as
 `"zui_widgets_data: Data needs a zui_widgets.Widgets(Ui, Skin), got u32"`,
 and so are a table's rows of another shape, naming the shapes it takes.
 
@@ -3398,7 +3433,10 @@ pub const zui_inspector: zui_reflect.Options(@This()) = .{ .fields = .{
 `Options(T)` has one field per field of `T`, built with `@Struct`, so a
 misspelled field name is a compile error, as are numeric options on a
 non-number, `min` above `max`, and a visible field of a type it cannot
-edit (the message quotes the `.hidden = true` line that fixes it).
+edit (the message quotes the `.hidden = true` line that fixes it). Its
+rows take the property grid's look (§19.2.1): the skin's `property_row`,
+`property_label` and `property_changed`, with a dot beside a value
+changed from its default.
 
 ### 19.4 `zui_testing`
 

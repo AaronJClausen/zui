@@ -44,7 +44,7 @@ and each is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:29-overlays` Overlays | done |
 | `11-polish:30-feedback-and-media` Feedback and media | done |
 | `11-polish:31-rich-text-and-reordering` Rich text and the reorderable list | not started |
-| `11-polish:32-zui-widgets-data` `zui_widgets_data` | in progress: slice 1 done |
+| `11-polish:32-zui-widgets-data` `zui_widgets_data` | done |
 | `11-polish:33-pickers` Pickers | not started |
 | `11-polish:34-zui-widgets-views` `zui_widgets_views` | not started |
 | `11-polish:35-italics` Italics | done |
@@ -2698,59 +2698,60 @@ and a table of a million rows declares as fast as one of a hundred.
 
 **Spec.** §3.3, §18, §19.
 
-**Status.** In progress: slice 1 of 2 is done. `core/zui_widgets_data/`
-is registered at every point a module is, importing only `zui`; its
-tests are a module of their own (`zui_widgets_data/tests.zig`), which
-also imports `zui_widgets`, `zui_testing` and `zui_design`.
-`zui_widgets_data.of(widgets)` takes any `Widgets` and gives `table`
-(only the rows in view declared, plus one either side, under a header
-that stays; a click on a sortable title sorts by it and a second
-reverses it; a click selects a row, the arrows, Page Up and Down, Home
-and End move the selection, Ctrl the keyboard's row alone, Ctrl+Space
-adds or removes it and Enter activates it; a handle at each column's
-trailing edge resizes it by drag, arrows or `adjust`; numeric cells in
-the `numeric` role at the trailing edge; rows a slice or a value with
-`count()` and `row(index)`), `tree` (expansion and selection `KeySet`s;
-Up, Down, Home, End, Right expanding or entering, Left collapsing or
-leaving, mirrored right to left, `*` expanding the siblings; a click on
-the chevron toggles, elsewhere selects; the chevron turning through
-`motion.disclosure`; a line beside the keyboard's branch) and
-`splitPane` (a divider dragged, moved by 16 with the arrows or `adjust`,
-each pane kept to `min`, thickening to 3 in the accent while dragged,
-focused or after 0.15 s of hover, asking for a frame at that instant).
-`KeySet` keeps keys in order in storage the application owns and refuses
-one past it. The parts are 15 tags of `zui_widgets.Part`
-(`zui_widgets.data_parts`), in `Designed`'s appearance and `DesignSkin`,
-so any skin restyles them and `zui_reflect` can take `propertyGrid`'s
-look the same way; `Widgets` makes `icon`, `overlayLayer`,
-`enterOverlay`, `leaveOverlay` and `inEnclosingLayer` public, so the
-module keeps `11-polish:46-dropdown-above-its-overlay`'s rule rather
-than a copy of it. `zui_widgets_data.previews` holds the three
-components' previews; `core/tests/instantiate.zig` declares each through
-three skins, with a million-row source; two compile errors are pinned.
-Tested with `zui_testing.Driver`: a table of a million rows declares as
-many elements and commands as one of a hundred, and End reaches its last
-row with the header in place; sorting, selection, hover, every key, the
-handles by drag, keys and `adjust`, the numeric cells and the columns
-lining up under their titles; every key of the tree, right to left too,
-its chevron, selection and branch line; the divider by drag at both
-limits, right to left, keys on both axes, `adjust`, and its hover delay;
-every part reaching the skin; and every `glance` permutation and each
-preview audited clean in every scheme and density. Found on the way: at
-200% text, fixed column widths cut their text short and the header
-outgrew its height, so a column's own widths grow with the text scale
-and the header and rows grow to their text; and a selected tree row's
-chevron is drawn in the row's text color, since the muted one falls
-short on `accent_container`. ARCHITECTURE.md §7 lists where the specs
-are not met. Verified: core `test` in three modes and for `x86-linux`,
-`check` for `wasm32-freestanding` and `powerpc-linux`, `test-all`,
-`check-all` and the terminal's `tour -- --dump --every-screen`; `counts`
-is +0.00% on every scenario against the parent, none of which uses these
-components. Slice 2 remains: `toolbar`, `statusBar`, `commandPalette` at
-`topmost` through `overlayLayer` and `enterOverlay`, `propertyGrid` and
-`zui_reflect.inspector` taking its look, the tour's screen for the
-module (its build importing `zui_widgets_data`), and the feature tour's
-entry for those four.
+**Status.** Done, in two slices. Slice 1 (`8839c3d`) registered
+`core/zui_widgets_data/` at every point a module is, importing only
+`zui`, its tests a module of their own that also imports `zui_widgets`,
+`zui_testing` and `zui_design`, and built `table` (only the rows in view
+declared under a header that stays, sorting, selection by click and
+keys, resizable columns, numeric cells, rows from a slice or a
+`count()`/`row(index)` value), `tree` (expansion and selection
+`KeySet`s, every key of its spec, mirrored right to left, its branch
+line) and `splitPane` (dragged, by the arrows or `adjust`, thickening
+after 0.15 s of hover), with their parts as tags of `zui_widgets.Part`
+(`data_parts`) and `Widgets`' `icon`, `overlayLayer`, `enterOverlay`,
+`leaveOverlay` and `inEnclosingLayer` made public. Slice 2 adds
+`toolbar` (tertiary and icon buttons in groups, the items without room
+moving into a More menu at its end and answering from it a frame later),
+`statusBar` and `statusText`, `commandPalette` (over the scrim at half
+its alpha, at the `topmost` elevation, through `overlayLayer` and
+`enterOverlay`, so it floats above an overlay it is declared in;
+filtered by a substring of the label as typed, the match in the accent's
+strong text, group headings and keycaps; Up and Down wrapping, Enter or
+a click choosing, Escape, the scrim and `dismiss` closing, focus back to
+the opener) and `propertyGrid` (a struct's fields in rows of a muted
+label in a column of 40%, at least 120, and a switch, slider, stepper,
+dropdown, text field, read-only text or group; a dot beside a value
+changed from its default; the struct's `zui_inspector` read for labels,
+ranges and hidden fields; a field it cannot edit a compile error).
+`zui_reflect.inspector` lays its rows out in the same `property_row`,
+`property_label` and `property_changed` parts, with the changed dot. 13
+more `Part` tags; previews for all seven; `core/tests/instantiate.zig`
+declares each through three skins; three compile errors pinned. Tested
+with `zui_testing.Driver`: a million-row table declares as much as a
+hundred-row one; every key and state of the seven; the toolbar's spill
+into its menu and back as the bar widens; the palette's filtering,
+highlight, keys, choice by key and click, its three ways of closing,
+focus returning, and its scrim taking a click over a dialog it opened
+in; the property grid's editors, labels, hidden fields, changed dot and
+group; the inspector's look; every part reaching the skin; and every
+`glance` permutation and preview audited clean in every scheme and
+density. Found on the way: at 200% text a property row's editor
+overlapped the next row's, so rows take the `xs` tier above and below; a
+toolbar sized by its items never learned it had too little room, so it
+scrolls sideways and stays as wide as its parent. The tour's new
+Manifest screen (`apps/tour/src/screens/manifest.zig`, its build
+importing `zui_widgets_data`) has all seven over a million containers.
+ARCHITECTURE.md §7 lists where the specs are not met. Verified: core
+`test` in three modes and for `x86-linux`, `check` for
+`wasm32-freestanding` and `powerpc-linux`; the tour's `test` in three
+modes, `check` and `check` for `x86_64-windows`; the terminal's
+`tour -- --dump --every-screen`; raylib's tour cycle (600 frames,
+`diagnostics ok: true`) and `--measure-idle` (0.89% of one core); the
+native host's tour cycle
+(`0 layer overflows, 0 glyph atlas overflows, diagnostics ok: true`);
+the web host's `test-demo`; `test-all` and `check-all`. `counts` is
++0.00% on every scenario against the parent, none of which uses these
+components.
 
 ## 11-polish:33-pickers — Pickers
 

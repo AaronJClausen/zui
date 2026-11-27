@@ -754,6 +754,449 @@ pub fn Data(comptime WidgetsType: type) type {
             ui.close();
         }
 
+        pub const ToolbarItemOptions = struct {
+            /// Drawn alone as an icon button, with the label as its tooltip
+            /// and accessible name; null draws a text button.
+            icon: ?zui.design.Icon = null,
+            disabled: bool = false,
+        };
+
+        const ToolbarState = struct {
+            menu_open: bool,
+            /// The item chosen in the overflow menu, answered by its
+            /// `item` in the next frame.
+            chosen: u64,
+            /// The width every item took in the last frame, shown or not.
+            needed: f32,
+        };
+
+        const OverflowEntry = struct { id: zui.Id, label: []const u8, disabled: bool };
+
+        /// What `toolbar` opened: declare its items and separators,
+        /// then call `end`.
+        pub const Toolbar = struct {
+            data: Self,
+            id: zui.Id,
+            /// The room the bar had for its items in the last frame; null in
+            /// its first.
+            room: ?f32,
+            gap: f32,
+            placed: f32 = 0,
+            needed: f32 = 0,
+            spilling: bool = false,
+            overflow: [toolbar_overflow_most]OverflowEntry = undefined,
+            overflow_count: usize = 0,
+
+            /// A tertiary button, or an icon button, in the bar, or in its
+            /// overflow menu once the bar has no room for it. True in the
+            /// frame it is chosen; chosen from the menu, in the next.
+            pub fn item(bar: *Toolbar, ui: *Ui, id: zui.Id, label: []const u8, options: ToolbarItemOptions) bool {
+                const widgets = bar.data.widgets;
+                const remembered = ui.state(id.child("width"), struct { width: f32 });
+                if (ui.rectOf(id)) |rect| remembered.width = rect.width;
+                const width = if (remembered.width > 0) remembered.width else widgets.style(ui, .control_medium, .idle).size[1];
+                const lead = if (bar.needed > 0) bar.gap else 0;
+                bar.needed += lead + width;
+                if (bar.room) |room| {
+                    const state = ui.state(bar.id, ToolbarState);
+                    const kept_room = if (state.needed > room) room - bar.overflowButtonWidth(ui) - bar.gap else room;
+                    if (bar.spilling or bar.placed + lead + width > kept_room) {
+                        bar.spilling = true;
+                        if (bar.overflow_count < bar.overflow.len) {
+                            bar.overflow[bar.overflow_count] = .{ .id = id, .label = label, .disabled = options.disabled };
+                            bar.overflow_count += 1;
+                        }
+                        if (state.chosen != id.hash) return false;
+                        state.chosen = 0;
+                        return !options.disabled;
+                    }
+                }
+                bar.placed += lead + width;
+                if (options.icon) |icon| return widgets.iconButton(ui, id, icon, .{ .label = label, .disabled = options.disabled });
+                return widgets.button(ui, id, label, .{ .variant = .tertiary, .disabled = options.disabled });
+            }
+
+            /// The line between two groups of items, left out once the
+            /// items after it spill into the overflow menu.
+            pub fn separator(bar: *Toolbar, ui: *Ui) void {
+                const line = bar.data.widgets.style(ui, .toolbar_separator, .idle);
+                const width = line.size[0] + line.padding.left + line.padding.right;
+                bar.needed += bar.gap + width;
+                if (bar.spilling) return;
+                bar.placed += bar.gap + width;
+                ui.open(.{ .layout = .{ .padding = .{ .left = line.padding.left, .right = line.padding.right }, .child_alignment = .{ .y = .center } } });
+                ui.box(.{ .decoration = .{ .background = line.background }, .layout = .{ .sizing = .{ .width = .fixed(line.size[0]), .height = .fixed(line.size[1]) } } });
+                ui.close();
+            }
+
+            fn overflowButtonWidth(bar: *const Toolbar, ui: *Ui) f32 {
+                if (ui.rectOf(bar.id.child("more"))) |rect| return rect.width;
+                return 2 * bar.data.widgets.style(ui, .control_medium, .idle).size[1];
+            }
+
+            /// Declares the overflow menu, when items spilled into it, and
+            /// closes the bar.
+            pub fn end(bar: *Toolbar, ui: *Ui) void {
+                const state = ui.state(bar.id, ToolbarState);
+                state.needed = bar.needed;
+                if (bar.overflow_count != 0) {
+                    const more_id = bar.id.child("more");
+                    ui.box(.{ .layout = .{ .sizing = .{ .width = .grow } } });
+                    _ = bar.data.widgets.button(ui, more_id, overflow_label, .{ .variant = .tertiary });
+                    if (bar.data.widgets.menu(ui, bar.id.child("overflow"), more_id, &state.menu_open, .{ .label = "More" })) |menu| {
+                        for (bar.overflow[0..bar.overflow_count]) |entry| {
+                            if (menu.item(ui, entry.label, .{ .disabled = entry.disabled })) {
+                                state.chosen = entry.id.hash;
+                                ui.requestFrame();
+                            }
+                        }
+                        menu.end(ui);
+                    }
+                } else state.menu_open = false;
+                ui.close();
+            }
+        };
+
+        /// A bar of tertiary buttons and icon buttons, in groups parted by
+        /// a line; the items that do not fit move into a menu at its
+        /// trailing end. Declare its items through what it returns, then
+        /// call `end`:
+        ///
+        /// ```zig
+        /// var bar = data.toolbar(ui, .of("editor.toolbar"), .{ .label = "Editor" });
+        /// if (bar.item(ui, .of("editor.undo"), "Undo", .{})) app.undo();
+        /// if (bar.item(ui, .of("editor.redo"), "Redo", .{ .disabled = !app.canRedo() })) app.redo();
+        /// bar.separator(ui);
+        /// if (bar.item(ui, .of("editor.export"), "Export", .{})) app.exportDocument();
+        /// bar.end(ui);
+        /// ```
+        pub fn toolbar(self: Self, ui: *Ui, id: zui.Id, options: BarOptions) Toolbar {
+            const look = self.widgets.style(ui, .toolbar, .idle);
+            // Scrolling sideways keeps the bar as wide as its parent gives it,
+            // whatever its items ask for, so it knows its room; once items
+            // spill into the menu there is nothing to scroll.
+            ui.open(.{
+                .id = id,
+                .scroll = .{ .horizontal = true, .vertical = false },
+                .semantics = .{ .role = .group, .label = options.label },
+                .decoration = .{ .background = look.background, .border = look.border },
+                .layout = .{
+                    .sizing = .{ .width = options.width, .height = .fitBetween(look.size[1], std.math.inf(f32)) },
+                    .padding = .{ .left = look.padding.left, .right = look.padding.right },
+                    .child_gap = look.gap,
+                    .child_alignment = .{ .y = .center },
+                },
+            });
+            const room: ?f32 = if (ui.rectOf(id)) |rect| rect.width - look.padding.left - look.padding.right else null;
+            return .{ .data = self, .id = id, .room = room, .gap = look.gap };
+        }
+
+        pub const BarOptions = struct {
+            /// For an assistive technology.
+            label: []const u8 = "",
+            width: zui.Sizing = .grow,
+        };
+
+        /// A bar along the bottom of a window or a pane, of short texts in
+        /// the caption role: declare them with `statusText` and close
+        /// the bar with `ui.close()`.
+        ///
+        /// ```zig
+        /// data.statusBar(ui, .of("status"), .{ .label = "Status" });
+        /// data.statusText(ui, "12 files");
+        /// data.statusText(ui, "Saved");
+        /// ui.close();
+        /// ```
+        pub fn statusBar(self: Self, ui: *Ui, id: zui.Id, options: BarOptions) void {
+            const look = self.widgets.style(ui, .status_bar, .idle);
+            ui.open(.{
+                .id = id,
+                .semantics = .{ .role = .group, .label = options.label },
+                .decoration = .{ .background = look.background, .border = look.border },
+                .layout = .{
+                    .sizing = .{ .width = options.width, .height = .fitBetween(look.size[1], std.math.inf(f32)) },
+                    .padding = .{ .left = look.padding.left, .right = look.padding.right },
+                    .child_gap = look.gap,
+                    .child_alignment = .{ .y = .center },
+                },
+            });
+        }
+
+        /// Text in a status bar, in its color and type.
+        pub fn statusText(self: Self, ui: *Ui, content: []const u8) void {
+            ui.text(content, singleLine(self.widgets.style(ui, .status_bar, .idle).text));
+        }
+
+        /// What `commandPalette` edits as the user types.
+        pub const EditableTextPointer = @typeInfo(@TypeOf(Widgets.textField)).@"fn".params[3].type.?;
+
+        pub const CommandPaletteOptions = struct {
+            /// What has been typed, which the palette empties as it opens.
+            query: EditableTextPointer,
+            placeholder: []const u8 = "Type a command",
+            /// For an assistive technology.
+            label: []const u8 = "Commands",
+        };
+
+        const PaletteState = struct {
+            was_open: bool,
+            opener: u64,
+            /// Among the commands that match.
+            selected: usize,
+        };
+
+        /// A panel at a fifth of the window's height, over a scrim, at the
+        /// `topmost` elevation, listing the commands whose label holds
+        /// what is typed, the part that matches in the accent's strong
+        /// text, under each group's heading. Up and Down move the
+        /// selection, and Enter or a click chooses it, closing the palette
+        /// and returning the command's index in `commands`; Escape, a click
+        /// on the scrim or a `dismiss` action closes it without one. Focus
+        /// goes back to what had it once it closes. Declared inside another
+        /// overlay, it floats above it.
+        ///
+        /// ```zig
+        /// if (ui.chordPressed(.{ .key = .k, .modifiers = .{ .control = true } })) app.palette_open = true;
+        /// if (data.commandPalette(ui, .of("palette"), &app.palette_open, &app.commands, .{ .query = &app.palette_query })) |index| app.run(index);
+        /// ```
+        pub fn commandPalette(self: Self, ui: *Ui, id: zui.Id, open: *bool, commands: []const Command, options: CommandPaletteOptions) ?usize {
+            const state = ui.state(id, PaletteState);
+            const panel_id = id.child("panel");
+            const scrim_id = id.child("scrim");
+            const query_id = id.child("query");
+            const dismissed = open.* and state.was_open and (ui.clicked(scrim_id) or ui.dismissed(panel_id));
+            if (dismissed) open.* = false;
+            if (!open.*) {
+                if (state.was_open) ui.requestFocus(.{ .hash = state.opener });
+                state.was_open = false;
+                if (!dismissed) return null;
+            }
+            const opening = open.* and !state.was_open;
+            if (opening) {
+                state.* = .{ .was_open = true, .opener = ui.focusedId().hash, .selected = 0 };
+                options.query.set("");
+                ui.requestFocus(query_id);
+            }
+
+            var chosen: ?usize = null;
+            const query = options.query.slice();
+            const match_count = matchCount(commands, query);
+            if (ui.focused(query_id) and match_count != 0) {
+                for (ui.keyEvents()) |key_event| switch (key_event.key) {
+                    .down => state.selected = (state.selected + 1) % match_count,
+                    .up => state.selected = (state.selected + match_count - 1) % match_count,
+                    else => {},
+                };
+            }
+            state.selected = if (match_count == 0) 0 else @min(state.selected, match_count - 1);
+
+            const viewport = ui.viewport();
+            const scrim = self.widgets.style(ui, .command_palette_scrim, .idle);
+            const look = self.widgets.style(ui, .command_palette, .idle);
+            const scrim_layer = Widgets.overlayLayer(ui, scrim.layer);
+            const panel_layer = @max(look.layer, scrim_layer +| 1);
+            const scrim_shown = entrance(ui, scrim_id.child("enter"), opening, scrim.motion);
+            ui.box(.{
+                .id = scrim_id,
+                .interactive = !dismissed,
+                .floating = .{ .attach_to = .root, .z = scrim_layer },
+                .decoration = .{ .background = if (scrim.background) |color| (if (scrim_shown < 1) faded(color, scrim_shown) else color) else null },
+                .exit = scrim.exit,
+                .layout = .{ .sizing = .{ .width = .fixed(viewport[0]), .height = .fixed(viewport[1]) } },
+            });
+            const entered = entrance(ui, panel_id.child("enter"), opening, look.motion);
+            const margin = look.padding.left + look.padding.right;
+            ui.open(.{
+                .id = panel_id,
+                .focus_scope = true,
+                .semantics = .{ .role = .dialog, .label = options.label, .actions = .initOne(.dismiss) },
+                .floating = .{ .attach_to = .root, .anchor = .top_center, .attach_point = .top_center, .offset = .{ 0, viewport[1] * palette_top_share - (1 - entered) * palette_enter_slide }, .z = panel_layer },
+                .decoration = .{ .background = look.background, .border = look.border, .corner_radius = look.corner_radius, .corner_shape = look.corner_shape },
+                .effects = if (look.shadow) |_| &.{ .shadow = look.shadow } else null,
+                .exit = look.exit,
+                .layout = .{
+                    .direction = .top_to_bottom,
+                    .sizing = .{ .width = .fixed(@min(look.size[0], @max(viewport[0] - 2 * margin, 0))) },
+                    .padding = look.padding,
+                    .child_gap = look.gap,
+                },
+            });
+            const replaced = Widgets.enterOverlay(ui, panel_layer);
+            if (self.widgets.textField(ui, query_id, options.query, .{ .placeholder = options.placeholder, .label = options.label }).submitted and match_count != 0) {
+                chosen = commandAt(commands, query, state.selected);
+            }
+            const first = state.selected -| (palette_results_most - 1);
+            ui.open(.{ .id = id.child("results"), .semantics = .{ .role = .list_box, .label = options.label }, .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow } } });
+            var position: usize = 0;
+            var heading: []const u8 = "";
+            for (commands, 0..) |command, index| {
+                const span = matchOf(command.label, query) orelse continue;
+                defer position += 1;
+                if (position < first or position >= first + palette_results_most) continue;
+                if (command.group.len != 0 and !std.mem.eql(u8, command.group, heading)) {
+                    const title = self.widgets.style(ui, .command_palette_heading, .idle);
+                    ui.open(.{ .layout = .{ .padding = title.padding } });
+                    ui.text(command.group, singleLine(title.text));
+                    ui.close();
+                }
+                heading = command.group;
+                if (self.paletteResult(ui, id.indexedChild("result", index), command, span, position == state.selected)) chosen = index;
+            }
+            if (match_count == 0) {
+                const title = self.widgets.style(ui, .command_palette_heading, .idle);
+                ui.open(.{ .layout = .{ .padding = title.padding } });
+                ui.text("No command matches", singleLine(title.text));
+                ui.close();
+            }
+            ui.close();
+            Widgets.leaveOverlay(ui, replaced);
+            ui.close();
+            if (chosen != null) open.* = false;
+            return chosen;
+        }
+
+        fn paletteResult(self: Self, ui: *Ui, result_id: zui.Id, command: Command, span: [2]usize, selected: bool) bool {
+            const clicked = ui.clicked(result_id);
+            const look = self.widgets.style(ui, if (selected) .command_palette_result_selected else .command_palette_result, ui.widgetState(result_id));
+            var match = self.widgets.style(ui, .command_palette_match, .idle).text;
+            if (selected) match.color = look.text.color;
+            ui.open(.{
+                .id = result_id,
+                .interactive = true,
+                .cursor = .pointer,
+                .semantics = .{ .role = .option, .label = command.label, .state = .{ .selected = selected } },
+                .decoration = .{ .background = look.background, .corner_radius = look.corner_radius, .corner_shape = look.corner_shape },
+                .layout = .{ .sizing = .{ .width = .grow, .height = .fitBetween(look.size[1], std.math.inf(f32)) }, .padding = .{ .left = look.padding.left, .right = look.padding.right }, .child_gap = look.gap, .child_alignment = .{ .y = .center } },
+            });
+            ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_alignment = .{ .y = .center } } });
+            const plain = singleLine(look.text);
+            if (span[0] != 0) ui.text(command.label[0..span[0]], plain);
+            if (span[1] != span[0]) ui.text(command.label[span[0]..span[1]], singleLine(match));
+            if (span[1] != command.label.len) ui.text(command.label[span[1]..], plain);
+            ui.close();
+            if (command.shortcut.len != 0) {
+                const keycap = self.widgets.style(ui, .command_palette_shortcut, .idle);
+                ui.open(.{
+                    .decoration = .{ .background = keycap.background, .corner_radius = keycap.corner_radius, .corner_shape = keycap.corner_shape },
+                    .layout = .{ .padding = .{ .left = keycap.padding.left, .right = keycap.padding.right } },
+                });
+                ui.text(command.shortcut, singleLine(keycap.text));
+                ui.close();
+            }
+            ui.close();
+            return clicked;
+        }
+
+        /// The fields of `value.*` in rows of a name and an editor, as
+        /// `zui_reflect.inspector` lays them out: a switch for a `bool`, a
+        /// slider for a number with `min` and `max` and a stepper for one
+        /// without, a dropdown for an enum, a text field for the widgets'
+        /// editable text, read-only text for `[]const u8`, and a group that
+        /// opens and closes for a struct. A dot beside a name marks a value
+        /// changed from the field's default. It honours the struct's
+        /// `zui_inspector` labels, hidden fields and ranges, and returns
+        /// whether any editor changed the value this frame.
+        ///
+        /// ```zig
+        /// if (data.propertyGrid(ui, .of("layer.properties"), &app.selected_layer)) app.redraw();
+        /// ```
+        pub fn propertyGrid(self: Self, ui: *Ui, id: zui.Id, value: anytype) bool {
+            const T = PropertiesOf(@TypeOf(value));
+            ui.open(.{ .id = id, .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow } } });
+            const changed = self.properties(ui, id, T, value, 0);
+            ui.close();
+            return changed;
+        }
+
+        fn properties(self: Self, ui: *Ui, id: zui.Id, comptime T: type, value: *T, depth: usize) bool {
+            var changed = false;
+            inline for (@typeInfo(T).@"struct".fields) |field| {
+                const options = comptime declaredOptions(T, field.name);
+                if (!comptime optionOf(options, "hidden", false)) {
+                    const label = comptime optionOf(options, "label", @as(?[]const u8, null)) orelse labelOf(field.name);
+                    if (self.property(ui, id.child(field.name), label, field.type, &@field(value, field.name), comptime field.defaultValue(), options, depth)) changed = true;
+                }
+            }
+            return changed;
+        }
+
+        const PropertyGroup = struct { collapsed: bool };
+
+        fn property(self: Self, ui: *Ui, id: zui.Id, label: []const u8, comptime Field: type, field: *Field, comptime default: ?Field, comptime options: anytype, depth: usize) bool {
+            const widgets = self.widgets;
+            if (comptime @typeInfo(Field) == .@"struct" and Field != EditableText) {
+                const group = ui.state(id, PropertyGroup);
+                var expanded = !group.collapsed;
+                if (widgets.disclosure(ui, id, label, &expanded)) group.collapsed = !expanded;
+                if (!expanded) return false;
+                ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow }, .padding = .{ .left = self.widgets.style(ui, .tree_row, .idle).size[0] } } });
+                defer ui.close();
+                return self.properties(ui, id, Field, field, depth + 1);
+            }
+            propertyRow(widgets, ui, label, changedFromDefault(Field, field.*, default));
+            defer ui.close();
+            if (Field == EditableText) return widgets.textField(ui, id, field, .{ .label = label, .placeholder = comptime optionOf(options, "placeholder", @as([]const u8, "")) }).changed;
+            switch (@typeInfo(Field)) {
+                .bool => return widgets.toggle(ui, id, "", field, .{ .label = label }),
+                .int, .float => {
+                    const min = comptime optionOf(options, "min", @as(?f64, null));
+                    const max = comptime optionOf(options, "max", @as(?f64, null));
+                    const step = comptime optionOf(options, "step", @as(?f64, null));
+                    if (min != null and max != null) return widgets.slider(ui, id, field, .{ .min = min.?, .max = max.?, .step = step, .label = label });
+                    return widgets.numberStepper(ui, id, field, .{
+                        .min = min orelse -std.math.inf(f64),
+                        .max = max orelse std.math.inf(f64),
+                        .step = step orelse if (@typeInfo(Field) == .float) 0.1 else 1,
+                        .label = label,
+                    });
+                },
+                .@"enum" => return widgets.dropdownEnum(ui, id, field, .{ .label = label }),
+                .pointer => {
+                    widgets.label(ui, field.*);
+                    return false;
+                },
+                else => comptime unreachable,
+            }
+        }
+
+        /// The widgets' editable text, which a property grid edits in a
+        /// text field and a command palette takes its query in.
+        pub const EditableText = @typeInfo(EditableTextPointer).pointer.child;
+
+        fn PropertiesOf(comptime Pointer: type) type {
+            const info = @typeInfo(Pointer);
+            if (info == .pointer and info.pointer.size == .one and !info.pointer.is_const and @typeInfo(info.pointer.child) == .@"struct") {
+                checkProperties(info.pointer.child);
+                return info.pointer.child;
+            }
+            @compileError("zui_widgets_data: propertyGrid needs a mutable pointer to a struct, got " ++ @typeName(Pointer));
+        }
+
+        fn checkProperties(comptime T: type) void {
+            for (@typeInfo(T).@"struct".fields) |field| {
+                const options = declaredOptions(T, field.name);
+                if (optionOf(options, "hidden", false)) continue;
+                const editable = field.type == EditableText or switch (@typeInfo(field.type)) {
+                    .bool, .int, .float => true,
+                    .@"enum" => |enum_info| enum_info.is_exhaustive and enum_info.fields.len != 0,
+                    .pointer => field.type == []const u8,
+                    .@"struct" => |struct_info| struct_info.layout != .@"packed",
+                    else => false,
+                };
+                if (!editable) @compileError("zui_widgets_data: propertyGrid cannot edit " ++ @typeName(T) ++ "." ++ field.name ++ ", a " ++ @typeName(field.type) ++ "; hide it with `.fields." ++ field.name ++ " = .{ .hidden = true }` in its zui_inspector");
+            }
+        }
+
+        /// How far an overlay has entered through `motion`: 0 in the frame it
+        /// opens, then toward 1.
+        fn entrance(ui: *Ui, id: zui.Id, opening: bool, motion: anytype) f32 {
+            if (opening) _ = switch (motion) {
+                .spring => |options| zui.motion.spring(ui, id, f32, 0, options),
+                .none, .tween => zui.motion.tween(ui, id, f32, 0, .{ .duration = 0 }),
+            };
+            return animate(ui, id, 1, motion);
+        }
+
         fn animate(ui: *Ui, id: zui.Id, target: f32, motion: anytype) f32 {
             return switch (motion) {
                 .none => target,
@@ -794,6 +1237,16 @@ pub fn Data(comptime WidgetsType: type) type {
         }
     };
 }
+
+/// One command of a command palette.
+pub const Command = struct {
+    label: []const u8,
+    /// Drawn as a keycap at the end of its row; none when empty.
+    shortcut: []const u8 = "",
+    /// The heading it is listed under, with the commands of the same group
+    /// declared before and after it; none when empty.
+    group: []const u8 = "",
+};
 
 /// The row of the tree `tree_id` showing the node of `key`, whose
 /// `child("chevron")` is its chevron.
@@ -909,8 +1362,105 @@ pub const previews = struct {
         }
     };
 
+    pub const Toolbar = struct {
+        pub const Content = struct { width: zui.Sizing = .grow };
+
+        pub const zuiPreviews = .{
+            .roomy = Content{},
+            .overflowing = Content{ .width = .fixed(preview_narrow_width) },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            var bar = of(widgets).toolbar(ui, .of("preview.toolbar"), .{ .label = "Editing", .width = content.width });
+            _ = bar.item(ui, .of("preview.toolbar.undo"), "Undo", .{});
+            _ = bar.item(ui, .of("preview.toolbar.redo"), "Redo", .{ .disabled = true });
+            bar.separator(ui);
+            _ = bar.item(ui, .of("preview.toolbar.crop"), "Crop", .{});
+            _ = bar.item(ui, .of("preview.toolbar.rotate"), "Rotate", .{});
+            bar.separator(ui);
+            _ = bar.item(ui, .of("preview.toolbar.export"), "Export", .{});
+            bar.end(ui);
+        }
+    };
+
+    pub const StatusBar = struct {
+        pub const Content = struct { texts: []const []const u8 };
+
+        pub const zuiPreviews = .{
+            .short = Content{ .texts = &.{ "6 files", "Saved" } },
+            .busy = Content{ .texts = &.{ "1,204 files", "3 selected", "Syncing", "Ln 12, Col 4" } },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            const data = of(widgets);
+            data.statusBar(ui, .of("preview.status_bar"), .{ .label = "Status" });
+            for (content.texts) |text| data.statusText(ui, text);
+            ui.close();
+        }
+    };
+
+    pub const CommandPalette = struct {
+        pub const Content = struct { query: []const u8 = "" };
+
+        pub const zuiPreviews = .{
+            .every_command = Content{},
+            .filtered = Content{ .query = "ex" },
+            .no_match = Content{ .query = "zebra" },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            const Shown = @TypeOf(of(widgets));
+            var query_bytes: [32]u8 = undefined;
+            var query: Shown.EditableText = .init(&query_bytes, content.query);
+            var open = true;
+            _ = of(widgets).commandPalette(ui, .of("preview.command_palette"), &open, &preview_commands, .{ .query = &query });
+        }
+    };
+
+    pub const PropertyGrid = struct {
+        pub const Content = struct { changed: bool = false };
+
+        pub const zuiPreviews = .{
+            .defaults = Content{},
+            .changed = Content{ .changed = true },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            var photo: PreviewPhoto = .{};
+            if (content.changed) {
+                photo.iso = 800;
+                photo.raw = true;
+            }
+            ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(preview_grid_width) } } });
+            _ = of(widgets).propertyGrid(ui, .of("preview.property_grid"), &photo);
+            ui.close();
+        }
+    };
+
     /// Every component above.
-    pub const all = .{ Table, Tree, SplitPane };
+    pub const all = .{ Table, Tree, SplitPane, Toolbar, StatusBar, CommandPalette, PropertyGrid };
+
+    const preview_narrow_width = 240;
+    const preview_grid_width = 420;
+
+    const preview_commands = [_]Command{
+        .{ .label = "Open file", .shortcut = "Ctrl+O", .group = "File" },
+        .{ .label = "Export as PNG", .shortcut = "Ctrl+E", .group = "File" },
+        .{ .label = "Export as JPEG", .group = "File" },
+        .{ .label = "Toggle grid", .shortcut = "Ctrl+G", .group = "View" },
+        .{ .label = "Zoom to fit", .group = "View" },
+    };
+
+    const PreviewPhoto = struct {
+        camera: []const u8 = "X100V",
+        exposure: f32 = 0.5,
+        iso: u16 = 400,
+        mode: enum { auto, manual } = .auto,
+        raw: bool = false,
+        crop: struct { width: u16 = 6000, height: u16 = 4000 } = .{},
+
+        pub const zui_inspector = .{ .fields = .{ .exposure = .{ .min = 0, .max = 1 }, .iso = .{ .label = "ISO" } } };
+    };
 
     const preview_height = 200;
     const preview_tree_width = 240;
@@ -979,6 +1529,111 @@ pub const previews = struct {
         .{ .title = "Shared", .id = 8 },
     };
 };
+
+const toolbar_overflow_most = 32;
+const overflow_label = "More";
+/// The share of the window's height above a command palette.
+const palette_top_share = 0.2;
+const palette_enter_slide = 8;
+const palette_results_most = 8;
+const property_label_share = 0.4;
+
+/// A row of a property grid, or of `zui_reflect.inspector`: its label in
+/// a column of 40% of the row, at least the skin's `property_row` width,
+/// with a dot after it when `changed`. Declare the editor, then close the
+/// row.
+fn propertyRow(widgets: anytype, ui: anytype, label: []const u8, changed: bool) void {
+    const row = widgets.style(ui, .property_row, .idle);
+    var name = widgets.style(ui, .property_label, .idle).text;
+    name.wrap = .words;
+    ui.open(.{ .layout = .{
+        .sizing = .{ .width = .grow, .height = .fitBetween(row.size[1], std.math.inf(f32)) },
+        .padding = .{ .top = row.padding.top, .bottom = row.padding.bottom },
+        .child_gap = row.gap,
+        .child_alignment = .{ .y = .center },
+    } });
+    ui.open(.{ .layout = .{ .sizing = .{ .width = .{ .rule = .percent, .amount = property_label_share, .min = row.size[0] } }, .child_gap = row.gap / 2, .child_alignment = .{ .y = .center } } });
+    ui.text(label, name);
+    if (changed) {
+        const dot = widgets.style(ui, .property_changed, .idle);
+        ui.box(.{ .decoration = .{ .background = dot.background, .corner_radius = dot.corner_radius, .corner_shape = dot.corner_shape }, .layout = .{ .sizing = .{ .width = .fixed(dot.size[0]), .height = .fixed(dot.size[0]) } } });
+    }
+    ui.close();
+}
+
+fn changedFromDefault(comptime Field: type, value: Field, comptime default: ?Field) bool {
+    const original = default orelse return false;
+    return switch (@typeInfo(Field)) {
+        .bool, .int, .float, .@"enum" => value != original,
+        .pointer => if (Field == []const u8) !std.mem.eql(u8, value, original) else false,
+        else => false,
+    };
+}
+
+/// A field's entry in its struct's `zui_inspector`, or none.
+fn declaredOptions(comptime T: type, comptime name: []const u8) DeclaredOptions(T, name) {
+    if (DeclaredOptions(T, name) == NoOptions) return .{};
+    return @field(T.zui_inspector.fields, name);
+}
+
+fn DeclaredOptions(comptime T: type, comptime name: []const u8) type {
+    if (!@hasDecl(T, "zui_inspector")) return NoOptions;
+    const Fields = @TypeOf(T.zui_inspector.fields);
+    return if (@hasField(Fields, name)) @FieldType(Fields, name) else NoOptions;
+}
+
+const NoOptions = struct {};
+
+fn optionOf(comptime options: anytype, comptime key: []const u8, comptime fallback: anytype) @TypeOf(fallback) {
+    return if (@hasField(@TypeOf(options), key)) @field(options, key) else fallback;
+}
+
+/// "max_fps" is "Max fps".
+fn labelOf(comptime identifier: []const u8) []const u8 {
+    return comptime blk: {
+        var bytes: [identifier.len]u8 = identifier[0..identifier.len].*;
+        for (&bytes) |*byte| {
+            if (byte.* == '_') byte.* = ' ';
+        }
+        if (bytes.len != 0) bytes[0] = std.ascii.toUpper(bytes[0]);
+        const label = bytes;
+        break :blk &label;
+    };
+}
+
+/// Where `query` first falls in `label`, ignoring case; the whole of an
+/// empty query matches at the start.
+fn matchOf(label: []const u8, query: []const u8) ?[2]usize {
+    if (query.len == 0) return .{ 0, 0 };
+    const at = std.ascii.indexOfIgnoreCase(label, query) orelse return null;
+    return .{ at, at + query.len };
+}
+
+fn matchCount(commands: []const Command, query: []const u8) usize {
+    var count: usize = 0;
+    for (commands) |command| {
+        if (matchOf(command.label, query) != null) count += 1;
+    }
+    return count;
+}
+
+/// The index in `commands` of the match at `position` among the matches.
+fn commandAt(commands: []const Command, query: []const u8, position: usize) ?usize {
+    var seen: usize = 0;
+    for (commands, 0..) |command, index| {
+        if (matchOf(command.label, query) == null) continue;
+        if (seen == position) return index;
+        seen += 1;
+    }
+    return null;
+}
+
+/// `color` with its alpha scaled by `share`, in any context's color type.
+fn faded(color: anytype, share: f32) @TypeOf(color) {
+    var clear = color;
+    clear.a = 0;
+    return clear.mix(color, share);
+}
 
 /// How far the arrows move a split pane's divider or a column's edge.
 const keyboard_step = 16;
