@@ -1921,6 +1921,33 @@ fn board(app: *App, ui: *Ui) void {
         <p>The tour's Field Guide screen has a menu, a context menu on each guide and a popover; its Cabin Booking screen asks in a dialog and answers with a toast.</p>
       </article>
 
+      <article class="feature" id="widget-feedback" data-title="Feedback and media">
+        <div class="feature-head"><h3>Feedback and media</h3><span class="pill shipped">Shipped</span></div>
+        <p>Banners, badges, spinners, skeletons, progress bars and empty states tell the user how things stand; avatars and async images show who and what. A banner spans the page in its tone's container with an icon, a title, one action and a close button, and is announced as it appears. A badge is a label or a count in a pill, past 99 shown as "99+", or a dot over a corner. A spinner turns, a skeleton shimmers where content will be, and an indeterminate progress bar slides; under reduced motion each holds still and asks for no frame. An avatar without its picture shows the initials of a name on the container of the category the name falls in, one of eight hues of <code class="z">Tokens.categories</code>, so a name has the same colors wherever it is drawn, each meeting its text's contrast in every scheme. An async image takes any status with a <code class="z">ready</code> image, such as a source's, shimmers while it loads, fades in, and shows a broken image once it fails.</p>
+<script type="text/x-zig" data-file="src/ui/inbox.zig">
+fn inbox(app: *App, ui: *Ui) void {
+    if (app.offline) {
+        const shown = widgets.banner(ui, .of("offline"), .{ .tone = .warning, .title = "You are offline", .message = "Replies are kept here and sent when you reconnect.", .action = "Retry", .dismissible = true });
+        if (shown.acted) app.reconnect();
+        if (shown.dismissed) app.offline = false;
+    }
+    widgets.badgeCount(ui, .of("unread"), app.unread, .{ .tone = .accent, .label = "Unread" });
+    if (app.syncing) widgets.spinner(ui, .of("syncing"), .{ .size = .small, .label = "Syncing" });
+    widgets.progressBar(ui, .of("upload"), app.upload_fraction, .{ .label = "Uploading" });
+
+    for (app.threads, 0..) |thread, index| {
+        widgets.avatar(ui, .indexed("sender", index), .{ .name = thread.sender, .image = app.portraits.get(thread.sender), .presence = thread.presence });
+        widgets.asyncImage(ui, .indexed("preview", index), ui.source(.previews).get(index), .{ .aspect = 4.0 / 3.0, .label = thread.subject });
+    }
+    widgets.avatarStack(ui, .of("people"), app.participants, .{ .label = "In this thread" });
+    if (app.threads.len == 0) {
+        if (widgets.emptyState(ui, .of("no_mail"), .{ .icon = .search, .title = "No messages", .message = "Mail you receive shows up here.", .action = "Compose" })) app.compose();
+    }
+}
+</script>
+        <p>The tour's Kanban screen counts each list in a badge, puts each card's owner in an avatar and the team in a stack, says "No cards" in an empty list and warns of a full list in a banner; its Photo Culling screen shows a photo decoding with a progress bar and one waiting as a skeleton.</p>
+      </article>
+
       <article class="feature" id="widget-theme" data-title="Theming widgets">
         <div class="feature-head"><h3>Theming widgets</h3><span class="pill shipped">Shipped</span></div>
         <p>A widget set is styled by a skin: any struct that declares <code class="z">zuiStyle(part, state, environment)</code> and returns a <code class="z">zui_widgets.Style(Ui)</code> for each element a widget draws, so a theme pack restyles every widget without forking it. The skin reads the environment, so it follows dark mode, contrast and text size, and the style's <code class="z">focus_ring</code> is drawn while a control has focus. A mistake in a skin fails to compile with a message naming it. <code class="z">zui_widgets.DesignSkin(Ui)</code> is zui's own skin: every part drawn in the roles, tiers and shapes of the default design, from <code class="z">zui.design.Tokens</code> you resolve again when a preference changes, so the widgets follow the theme, contrast, density, text size and color vision. Its focus ring is drawn 2 units outside the control, so it shows on an accent-filled button or a checked box as well as on the page. A button takes a variant, <code class="z">primary</code>, <code class="z">secondary</code>, <code class="z">tonal</code>, <code class="z">tertiary</code> or <code class="z">danger</code>.</p>

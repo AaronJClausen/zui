@@ -6,6 +6,7 @@ const zui_design = @import("zui_design");
 const EveryContainer = @import("containers_tests.zig").EveryContainer;
 const EveryInput = @import("inputs_tests.zig").EveryInput;
 const EveryOverlay = @import("overlays_tests.zig").EveryOverlay;
+const EveryFeedback = @import("feedback_tests.zig").EveryFeedback;
 
 const testing = std.testing;
 const Text = zui_testing.FixedMetricsText(u16);
@@ -823,11 +824,13 @@ test "every part and every state reach the skin" {
     const SkinnedContainers = EveryContainer(Recorded);
     const SkinnedInputs = EveryInput(Recorded);
     const SkinnedOverlays = EveryOverlay(Recorded);
+    const SkinnedFeedback = EveryFeedback(Recorded);
     const Both = struct {
         form: SkinnedForm,
         containers: SkinnedContainers,
         inputs: SkinnedInputs,
         overlays: SkinnedOverlays,
+        feedback: SkinnedFeedback,
 
         fn declare(both: *@This(), ui: *Ui) void {
             ui.open(.{ .layout = .{ .sizing = .grow_both } });
@@ -835,6 +838,7 @@ test "every part and every state reach the skin" {
             SkinnedContainers.declare(&both.containers, ui);
             SkinnedInputs.declare(&both.inputs, ui);
             SkinnedOverlays.declare(&both.overlays, ui);
+            SkinnedFeedback.declare(&both.feedback, ui);
             ui.close();
         }
     };
@@ -843,7 +847,7 @@ test "every part and every state reach the skin" {
     try fixture.init();
     defer fixture.deinit();
     const driver = &fixture.driver;
-    var both: Both = .{ .form = undefined, .containers = .{ .widgets = .{ .skin = .{ .asked = &asked } } }, .inputs = undefined, .overlays = undefined };
+    var both: Both = .{ .form = undefined, .containers = .{ .widgets = .{ .skin = .{ .asked = &asked } } }, .inputs = undefined, .overlays = undefined, .feedback = .{ .widgets = .{ .skin = .{ .asked = &asked } } } };
     both.form.init(.{ .skin = .{ .asked = &asked } });
     both.inputs.init(.{ .skin = .{ .asked = &asked } });
     both.overlays.init(.{ .skin = .{ .asked = &asked } });

@@ -2816,6 +2816,21 @@ if (!std.meta.eql(preferences, app.preferences)) {
     status fills 0.20 apart instead. Images and custom drawing are not
     recolored.
 
+- **Categories.** For what is told apart by more than its color, a
+  chart's series beside their legend or an avatar beside its initials,
+  `Design.categories` gives eight hues, `blue`, `violet`, `rose`,
+  `coral`, `amber`, `green`, `teal` and `graphite`, each a hue and a
+  chroma (by default the default design's eight accent presets).
+  `resolve` writes each to `Tokens.categories` as a fill, a container
+  and the text on each, taking the accent's tones on the category's own
+  hue and chroma; each text is moved until it meets its target on its
+  fill or container, as a role's is, the move reported in `Repairs` with
+  its category, and at comptime a compile error. A chosen accent and a
+  chosen color vision leave them as they are, and they are not held
+  apart from one another under color vision, since what each marks is
+  named beside it. `Category.of(name)` picks one by FNV-1a of the name,
+  so a name takes the same colors wherever it is drawn.
+
 ### 18.5 Spacing and density
 
 | `Space` | compact | comfortable | roomy |
@@ -3158,7 +3173,11 @@ color vision the tokens were resolved for.
 | `textField`, `textArea` | `*EditableText` | `.{ changed, submitted }` |
 | `dropdown`, `dropdownEnum` | `*usize`, any enum | changed |
 | `disclosure` | `*bool` | toggled |
-| `progressBar`, `asyncImage`, `label`, `labelWith`, `labeledRow`, `labeledRowWith` | nothing | nothing |
+| `label`, `labelWith`, `labeledRow`, `labeledRowWith` | nothing | nothing |
+| `banner` | nothing | `.{ acted, dismissed }` |
+| `badge`, `badgeCount`, `spinner`, `skeleton`, `progressBar` | nothing | nothing |
+| `emptyState` | nothing | its action chosen |
+| `avatar`, `avatarStack`, `asyncImage` | nothing | nothing |
 | `card` | nothing | clicked, when interactive |
 | `divider`, `groupBox` | nothing | nothing |
 | `scrollArea`, `scrollbar` | the scroll offset | nothing |
@@ -3243,6 +3262,37 @@ the frame it closes so its fade starts there; both land at once under
 reduced motion. A tooltip or a toast waiting on its time asks only for a
 frame at its deadline. Each overlay declares its `zuiPreviews` in
 `zui_widgets.previews.overlays`.
+
+A banner spans its container in its tone's container role, with the
+tone's icon, a title, one action and a close button; it reports the
+`status` role, and its close button, Escape on one of its buttons and a
+`dismiss` action dismiss it. A badge is a label in a pill of its tone, a
+count in numerals that shows "99+" past 99, or, without text, a dot
+ringed in the surface beneath it. A spinner turns its arc once every 0.9
+s; a skeleton stands in as lines of text, the last at 60% of the width,
+a block at an aspect or a circle, a highlight sweeping across it every
+1.6 s; an indeterminate progress bar slides a fill of 30% of its track,
+and a determinate one eases to each value. Each asks for every frame
+while it moves; under reduced motion the spinner holds its arc at the
+top, the skeleton holds still and the indeterminate bar pulses at the
+middle, and only the bar asks for frames. Each reports the
+`progress_bar` role, with its value when it has one. An empty state
+centers an icon in a circle, a title, a message at most 40 characters
+wide and an action. An avatar shows its image, or the initials of its
+name on the container of `Category.of(name)` in `Tokens.categories`
+(§18.4), with a presence dot at its trailing bottom corner; a stack
+overlaps its avatars by a quarter of their side, ringed in the surface,
+and counts those past its `most` in a last circle. `asyncImage` takes
+its source as `anytype`: a tagged union with a `ready` field holding
+`Config.ImageHandle`, as `zui.Status` is, or a value whose `status()`
+returns one; it shimmers while `idle` or `running`, fades its image in
+once `ready`, and shows the broken image icon once `failed` or
+`canceled`. A source of another shape is a compile error, as
+`` "zui_widgets: asyncImage needs a source with a status, a tagged union with a `ready` field or a value whose `status()` returns one, got u32" ``,
+and so is a status ready with another handle or with a tag outside
+`idle`, `running`, `ready`, `failed` and `canceled`. They declare their
+`zuiPreviews` in `zui_widgets.previews.feedback` and
+`zui_widgets.previews.media`.
 
 Every control is focusable, draws the skin's focus ring, reports
 semantics when the feature is on, and is operable by keyboard and by

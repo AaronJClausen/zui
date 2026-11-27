@@ -162,20 +162,41 @@ pub fn solve(shades: *palette.Palette, scheme: palette.Scheme, repairs: *Repairs
         const background = shades.getPtr(pair.background);
         const before: Contrast = .ofShades(foreground.color, background.color);
         if (before.meets(target)) continue;
-
-        var repair: repairs_file.Repair = .{ .foreground = pair.foreground, .background = pair.background, .scheme = scheme, .target = target, .before = before };
-        const foreground_from = foreground.color.lightness;
-        if (passingLightness(foreground.color, background.color, .foreground, target)) |lightness| {
-            foreground.color.lightness = lightness;
-        } else {
-            foreground.color.lightness = farthestLightness(foreground.color, background.color);
-            const background_from = background.color.lightness;
-            background.color.lightness = passingLightness(foreground.color, background.color, .background, target) orelse farthestLightness(background.color, foreground.color);
-            repair.background_moved = .{ .from = background_from, .to = background.color.lightness };
-        }
-        repair.foreground_moved = .{ .from = foreground_from, .to = foreground.color.lightness };
-        repairs.record(repair);
+        const moves = moveUntilMet(&foreground.color, &background.color, target);
+        repairs.record(.{
+            .foreground = pair.foreground,
+            .background = pair.background,
+            .scheme = scheme,
+            .target = target,
+            .before = before,
+            .foreground_moved = moves.foreground,
+            .background_moved = moves.background,
+        });
     }
+}
+
+/// How far each side of a pair moved to meet its target.
+pub const Moves = struct {
+    foreground: repairs_file.LightnessMove,
+    /// Null when the foreground passed alone.
+    background: ?repairs_file.LightnessMove = null,
+};
+
+/// Moves `foreground` in lightness until the pair meets `target`; when no
+/// lightness of it passes, it goes to white or black on its side and
+/// `background` moves too.
+pub fn moveUntilMet(foreground: *Oklch, background: *Oklch, target: Target) Moves {
+    const foreground_from = foreground.lightness;
+    var background_moved: ?repairs_file.LightnessMove = null;
+    if (passingLightness(foreground.*, background.*, .foreground, target)) |lightness| {
+        foreground.lightness = lightness;
+    } else {
+        foreground.lightness = farthestLightness(foreground.*, background.*);
+        const background_from = background.lightness;
+        background.lightness = passingLightness(foreground.*, background.*, .background, target) orelse farthestLightness(background.*, foreground.*);
+        background_moved = .{ .from = background_from, .to = background.lightness };
+    }
+    return .{ .foreground = .{ .from = foreground_from, .to = foreground.lightness }, .background = background_moved };
 }
 
 /// Each role's share of the state layers in `idle`, solved so every

@@ -4,10 +4,15 @@ const palette = @import("palette.zig");
 const color_vision = @import("color_vision.zig");
 
 const ColorRole = zui.design.ColorRole;
+const Category = zui.design.Category;
 
 /// One pair a resolve moved to meet its target, or could not.
 pub const Repair = struct {
     kind: Kind = .contrast,
+    /// For a pair of the categorical palette, its category; `foreground`
+    /// and `background` are then the accent's roles it takes its tones
+    /// from.
+    category: ?Category = null,
     /// For a contrast repair, the role drawn on `background`; for the
     /// others, the first of two status fills.
     foreground: ColorRole,

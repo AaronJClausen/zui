@@ -123,6 +123,85 @@ test "every accent preset's seed resolves with nothing repaired in every scheme"
     }
 }
 
+fn categoriesIn(scheme: zui_design.Scheme) expected.ByCategory {
+    return switch (scheme) {
+        .light => expected.categories.light,
+        .dark => expected.categories.dark,
+        .light_high_contrast => expected.categories.light_high_contrast,
+        .dark_high_contrast => expected.categories.dark_high_contrast,
+    };
+}
+
+test "the default design's categories are the eight accent presets" {
+    for (std.enums.values(design.Category), expected.accent_presets) |category, preset| {
+        try testing.expectEqual(preset, zui_design.default.categories.get(category));
+    }
+}
+
+test "the default design resolves every category in every scheme to its pinned colors, to the byte, with nothing repaired" {
+    for (std.enums.values(zui_design.Scheme)) |scheme| {
+        var tokens: Tokens = .{};
+        const repairs = zui_design.resolve(zui_design.default, preferencesOf(scheme), &tokens);
+        try testing.expectEqual(0, repairs.kept_count);
+        for (std.enums.values(design.Category)) |category| {
+            const resolved = tokens.categories.get(category);
+            const pinned = categoriesIn(scheme).get(category);
+            for ([_]zui.Color{ resolved.fill, resolved.on_fill, resolved.container, resolved.on_container }, pinned) |color, hex| {
+                if (!color.eql(.rgba(hex))) {
+                    std.debug.print("{s} {t}: expected {x:0>8}, resolved {x:0>2}{x:0>2}{x:0>2}{x:0>2}\n", .{ scheme.name(), category, hex, color.r, color.g, color.b, color.a });
+                    return error.TestUnexpectedResult;
+                }
+            }
+        }
+    }
+}
+
+test "every category's text meets its target on its fill and on its container in every scheme" {
+    for (std.enums.values(zui_design.Scheme)) |scheme| {
+        var tokens: Tokens = .{};
+        _ = zui_design.resolve(zui_design.default, preferencesOf(scheme), &tokens);
+        const target = zui_design.tierOf(.on_accent).?.target(scheme.environmentContrast());
+        for (tokens.categories.values) |colors| {
+            try testing.expect(zui_design.Contrast.of(colors.on_fill, colors.fill).meets(target));
+            try testing.expect(zui_design.Contrast.of(colors.on_container, colors.container).meets(target));
+        }
+    }
+}
+
+test "every category's text stays apart from its fill and its container under every simulated color vision" {
+    for (std.enums.values(zui_design.Scheme)) |scheme| {
+        var tokens: Tokens = .{};
+        _ = zui_design.resolve(zui_design.default, preferencesOf(scheme), &tokens);
+        for (tokens.categories.values) |colors| {
+            try testing.expect(zui_design.nearestOfColors(colors.on_fill, colors.fill).isApart(zui_design.least_lightness_difference));
+            try testing.expect(zui_design.nearestOfColors(colors.on_container, colors.container).isApart(zui_design.least_lightness_difference));
+        }
+    }
+}
+
+test "the categories follow neither a chosen accent nor a chosen color vision" {
+    var plain: Tokens = .{};
+    var chosen: Tokens = .{};
+    _ = zui_design.resolve(zui_design.default, .{}, &plain);
+    _ = zui_design.resolve(zui_design.default, .{ .accent = .rgb(0xd04090), .color_vision = .deutan }, &chosen);
+    for (plain.categories.values, chosen.categories.values) |designed, kept| try testing.expectEqual(designed, kept);
+}
+
+test "a category of any hue and chroma meets its targets in every scheme with nothing repaired" {
+    for (std.enums.values(zui_design.Scheme)) |scheme| {
+        var hue: f32 = 0;
+        while (hue < 360) : (hue += 30) {
+            var chroma: f32 = 0.05;
+            while (chroma < 0.4) : (chroma += 0.1) {
+                var vivid = zui_design.default;
+                vivid.categories.set(.amber, .{ .lightness = 0.55, .chroma = chroma, .hue = hue });
+                var tokens: Tokens = .{};
+                try testing.expectEqual(0, zui_design.resolve(vivid, preferencesOf(scheme), &tokens).kept_count);
+            }
+        }
+    }
+}
+
 test "control heights and icon sizes follow the density, and a touch pointer raises every height to a finger's" {
     var tokens: Tokens = .{};
     _ = zui_design.resolve(zui_design.default, .{ .density = .compact }, &tokens);

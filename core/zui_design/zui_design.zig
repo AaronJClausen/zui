@@ -21,6 +21,7 @@ const audit_file = @import("audit.zig");
 const permutations_file = @import("permutations.zig");
 const default_file = @import("default.zig");
 const elevation = @import("elevation.zig");
+const categories_file = @import("categories.zig");
 
 const design = zui.design;
 const Design = design.Design;
@@ -131,6 +132,13 @@ pub const Repair = repairs_file.Repair;
 /// `lineHeightFor` and its letter spacing `trackingFor` its size. The
 /// measure is 66 characters of half the body size.
 ///
+/// Each of `Design.categories` takes the accent's tones for its fill, its
+/// container and the text on each, on its own hue and chroma, and each
+/// text is moved until it meets its target on its fill or container, as a
+/// role's is, the move returned in `Repairs` with its category. The
+/// categories are not held apart from one another under color vision:
+/// what each marks is named in text beside it.
+///
 /// The motion is the design's as it declares it: under reduced motion
 /// `zui.motion.tween` and `zui.motion.spring` land at once by themselves.
 /// The icons are the design's icon font and its codepoints, when it gives
@@ -151,6 +159,7 @@ pub fn resolve(resolved_design: Design, preferences: Preferences, tokens: anytyp
     var repairs: Repairs = .{};
     const palettes = palettesFor(resolved_design.seeds, preferences, &repairs);
     writeColors(palettes, tokens);
+    writeCategories(resolved_design.categories, .of(preferences.theme, preferences.contrast), &repairs, tokens);
     elevation.write(palettes.get(.idle), .of(preferences.theme, preferences.contrast), tokens);
     if (@inComptime()) failOnRepairsTheDesignNeeds(resolved_design, preferences, &repairs);
     tokens.spacing = resolved_design.density.get(preferences.density);
@@ -198,7 +207,7 @@ fn failOnHalfAnIconFont(resolved_design: Design) void {
 
 fn failOnRepairsTheDesignNeeds(resolved_design: Design, preferences: Preferences, repairs: *const Repairs) void {
     for (repairs.slice()) |repair| {
-        const moves_chosen_accent = preferences.accent != null and
+        const moves_chosen_accent = preferences.accent != null and repair.category == null and
             (palette.rampOf(repair.foreground, repair.scheme) == .accent or palette.rampOf(repair.background, repair.scheme) == .accent);
         const adapts_to_chosen_color_vision = repair.kind != .contrast and preferences.color_vision != .typical;
         if (moves_chosen_accent or adapts_to_chosen_color_vision) continue;
@@ -234,13 +243,22 @@ fn repairMessage(comptime design_name: []const u8, comptime repair: Repair) []co
         fmt("Lc {d} in {s}, needs {d}", .{ lightness_contrast, repair.scheme.name(), needed_lightness_contrast })
     else
         fmt("{s}:1 in {s}, needs {s}:1", .{ tenths(@floor(repair.before.ratio * 10)), repair.scheme.name(), tenths(repair.target.ratio * 10) });
-    const foreground = @tagName(repair.foreground);
-    const background = @tagName(repair.background);
+    const foreground = categoryPrefixOf(repair) ++ colorNameOf(repair, repair.foreground);
+    const background = colorNameOf(repair, repair.background);
     const passing = if (repair.background_moved) |background_moved|
         fmt("{s} at L {s} and {s} at L {s} pass", .{ foreground, hundredthsPast(repair.foreground_moved.?), background, hundredthsPast(background_moved) })
     else
         fmt("{s} at L {s} passes", .{ foreground, hundredthsPast(repair.foreground_moved.?) });
     return fmt("zui_design: {s}'s {s} on {s} is {s}; {s}", .{ design_name, foreground, background, measured, passing });
+}
+
+fn categoryPrefixOf(comptime repair: Repair) []const u8 {
+    const category = repair.category orelse return "";
+    return @tagName(category) ++ " ";
+}
+
+fn colorNameOf(comptime repair: Repair, comptime role: design.ColorRole) []const u8 {
+    return if (repair.category != null) categories_file.colorNameOf(role) else @tagName(role);
 }
 
 fn tenths(comptime value_in_tenths: f32) []const u8 {
@@ -468,6 +486,19 @@ fn writeColors(palettes: palette.PalettesByState, tokens: anytype) void {
     }
 }
 
+fn writeCategories(seeds: std.EnumArray(design.Category, design.Oklch), scheme: palette.Scheme, repairs: *Repairs, tokens: anytype) void {
+    const Color = @TypeOf(tokens.colors).Value.Value;
+    for (std.enums.values(design.Category)) |category| {
+        const shades = categories_file.shadesOf(category, seeds.get(category), scheme, repairs);
+        tokens.categories.set(category, .{
+            .fill = shades.fill.encoded(Color),
+            .on_fill = shades.on_fill.encoded(Color),
+            .container = shades.container.encoded(Color),
+            .on_container = shades.on_container.encoded(Color),
+        });
+    }
+}
+
 fn targetFloorsFor(pointer: Target) std.EnumArray(Target, f32) {
     return .init(.{
         .none = 0,
@@ -604,4 +635,5 @@ test {
     _ = @import("audit_tests.zig");
     _ = @import("permutations_tests.zig");
     _ = @import("default_tests.zig");
+    _ = @import("categories.zig");
 }

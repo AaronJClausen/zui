@@ -179,6 +179,35 @@ fn declareWidgetsWith(widgets: anytype, ui: *Ui, scope: zui.Id) void {
     declareContainersWith(widgets, ui, scope);
     declareInputsWith(widgets, ui, scope);
     declareOverlaysWith(widgets, ui, scope);
+    declareFeedbackWith(widgets, ui, scope);
+}
+
+const CheckImageStatus = zui.Status(error{NotFound}!u32);
+
+const CheckImageSource = struct {
+    loaded: CheckImageStatus,
+
+    pub fn status(source: *const CheckImageSource) CheckImageStatus {
+        return source.loaded;
+    }
+};
+
+var image_source: CheckImageSource = .{ .loaded = .{ .ready = 3 } };
+
+fn declareFeedbackWith(widgets: anytype, ui: *Ui, scope: zui.Id) void {
+    const shown = widgets.banner(ui, scope.child("banner"), .{ .tone = .danger, .title = "title", .message = "message", .action = "action", .dismissible = true });
+    if (shown.acted or shown.dismissed) overlays_open = false;
+    widgets.badge(ui, scope.child("badge"), "badge", .{ .tone = .accent });
+    widgets.badge(ui, scope.child("dot"), "", .{ .tone = .danger, .label = "dot" });
+    widgets.badgeCount(ui, scope.child("count"), 120, .{ .label = "count" });
+    widgets.spinner(ui, scope.child("spinner"), .{ .size = .small, .label = "spinner" });
+    widgets.skeleton(ui, scope.child("skeleton"), .{ .shape = .{ .lines = 2 }, .role = .title, .width = .fixed(40), .label = "skeleton" });
+    widgets.progressBar(ui, scope.child("progress"), null, .{ .label = "progress", .width = .fixed(40) });
+    if (widgets.emptyState(ui, scope.child("empty"), .{ .icon = .search, .title = "title", .message = "message", .action = "action", .action_variant = .tonal })) overlays_open = false;
+    widgets.avatar(ui, scope.child("avatar"), .{ .name = "Ana Ribeiro", .image = 2, .size = .xlarge, .presence = .away });
+    widgets.avatarStack(ui, scope.child("stack"), &.{ "a", "b", "c" }, .{ .size = .large, .most = 2, .label = "stack" });
+    widgets.asyncImage(ui, scope.child("image"), CheckImageStatus{ .ready = 1 }, .{ .aspect = 1, .width = .fixed(20), .label = "image" });
+    widgets.asyncImage(ui, scope.child("sourced_image"), &image_source, .{});
 }
 
 var overlays_open = true;

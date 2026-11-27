@@ -42,7 +42,7 @@ and each is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:27-essential-inputs` Essential inputs | done |
 | `11-polish:28-containers-and-navigation` Containers and navigation | done |
 | `11-polish:29-overlays` Overlays | done |
-| `11-polish:30-feedback-and-media` Feedback and media | not started |
+| `11-polish:30-feedback-and-media` Feedback and media | done |
 | `11-polish:31-rich-text-and-reordering` Rich text and the reorderable list | not started |
 | `11-polish:32-zui-widgets-data` `zui_widgets_data` | not started |
 | `11-polish:33-pickers` Pickers | not started |
@@ -2574,7 +2574,61 @@ and every categorical color meets its text's target in every scheme.
 
 **Spec.** §18.4, §19.2.
 
-**Status.** Not started.
+**Status.** Done, in one commit. `zui.design.Category` names eight hues
+and `Category.of(name)` picks one by FNV-1a of a name;
+`Design.categories` gives each a hue and chroma (the default design's
+eight accent presets), and `zui_design.resolve` writes
+`Tokens.categories`, a fill, a container and the text on each, from the
+accent's tones on each hue (`palette.shadeOnSeed`,
+`core/zui_design/categories.zig`), moving a text that misses its target
+through `contrast.moveUntilMet`, split out of `contrast.solve`, and
+reporting the move in `Repairs` with its category. The pinned values are
+in `default_expected.zig`, and `default_tests.zig` checks every
+category's text against its target in every scheme, text apart from its
+fill under every simulated color vision, the palette unmoved by a chosen
+accent or color vision, and 48 seeds of other hues and chromas, none of
+which needs a repair. `Widgets(Ui, Skin)` gains `banner`, `badge` and
+`badgeCount`, `spinner`, `skeleton`, `progressBar` (eased to its value,
+or indeterminate), `emptyState`, `avatar`, `avatarStack` and
+`asyncImage`, whose source is `anytype` with a status, so the module
+does not import `zui_async`, with three compile errors pinned for a
+source of another shape. 50 `Part` tags, each in `Designed`'s appearance
+and `DesignSkin`; the sizes, periods and shares are the skin's and the
+module's named constants. `zui_widgets.previews.feedback` and
+`previews.media` hold the previews. Tested in
+`core/zui_widgets/feedback_tests.zig` with `zui_testing.Driver`: each
+banner tone, its action by click, Enter and Space, its dismissal by its
+close button, Escape and `dismiss`; each badge tone, the dot and "99+";
+the spinner, skeleton and indeterminate bar moving and asking for
+frames, and holding still under reduced motion; the bar easing and
+clamping its value; the empty state's action; an avatar's initials in
+its category's colors, its image, its presence dot at the trailing
+corner in both reading directions; the stack's overlap, rings and count;
+the async image loading, fading in, failing, through a value's
+`status()` and in a context without images; and every `glance`
+permutation and each preview audited clean in every scheme and density,
+and an avatar of every category in every scheme. `tests.zig`'s
+every-part test covers the new parts through `EveryFeedback`, and
+`core/tests/instantiate.zig` exercises each API through three skins.
+Found on the way: an avatar's presence dot was mirrored twice in a
+right-to-left layout, since the core already mirrors a floating anchor,
+and an async image never faded in, since its tween was only started once
+it was ready. The tour's Kanban counts each list in a badge, shows each
+card's owner as an avatar and the team as a stack, an empty list as an
+empty state and a full list as a banner; Photo Culling shows a decoding
+photo's progress in a progress bar and a waiting one as a skeleton.
+ARCHITECTURE.md §7 lists where the specs are not met. Verified: core
+`test` in three modes, `check` for `wasm32-freestanding` and
+`powerpc-linux`, `test` for `x86-linux`; the tour's `test` in three
+modes and `check` for `x86_64-windows`; raylib's tour cycle
+(`diagnostics ok: true`), its screenshots of `kanban` and `photo_cull`,
+`--measure-idle` (0.7% of one core) and its test card; the terminal's
+`tour -- --dump --every-screen` and test card; the native host's tour
+cycle
+(`0 layer overflows, 0 glyph atlas overflows, diagnostics ok: true`);
+`test-all`, `check-all` and the web host's `test-demo`, `test-host` and
+`test-draw`. `counts` is +0.00% on every scenario against the parent,
+none of which uses these widgets.
 
 ## 11-polish:31-rich-text-and-reordering — Rich text and the reorderable list
 

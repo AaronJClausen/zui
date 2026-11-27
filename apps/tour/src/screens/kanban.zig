@@ -12,6 +12,7 @@ const auto_scroll_step = 10;
 const list_names = [list_count][]const u8{ "Backlog", "In progress", "Review", "Done" };
 /// How many cards a list should hold at most; 0 for no limit.
 const work_in_progress_limits = [list_count]u32{ 0, 4, 3, 0 };
+const team = [_][]const u8{ "Ana Ribeiro", "Kofi Mensah", "Mei Chen", "Lars Berg", "Priya Nair" };
 
 const Tag = enum(u8) {
     feature,
@@ -39,6 +40,10 @@ const Card = struct {
 
     fn id(card: *const Card) zui.Id {
         return .indexed("kanban.card", card.uid);
+    }
+
+    fn owner(card: *const Card) []const u8 {
+        return team[card.uid % team.len];
     }
 };
 
@@ -155,6 +160,8 @@ const ids = zui.ids(.{
     "kanban.menu",
     "kanban.menu_backdrop",
     "kanban.ghost",
+    "kanban.full",
+    "kanban.team",
 });
 
 fn listId(list: usize) zui.Id {
@@ -196,6 +203,10 @@ pub fn Using(comptime kit: type) type {
                     shell.label(ui, .caption, "Drag a card to another list or place. Tab to a card: arrows move between cards, Ctrl+arrows move the card, Delete removes it, the Menu key or a right-click opens its actions.");
                 }
                 self.toolbar(ui, shell);
+                if (self.message.len != 0) {
+                    const shown = shell.widgets.banner(ui, ids.@"kanban.full", .{ .tone = .warning, .message = self.message, .dismissible = true });
+                    if (shown.dismissed) self.message = "";
+                }
                 var dragged: ?DragSeen = null;
                 {
                     ui.open(.{ .layout = .{ .sizing = .grow_both, .child_gap = 12 } });
@@ -224,9 +235,9 @@ pub fn Using(comptime kit: type) type {
                         self.message = "";
                     } else self.message = "That list is full.";
                 }
-                if (self.message.len != 0) shell.labelColored(ui, .caption, colors.get(.on_warning_container), self.message);
                 shell.spacer(ui);
                 shell.printColored(ui, .caption, colors.get(.on_surface_muted), "{d} cards, {d} points in progress", .{ self.board.count(), self.pointsIn(1) + self.pointsIn(2) });
+                widgets.avatarStack(ui, ids.@"kanban.team", &team, .{ .label = "The team" });
             }
 
             fn pointsIn(self: *const Kanban, list: usize) u32 {
@@ -340,9 +351,12 @@ pub fn Using(comptime kit: type) type {
                     defer ui.close();
                     shell.label(ui, .heading, list_names[list]);
                     shell.spacer(ui);
+                    const count_id = listId(list).child("count");
                     if (limit != 0) {
-                        shell.printColored(ui, .caption, if (over_limit) colors.get(.on_warning_container) else colors.get(.on_surface_muted), "{d} / {d}", .{ items.len, limit });
-                    } else shell.printColored(ui, .caption, colors.get(.on_surface_muted), "{d}", .{items.len});
+                        var shown_bytes: [16]u8 = undefined;
+                        const shown = std.fmt.bufPrint(&shown_bytes, "{d} / {d}", .{ items.len, limit }) catch "";
+                        shell.widgets.badge(ui, count_id, shown, .{ .tone = if (over_limit) .warning else .neutral });
+                    } else shell.widgets.badgeCount(ui, count_id, @intCast(items.len), .{ .label = "Cards" });
                 }
                 if (over_limit) shell.labelColored(ui, .caption, colors.get(.on_warning_container), "Over its work-in-progress limit");
 
@@ -362,11 +376,7 @@ pub fn Using(comptime kit: type) type {
                     if (self.declareCard(ui, shell, slot)) |position| dragged = .{ .slot = slot, .position = position };
                 }
                 if (incoming != null and shown_index <= self.drop_index[list]) self.dropIndicator(ui, shell);
-                if (items.len == 0) {
-                    ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .padding = .all(12), .child_alignment = .{ .x = .center } } });
-                    shell.labelColored(ui, .caption, colors.get(.on_surface_muted), "Drop a card here");
-                    ui.close();
-                }
+                if (items.len == 0) _ = shell.widgets.emptyState(ui, listId(list).child("empty"), .{ .title = "No cards", .message = "Drop a card here." });
                 return dragged;
             }
 
@@ -446,6 +456,7 @@ pub fn Using(comptime kit: type) type {
                     shell.printColored(ui, .caption, colors.get(.on_surface_muted), "{d} pt", .{card.points});
                     shell.spacer(ui);
                     shell.printColored(ui, .tiny, colors.get(.on_surface_muted), "#{d}", .{card.uid});
+                    shell.widgets.avatar(ui, id.child("owner"), .{ .name = card.owner(), .size = .small });
                 }
                 return if (drag) |moving| moving.position else null;
             }

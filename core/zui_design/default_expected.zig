@@ -188,6 +188,53 @@ pub const text_styles_at_1_5: std.EnumArray(design.TypeRole, TextStyle) = .init(
     .display = .{ .size = 40.63, .line_height = 48, .letter_spacing = -0.813 },
 });
 
+/// Each category's resolved fill, the text on it, its container and the
+/// text on that, as `0xRRGGBBAA`.
+pub const ByCategory = std.EnumArray(design.Category, [4]u32);
+
+pub const categories = struct {
+    pub const light: ByCategory = .init(.{
+        .blue = .{ 0x2269cdff, 0xffffffff, 0xdae9ffff, 0x003981ff },
+        .violet = .{ 0x7654beff, 0xffffffff, 0xe9e3ffff, 0x45277bff },
+        .rose = .{ 0xac4072ff, 0xffffffff, 0xffdde9ff, 0x6c1440ff },
+        .coral = .{ 0xb73f2aff, 0xffffffff, 0xffe0d9ff, 0x740f00ff },
+        .amber = .{ 0x975f00ff, 0xffffffff, 0xfce3c8ff, 0x573400ff },
+        .green = .{ 0x14833eff, 0xffffffff, 0xd4f1d8ff, 0x004b1eff },
+        .teal = .{ 0x007d7eff, 0xffffffff, 0xcef0efff, 0x004747ff },
+        .graphite = .{ 0x666e79ff, 0xffffffff, 0xe5e8ecff, 0x383e46ff },
+    });
+    pub const dark: ByCategory = .init(.{
+        .blue = .{ 0x2269cdff, 0xffffffff, 0x193763ff, 0xdae9ffff },
+        .violet = .{ 0x7654beff, 0xffffffff, 0x3b2e5dff, 0xe9e3ffff },
+        .rose = .{ 0xac4072ff, 0xffffffff, 0x55263aff, 0xffdde9ff },
+        .coral = .{ 0xb73f2aff, 0xffffffff, 0x5a261cff, 0xffe0d9ff },
+        .amber = .{ 0x975f00ff, 0xffffffff, 0x4f3005ff, 0xfbe4caff },
+        .green = .{ 0x14833eff, 0xffffffff, 0x194224ff, 0xd5f0d9ff },
+        .teal = .{ 0x007d7eff, 0xffffffff, 0x064141ff, 0xd0efefff },
+        .graphite = .{ 0x666e79ff, 0xffffffff, 0x35383dff, 0xe5e8ecff },
+    });
+    pub const light_high_contrast: ByCategory = .init(.{
+        .blue = .{ 0x004395ff, 0xffffffff, 0xe0ecffff, 0x00183fff },
+        .violet = .{ 0x512b92ff, 0xffffffff, 0xece7ffff, 0x22004bff },
+        .rose = .{ 0x7f124cff, 0xffffffff, 0xffe2ecff, 0x37001dff },
+        .coral = .{ 0x871300ff, 0xffffffff, 0xffe4dfff, 0x380400ff },
+        .amber = .{ 0x653e00ff, 0xffffffff, 0xfee7ceff, 0x281600ff },
+        .green = .{ 0x005725ff, 0xffffffff, 0xd8f4ddff, 0x00220aff },
+        .teal = .{ 0x005353ff, 0xffffffff, 0xd3f3f2ff, 0x002020ff },
+        .graphite = .{ 0x414853ff, 0xffffffff, 0xe9ebefff, 0x161b22ff },
+    });
+    pub const dark_high_contrast: ByCategory = .init(.{
+        .blue = .{ 0x004395ff, 0xffffffff, 0x07254fff, 0xeff6ffff },
+        .violet = .{ 0x512b92ff, 0xffffffff, 0x2a1c49ff, 0xf6f3ffff },
+        .rose = .{ 0x7f124cff, 0xffffffff, 0x411328ff, 0xfff1f6ff },
+        .coral = .{ 0x871300ff, 0xffffffff, 0x46130aff, 0xfff2efff },
+        .amber = .{ 0x653e00ff, 0xffffffff, 0x382000ff, 0xfff3e6ff },
+        .green = .{ 0x005725ff, 0xffffffff, 0x042f12ff, 0xe9fbebff },
+        .teal = .{ 0x005353ff, 0xffffffff, 0x002d2dff, 0xe5fafaff },
+        .graphite = .{ 0x414853ff, 0xffffffff, 0x23272bff, 0xf3f5f8ff },
+    });
+};
+
 pub const accent_presets = [_]design.Oklch{
     .{ .lightness = 0.55, .chroma = 0.17, .hue = 258 },
     .{ .lightness = 0.55, .chroma = 0.16, .hue = 295 },

@@ -192,6 +192,8 @@ const ids = zui.ids(.{
     "photo_cull.undo",
     "photo_cull.top",
     "photo_cull.next_unsorted",
+    "photo_cull.loupe",
+    "photo_cull.sorted",
 });
 
 const thumbnail_width = 128;
@@ -405,7 +407,7 @@ pub fn Using(comptime kit: type) type {
                     defer ui.close();
                     const inner_width: f32 = if (ring != null) thumbnail_width - 4 else thumbnail_width;
                     const inner_height: f32 = if (ring != null) thumbnail_height - 4 else thumbnail_height;
-                    picture(ui, shell, status, .{ inner_width, inner_height }, 4);
+                    picture(ui, shell, id.child("picture"), status, .{ inner_width, inner_height }, 4);
                     if (verdict == .rejected) {
                         var veil = colors.get(.background);
                         veil.a = 170;
@@ -444,7 +446,7 @@ pub fn Using(comptime kit: type) type {
                     defer ui.close();
                     var name_buffer: [16]u8 = undefined;
                     const status = photos.get(self.selected);
-                    picture(ui, shell, status, .{ side_width - 34, loupe_height }, 6);
+                    picture(ui, shell, ids.@"photo_cull.loupe", status, .{ side_width - 34, loupe_height }, 6);
                     ui.open(.{ .layout = .{ .sizing = .{ .width = .grow }, .child_gap = 8, .child_alignment = .{ .y = .center } } });
                     shell.label(ui, .heading, photoName(&name_buffer, self.selected));
                     shell.spacer(ui);
@@ -466,7 +468,7 @@ pub fn Using(comptime kit: type) type {
                 }
                 const sorted = self.picked + self.rejected;
                 shell.printColored(ui, .caption, colors.get(.on_surface_muted), "{d} of {d} sorted, {d} to go", .{ sorted, photo_count, photo_count - sorted });
-                shell.meter(ui, @as(f32, @floatFromInt(sorted)) / photo_count, colors.get(.accent), 6);
+                shell.widgets.progressBar(ui, ids.@"photo_cull.sorted", @as(f32, @floatFromInt(sorted)) / photo_count, .{ .label = "Sorted" });
 
                 {
                     shell.openCard(ui, "Decoding", .{ .width = .grow });
@@ -526,17 +528,15 @@ pub fn Using(comptime kit: type) type {
         }
 
         /// The photo once decoded, and a placeholder of its size until then.
-        fn picture(ui: *Ui, shell: *const Shell, status: PhotoLoads.Status, size: [2]f32, radius: f32) void {
+        fn picture(ui: *Ui, shell: *const Shell, id: zui.Id, status: PhotoLoads.Status, size: [2]f32, radius: f32) void {
             const colors = shell.colors;
             switch (status) {
                 .ready => |photo| landscape(ui, photo, size, radius),
-                .idle, .running => {
-                    const progress = if (status == .running) status.running else 0;
+                .idle => shell.widgets.skeleton(ui, id, .{ .shape = .{ .block = size[0] / size[1] }, .width = .fixed(size[0]), .label = "Waiting for a thread" }),
+                .running => |progress| {
                     ui.open(placeholderOf(shell, size, radius));
                     defer ui.close();
-                    ui.open(.{ .layout = .{ .sizing = .{ .width = .fixed(size[0] * 0.6) } } });
-                    shell.meter(ui, progress, colors.get(.accent), 4);
-                    ui.close();
+                    shell.widgets.progressBar(ui, id, progress, .{ .label = "Decoding", .width = .fixed(size[0] * 0.6) });
                 },
                 .failed, .canceled => {
                     ui.open(placeholderOf(shell, size, radius));
@@ -595,7 +595,7 @@ pub fn Using(comptime kit: type) type {
                 .decoration = .{ .background = colors.get(.surface_raised), .border = .{ .color = colors.get(.accent), .widths = .all(1) }, .corner_radius = .all(8) },
             });
             defer ui.close();
-            picture(ui, shell, status, .{ 96, 72 }, 4);
+            picture(ui, shell, ids.@"photo_cull.ghost".child("picture"), status, .{ 96, 72 }, 4);
             shell.label(ui, .tiny, photoName(&name_buffer, index));
         }
 

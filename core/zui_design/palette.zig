@@ -125,6 +125,13 @@ pub fn idlePalette(ramps: std.EnumArray(Ramp, Oklch), scheme: Scheme, reduced_tr
     return palette;
 }
 
+/// `role`'s idle color in `scheme` on a ramp of `seed`'s hue and chroma:
+/// the accent's tone, for a hue that is not the accent's.
+pub fn shadeOnSeed(role: ColorRole, seed: Oklch, scheme: Scheme) Shade {
+    const tone = tones.get(scheme).get(role);
+    return .{ .color = .{ .lightness = tone.lightness, .chroma = seed.chroma * tone.chroma_share, .hue = seed.hue }, .alpha = tone.alpha };
+}
+
 /// A shadow or a rim is drawn translucent so the surface beneath shows
 /// through its edge; raised to an opaque alpha it would read as a border.
 fn keepsAlphaUnderReducedTransparency(role: ColorRole) bool {

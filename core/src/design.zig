@@ -140,6 +140,31 @@ pub const IconGlyph = struct {
 /// row being dragged.
 pub const Elevation = enum { raised, floating, modal, topmost };
 
+/// A hue of the categorical palette, for what is told apart by more than
+/// its color: a chart's series beside their legend, an avatar beside its
+/// initials. Each has a fill and a container, and the text drawn on each.
+pub const Category = enum {
+    blue,
+    violet,
+    rose,
+    coral,
+    amber,
+    green,
+    teal,
+    graphite,
+
+    /// The category a name always takes, wherever and whenever it is
+    /// drawn: FNV-1a of its bytes, among the eight.
+    ///
+    /// ```zig
+    /// const colors = tokens.categories.get(.of("Ana Ribeiro"));
+    /// ```
+    pub fn of(name: []const u8) Category {
+        const count = @typeInfo(Category).@"enum".fields.len;
+        return @enumFromInt(std.hash.Fnv1a_32.hash(name) % count);
+    }
+};
+
 /// A face's vertical metrics in font units, which a design sizes its text
 /// by. Sizes follow the font's `ascent - descent`, as a font system's do.
 pub const FaceMetrics = struct {
@@ -197,6 +222,21 @@ pub const Design = struct {
     /// Where `type.fonts.icons` draws each `Icon`; the two are given
     /// together or not at all.
     icons: ?IconSet = null,
+    /// Each category's hue and chroma, its lightness unused, as the
+    /// accent's seed gives the accent's.
+    categories: std.EnumArray(Category, Oklch) = default_categories,
+
+    /// The eight accent presets of zui's default design.
+    pub const default_categories: std.EnumArray(Category, Oklch) = .init(.{
+        .blue = .{ .lightness = 0.55, .chroma = 0.17, .hue = 258 },
+        .violet = .{ .lightness = 0.55, .chroma = 0.16, .hue = 295 },
+        .rose = .{ .lightness = 0.55, .chroma = 0.15, .hue = 355 },
+        .coral = .{ .lightness = 0.55, .chroma = 0.16, .hue = 32 },
+        .amber = .{ .lightness = 0.55, .chroma = 0.14, .hue = 70 },
+        .green = .{ .lightness = 0.55, .chroma = 0.14, .hue = 150 },
+        .teal = .{ .lightness = 0.55, .chroma = 0.11, .hue = 195 },
+        .graphite = .{ .lightness = 0.55, .chroma = 0.02, .hue = 258 },
+    });
 
     /// Each becomes a tonal ramp, and every role is taken from a ramp.
     pub const Seeds = struct {
@@ -616,6 +656,18 @@ pub fn Tokens(comptime Ui: type, comptime ExtraRoles: type) type {
         /// icons, and each icon's codepoint in it.
         icon_font: ?u32 = null,
         icon_codepoints: std.EnumArray(Icon, u21) = .initFill(0),
+        /// Each category's colors at rest, each pair meeting its text's
+        /// contrast target.
+        categories: std.EnumArray(Category, CategoryColors) = .initFill(.{}),
+
+        /// A category's fill and container, as the accent's are, and the
+        /// text on each.
+        pub const CategoryColors = struct {
+            fill: Ui.Color = .transparent,
+            on_fill: Ui.Color = .transparent,
+            container: Ui.Color = .transparent,
+            on_container: Ui.Color = .transparent,
+        };
 
         /// What a part at one `Elevation` draws beneath and around itself.
         pub const Lift = struct {

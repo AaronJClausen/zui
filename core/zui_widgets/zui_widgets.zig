@@ -447,6 +447,127 @@ pub const Part = enum {
     toast_icon_success,
     /// The icon of a toast of `.tone = .danger`, read as `toast_icon`.
     toast_icon_danger,
+    /// `banner` of `.tone = .info`: `background`, `corner_radius`,
+    /// `padding`, `gap`, and `text` for its message, whose color its
+    /// title, icon, action and close button take too.
+    banner,
+    /// A banner of `.tone = .success`, read as `banner`.
+    banner_success,
+    /// A banner of `.tone = .warning`, read as `banner`.
+    banner_warning,
+    /// A banner of `.tone = .danger`, read as `banner`.
+    banner_danger,
+    /// A banner's title: `text`, its color aside.
+    banner_title,
+    /// A banner's icon: `size[0]`.
+    banner_icon,
+    /// A banner's action: `focus_ring` but its color, `corner_radius`,
+    /// `size[1]` for its least height, and `text` but its color.
+    banner_action,
+    /// The button that dismisses a banner: `focus_ring` but its color,
+    /// `corner_radius`, `size` for its icon's side and its own, and
+    /// `glyph`.
+    banner_close,
+    /// `badge` of `.tone = .neutral`: `background`, `corner_radius`,
+    /// `size[1]` for its least height and width, `padding` and `text`.
+    badge,
+    /// A badge of `.tone = .accent`, read as `badge`.
+    badge_accent,
+    /// A badge of `.tone = .success`, read as `badge`.
+    badge_success,
+    /// A badge of `.tone = .warning`, read as `badge`.
+    badge_warning,
+    /// A badge of `.tone = .danger`, read as `badge`.
+    badge_danger,
+    /// A badge without text, a dot, of `.tone = .neutral`: `background`,
+    /// `border` for its ring, `corner_radius` and `size`.
+    badge_dot,
+    /// A dot of `.tone = .accent`, read as `badge_dot`.
+    badge_dot_accent,
+    /// A dot of `.tone = .success`, read as `badge_dot`.
+    badge_dot_success,
+    /// A dot of `.tone = .warning`, read as `badge_dot`.
+    badge_dot_warning,
+    /// A dot of `.tone = .danger`, read as `badge_dot`.
+    badge_dot_danger,
+    /// `spinner`'s circle, which its arc runs along: `background` for its
+    /// color.
+    spinner_track,
+    /// The arc that turns: `background` for its color.
+    spinner_arc,
+    /// A line of `skeleton` of `.shape = .lines`: `background` and
+    /// `corner_radius`.
+    skeleton_line,
+    /// A skeleton of `.shape = .block`, read as `skeleton_line`.
+    skeleton_block,
+    /// A skeleton of `.shape = .circle`, read as `skeleton_line`.
+    skeleton_circle,
+    /// The highlight that sweeps across a skeleton, or an image while it
+    /// loads: `background` and `size[0]` for its share of the width.
+    skeleton_shimmer,
+    /// `emptyState`: `padding` and `gap`.
+    empty_state,
+    /// The circle behind its icon: `background`, `corner_radius` and
+    /// `size[0]`.
+    empty_state_illustration,
+    /// Its icon: `text` and `size[0]`.
+    empty_state_icon,
+    /// Its title: `text`.
+    empty_state_title,
+    /// Its message: `text`, `size[0]` for its greatest width, and `gap`
+    /// above its action.
+    empty_state_message,
+    /// `avatar` of `.size = .small`: `size[0]` for its side and `text`
+    /// for its initials' type.
+    avatar_small,
+    /// An avatar of `.size = .medium`, read as `avatar_small`.
+    avatar_medium,
+    /// An avatar of `.size = .large`, read as `avatar_small`.
+    avatar_large,
+    /// An avatar of `.size = .xlarge`, read as `avatar_small`.
+    avatar_xlarge,
+    /// An avatar without its image, whose name falls in
+    /// `zui.design.Category.blue`: `background`, `corner_radius` and
+    /// `text` for its initials' color.
+    avatar_blue,
+    /// The `violet` category's, read as `avatar_blue`.
+    avatar_violet,
+    /// The `rose` category's, read as `avatar_blue`.
+    avatar_rose,
+    /// The `coral` category's, read as `avatar_blue`.
+    avatar_coral,
+    /// The `amber` category's, read as `avatar_blue`.
+    avatar_amber,
+    /// The `green` category's, read as `avatar_blue`.
+    avatar_green,
+    /// The `teal` category's, read as `avatar_blue`.
+    avatar_teal,
+    /// The `graphite` category's, read as `avatar_blue`.
+    avatar_graphite,
+    /// The circle at the end of `avatarStack` that counts the rest:
+    /// `background`, `corner_radius` and `text`.
+    avatar_overflow,
+    /// The ring round each avatar of a stack: `border`.
+    avatar_stack,
+    /// The dot of an avatar of `.presence = .online`: `background`,
+    /// `border` for its ring, and `corner_radius`.
+    avatar_presence_online,
+    /// The dot of `.presence = .away`, read as `avatar_presence_online`.
+    avatar_presence_away,
+    /// The dot of `.presence = .offline`, read as
+    /// `avatar_presence_online`.
+    avatar_presence_offline,
+    /// `progressBar`'s track: `background`, `corner_radius` and `size[1]`
+    /// for its thickness.
+    progress_track,
+    /// What it has done: `background`, `corner_radius`, and `motion` as
+    /// the value changes.
+    progress_fill,
+    /// `asyncImage`'s frame: `background` while the image is not there,
+    /// `corner_radius`, and `motion` as the image fades in.
+    async_image,
+    /// The icon of an image that failed: `text`, `size[0]` and `glyph`.
+    async_image_failed,
 };
 
 /// How a widget moves a value it draws toward the skin's next one: at once,
@@ -810,7 +931,97 @@ pub fn DesignSkinWith(comptime Ui: type, comptime ExtraRoles: type) type {
                 .toast_icon => sized(skin.styled(.toast_icon, state), .{ tokens.icon_sizes.get(.medium), 0 }),
                 .toast_icon_success => sized(skin.styled(.toast_icon_success, state), .{ tokens.icon_sizes.get(.medium), 0 }),
                 .toast_icon_danger => sized(skin.styled(.toast_icon_danger, state), .{ tokens.icon_sizes.get(.medium), 0 }),
+                .banner => skin.styled(.banner, state),
+                .banner_success => skin.styled(.banner_success, state),
+                .banner_warning => skin.styled(.banner_warning, state),
+                .banner_danger => skin.styled(.banner_danger, state),
+                .banner_title => skin.styled(.label_body_strong, state),
+                .banner_icon => .{ .size = .{ tokens.icon_sizes.get(.medium), 0 } },
+                .banner_action => sized(skin.styled(.banner_action, state), .{ 0, tokens.target_floors.get(.pointer) }),
+                .banner_close => sized(withGlyph(skin.styled(.banner_close, state), "×"), .{ small_icon, tokens.target_floors.get(.pointer) }),
+                .badge => skin.badge(.badge, state),
+                .badge_accent => skin.badge(.badge_accent, state),
+                .badge_success => skin.badge(.badge_success, state),
+                .badge_warning => skin.badge(.badge_warning, state),
+                .badge_danger => skin.badge(.badge_danger, state),
+                .badge_dot => ringed(sized(skin.styled(.badge_dot, state), @splat(badge_dot_side + 2 * surface_ring_width))),
+                .badge_dot_accent => ringed(sized(skin.styled(.badge_dot_accent, state), @splat(badge_dot_side + 2 * surface_ring_width))),
+                .badge_dot_success => ringed(sized(skin.styled(.badge_dot_success, state), @splat(badge_dot_side + 2 * surface_ring_width))),
+                .badge_dot_warning => ringed(sized(skin.styled(.badge_dot_warning, state), @splat(badge_dot_side + 2 * surface_ring_width))),
+                .badge_dot_danger => ringed(sized(skin.styled(.badge_dot_danger, state), @splat(badge_dot_side + 2 * surface_ring_width))),
+                .spinner_track => skin.styled(.spinner_track, state),
+                .spinner_arc => skin.styled(.spinner_arc, state),
+                .skeleton_line => line: {
+                    var line = skin.styled(.skeleton_line, state);
+                    line.corner_radius = .all(skeleton_line_corner_radius);
+                    break :line line;
+                },
+                .skeleton_block => skin.styled(.skeleton_block, state),
+                .skeleton_circle => skin.styled(.skeleton_circle, state),
+                .skeleton_shimmer => shimmer: {
+                    var shimmer = sized(skin.styled(.skeleton_shimmer, state), .{ shimmer_share, 0 });
+                    if (shimmer.background) |color| shimmer.background = faded(color, shimmer_alpha);
+                    break :shimmer shimmer;
+                },
+                .empty_state => skin.styled(.empty_state, state),
+                .empty_state_illustration => sized(skin.styled(.empty_state_illustration, state), @splat(empty_state_illustration_side)),
+                .empty_state_icon => sized(skin.styled(.empty_state_icon, state), .{ empty_state_icon_side, 0 }),
+                .empty_state_title => skin.styled(.empty_state_title, state),
+                .empty_state_message => sized(skin.styled(.empty_state_message, state), .{ empty_state_measure_characters * average_character_share * tokens.text_styles.get(.body).size, 0 }),
+                .avatar_small => sized(skin.styled(.avatar_small, state), .{ avatar_sides.get(.small), 0 }),
+                .avatar_medium => sized(skin.styled(.avatar_medium, state), .{ avatar_sides.get(.medium), 0 }),
+                .avatar_large => sized(skin.styled(.avatar_large, state), .{ avatar_sides.get(.large), 0 }),
+                .avatar_xlarge => sized(skin.styled(.avatar_xlarge, state), .{ avatar_sides.get(.xlarge), 0 }),
+                inline .avatar_blue, .avatar_violet, .avatar_rose, .avatar_coral, .avatar_amber, .avatar_green, .avatar_teal, .avatar_graphite => |category_part| skin.categorical(comptime categoryOfAvatar(category_part)),
+                .avatar_overflow => skin.styled(.avatar_overflow, state),
+                .avatar_stack => ringed(skin.styled(.avatar_stack, state)),
+                .avatar_presence_online => ringed(skin.styled(.avatar_presence_online, state)),
+                .avatar_presence_away => ringed(skin.styled(.avatar_presence_away, state)),
+                .avatar_presence_offline => ringed(skin.styled(.avatar_presence_offline, state)),
+                .progress_track => sized(skin.styled(.progress_track, state), .{ 0, progress_track_thickness }),
+                .progress_fill => fill: {
+                    var fill = skin.styled(.progress_fill, state);
+                    fill.motion = .{ .tween = progress_motion };
+                    break :fill fill;
+                },
+                .async_image => frame: {
+                    var frame = skin.styled(.async_image, state);
+                    frame.motion = .{ .tween = image_fade_in };
+                    break :frame frame;
+                },
+                .async_image_failed => sized(withGlyph(skin.styled(.async_image_failed, state), "!"), .{ tokens.icon_sizes.get(.medium), 0 }),
             };
+        }
+
+        /// A badge is 18, 20 and 22 tall at the three densities.
+        fn badge(skin: *const Skin, comptime designed: Designed.Part, state: zui.WidgetState) Style(Ui) {
+            return sized(skin.styled(designed, state), .{ 0, badge_least_height + (skin.tokens.control_heights.get(.small) - small_control_compact_height) / 2 });
+        }
+
+        /// An avatar without its image, in `category`'s container and the
+        /// text on it.
+        fn categorical(skin: *const Skin, category: zui.design.Category) Style(Ui) {
+            const tokens = skin.tokens;
+            const colors = tokens.categories.get(category);
+            var text_style = tokens.text_styles.get(.label_strong);
+            text_style.color = colors.on_container;
+            return .{
+                .background = colors.container,
+                .corner_radius = tokens.corner_radii.get(.indicator),
+                .corner_shape = tokens.corner_shapes.get(.indicator),
+                .text = text_style,
+            };
+        }
+
+        fn categoryOfAvatar(comptime part: Part) zui.design.Category {
+            return @field(zui.design.Category, @tagName(part)["avatar_".len..]);
+        }
+
+        /// The ring a dot or an avatar draws in the surface beneath it.
+        fn ringed(style: Style(Ui)) Style(Ui) {
+            var with_ring = style;
+            if (with_ring.border) |*border| border.widths = .all(surface_ring_width);
+            return with_ring;
         }
 
         /// A popup standing at `elevation`: that level's surface, rim and
@@ -1053,6 +1264,42 @@ const scroll_thumb_dragged_share = 0.56;
 const scroll_track_hovered_share = 0.06;
 const scroll_edge_fade_depth = 16;
 const tab_indicator_thickness = 2;
+const badge_least_height = 18;
+const small_control_compact_height = 24;
+const badge_dot_side = 8;
+/// Shown in place of a count past it, as "99+".
+const badge_count_most = 99;
+/// Of a dot, an avatar in a stack and a presence dot, in the surface beneath.
+const surface_ring_width = 2;
+const spinner_period_seconds = 0.9;
+const spinner_sweep_turns = 0.25;
+/// The arc is drawn as this many overlapping dots along its sweep.
+const spinner_arc_dots = 7;
+const skeleton_shimmer_period_seconds = 1.6;
+const skeleton_line_corner_radius = 4;
+/// A line stands for text this share of its type's size tall: about its
+/// x-height, times 1.6.
+const skeleton_line_share = 0.4 * 1.6;
+const skeleton_last_line_share = 0.6;
+const shimmer_share = 0.4;
+const shimmer_alpha = 0.6;
+const empty_state_illustration_side = 96;
+const empty_state_icon_side = 48;
+const empty_state_measure_characters = 40;
+/// Running text's mean advance as a share of its size.
+const average_character_share = 0.5;
+const avatar_sides: std.EnumArray(AvatarSize, f32) = .init(.{ .small = 24, .medium = 32, .large = 48, .xlarge = 72 });
+const avatar_presence_least_side = 8;
+const progress_track_thickness = 4;
+const progress_motion: zui.motion.TweenOptions = .{ .duration = 0.3, .easing = .ease_out };
+const progress_period_seconds = 1.4;
+const progress_indeterminate_share = 0.3;
+/// The least opacity an indeterminate bar pulses down to under reduced
+/// motion.
+const progress_pulse_least_alpha = 0.4;
+const image_fade_in: zui.motion.TweenOptions = .{ .duration = 0.2, .easing = .ease_out };
+const banner_close_hover_share = 0.12;
+const badge_count_overflow = std.fmt.comptimePrint("{d}+", .{badge_count_most});
 
 const keyboard_scroll_step = 40;
 /// Of the view, so a line of the last page stays in sight on the next.
@@ -1211,6 +1458,46 @@ const Designed = struct {
         toast_icon,
         toast_icon_success,
         toast_icon_danger,
+        banner,
+        banner_success,
+        banner_warning,
+        banner_danger,
+        banner_action,
+        banner_close,
+        badge,
+        badge_accent,
+        badge_success,
+        badge_warning,
+        badge_danger,
+        badge_dot,
+        badge_dot_accent,
+        badge_dot_success,
+        badge_dot_warning,
+        badge_dot_danger,
+        spinner_track,
+        spinner_arc,
+        skeleton_line,
+        skeleton_block,
+        skeleton_circle,
+        skeleton_shimmer,
+        empty_state,
+        empty_state_illustration,
+        empty_state_icon,
+        empty_state_title,
+        empty_state_message,
+        avatar_small,
+        avatar_medium,
+        avatar_large,
+        avatar_xlarge,
+        avatar_overflow,
+        avatar_stack,
+        avatar_presence_online,
+        avatar_presence_away,
+        avatar_presence_offline,
+        progress_track,
+        progress_fill,
+        async_image,
+        async_image_failed,
     };
 
     const on_hover: zui.design.PartAppearance(void).Colors = .{ .surface = .secondary_container, .text = .on_secondary_container };
@@ -1494,7 +1781,62 @@ const Designed = struct {
         .toast_icon = .{ .icon = .on_surface_inverse, .on = .toast },
         .toast_icon_success = .{ .icon = .success, .on = .toast },
         .toast_icon_danger = .{ .icon = .danger, .on = .toast },
+        .banner = bannerOf(.accent_container, .on_accent_container, .banner),
+        .banner_success = bannerOf(.success_container, .on_success_container, .banner_success),
+        .banner_warning = bannerOf(.warning_container, .on_warning_container, .banner_warning),
+        .banner_danger = bannerOf(.danger_container, .on_danger_container, .banner_danger),
+        .banner_action = .{ .text = .on_accent_container, .type = .body_strong, .on = .banner, .shape = .control, .target = .pointer },
+        .banner_close = .{ .icon = .on_accent_container, .on = .banner, .shape = .indicator, .target = .pointer },
+        .badge = badgeOf(.secondary_container, .on_secondary_container, .badge),
+        .badge_accent = badgeOf(.accent, .on_accent, .badge_accent),
+        .badge_success = badgeOf(.success_container, .on_success_container, .badge_success),
+        .badge_warning = badgeOf(.warning_container, .on_warning_container, .badge_warning),
+        .badge_danger = badgeOf(.danger, .on_danger, .badge_danger),
+        .badge_dot = dotOf(.outline),
+        .badge_dot_accent = dotOf(.accent),
+        .badge_dot_success = dotOf(.success),
+        .badge_dot_warning = dotOf(.warning),
+        .badge_dot_danger = dotOf(.danger),
+        .spinner_track = .{ .surface = .outline_muted },
+        .spinner_arc = .{ .surface = .accent },
+        .skeleton_line = .{ .surface = .surface_sunken },
+        .skeleton_block = .{ .surface = .surface_sunken, .shape = .image },
+        .skeleton_circle = .{ .surface = .surface_sunken, .shape = .indicator },
+        // The overlay's surface is the light theme's page and lighter than
+        // the dark theme's, so one role sweeps both.
+        .skeleton_shimmer = .{ .surface = .surface_overlay },
+        .empty_state = .{ .padding = .{ .x = .xl, .y = .xxl }, .gap = .s },
+        .empty_state_illustration = .{ .surface = .surface_sunken, .shape = .indicator },
+        .empty_state_icon = .{ .icon = .on_surface_muted, .on = .empty_state_illustration },
+        .empty_state_title = .{ .text = .on_surface, .type = .title, .on = .page },
+        .empty_state_message = .{ .text = .on_surface_muted, .type = .body, .on = .page, .gap = .l },
+        .avatar_small = .{ .type = .label_strong },
+        .avatar_medium = .{ .type = .label_strong },
+        .avatar_large = .{ .type = .body_strong },
+        .avatar_xlarge = .{ .type = .title },
+        .avatar_overflow = .{ .surface = .secondary_container, .text = .on_secondary_container, .type = .label_strong, .on = .avatar_overflow, .shape = .indicator },
+        .avatar_stack = .{ .outline = .surface },
+        .avatar_presence_online = dotOf(.success),
+        .avatar_presence_away = dotOf(.warning),
+        .avatar_presence_offline = dotOf(.outline),
+        .progress_track = .{ .surface = .outline_muted, .shape = .indicator },
+        .progress_fill = .{ .surface = .accent, .shape = .indicator },
+        .async_image = .{ .surface = .surface_sunken, .shape = .image },
+        .async_image_failed = .{ .icon = .on_surface_muted, .on = .async_image },
     });
+
+    fn bannerOf(comptime surface: zui.design.ColorChoice(void), comptime text: zui.design.ColorChoice(void), comptime on: @EnumLiteral()) zui.design.PartAppearance(void) {
+        return .{ .surface = surface, .text = text, .type = .body, .on = on, .shape = .container, .padding = .{ .x = .l, .y = .m }, .gap = .m };
+    }
+
+    fn badgeOf(comptime surface: zui.design.ColorChoice(void), comptime text: zui.design.ColorChoice(void), comptime on: @EnumLiteral()) zui.design.PartAppearance(void) {
+        return .{ .surface = surface, .text = text, .type = .label_strong, .on = on, .shape = .chip, .padding = .{ .x = .s } };
+    }
+
+    /// A dot ringed in the surface beneath it.
+    fn dotOf(comptime surface: zui.design.ColorChoice(void)) zui.design.PartAppearance(void) {
+        return .{ .surface = surface, .outline = .surface, .shape = .indicator };
+    }
 
     const on_danger_hover: zui.design.PartAppearance(void).Colors = .{ .surface = .danger_container, .text = .on_danger_container };
 
@@ -1670,6 +2012,136 @@ pub const Placement = enum { below, above, leading, trailing };
 
 pub const ToastTone = enum { neutral, success, danger };
 
+/// How a banner stands out: `info` in the accent's container, and the
+/// three status containers.
+pub const BannerTone = enum {
+    info,
+    success,
+    warning,
+    danger,
+
+    pub fn part(tone: BannerTone) Part {
+        return switch (tone) {
+            .info => .banner,
+            .success => .banner_success,
+            .warning => .banner_warning,
+            .danger => .banner_danger,
+        };
+    }
+
+    pub fn icon(tone: BannerTone) zui.design.Icon {
+        return switch (tone) {
+            .info => .info,
+            .success => .success,
+            .warning => .warning,
+            .danger => .danger,
+        };
+    }
+};
+
+/// How a badge stands out: `neutral` and `accent`, and the three status
+/// tones.
+pub const BadgeTone = enum {
+    neutral,
+    accent,
+    success,
+    warning,
+    danger,
+
+    pub fn part(tone: BadgeTone) Part {
+        return switch (tone) {
+            .neutral => .badge,
+            .accent => .badge_accent,
+            .success => .badge_success,
+            .warning => .badge_warning,
+            .danger => .badge_danger,
+        };
+    }
+
+    /// The dot a badge without text is.
+    pub fn dotPart(tone: BadgeTone) Part {
+        return switch (tone) {
+            .neutral => .badge_dot,
+            .accent => .badge_dot_accent,
+            .success => .badge_dot_success,
+            .warning => .badge_dot_warning,
+            .danger => .badge_dot_danger,
+        };
+    }
+};
+
+/// What a skeleton stands in for: lines of text, the last one shorter; a
+/// block at a width-to-height `aspect`, as an image; or a circle of a
+/// diameter, as an avatar.
+pub const SkeletonShape = union(enum) {
+    lines: u8,
+    block: f32,
+    circle: f32,
+};
+
+/// An avatar's side: 24, 32, 48 or 72 in `DesignSkin`.
+pub const AvatarSize = enum {
+    small,
+    medium,
+    large,
+    xlarge,
+
+    pub fn part(size: AvatarSize) Part {
+        return switch (size) {
+            .small => .avatar_small,
+            .medium => .avatar_medium,
+            .large => .avatar_large,
+            .xlarge => .avatar_xlarge,
+        };
+    }
+};
+
+/// Whether the person an avatar shows is there, as a dot at its corner.
+pub const Presence = enum {
+    online,
+    away,
+    offline,
+
+    pub fn part(presence: Presence) Part {
+        return switch (presence) {
+            .online => .avatar_presence_online,
+            .away => .avatar_presence_away,
+            .offline => .avatar_presence_offline,
+        };
+    }
+};
+
+/// The part an avatar without its image is drawn in: its category's.
+pub fn categoryPart(category: zui.design.Category) Part {
+    return switch (category) {
+        inline else => |known| @field(Part, "avatar_" ++ @tagName(known)),
+    };
+}
+
+/// The initials an avatar shows for `name`, in `buffer`: the first letter
+/// of its first word and of its last, upper-cased where it is ASCII.
+///
+/// ```zig
+/// var buffer: [8]u8 = undefined;
+/// const shown = zui_widgets.initialsOf("Ana Ribeiro", &buffer); // "AR"
+/// ```
+pub fn initialsOf(name: []const u8, buffer: *[8]u8) []const u8 {
+    var words = std.mem.tokenizeAny(u8, name, " \t\n");
+    const first = words.next() orelse return buffer[0..0];
+    var last: ?[]const u8 = null;
+    while (words.next()) |word| last = word;
+    var length = copyFirstCharacter(first, buffer[0..4]);
+    if (last) |word| length += copyFirstCharacter(word, buffer[length..][0..4]);
+    return buffer[0..length];
+}
+
+fn copyFirstCharacter(word: []const u8, into: *[4]u8) usize {
+    const length = @min(std.unicode.utf8ByteSequenceLength(word[0]) catch 1, word.len);
+    @memcpy(into[0..length], word[0..length]);
+    if (length == 1) into[0] = std.ascii.toUpper(into[0]);
+    return length;
+}
+
 /// What `ToastQueue.push` shows.
 pub const Toast = struct {
     /// Copied, cut at a character past 160 bytes.
@@ -1780,6 +2252,9 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
         pub const Skin = SkinType;
         pub const TextStyle = Ui.TextStyle;
         pub const SkinStyle = Style(Ui);
+        /// The context's `Config.ImageHandle`, which an avatar and an async
+        /// image draw; `void` in a context without images.
+        pub const ImageHandle = @FieldType(Ui.Image, "handle");
         const FontId = @FieldType(TextStyle, "font");
 
         skin: Skin,
@@ -4609,6 +5084,629 @@ pub fn Widgets(comptime UiType: type, comptime SkinType: type) type {
             ui.close();
         }
 
+        pub const BannerOptions = struct {
+            tone: BannerTone = .info,
+            /// Above its message in the strong font; none when empty.
+            title: []const u8 = "",
+            message: []const u8 = "",
+            /// The label of its one action, a text button at its end; none
+            /// when empty.
+            action: []const u8 = "",
+            /// Draws a close button, and lets Escape on its buttons and a
+            /// `dismiss` action dismiss it.
+            dismissible: bool = false,
+        };
+
+        pub const BannerResult = struct {
+            /// Its action was chosen, by a click, Enter or Space.
+            acted: bool = false,
+            /// Its close button was chosen, Escape was pressed on one of its
+            /// buttons, or an assistive technology dismissed it: the
+            /// application stops declaring it.
+            dismissed: bool = false,
+        };
+
+        /// A message across the page in the tone's container, with the
+        /// tone's icon, a title, an action and a close button, announced to
+        /// an assistive technology as it appears. Its text wraps to its
+        /// width.
+        ///
+        /// ```zig
+        /// if (app.offline_banner) {
+        ///     const shown = widgets.banner(ui, .of("offline"), .{ .tone = .warning, .title = "You are offline", .message = "Changes are saved here and sent when you reconnect.", .action = "Retry", .dismissible = true });
+        ///     if (shown.acted) app.reconnect();
+        ///     if (shown.dismissed) app.offline_banner = false;
+        /// }
+        /// ```
+        pub fn banner(self: Self, ui: *Ui, id: zui.Id, options: BannerOptions) BannerResult {
+            const action_id = id.child("action");
+            const close_id = id.child("close");
+            const result: BannerResult = .{
+                .acted = options.action.len != 0 and ui.clicked(action_id),
+                .dismissed = options.dismissible and (ui.clicked(close_id) or ui.dismissed(id) or ui.dismissed(close_id) or ui.dismissed(action_id)),
+            };
+            const look = self.style(ui, options.tone.part(), .idle);
+            const ink = look.text.color;
+            ui.open(.{
+                .id = id,
+                .semantics = .{ .role = .status, .label = if (options.title.len != 0) options.title else options.message, .actions = if (options.dismissible) .initOne(.dismiss) else .initEmpty() },
+                .decoration = decorationOf(look, false),
+                .layout = .{ .sizing = .{ .width = .grow }, .padding = look.padding, .child_gap = look.gap, .child_alignment = .{ .y = .center } },
+            });
+            var icon_look = look;
+            icon_look.size[0] = self.style(ui, .banner_icon, .idle).size[0];
+            self.icon(ui, options.tone.icon(), icon_look);
+            ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow } } });
+            if (options.title.len != 0) {
+                var title_style = self.style(ui, .banner_title, .idle).text;
+                title_style.color = ink;
+                title_style.wrap = .words;
+                ui.text(options.title, title_style);
+            }
+            if (options.message.len != 0) {
+                var message_style = look.text;
+                message_style.wrap = .words;
+                ui.text(options.message, message_style);
+            }
+            ui.close();
+            if (options.action.len != 0) self.bannerAction(ui, action_id, options.action, ink);
+            if (options.dismissible) self.bannerClose(ui, close_id, ink);
+            ui.close();
+            return result;
+        }
+
+        fn bannerAction(self: Self, ui: *Ui, action_id: zui.Id, content: []const u8, ink: Ui.Color) void {
+            const state = ui.widgetState(action_id);
+            const look = self.style(ui, .banner_action, state);
+            var label_style = singleLine(look.text);
+            label_style.color = ink;
+            const hovered = state == .hovered or state == .pressed;
+            ui.open(.{
+                .id = action_id,
+                .focusable = true,
+                .cursor = .pointer,
+                .semantics = .{ .role = .button, .label = content },
+                .decoration = .{ .border = if (focusShown(ui, action_id)) ringIn(look, ink) else null, .corner_radius = look.corner_radius, .corner_shape = look.corner_shape },
+                .layout = .{ .direction = .top_to_bottom, .sizing = .{ .height = .fitBetween(look.size[1], std.math.inf(f32)) }, .child_alignment = .{ .y = .center } },
+            });
+            ui.text(content, label_style);
+            ui.box(.{ .decoration = .{ .background = if (hovered) ink else faded(ink, link_underline_resting_share) }, .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(link_underline_thickness) } } });
+            ui.close();
+        }
+
+        fn bannerClose(self: Self, ui: *Ui, close_id: zui.Id, ink: Ui.Color) void {
+            const state = ui.widgetState(close_id);
+            var close = self.style(ui, .banner_close, state);
+            close.text.color = ink;
+            const hovered = state == .hovered or state == .pressed;
+            ui.open(.{
+                .id = close_id,
+                .focusable = true,
+                .cursor = .pointer,
+                .semantics = .{ .role = .button, .label = "Dismiss" },
+                .decoration = .{
+                    .background = if (hovered) faded(ink, banner_close_hover_share) else null,
+                    .border = if (focusShown(ui, close_id)) ringIn(close, ink) else null,
+                    .corner_radius = close.corner_radius,
+                    .corner_shape = close.corner_shape,
+                },
+                .layout = .{ .sizing = .{ .width = .fixed(close.size[1]), .height = .fixed(close.size[1]) }, .child_alignment = .{ .x = .center, .y = .center } },
+            });
+            self.icon(ui, .close, close);
+            ui.close();
+        }
+
+        /// The skin's focus ring drawn in `ink`, the text of the container
+        /// it stands on, which the focus role may not stand apart from.
+        fn ringIn(look: SkinStyle, ink: Ui.Color) ?Ui.Border {
+            var ring = look.focus_ring orelse return null;
+            ring.color = ink;
+            return ring;
+        }
+
+        pub const BadgeOptions = struct {
+            tone: BadgeTone = .neutral,
+            /// Its name to an assistive technology; its text when empty, as
+            /// a dot's must not be.
+            label: []const u8 = "",
+        };
+
+        /// A short label in a pill, in the tone's colors; without text, a
+        /// dot ringed in the surface beneath it, to sit over a corner.
+        ///
+        /// ```zig
+        /// widgets.badge(ui, .of("plan"), "Beta", .{ .tone = .accent });
+        /// widgets.badge(ui, .of("unread"), "", .{ .tone = .danger, .label = "Unread messages" });
+        /// ```
+        pub fn badge(self: Self, ui: *Ui, id: zui.Id, content: []const u8, options: BadgeOptions) void {
+            if (content.len == 0) return self.badgeDot(ui, id, options);
+            const look = self.style(ui, options.tone.part(), .idle);
+            badgePill(ui, id, content, singleLine(look.text), look, if (options.label.len != 0) options.label else content);
+        }
+
+        /// A count in a badge, in numerals at the badge's size; past 99 it
+        /// shows "99+".
+        ///
+        /// ```zig
+        /// widgets.badgeCount(ui, .of("inbox.unread"), app.unread, .{ .tone = .accent, .label = "Unread" });
+        /// ```
+        pub fn badgeCount(self: Self, ui: *Ui, id: zui.Id, count: u32, options: BadgeOptions) void {
+            var digits: [16]u8 = undefined;
+            const shown = if (count > badge_count_most) badge_count_overflow else std.fmt.bufPrint(&digits, "{d}", .{count}) catch badge_count_overflow;
+            const look = self.style(ui, options.tone.part(), .idle);
+            var numerals = singleLine(look.text);
+            numerals.font = self.style(ui, .label_numeric, .idle).text.font;
+            var label_bytes: [64]u8 = undefined;
+            const accessible_label = if (options.label.len != 0) std.fmt.bufPrint(&label_bytes, "{s}: {s}", .{ options.label, shown }) catch shown else shown;
+            badgePill(ui, id, shown, numerals, look, accessible_label);
+        }
+
+        fn badgePill(ui: *Ui, id: zui.Id, content: []const u8, text_style: TextStyle, look: SkinStyle, accessible_label: []const u8) void {
+            ui.open(.{
+                .id = id,
+                .semantics = .{ .role = .label, .label = accessible_label },
+                .decoration = decorationOf(look, false),
+                .layout = .{
+                    .sizing = .{ .width = .fitBetween(look.size[1], std.math.inf(f32)), .height = .fitBetween(look.size[1], std.math.inf(f32)) },
+                    .padding = look.padding,
+                    .child_alignment = .{ .x = .center, .y = .center },
+                },
+            });
+            ui.text(content, text_style);
+            ui.close();
+        }
+
+        fn badgeDot(self: Self, ui: *Ui, id: zui.Id, options: BadgeOptions) void {
+            const dot = self.style(ui, options.tone.dotPart(), .idle);
+            ui.box(.{
+                .id = id,
+                .semantics = .{ .role = .label, .label = options.label },
+                .decoration = decorationOf(dot, false),
+                .layout = .{ .sizing = .{ .width = .fixed(dot.size[0]), .height = .fixed(dot.size[1]) } },
+            });
+        }
+
+        pub const SpinnerOptions = struct {
+            /// It is as big as a control's icon of this size.
+            size: zui.design.ControlSize = .medium,
+            /// Its name to an assistive technology.
+            label: []const u8 = "Loading",
+        };
+
+        /// An arc turning round its circle once every 0.9 s, for work of no
+        /// known length, reported as a progress bar without a value. It
+        /// asks for every frame while it turns; under reduced motion it
+        /// holds still with its arc at the top, and asks for none.
+        ///
+        /// ```zig
+        /// if (app.saving) widgets.spinner(ui, .of("saving"), .{ .size = .small, .label = "Saving" });
+        /// ```
+        pub fn spinner(self: Self, ui: *Ui, id: zui.Id, options: SpinnerOptions) void {
+            const side = self.style(ui, controlSizePart(options.size), .idle).size[0];
+            const stroke = side / 8;
+            const track = self.style(ui, .spinner_track, .idle);
+            const arc = self.style(ui, .spinner_arc, .idle);
+            const turning = !ui.environment().reduced_motion;
+            const turned: f32 = if (turning) loopPhase(ui, spinner_period_seconds) else 0;
+            if (turning) ui.requestFrame();
+            ui.open(.{
+                .id = id,
+                .semantics = .{ .role = .progress_bar, .label = options.label },
+                .decoration = .{ .border = if (track.background) |color| .{ .color = color, .widths = .all(stroke) } else null, .corner_radius = .all(side / 2) },
+                .layout = .{ .sizing = .{ .width = .fixed(side), .height = .fixed(side) } },
+            });
+            const radius = (side - stroke) / 2;
+            for (0..spinner_arc_dots) |dot| {
+                const along = @as(f32, @floatFromInt(dot)) / (spinner_arc_dots - 1);
+                const angle = (turned + spinner_sweep_turns * (along - 0.5)) * 2 * std.math.pi;
+                ui.box(.{
+                    .floating = .{ .attach_to = .parent, .anchor = .center, .attach_point = .center, .offset = .{ radius * @sin(angle), -radius * @cos(angle) }, .capture = false },
+                    .decoration = .{ .background = arc.background, .corner_radius = .all(stroke / 2) },
+                    .layout = .{ .sizing = .{ .width = .fixed(stroke), .height = .fixed(stroke) } },
+                });
+            }
+            ui.close();
+        }
+
+        pub const SkeletonOptions = struct {
+            shape: SkeletonShape = .{ .lines = 3 },
+            /// The type lines stand in for, which sets their thickness and
+            /// spacing.
+            role: zui.design.TypeRole = .body,
+            /// Of lines and a block; a circle is as wide as it is tall.
+            width: zui.Sizing = .grow,
+            /// Its name to an assistive technology.
+            label: []const u8 = "Loading",
+        };
+
+        /// Where content will be once it loads: lines of text, the last at
+        /// 60% of the width, a block or a circle, in the sunken surface. A
+        /// highlight sweeps across each line and block every 1.6 s, and a
+        /// circle brightens and dims, asking for every frame; under reduced
+        /// motion it holds still and asks for none.
+        ///
+        /// ```zig
+        /// switch (ui.source(.profile).status()) {
+        ///     .ready => |profile| showProfile(ui, profile),
+        ///     else => {
+        ///         widgets.skeleton(ui, .of("profile.photo"), .{ .shape = .{ .circle = 48 } });
+        ///         widgets.skeleton(ui, .of("profile.bio"), .{ .shape = .{ .lines = 3 } });
+        ///     },
+        /// }
+        /// ```
+        pub fn skeleton(self: Self, ui: *Ui, id: zui.Id, options: SkeletonOptions) void {
+            const shimmering = !ui.environment().reduced_motion;
+            if (shimmering) ui.requestFrame();
+            const semantics: zui.Semantics = .{ .role = .progress_bar, .label = options.label };
+            switch (options.shape) {
+                .lines => |count| {
+                    const line = self.style(ui, .skeleton_line, .idle);
+                    const type_style = self.style(ui, labelPartOf(options.role), .idle).text;
+                    const thickness = @round(type_style.size * skeleton_line_share);
+                    const spacing = @max(type_style.line_height - thickness, 0);
+                    ui.open(.{ .id = id, .semantics = semantics, .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = options.width }, .padding = .symmetric(0, spacing / 2), .child_gap = spacing } });
+                    for (0..count) |index| {
+                        const shortened = count > 1 and index + 1 == count;
+                        const width: zui.Sizing = if (shortened) .percent(skeleton_last_line_share) else .grow;
+                        self.sweptPiece(ui, id.indexedChild("line", index), line, width, .fixed(thickness), null, shimmering);
+                    }
+                    ui.close();
+                },
+                .block => |aspect| self.sweptPiece(ui, id, self.style(ui, .skeleton_block, .idle), options.width, .aspectRatio(aspect), semantics, shimmering),
+                .circle => |diameter| {
+                    var circle = self.style(ui, .skeleton_circle, .idle);
+                    if (shimmering) circle.background = self.pulsed(ui, circle.background);
+                    ui.box(.{ .id = id, .semantics = semantics, .decoration = decorationOf(circle, false), .layout = .{ .sizing = .{ .width = .fixed(diameter), .height = .fixed(diameter) } } });
+                },
+            }
+        }
+
+        /// A piece of a skeleton, with the highlight sweeping across it
+        /// while `shimmering`.
+        fn sweptPiece(self: Self, ui: *Ui, piece_id: zui.Id, look: SkinStyle, width: zui.Sizing, height: zui.Sizing, semantics: ?zui.Semantics, shimmering: bool) void {
+            ui.open(.{ .id = piece_id, .semantics = semantics, .clip = .both, .decoration = decorationOf(look, false), .layout = .{ .sizing = .{ .width = width, .height = height } } });
+            if (shimmering) self.shimmerOver(ui, piece_id);
+            ui.close();
+        }
+
+        /// The highlight, a band of the skin's share of `piece_id`'s width
+        /// as it was last laid out, entering at its start and leaving past
+        /// its end once a period.
+        fn shimmerOver(self: Self, ui: *Ui, piece_id: zui.Id) void {
+            const rect = ui.rectOf(piece_id) orelse return;
+            const shimmer = self.style(ui, .skeleton_shimmer, .idle);
+            const band = rect.width * shimmer.size[0];
+            const phase = loopPhase(ui, skeleton_shimmer_period_seconds);
+            ui.box(.{
+                .floating = .{ .attach_to = .parent, .anchor = .top_left, .attach_point = .top_left, .offset = .{ phase * (rect.width + band) - band, 0 }, .capture = false },
+                .decoration = .{ .background = shimmer.background },
+                .layout = .{ .sizing = .{ .width = .fixed(band), .height = .fixed(rect.height) } },
+            });
+        }
+
+        /// `color` brightened toward the highlight and back once a period.
+        fn pulsed(self: Self, ui: *Ui, color: ?Ui.Color) ?Ui.Color {
+            const base = color orelse return null;
+            var highlight = self.style(ui, .skeleton_shimmer, .idle).background orelse return base;
+            highlight.a = base.a;
+            const wave = 0.5 - 0.5 * @cos(loopPhase(ui, skeleton_shimmer_period_seconds) * 2 * std.math.pi);
+            return base.mix(highlight, wave * shimmer_alpha);
+        }
+
+        pub const ProgressBarOptions = struct {
+            /// Its name to an assistive technology.
+            label: []const u8 = "Progress",
+            width: zui.Sizing = .grow,
+        };
+
+        /// How much of a piece of work is done, `value` from 0 to 1, the
+        /// fill easing to each new value; with a null `value`, a fill of 30%
+        /// sliding back and forth every 1.4 s, or, under reduced motion,
+        /// holding at the middle and pulsing. Reported as a progress bar
+        /// with its value. An indeterminate bar asks for every frame.
+        ///
+        /// ```zig
+        /// widgets.progressBar(ui, .of("upload"), app.uploaded_bytes / app.total_bytes, .{ .label = "Uploading" });
+        /// widgets.progressBar(ui, .of("connecting"), null, .{ .label = "Connecting" });
+        /// ```
+        pub fn progressBar(self: Self, ui: *Ui, id: zui.Id, value: ?f32, options: ProgressBarOptions) void {
+            const track = self.style(ui, .progress_track, .idle);
+            var fill = self.style(ui, .progress_fill, .idle);
+            const done: ?f32 = if (value) |fraction| std.math.clamp(fraction, 0, 1) else null;
+            ui.open(.{
+                .id = id,
+                .semantics = .{ .role = .progress_bar, .label = options.label, .value = if (done) |fraction| .{ .range = .{ .value = fraction } } else .none },
+                .decoration = decorationOf(track, false),
+                .layout = .{ .sizing = .{ .width = options.width, .height = .fixed(track.size[1]) } },
+            });
+            if (done) |fraction| {
+                const shown = animate(ui, id.child("fill"), f32, fraction, fill.motion);
+                if (shown > 0) ui.box(.{ .decoration = decorationOf(fill, false), .layout = .{ .sizing = .{ .width = .percent(shown), .height = .grow } } });
+            } else {
+                ui.requestFrame();
+                const phase = loopPhase(ui, progress_period_seconds);
+                const room: f32 = 1 - progress_indeterminate_share;
+                const reduced = ui.environment().reduced_motion;
+                const lead = if (reduced) room / 2 else room * zui.motion.Easing.ease_in_out.apply(1 - @abs(2 * phase - 1));
+                if (reduced) if (fill.background) |color| {
+                    const wave = 0.5 + 0.5 * @cos(phase * 2 * std.math.pi);
+                    fill.background = faded(color, progress_pulse_least_alpha + (1 - progress_pulse_least_alpha) * wave);
+                };
+                ui.box(.{ .layout = .{ .sizing = .{ .width = .percent(lead), .height = .grow } } });
+                ui.box(.{ .decoration = decorationOf(fill, false), .layout = .{ .sizing = .{ .width = .percent(progress_indeterminate_share), .height = .grow } } });
+            }
+            ui.close();
+        }
+
+        pub const EmptyStateOptions = struct {
+            /// Drawn large in a circle above the title; none when null.
+            icon: ?zui.design.Icon = null,
+            title: []const u8,
+            message: []const u8 = "",
+            /// The label of its one action, a button below; none when empty.
+            action: []const u8 = "",
+            action_variant: ButtonVariant = .primary,
+        };
+
+        /// What stands in a view with nothing to show: an icon in a circle,
+        /// a title, a message at most 40 characters wide, and an action,
+        /// centered. Returns whether the action was chosen.
+        ///
+        /// ```zig
+        /// if (app.results.len == 0) {
+        ///     if (widgets.emptyState(ui, .of("no_results"), .{ .icon = .search, .title = "No matches", .message = "Try fewer filters or another word.", .action = "Clear filters", .action_variant = .secondary })) app.clearFilters();
+        /// }
+        /// ```
+        pub fn emptyState(self: Self, ui: *Ui, id: zui.Id, options: EmptyStateOptions) bool {
+            const look = self.style(ui, .empty_state, .idle);
+            ui.open(.{
+                .id = id,
+                .semantics = .{ .role = .group, .label = options.title },
+                .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .grow }, .padding = look.padding, .child_gap = look.gap, .child_alignment = .{ .x = .center } },
+            });
+            if (options.icon) |name| {
+                const circle = self.style(ui, .empty_state_illustration, .idle);
+                ui.open(.{
+                    .decoration = decorationOf(circle, false),
+                    .layout = .{ .sizing = .{ .width = .fixed(circle.size[0]), .height = .fixed(circle.size[1]) }, .child_alignment = .{ .x = .center, .y = .center } },
+                });
+                self.icon(ui, name, self.style(ui, .empty_state_icon, .idle));
+                ui.close();
+            }
+            var title_style = self.style(ui, .empty_state_title, .idle).text;
+            title_style.wrap = .words;
+            title_style.alignment = .center;
+            ui.text(options.title, title_style);
+            const message = self.style(ui, .empty_state_message, .idle);
+            if (options.message.len != 0) {
+                var message_style = message.text;
+                message_style.wrap = .words;
+                message_style.alignment = .center;
+                ui.open(.{ .layout = .{ .sizing = .{ .width = .fitBetween(0, message.size[0]) } } });
+                ui.text(options.message, message_style);
+                ui.close();
+            }
+            var acted = false;
+            if (options.action.len != 0) {
+                ui.open(.{ .layout = .{ .padding = .{ .top = @max(message.gap - look.gap, 0) } } });
+                acted = self.button(ui, id.child("action"), options.action, .{ .variant = options.action_variant });
+                ui.close();
+            }
+            ui.close();
+            return acted;
+        }
+
+        pub const AvatarOptions = struct {
+            /// Its initials, its colors and its name to an assistive
+            /// technology.
+            name: []const u8,
+            /// Drawn in place of the initials, in the circle.
+            image: ?ImageHandle = null,
+            size: AvatarSize = .medium,
+            presence: ?Presence = null,
+        };
+
+        /// A person, as their picture or, without one, the initials of
+        /// their name on the container of the category the name falls in,
+        /// so a name has the same colors wherever it is drawn. A presence
+        /// dot sits at its bottom trailing corner.
+        ///
+        /// ```zig
+        /// widgets.avatar(ui, .of("author"), .{ .name = "Ana Ribeiro", .image = app.portraits.get("ana"), .size = .large, .presence = .online });
+        /// ```
+        pub fn avatar(self: Self, ui: *Ui, id: zui.Id, options: AvatarOptions) void {
+            self.declareAvatar(ui, id, options, null);
+        }
+
+        fn declareAvatar(self: Self, ui: *Ui, id: zui.Id, options: AvatarOptions, ring: ?Ui.Border) void {
+            const sized_look = self.style(ui, options.size.part(), .idle);
+            const side = sized_look.size[0];
+            const colors = self.style(ui, categoryPart(.of(options.name)), .idle);
+            const pictured = Ui.has_image and options.image != null;
+            var label_bytes: [128]u8 = undefined;
+            const accessible_label = if (options.presence) |presence| std.fmt.bufPrint(&label_bytes, "{s}, {t}", .{ options.name, presence }) catch options.name else options.name;
+            ui.open(.{
+                .id = id,
+                .semantics = .{ .role = .image, .label = accessible_label },
+                .decoration = .{ .background = if (pictured) null else colors.background, .border = ring, .corner_radius = colors.corner_radius, .corner_shape = colors.corner_shape },
+                .layout = .{ .sizing = .{ .width = .fixed(side), .height = .fixed(side) }, .child_alignment = .{ .x = .center, .y = .center } },
+            });
+            if (comptime Ui.has_image) if (options.image) |handle| {
+                ui.image(.{ .handle = handle, .corner_radius = colors.corner_radius, .corner_shape = colors.corner_shape }, .{ .layout = .{ .sizing = .grow_both } });
+            };
+            if (!pictured) {
+                var initials_style = singleLine(sized_look.text);
+                initials_style.color = colors.text.color;
+                var initials: [8]u8 = undefined;
+                ui.text(initialsOf(options.name, &initials), initials_style);
+            }
+            if (options.presence) |presence| {
+                const dot = self.style(ui, presence.part(), .idle);
+                const ringed_width = if (dot.border) |border| border.widths.left else 0;
+                const dot_side = @max(side / 4, avatar_presence_least_side) + 2 * ringed_width;
+                ui.box(.{
+                    .floating = .{ .attach_to = .parent, .anchor = .bottom_right, .attach_point = .bottom_right, .capture = false },
+                    .decoration = decorationOf(dot, false),
+                    .layout = .{ .sizing = .{ .width = .fixed(dot_side), .height = .fixed(dot_side) } },
+                });
+            }
+            ui.close();
+        }
+
+        pub const AvatarStackOptions = struct {
+            size: AvatarSize = .small,
+            /// Shown before the rest are counted in a last circle, as "+3".
+            most: usize = 3,
+            /// Its name to an assistive technology; "N people" when empty.
+            label: []const u8 = "",
+        };
+
+        /// The avatars of `names`, each overlapping the one before by a
+        /// quarter of its side and ringed in the surface beneath, the rest
+        /// past `most` counted at the end.
+        ///
+        /// ```zig
+        /// widgets.avatarStack(ui, .of("editors"), &.{ "Ana Ribeiro", "Kofi Mensah", "Mei Chen", "Lars Berg" }, .{ .label = "Editing now" });
+        /// ```
+        pub fn avatarStack(self: Self, ui: *Ui, id: zui.Id, names: []const []const u8, options: AvatarStackOptions) void {
+            const side = self.style(ui, options.size.part(), .idle).size[0];
+            const overlapped = side - side / 4;
+            const ring = self.style(ui, .avatar_stack, .idle).border;
+            var label_bytes: [32]u8 = undefined;
+            const accessible_label = if (options.label.len != 0) options.label else std.fmt.bufPrint(&label_bytes, "{d} people", .{names.len}) catch "";
+            const shown = @min(names.len, options.most);
+            const counted = names.len - shown;
+            ui.open(.{ .id = id, .semantics = .{ .role = .group, .label = accessible_label }, .layout = .{ .child_alignment = .{ .y = .center } } });
+            for (names[0..shown], 0..) |name, index| {
+                const covered = index + 1 < shown or counted != 0;
+                ui.open(.{ .layout = .{ .sizing = .{ .width = .fixed(if (covered) overlapped else side), .height = .fixed(side) } } });
+                self.declareAvatar(ui, id.indexedChild("avatar", index), .{ .name = name, .size = options.size }, ring);
+                ui.close();
+            }
+            if (counted != 0) {
+                const overflow = self.style(ui, .avatar_overflow, .idle);
+                var count_bytes: [16]u8 = undefined;
+                ui.open(.{
+                    .decoration = .{ .background = overflow.background, .border = ring, .corner_radius = overflow.corner_radius, .corner_shape = overflow.corner_shape },
+                    .layout = .{ .sizing = .{ .width = .fixed(side), .height = .fixed(side) }, .child_alignment = .{ .x = .center, .y = .center } },
+                });
+                ui.text(std.fmt.bufPrint(&count_bytes, "+{d}", .{counted}) catch "+", singleLine(overflow.text));
+                ui.close();
+            }
+            ui.close();
+        }
+
+        pub const AsyncImageOptions = struct {
+            /// Width over height, of the frame and of the image in it.
+            aspect: f32 = 16.0 / 9.0,
+            width: zui.Sizing = .grow,
+            /// Its name to an assistive technology.
+            label: []const u8 = "",
+        };
+
+        /// An image that arrives later. `source` is a status, a tagged union
+        /// with a `ready` field holding the context's `ImageHandle`, as
+        /// `zui.Status(ImageHandle)` is, or a value whose `status()` returns
+        /// one, as a `zui_async.Task`'s view's does. While it is `idle` or
+        /// `running` the frame shimmers as a skeleton does; once `ready` the
+        /// image fades in; `failed` or `canceled`, it shows the broken image
+        /// icon. A context without images draws a ready image's frame alone.
+        ///
+        /// ```zig
+        /// widgets.asyncImage(ui, .of("cover"), ui.source(.cover), .{ .aspect = 3.0 / 2.0, .label = "The book's cover" });
+        /// widgets.asyncImage(ui, .indexed("thumbnail", index), ui.source(.thumbnails).get(index), .{ .aspect = 1 });
+        /// ```
+        pub fn asyncImage(self: Self, ui: *Ui, id: zui.Id, source: anytype, options: AsyncImageOptions) void {
+            const status = imageStatusOf(source);
+            const phase = imagePhaseOf(status);
+            const frame = self.style(ui, .async_image, .idle);
+            const ready = phase == .ready;
+            const opacity = animate(ui, id.child("fade"), f32, if (ready) 1 else 0, frame.motion);
+            const pictured = Ui.has_image and ready;
+            ui.open(.{
+                .id = id,
+                .clip = .both,
+                .semantics = .{ .role = .image, .label = options.label },
+                .decoration = .{ .background = if (pictured and opacity == 1) null else frame.background, .corner_radius = frame.corner_radius, .corner_shape = frame.corner_shape },
+                .layout = .{ .sizing = .{ .width = options.width, .height = .aspectRatio(options.aspect) }, .child_alignment = .{ .x = .center, .y = .center } },
+            });
+            switch (phase) {
+                .loading => if (!ui.environment().reduced_motion) {
+                    ui.requestFrame();
+                    self.shimmerOver(ui, id);
+                },
+                .ready => if (comptime Ui.has_image) {
+                    const tint: Ui.Color = .white;
+                    ui.image(.{ .handle = readyImageOf(status), .tint = if (opacity < 1) faded(tint, opacity) else tint, .corner_radius = frame.corner_radius, .corner_shape = frame.corner_shape }, .{ .layout = .{ .sizing = .grow_both } });
+                },
+                .failed => self.icon(ui, .broken_image, self.style(ui, .async_image_failed, .idle)),
+            }
+            ui.close();
+        }
+
+        const ImagePhase = enum { loading, ready, failed };
+
+        fn imageStatusOf(source: anytype) ImageStatusOf(@TypeOf(source)) {
+            if (comptime isImageStatus(@TypeOf(source))) return source;
+            return source.status();
+        }
+
+        fn ImageStatusOf(comptime Source: type) type {
+            if (isImageStatus(Source)) return checkedImageStatus(Source);
+            const Holder = switch (@typeInfo(Source)) {
+                .pointer => |pointer| pointer.child,
+                else => Source,
+            };
+            const holds_declarations = switch (@typeInfo(Holder)) {
+                .@"struct", .@"union", .@"enum", .@"opaque" => true,
+                else => false,
+            };
+            if (holds_declarations and @hasDecl(Holder, "status")) {
+                const Status = @typeInfo(@TypeOf(Holder.status)).@"fn".return_type.?;
+                if (isImageStatus(Status)) return checkedImageStatus(Status);
+            }
+            @compileError("zui_widgets: asyncImage needs a source with a status, a tagged union with a `ready` field or a value whose `status()` returns one, got " ++ @typeName(Source));
+        }
+
+        fn isImageStatus(comptime Status: type) bool {
+            return @typeInfo(Status) == .@"union" and @typeInfo(Status).@"union".tag_type != null and @hasField(Status, "ready");
+        }
+
+        fn checkedImageStatus(comptime Status: type) type {
+            const Ready = @FieldType(Status, "ready");
+            if (Ui.has_image and Ready != ImageHandle)
+                @compileError("zui_widgets: asyncImage's source is ready with " ++ @typeName(Ready) ++ ", not the context's ImageHandle, " ++ @typeName(ImageHandle));
+            return Status;
+        }
+
+        fn imagePhaseOf(status: anytype) ImagePhase {
+            return switch (status) {
+                inline else => |_, tag| comptime imagePhaseNamed(@TypeOf(status), @tagName(tag)),
+            };
+        }
+
+        fn imagePhaseNamed(comptime Status: type, comptime name: []const u8) ImagePhase {
+            if (std.mem.eql(u8, name, "ready")) return .ready;
+            if (std.mem.eql(u8, name, "idle") or std.mem.eql(u8, name, "running")) return .loading;
+            if (std.mem.eql(u8, name, "failed") or std.mem.eql(u8, name, "canceled")) return .failed;
+            @compileError("zui_widgets: asyncImage's source status " ++ @typeName(Status) ++ " has `" ++ name ++ "`, which is none of idle, running, ready, failed and canceled");
+        }
+
+        fn readyImageOf(status: anytype) ImageHandle {
+            return switch (status) {
+                .ready => |handle| handle,
+                else => unreachable,
+            };
+        }
+
+        /// How far through its period a looping animation is, from 0 to 1,
+        /// by the frame's clock, so every looping part of a frame agrees.
+        fn loopPhase(ui: *const Ui, period_seconds: f64) f32 {
+            const period: u64 = @intFromFloat(period_seconds * std.time.ns_per_s);
+            const into = ui.now().nanoseconds % period;
+            return @floatCast(@as(f64, @floatFromInt(into)) / @as(f64, @floatFromInt(period)));
+        }
+
         const Alignment = enum { start, center };
         const Side = enum { below, above, left, right };
 
@@ -5346,6 +6444,147 @@ pub const previews = struct {
         }
     };
 
+    pub const Banner = struct {
+        pub const Content = struct { tone: BannerTone, title: []const u8 = "", message: []const u8, action: []const u8 = "", dismissible: bool = false };
+
+        pub const zuiPreviews = .{
+            .info = Content{ .tone = .info, .title = "A new version is ready", .message = "Restart to update; your work is kept.", .action = "Restart" },
+            .success = Content{ .tone = .success, .message = "Your changes are published." },
+            .warning = Content{ .tone = .warning, .title = "You are offline", .message = "Changes are saved here and sent when you reconnect.", .action = "Retry", .dismissible = true },
+            .danger = Content{ .tone = .danger, .title = "Payment failed", .message = "The card was declined. Update it to keep your plan.", .action = "Update card", .dismissible = true },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            _ = widgets.banner(ui, .of("preview.banner"), .{ .tone = content.tone, .title = content.title, .message = content.message, .action = content.action, .dismissible = content.dismissible });
+        }
+    };
+
+    pub const Badge = struct {
+        pub const Content = struct { text: []const u8 = "", tone: BadgeTone = .neutral, count: ?u32 = null };
+
+        pub const zuiPreviews = .{
+            .neutral = Content{ .text = "Draft" },
+            .accent = Content{ .text = "Beta", .tone = .accent },
+            .success = Content{ .text = "Paid", .tone = .success },
+            .warning = Content{ .text = "Due soon", .tone = .warning },
+            .danger = Content{ .text = "Overdue", .tone = .danger },
+            .count = Content{ .tone = .accent, .count = 128 },
+            .dot = Content{ .tone = .danger },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            if (content.count) |count| return widgets.badgeCount(ui, .of("preview.badge"), count, .{ .tone = content.tone, .label = "Unread" });
+            widgets.badge(ui, .of("preview.badge"), content.text, .{ .tone = content.tone, .label = if (content.text.len == 0) "Unread" else "" });
+        }
+    };
+
+    /// Turning, unless the permutation reduces motion.
+    pub const Spinner = struct {
+        pub const Content = struct { size: zui.design.ControlSize };
+
+        pub const zuiPreviews = .{
+            .small = Content{ .size = .small },
+            .medium = Content{ .size = .medium },
+            .large = Content{ .size = .large },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            widgets.spinner(ui, .of("preview.spinner"), .{ .size = content.size });
+        }
+    };
+
+    pub const Skeleton = struct {
+        pub const Content = struct { shape: SkeletonShape };
+
+        pub const zuiPreviews = .{
+            .lines = Content{ .shape = .{ .lines = 3 } },
+            .block = Content{ .shape = .{ .block = 16.0 / 9.0 } },
+            .circle = Content{ .shape = .{ .circle = 48 } },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            widgets.skeleton(ui, .of("preview.skeleton"), .{ .shape = content.shape });
+        }
+    };
+
+    pub const ProgressBar = struct {
+        pub const Content = struct { value: ?f32 };
+
+        pub const zuiPreviews = .{
+            .started = Content{ .value = 0.3 },
+            .nearly_done = Content{ .value = 0.9 },
+            .indeterminate = Content{ .value = null },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            widgets.progressBar(ui, .of("preview.progress_bar"), content.value, .{ .label = "Uploading" });
+        }
+    };
+
+    pub const EmptyState = struct {
+        pub const Content = struct { icon: ?zui.design.Icon = null, title: []const u8, message: []const u8 = "", action: []const u8 = "" };
+
+        pub const zuiPreviews = .{
+            .plain = Content{ .title = "No messages", .message = "New messages show up here." },
+            .with_action = Content{ .icon = .search, .title = "No matches", .message = "Try fewer filters, or search for another word.", .action = "Clear filters" },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            _ = widgets.emptyState(ui, .of("preview.empty_state"), .{ .icon = content.icon, .title = content.title, .message = content.message, .action = content.action, .action_variant = .secondary });
+        }
+    };
+
+    pub const Avatar = struct {
+        pub const Content = struct { name: []const u8, size: AvatarSize = .medium, presence: ?Presence = null };
+
+        pub const zuiPreviews = .{
+            .initials = Content{ .name = "Ana Ribeiro" },
+            .online = Content{ .name = "Kofi Mensah", .size = .large, .presence = .online },
+            .away = Content{ .name = "Mei Chen", .size = .xlarge, .presence = .away },
+            .small = Content{ .name = "Lars Berg", .size = .small, .presence = .offline },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            widgets.avatar(ui, .of("preview.avatar"), .{ .name = content.name, .size = content.size, .presence = content.presence });
+        }
+    };
+
+    pub const AvatarStack = struct {
+        pub const Content = struct { names: []const []const u8, size: AvatarSize = .small };
+
+        pub const zuiPreviews = .{
+            .few = Content{ .names = preview_people[0..3] },
+            .counted = Content{ .names = &preview_people, .size = .medium },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            widgets.avatarStack(ui, .of("preview.avatar_stack"), content.names, .{ .size = content.size, .label = "Editing now" });
+        }
+    };
+
+    /// Shown before it arrives and after it failed, since a review has no
+    /// image of its own to show.
+    pub const AsyncImage = struct {
+        pub const Shown = enum { loading, failed };
+        pub const Content = struct { shown: Shown, aspect: f32 = 16.0 / 9.0 };
+
+        pub const zuiPreviews = .{
+            .loading = Content{ .shown = .loading },
+            .failed = Content{ .shown = .failed, .aspect = 1 },
+        };
+
+        pub fn declare(widgets: anytype, ui: anytype, content: Content) void {
+            const Status = zui.Status(error{NotFound}!@TypeOf(widgets).ImageHandle);
+            const status: Status = switch (content.shown) {
+                .loading => .{ .running = {} },
+                .failed => .{ .failed = error.NotFound },
+            };
+            ui.open(.{ .layout = .{ .sizing = .{ .width = .fixed(preview_image_width) } } });
+            widgets.asyncImage(ui, .of("preview.async_image"), status, .{ .aspect = content.aspect, .label = "The cabin from the shore" });
+            ui.close();
+        }
+    };
+
     /// The containers and navigation, for a review or an audit to step
     /// through.
     pub const containers = .{ Card, Divider, ScrollArea, GroupBox, Tabs, NavigationList, Breadcrumbs };
@@ -5353,10 +6592,16 @@ pub const previews = struct {
     pub const inputs = .{ Label, LabeledRow, Disclosure, Button, Checkbox, Slider, TextField, Dropdown, RadioGroup, Segmented, NumberStepper, SearchField, IconButton, Link, Chip, Toggle };
     /// What floats over the page.
     pub const overlays = .{ Tooltip, Menu, Popover, Dialog, Toasts };
+    /// What tells the user how things stand.
+    pub const feedback = .{ Banner, Badge, Spinner, Skeleton, ProgressBar, EmptyState };
+    /// The images that show who and what.
+    pub const media = .{ Avatar, AvatarStack, AsyncImage };
     /// Every component above.
-    pub const all = containers ++ inputs ++ overlays;
+    pub const all = containers ++ inputs ++ overlays ++ feedback ++ media;
 
     const preview_height = 160;
+    const preview_image_width = 240;
+    const preview_people = [_][]const u8{ "Ana Ribeiro", "Kofi Mensah", "Mei Chen", "Lars Berg", "Priya Nair" };
     const preview_rows = [_][]const u8{
         "Invoice 2041 was paid",
         "Ada commented on the release plan",
@@ -5457,4 +6702,5 @@ test {
     _ = @import("containers_tests.zig");
     _ = @import("inputs_tests.zig");
     _ = @import("overlays_tests.zig");
+    _ = @import("feedback_tests.zig");
 }

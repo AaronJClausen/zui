@@ -2331,6 +2331,55 @@ The tour's Field Guide screen has a menu, a context menu on each guide
 and a popover; its Cabin Booking screen asks in a dialog and answers
 with a toast.
 
+<a id="widget-feedback"></a>
+
+### Feedback and media · *shipped*
+
+Banners, badges, spinners, skeletons, progress bars and empty states
+tell the user how things stand; avatars and async images show who and
+what. A banner spans the page in its tone's container with an icon, a
+title, one action and a close button, and is announced as it appears. A
+badge is a label or a count in a pill, past 99 shown as "99+", or a dot
+over a corner. A spinner turns, a skeleton shimmers where content will
+be, and an indeterminate progress bar slides; under reduced motion each
+holds still and asks for no frame. An avatar without its picture shows
+the initials of a name on the container of the category the name falls
+in, one of eight hues of `Tokens.categories`, so a name has the same
+colors wherever it is drawn, each meeting its text's contrast in every
+scheme. An async image takes any status with a `ready` image, such as a
+source's, shimmers while it loads, fades in, and shows a broken image
+once it fails.
+
+`src/ui/inbox.zig`
+
+```zig
+fn inbox(app: *App, ui: *Ui) void {
+    if (app.offline) {
+        const shown = widgets.banner(ui, .of("offline"), .{ .tone = .warning, .title = "You are offline", .message = "Replies are kept here and sent when you reconnect.", .action = "Retry", .dismissible = true });
+        if (shown.acted) app.reconnect();
+        if (shown.dismissed) app.offline = false;
+    }
+    widgets.badgeCount(ui, .of("unread"), app.unread, .{ .tone = .accent, .label = "Unread" });
+    if (app.syncing) widgets.spinner(ui, .of("syncing"), .{ .size = .small, .label = "Syncing" });
+    widgets.progressBar(ui, .of("upload"), app.upload_fraction, .{ .label = "Uploading" });
+
+    for (app.threads, 0..) |thread, index| {
+        widgets.avatar(ui, .indexed("sender", index), .{ .name = thread.sender, .image = app.portraits.get(thread.sender), .presence = thread.presence });
+        widgets.asyncImage(ui, .indexed("preview", index), ui.source(.previews).get(index), .{ .aspect = 4.0 / 3.0, .label = thread.subject });
+    }
+    widgets.avatarStack(ui, .of("people"), app.participants, .{ .label = "In this thread" });
+    if (app.threads.len == 0) {
+        if (widgets.emptyState(ui, .of("no_mail"), .{ .icon = .search, .title = "No messages", .message = "Mail you receive shows up here.", .action = "Compose" })) app.compose();
+    }
+}
+```
+
+The tour's Kanban screen counts each list in a badge, puts each card's
+owner in an avatar and the team in a stack, says "No cards" in an empty
+list and warns of a full list in a banner; its Photo Culling screen
+shows a photo decoding with a progress bar and one waiting as a
+skeleton.
+
 <a id="widget-theme"></a>
 
 ### Theming widgets · *shipped*
