@@ -16,20 +16,30 @@ pub fn build(b: *std.Build) void {
 
     const test_card_module = b.addModule("zui_test_card", testCardModuleOptions(b, target, optimize, core_options));
 
-    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "tests" };
+    const formatted_paths: []const []const u8 = &.{ "build.zig", "build.zig.zon", "src", "tests", "snapshots" };
     b.step("fmt", "Format all Zig sources").dependOn(&b.addFmt(.{ .paths = formatted_paths }).step);
     b.step("fmt-check", "Fail if any Zig source is not formatted").dependOn(&b.addFmt(.{ .paths = formatted_paths, .check = true }).step);
 
-    const test_step = b.step("test", "Declare every scene headlessly on renderers that draw every command and none, in pixels and in cells, and check the compile errors");
+    const test_step = b.step("test", "Declare every scene headlessly on renderers that draw every command and none, in pixels and in cells, compare each scene's snapshot with snapshots/, and check the compile errors");
     const check_step = b.step("check", "Compile the tests, natively and for wasm32-freestanding, without running them");
+    const approve_step = b.step("approve", "Write every scene's snapshot, in pixels and in cells, into snapshots/, as the tests now draw them");
     // The tests measure with zui_truetype, whose stb a package depending
     // on the test card must not be made to fetch.
     if (b.pkg_hash.len != 0) return;
     const truetype_dependency = truetypeDeclaring(b, core_options.on(target, optimize)) orelse return;
 
-    const tests = b.addTest(.{ .root_module = testsModule(b, target, optimize, core_options, test_card_module, truetype_dependency) });
+    const tests = b.addTest(.{ .root_module = testsModule(b, "src/tests.zig", target, optimize, core_options, test_card_module, truetype_dependency) });
     test_step.dependOn(&b.addRunArtifact(tests).step);
     check_step.dependOn(&tests.step);
+
+    const approve_snapshots = b.addExecutable(.{
+        .name = "approve-snapshots",
+        .root_module = testsModule(b, "src/approve_snapshots.zig", target, optimize, core_options, test_card_module, truetype_dependency),
+    });
+    const write_snapshots = b.addRunArtifact(approve_snapshots);
+    write_snapshots.addArg(b.pathFromRoot("snapshots"));
+    approve_step.dependOn(&write_snapshots.step);
+    check_step.dependOn(&approve_snapshots.step);
 
     for (compile_error_cases) |case| {
         const failing_object = b.addObject(.{
@@ -52,7 +62,7 @@ pub fn build(b: *std.Build) void {
     const browser_test_card_module = b.createModule(testCardModuleOptions(b, browser_target, optimize, core_options));
     const browser_tests = b.addTest(.{
         .name = "zui-test-card-freestanding",
-        .root_module = testsModule(b, browser_target, optimize, core_options, browser_test_card_module, browser_truetype_dependency),
+        .root_module = testsModule(b, "src/tests.zig", browser_target, optimize, core_options, browser_test_card_module, browser_truetype_dependency),
         .test_runner = .{ .path = b.path("src/freestanding_test_runner.zig"), .mode = .simple },
     });
     browser_tests.entry = .disabled;
@@ -60,9 +70,9 @@ pub fn build(b: *std.Build) void {
     check_step.dependOn(&browser_tests.step);
 }
 
-fn testsModule(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, core_options: CoreOptions, test_card_module: *std.Build.Module, truetype_dependency: *std.Build.Dependency) *std.Build.Module {
+fn testsModule(b: *std.Build, root_source_file: []const u8, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, core_options: CoreOptions, test_card_module: *std.Build.Module, truetype_dependency: *std.Build.Dependency) *std.Build.Module {
     return b.createModule(.{
-        .root_source_file = b.path("src/tests.zig"),
+        .root_source_file = b.path(root_source_file),
         .target = target,
         .optimize = optimize,
         .imports = &.{
@@ -70,6 +80,8 @@ fn testsModule(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.bu
             .{ .name = "zui", .module = coreModule(b, target, optimize, core_options, "zui") },
             .{ .name = "zui_app", .module = coreModule(b, target, optimize, core_options, "zui_app") },
             .{ .name = "zui_design", .module = coreModule(b, target, optimize, core_options, "zui_design") },
+            .{ .name = "zui_testing", .module = coreModule(b, target, optimize, core_options, "zui_testing") },
+            .{ .name = "test_card_snapshots", .module = b.createModule(.{ .root_source_file = b.path("snapshots/approved.zig") }) },
             .{ .name = "zui_glyphs", .module = b.dependency("zui_glyphs", .{ .target = target, .optimize = optimize }).module("zui_glyphs") },
             .{ .name = "zui_truetype", .module = truetype_dependency.module("zui_truetype") },
         },

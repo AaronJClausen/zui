@@ -45,6 +45,20 @@ pub const RowOrder = harness_parts.RowOrder;
 pub const ReadBack = harness_parts.ReadBack;
 pub const PolledRecord = harness_parts.PolledRecord;
 
+const snapshot_module = @import("snapshot.zig");
+pub const snapshot = snapshot_module.snapshot;
+pub const expectSnapshot = snapshot_module.expectSnapshot;
+pub const SnapshotPlacement = snapshot_module.SnapshotPlacement;
+pub const GlyphCoverage = snapshot_module.GlyphCoverage;
+pub const FrameSnapshotHeader = snapshot_module.FrameSnapshotHeader;
+pub const writeFrameSnapshot = snapshot_module.writeFrameSnapshot;
+pub const SnapshotRegion = snapshot_module.SnapshotRegion;
+pub const SnapshotDifference = snapshot_module.SnapshotDifference;
+pub const SnapshotDifferences = snapshot_module.SnapshotDifferences;
+pub const snapshotDifferences = snapshot_module.snapshotDifferences;
+pub const shown_differences = snapshot_module.shown_differences;
+pub const expectSnapshotMatches = snapshot_module.expectSnapshotMatches;
+
 /// A text contract whose metrics don't depend on fonts: each byte is
 /// `size / 2` wide plus the letter spacing after it, and `size` tall, so
 /// at the default size of 16 an unspaced character is 8×16.
@@ -467,141 +481,6 @@ fn nothingDelivered(comptime Delivery: type, comptime source_name: []const u8) D
 
 fn isContinuationByte(byte: u8) bool {
     return byte & 0b1100_0000 == 0b1000_0000;
-}
-
-/// Writes one line per render command, in paint order, for golden-file
-/// tests. Elements are named only when their id is a field of `names`
-/// (a `zui.ids(...)` set, or any struct of `zui.Id` fields), so snapshots
-/// don't change when unrelated internal ids do.
-///
-/// ```text
-/// rect id=toolbar x=0 y=0 w=800 h=40 color=#202020
-/// text x=12 y=12 w=32 h=16 size=16 color=#e8e8f0 "Save"
-/// clip x=0 y=40 w=200 h=560
-/// clip_end
-/// ```
-pub fn snapshot(writer: *std.Io.Writer, commands: anytype, names: anytype) std.Io.Writer.Error!void {
-    for (commands) |command| {
-        try writer.writeAll(@tagName(command.payload));
-        if (nameOf(names, command.id)) |name| try writer.print(" id={s}", .{name});
-        if (command.z != 0) try writer.print(" z={d}", .{command.z});
-        switch (command.payload) {
-            .clip_begin => |clip| try writeRect(writer, clip),
-            .clip_end => {},
-            inline else => |_, kind| if (comptime !std.mem.eql(u8, @tagName(kind), "transform_end")) try writeRect(writer, command.bounds),
-        }
-        switch (command.payload) {
-            .rectangle => |rectangle| {
-                try writeColor(writer, rectangle.color);
-                try writeCorners(writer, rectangle);
-            },
-            .border => |border| {
-                try writeColor(writer, border.color);
-                try writeEdges(writer, border.widths);
-                try writeCorners(writer, border);
-            },
-            .text => |text| {
-                if (text.line != 0) try writer.print(" line={d}", .{text.line});
-                try writeFont(writer, text.style.font);
-                try writer.print(" size={d}", .{text.style.size});
-                if (text.style.letter_spacing != 0) try writer.print(" spacing={d}", .{text.style.letter_spacing});
-                try writeColor(writer, text.style.color);
-                try writer.print(" \"{s}\"", .{text.content});
-            },
-            inline else => |payload, kind| if (comptime std.mem.eql(u8, @tagName(kind), "image")) {
-                try writeHandle(writer, payload.handle);
-                if (!payload.tint.eql(.white)) try writer.print(" tint=#{x:0>2}{x:0>2}{x:0>2}{x:0>2}", .{ payload.tint.r, payload.tint.g, payload.tint.b, payload.tint.a });
-                try writeCorners(writer, payload);
-            } else if (comptime std.mem.eql(u8, @tagName(kind), "gradient")) {
-                try writeNamedColor(writer, "from", payload.from);
-                try writeNamedColor(writer, "to", payload.to);
-                if (payload.angle != 0) try writer.print(" angle={d}", .{payload.angle});
-                try writeCorners(writer, payload);
-            } else if (comptime std.mem.eql(u8, @tagName(kind), "shadow")) {
-                try writeColor(writer, payload.color);
-                if (payload.offset[0] != 0 or payload.offset[1] != 0) try writer.print(" offset={d},{d}", .{ payload.offset[0], payload.offset[1] });
-                if (payload.blur != 0) try writer.print(" blur={d}", .{payload.blur});
-                if (payload.spread != 0) try writer.print(" spread={d}", .{payload.spread});
-                try writeCorners(writer, payload);
-            } else if (comptime std.mem.eql(u8, @tagName(kind), "backdrop_blur")) {
-                try writer.print(" blur={d}", .{payload.radius});
-                try writeNamedColor(writer, "tint", payload.tint);
-                try writeCorners(writer, payload);
-            } else if (comptime std.mem.eql(u8, @tagName(kind), "material")) {
-                try writeHandle(writer, payload.handle);
-                try writeNamedColor(writer, "fallback", payload.fallback);
-                try writeCorners(writer, payload);
-            } else if (comptime std.mem.eql(u8, @tagName(kind), "transform_begin")) {
-                if (payload.translation[0] != 0 or payload.translation[1] != 0) try writer.print(" translate={d},{d}", .{ payload.translation[0], payload.translation[1] });
-                if (payload.scale[0] != 1 or payload.scale[1] != 1) try writer.print(" scale={d},{d}", .{ payload.scale[0], payload.scale[1] });
-                if (payload.rotation != 0) try writer.print(" rotate={d}", .{payload.rotation});
-                if (payload.origin[0] != 0.5 or payload.origin[1] != 0.5) try writer.print(" origin={d},{d}", .{ payload.origin[0], payload.origin[1] });
-            },
-        }
-        try writer.writeByte('\n');
-    }
-}
-
-/// Compares `snapshot(commands, names)` with `expected`, printing both on
-/// a mismatch.
-pub fn expectSnapshot(commands: anytype, names: anytype, expected: []const u8) !void {
-    var actual: std.Io.Writer.Allocating = .init(std.testing.allocator);
-    defer actual.deinit();
-    try snapshot(&actual.writer, commands, names);
-    try std.testing.expectEqualStrings(expected, actual.written());
-}
-
-fn nameOf(names: anytype, hash: u64) ?[]const u8 {
-    inline for (@typeInfo(@TypeOf(names)).@"struct".fields) |field| {
-        if (field.type != zui.Id) @compileError("zui_testing: snapshot names must be zui.Id fields; ." ++ field.name ++ " is " ++ @typeName(field.type));
-        if (@field(names, field.name).hash == hash) return field.name;
-    }
-    return null;
-}
-
-fn writeRect(writer: *std.Io.Writer, rect: zui.Rect) !void {
-    try writer.print(" x={d} y={d} w={d} h={d}", .{ rect.x, rect.y, rect.width, rect.height });
-}
-
-fn writeColor(writer: *std.Io.Writer, color: zui.Color) !void {
-    try writeNamedColor(writer, "color", color);
-}
-
-fn writeNamedColor(writer: *std.Io.Writer, name: []const u8, color: zui.Color) !void {
-    try writer.print(" {s}=#{x:0>2}{x:0>2}{x:0>2}", .{ name, color.r, color.g, color.b });
-    if (color.a != 255) try writer.print("{x:0>2}", .{color.a});
-}
-
-fn writeCorners(writer: *std.Io.Writer, payload: anytype) !void {
-    const shape = zui.cornerShapeOf(payload);
-    if (shape != .round) try writer.print(" shape={t}", .{shape});
-    const corners = payload.corner_radius;
-    if (std.meta.eql(corners, zui.CornerRadius.zero)) return;
-    if (std.meta.eql(corners, zui.CornerRadius.all(corners.top_left))) return writer.print(" radius={d}", .{corners.top_left});
-    try writer.print(" radius={d},{d},{d},{d}", .{ corners.top_left, corners.top_right, corners.bottom_left, corners.bottom_right });
-}
-
-fn writeEdges(writer: *std.Io.Writer, edges: zui.Edges) !void {
-    if (std.meta.eql(edges, zui.Edges.all(edges.left))) return writer.print(" widths={d}", .{edges.left});
-    try writer.print(" widths={d},{d},{d},{d}", .{ edges.left, edges.right, edges.top, edges.bottom });
-}
-
-fn writeFont(writer: *std.Io.Writer, font: anytype) !void {
-    switch (@typeInfo(@TypeOf(font))) {
-        .int => if (font != 0) try writer.print(" font={d}", .{font}),
-        .@"enum" => if (@intFromEnum(font) != 0) try writer.print(" font={t}", .{font}),
-        else => comptime unreachable,
-    }
-}
-
-/// Only integer and enum handles are written; pointers would make
-/// snapshots differ from run to run.
-fn writeHandle(writer: *std.Io.Writer, handle: anytype) !void {
-    switch (@typeInfo(@TypeOf(handle))) {
-        .int => try writer.print(" handle={d}", .{handle}),
-        .@"enum" => try writer.print(" handle={t}", .{handle}),
-        else => {},
-    }
 }
 
 pub const CommandError = error{ InvalidBounds, ZOrderDecreases, UnbalancedClip, UnbalancedTransform };
@@ -1434,6 +1313,7 @@ test "a recording drops a record that does not fit, whole" {
 }
 
 test {
+    _ = snapshot_module;
     _ = renderer_conformance;
     _ = host_conformance;
     _ = loop_conformance;

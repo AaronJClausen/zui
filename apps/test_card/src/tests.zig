@@ -5,30 +5,15 @@ const zui_app = @import("zui_app");
 const zui_design = @import("zui_design");
 const zui_glyphs = @import("zui_glyphs");
 const zui_truetype = @import("zui_truetype");
+const zui_testing = @import("zui_testing");
 const test_card = @import("zui_test_card");
+const approved_snapshots = @import("test_card_snapshots");
 
 const testing = std.testing;
 const io = if (builtin.os.tag == .freestanding) std.Io.failing else testing.io;
-const cells: zui_glyphs.Placement = .{ .cells = .{ 8, 16 } };
-
-/// Draws nothing, and declares that it draws every optional command and
-/// corner shape, or none of them but round corners, in `placement`.
-fn FakeRenderer(comptime draws_every_command: bool, comptime placement: zui_glyphs.Placement) type {
-    return struct {
-        pub const zui_surfaces: zui.SurfaceKinds = .initOne(.offscreen);
-        pub const zui_commands: zui.CommandSet = if (draws_every_command) .initFull() else .initEmpty();
-        pub const zui_corner_shapes: zui.CornerShapeSet = if (draws_every_command) .initFull() else .initOne(.round);
-        pub const MaterialHandle = if (draws_every_command) FlatMaterial else void;
-        pub const glyph_placement = placement;
-
-        clear_color: zui.Color = .black,
-
-        pub fn zuiSubmit(_: *@This(), _: zui.Surface, _: anytype) !void {}
-    };
-}
-
-/// A renderer's own material, which the card never draws.
-const FlatMaterial = struct { color: zui.Color };
+const headless = @import("headless.zig");
+const FakeRenderer = headless.FakeRenderer;
+const cells = headless.cells;
 
 const renderers = .{
     FakeRenderer(true, .pixel_grid),
@@ -37,52 +22,13 @@ const renderers = .{
     FakeRenderer(false, cells),
 };
 
-/// The card without a host: its text measures, and nothing is drawn.
-fn Harness(comptime Renderer: type) type {
+/// The checks of the card's scenes on `Renderer`.
+fn SceneChecks(comptime Renderer: type) type {
     return struct {
-        const Self = @This();
-        const Text = test_card.Text(zui_truetype.Text, Renderer);
-        const Ui = zui.Context(zui_app.contextConfig(Renderer, .{ .Text = Text }));
-        const CardOnUi = test_card.Card(Ui);
+        const Harness = headless.Harness(Renderer);
+        const Ui = Harness.Ui;
 
-        text: Text = .{},
-        ui: Ui = undefined,
-        tokens: CardOnUi.Tokens = .{},
-        card: CardOnUi = undefined,
-        events: [64]zui.Event = undefined,
-        text_bytes: [256]u8 = undefined,
-        builder: zui.RecordBuilder = undefined,
-
-        fn init(harness: *Self) !void {
-            try harness.text.init();
-            harness.ui = try .init(testing.allocator, io, &harness.text);
-            CardOnUi.resolveTokens(&harness.tokens, harness.text.fonts);
-            harness.card.init(&harness.tokens, .{
-                .renderer_name = "a fake renderer",
-                .host_name = "no host",
-                .fonts_fingerprint = harness.text.zuiFingerprint(),
-                .placement = zui_glyphs.placementOf(Renderer),
-            });
-            harness.builder = .init(&harness.events, &harness.text_bytes);
-        }
-
-        fn deinit(harness: *Self) void {
-            harness.ui.deinit(testing.allocator);
-            harness.text.deinit();
-        }
-
-        fn frame(harness: *Self, scene: test_card.Scene, next: test_card.Scene) *const Ui.Frame {
-            return harness.card.declareWithoutHost(&harness.ui, &harness.builder, scene, next);
-        }
-
-        /// `scene` held for the frames it takes to settle; the caller
-        /// releases the last.
-        fn heldFrame(harness: *Self, scene: test_card.Scene) *const Ui.Frame {
-            for (1..test_card.settling_frames) |_| harness.ui.release(harness.frame(scene, scene));
-            return harness.frame(scene, scene);
-        }
-
-        fn expectSceneState(harness: *Self, scene: test_card.Scene, drawn: *const Ui.Frame) !void {
+        fn expectSceneState(harness: *Harness, scene: test_card.Scene, drawn: *const Ui.Frame) !void {
             const ui = &harness.ui;
             try testing.expect(drawn.diagnostics.ok());
             try testing.expectEqual(scene == .hovered, ui.hovered(test_card.ids.button) and !ui.pressed(test_card.ids.button));
@@ -95,25 +41,25 @@ fn Harness(comptime Renderer: type) type {
         }
 
         fn expectEverySceneInTurnThenHeld() !void {
-            var harness: Self = .{};
-            try harness.init();
+            var harness: Harness = .{};
+            try harness.init(testing.allocator, io);
             defer harness.deinit();
             for (0..2 * test_card.Scene.count) |index| {
                 const scene: test_card.Scene = .inTurn(index);
                 const drawn = harness.frame(scene, .inTurn(index + 1));
                 defer harness.ui.release(drawn);
-                try harness.expectSceneState(scene, drawn);
+                try expectSceneState(&harness, scene, drawn);
             }
             try testing.expectEqual(test_card.Values{}, harness.card.values);
             try testing.expectEqualStrings("zui", harness.card.field.slice());
 
             for (std.enums.values(test_card.Scene)) |scene| {
-                var held: Self = .{};
-                try held.init();
+                var held: Harness = .{};
+                try held.init(testing.allocator, io);
                 defer held.deinit();
                 const drawn = held.heldFrame(scene);
                 defer held.ui.release(drawn);
-                try held.expectSceneState(scene, drawn);
+                try expectSceneState(&held, scene, drawn);
             }
         }
 
@@ -128,8 +74,8 @@ fn Harness(comptime Renderer: type) type {
         };
 
         fn expectRegionsWhereTheyBelong() !void {
-            var harness: Self = .{};
-            try harness.init();
+            var harness: Harness = .{};
+            try harness.init(testing.allocator, io);
             defer harness.deinit();
             for (std.enums.values(test_card.Scene)) |scene| {
                 const drawn = harness.heldFrame(scene);
@@ -148,13 +94,13 @@ fn Harness(comptime Renderer: type) type {
         }
 
         fn expectEverySceneAlikeInTurnAndHeld() !void {
-            var in_turn: Self = .{};
-            try in_turn.init();
+            var in_turn: Harness = .{};
+            try in_turn.init(testing.allocator, io);
             defer in_turn.deinit();
             for (0..test_card.Scene.count) |index| {
                 const scene: test_card.Scene = .inTurn(index);
-                var held: Self = .{};
-                try held.init();
+                var held: Harness = .{};
+                try held.init(testing.allocator, io);
                 defer held.deinit();
                 const drawn_held = held.heldFrame(scene);
                 defer held.ui.release(drawn_held);
@@ -165,8 +111,8 @@ fn Harness(comptime Renderer: type) type {
         }
 
         fn expectEverySceneToAuditClean() !void {
-            var harness: Self = .{};
-            try harness.init();
+            var harness: Harness = .{};
+            try harness.init(testing.allocator, io);
             defer harness.deinit();
             var room: [64]zui_design.Finding = undefined;
             var finding_count: usize = 0;
@@ -204,19 +150,43 @@ fn expectSameCommands(scene: test_card.Scene, expected: anytype, actual: anytype
 }
 
 test "every scene declares within its limits, in turn and held, on renderers that draw every command and none, in pixels and in cells" {
-    inline for (renderers) |Renderer| try Harness(Renderer).expectEverySceneInTurnThenHeld();
+    inline for (renderers) |Renderer| try SceneChecks(Renderer).expectEverySceneInTurnThenHeld();
 }
 
 test "each region is where the card puts it, its content inside it, in every scene" {
-    inline for (renderers) |Renderer| try Harness(Renderer).expectRegionsWhereTheyBelong();
+    inline for (renderers) |Renderer| try SceneChecks(Renderer).expectRegionsWhereTheyBelong();
 }
 
 test "a scene drawn in turn, after the one before it, is the scene held" {
-    inline for (renderers) |Renderer| try Harness(Renderer).expectEverySceneAlikeInTurnAndHeld();
+    inline for (renderers) |Renderer| try SceneChecks(Renderer).expectEverySceneAlikeInTurnAndHeld();
 }
 
 test "every scene's text and focus ring meet their contrast targets" {
-    inline for (renderers) |Renderer| try Harness(Renderer).expectEverySceneToAuditClean();
+    inline for (renderers) |Renderer| try SceneChecks(Renderer).expectEverySceneToAuditClean();
+}
+
+test "every scene's frame is its approved snapshot, in pixels and in cells" {
+    var written: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer written.deinit();
+    inline for (comptime std.enums.values(headless.SnapshotPlacement)) |placement| {
+        const Harness = headless.Harness(placement.Renderer());
+        inline for (comptime std.enums.values(test_card.Scene)) |scene| {
+            const harness = try testing.allocator.create(Harness);
+            defer testing.allocator.destroy(harness);
+            harness.* = .{};
+            try harness.init(testing.allocator, io);
+            defer harness.deinit();
+            const drawn = harness.heldFrame(scene);
+            defer harness.ui.release(drawn);
+            written.clearRetainingCapacity();
+            try harness.writeSnapshot(&written.writer, drawn);
+            const regions = headless.regionsOf(drawn);
+            zui_testing.expectSnapshotMatches(approved_snapshots.of(scene, placement), written.written(), &regions) catch |err| {
+                std.debug.print("in snapshots/{t}.{t}.txt; `zig build approve` writes every snapshot again\n", .{ scene, placement });
+                return err;
+            };
+        }
+    }
 }
 
 test "every color role has a swatch label of its own" {

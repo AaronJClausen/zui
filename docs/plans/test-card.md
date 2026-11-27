@@ -142,7 +142,7 @@ come out everywhere. Where that may fail:
 | Risk | Handled by |
 |---|---|
 | a float rounds differently on another target or optimize mode | positions to 1/64 unit in the snapshot; T2's Done when is the same file on Linux, Windows and macOS in all three modes, and a position that still differs is a bug found |
-| x87 on 32-bit x86 rounds at 80 bits | the snapshots are not compared there; that leg checks indices, not drawing |
+| x87 on 32-bit x86 rounds at 80 bits | Zig's 32-bit x86 target computes floats in SSE2, not x87: T2's snapshots matched there, so they are compared there too |
 | a font, stb or `zui_glyphs` changes on purpose | one header line changes; every scene is approved again in one step |
 | a user's own fonts | out of scope: the card checks zui, not the user's application |
 

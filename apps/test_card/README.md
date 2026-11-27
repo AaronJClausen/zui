@@ -95,6 +95,48 @@ renderer and font system:
 | a native window, drawn by the sokol renderer | [hosts/native/](../../hosts/native/README.md#the-tour-on-a-native-host) |
 | the terminal, and its `--dump` without one | [renderers/terminal/](../../renderers/terminal/README.md#development) |
 
+## Snapshots
+
+`apps/test_card/snapshots/` holds each scene's frame as text,
+`<scene>.<placement>.txt`: `rest.pixels.txt` drawn on the pixel grid and
+`rest.cells.txt` in cells of 8×16, each on a renderer that draws every
+optional command and nothing else, in `zui_truetype`'s text. Each is
+`zui_testing.writeFrameSnapshot`'s: four lines of what drew it, its
+viewport, its placement, the fonts' fingerprint and, on the pixel grid,
+the count and hash of the glyphs it rasterizes into an atlas as a
+renderer does, so a change of font or of stb changes one line; then one
+line per command, every length to 1/64 unit, the card's regions and the
+elements its scenes reach named by id:
+
+```text
+viewport 640x384, 1 pixels a unit
+placement pixel_grid
+fonts df582f8282bf04c6
+glyphs 131, coverage 94e0b6798b656dbf
+rectangle id=card x=0 y=0 w=640 h=384 color=#f5f8fe
+clip_begin id=card x=0 y=0 w=640 h=384
+rectangle id=identity x=0 y=0 w=640 h=32 color=#24272a
+```
+
+The headless test holds every scene from a card of its own and compares
+its snapshot with the approved one exactly. A difference fails it with
+the first lines that differ, each named by the region whose rectangle
+holds its command, and how many differ in all:
+
+```text
+zui_testing: the snapshot differs from line 121, in the `geometry` region:
+  expected: rectangle id=geometry x=0 y=304 w=320 h=80 color=#f5f8fe
+  actual:   rectangle id=geometry x=0 y=305 w=320 h=80 color=#f5f8fe
+...
+18 of its lines differ
+in snapshots/rest.pixels.txt; `zig build approve` writes every snapshot again
+```
+
+When a change to the card, to layout or to the fonts is meant,
+`zig build approve` writes every snapshot again as the tests now draw
+them, and `git diff snapshots/` shows what changed for review. A new
+scene fails to compile the tests until it has been approved.
+
 ## Development
 
 Run from `apps/test_card/`; the first build fetches stb, since the tests
@@ -102,5 +144,6 @@ measure with `zui_truetype`:
 
 | Command | What it does |
 |---|---|
-| `zig build test` | declare every scene headlessly, in turn and held, on renderers that draw every optional command and none, in pixels and in cells: each region where the card puts it with its content inside it, each scene's hover, press, focus, dialog and scroll, a scene drawn after another the same as the scene held, clean diagnostics, and the text and focus ring meeting their contrast targets with `zui_design.audit`; run the card through `zui_app`, ignoring the host's input; and check the card's compile errors |
-| `zig build check` | compile the tests, natively and for `wasm32-freestanding` |
+| `zig build test` | declare every scene headlessly, in turn and held, on renderers that draw every optional command and none, in pixels and in cells: each region where the card puts it with its content inside it, each scene's hover, press, focus, dialog and scroll, a scene drawn after another the same as the scene held, clean diagnostics, and the text and focus ring meeting their contrast targets with `zui_design.audit`; compare every scene's snapshot with its approved one in `snapshots/`; run the card through `zui_app`, ignoring the host's input; and check the card's compile errors |
+| `zig build check` | compile the tests, natively and for `wasm32-freestanding`, and the program `approve` runs |
+| `zig build approve` | write every scene's snapshot, in pixels and in cells, into `snapshots/` |

@@ -3288,7 +3288,21 @@ edit (the message quotes the `.hidden = true` line that fixes it).
   loader between frames, so a recorded session replays to the same
   commands without starting any work.
 - **`snapshot` / `expectSnapshot`**: one line per command, for named ids
-  only, defaults omitted, identical in debug and release.
+  only, defaults omitted, every length to 1/64 unit, so identical in
+  every optimize mode and on every target.
+- **`writeFrameSnapshot(writer, frame, names, header)`**: a frame's
+  snapshot to commit, its commands under a header of its viewport and
+  pixels a unit and of what the caller gives as values: the placement
+  (`SnapshotPlacement.of` any union of `pixel_grid` and `cells: [2]f32`,
+  such as `zui_glyphs.Placement`), the fonts' fingerprint, and the count
+  and one hash of the glyph coverage drawn, so a change of font or
+  rasterizer changes one line.
+  **`expectSnapshotMatches(expected, actual, regions)`** fails on any
+  difference, printing the first lines that differ and how many do, each
+  named by the smallest of `regions` (name and `Rect` pairs) that holds
+  its command's bounds, or else the one holding their center;
+  `snapshotDifferences` gives each differing line for a check of its
+  own.
 - **`checkCommands`**: finite bounds, nondecreasing layers, balanced
   clips and transforms, each ending inside what it began inside.
 - **Conformance suites**, which every implementation runs in CI. Each
@@ -3724,8 +3738,11 @@ with nothing repaired.
   renderers that draw every optional command and none, in pixels and in
   cells, and finds a scene drawn after another the same as the scene
   held, its diagnostics clean and its text and focus ring meeting their
-  contrast targets; every renderer's and host's `test-card` target draws
-  each scene once with clean diagnostics.
+  contrast targets, and compares each scene, in pixels and in cells,
+  with its committed snapshot,
+  `apps/test_card/snapshots/<scene>.<placement>.txt`, exactly; every
+  renderer's and host's `test-card` target draws each scene once with
+  clean diagnostics.
 
 ### 20.2 Budgets
 

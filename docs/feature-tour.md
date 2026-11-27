@@ -3446,6 +3446,40 @@ test "the toolbar's layout" {
 The golden text above is illustrative. The format, one line per command
 in paint order, matches what `snapshot` writes.
 
+For a whole frame committed as a file, `writeFrameSnapshot` writes the
+same lines, every length to 1/64 unit so the file is the same in every
+optimize mode and on every OS, under a header of the viewport, the
+placement, the fonts' fingerprint and the glyphs' coverage, which you
+give as values. `expectSnapshotMatches` compares it with the approved
+file, printing the first lines that differ and naming the region whose
+rectangle holds each, as the test card's snapshots do.
+
+`tests/settings.zig`
+
+```zig
+test "the settings screen is its approved snapshot" {
+    var text: zui_truetype.Text = .{};
+    var ui: Ui = try .init(std.testing.allocator, std.testing.io, &text);
+    defer ui.deinit(std.testing.allocator);
+    var driver: zui_testing.Driver(Ui) = .{ .ui = &ui };
+    var app: App = .{};
+    const frame = try driver.frame(&app, App.declareSettings, &.{});
+
+    var written: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer written.deinit();
+    try zui_testing.writeFrameSnapshot(&written.writer, frame, zui.ids(.{ "sidebar", "content" }), .{
+        .placement = .of(text.placement),
+        .fonts_fingerprint = text.zuiFingerprint(),
+        .glyph_coverage = null,
+    });
+    const regions = [_]zui_testing.SnapshotRegion{
+        .{ .name = "sidebar", .rect = frame.rectOf(.of("sidebar")).? },
+        .{ .name = "content", .rect = frame.rectOf(.of("content")).? },
+    };
+    try zui_testing.expectSnapshotMatches(@embedFile("snapshots/settings.txt"), written.written(), &regions);
+}
+```
+
 <a id="replay"></a>
 
 ### Record and replay · *shipped*

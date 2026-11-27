@@ -9,5 +9,5 @@
         .zui_fonts = .{ .path = "../../text/fonts" },
         .zui_truetype = .{ .path = "../../text/truetype" },
     },
-    .paths = .{ "build.zig", "build.zig.zon", "src", "tests" },
+    .paths = .{ "build.zig", "build.zig.zon", "src", "tests", "snapshots" },
 }

@@ -3017,8 +3017,8 @@ after it.
 T2 of `docs/plans/test-card.md`: each scene's frame as committed text,
 compared exactly on every OS.
 
-**Grounding** (at `cddd4a1`). `Frame.commands()`
-(`core/src/context.zig:594`) is every command a frame draws.
+**Grounding** (at `2610626`). `Frame.commands()`
+(`core/src/context.zig:600`) is every command a frame draws.
 `zui_truetype.Text.zuiFingerprint` (`text/truetype/src/root.zig:56`)
 names the fonts and the placement. stb_truetype's math is zui's own Zig
 (`text/truetype/src/stb_truetype.c:19`–`28`), not each OS's libm.
@@ -3041,7 +3041,33 @@ that region.
 
 **Spec.** §19.4, §20.1.
 
-**Status.** Not started.
+**Status.** Done here; Windows and macOS wait on CI. `zui_testing`'s
+`snapshot` writes every length to the nearest 1/64 unit, and
+`writeFrameSnapshot(writer, frame, names, header)` heads it with the
+frame's viewport and pixels a unit and the placement
+(`SnapshotPlacement.of`), the fonts' fingerprint and the glyph coverage
+(a count and one hash) the caller gives as values, since `zui_testing`
+imports no font system.
+`expectSnapshotMatches(expected, actual, regions)` prints the first four
+lines that differ, each named by the smallest region (a name and a
+`Rect`) holding its command, or the one holding its center, and how many
+differ; `snapshotDifferences` yields each. Its misuse,
+`SnapshotPlacement.of` of anything but a placement, is a compile-error
+case. The card's test holds each scene from a card of its own, on the
+renderer that draws every optional command, in pixels and in cells of
+8×16, and compares it with
+`apps/test_card/snapshots/<scene>.{pixels,cells}.txt`, embedded through
+`snapshots/approved.zig` so the freestanding build compiles them; its
+glyph line hashes a `zui_glyphs.Atlas(.rg8)` filled as a renderer fills
+it. `zig build approve` in `apps/test_card/` writes every snapshot
+(about 180 lines a scene); the plan's `--approve` is this step. Measured
+here: the snapshots match in Debug, ReleaseSafe and ReleaseFast on
+x86-64 Linux, and on `-Dtarget=x86-linux` too, so that target is not
+skipped; one unit of space above the `geometry` region fails the test
+with `` the snapshot differs from line 121, in the `geometry` region ``
+and 18 differing lines. CI runs the card's tests on Linux alone and only
+compiles them for Windows and macOS, so confirming those needs the
+card's tests run on their runners.
 
 ## 11-polish:40-terminal-snapshots — Terminal snapshots
 
