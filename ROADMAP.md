@@ -114,11 +114,12 @@ is in the file its group names.
 
 | Item | Where | Waits for | Status |
 |---|---|---|---|
+| `11-polish:46-dropdown-above-its-overlay` | `core/zui_widgets/`, `apps/tour/` | | next |
 | `11-polish:31-rich-text-and-reordering` | `core/zui_widgets/` | `11-polish:28-containers-and-navigation`, `11-polish:06-text-editing` | |
 | `11-polish:32-zui-widgets-data` | `core/zui_widgets_data/` | `11-polish:29-overlays` | |
 | `11-polish:33-pickers` | `core/zui_widgets_data/` | `11-polish:32-zui-widgets-data` | |
 | `11-polish:34-zui-widgets-views` | `core/zui_widgets_views/` | `11-polish:30-feedback-and-media` | |
-| `11-polish:39-frame-snapshots` | `core/zui_testing/`, `apps/test_card/` | `11-polish:38-test-card` | |
+| `11-polish:39-frame-snapshots` | `core/zui_testing/`, `apps/test_card/` | `11-polish:38-test-card` | waiting on CI: `apps/test_card: snapshots` on Windows and macOS |
 | `11-polish:40-terminal-snapshots` | `renderers/terminal/`, `apps/test_card/` | `11-polish:39-frame-snapshots` | |
 | `11-polish:41-pixel-hashes` | `apps/test_card/`, `renderers/raylib/`, `hosts/native/`, `.github/`, `tools/ci/` | `11-polish:39-frame-snapshots` | |
 | `11-polish:42-scripted-input` | `apps/test_card/`, `renderers/raylib/`, `renderers/terminal/`, `hosts/native/` | `11-polish:39-frame-snapshots` | |

@@ -154,7 +154,8 @@ Each job, from its package's directory, fits within 10 minutes:
   three jobs for each, its tests in Debug with `check` there and for
   x86-64 Windows and ARM64 macOS, and its tests in each release mode;
   `text/truetype/`, which compiles stb_truetype's C, is also tested on
-  Windows;
+  Windows, and `apps/test_card/`'s tests, which compare its scenes'
+  committed snapshots exactly, also run on Windows and macOS;
 - `renderers/raylib/`: its tests and `check` on Linux, Windows and
   macOS, and `check -Dzui-tracy=true` on Linux; and in a job of its own
   on Linux, under `xvfb-run`, its conformance, the `tour` target's visit

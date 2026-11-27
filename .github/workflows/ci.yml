@@ -39,6 +39,7 @@ jobs:
       core: ${{ steps.affected.outputs.core }}
       pure-packages: ${{ steps.affected.outputs.pure-packages }}
       text-truetype: ${{ steps.affected.outputs.text-truetype }}
+      apps-test_card: ${{ steps.affected.outputs.apps-test_card }}
       renderers-terminal: ${{ steps.affected.outputs.renderers-terminal }}
       renderers-raylib: ${{ steps.affected.outputs.renderers-raylib }}
       renderers-sokol: ${{ steps.affected.outputs.renderers-sokol }}
@@ -241,6 +242,26 @@ jobs:
     defaults:
       run:
         working-directory: text/truetype
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-zig
+      - run: zig build test
+
+  # The test card's snapshots are compared exactly, so its tests run where
+  # each OS's own float and libm code would show a difference.
+  test-card-snapshots:
+    name: "apps/test_card: snapshots (${{ matrix.os }})"
+    needs: changes
+    if: needs.changes.outputs.apps-test_card == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    defaults:
+      run:
+        working-directory: apps/test_card
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-zig

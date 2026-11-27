@@ -51,13 +51,14 @@ and each is given its Grounding, Plan and Done when as it is taken.
 | `11-polish:36-motion-in-core` Motion in the core | done |
 | `11-polish:37-tour-preferences-menu` The tour's preferences in a menu on the top bar | done |
 | `11-polish:38-test-card` The test card | done |
-| `11-polish:39-frame-snapshots` Frame snapshots | not started |
+| `11-polish:39-frame-snapshots` Frame snapshots | done here; waiting on CI for Windows and macOS |
 | `11-polish:40-terminal-snapshots` Terminal snapshots | not started |
 | `11-polish:41-pixel-hashes` Pixel hashes per rasterizer | not started |
 | `11-polish:42-scripted-input` Scripted input on the test card | not started |
 | `11-polish:43-test-card-review` The test card's review mode | not started |
 | `11-polish:44-test-card-on-the-web` The test card in the web checks | not started |
 | `11-polish:45-focus-ring-done-right` A focus ring that sits evenly, above its neighbours, only for navigation without a pointer | done |
+| `11-polish:46-dropdown-above-its-overlay` A dropdown's list above the overlay it opens in | not started |
 
 ### The design system
 
@@ -3408,3 +3409,51 @@ parent: at most +0.07%, +1.02% (4096 interactive boxes, endFrame),
 +0.02% and +0.07%. The tour's cycles print `diagnostics ok: true` on
 raylib and on the native host, and its screenshots match those taken at
 `a0747c6` but for timings.
+
+## 11-polish:46-dropdown-above-its-overlay — A dropdown's list above the overlay it opens in
+
+A bug the owner found: a dropdown opened inside a popover or menu draws
+its list under the triggers of the dropdowns declared after it.
+
+**Grounding** (at `bc12c78`). The tour's preferences menu is a popover
+(`apps/tour/src/tour.zig:327`) holding three dropdowns one after another
+(`apps/tour/src/preferences_menu.zig:32`, `:36`, `:44`). A popover
+floats its panel at `look.layer + 1`
+(`core/zui_widgets/zui_widgets.zig`, `popover`), `popup_layer + 1`,
+since `lifted` gives every floating part `popup_layer`
+(`const popup_layer = 100`). A dropdown's `declarePopup` floats its
+backdrop at `list.layer`, 100, and its list at `list.layer + 1`, 101:
+the list ties with the panel it opened in, so the triggers declared
+after it in that panel paint over it, and the backdrop lies under the
+panel, so a click on another trigger reaches the trigger rather than
+closing the list. A layer is a fixed number, not one above the element
+the overlay opens from.
+
+The dialog's close button (`dialogClose`) mirrors its own position under
+right-to-left layout, as the avatar's presence dot did until
+`11-polish:30-feedback-and-media` found the core already flips a
+floating element's anchors, so the button is likely mirrored twice and
+lands back on the left; the owner asked for it to be fixed with this.
+
+**Plan.** An overlay that opens from inside another floats above it: its
+backdrop and its surface take layers above the layer of the floating
+element its anchor is in, whether by a widget-level rule in
+`zui_widgets` or by a floating option of the core (one relative to the
+enclosing layer), chosen by what the tests show, and SPEC.md changed if
+the core gains it. Every overlay that can open inside another (dropdown,
+menu, popover, tooltip) follows the same rule. The dialog's close button
+takes its place once, through the core's flip, in both directions.
+
+**Done when.** A `zui_testing.Driver` test opens a dropdown inside a
+popover above a second dropdown and finds the list's commands painted
+after the second trigger's, and a click on the second trigger closes the
+list; the tour's preferences menu shows it on raylib (a screenshot); the
+dialog's close button sits at the trailing corner in both directions,
+tested; the test card's snapshots, approved again only if a layer number
+changed, and `counts` within 2%.
+
+**Waits for** nothing.
+
+**Spec.** §8.4, §19.2.
+
+**Status.** Not started.
